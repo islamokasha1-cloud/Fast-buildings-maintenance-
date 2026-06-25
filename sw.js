@@ -2,7 +2,7 @@
 // استراتيجية: Cache-First للملف الرئيسي، Network-First للـ Firebase
 // يُحسّن وقت التحميل على الشبكات البطيئة داخل المباني
 
-const CACHE_NAME = 'hail-v18-9bn';
+const CACHE_NAME = 'hail-v18-9bo';
 
 // الموارد الثابتة التي تُخزَّن عند التثبيت
 const STATIC_ASSETS = [
