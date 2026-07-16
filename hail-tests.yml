@@ -1,0 +1,77 @@
+# ══════════════════════════════════════════════════════════════════
+#  فحوص نظام هيل — تعمل على GitHub لا على جهازك
+#
+#  مكان الملف في المستودع:  .github/workflows/hail-tests.yml
+#
+#  تعمل تلقائياً عند كل رفع لـ index.html أو الوحدات الخارجية،
+#  ويمكن تشغيلها يدوياً من تبويب Actions بزر "Run workflow".
+#
+#  النتيجة: ✅ أو ❌ بجانب كل commit — بلا طرفية ولا أوامر.
+#  ولو فشل فحص، يُمنع النشر ويصلك بريد تلقائياً من GitHub.
+# ══════════════════════════════════════════════════════════════════
+name: فحوص نظام هيل
+
+on:
+  push:
+    paths:
+      - 'index.html'
+      - 'purchase-kpi.js'
+      - 'labor-catalog.js'
+      - 'price-analysis.js'
+      - 'hail-tests/**'
+  pull_request:
+  workflow_dispatch:        # زر تشغيل يدوي في تبويب Actions
+
+jobs:
+  test:
+    name: فحص المنطق الحسابي والحمايات
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: جلب الملفات
+        uses: actions/checkout@v4
+
+      - name: تجهيز Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: تجهيز jsdom
+        working-directory: hail-tests
+        run: |
+          npm init -y > /dev/null 2>&1
+          npm install jsdom --silent
+
+      # ── قائمة ما قبل التسليم: صياغة JS، توازن <div>، الإصدار، ?v= ──
+      - name: قائمة الفحص الإلزامية
+        run: cd hail-tests && python3 check_nl.py
+
+      # ── تشغيل المنطق الحقيقي المستخرَج من index.html ──
+      - name: توزيع كميات الاستلام
+        run: cd hail-tests && node verify-wa.js
+
+      - name: عكس المخزون عند حذف الطلب
+        run: cd hail-tests && node verify-del.js
+
+      - name: إشارة سجل الحركات
+        run: cd hail-tests && node verify-log.js
+
+      - name: حارس النقر المزدوج وتعديل الرصيد
+        run: cd hail-tests && node verify-nl.js
+
+      - name: وحدة مؤشرات الأداء
+        run: cd hail-tests && node verify-kpi.js
+
+      # ── تقارير للاطلاع: لا تُفشل البناء، لكن تُطبع في السجل ──
+      - name: خريطة الكُتّاب (تقرير)
+        run: cd hail-tests && python3 map_writers.py
+        continue-on-error: true
+
+      - name: فحص الحمايات والتسابق (تقرير)
+        run: cd hail-tests && python3 probe_guards.py
+        continue-on-error: true
+
+      - name: الخلاصة
+        if: success()
+        run: echo "✅ كل الفحوص نجحت — آمن للنشر"
