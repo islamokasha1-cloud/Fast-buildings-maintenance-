@@ -1822,44 +1822,34 @@ html[data-theme="dark"] .ppm-approval-row{background:#1a2d45;border-color:#2e4a6
 .rank-group-label .rgl-name{font-size:14px;font-weight:900;color:var(--primary)}
 .rank-group-label .rgl-count{font-size:11px;font-weight:800;color:var(--muted);background:var(--surface2);border:1px solid var(--border);padding:3px 10px;border-radius:999px;margin-right:auto}
 .rank-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.rank-card{position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--shadow);transition:box-shadow .15s,transform .15s}
-.rank-card::before{content:"";position:absolute;top:0;bottom:0;right:0;width:4px;background:var(--_c,var(--primary))}
+.rank-card{position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:15px 16px 13px;box-shadow:var(--shadow);border-inline-start:4px solid var(--_c,var(--primary));transition:box-shadow .15s,transform .15s}
 .rank-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.1);transform:translateY(-1px)}
-.rank-head{display:flex;align-items:center;gap:11px;margin-bottom:12px}
-.rank-badge{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.rank-head{display:flex;align-items:flex-start;gap:11px;margin-bottom:12px}
+.rank-badge{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;flex-shrink:0;font-family:'JetBrains Mono',monospace}
 .rank-id{flex:1;min-width:0}
-.rank-name{font-size:15px;font-weight:800;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rank-role{font-size:11px;color:var(--muted);font-weight:600;margin-top:1px}
-.rank-score{font-size:27px;font-weight:900;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;line-height:1}
-.rank-meter{height:8px;background:var(--surface2);border-radius:5px;overflow:hidden;margin-bottom:11px}
-.rank-meter>div{height:100%;border-radius:5px;transition:width .5s}
-.rank-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;text-align:center}
-.rank-stat{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:8px 4px}
-.rank-stat.tone-accent{background:color-mix(in srgb,var(--accent) 10%,var(--surface));border-color:color-mix(in srgb,var(--accent) 25%,var(--border))}
-.rank-stat.tone-info{background:color-mix(in srgb,var(--info) 9%,var(--surface));border-color:color-mix(in srgb,var(--info) 22%,var(--border))}
-.rank-stat.tone-danger{background:color-mix(in srgb,var(--danger) 9%,var(--surface));border-color:color-mix(in srgb,var(--danger) 25%,var(--border))}
-.rank-stat.tone-violet{background:color-mix(in srgb,#7c3aed 8%,var(--surface));border-color:color-mix(in srgb,#7c3aed 20%,var(--border))}
-.rank-stat-v{font-size:18px;font-weight:800;line-height:1;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
-.rank-stat-l{font-size:10.5px;color:var(--muted);margin-top:3px}
-/* ── تصنيف الأداء: النتيجة المُفسَّرة بثلاثة محاور (v18.9pp) ── */
-.rank-scorewrap{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
-.rank-grade{font-size:9.5px;font-weight:900;padding:2px 8px;border-radius:999px;white-space:nowrap;letter-spacing:.2px;border:1px solid transparent}
-.rank-grade.g-hi{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--surface));border-color:color-mix(in srgb,var(--accent) 28%,var(--border))}
-.rank-grade.g-mid{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--surface));border-color:color-mix(in srgb,var(--warn) 28%,var(--border))}
-.rank-grade.g-low{color:var(--danger);background:color-mix(in srgb,var(--danger) 12%,var(--surface));border-color:color-mix(in srgb,var(--danger) 28%,var(--border))}
-.rank-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
-.rank-star{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:800;color:#b45309;background:color-mix(in srgb,#f59e0b 13%,var(--surface));border:1px solid color-mix(in srgb,#f59e0b 26%,var(--border));padding:1px 7px;border-radius:999px;font-family:'JetBrains Mono',monospace}
-/* الشريط الثلاثي: طول التعبئة = النتيجة، مقسّماً بمساهمة كل محور */
-.rank-seg{display:flex;height:9px;background:var(--surface2);border-radius:5px;overflow:hidden;margin-bottom:8px;border:1px solid var(--border)}
-.rank-seg>span{height:100%;display:block;transition:width .5s}
-.rank-seg .sg-close{background:var(--accent)}
-.rank-seg .sg-resp{background:var(--info)}
-.rank-seg .sg-vol{background:#d97706}
-.rank-seg-key{display:flex;flex-wrap:wrap;gap:4px 12px;margin-bottom:11px}
-.rank-seg-key span{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;color:var(--muted)}
-.rank-seg-key i{width:9px;height:9px;border-radius:3px;display:inline-block;flex-shrink:0}
-.rank-seg-key b{font-family:'JetBrains Mono',monospace;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums}
-.rank-od-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:900;color:#fff;background:var(--danger);padding:1px 8px;border-radius:999px}
+.rank-name{font-size:14px;font-weight:800;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rank-role{font-size:11px;color:var(--muted);font-weight:700;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rank-scorewrap{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0}
+.rank-score{font-size:24px;font-weight:900;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;line-height:1}
+.rank-grade{font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;background:var(--surface2);white-space:nowrap;letter-spacing:.2px}
+.rank-grade.g-hi{color:var(--accent)}
+.rank-grade.g-mid{color:var(--warn)}
+.rank-grade.g-low{color:var(--danger)}
+.rank-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
+.rank-star{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:800;color:var(--warn);background:var(--surface2);padding:3px 9px;border-radius:20px;font-family:'JetBrains Mono',monospace}
+.rank-od-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:800;color:var(--danger);background:var(--surface2);padding:3px 9px;border-radius:20px}
+/* محاور النتيجة الثلاثة — بنفس نمط شريط مؤشّر الأداء kpi-li-bar */
+.rank-axes{display:flex;flex-direction:column;gap:8px;margin:2px 0 12px}
+.rax{display:flex;align-items:center;gap:9px}
+.rax-lbl{font-size:11px;font-weight:700;color:var(--muted);width:86px;flex-shrink:0;display:flex;align-items:center;gap:6px}
+.rax-lbl i{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.rax-bar{flex:1;height:7px;background:var(--surface2);border-radius:4px;overflow:hidden}
+.rax-bar>span{display:block;height:100%;border-radius:4px;transition:width 1s ease}
+.rax-val{font-size:11.5px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--text);width:60px;text-align:left;flex-shrink:0;font-variant-numeric:tabular-nums}
+.rank-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center}
+.rank-stat{background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:9px 4px}
+.rank-stat-v{font-size:17px;font-weight:900;line-height:1;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+.rank-stat-l{font-size:10px;color:var(--muted);font-weight:700;margin-top:4px}
 /* شارات مفتاح المخططات المرسومة يدويًا */
 .chart-legend-pill{display:inline-flex;align-items:center;gap:6px;font-weight:800;color:var(--lc);background:color-mix(in srgb,var(--lc) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--lc) 22%,var(--border));padding:3px 10px;border-radius:999px}
 .chart-legend-pill .clp-dot{width:9px;height:9px;border-radius:3px;background:var(--lc)}
@@ -9770,7 +9760,7 @@ function renderKPI(){
     const star  = avgRating>0 ? `<span class="rank-star">★ ${avgRating.toFixed(1)}</span>` : "";
     const odBad = overdue>0 ? `<span class="rank-od-badge">⚠ ${overdue} متأخر</span>` : "";
     const tags  = (star||odBad) ? `<div class="rank-tags">${star}${odBad}</div>` : "";
-    const w = v => Math.max(0, Math.round(v*10)/10);
+    const volPct = Math.round(_r.pVol*100);
     return `<div class="rank-card" style="--_c:${sc}">
       <div class="rank-head">
         <div class="rank-badge" style="background:${rbg};color:${rc};border:1px solid ${rbd}">${idx+1}</div>
@@ -9780,21 +9770,16 @@ function renderKPI(){
           <div class="rank-grade ${grade.c}">${grade.t}</div>
         </div>
       </div>
-      <div class="rank-seg" title="الإغلاق ${Math.round(_r.sClose)} · الاستجابة ${Math.round(_r.sResp)} · الحجم ${Math.round(_r.sVol)} من ${score}">
-        <span class="sg-close" style="width:${w(_r.sClose)}%"></span>
-        <span class="sg-resp"  style="width:${w(_r.sResp)}%"></span>
-        <span class="sg-vol"   style="width:${w(_r.sVol)}%"></span>
-      </div>
-      <div class="rank-seg-key">
-        <span><i style="background:var(--accent)"></i>إغلاق <b>${Math.round(_r.sClose)}</b></span>
-        <span><i style="background:var(--info)"></i>استجابة <b>${Math.round(_r.sResp)}</b></span>
-        <span><i style="background:#d97706"></i>حجم <b>${Math.round(_r.sVol)}</b></span>
+      <div class="rank-axes">
+        <div class="rax"><div class="rax-lbl"><i style="background:var(--accent)"></i>الإغلاق</div><div class="rax-bar"><span style="width:${closeRate}%;background:var(--accent)"></span></div><div class="rax-val">${closeRate}%</div></div>
+        <div class="rax"><div class="rax-lbl"><i style="background:var(--info)"></i>في الوقت</div><div class="rax-bar"><span style="width:${onTimeRate}%;background:var(--info)"></span></div><div class="rax-val">${closed?onTimeRate+"%":"—"}</div></div>
+        <div class="rax"><div class="rax-lbl"><i style="background:#d97706"></i>حجم العمل</div><div class="rax-bar"><span style="width:${volPct}%;background:#d97706"></span></div><div class="rax-val">${tot} بلاغ</div></div>
       </div>
       <div class="rank-stats">
         <div class="rank-stat"><div class="rank-stat-v" style="color:var(--primary)">${tot}</div><div class="rank-stat-l">البلاغات</div></div>
-        <div class="rank-stat tone-info"><div class="rank-stat-v" style="color:var(--info)">${_hShort(avgClose)}</div><div class="rank-stat-l">متوسط الاستجابة</div></div>
-        <div class="rank-stat tone-accent"><div class="rank-stat-v" style="color:var(--accent)">${closeRate}%</div><div class="rank-stat-l">نسبة الإغلاق</div></div>
-        <div class="rank-stat tone-violet"><div class="rank-stat-v" style="color:#7c3aed">${closed?onTimeRate+"%":"—"}</div><div class="rank-stat-l">في الوقت</div></div>
+        <div class="rank-stat"><div class="rank-stat-v" style="color:var(--info)">${_hShort(avgClose)}</div><div class="rank-stat-l">متوسط الاستجابة</div></div>
+        <div class="rank-stat"><div class="rank-stat-v" style="color:var(--accent)">${closeRate}%</div><div class="rank-stat-l">نسبة الإغلاق</div></div>
+        <div class="rank-stat"><div class="rank-stat-v" style="color:${overdue>0?'var(--danger)':'var(--muted)'}">${overdue}</div><div class="rank-stat-l">متأخرة</div></div>
       </div>
     </div>`;
   };
