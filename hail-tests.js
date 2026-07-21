@@ -290,11 +290,15 @@ function predelivery() {
   const f = (HTML.match(/id="login-version-footer">نظام صيانة المباني — (v[\d.a-z]+)</) || [])[1];
   T("الإصدار متطابق في الموضعين", f === VER, `footer=${f}  APP_VERSION=${VER}`);
 
-  // cache-busters
+  // cache-busters — كل وحدة محلية (.js نسبية) يجب أن تحمل ?v= مطابقاً للإصدار.
+  // لا نثبّت العدد (كان 4 ثم أُضيفت وحدة خامسة فسقط الاختبار): نتحقّق أن كل وحدة محلية
+  // موسومة، وأن كل الوسوم تطابق APP_VERSION — فلا يعود يسقط عند إضافة/حذف وحدة.
   const cb = [...HTML.matchAll(/<script src="([^"]+\.js)\?v=([^"]+)"><\/script>/g)].map(m => [m[1], m[2]]);
+  const localMods = [...HTML.matchAll(/<script src="(?!https?:)([^"]+\.js)(?:\?v=[^"]*)?"><\/script>/g)].length;
   const want = VER.replace(/^v/, "");
-  T("cache-busters تطابق الإصدار", cb.length === 4 && cb.every(([, v]) => v === want),
-    cb.map(([f2, v]) => `${f2}?v=${v}`).join("، ") || "لا وسوم خارجية");
+  T("cache-busters تطابق الإصدار",
+    cb.length >= 1 && cb.length === localMods && cb.every(([, v]) => v === want),
+    `${cb.length}/${localMods} موسومة — ` + (cb.map(([f2, v]) => `${f2}?v=${v}`).join("، ") || "لا وسوم"));
 
   // صياغة JS لكل كتلة script داخلية
   const vm = require("vm");
