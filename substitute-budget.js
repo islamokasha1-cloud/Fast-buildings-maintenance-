@@ -58,6 +58,8 @@
   function _estTotal(p){ try{ return (typeof getPOTotal==="function") ? Number(getPOTotal(p))||0 : (Number(p&&p.estCost)||0); }catch(e){ return Number(p&&p.estCost)||0; } }
 
   function _fmt(n){ return (Number(n)||0).toLocaleString("en-US",{maximumFractionDigits:2}); }
+  // أيقونة SVG من طقم المنصة (لغة الأيقونات الموحّدة) — بديل الإيموجي. آمنة إن غاب _ic.
+  function _icn(name,cls){ try{ return (typeof _ic==="function") ? _ic(name,cls) : ""; }catch(e){ return ""; } }
 
   function _canManage(){ // إنشاء/تعديل/حذف الحسابات — المسؤول فقط
     try{ return (typeof isAdmin==="function") && isAdmin(); }catch(e){ return false; }
@@ -221,8 +223,8 @@
     var rows = _accounts.map(function(acc){
       var s = _stats(acc);
       var kindBadge = acc.kind==="linked"
-        ? '<span style="font-size:10px;background:color-mix(in srgb,var(--primary) 12%,transparent);color:var(--primary);padding:2px 7px;border-radius:20px;font-weight:700">🔗 مربوط بمشروع</span>'
-        : '<span style="font-size:10px;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);padding:2px 7px;border-radius:20px;font-weight:700">✏️ مستقلّ</span>';
+        ? '<span style="font-size:10px;background:color-mix(in srgb,var(--primary) 12%,transparent);color:var(--primary);padding:2px 7px;border-radius:20px;font-weight:700">'+_icn("link","ic-sm")+' مربوط بمشروع</span>'
+        : '<span style="font-size:10px;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);padding:2px 7px;border-radius:20px;font-weight:700">'+_icn("edit","ic-sm")+' مستقلّ</span>';
       var moneyCells = money
         ? '<td style="padding:8px;text-align:center">'+_fmt(s.total)+'</td>' +
           '<td style="padding:8px;text-align:center;color:var(--muted)">'+_fmt(s.opening)+'</td>' +
@@ -313,7 +315,7 @@
           '<button class="btn btn-ghost btn-sm" onclick="window.substituteBudget.back()">← رجوع</button> ' +
           '<span style="font-size:17px;font-weight:800;margin-inline-start:8px">'+_esc(_acctName(acc))+'</span>' +
           '<div style="font-size:12px;color:var(--muted);margin-top:4px">'+
-            (acc.kind==="linked"?'🔗 مربوط بمشروع (رسمي أو يدوي)':'✏️ حساب مستقلّ')+
+            (acc.kind==="linked"?_icn("link","ic-sm")+' مربوط بمشروع (رسمي أو يدوي)':_icn("edit","ic-sm")+' حساب مستقلّ')+
             (acc.note?' — '+_esc(acc.note):'')+'</div>' +
           _moneyNote() +
         '</div>' +
@@ -343,7 +345,7 @@
       var dis = usedProj[o.value] ? ' disabled' : '';
       var sel = (acc && acc.projectId===o.value) ? ' selected' : '';
       var custom = _isCustomKey(o.value);
-      return '<option value="'+_esc(o.value)+'"'+dis+sel+'>'+(custom?'✏️ ':'')+_esc(o.label)+(dis?' (له حساب)':'')+'</option>';
+      return '<option value="'+_esc(o.value)+'"'+dis+sel+'>'+_esc(o.label)+(custom?' (يدوي)':'')+(dis?' (له حساب)':'')+'</option>';
     }).join("");
     return opts || '<option value="">لا مشاريع</option>';
   }
@@ -366,8 +368,8 @@
       '<div class="form-group">' +
         '<label class="form-label">نوع الحساب</label>' +
         '<div style="display:flex;gap:16px;flex-wrap:wrap">' +
-          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="sb-kind" value="linked"'+(kind==="linked"?" checked":"")+' onchange="window.substituteBudget._kindToggle()"> 🔗 مربوط بمشروع (رسمي أو يدوي)</label>' +
-          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="sb-kind" value="standalone"'+(kind==="standalone"?" checked":"")+' onchange="window.substituteBudget._kindToggle()"> ✏️ مستقلّ (اسمٌ جديد غير موجود)</label>' +
+          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="sb-kind" value="linked"'+(kind==="linked"?" checked":"")+' onchange="window.substituteBudget._kindToggle()"> '+_icn("link")+' مربوط بمشروع (رسمي أو يدوي)</label>' +
+          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="sb-kind" value="standalone"'+(kind==="standalone"?" checked":"")+' onchange="window.substituteBudget._kindToggle()"> '+_icn("edit")+' مستقلّ (اسمٌ جديد غير موجود)</label>' +
         '</div>' +
       '</div>' +
       '<div class="form-group" id="sb-linked-wrap" style="'+(kind==="linked"?"":"display:none")+'">' +
@@ -524,8 +526,7 @@
     var opts = '<option value="">— اختر الحساب —</option>';
     opts += _accounts.map(function(a){
       var sel = (a.id===selectedId) ? ' selected' : '';
-      var tag = a.kind==="linked" ? "🔗" : "✏️";
-      return '<option value="'+_esc(a.id)+'"'+sel+'>'+tag+' '+_esc(_acctName(a))+'</option>';
+      return '<option value="'+_esc(a.id)+'"'+sel+'>'+_esc(_acctName(a))+(a.kind==="linked"?'':' (مستقلّ)')+'</option>';
     }).join("");
     return opts;
   }
