@@ -56,7 +56,7 @@
   node hail-tests.js
   ```
   (نفس ما يفعله سير عمل CI: `.github/workflows/hail-tests.yml`.)
-- **الحالة الحالية:** ✅ **100/100** فحصاً ناجحة على `v18.9rh`.
+- **الحالة الحالية:** ✅ **100/100** فحصاً ناجحة على `v18.9ri`.
 - **ثابت الإصدار `APP_VERSION`:** في `index.html` (بحث عن `const APP_VERSION`). يُعرَض في
   تذييل تسجيل الدخول تلقائياً. **عند أي تعديل يُرفع الإصدار** (لاحقة حرفية: ...qf → qg)،
   وتُرفع معه cache-busters كل الوحدات في نهاية `index.html` (`?v=...`) — يفحص hail-tests
@@ -64,6 +64,13 @@
 
 ## 6) سجل موجز بأهم التعديلات
 
+- **v18.9ri — المتابعة اليومية (`renderDaily`): إيموجي → أيقونات SVG — يكتمل جانب الصيانة (عرض فقط):**
+  ترويسة اللوحة 📅→`calendar`. بطاقات الإحصاء 📥/✅/🔧/⏰→`download`/`checkCircle`/`wrench`/`alarmClock`
+  (+قاعدة `.daily-card-ico svg` بحجم 22px). بطاقات البلاغ المصغّرة (`miniTicket` + قائمة المتأخّر):
+  ⚠→`alertTriangle`، 👷→`hardHat`، ⏱→`timer`، 📍→`pin`، الأزرار 👁/📸/🔄/👷/🗑→`eye`/`camera`/`repeat`/
+  `hardHat`/`trash`. الحالات الفارغة 🎉→`sparkles`/✅→`checkCircle`. وشريط تنبيه SLA الطافي ⚠→
+  `alertTriangle`. عناوين أعمدة اللوحة (`.card-title`: 🔴/✅/⚠) تُحوَّل أصلاً عبر `applyGlyphIcons`.
+  بذلك اكتملت الشاشات الخمس لجانب الصيانة (الداشبورد، البلاغات، الأرشيف، المتابعة، والمؤشرات). عرض فقط.
 - **v18.9rh — أرشيف البلاغات (`page-tickets-archive` + `renderArchiveMonthTickets`): إيموجي → SVG (عرض فقط):**
   الترويسة 🗄️→`archive`، زر «تصدير Excel» 📗→`sheet` (٣ مواضع: الأرشيف + تقريرا الشاشة/المشتريات)،
   زر «أرشفة شهر يدوياً» 📦→`archive`. الحالات الفارغة 🗄️/⏳→`archive`/`hourglass`، `📭`→`archive`.
