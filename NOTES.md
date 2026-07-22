@@ -56,7 +56,7 @@
   node hail-tests.js
   ```
   (نفس ما يفعله سير عمل CI: `.github/workflows/hail-tests.yml`.)
-- **الحالة الحالية:** ✅ **100/100** فحصاً ناجحة على `v18.9rf`.
+- **الحالة الحالية:** ✅ **100/100** فحصاً ناجحة على `v18.9rg`.
 - **ثابت الإصدار `APP_VERSION`:** في `index.html` (بحث عن `const APP_VERSION`). يُعرَض في
   تذييل تسجيل الدخول تلقائياً. **عند أي تعديل يُرفع الإصدار** (لاحقة حرفية: ...qf → qg)،
   وتُرفع معه cache-busters كل الوحدات في نهاية `index.html` (`?v=...`) — يفحص hail-tests
@@ -64,6 +64,14 @@
 
 ## 6) سجل موجز بأهم التعديلات
 
+- **v18.9rg — قائمة البلاغات (`renderTickets`): كل الإيموجي أيقونات SVG (عرض فقط):**
+  أُضيفت أيقونتا `eye`/`camera` إلى `_ICON` (+قاعدة `.te-ico svg` بحجم 34px). حُوِّل الإيموجي في
+  بطاقتَي البلاغ (سطح المكتب والجوال): شريط الشهر 📅→`calendar`/↩️ المرحّل→`rotateCcw`/🗄️ الأرشيف→
+  `archive`؛ حالات فارغة 🔍/📭→`search`/`archive` و➕→`plus`؛ ⚠ متأخر→`alertTriangle`، نوع الصيانة
+  🛡/🔧→`shield`/`wrench`، 👷 الفني→`hardHat`، 👤 المشرف→`user`، ⏱→`timer`، 📅→`calendar`، ✅ أُغلق→
+  `checkCircle`، 📍→`pin`، 🏢→`building2`؛ الأزرار 👁 التفاصيل→`eye`، 📸 الإغلاق→`camera`، 🔄 تغيير/
+  👷 تعيين الفني→`repeat`/`hardHat`، 🗑 الحذف→`trash`. (`typeIcon`/`statusBadge`/`priBadge` كانت SVG/CSS
+  أصلاً.) وحُذف إيموجي 🔍 من `placeholder` البحث (لا يقبل SVG). عرض فقط، لا منطق.
 - **v18.9rf — اللوحة التنفيذية (الداشبورد): الإيموجي الديناميكي أيقونات SVG (عرض فقط):**
   عناوين أقسام اللوحة (`.kpi-section-title`/`.card-title`) كانت تُحوَّل أصلاً عبر `applyGlyphIcons`.
   الآن حُوِّل الإيموجي الديناميكي في `renderDashboard`: بطاقات مؤشّرات الأداء 🎯 الهدف→`target`
