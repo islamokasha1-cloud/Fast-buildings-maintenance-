@@ -900,7 +900,9 @@ table tfoot td{background:#f1f5f9;font-weight:800}
   }
 
   // ══ الحفظ ══
+  let _saving=false; // v18.9rn: حارس ضد النقر المزدوج — كان add() يُنفَّذ مرتين فتُنشأ وثيقة مكرّرة
   async function save(){
+    if(_saving) return;
     if(!canManage()){ T("⚠ صلاحية غير كافية","warn"); return; }
     const id       = document.getElementById("pa-edit-id").value.trim();
     const code     = document.getElementById("pa-code").value.trim();
@@ -943,6 +945,7 @@ table tfoot td{background:#f1f5f9;font-weight:800}
       updatedAt: stamp(), updatedBy: userLabel()
     };
 
+    _saving=true;
     try{
       if(id){
         await db.collection(COLLECTION()).doc(id).update(data);
@@ -956,6 +959,8 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     } catch(e){
       console.error("price analysis save error", e);
       T("⚠ خطأ في الحفظ — تحقق من الاتصال","warn");
+    } finally {
+      _saving=false;
     }
   }
 

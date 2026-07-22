@@ -150,9 +150,34 @@
     }, function(e){ console.warn("substitute-budget sync error:", e); });
   }
 
-  function _save(){
+  // v18.9rn: تطبيق تغييرٍ على مصفوفة الحسابات ذرّياً عبر transaction — يقرأ الوثيقة
+  // الطازجة، يطبّق الدلتا بالمعرّف (id)، ثم يكتب. يُنهي عيبين:
+  //  (١) فقدان تعديلٍ صامت: كان _submitForm يعدّل مرجع كائنٍ قد يستبدله onSnapshot أثناء
+  //      فتح النافذة، ثم يكتب _accounts التي لم تعد تحويه — فيضيع التعديل برسالة نجاح.
+  //  (٢) دهس متزامن: كان .set({accounts}) يكتب المصفوفة كاملةً بلا دمج، فيدهس محرّرٌ
+  //      تعديلَ الآخر. الآن يقرأ الـ transaction أحدث نسخة ويطبّق التغيير المحدَّد وحده.
+  // mutate(list) يستقبل نسخةً طازجةً من المصفوفة، يعدّلها ويُعيد النهائية (أو يرمي للإلغاء).
+  function _apply(mutate){
     if(typeof db==="undefined" || !db) return Promise.reject(new Error("no db"));
-    return db.doc(DOC()).set({ accounts: _accounts });
+    var ref = db.doc(DOC());
+    if(typeof db.runTransaction==="function"){
+      return db.runTransaction(function(tx){
+        return tx.get(ref).then(function(snap){
+          var cur = (snap.exists && Array.isArray((snap.data()||{}).accounts)) ? snap.data().accounts.slice() : [];
+          var next = mutate(cur);
+          tx.set(ref, { accounts: next });
+          return next;
+        });
+      }).then(function(next){
+        _accounts = next; window._substituteAccounts = _accounts;
+        return next;
+      });
+    }
+    // احتياط بلا transaction (نادر) — أفضل جهد
+    var next = mutate(_accounts.slice());
+    return db.doc(DOC()).set({ accounts: next }).then(function(){
+      _accounts = next; window._substituteAccounts = _accounts; return next;
+    });
   }
 
   // ════════ العرض ════════
@@ -464,28 +489,42 @@
     }
 
     _saving = true;
-    var backup = _accounts.map(function(a){ return Object.assign({}, a); });
-    if(acc){
-      acc.kind=kind; acc.projectId=(kind==="linked"?projectId:""); acc.name=name;
-      acc.total=total; acc.openingConsumed=opening; acc.margin=margin; acc.note=note;
-      acc.updatedAt=_now();
-    } else {
-      var id = "sb_" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
-      _accounts.push({
-        id:id, kind:kind, projectId:(kind==="linked"?projectId:""), name:name,
-        total:total, openingConsumed:opening, margin:margin, note:note,
-        createdAt:_now(), createdBy:_me(), updatedAt:_now()
-      });
-    }
     try{
-      await _save();
+      if(acc){
+        // v18.9rn: عدّل النسخة الطازجة داخل الـ transaction بالمعرّف — لا الكائن الملتقط
+        // (قد يكون onSnapshot استبدله)، فلا يضيع التعديل ولا يُدهَس تعديلٌ متزامن.
+        await _apply(function(list){
+          var i = list.findIndex(function(a){ return a.id===acc.id; });
+          if(i<0) throw new Error("__gone__"); // حُذف الحساب أثناء فتح النافذة
+          list[i] = Object.assign({}, list[i], {
+            kind:kind, projectId:(kind==="linked"?projectId:""), name:name,
+            total:total, openingConsumed:opening, margin:margin, note:note, updatedAt:_now()
+          });
+          return list;
+        });
+      } else {
+        await _apply(function(list){
+          // إعادة فحص التكرار على النسخة الطازجة داخل الـ transaction
+          if(kind==="linked" && list.some(function(a){ return a.kind==="linked" && a.projectId===projectId; }))
+            throw new Error("__dup__");
+          var id = "sb_" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+          list.push({
+            id:id, kind:kind, projectId:(kind==="linked"?projectId:""), name:name,
+            total:total, openingConsumed:opening, margin:margin, note:note,
+            createdAt:_now(), createdBy:_me(), updatedAt:_now()
+          });
+          return list;
+        });
+      }
       _saving=false;
       _toast(acc?"✅ تم حفظ التعديل":"✅ تم إضافة الحساب","success");
       _audit(acc?"تعديل حساب بند مستعاض":"إضافة حساب بند مستعاض", name+" — إجمالي:"+_fmt(total)+" هامش:"+margin+"%");
       render();
       return true; // نجح — يُغلق المودال
     }catch(e){
-      _saving=false; _accounts=backup; window._substituteAccounts=_accounts;
+      _saving=false;
+      if(e && e.message==="__gone__"){ _toast("⚠ حُذف هذا الحساب أثناء التعديل — أُلغيت العملية","warn"); render(); return true; }
+      if(e && e.message==="__dup__"){ _toast("⚠ هذا المشروع مربوطٌ بحسابٍ آخر","warn"); return false; }
       _toast("⚠ خطأ في الحفظ — تحقق من الاتصال","warn"); render();
       return false; // يبقى المودال مفتوحاً لإعادة المحاولة
     }
@@ -503,15 +542,17 @@
       icon:"🗑", okText:"حذف", okClass:"btn-danger"
     })).then(function(ok){
       if(!ok) return;
-      var backup=_accounts.slice();
-      _accounts = _accounts.filter(function(a){ return a.id!==id; });
-      _save().then(function(){
+      if(_saving) return;           // حارس ضد النقر المزدوج على الحذف
+      _saving = true;
+      // v18.9rn: حذف ذرّي عبر _apply — يقرأ الطازج ويُزيل بالمعرّف فلا يدهس تعديلاً متزامناً.
+      _apply(function(list){ return list.filter(function(a){ return a.id!==id; }); }).then(function(){
+        _saving=false;
         _toast("✅ تم حذف الحساب","success");
         _audit("حذف حساب بند مستعاض", _acctName(acc));
         if(_curId===id) _curId=null;
         render();
       }).catch(function(){
-        _accounts=backup; window._substituteAccounts=_accounts;
+        _saving=false;
         _toast("⚠ خطأ في الحذف","warn"); render();
       });
     });

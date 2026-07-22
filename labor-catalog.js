@@ -368,7 +368,9 @@
   }
 
   // ══ حفظ (إضافة أو تعديل) ══
+  let _saving=false; // v18.9rn: حارس ضد النقر المزدوج — كان add() يُنفَّذ مرتين فتُنشأ وثيقة مكرّرة
   async function save(){
+    if(_saving) return;
     if(!canManage()){ T("⚠ صلاحية غير كافية","warn"); return; }
     const id       = document.getElementById("lab-edit-id").value.trim();
     const code     = document.getElementById("lab-code").value.trim();
@@ -404,6 +406,7 @@
       updatedAt: stamp(), updatedBy: userLabel()
     };
 
+    _saving=true;
     try{
       if(id){
         await db.collection(COLLECTION()).doc(id).update(data);
@@ -418,6 +421,8 @@
     } catch(e){
       console.error("labor save error", e);
       T("⚠ خطأ في الحفظ — تحقق من الاتصال","warn");
+    } finally {
+      _saving=false;
     }
   }
 
