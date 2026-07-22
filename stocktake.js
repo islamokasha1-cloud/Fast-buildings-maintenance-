@@ -76,6 +76,8 @@
   function _esc(s){ try{ return esc(s); }catch(e){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); } }
   function _num(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
   function _fmt(n){ return (_num(n)).toLocaleString("en-US",{maximumFractionDigits:3}); }
+  // أيقونة SVG من طقم المنصة (بديل الإيموجي) — آمنة إن غاب _ic.
+  function _icn(name,cls){ try{ return (typeof _ic==="function") ? _ic(name,cls) : ""; }catch(e){ return ""; } }
 
   function _warehouseNames(){
     try{ if(typeof getWarehouseNames==="function") return getWarehouseNames(); }catch(e){}
@@ -162,13 +164,13 @@
     const _admDel = _canDelete();
 
     const startBtn = _canManage()
-      ? `<button class="btn btn-sm" onclick="window.stocktake.startNew()">➕ بدء جرد جديد</button>` : "";
+      ? `<button class="btn btn-sm" onclick="window.stocktake.startNew()">${_icn("plus")} بدء جرد جديد</button>` : "";
 
     const openCards = open.length ? open.map(t=>{
       const sm = _summarize(t, t.counts||{});
       const badge = t.status==="pending_approval"
         ? `<span style="background:#fef3c7;color:#92400e;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">⏳ ${_esc(STATUS[t.status])}</span>`
-        : `<span style="background:#dbeafe;color:#1e40af;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">✏️ ${_esc(STATUS[t.status])}</span>`;
+        : `<span style="background:#dbeafe;color:#1e40af;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">${_icn("edit")} ${_esc(STATUS[t.status])}</span>`;
       return `
       <div class="card" style="margin-bottom:10px;cursor:pointer" onclick="window.stocktake.open('${t.id}')">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
@@ -220,7 +222,7 @@
     return `
       <div class="page-hero">
         <div class="page-hero-titles">
-          <div class="page-hero-title">📊 الجرد الشهري</div>
+          <div class="page-hero-title">${_icn("barChart","ic-lg")} الجرد الشهري</div>
           <div class="page-hero-sub">جرد فعلي لكل مستودع ومطابقته برصيد النظام</div>
         </div>
         <div class="page-hero-actions">${startBtn}</div>
@@ -248,7 +250,7 @@
 
     // ترويسة الحالة
     let statusBadge;
-    if(t.status==="counting")              statusBadge=`<span style="background:#dbeafe;color:#1e40af;padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">✏️ ${_esc(STATUS[t.status])}</span>`;
+    if(t.status==="counting")              statusBadge=`<span style="background:#dbeafe;color:#1e40af;padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">${_icn("edit")} ${_esc(STATUS[t.status])}</span>`;
     else if(t.status==="pending_approval") statusBadge=`<span style="background:#fef3c7;color:#92400e;padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">⏳ ${_esc(STATUS[t.status])}</span>`;
     else if(t.status==="applied")          statusBadge=`<span style="background:#dcfce7;color:#166534;padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">✅ ${_esc(STATUS[t.status])}</span>`;
     else                                   statusBadge=`<span style="background:#f3f4f6;color:#374151;padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">🚫 ${_esc(STATUS[t.status])}</span>`;
@@ -332,7 +334,7 @@
     return `
       <div class="page-hero">
         <div class="page-hero-titles">
-          <div class="page-hero-title">📊 جرد: ${_esc(t.warehouseName)}</div>
+          <div class="page-hero-title">${_icn("barChart","ic-lg")} جرد: ${_esc(t.warehouseName)}</div>
           <div class="page-hero-sub">${statusBadge} &nbsp; بدأه ${_esc(t.createdBy)} — ${_esc(_shortDate(t.createdAt))}</div>
         </div>
         <div class="page-hero-actions">
@@ -448,7 +450,7 @@
       return `<option value="${_esc(n)}"${busy?" disabled":""}>${_esc(n)}${busy?" — جردٌ مفتوح":""}</option>`;
     }).join("");
     _showModal({
-      title:"➕ بدء جرد شهري جديد",
+      title:_icn("plus")+" بدء جرد شهري جديد",
       body:`<div style="font-size:13px;color:var(--muted);margin-bottom:8px">اختر المستودع المراد جرده. ستُلتقط لقطة برصيد النظام الحالي لكل بنوده.</div>
             <select id="_st-wh-pick" style="width:100%;padding:9px;border:1px solid var(--border,#d1d5db);border-radius:8px;font-size:14px">
               <option value="">— اختر المستودع —</option>${opts}
