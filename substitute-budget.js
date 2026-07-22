@@ -134,6 +134,8 @@
   // ════════ الاشتراك الفوري ════════
   function startSync(){
     if(typeof db==="undefined" || !db) return;
+    // حمّل الأسماء اليدوية من meta (أفضل جهد) حتى تكتمل قائمة المشاريع للربط والعرض
+    try{ if(typeof _loadManualProjectNames==="function") _loadManualProjectNames(); }catch(e){}
     if(_unsub) _unsub();
     _unsub = db.doc(DOC()).onSnapshot(function(snap){
       var d = snap.exists ? snap.data() : null;
@@ -386,7 +388,10 @@
     _openForm(acc);
   }
 
-  function _openForm(acc){
+  async function _openForm(acc){
+    // نضمن تحميل الأسماء اليدوية من meta قبل بناء القائمة — حتى تظهر المشاريع
+    // اليدوية المحفوظة ولو لم تُفتح صفحة «طلب جديد» في هذه الجلسة بعد.
+    try{ if(typeof _loadManualProjectNames==="function") await _loadManualProjectNames(); }catch(e){}
     try{
       showCustomModal({
         title: acc ? ("✏️ تعديل حساب: "+_acctName(acc)) : "➕ إضافة حساب بند مستعاض",
