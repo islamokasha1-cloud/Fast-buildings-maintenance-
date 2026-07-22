@@ -350,6 +350,8 @@ function substituteBudget() {
   T("تُشغَّل مع بقية الوحدات", HTML.includes("window.substituteBudget.startSync"));
   T("حقول الطلب تُحفظ", HTML.includes("isSubstitute,") && HTML.includes("substituteAccountId,"));
   T("قسم النموذج موجود", HTML.includes('id="np-is-substitute"') && HTML.includes('id="np-substitute-account"'));
+  T("يقرأ المصدر الموحّد للمشاريع (رسمية + يدوية)", src.includes("_allProjectOptions"));
+  T("الترشيح التلقائي بالمفتاح الموحّد", HTML.includes("function _npProjKeyForSub()") && HTML.includes("__CUSTOM__:"));
 
   // تحميل الوحدة فعلياً واختبار دالة الحساب النقية _calcStats
   const sandbox = { window: {}, console };
