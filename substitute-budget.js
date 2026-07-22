@@ -180,7 +180,7 @@
       '<div class="card" style="margin-bottom:12px">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">' +
           '<div>' +
-            '<div style="font-size:17px;font-weight:800">🪙 رصيد البند المستعاض</div>' +
+            '<div style="font-size:17px;font-weight:800">'+(typeof _ic==="function"?_ic("landmark","ic-lg"):"")+' رصيد البند المستعاض</div>' +
             '<div style="font-size:12px;color:var(--muted);margin-top:2px">رصيد كل مشروع للمشتريات والخدمات خارج بنود العقد — يُخصم بسعر البيع عند إغلاق الطلب.</div>' +
             _moneyNote() +
           '</div>' + addBtn +
