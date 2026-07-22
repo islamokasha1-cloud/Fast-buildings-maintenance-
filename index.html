@@ -22982,19 +22982,32 @@ async function onNPProjectChange(){
 }
 
 // ── البند المستعاض: ملء القائمة المنسدلة وتبديل ظهورها في نموذج طلب الشراء ──
+// المفتاح الموحّد للمشروع المختار في النموذج — يطابق قيمة _allProjectOptions:
+// الرسمي بمعرّفه، والمشروع اليدوي (المحفوظ __MPN__ أو المُدخَل __OTHER__) بـ
+// "__CUSTOM__:"+الاسم — فيترابط حساب البند المستعاض مع المشاريع اليدوية.
+function _npProjKeyForSub(){
+  const projEl = document.getElementById("np-project");
+  const v = projEl ? projEl.value : "";
+  if(!v) return "";
+  if(v==="__OTHER__"){
+    const nm = ((document.getElementById("np-custom-project-name")||{}).value||"").trim();
+    return nm ? ("__CUSTOM__:"+nm) : "";
+  }
+  if(v.indexOf("__MPN__:")===0) return "__CUSTOM__:"+v.slice(8);
+  return v; // مشروع رسمي بمعرّفه
+}
+
 function _sbRefreshPOSelect(){
   const sel = document.getElementById("np-substitute-account");
   if(!sel) return;
   if(!(window.substituteBudget && typeof window.substituteBudget.optionsHtml==="function")) return;
   let preferred = sel.value;
-  if(!preferred){
-    // ترشيح تلقائي: الحساب المربوط بالمشروع المختار (إن وُجد)
-    const projEl = document.getElementById("np-project");
-    const pid = projEl ? projEl.value : "";
-    if(pid && pid!=="__OTHER__" && !String(pid).startsWith("__MPN__:") &&
-       typeof window.substituteBudget.accountForProject==="function"){
-      preferred = window.substituteBudget.accountForProject(pid) || "";
-    }
+  if(!preferred && typeof window.substituteBudget.accountForProject==="function"){
+    // ترشيح تلقائي: الحساب المربوط بالمشروع المختار — بالمفتاح الموحّد نفسه
+    // (_poProjKey: الرسمي بمعرّفه، اليدوي بـ "__CUSTOM__:"+الاسم) حتى يترابط
+    // مع المشاريع اليدوية كما مع الرسمية.
+    const key = _npProjKeyForSub();
+    if(key) preferred = window.substituteBudget.accountForProject(key) || "";
   }
   sel.innerHTML = window.substituteBudget.optionsHtml(preferred);
 }

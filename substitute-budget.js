@@ -70,12 +70,23 @@
     }catch(e){ return false; }
   }
 
-  // اسم الحساب المعروض: للمربوط اسمُ المشروع الحيّ إن وُجد، وإلا المخزّن.
+  // المصدر الموحّد للمشاريع (رسمية + يدوية مشتقّة من الطلبات و meta) — نفس ما
+  // يستعمله فلتر/تقارير المشتريات، فيترابط البند المستعاض مع بنود طلبات الشراء.
+  // القيمة (value): الرسمي بمعرّفه، واليدوي بـ "__CUSTOM__:"+الاسم.
+  function _projOptions(){
+    try{ if(typeof _allProjectOptions==="function"){ var o=_allProjectOptions(); if(Array.isArray(o)) return o; } }catch(e){}
+    return _projects().map(function(p){ return { value:p.id, label:p.name }; });
+  }
+  function _isCustomKey(v){ return typeof v==="string" && v.indexOf("__CUSTOM__:")===0; }
+
+  // اسم الحساب المعروض: للمربوط اسمُ المشروع الحيّ من المصدر الموحّد، وإلا المخزّن.
   function _acctName(acc){
     if(acc && acc.kind==="linked"){
+      var hit = _projOptions().find(function(o){ return o.value===acc.projectId; });
+      if(hit && hit.label) return hit.label;
       var pj = _projects().find(function(p){ return p.id===acc.projectId; });
       if(pj && pj.name) return pj.name;
-      try{ if(typeof _getProjName==="function"){ var n=_getProjName(acc.projectId); if(n && n!==acc.projectId) return n; } }catch(e){}
+      if(_isCustomKey(acc.projectId)) return acc.projectId.slice(11);
     }
     return (acc && acc.name) || "—";
   }
@@ -300,7 +311,7 @@
           '<button class="btn btn-ghost btn-sm" onclick="window.substituteBudget.back()">← رجوع</button> ' +
           '<span style="font-size:17px;font-weight:800;margin-inline-start:8px">'+_esc(_acctName(acc))+'</span>' +
           '<div style="font-size:12px;color:var(--muted);margin-top:4px">'+
-            (acc.kind==="linked"?'🔗 مربوط بمشروع من القائمة':'✏️ حساب مستقلّ (خارج قائمة المشاريع)')+
+            (acc.kind==="linked"?'🔗 مربوط بمشروع (رسمي أو يدوي)':'✏️ حساب مستقلّ')+
             (acc.note?' — '+_esc(acc.note):'')+'</div>' +
           _moneyNote() +
         '</div>' +
@@ -324,21 +335,22 @@
   function _formHtml(acc){
     var isEdit = !!acc;
     var kind = (acc && acc.kind) || "linked";
-    // المشاريع المتاحة للربط (تُستثنى المشاريع المرتبطة بحسابٍ آخر عند الإضافة)
+    // المشاريع المتاحة للربط من المصدر الموحّد (رسمية + يدوية) — يُستثنى المرتبط بحسابٍ آخر
     var usedProj = {};
     _accounts.forEach(function(a){ if(a.kind==="linked" && (!acc||a.id!==acc.id)) usedProj[a.projectId]=1; });
-    var projOpts = _projects().map(function(p){
-      var dis = usedProj[p.id] ? ' disabled' : '';
-      var sel = (acc && acc.projectId===p.id) ? ' selected' : '';
-      return '<option value="'+_esc(p.id)+'"'+dis+sel+'>'+_esc(p.name)+(dis?' (له حساب)':'')+'</option>';
+    var projOpts = _projOptions().map(function(o){
+      var dis = usedProj[o.value] ? ' disabled' : '';
+      var sel = (acc && acc.projectId===o.value) ? ' selected' : '';
+      var custom = _isCustomKey(o.value);
+      return '<option value="'+_esc(o.value)+'"'+dis+sel+'>'+(custom?'✏️ ':'')+_esc(o.label)+(dis?' (له حساب)':'')+'</option>';
     }).join("");
 
     return '' +
       '<div class="form-group">' +
         '<label class="form-label">نوع الحساب</label>' +
         '<div style="display:flex;gap:16px;flex-wrap:wrap">' +
-          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="sb-kind" value="linked"'+(kind==="linked"?" checked":"")+' onchange="window.substituteBudget._kindToggle()"> 🔗 مربوط بمشروع من القائمة</label>' +
-          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="sb-kind" value="standalone"'+(kind==="standalone"?" checked":"")+' onchange="window.substituteBudget._kindToggle()"> ✏️ مستقلّ (مشروع خارج القائمة)</label>' +
+          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="sb-kind" value="linked"'+(kind==="linked"?" checked":"")+' onchange="window.substituteBudget._kindToggle()"> 🔗 مربوط بمشروع (رسمي أو يدوي)</label>' +
+          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="sb-kind" value="standalone"'+(kind==="standalone"?" checked":"")+' onchange="window.substituteBudget._kindToggle()"> ✏️ مستقلّ (اسمٌ جديد غير موجود)</label>' +
         '</div>' +
       '</div>' +
       '<div class="form-group" id="sb-linked-wrap" style="'+(kind==="linked"?"":"display:none")+'">' +
@@ -414,8 +426,8 @@
       // منع ربط مشروعين بنفس الحساب
       var dup = _accounts.find(function(a){ return a.kind==="linked" && a.projectId===projectId && (!acc||a.id!==acc.id); });
       if(dup){ _toast("⚠ هذا المشروع مربوطٌ بحسابٍ آخر","warn"); return false; }
-      var pj = _projects().find(function(p){ return p.id===projectId; });
-      name = (pj && pj.name) || projectId;
+      var hit = _projOptions().find(function(o){ return o.value===projectId; });
+      name = (hit && hit.label) || (_isCustomKey(projectId) ? projectId.slice(11) : projectId);
     } else {
       name = ((document.getElementById("sb-name")||{}).value||"").trim();
       if(!name){ _toast("⚠ أدخل اسم الحساب","warn"); return false; }
