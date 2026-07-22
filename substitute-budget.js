@@ -334,18 +334,33 @@
   }
 
   // ════════ نموذج الإضافة/التعديل ════════
-  function _formHtml(acc){
-    var isEdit = !!acc;
-    var kind = (acc && acc.kind) || "linked";
-    // المشاريع المتاحة للربط من المصدر الموحّد (رسمية + يدوية) — يُستثنى المرتبط بحسابٍ آخر
+  // خيارات قائمة الربط (رسمية + يدوية من المصدر الموحّد) — يُستثنى المرتبط بحسابٍ آخر.
+  // مُستخرَجة لتُعاد بناؤها في الخلفية عند وصول الأسماء اليدوية بلا حجب فتح النافذة.
+  function _projSelectOptionsHtml(acc){
     var usedProj = {};
     _accounts.forEach(function(a){ if(a.kind==="linked" && (!acc||a.id!==acc.id)) usedProj[a.projectId]=1; });
-    var projOpts = _projOptions().map(function(o){
+    var opts = _projOptions().map(function(o){
       var dis = usedProj[o.value] ? ' disabled' : '';
       var sel = (acc && acc.projectId===o.value) ? ' selected' : '';
       var custom = _isCustomKey(o.value);
       return '<option value="'+_esc(o.value)+'"'+dis+sel+'>'+(custom?'✏️ ':'')+_esc(o.label)+(dis?' (له حساب)':'')+'</option>';
     }).join("");
+    return opts || '<option value="">لا مشاريع</option>';
+  }
+
+  // إعادة بناء قائمة الربط داخل نافذةٍ مفتوحة (بعد وصول الأسماء اليدوية) مع حفظ الاختيار.
+  function _refreshFormProjectSelect(acc){
+    var sel = document.getElementById("sb-project");
+    if(!sel) return; // النافذة أُغلقت
+    var cur = sel.value;
+    sel.innerHTML = _projSelectOptionsHtml(acc);
+    if(cur){ sel.value = cur; }
+  }
+
+  function _formHtml(acc){
+    var isEdit = !!acc;
+    var kind = (acc && acc.kind) || "linked";
+    var projOpts = _projSelectOptionsHtml(acc);
 
     return '' +
       '<div class="form-group">' +
@@ -357,7 +372,7 @@
       '</div>' +
       '<div class="form-group" id="sb-linked-wrap" style="'+(kind==="linked"?"":"display:none")+'">' +
         '<label class="form-label">المشروع *</label>' +
-        '<select class="form-select" id="sb-project">'+(projOpts||'<option value="">لا مشاريع</option>')+'</select>' +
+        '<select class="form-select" id="sb-project">'+projOpts+'</select>' +
       '</div>' +
       '<div class="form-group" id="sb-name-wrap" style="'+(kind==="standalone"?"":"display:none")+'">' +
         '<label class="form-label">اسم الحساب/المشروع *</label>' +
@@ -388,10 +403,8 @@
     _openForm(acc);
   }
 
-  async function _openForm(acc){
-    // نضمن تحميل الأسماء اليدوية من meta قبل بناء القائمة — حتى تظهر المشاريع
-    // اليدوية المحفوظة ولو لم تُفتح صفحة «طلب جديد» في هذه الجلسة بعد.
-    try{ if(typeof _loadManualProjectNames==="function") await _loadManualProjectNames(); }catch(e){}
+  function _openForm(acc){
+    // اعرض النافذة فوراً ببيانات المتاح — لا تنتظر الشبكة (كان await يؤخّر ظهورها).
     try{
       showCustomModal({
         title: acc ? ("✏️ تعديل حساب: "+_acctName(acc)) : "➕ إضافة حساب بند مستعاض",
@@ -401,7 +414,17 @@
       });
     }catch(e){
       _toast("⚠ تعذّر فتح النموذج","warn");
+      return;
     }
+    // حمّل الأسماء اليدوية من meta في الخلفية، ثم حدّث قائمة الربط إن كانت النافذة
+    // ما زالت مفتوحة — فتظهر المشاريع اليدوية بلا حجب فتح النافذة.
+    try{
+      if(typeof _loadManualProjectNames==="function"){
+        Promise.resolve(_loadManualProjectNames())
+          .then(function(){ _refreshFormProjectSelect(acc); })
+          .catch(function(){});
+      }
+    }catch(e){}
   }
 
   function _kindToggle(){
