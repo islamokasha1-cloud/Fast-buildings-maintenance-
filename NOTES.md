@@ -56,7 +56,7 @@
   node hail-tests.js
   ```
   (نفس ما يفعله سير عمل CI: `.github/workflows/hail-tests.yml`.)
-- **الحالة الحالية:** ✅ **100/100** فحصاً ناجحة على `v18.9rl`.
+- **الحالة الحالية:** ✅ **100/100** فحصاً ناجحة على `v18.9rm`.
 - **ثابت الإصدار `APP_VERSION`:** في `index.html` (بحث عن `const APP_VERSION`). يُعرَض في
   تذييل تسجيل الدخول تلقائياً. **عند أي تعديل يُرفع الإصدار** (لاحقة حرفية: ...qf → qg)،
   وتُرفع معه cache-busters كل الوحدات في نهاية `index.html` (`?v=...`) — يفحص hail-tests
@@ -64,6 +64,12 @@
 
 ## 6) سجل موجز بأهم التعديلات
 
+- **v18.9rm — المقارنة الشهرية (`renderMonthlyCompare`) + أزرار الذكاء: إيموجي → SVG (عرض فقط):**
+  الترويسة 📈→`trendingUp`. بطاقات المقارنة: بدلاً من 📊 عامّة + إيموجي المقياس، صار لكل مقياس
+  أيقونته الخاصّة عبر حقل `icon` (📋→`clipboardList`، ✅→`checkCircle`، ⚠→`alertTriangle`، 🎯→`target`،
+  ⏱→`timer`، 🔁→`repeat`) وحُذفت 📊 المكرّرة. عنوانا المخططين 📊/📈→`barChart`/`trendingUp`. وشارة
+  ✨ في **كل أزرار «تحليل ذكي/ملخص تنفيذي»** (`.ai-spark` — ٩ مواضع) صارت أيقونة `sparkles` (+قاعدة
+  `.ai-spark svg`). أسهم الاتجاه (↑/↓/=) نصّية تبقى. عرض فقط، لا منطق.
 - **v18.9rl — خريطة المباني (`page-buildings` + `renderBuildings`): إيموجي → SVG (عرض فقط):**
   الترويسة 🗺️→`map`. بطاقات الملخّص (`stat-tile`) 🏢/✅/🔴/⚠️→`building2`/`checkCircle`/`alertCircle`/
   `alertTriangle` (عبر `_svgIcon`؛ `.st-ico svg` مُحجَّم 19px أصلاً). بطاقة المبنى: 🏢 الاسم→`building2`،
