@@ -24,6 +24,7 @@ const IDX = CANDIDATES.find(p => fs.existsSync(p));
 if (!IDX) { console.error("❌ لم يُعثر على index.html في:\n   " + CANDIDATES.join("\n   ")); process.exit(1); }
 const HTML = fs.readFileSync(IDX, "utf8");
 const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
+const SB_PATH  = [path.resolve(path.dirname(IDX), "substitute-budget.js")].find(p => fs.existsSync(p));
 
 const VER = (HTML.match(/const APP_VERSION = "(v[\d.a-z]+)"/) || [])[1] || "?";
 
@@ -330,6 +331,65 @@ function kpi() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   9) وحدة البند المستعاض (substitute-budget.js)
+      تركيبٌ صحيح في index.html + صحّة حساب السجل المالي (دالة نقية).
+   ════════════════════════════════════════════════════════════════════ */
+function substituteBudget() {
+  H("9) وحدة البند المستعاض (substitute-budget.js)");
+  if (!SB_PATH) { console.log("  ⏭  substitute-budget.js غير موجود — تُخطّى"); return; }
+  const src = fs.readFileSync(SB_PATH, "utf8");
+  const vm = require("vm");
+  try { new vm.Script(src); T("صياغة substitute-budget.js سليمة", true); }
+  catch (e) { T("صياغة substitute-budget.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  // نقاط الربط في index.html
+  T("الوسم موجود في index.html", /<script src="substitute-budget\.js\?v=/.test(HTML));
+  T("زر القائمة الجانبية موجود", HTML.includes('data-page="substitute-budget"'));
+  T("حاوية الصفحة موجودة", HTML.includes('id="page-substitute-budget"'));
+  T("showPage يرسم الوحدة", HTML.includes('id==="substitute-budget"') && HTML.includes("window.substituteBudget.render"));
+  T("تُشغَّل مع بقية الوحدات", HTML.includes("window.substituteBudget.startSync"));
+  T("حقول الطلب تُحفظ", HTML.includes("isSubstitute,") && HTML.includes("substituteAccountId,"));
+  T("قسم النموذج موجود", HTML.includes('id="np-is-substitute"') && HTML.includes('id="np-substitute-account"'));
+
+  // تحميل الوحدة فعلياً واختبار دالة الحساب النقية _calcStats
+  const sandbox = { window: {}, console };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل الوحدة", false, String(e.message).slice(0, 120)); return; }
+  const SB = sandbox.window.substituteBudget;
+  T("تعرّض window.substituteBudget._calcStats", SB && typeof SB._calcStats === "function");
+  if (!SB || typeof SB._calcStats !== "function") return;
+
+  // مثال محسوبٌ باليد: هامش 25%، إجمالي 500000، مستهلك سابق 180000
+  //   مغلق 10000 + مغلق 20000 (سعر بيع ×1.25) + جارٍ تقديري 5000
+  const acc = { margin: 25, total: 500000, openingConsumed: 180000 };
+  const pos = [
+    { closed: true,  cost: 10000, est: 9000 },
+    { closed: true,  cost: 20000, est: 21000 },
+    { closed: false, cost: 0,     est: 5000 },
+  ];
+  const s = SB._calcStats(acc, pos, p => p.closed, p => p.cost, p => p.est);
+  T("سعر البيع المصروف = Σ تكلفة مغلقة × (1+هامش)", s.closedSell === 37500, `=${s.closedSell} (متوقع 37500)`);
+  T("الربح المحقّق = سعر البيع − التكلفة", s.closedProfit === 7500, `=${s.closedProfit} (متوقع 7500)`);
+  T("المستهلك = المستهلك سابقاً + المصروف", s.consumed === 217500, `=${s.consumed} (متوقع 217500)`);
+  T("المتبقي = الإجمالي − المستهلك", s.remaining === 282500, `=${s.remaining} (متوقع 282500)`);
+  T("قيد التنفيذ (تقديري) لا يُخصم", s.wipSell === 6250 && s.closedSell === 37500, `wip=${s.wipSell}`);
+
+  // ثابت عشوائي: مهما كانت المدخلات، تتماسك المعادلات الأساسية
+  let _s2 = 424242, bad = null;
+  const rnd = () => { _s2 = (_s2 + 0x6D2B79F5) | 0; let t = Math.imul(_s2 ^ (_s2 >>> 15), 1 | _s2); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  for (let i = 0; i < 500 && !bad; i++) {
+    const a = { margin: Math.round(rnd() * 5000) / 100, total: Math.round(rnd() * 1e6), openingConsumed: Math.round(rnd() * 2e5) };
+    const ps = Array.from({ length: Math.floor(rnd() * 6) }, () => ({ closed: rnd() < 0.6, cost: Math.round(rnd() * 5e4), est: Math.round(rnd() * 5e4) }));
+    const r = SB._calcStats(a, ps, p => p.closed, p => p.cost, p => p.est);
+    const eps = 1e-6;
+    if (Math.abs(r.consumed - (a.openingConsumed + r.closedSell)) > eps) bad = { why: "consumed", r };
+    else if (Math.abs(r.remaining - (a.total - r.consumed)) > eps) bad = { why: "remaining", r };
+    else if (Math.abs(r.closedProfit - (r.closedSell - r.closedCost)) > eps) bad = { why: "profit", r };
+  }
+  T("ثابت: المستهلك/المتبقي/الربح متماسكة على 500 تركيبة عشوائية", !bad, bad ? JSON.stringify(bad).slice(0, 120) : "");
+}
+
+/* ════════════════════════════════════════════════════════════════════
    8) فحص الثوابت العشوائي
       الأمثلة المكتوبة تُثبت ما خطر ببالنا. هذه تُجرّب ما لم يخطر:
       آلاف التركيبات العشوائية، والحكم ليس قيمة متوقعة مكتوبة بيد،
@@ -519,6 +579,7 @@ function fuzz() {
   guards();
   predelivery();
   kpi();
+  substituteBudget();
   fuzz();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
