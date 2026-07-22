@@ -703,7 +703,15 @@ const firebaseConfig = {
 const RECAPTCHA_SITE_KEY = "6Lf-MEQtAAAAAAcvx6wGbqjS5OLeKK4m4sNXrCqJ";
 
 const APP_VERSION = "5.20";
-const COLLECTION = "hail_tickets";
+// ── مجموعة البلاغات ──────────────────────────────────────────────────────
+// v18.9rn: تطبيق الفنيين مقترنٌ عمداً بمشروع «hail» (المشروع الأصلي). في index.html:
+//   COLLECTION() = IS_DEV ? _pfx("tickets")+"_dev" : _pfx("tickets)
+//   و _pfx("tickets") = "hail_tickets" حين CURRENT_PROJECT.id === "hail".
+// نطابق هنا الاسم نفسه، ونحترم وضع التطوير (?dev=1) فلا يقرأ الفنيّ بلاغات الإنتاج وهو
+// يجرّب على dev (والعكس). تنبيه: عند إضافة مشروعٍ ثانٍ في index.html تكتب بلاغاته إلى
+// «<projectId>_tickets» ولن يراها هذا التطبيق — يلزم حينها تعميم اسم المجموعة هنا.
+const IS_DEV = location.search.includes('dev=1');
+const COLLECTION = IS_DEV ? "hail_tickets_dev" : "hail_tickets";
 const ATTENDANCE_COLLECTION = "attendance";
 const DEFAULT_PIN = "1234";
 const DEFAULT_ADMIN_PIN = "0000"; // PIN احتياطي لمدير النظام

@@ -7,6 +7,9 @@ on:
       - 'purchase-kpi.js'
       - 'labor-catalog.js'
       - 'price-analysis.js'
+      - 'substitute-budget.js'
+      - 'stocktake.js'
+      - 'HailNotify.js'
       - 'hail-tests.js'
   pull_request:
   workflow_dispatch:

@@ -76,11 +76,18 @@
     return s;
   }
 
+  // v18.9rn: سياق صوتي واحد مُعاد الاستخدام. كان beep() يُنشئ AudioContext جديداً لكل toast
+  // ولا يُغلقه، فبعد ~٦ إشعارات يبلغ المتصفح سقفَ السياقات الحيّة ويرمي new AC() (يُبتلع)
+  // فيتوقّف الصوت. الآن نُنشئ سياقاً واحداً كسولاً ونستأنفه عند الحاجة.
+  var _audioCtx = null;
   function beep() {
     if (!cfg.sound) return;
     try {
       var AC = w.AudioContext || w.webkitAudioContext; if (!AC) return;
-      var ctx = new AC(), o = ctx.createOscillator(), g = ctx.createGain();
+      if (!_audioCtx) _audioCtx = new AC();
+      var ctx = _audioCtx;
+      if (ctx.state === "suspended" && ctx.resume) { try { ctx.resume(); } catch (e) {} }
+      var o = ctx.createOscillator(), g = ctx.createGain();
       o.type = "sine"; o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
       g.gain.setValueAtTime(0.0001, ctx.currentTime);
       g.gain.exponentialRampToValueAtTime(0.1, ctx.currentTime + 0.01);
@@ -91,6 +98,9 @@
 
   function dismiss(el) {
     if (!el || el.__gone) return; el.__gone = true;
+    // v18.9rn: ألغِ مؤقّت الإخفاء التلقائي إن كان قائماً — كان يبقى يستطلع عقدةً منفصلة
+    // بعد الإغلاق اليدوي حتى تنقضي المدة.
+    if (el.__hnTimer) { w.clearInterval(el.__hnTimer); el.__hnTimer = null; }
     el.classList.add("hn-out");
     w.setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 260);
   }
@@ -164,10 +174,10 @@
 
     if (dur) {
       var remain = dur, last = Date.now();
-      var timer = w.setInterval(function () {
+      el.__hnTimer = w.setInterval(function () {
         if (el.matches(":hover")) { last = Date.now(); return; } // إيقاف مع تعليق الـ CSS
         var t = Date.now(); remain -= (t - last); last = t;
-        if (remain <= 0) { w.clearInterval(timer); dismiss(el); }
+        if (remain <= 0) { w.clearInterval(el.__hnTimer); el.__hnTimer = null; dismiss(el); }
       }, 120);
     }
 

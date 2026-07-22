@@ -25,6 +25,7 @@ if (!IDX) { console.error("❌ لم يُعثر على index.html في:\n   " + C
 const HTML = fs.readFileSync(IDX, "utf8");
 const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
 const SB_PATH  = [path.resolve(path.dirname(IDX), "substitute-budget.js")].find(p => fs.existsSync(p));
+const _modPath = f => path.resolve(path.dirname(IDX), f);
 
 const VER = (HTML.match(/const APP_VERSION = "(v[\d.a-z]+)"/) || [])[1] || "?";
 
@@ -392,6 +393,56 @@ function substituteBudget() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   10) الوحدات الخارجية غير المغطّاة (v18.9rn)
+       price-analysis / labor-catalog / stocktake / HailNotify: كانت لا
+       تُقرأ في الفحوص إطلاقاً — فخطأ صياغة أو تعطّل تحميل يشحن أخضر.
+       نفحص لكلٍّ: (١) صياغة سليمة، (٢) وسم <script> بالإصدار في index.html،
+       (٣) تحميلٌ فعلي في سياق DOM يُعرّض كائنه على window بدواله المتوقّعة.
+   ════════════════════════════════════════════════════════════════════ */
+function externalModules() {
+  H("10) الوحدات الخارجية (price-analysis / labor-catalog / stocktake / HailNotify)");
+  const vm = require("vm");
+  const { JSDOM } = require("jsdom");
+  const MODS = [
+    { file: "price-analysis.js",   global: "priceAnalysis", methods: ["startSync", "render", "save"] },
+    { file: "labor-catalog.js",    global: "laborCatalog",  methods: ["startSync", "render", "save"] },
+    { file: "stocktake.js",        global: "stocktake",     methods: ["render", "back"] },
+    { file: "HailNotify.js",       global: "HailNotify",    methods: ["push", "clearAll"] },
+  ];
+  MODS.forEach(m => {
+    const p = _modPath(m.file);
+    if (!fs.existsSync(p)) { T(m.file + " موجود", false, "الملف مفقود"); return; }
+    const src = fs.readFileSync(p, "utf8");
+    // (١) صياغة
+    let ok = true;
+    try { new vm.Script(src); } catch (e) { ok = false; T("صياغة " + m.file + " سليمة", false, String(e.message).slice(0, 120)); }
+    if (ok) T("صياغة " + m.file + " سليمة", true);
+    // (٢) الوسم بالإصدار في index.html
+    T(m.file + " مربوطٌ في index.html بإصدارٍ مطابق",
+      new RegExp("<script src=\"" + m.file.replace(/[.]/g, "\\$&") + "\\?v=" + VER.replace(/^v/, "").replace(/[.]/g, "\\$&") + "\"").test(HTML));
+    // (٣) تحميلٌ فعلي يُعرّض الكائن
+    const dom = new JSDOM("<!DOCTYPE html><body></body>");
+    const sandbox = {
+      window: dom.window, document: dom.window.document, console,
+      navigator: dom.window.navigator, location: dom.window.location,
+      setTimeout, clearTimeout, setInterval, clearInterval,
+    };
+    dom.window.console = console;
+    vm.createContext(sandbox);
+    let loaded = true;
+    try { vm.runInContext(src, sandbox); } catch (e) { loaded = false; T("تُحمَّل " + m.file + " بلا خطأ", false, String(e.message).slice(0, 120)); }
+    if (!loaded) return;
+    T("تُحمَّل " + m.file + " بلا خطأ", true);
+    const obj = sandbox.window[m.global];
+    T(m.file + " تعرّض window." + m.global, obj && typeof obj === "object");
+    if (obj && typeof obj === "object") {
+      const missing = m.methods.filter(fn => typeof obj[fn] !== "function");
+      T(m.file + " تُصدّر دوالها المتوقّعة (" + m.methods.join("، ") + ")", missing.length === 0, missing.length ? "ناقص: " + missing.join("، ") : "");
+    }
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════════
    8) فحص الثوابت العشوائي
       الأمثلة المكتوبة تُثبت ما خطر ببالنا. هذه تُجرّب ما لم يخطر:
       آلاف التركيبات العشوائية، والحكم ليس قيمة متوقعة مكتوبة بيد،
@@ -582,6 +633,7 @@ function fuzz() {
   predelivery();
   kpi();
   substituteBudget();
+  externalModules();
   fuzz();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
