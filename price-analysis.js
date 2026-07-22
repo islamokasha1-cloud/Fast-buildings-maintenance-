@@ -877,7 +877,7 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     if(id){
       const it = _items.find(function(c){ return c.id===id; });
       if(!it){ T("⚠ البند غير موجود","warn"); return; }
-      if(titleEl) titleEl.textContent="✏️ تعديل تحليل بند";
+      if(titleEl) titleEl.innerHTML=(typeof _ic==="function"?_ic("edit"):"")+" تعديل تحليل بند";
       document.getElementById("pa-code").value = it.code||"";
       document.getElementById("pa-name").value = it.name||"";
       { const _cs=document.getElementById("pa-category-select"); if(_cs) _cs.value = it.category||""; }

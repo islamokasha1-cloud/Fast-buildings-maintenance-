@@ -272,7 +272,7 @@
                     .sort(function(a,b){ return String(b.createdAt||"").localeCompare(String(a.createdAt||"")); });
 
     var manageBtns = _canManage()
-      ? '<button class="btn btn-ghost btn-sm" onclick="window.substituteBudget.openEdit(\''+acc.id+'\')">✏️ تعديل</button> ' +
+      ? '<button class="btn btn-ghost btn-sm" onclick="window.substituteBudget.openEdit(\''+acc.id+'\')">'+_icn("edit")+' تعديل</button> ' +
         '<button class="btn btn-danger btn-sm" onclick="window.substituteBudget.remove(\''+acc.id+'\')">🗑 حذف</button>'
       : '';
 
@@ -409,7 +409,7 @@
     // اعرض النافذة فوراً ببيانات المتاح — لا تنتظر الشبكة (كان await يؤخّر ظهورها).
     try{
       showCustomModal({
-        title: acc ? ("✏️ تعديل حساب: "+_acctName(acc)) : "➕ إضافة حساب بند مستعاض",
+        title: acc ? (_icn("edit")+" تعديل حساب: "+_acctName(acc)) : "➕ إضافة حساب بند مستعاض",
         body: _formHtml(acc),
         okText: acc ? "💾 حفظ التعديل" : "✅ إضافة",
         onOk: function(){ return _submitForm(acc); }

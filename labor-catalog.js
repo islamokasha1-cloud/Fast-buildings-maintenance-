@@ -351,7 +351,7 @@
     if(id){
       const it = _items.find(function(c){ return c.id===id; });
       if(!it){ T("⚠ البند غير موجود","warn"); return; }
-      if(titleEl) titleEl.textContent="✏️ تعديل مصنعية";
+      if(titleEl) titleEl.innerHTML=(typeof _ic==="function"?_ic("edit"):"")+" تعديل مصنعية";
       document.getElementById("lab-code").value = it.code||"";
       document.getElementById("lab-name").value = it.name||"";
       { const _cs=document.getElementById("lab-category-select"); if(_cs) _cs.value = it.category||""; }
