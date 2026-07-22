@@ -43,6 +43,9 @@ function _esc(s){
   return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 function _toast(msg,type){ try{ if(typeof toast==="function") toast(msg,type); }catch(e){} }
+/* أيقونات SVG من طقم المنصة (بديل الإيموجي) — آمنة إن غابت الدوال العامة */
+function ICN(name,cls){ try{ return (typeof _ic==="function") ? _ic(name,cls) : ""; }catch(e){ return ""; } }
+function ICG(name){ try{ return (typeof _svgIcon==="function") ? _svgIcon(name) : ""; }catch(e){ return ""; } }
 
 /* ── الوصول إلى مصفوفة الطلبات ──
    الملف الرئيسي يعرّفها بـ let purchases = [] — وتعريفات let لا تصبح خصائص
@@ -318,7 +321,7 @@ function render(){
 
   root.innerHTML = `
   <div class="card-header" style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px">
-    <h3 style="margin:0;font-size:16px">📈 مؤشرات أداء المشتريات</h3>
+    <h3 style="margin:0;font-size:16px">${ICN("trendingUp","ic-lg")} مؤشرات أداء المشتريات</h3>
     <span style="font-size:10px;color:var(--muted)">v${VERSION} — ${nf(K.total)} طلب ضمن النطاق</span>
   </div>
 
@@ -332,7 +335,7 @@ function render(){
     <button class="btn btn-ghost btn-sm" onclick="document.getElementById('pkpi-f-proj').value='';document.getElementById('pkpi-f-from').value='';document.getElementById('pkpi-f-to').value='';window.purchaseKPI.render()">↺ إعادة تعيين</button>
   </div>
 
-  ${K.total===0 ? `<div class="pkpi-empty">📭 لا توجد طلبات شراء ضمن النطاق المحدد</div>` : `
+  ${K.total===0 ? `<div class="pkpi-empty">${ICN("archive")} لا توجد طلبات شراء ضمن النطاق المحدد</div>` : `
 
   <div class="pkpi-grid">
     <div class="pkpi-card"><div class="v">${nf(K.openCount)}</div><div class="l">طلبات مفتوحة الآن</div><div class="s">من أصل ${nf(K.total)} طلباً</div></div>
@@ -347,7 +350,7 @@ function render(){
   </div>
 
   ${K.finance && (K.finance.paidN||K.finance.pendingN) ? `
-  <div style="font-size:13px;font-weight:800;margin:16px 2px 8px;color:#0e7490">💳 أداء المالية في السداد</div>
+  <div style="font-size:13px;font-weight:800;margin:16px 2px 8px;color:#0e7490">${ICN("banknote")} أداء المالية في السداد</div>
   <div class="pkpi-grid">
     <div class="pkpi-card ${K.finance.pendingN?"warn":""}"><div class="v">${nf(K.finance.pendingN)}</div><div class="l">بانتظار السداد الآن</div><div class="s" data-viewer-hide>${K.finance.pendingN?nf2(K.finance.pendingTotal)+" ر.س":"لا طلبات معلّقة"}</div></div>
     <div class="pkpi-card"><div class="v">${nf(K.finance.paidN)}</div><div class="l">طلبات سُدّدت (تراكمي)</div><div class="s" data-viewer-hide>${K.finance.paidN?nf2(K.finance.paidTotal)+" ر.س":"—"}</div></div>
@@ -356,12 +359,12 @@ function render(){
   </div>` : ""}
 
   <div class="pkpi-charts">
-    ${K.measurableN?`<div class="pkpi-chart-card"><h4>⏱ متوسط زمن كل مرحلة (يوم) — عنق الزجاجة</h4><div class="cwrap"><canvas id="pkpi-c-stages"></canvas></div></div>`:""}
-    <div class="pkpi-chart-card"><h4>📊 توزيع الطلبات حسب الحالة</h4><div class="cwrap"><canvas id="pkpi-c-status"></canvas></div></div>
-    <div class="pkpi-chart-card" data-viewer-hide><h4>💰 الإنفاق الشهري — تقديري مقابل فعلي (ر.س)</h4><div class="cwrap"><canvas id="pkpi-c-monthly"></canvas></div></div>
-    ${K.measurableN?`<div class="pkpi-chart-card"><h4>⛔ الرفض حسب جهة الاعتماد</h4><div class="cwrap"><canvas id="pkpi-c-reject"></canvas></div></div>`:""}
-    <div class="pkpi-chart-card" data-viewer-hide><h4>🏪 أعلى 5 موردين إنفاقاً (ر.س)</h4><div class="cwrap"><canvas id="pkpi-c-vendors"></canvas></div></div>
-    <div class="pkpi-chart-card"><h4>🚦 الطلبات المفتوحة حسب الأولوية</h4><div class="cwrap"><canvas id="pkpi-c-priority"></canvas></div></div>
+    ${K.measurableN?`<div class="pkpi-chart-card"><h4>${ICN("timer")} متوسط زمن كل مرحلة (يوم) — عنق الزجاجة</h4><div class="cwrap"><canvas id="pkpi-c-stages"></canvas></div></div>`:""}
+    <div class="pkpi-chart-card"><h4>${ICN("pieChart")} توزيع الطلبات حسب الحالة</h4><div class="cwrap"><canvas id="pkpi-c-status"></canvas></div></div>
+    <div class="pkpi-chart-card" data-viewer-hide><h4>${ICN("receipt")} الإنفاق الشهري — تقديري مقابل فعلي (ر.س)</h4><div class="cwrap"><canvas id="pkpi-c-monthly"></canvas></div></div>
+    ${K.measurableN?`<div class="pkpi-chart-card"><h4>${ICN("ban")} الرفض حسب جهة الاعتماد</h4><div class="cwrap"><canvas id="pkpi-c-reject"></canvas></div></div>`:""}
+    <div class="pkpi-chart-card" data-viewer-hide><h4>${ICN("store")} أعلى 5 موردين إنفاقاً (ر.س)</h4><div class="cwrap"><canvas id="pkpi-c-vendors"></canvas></div></div>
+    <div class="pkpi-chart-card"><h4>${ICN("alertTriangle")} الطلبات المفتوحة حسب الأولوية</h4><div class="cwrap"><canvas id="pkpi-c-priority"></canvas></div></div>
   </div>`}
   `;
 
@@ -460,7 +463,7 @@ function injectSidebarButton(){
   btn.className="sidebar-nav-btn sidebar-child";
   btn.id="nav-purchase-kpi-btn";
   btn.dataset.page=PAGE_ID;
-  btn.innerHTML='<span class="s-icon">📈</span> مؤشرات الأداء';
+  btn.innerHTML='<span class="s-icon">'+ICG('trendingUp')+'</span> مؤشرات الأداء';
   btn.onclick=()=>{ try{ showPage(PAGE_ID); }catch(e){} };
   /* بعد زر تقارير المشتريات إن وُجد، وإلا في نهاية المجموعة */
   const after = grp.querySelector('[data-page="purchase-reports"]');
