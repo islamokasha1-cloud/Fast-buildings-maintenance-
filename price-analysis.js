@@ -57,7 +57,33 @@
   function matSource(){ try{ return (typeof _catalogItems!=='undefined' && _catalogItems) ? _catalogItems.filter(function(c){ return !isMerged(c); }) : []; }catch(e){ return []; } }
   function laborSource(){ try{ return (window.laborCatalog && window.laborCatalog.getItems) ? (window.laborCatalog.getItems()||[]) : []; }catch(e){ return []; } }
 
-  function num(v){ const n = parseFloat(String(v==null?"":v).replace(/,/g,".")); return isNaN(n)?0:n; }
+  // تحويل نصّ إلى رقم يقبل الفاصلة العربية العشرية («1,25»=1.25) دون أن يُفسد فاصلة
+  // الآلاف: الاستبدال القديم replace(/,/g,".") كان يحوّل «1,250.00» إلى «1.250.00» ثم
+  // parseFloat=1.25 — بخس 1000×. الآن: الأرقام العربية→لاتينية، ثم حسم الفاصل العشري:
+  // عند وجود «.» و«,» معاً الأخير منهما عشري والآخر آلاف؛ وعند «,» وحدها تُعامَل عشرية
+  // فقط إن تبعها 1-2 خانة (1,25) وإلا فهي آلاف (1,250)؛ وتُزال آلاف النقطة المكرّرة.
+  function num(v){
+    if(typeof v==='number') return isFinite(v)?v:0;
+    var s=String(v==null?"":v).trim();
+    if(!s) return 0;
+    s=s.replace(/[٠-٩]/g,function(d){return String(d.charCodeAt(0)-0x0660);})
+       .replace(/[۰-۹]/g,function(d){return String(d.charCodeAt(0)-0x06F0);})
+       .replace(/[\s ٬']/g,"");
+    var hasDot=s.indexOf(".")>=0, hasComma=s.indexOf(",")>=0;
+    if(hasDot&&hasComma){
+      if(s.lastIndexOf(",")>s.lastIndexOf(".")) s=s.replace(/\./g,"").replace(/,/g,".");
+      else s=s.replace(/,/g,"");
+    } else if(hasComma){
+      var pc=s.split(",");
+      if(pc.length===2 && pc[1].length>0 && pc[1].length<3) s=pc[0]+"."+pc[1];
+      else s=s.replace(/,/g,"");
+    } else if(hasDot){
+      var pd=s.split(".");
+      if(pd.length>2) s=pd.slice(0,-1).join("")+"."+pd[pd.length-1];
+    }
+    var n=parseFloat(s);
+    return isFinite(n)?n:0;
+  }
   function fmt(n){ return (n==null?0:n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
   // ══ توليد الكود التسلسلي PA-### ══
@@ -1199,6 +1225,7 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     pickForRFQ: pickForRFQ,
     showDetail: showDetail,
     printDetail: printDetail,
-    getItems: function(){ return _items.slice(); }
+    getItems: function(){ return _items.slice(); },
+    _num: num   // مكشوف للاختبار فقط (hail-tests.js) — دالة نقية
   };
 })();

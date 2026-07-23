@@ -35,6 +35,30 @@
   function T(msg,type){ try{ if(typeof toast==='function') toast(msg,type); }catch(e){} }
   function E(s){ try{ return (typeof esc==='function') ? esc(s) : String(s==null?'':s); }catch(e){ return String(s==null?'':s); } }
   function ICON(name){ try{ return (typeof _svgIcon==='function') ? _svgIcon(name) : ''; }catch(e){ return ''; } }
+  // تحويل نصّ إلى رقم يقبل الفاصلة العربية العشرية دون إفساد فاصلة الآلاف: القديم
+  // replace(/,/g,".") كان يحوّل «1,250.00» إلى «1.250.00»→parseFloat=1.25 (بخس 1000×).
+  function num(v){
+    if(typeof v==='number') return isFinite(v)?v:0;
+    var s=String(v==null?"":v).trim();
+    if(!s) return 0;
+    s=s.replace(/[٠-٩]/g,function(d){return String(d.charCodeAt(0)-0x0660);})
+       .replace(/[۰-۹]/g,function(d){return String(d.charCodeAt(0)-0x06F0);})
+       .replace(/[\s ٬']/g,"");
+    var hasDot=s.indexOf(".")>=0, hasComma=s.indexOf(",")>=0;
+    if(hasDot&&hasComma){
+      if(s.lastIndexOf(",")>s.lastIndexOf(".")) s=s.replace(/\./g,"").replace(/,/g,".");
+      else s=s.replace(/,/g,"");
+    } else if(hasComma){
+      var pc=s.split(",");
+      if(pc.length===2 && pc[1].length>0 && pc[1].length<3) s=pc[0]+"."+pc[1];
+      else s=s.replace(/,/g,"");
+    } else if(hasDot){
+      var pd=s.split(".");
+      if(pd.length>2) s=pd.slice(0,-1).join("")+"."+pd[pd.length-1];
+    }
+    var n=parseFloat(s);
+    return isFinite(n)?n:0;
+  }
   function canManage(){ try{ return (typeof canManageCatalog==='function') ? canManageCatalog() : false; }catch(e){ return false; } }
   function isViewerMode(){ try{ return (typeof isViewer==='function') ? isViewer() : false; }catch(e){ return false; } }
   function userLabel(){ try{ return (currentUser && (currentUser.name||currentUser.user)) || "—"; }catch(e){ return "—"; } }
@@ -375,14 +399,14 @@
     const name     = document.getElementById("lab-name").value.trim();
     const category = readCategory();
     const unit     = document.getElementById("lab-unit").value.trim();
-    const rawR     = (document.getElementById("lab-rate").value||"").replace(/,/g,".");
-    const rate     = parseFloat(rawR);
+    const rawR     = (document.getElementById("lab-rate").value||"").trim();
+    const rate     = num(rawR);
     const scope    = document.getElementById("lab-scope").value.trim();
 
     if(!name){ T("⚠ أدخل اسم البند","warn"); return; }
     if(!category){ T("⚠ اختر أو اكتب التصنيف","warn"); return; }
     if(!unit){ T("⚠ اختر الوحدة","warn"); return; }
-    if(isNaN(rate)||rate<0){ T("⚠ أدخل سعراً صحيحاً","warn"); return; }
+    if(!/\d/.test(rawR)||rate<0){ T("⚠ أدخل سعراً صحيحاً","warn"); return; }
 
     // تكرار الكود
     if(code){
@@ -512,8 +536,9 @@
       let skipped = 0;
       dataRows.forEach(function(r){
         const name = String(r[2]||"").trim();
-        const rate = parseFloat(String(r[5]||"").replace(/,/g,"."));
-        if(!name || isNaN(rate) || rate<0){ skipped++; return; }
+        const rawRate = String(r[5]==null?"":r[5]).trim();
+        const rate = num(rawRate);
+        if(!name || !/\d/.test(rawRate) || rate<0){ skipped++; return; }
         let code = String(r[1]||"").trim();
         if(!code || usedCodes.has(code.toLowerCase())) code = nextCode();
         else usedCodes.add(code.toLowerCase());
@@ -569,6 +594,7 @@
     downloadTemplate: downloadTemplate,
     triggerImport: triggerImport,
     importExcel: importExcel,
-    getItems: function(){ return _items.slice(); }
+    getItems: function(){ return _items.slice(); },
+    _num: num   // مكشوف للاختبار فقط (hail-tests.js) — دالة نقية
   };
 })();

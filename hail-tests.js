@@ -25,6 +25,8 @@ if (!IDX) { console.error("❌ لم يُعثر على index.html في:\n   " + C
 const HTML = fs.readFileSync(IDX, "utf8");
 const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
 const SB_PATH  = [path.resolve(path.dirname(IDX), "substitute-budget.js")].find(p => fs.existsSync(p));
+const PA_PATH  = [path.resolve(path.dirname(IDX), "price-analysis.js")].find(p => fs.existsSync(p));
+const LC_PATH  = [path.resolve(path.dirname(IDX), "labor-catalog.js")].find(p => fs.existsSync(p));
 
 const VER = (HTML.match(/const APP_VERSION = "(v[\d.a-z]+)"/) || [])[1] || "?";
 
@@ -270,6 +272,13 @@ function guards() {
     ["حارس !db في savePurchase", "لم يُحفظ طلب الشراء", true],
     ["رصيد المخزون يأخذ خانة المستودع وحدها", "const add = parseFloat(it.stockQty)||0;", true],
     ["purchase-kpi داخل خريطة الصلاحيات", '"purchase-reports","purchase-kpi"', true],
+    // v18.9rv — عكس المخزون عند الحذف من كل السندات لا من آخر جلسة تدقيق
+    ["عكس الحذف يجمع من grnDocs (كل السندات)", "const _stockInRows = (Array.isArray(po.grnDocs) && po.grnDocs.length)", true],
+    ["عكس الحذف لا يعتمد auditItems وحدها", "(po.auditItems||[]).forEach(it=>{\n          const q = parseFloat(it.stockQty||0);", false],
+    // v18.9rv — حفظ الطلب بعد كتابة المخزون يُنتظَر ويُتحقَّق (لا fire-and-forget)
+    ["حفظ الطلب بعد التدقيق مُنتظَر ومُتحقَّق", "await db.collection(PURCHASES_COLLECTION()).doc(poId).set(pCurrent,{merge:true}); _poPersisted = true;", true],
+    ["رسائل نجاح التدقيق تُؤجَّل حتى الحفظ", "let _afterSaveOK = ()=>{};", true],
+    ["تحذير صريح عند فشل حفظ الطلب بعد كتابة المخزون", "احتُسب المخزون مرتين", true],
   ];
   G.forEach(([n, needle, want]) => T(n, HTML.includes(needle) === want, want ? "" : "يجب ألا يعود"));
 
@@ -389,6 +398,116 @@ function substituteBudget() {
     else if (Math.abs(r.closedProfit - (r.closedSell - r.closedCost)) > eps) bad = { why: "profit", r };
   }
   T("ثابت: المستهلك/المتبقي/الربح متماسكة على 500 تركيبة عشوائية", !bad, bad ? JSON.stringify(bad).slice(0, 120) : "");
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   10) تحويل الأرقام num() — الفاصلة العربية العشرية دون إفساد فاصلة الآلاف
+       (price-analysis.js + labor-catalog.js). أوّل تغطية تنفيذية لهذين الملفين.
+       العطل المُصلَح: replace(/,/g,".") كان يحوّل «1,250.00» إلى «1.250.00» ثم
+       parseFloat=1.25 — بخس السعر/الكمية 1000×.
+   ════════════════════════════════════════════════════════════════════ */
+function numParsing() {
+  H("10) تحويل الأرقام num() (price-analysis.js + labor-catalog.js)");
+  const vm = require("vm");
+  const docStub = {
+    getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+    addEventListener: () => {}, createElement: () => ({ style: {}, classList: { add() {}, remove() {} }, appendChild() {}, setAttribute() {} })
+  };
+  function loadNum(p, globalName) {
+    if (!p) { T(globalName + " موجودة", false, "الملف غير موجود"); return null; }
+    const src = fs.readFileSync(p, "utf8");
+    try { new vm.Script(src); T("صياغة " + globalName + " سليمة", true); }
+    catch (e) { T("صياغة " + globalName + " سليمة", false, String(e.message).slice(0, 120)); return null; }
+    const sandbox = { window: {}, document: docStub, console, setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {} };
+    vm.createContext(sandbox);
+    try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل " + globalName, false, String(e.message).slice(0, 120)); return null; }
+    const mod = sandbox.window[globalName];
+    T(globalName + "._num مكشوفة للاختبار", mod && typeof mod._num === "function");
+    return (mod && typeof mod._num === "function") ? mod._num : null;
+  }
+  const paNum = loadNum(PA_PATH, "priceAnalysis");
+  const lcNum = loadNum(LC_PATH, "laborCatalog");
+
+  // [المدخل, المتوقع]
+  const cases = [
+    ["1,250.00", 1250],    // ★ العطل المُبلَّغ: آلاف + عشري — كان يعطي 1.25
+    ["1,250",    1250],    // آلاف بلا عشري
+    ["12,500.50", 12500.5],
+    ["1,250,000", 1250000],
+    ["1,25",     1.25],    // فاصلة عربية عشرية — تبقى
+    ["1,5",      1.5],
+    ["0,5",      0.5],
+    ["1250.75",  1250.75], // عشري لاتيني عادي
+    ["1250",     1250],
+    ["3.14",     3.14],
+    ["-5",       -5],      // الإشارة تبقى
+    ["",         0],
+    [null,       0],
+    [undefined,  0],
+    ["abc",      0],
+    ["  42  ",   42],
+    [1234.5,     1234.5],  // مُدخل رقمي
+  ];
+  function checkNum(fn, label) {
+    if (!fn) return;
+    let bad = null;
+    for (const [inp, exp] of cases) {
+      const got = fn(inp);
+      if (Math.abs(got - exp) > 1e-9) { bad = { inp, exp, got }; break; }
+    }
+    T("★ " + label + ": كل حالات num() صحيحة (شاملة عطل فاصلة الآلاف)", !bad,
+      bad ? `num(${JSON.stringify(bad.inp)})=${bad.got} — متوقع ${bad.exp}` : cases.length + " حالة");
+    T(label + ": «1,250.00» لم تعُد 1.25 (تأكيد الإصلاح)", Math.abs(fn("1,250.00") - 1250) < 1e-9, "=" + fn("1,250.00"));
+  }
+  checkNum(paNum, "priceAnalysis");
+  checkNum(lcNum, "laborCatalog");
+
+  if (paNum && lcNum) {
+    let mismatch = null;
+    for (const [inp] of cases) { if (Math.abs(paNum(inp) - lcNum(inp)) > 1e-9) { mismatch = { inp, pa: paNum(inp), lc: lcNum(inp) }; break; } }
+    T("الوحدتان تعطيان النتيجة نفسها", !mismatch, mismatch ? JSON.stringify(mismatch) : "");
+  }
+
+  T("الوسم موجود في index.html (price-analysis)", /<script src="price-analysis\.js\?v=/.test(HTML));
+  T("الوسم موجود في index.html (labor-catalog)", /<script src="labor-catalog\.js\?v=/.test(HTML));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   11) طبقة الإشعارات (HailNotify.js) — إزاحة الفائض لا تُجمّد التبويب
+   ════════════════════════════════════════════════════════════════════ */
+function hailNotify() {
+  H("11) طبقة الإشعارات (HailNotify.js)");
+  const HN_PATH = [path.resolve(path.dirname(IDX), "HailNotify.js")].find(p => fs.existsSync(p));
+  if (!HN_PATH) { console.log("  ⏭  HailNotify.js غير موجود — تُخطّى"); return; }
+  const src = fs.readFileSync(HN_PATH, "utf8");
+  const vm = require("vm");
+  try { new vm.Script(src); T("صياغة HailNotify.js سليمة", true); }
+  catch (e) { T("صياغة HailNotify.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  T("الوسم موجود في index.html", /<script src="HailNotify\.js\?v=/.test(HTML));
+  // حراسة الإصلاح: إزاحة الفائض تطوي على لقطة ثابتة للعناصر الحيّة لا على children[0]
+  T("إزاحة الفائض لا تكرّر على نفس العنصر (لا تجمّد)",
+    src.includes("Array.prototype.filter.call(stack.children") && src.includes("while (live.length > cfg.maxVisible) dismiss(live.shift());"));
+  T("زال النمط المُجمِّد (while على children[0])",
+    !src.includes("while (stack.children.length > cfg.maxVisible) dismiss(stack.children[0]);"));
+
+  // محاكاة تنفيذية: dismiss يؤجّل الحذف (يعلّم __gone) — نتأكّد أن حلقة الإزاحة تنتهي
+  // مع لقطة ثابتة حتى لو لم تُحذف العقد فوراً. نعيد بناء المنطق المُصلَح ونتحقّق أنه ينتهي
+  // ويُعلّم العدد الصحيح للإزاحة، بينما النمط القديم كان يدور أبداً.
+  (function () {
+    const maxVisible = 4;
+    // عقد وهمية: children مصفوفة لا تنقص (يحاكي تأجيل removeChild 260ms)
+    const children = [];
+    for (let i = 0; i < 7; i++) children.push({ __gone: false });
+    function dismiss(el) { if (!el || el.__gone) return; el.__gone = true; }
+    // النمط المُصلَح
+    const live = Array.prototype.filter.call(children, c => !c.__gone);
+    let iterations = 0;
+    while (live.length > maxVisible) { dismiss(live.shift()); if (++iterations > 1000) break; }
+    const goneCount = children.filter(c => c.__gone).length;
+    T("★ إزاحة 7 إشعارات (حد 4) تنتهي وتُعلّم 3 للإزاحة",
+      iterations === 3 && goneCount === 3, `تكرارات=${iterations} مُزاحة=${goneCount}`);
+  })();
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -582,6 +701,8 @@ function fuzz() {
   predelivery();
   kpi();
   substituteBudget();
+  numParsing();
+  hailNotify();
   fuzz();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);

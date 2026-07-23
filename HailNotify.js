@@ -160,7 +160,12 @@
     }
 
     stack.appendChild(el);
-    while (stack.children.length > cfg.maxVisible) dismiss(stack.children[0]);
+    // dismiss() لا يحذف العقدة فوراً (يعلّمها __gone ويؤجّل removeChild 260ms)، فعدّ
+    // children لا ينقص داخل هذه الحلقة؛ ولو مررنا على stack.children[0] مباشرةً لكرّرنا
+    // dismiss على نفس العنصر المُعلَّم فيرجع فوراً ⇒ حلقة لا نهائية تُجمّد التبويب.
+    // نطوي على لقطة ثابتة للعناصر الحيّة (غير المُعلَّمة) ونُزيح الأقدم منها فقط.
+    var live = Array.prototype.filter.call(stack.children, function (c) { return !c.__gone; });
+    while (live.length > cfg.maxVisible) dismiss(live.shift());
 
     if (dur) {
       var remain = dur, last = Date.now();
