@@ -30,12 +30,20 @@ window.__store = {};                       // path -> data (Firestore في ال�
     onSnapshot:function(cb){ try{ cb(collSnap(coll)); }catch(e){} return function(){}; }
   }; return q; }
   var FieldValue={ serverTimestamp:function(){return {__sv:1};}, increment:function(n){return {__inc:n};}, arrayUnion:function(){return {};}, arrayRemove:function(){return {};}, delete:function(){return {__del:1};} };
+  // نمذجة عزل Firestore التسلسلي: كل معاملة تُنفَّذ كاملةً قبل التالية (طابور)،
+  // فلا تقرأ معاملتان العدّاد نفسه ثم تدهس إحداهما الأخرى — كضمان Firestore الفعلي.
+  var __txq = Promise.resolve();
   var fs={ collection:collRef, doc:docRef, runTransaction:function(fn){
-    var tx={ get:function(ref){ return Promise.resolve(snap(ref.path)); },
-             set:function(ref,d,opt){ writeDoc(ref.path,d,!!(opt&&opt.merge)); },
-             update:function(ref,d){ writeDoc(ref.path,d,true); },
-             delete:function(ref){ delete window.__store[ref.path]; } };
-    return Promise.resolve().then(function(){ return fn(tx); });
+    var run=function(){
+      var tx={ get:function(ref){ return Promise.resolve(snap(ref.path)); },
+               set:function(ref,d,opt){ writeDoc(ref.path,d,!!(opt&&opt.merge)); },
+               update:function(ref,d){ writeDoc(ref.path,d,true); },
+               delete:function(ref){ delete window.__store[ref.path]; } };
+      return Promise.resolve().then(function(){ return fn(tx); });
+    };
+    var res = __txq.then(run, run);            // نفِّذ بعد المعاملة السابقة أياً كانت نتيجتها
+    __txq = res.then(function(){}, function(){}); // لا يكسر الطابور خطأُ معاملةٍ ما
+    return res;
   }, batch:function(){ return {
              set:function(ref,d,opt){ writeDoc(ref.path,d,!!(opt&&opt.merge)); },
              update:function(ref,d){ writeDoc(ref.path,d,true); },
@@ -296,6 +304,50 @@ check('اسم المستلم حُفظ', s5.receiverName==='أحمد المستل
 check('المورد الفعلي حُفظ من الفاتورة', s5.actualVendor==='المورد الفعلي', 'المورد='+s5.actualVendor);
 check('★ الطلب أُغلق بعد اكتمال الاستلام', s5.status==='closed', 'الحالة='+s5.status);
 check('الحالة «مغلق» ثبتت في المخزن', s5.storedStatus==='closed');
+
+/* ══ سيناريو 6: سباق الكتابة على عدّاد الترقيم (تخصيص أرقام البلاغات متزامناً) ══ */
+log('\n=== السيناريو 6: سباق الكتابة على عدّاد الترقيم ══');
+const s6 = await page.evaluate(async ()=>{
+  const out={}; const N=25;
+  window.toast=()=>{}; window.safeLSSet=()=>{};
+
+  // ── أ) المسار الحقيقي: newId() داخل معاملة ذرّية — 25 تخصيصاً متزامناً ──
+  tickets=[]; counter=0;
+  const META=META_DOC();
+  delete window.__store[META];                    // ابدأ بعدّاد نظيف
+  const ids = await Promise.all(Array.from({length:N}, ()=> newId()));
+  const uniq = new Set(ids);
+  const nums = ids.map(s=>{ const m=String(s).match(/BLG-\d{4}-(\d+)/); return m?parseInt(m[1],10):NaN; })
+                  .sort((a,b)=>a-b);
+  out.total       = ids.length;
+  out.unique      = uniq.size;
+  out.counterEnd  = (window.__store[META]||{}).counter;
+  out.sequential  = nums.length===N && nums[0]===1 && nums[N-1]===N &&
+                    nums.every((v,i)=> v===i+1);          // 1..N بلا ثغرات ولا تكرار
+  out.sample      = ids.slice(0,3).join(', ');
+
+  // ── ب) شاهد سلبي: مخصِّص ساذج بلا معاملة (اقرأ ثم اكتب) — يجب أن يتصادم ──
+  // يثبت أن المحاكي يكشف السباق فعلاً، فنجاح (أ) ليس لأن كل شيء متسلسل تلقائياً.
+  const NAIVE='meta/__naive_counter_test';
+  delete window.__store[NAIVE];
+  async function naiveId(){
+    const snap = await db.doc(NAIVE).get();       // قراءة (تُنتِج فجوة تزامن)
+    const c = ((snap.exists?snap.data().counter:0)||0) + 1;
+    await Promise.resolve();                      // فجوة قبل الكتابة
+    db.doc(NAIVE).set({counter:c},{merge:false}); // كتابة تدهس قراءة الآخرين
+    return c;
+  }
+  const nIds = await Promise.all(Array.from({length:N}, ()=> naiveId()));
+  out.naiveUnique = new Set(nIds).size;           // < N ⇒ وقع تصادم (تكرار)
+
+  return out;
+});
+check('خُصِّص 25 رقماً', s6.total===25);
+check('★ كل الأرقام فريدة (لا تكرار تحت التزامن)', s6.unique===25, 'الفريد='+s6.unique+'/25');
+check('★ الأرقام متسلسلة 1..25 بلا ثغرات', s6.sequential===true);
+check('عدّاد Firestore انتهى عند 25', s6.counterEnd===25, 'العدّاد='+s6.counterEnd);
+check('عيّنة: '+s6.sample, /^BLG-\d{4}-0001/.test(s6.sample));
+check('شاهد سلبي: المخصِّص الساذج تصادم (تكرار) — فالمحاكي يكشف السباق', s6.naiveUnique<25, 'الفريد الساذج='+s6.naiveUnique+'/25');
 
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
