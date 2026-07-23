@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ═══════════ دوال مساعدة ═══════════
+    function hasRole() {
+      return request.auth != null
+        && request.auth.token.role != null
+        && request.auth.token.role != '';
+    }
+    function isViewer() {
+      return request.auth != null
+        && request.auth.token.role == 'viewer';
+    }
+    // مُصادَق (يشمل المجهول) — يستخدمه تطبيق الفنيين
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // ═══════════ القاعدة العامة (النظام الرئيسي) — بدون تغيير ═══════════
+    match /{document=**} {
+      allow read:  if hasRole();
+      allow write: if hasRole() && !isViewer();
+    }
+
+    // ═══════════ إضافات تطبيق الفنيين (مصادقة مجهولة، مرحلة اختبار) ═══════════
+    // الإصلاح النهائي قبل التشغيل الحقيقي = دخول الفنيين بـ Custom Token بدور
+    // 'technician' ثم تقييد القواعد بالدور (Phase 3).
+
+    // البلاغات (الأمانة): قراءة + تحديث فقط
+    match /hail_tickets/{doc} {
+      allow read, update: if isSignedIn();
+    }
+
+    // الحضور والانصراف
+    match /attendance/{doc} {
+      allow read, write: if isSignedIn();
+    }
+
+    // الفنيون (PIN): قراءة + كتابة (تغيير PIN من لوحة أدمن التطبيق)
+    match /technicians/{doc} {
+      allow read, write: if isSignedIn();
+    }
+
+    // مستندات meta التي يقرأها/يعدّلها التطبيق فقط (لا نفتح meta كاملة)
+    match /meta/settings       { allow read:        if isSignedIn(); }
+    match /meta/ai_settings     { allow read:        if isSignedIn(); }
+    match /meta/ppm_checklists  { allow read, write: if isSignedIn(); }
+
+    // ─────────── جديد (tech-app v5.22): مُنتقي المشروع ───────────
+    // (1) قائمة المشاريع — يقرؤها المُنتقي لبناء القائمة المنسدلة.
+    match /meta/projects { allow read: if isSignedIn(); }
+
+    // (2) إعدادات كل مشروع (workTypes/buildings/supervisors) — أي مستندٍ في مجموعة
+    //     meta ينتهي اسمه بـ "_settings" (مثل bathroom001_settings). لا يشمل
+    //     المستندات الحسّاسة الأخرى (counter/…): الشرط يقصره على *_settings فقط.
+    match /meta/{doc} {
+      allow read: if isSignedIn() && doc.matches('.*_settings');
+    }
+
+    // (3) بلاغات بقية المشاريع — أي مجموعةٍ عليا ينتهي اسمها بـ "_tickets"
+    //     (تشمل hail_tickets و bathroom001_tickets…). نستخدم متغيّر المجموعة الكامل
+    //     مع شرط regex — Firestore لا يقبل خلط متغيّر بلاحقة في المقطع نفسه.
+    match /{coll}/{doc} {
+      allow read, update: if isSignedIn() && coll.matches('.*_tickets');
+    }
+
+    // ─────────── سجل التدقيق ───────────
+    // قراءة + إضافة للمجهول (بلا تعديل/حذف لحماية السجل)
+    match /audit_log/{doc} {
+      allow read, create: if isSignedIn();
+      allow read, write:  if hasRole();
+    }
+    match /audit_log_dev/{doc} {
+      allow read, write: if hasRole();
+    }
+  }
+}
