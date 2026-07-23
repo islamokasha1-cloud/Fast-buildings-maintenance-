@@ -3,11 +3,16 @@ name: Hail Tests
 on:
   push:
     paths:
+      # كل ملفٍ يفحصه hail-tests — أي إغفال يعني أن push مباشراً له لا يُشغّل CI.
       - 'index.html'
       - 'purchase-kpi.js'
       - 'labor-catalog.js'
       - 'price-analysis.js'
+      - 'stocktake.js'
+      - 'substitute-budget.js'
+      - 'HailNotify.js'
       - 'hail-tests.js'
+      - '.github/workflows/hail-tests.yml'
   pull_request:
   workflow_dispatch:
 

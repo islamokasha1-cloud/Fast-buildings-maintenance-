@@ -27,6 +27,7 @@ const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => 
 const SB_PATH  = [path.resolve(path.dirname(IDX), "substitute-budget.js")].find(p => fs.existsSync(p));
 const PA_PATH  = [path.resolve(path.dirname(IDX), "price-analysis.js")].find(p => fs.existsSync(p));
 const LC_PATH  = [path.resolve(path.dirname(IDX), "labor-catalog.js")].find(p => fs.existsSync(p));
+const ST_PATH  = [path.resolve(path.dirname(IDX), "stocktake.js")].find(p => fs.existsSync(p));
 
 const VER = (HTML.match(/const APP_VERSION = "(v[\d.a-z]+)"/) || [])[1] || "?";
 
@@ -279,6 +280,10 @@ function guards() {
     ["حفظ الطلب بعد التدقيق مُنتظَر ومُتحقَّق", "await db.collection(PURCHASES_COLLECTION()).doc(poId).set(pCurrent,{merge:true}); _poPersisted = true;", true],
     ["رسائل نجاح التدقيق تُؤجَّل حتى الحفظ", "let _afterSaveOK = ()=>{};", true],
     ["تحذير صريح عند فشل حفظ الطلب بعد كتابة المخزون", "احتُسب المخزون مرتين", true],
+    // v18.9ry — الإغلاق اليدوي يتطلّب تكلفة فعلية صريحة > 0 (لا يتسرّب التقدير كأنه فعلي)
+    ["الإغلاق اليدوي يمنع تكلفة فعلية ≤ صفر", "if(!(_acVal > 0)){", true],
+    ["تأكيد الإغلاق اليدوي يُظهر الرقم المُسجَّل كتكلفة فعلية", "كتكلفة فعلية — تأكّد أنه مبلغ فاتورة المورد الحقيقي لا التقدير", true],
+    ["التكلفة الفعلية تُحفظ عند الإغلاق", "if(actualCost) p.actualCost=actualCost;", true],
   ];
   G.forEach(([n, needle, want]) => T(n, HTML.includes(needle) === want, want ? "" : "يجب ألا يعود"));
 
@@ -511,6 +516,123 @@ function hailNotify() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   12) معالجة جذر سباقات الكتابة — دمجٌ ذرّي + عدّاد كود ذرّي
+       substitute-budget.js: دمج حسابٍ واحد على حالة الخادم بدل كتابة اللقطة
+       المحلية كاملةً (فقدان تحديث). price-analysis.js/labor-catalog.js: تخصيص
+       الكود عبر عدّاد ذرّي بدل حسابٍ محلي يكرّر عند التزامن.
+   ════════════════════════════════════════════════════════════════════ */
+function writeRaceRoot() {
+  H("12) جذر سباقات الكتابة (دمج ذرّي + عدّاد كود ذرّي)");
+  const vm = require("vm");
+  const docStub = {
+    getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+    addEventListener: () => {}, createElement: () => ({ style: {}, classList: { add() {}, remove() {} }, appendChild() {}, setAttribute() {} })
+  };
+  function loadMod(p, globalName) {
+    if (!p) return null;
+    const src = fs.readFileSync(p, "utf8");
+    const sandbox = { window: {}, document: docStub, console, setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {} };
+    vm.createContext(sandbox);
+    try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل " + globalName, false, String(e.message).slice(0, 120)); return null; }
+    return sandbox.window[globalName];
+  }
+
+  // ── (أ) substitute-budget: الدمج الذرّي يحفظ حسابات الآخرين ──
+  const SB = loadMod(SB_PATH, "substituteBudget");
+  T("substituteBudget._applyUpsert/_applyRemove مكشوفتان",
+    !!(SB && typeof SB._applyUpsert === "function" && typeof SB._applyRemove === "function"));
+  if (SB && SB._applyUpsert) {
+    const server = [{ id: "A", total: 100 }, { id: "B", total: 200 }];
+    const up = SB._applyUpsert(server, { id: "B", total: 250 });          // مسؤول يعدّل B
+    T("★ الدمج: تعديل حسابٍ يبقي الآخر ولا يكرّر",
+      up.length === 2 && up.find(a => a.id === "A").total === 100 && up.find(a => a.id === "B").total === 250,
+      JSON.stringify(up));
+    const add = SB._applyUpsert(server, { id: "C", total: 300 });          // مسؤول آخر يضيف C
+    T("★ الدمج: إضافة حسابٍ على حالة الخادم لا تدهس القائمة",
+      add.length === 3 && !!add.find(a => a.id === "A") && !!add.find(a => a.id === "B") && !!add.find(a => a.id === "C"));
+    const rm = SB._applyRemove(server, "A");
+    T("★ الحذف الذرّي يزيل الهدف وحده", rm.length === 1 && rm[0].id === "B");
+    T("الدمج لا يحوّر مصفوفة الخادم الأصلية", server.length === 2 && server[1].total === 200);
+  }
+
+  // ── (ب) عدّاد الكود الذرّي: max(الخادم, المحلي)+1 ──
+  function checkCounter(fn, label) {
+    if (!fn) { T(label + "._nextCodeNum مكشوفة", false); return; }
+    const cases = [[0, 3, 4], [5, 3, 6], [5, 0, 6], [0, 0, 1], [10, 10, 11]];
+    let bad = null;
+    for (const [svr, loc, exp] of cases) { if (fn(svr, loc) !== exp) { bad = { svr, loc, exp, got: fn(svr, loc) }; break; } }
+    T("★ " + label + ": الكود التالي = max(الخادم, المحلي)+1", !bad, bad ? JSON.stringify(bad) : cases.length + " حالة");
+    T(label + ": عدّاد الخادم المتقدّم على لقطة متخلّفة يمنع التكرار", fn(9, 3) === 10, "=" + fn(9, 3));
+  }
+  const PA = loadMod(PA_PATH, "priceAnalysis");
+  const LC = loadMod(LC_PATH, "laborCatalog");
+  checkCounter(PA && PA._nextCodeNum, "priceAnalysis");
+  checkCounter(LC && LC._nextCodeNum, "laborCatalog");
+
+  // ── (ج) حراسة النمط المصدري ──
+  const sbSrc = SB_PATH ? fs.readFileSync(SB_PATH, "utf8") : "";
+  const paSrc = PA_PATH ? fs.readFileSync(PA_PATH, "utf8") : "";
+  const lcSrc = LC_PATH ? fs.readFileSync(LC_PATH, "utf8") : "";
+  const GW = [
+    ["substitute: الحفظ عبر معاملة ذرّية", sbSrc, "return db.runTransaction(function(tx){", true],
+    ["substitute: زالت الكتابة الكاملة للمصفوفة", sbSrc, "return db.doc(DOC()).set({ accounts: _accounts });", false],
+    ["substitute: الإضافة/التعديل عبر _upsertAccount", sbSrc, "await _upsertAccount(saved);", true],
+    ["substitute: الحذف عبر _removeAccountTx", sbSrc, "_removeAccountTx(id).then(function(){", true],
+    ["price-analysis: تخصيص الكود عبر معاملة", paSrc, "await db.runTransaction(async tx=>{", true],
+    ["price-analysis: الحفظ يخصّص كوداً ذرّياً", paSrc, "data.code = await allocCode();", true],
+    ["labor-catalog: تخصيص الكود عبر معاملة", lcSrc, "await db.runTransaction(async tx=>{", true],
+    ["labor-catalog: الحفظ يخصّص كوداً ذرّياً", lcSrc, "data.code = await allocCode();", true],
+  ];
+  GW.forEach(([n, src, needle, want]) => T(n, src.includes(needle) === want, want ? "" : "يجب ألا يعود"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   13) الجرد الشهري (stocktake.js) — أوّل تغطية تنفيذية (٩٠٨ أسطر كانت بلا اختبار)
+       تصنيف الفرق _classify + قصر العدّ السالب _countAt (منع الرصيد السالب).
+   ════════════════════════════════════════════════════════════════════ */
+function stocktakeTests() {
+  H("13) الجرد الشهري (stocktake.js)");
+  if (!ST_PATH) { console.log("  ⏭  stocktake.js غير موجود — تُخطّى"); return; }
+  const vm = require("vm");
+  const src = fs.readFileSync(ST_PATH, "utf8");
+  try { new vm.Script(src); T("صياغة stocktake.js سليمة", true); }
+  catch (e) { T("صياغة stocktake.js سليمة", false, String(e.message).slice(0, 120)); return; }
+  T("الوسم موجود في index.html", /<script src="stocktake\.js\?v=/.test(HTML));
+
+  const docStub = {
+    getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+    addEventListener: () => {}, createElement: () => ({ style: {}, classList: { add() {}, remove() {} }, appendChild() {}, setAttribute() {} })
+  };
+  const sandbox = { window: {}, document: docStub, console, setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {} };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل stocktake", false, String(e.message).slice(0, 120)); return; }
+  const ST = sandbox.window.stocktake;
+  T("stocktake._classify/_countAt مكشوفتان",
+    !!(ST && typeof ST._classify === "function" && typeof ST._countAt === "function"));
+  if (!ST || !ST._classify) return;
+
+  // ── _classify: الفرق = المعدود − النظام؛ منطق «الكبير» (≥10% و ≥3 وحدات) ──
+  T("_classify: الفرق = المعدود − النظام", ST._classify(100, 93).delta === -7, JSON.stringify(ST._classify(100, 93)));
+  T("_classify: فرق صغير على رصيد كبير ليس «كبيراً»", ST._classify(1000, 998).big === false);
+  T("_classify: ≥10% و ≥3 وحدات = «كبير»", ST._classify(100, 85).big === true);
+  T("_classify: قطعة واحدة على رصيد صغير ليست «كبيراً» (حدّ مطلق 3)", ST._classify(4, 3).big === false);
+  T("★ _classify: رصيد صفر وظهر مخزون = يستحق مراجعة", ST._classify(0, 5).big === true && ST._classify(0, 0).big === false);
+
+  // ── _countAt: قصر العدّ السالب إلى صفر — منع الرصيد السالب ──
+  T("★ _countAt: العدّ السالب يُقصَر إلى صفر (لا رصيد سالب)", ST._countAt({ x: -5 }, "x") === 0, "=" + ST._countAt({ x: -5 }, "x"));
+  T("_countAt: العدّ الموجب يبقى كما هو", ST._countAt({ x: 7.5 }, "x") === 7.5);
+  T("_countAt: المفقود = صفر", ST._countAt({}, "y") === 0);
+  // ثابت: مهما كان المُدخَل، الهدف المُطبَّق ≥ 0
+  let neg = null;
+  for (const v of [-1000, -0.001, -5, 0, 3.2, 999]) { if (ST._countAt({ k: v }, "k") < 0) { neg = v; break; } }
+  T("★ ثابت: _countAt لا يُنتج قيمة سالبة أبداً", neg === null, neg === null ? "" : "سالب عند " + neg);
+
+  // ── حراسة: مسار التطبيق يستهلك العدّ عبر _countAt (لا _num الخام) ──
+  T("التطبيق يقصر العدّ عبر _countAt", src.includes("const counted=_countAt(counts, s.itemId);"));
+  T("زال قراءة العدّ الخام في التطبيق", !src.includes("const counted=_num(counts[s.itemId]);"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    8) فحص الثوابت العشوائي
       الأمثلة المكتوبة تُثبت ما خطر ببالنا. هذه تُجرّب ما لم يخطر:
       آلاف التركيبات العشوائية، والحكم ليس قيمة متوقعة مكتوبة بيد،
@@ -703,6 +825,8 @@ function fuzz() {
   substituteBudget();
   numParsing();
   hailNotify();
+  writeRaceRoot();
+  stocktakeTests();
   fuzz();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);

@@ -75,6 +75,11 @@
 
   function _esc(s){ try{ return esc(s); }catch(e){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); } }
   function _num(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
+  // المعدود لا يكون سالباً أبداً — الرصيد الفعلي ≥ 0 في كل النظام (Math.max(0,…)).
+  // كان الإسناد المطلق currentQty=counted يكتب رصيداً سالباً لو أُدخل عددٌ سالب
+  // (كتابةً أو استيراداً؛ min="0" مجرّد تلميح HTML). يقصر أي مُدخَل سالب إلى صفر
+  // عند كل استهلاك (فلتر الأهداف، النتائج، التطبيق) فيتّسق الرصيد والسجل والتقرير.
+  function _countAt(counts, id){ return Math.max(0, _num(counts[id])); }
   function _fmt(n){ return (_num(n)).toLocaleString("en-US",{maximumFractionDigits:3}); }
   // أيقونة SVG من طقم المنصة (بديل الإيموجي) — آمنة إن غاب _ic.
   function _icn(name,cls){ try{ return (typeof _ic==="function") ? _ic(name,cls) : ""; }catch(e){ return ""; } }
@@ -589,13 +594,13 @@
     // ابنِ قائمة البنود ذات الفرق فقط
     const targets = (take.snapshot||[]).filter(s=>{
       if(!Object.prototype.hasOwnProperty.call(counts, s.itemId)) return false;
-      return _num(counts[s.itemId]) !== _num(s.systemQty);
+      return _countAt(counts, s.itemId) !== _num(s.systemQty);
     });
 
     const now=_now(), by=_me();
     const results = (take.snapshot||[]).map(s=>{
       const has=Object.prototype.hasOwnProperty.call(counts, s.itemId);
-      const counted = has?_num(counts[s.itemId]):_num(s.systemQty);
+      const counted = has?_countAt(counts, s.itemId):_num(s.systemQty);
       const c=_classify(s.systemQty, counted);
       return { itemId:s.itemId, itemName:s.itemName, unit:s.unit, systemQty:_num(s.systemQty), countedQty:counted, delta:has?c.delta:0, big:has?c.big:false };
     });
@@ -603,7 +608,7 @@
     let done=0, failed=0;
     _toast("⏳ جارٍ تطبيق التسويات...","info");
     for(const s of targets){
-      const counted=_num(counts[s.itemId]);
+      const counted=_countAt(counts, s.itemId);   // مقصور ≥ 0 — لا يُكتب رصيد سالب
       try{
         await db.runTransaction(async tx=>{
           const invRef = db.collection(INVENTORY_COLLECTION()).doc(s.itemId);
@@ -903,6 +908,7 @@
   window.stocktake = {
     startSync, render, open, back,
     startNew, saveCounts, submit, approve, reject, cancel, print,
-    _count, _import, _uploadSigned, _delete
+    _count, _import, _uploadSigned, _delete,
+    _classify, _countAt, _num   // دوال نقية — مكشوفة لفحوص hail-tests
   };
 })();
