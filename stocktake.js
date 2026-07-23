@@ -932,6 +932,7 @@
     startSync, render, open, back,
     startNew, saveCounts, submit, approve, reject, cancel, print,
     _count, _import, _uploadSigned, _delete,
-    _classify, _countAt, _num, _adjustDelta   // دوال نقية — مكشوفة لفحوص hail-tests
+    _classify, _countAt, _num, _adjustDelta,  // دوال نقية — مكشوفة لفحوص hail-tests
+    _apply                                    // مسار التسوية — مكشوف لسيناريوهات المتصفّح
   };
 })();
