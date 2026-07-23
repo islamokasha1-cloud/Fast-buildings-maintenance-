@@ -798,6 +798,44 @@ function auditRound2() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   16) توحيد تجميع التواريخ على التوقيت المحلّي (لا UTC)
+   ════════════════════════════════════════════════════════════════════ */
+function dateBucketing() {
+  H("16) توحيد تجميع التواريخ على التوقيت المحلّي");
+  const grab = name => {
+    const i = HTML.indexOf("function " + name + "(");
+    if (i < 0) return null;
+    return HTML.slice(i, HTML.indexOf("\n", i));
+  };
+  const src = [grab("_ymd"), grab("_ym"), grab("_parseLocalDate")].filter(Boolean).join("\n");
+  let _ymd, _ym, _parseLocalDate;
+  try {
+    const o = new Function(src + "\nreturn {_ymd:_ymd,_ym:_ym,_parseLocalDate:_parseLocalDate};")();
+    _ymd = o._ymd; _ym = o._ym; _parseLocalDate = o._parseLocalDate;
+  } catch (e) { T("تُبنى دوال التاريخ", false, String(e.message).slice(0, 100)); return; }
+  T("_ym/_ymd/_parseLocalDate مبنيّة",
+    typeof _ym === "function" && typeof _ymd === "function" && typeof _parseLocalDate === "function");
+  if (typeof _ym !== "function") return;
+
+  // مكوّنات محلّية — النتيجة مستقلّة عن منطقة زمن الجهاز
+  T("_ymd يقرأ اليوم المحلّي", _ymd(new Date(2026, 0, 5, 1, 30)) === "2026-01-05");
+  T("_ym يقرأ الشهر المحلّي", _ym(new Date(2026, 6, 1, 1, 30)) === "2026-07");
+  // ★ تاريخ-فقط لا ينزلق ليومٍ سابق (يُحلّل منتصف نهارٍ محلّي) — في أي منطقة زمن
+  T("★ _parseLocalDate: «2026-07-01» يبقى 1 يوليو محلياً", _ymd(_parseLocalDate("2026-07-01")) === "2026-07-01");
+  T("_parseLocalDate يمرّر الطوابع الكاملة كما هي", _parseLocalDate("2026-07-01T09:00:00Z") instanceof Date);
+
+  // حراسة: المواضع المُبلَّغة صارت تمرّ عبر المساعدات المحلّية
+  T("تاريخ «من» الافتراضي محلّي", HTML.includes("rfrom.value=_ymd(firstDay)"));
+  T("★ المتابعة اليومية تُطابق باليوم المحلّي", HTML.includes("_ymd(new Date(t.createdAt))===selectedStr"));
+  T("★ مخطّط إنفاق المشتريات بمفتاح شهر محلّي", HTML.includes("const dateStr=_dt?_ym(new Date(_dt)):"));
+  T("poApprovedThisMonth محلّي الطرفين", HTML.includes("_ym(new Date(t)) === (ym || _ym(new Date()))"));
+  T("لوحة المشتريات thisMonth محلّي", HTML.includes("const thisMonth = _ym(now);"));
+  T("تأخّر الطلب يحلّل تاريخ-فقط محلياً", HTML.includes("const exp = _parseLocalDate(d)"));
+  T("★ فلتر تاريخ قائمة الطلبات باليوم المحلّي", HTML.includes("_ymd(new Date(p.createdAt)) < fFrom"));
+  T("مدى فلتر التاريخ يحلّل «من» محلياً", HTML.includes('new Date(from+"T00:00:00")'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    8) فحص الثوابت العشوائي
       الأمثلة المكتوبة تُثبت ما خطر ببالنا. هذه تُجرّب ما لم يخطر:
       آلاف التركيبات العشوائية، والحكم ليس قيمة متوقعة مكتوبة بيد،
@@ -994,6 +1032,7 @@ function fuzz() {
   stocktakeTests();
   vendorSummary();
   auditRound2();
+  dateBucketing();
   fuzz();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
