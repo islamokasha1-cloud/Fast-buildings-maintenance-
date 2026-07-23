@@ -342,6 +342,12 @@ button{cursor:pointer;border:none;background:none}
     </div>
     <div class="login-error" id="login-error">اسم الفني أو الرقم السري غير صحيح</div>
     <div class="form-group">
+      <label class="form-label">اختر المشروع</label>
+      <select class="login-select" id="login-project-select" onchange="selectTechProject(this.value)">
+        <option value="">-- اختر المشروع --</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label class="form-label">اختر اسمك</label>
       <select class="login-select" id="login-tech-select">
         <option value="">-- اختر اسمك --</option>
@@ -702,8 +708,8 @@ const firebaseConfig = {
 // ── App Check: مفتاح موقع reCAPTCHA Enterprise — الصق قيمتك هنا فقط ──
 const RECAPTCHA_SITE_KEY = "6Lf-MEQtAAAAAAcvx6wGbqjS5OLeKK4m4sNXrCqJ";
 
-const APP_VERSION = "5.21";
-const COLLECTION = "hail_tickets";
+const APP_VERSION = "5.22";
+let COLLECTION = "hail_tickets";   // v5.22: يتغيّر بحسب المشروع المختار (X_tickets)
 const ATTENDANCE_COLLECTION = "attendance";
 const DEFAULT_PIN = "1234";
 const DEFAULT_ADMIN_PIN = "0000"; // PIN احتياطي لمدير النظام
@@ -721,6 +727,56 @@ const WORK_TYPES = {
   "أخرى":                      {icon:"🔨", techs:[]}
 };
 const ALL_TECHS = Object.values(WORK_TYPES).flatMap(w=>w.techs);
+
+// ── v5.22: مُنتقي المشروع — تحميل فنيّي كل مشروع ديناميكياً من Firestore ──
+// كان WORK_TYPES ثابتاً = فريق مشروع الأمانة فقط. الآن يُختار المشروع، ويُحمَّل فريقه
+// من إعدادات المشروع (meta/{id}_settings.workTypes)، وتُقسَّم البلاغات على {id}_tickets.
+// الأمانة (hail) تبقى حرفياً كما كانت (فريق مضمّن + hail_tickets + meta/settings).
+const _DEFAULT_WT = JSON.parse(JSON.stringify(WORK_TYPES));   // لقطة فريق الأمانة الافتراضي
+let _techProjects = [];        // [{id,name}]
+let _activeProjectId = "hail"; // المشروع المختار حالياً
+function _projTickets(id){     return (!id || id==="hail") ? "hail_tickets"  : (id+"_tickets"); }
+function _projSettingsDoc(id){ return (!id || id==="hail") ? "meta/settings" : ("meta/"+id+"_settings"); }
+// يبدّل WORK_TYPES/ALL_TECHS في مكانهما (مثل _applyWT في النظام الرئيسي)
+function _applyWT(src){
+  Object.keys(WORK_TYPES).forEach(k=>delete WORK_TYPES[k]);
+  Object.entries(src||{}).forEach(([k,v])=>{ WORK_TYPES[k]={icon:(v&&v.icon)||"🔧", techs:[...((v&&v.techs)||[])]}; });
+  ALL_TECHS.length=0;
+  [...new Set(Object.values(WORK_TYPES).flatMap(w=>w.techs||[]))].forEach(t=>ALL_TECHS.push(t));
+}
+async function loadTechProjects(){
+  _techProjects=[{id:"hail", name:"مباني الأمانة"}];   // الأمانة أولاً دائماً (سلوك مضمون)
+  try{
+    if(db){
+      const snap=await db.doc("meta/projects").get();
+      if(snap.exists && Array.isArray(snap.data().projects)){
+        snap.data().projects.forEach(p=>{ if(p && p.id && p.id!=="hail") _techProjects.push({id:p.id, name:p.name||p.id}); });
+      }
+    }
+  }catch(e){ console.warn("loadTechProjects:",e); }
+  const sel=document.getElementById("login-project-select");
+  if(sel){
+    sel.innerHTML="";
+    _techProjects.forEach(p=>{ const o=document.createElement("option"); o.value=p.id; o.textContent=p.name; sel.appendChild(o); });
+    sel.value=_activeProjectId;
+  }
+}
+async function selectTechProject(id){
+  _activeProjectId = id || "hail";
+  COLLECTION = _projTickets(_activeProjectId);
+  if(_activeProjectId==="hail"){
+    _applyWT(_DEFAULT_WT);                 // الأمانة: الفريق المضمّن (لا يعتمد على الشبكة)
+  } else {
+    try{
+      const s=await db.doc(_projSettingsDoc(_activeProjectId)).get();
+      const wt=(s.exists && s.data().workTypes && typeof s.data().workTypes==="object") ? s.data().workTypes : {};
+      _applyWT(wt);
+    }catch(e){ console.warn("project workTypes:",e); _applyWT({}); }
+  }
+  buildTechSelect();
+  const el=document.getElementById("login-tech-select"); if(el) el.value="";
+  const psel=document.getElementById("login-project-select"); if(psel) psel.value=_activeProjectId;
+}
 const SLA = {"حرج 🔴 (2 ساعة)":2,"عاجل 🟡 (8 ساعات)":8,"عادي 🟢 (48 ساعة)":48};
 
 const PHOTO_MAX_PX = 1280;
@@ -909,7 +965,7 @@ async function attemptLogin(){
   }
 
   // Success
-  currentTech={name:techName, specialty:isAdminName?"⚙️ مدير النظام":techSpecialty(techName), isAdmin};
+  currentTech={name:techName, specialty:isAdminName?"⚙️ مدير النظام":techSpecialty(techName), isAdmin, projectId:_activeProjectId};
   localStorage.setItem("tech_session", JSON.stringify(currentTech));
   document.getElementById("login-error").classList.remove("show");
   pinBuffer=""; updatePinDots();
@@ -928,8 +984,13 @@ function restoreSession(){
     const s=localStorage.getItem("tech_session");
     if(s){
       const parsed=JSON.parse(s);
-      if(parsed.name && (parsed.name==="مدير النظام" || ALL_TECHS.includes(parsed.name))){
+      if(parsed.name){
+        // v5.22: استعد المشروع المحفوظ — مسار البلاغات فوري (حتمي)، والفريق يُحمَّل خلفياً.
+        // الاسم صُودق عليه وقت الدخول فنثق بالجلسة (لا نحجبها إن كان المشروع غير الأمانة).
+        _activeProjectId = parsed.projectId || "hail";
+        COLLECTION = _projTickets(_activeProjectId);
         currentTech=parsed;
+        try{ selectTechProject(_activeProjectId); }catch(e){}
         return true;
       }
     }
@@ -2440,6 +2501,7 @@ function closeLightbox(){
 window.addEventListener("DOMContentLoaded",()=>{
   initFirebase();
   buildTechSelect();
+  loadTechProjects();   // v5.22: يملأ مُنتقي المشروع (الأمانة افتراضاً)
   { const _vf=document.getElementById("login-version-footer"); if(_vf) _vf.textContent="v"+APP_VERSION; }
 
   setTimeout(()=>{
