@@ -105,7 +105,7 @@
     if (cfg.nativeWhenHidden && d.visibilityState !== "hidden") return; // التاب مرئي → يكفي الـ toast
     if (Notification.permission !== "granted") return;
     try {
-      var n = new Notification("نظام هيل — " + (KICKERS[type] || ""), {
+      var n = new Notification("نظام ادارة الصيانة والمشتريات — " + (KICKERS[type] || ""), {
         body: (o.title || "") + (o.body ? "\n" + o.body : ""),
         tag: o.code || undefined,
         renotify: false
