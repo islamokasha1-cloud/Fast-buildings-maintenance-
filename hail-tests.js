@@ -688,6 +688,55 @@ function stocktakeTests() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   14) ملخّص الموردين — نسبة التكلفة/العدّ للمورّد الفعلي لا المطلوب
+       (index.html poVendorBreakdown) — يُوزَّع الطلب المغلق على مورّديه الفعليين
+       من سندات الاستلام (grnDocs[].invoicedTotal) بدل نسبه كلَّه لمورد الطلب.
+   ════════════════════════════════════════════════════════════════════ */
+function vendorSummary() {
+  H("14) ملخّص الموردين (poVendorBreakdown)");
+  const a = HTML.indexOf("function poVendorBreakdown(p){");
+  if (a < 0) { T("poVendorBreakdown موجودة في index.html", false, "لم تُعثر"); return; }
+  const src = HTML.slice(a, HTML.indexOf("\nfunction ", a + 10));
+  let fn;
+  try {
+    // نُبني الدالة الحقيقية مع بدائل تبعيتيها (poIsClosed / poActualCost)
+    fn = new Function("poIsClosed", "poActualCost", src + "\nreturn poVendorBreakdown;")(
+      p => !!p._closed,
+      p => Number(p.actualCost) || 0
+    );
+  } catch (e) { T("تُبنى poVendorBreakdown وتُنفَّذ", false, String(e.message).slice(0, 120)); return; }
+  T("تُبنى poVendorBreakdown وتُنفَّذ", typeof fn === "function");
+  if (typeof fn !== "function") return;
+
+  const r1 = fn({ _closed: true, grnDocs: [{ vendor: "مورّد أ", invoicedTotal: 5000 }], vendor: "مطلوب" });
+  T("مغلق: التكلفة للمورّد الفعلي من السند", r1.length === 1 && r1[0].vendor === "مورّد أ" && r1[0].cost === 5000);
+
+  const r2 = fn({ _closed: true, grnDocs: [{ vendor: "أ", invoicedTotal: 3000 }, { vendor: "ب", invoicedTotal: 2000 }] });
+  const va = r2.find(x => x.vendor === "أ"), vb = r2.find(x => x.vendor === "ب");
+  T("★ متعدّد الموردين: التكلفة تُوزَّع بالحصص", r2.length === 2 && va && vb && va.cost === 3000 && vb.cost === 2000);
+
+  const r3 = fn({ _closed: true, grnDocs: [{ vendor: "أ", invoicedTotal: 1000 }, { vendor: "أ", invoicedTotal: 1500 }] });
+  T("سندان لنفس المورّد يُدمجان", r3.length === 1 && r3[0].cost === 2500);
+
+  const r4 = fn({ _closed: true, actualVendor: "فعلي", vendor: "مطلوب", actualCost: 8000 });
+  T("مغلق قديم بلا سندات: يُنسَب لـ actualVendor بكامل التكلفة", r4.length === 1 && r4[0].vendor === "فعلي" && r4[0].cost === 8000);
+
+  const r5 = fn({ _closed: true, grnDocs: [{ vendor: "ب", invoicedTotal: 4000 }], vendor: "أ" });
+  T("★ يُنسَب للمورّد الفعلي (ب) لا المطلوب (أ)", r5.length === 1 && r5[0].vendor === "ب");
+
+  const r6 = fn({ _closed: false, vendor: "مطلوب", actualCost: 9999 });
+  T("غير مغلق: تكلفة صفر (عدّ فقط) تحت مورّده", r6.length === 1 && r6[0].cost === 0 && r6[0].vendor === "مطلوب");
+
+  // حراسة: التجميعتان (شاشة + PDF) تستخدمان poVendorBreakdown لا فهرسة p.vendor
+  T("تقرير الشاشة يستخدم poVendorBreakdown",
+    HTML.includes("poVendorBreakdown(p).forEach(({vendor,cost})=>{\n      if(!byVendor[vendor])"));
+  T("تقرير PDF يستخدم poVendorBreakdown",
+    HTML.includes("poVendorBreakdown(p).forEach(({vendor,cost})=>{\n      if(!byVendorPDF[vendor])"));
+  T("زالت فهرسة الملخّص على مورد الطلب (شاشة)", !HTML.includes("if(!byVendor[v]) byVendor[v]={total:0,actualCost:0};"));
+  T("زالت فهرسة الملخّص على مورد الطلب (PDF)", !HTML.includes("if(!byVendorPDF[v]) byVendorPDF[v]={total:0,cost:0};"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    8) فحص الثوابت العشوائي
       الأمثلة المكتوبة تُثبت ما خطر ببالنا. هذه تُجرّب ما لم يخطر:
       آلاف التركيبات العشوائية، والحكم ليس قيمة متوقعة مكتوبة بيد،
@@ -882,6 +931,7 @@ function fuzz() {
   hailNotify();
   writeRaceRoot();
   stocktakeTests();
+  vendorSummary();
   fuzz();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
