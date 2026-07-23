@@ -702,7 +702,7 @@ const firebaseConfig = {
 // ── App Check: مفتاح موقع reCAPTCHA Enterprise — الصق قيمتك هنا فقط ──
 const RECAPTCHA_SITE_KEY = "6Lf-MEQtAAAAAAcvx6wGbqjS5OLeKK4m4sNXrCqJ";
 
-const APP_VERSION = "5.20";
+const APP_VERSION = "5.21";
 const COLLECTION = "hail_tickets";
 const ATTENDANCE_COLLECTION = "attendance";
 const DEFAULT_PIN = "1234";
@@ -825,6 +825,28 @@ function updatePinDots(){
   }
 }
 
+// ── تخفيف تسريب الأرقام السرية (v18.9se): تُخزَّن مُجزّأةً (SHA-256) بدل نصّ صريح ──
+// المتصفّح لا يقرأ رقماً صريحاً بل تجزئةً، والتحقّق يقارن تجزئتين. توافق رجعي كامل:
+// القيم القديمة الصريحة (والافتراضية) تبقى تعمل. تنبيه: هذا تخفيف لا حلّ — تجزئة رقمٍ
+// من 4 خانات تبقى قابلة للتخمين (10 آلاف احتمال)؛ الحلّ الجذري نقل التحقّق للخادم.
+const _PIN_SALT = "hail-tech-v1";
+async function _hashPin(name, pin){
+  try{
+    const data = new TextEncoder().encode(_PIN_SALT + "|" + (name||"") + "|" + String(pin==null?"":pin));
+    const buf = await crypto.subtle.digest("SHA-256", data);
+    return "h$" + Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+  }catch(e){ return null; }
+}
+async function _pinMatches(entered, stored, name){
+  if(stored==null) return false;
+  const s = String(stored);
+  if(s.indexOf("h$")===0){                       // مُجزّأ
+    const h = await _hashPin(name, entered);
+    return !!h && h===s;
+  }
+  return String(entered)===s;                    // صريح قديم/افتراضي — توافق رجعي
+}
+
 async function attemptLogin(){
   const techName=document.getElementById("login-tech-select").value;
   if(!techName){
@@ -840,38 +862,38 @@ async function attemptLogin(){
     pinBuffer=""; updatePinDots(); return;
   }
 
-  let correctPin = DEFAULT_PIN;
+  let correctPin = DEFAULT_PIN, correctOwner = "";   // owner = اسمٌ لتمليح التجزئة
   let isAdmin = false;
 
   if(db){
-    // جلب adminPin من meta/settings
+    // جلب adminPin من meta/settings — يُقارَن عبر _pinMatches (يدعم المُجزّأ والصريح)
     try{
       const settDoc = await db.collection("meta").doc("settings").get();
       if(settDoc.exists && settDoc.data().adminPin){
         const adminPin = settDoc.data().adminPin;
-        if(pinBuffer === adminPin) isAdmin = true;
-        if(isAdminName) correctPin = adminPin;
+        if(await _pinMatches(pinBuffer, adminPin, "__admin__")) isAdmin = true;
+        if(isAdminName){ correctPin = adminPin; correctOwner = "__admin__"; }
       } else {
         // لا يوجد adminPin في Firebase — استخدم الافتراضي
         if(pinBuffer === DEFAULT_ADMIN_PIN) isAdmin = true;
-        if(isAdminName) correctPin = DEFAULT_ADMIN_PIN;
+        if(isAdminName){ correctPin = DEFAULT_ADMIN_PIN; correctOwner = ""; }
       }
     }catch(e){
       // خطأ في الاتصال — استخدم الافتراضي
       if(pinBuffer === DEFAULT_ADMIN_PIN) isAdmin = true;
-      if(isAdminName) correctPin = DEFAULT_ADMIN_PIN;
+      if(isAdminName){ correctPin = DEFAULT_ADMIN_PIN; correctOwner = ""; }
     }
 
-    // الفنيون العاديون: جلب PIN الخاص بهم
+    // الفنيون العاديون: جلب PIN الخاص بهم (قد يكون مُجزّأً)
     if(!isAdminName){
       try{
         const doc = await db.collection("technicians").doc(techName).get();
-        if(doc.exists && doc.data().pin) correctPin = doc.data().pin;
+        if(doc.exists && doc.data().pin){ correctPin = doc.data().pin; correctOwner = techName; }
       }catch(e){}
     }
   } else {
     // لا يوجد db — استخدم الافتراضي
-    if(isAdminName){ correctPin = DEFAULT_ADMIN_PIN; if(pinBuffer===DEFAULT_ADMIN_PIN) isAdmin=true; }
+    if(isAdminName){ correctPin = DEFAULT_ADMIN_PIN; correctOwner = ""; if(pinBuffer===DEFAULT_ADMIN_PIN) isAdmin=true; }
   }
 
   // مدير النظام يجب أن يدخل adminPin الصحيح
@@ -881,7 +903,7 @@ async function attemptLogin(){
   }
 
   // الفنيون العاديون
-  if(!isAdminName && pinBuffer !== correctPin && !isAdmin){
+  if(!isAdminName && !isAdmin && !(await _pinMatches(pinBuffer, correctPin, correctOwner))){
     showLoginError("الرقم السري غير صحيح");
     pinBuffer=""; updatePinDots(); return;
   }
@@ -1203,7 +1225,9 @@ async function _cpConfirm(){
     _cpBuffer = ""; _cpUpdateDots(); return;
   }
   try{
-    await db.collection("technicians").doc(techName).set({pin:_cpBuffer},{merge:true});
+    // v18.9se: يُخزَّن مُجزّأً (لا نصّاً صريحاً)؛ يرجع للصريح فقط إن تعذّر التجزئة
+    const _pinToStore = (await _hashPin(techName, _cpBuffer)) || _cpBuffer;
+    await db.collection("technicians").doc(techName).set({pin:_pinToStore},{merge:true});
     toast("✅ تم تغيير PIN الفني "+techName,"success");
     logAudit("تغيير PIN","الفني: "+techName);
     // إبقاء العرض ••••
