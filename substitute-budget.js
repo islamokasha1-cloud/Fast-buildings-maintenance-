@@ -150,10 +150,34 @@
     }, function(e){ console.warn("substitute-budget sync error:", e); });
   }
 
-  function _save(){
-    if(typeof db==="undefined" || !db) return Promise.reject(new Error("no db"));
-    return db.doc(DOC()).set({ accounts: _accounts });
+  // ════════ الحفظ الذرّي ════════
+  // القديم set({accounts:_accounts}) كان يكتب اللقطة المحلية كاملةً فوق مستند الخادم،
+  // فتعديلُ مسؤولٍ على حسابٍ يدهس تعديلَ مسؤولٍ آخر على حسابٍ مختلف (فقدان تحديث).
+  // الآن: معاملة تقرأ مصفوفة الخادم الحيّة، تدمج تغيير الحساب الواحد عليها، ثم تكتب —
+  // فلا تُفقَد تعديلات متزامنة على حسابات أخرى. (تقتدي بنمط newId في index.html.)
+  function _applyUpsert(list, account){                 // نقيّة — مكشوفة للاختبار
+    var out = list.slice(), i = -1;
+    for(var k=0;k<out.length;k++){ if(out[k] && out[k].id===account.id){ i=k; break; } }
+    if(i>=0) out[i]=account; else out.push(account);
+    return out;
   }
+  function _applyRemove(list, id){                       // نقيّة — مكشوفة للاختبار
+    return list.filter(function(a){ return a && a.id!==id; });
+  }
+  function _txAccounts(mutate){
+    if(typeof db==="undefined" || !db) return Promise.reject(new Error("no db"));
+    var ref = db.doc(DOC());
+    return db.runTransaction(function(tx){
+      return tx.get(ref).then(function(snap){
+        var server = (snap.exists && Array.isArray(snap.data().accounts)) ? snap.data().accounts : [];
+        var next = mutate(server.map(function(a){ return Object.assign({}, a); }));
+        tx.set(ref, { accounts: next }, { merge:true });
+        return next;
+      });
+    });
+  }
+  function _upsertAccount(account){ return _txAccounts(function(list){ return _applyUpsert(list, account); }); }
+  function _removeAccountTx(id){    return _txAccounts(function(list){ return _applyRemove(list, id); }); }
 
   // ════════ العرض ════════
   function render(){
@@ -465,20 +489,23 @@
 
     _saving = true;
     var backup = _accounts.map(function(a){ return Object.assign({}, a); });
+    var saved;
     if(acc){
       acc.kind=kind; acc.projectId=(kind==="linked"?projectId:""); acc.name=name;
       acc.total=total; acc.openingConsumed=opening; acc.margin=margin; acc.note=note;
       acc.updatedAt=_now();
+      saved = acc;                                       // تحديثٌ محلّي متفائل — تُوحَّده onSnapshot
     } else {
       var id = "sb_" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
-      _accounts.push({
+      saved = {
         id:id, kind:kind, projectId:(kind==="linked"?projectId:""), name:name,
         total:total, openingConsumed:opening, margin:margin, note:note,
         createdAt:_now(), createdBy:_me(), updatedAt:_now()
-      });
+      };
+      _accounts.push(saved);
     }
     try{
-      await _save();
+      await _upsertAccount(saved);                        // معاملة تدمج هذا الحساب وحده
       _saving=false;
       _toast(acc?"✅ تم حفظ التعديل":"✅ تم إضافة الحساب","success");
       _audit(acc?"تعديل حساب بند مستعاض":"إضافة حساب بند مستعاض", name+" — إجمالي:"+_fmt(total)+" هامش:"+margin+"%");
@@ -505,7 +532,7 @@
       if(!ok) return;
       var backup=_accounts.slice();
       _accounts = _accounts.filter(function(a){ return a.id!==id; });
-      _save().then(function(){
+      _removeAccountTx(id).then(function(){               // معاملة تحذف هذا الحساب وحده من حالة الخادم
         _toast("✅ تم حذف الحساب","success");
         _audit("حذف حساب بند مستعاض", _acctName(acc));
         if(_curId===id) _curId=null;
@@ -545,6 +572,7 @@
     openAdd: openAdd, openEdit: openEdit, remove: remove,
     _kindToggle: _kindToggle,
     optionsHtml: optionsHtml, accounts: accounts, accountForProject: accountForProject,
-    _calcStats: _calcStats   // دالة الحساب النقية — لفحوص hail-tests
+    _calcStats: _calcStats,  // دالة الحساب النقية — لفحوص hail-tests
+    _applyUpsert: _applyUpsert, _applyRemove: _applyRemove   // مبدّلات الدمج النقية — للاختبار
   };
 })();

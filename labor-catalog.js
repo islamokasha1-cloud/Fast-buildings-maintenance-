@@ -65,12 +65,34 @@
   function stamp(){ return firebase.firestore.FieldValue.serverTimestamp(); }
 
   // ══ توليد الكود التسلسلي LAB-### ══
-  function genCode(){
-    const nums = _items
+  // genCode معاينةٌ محليّة فقط. التخصيص النهائي ذرّيّ عند الحفظ (allocCode) — فلا يتكرّر
+  // الكود عند إضافة متزامنة من مستخدمين (كان كلاهما يحسب LAB-### نفسه من لقطته المحلية).
+  function _localCodeMax(){
+    return _items
       .filter(c => c.code && c.code.indexOf(CODE_PREFIX + "-") === 0)
-      .map(c => { const n = parseInt(c.code.slice(CODE_PREFIX.length+1),10); return isNaN(n)?0:n; });
-    const next = nums.length ? Math.max.apply(null,nums)+1 : 1;
-    return CODE_PREFIX + "-" + String(next).padStart(3,"0");
+      .reduce((mx,c)=>{ const n = parseInt(c.code.slice(CODE_PREFIX.length+1),10); return isNaN(n)?mx:Math.max(mx,n); }, 0);
+  }
+  function _nextCodeNum(serverCounter, localMax){ return Math.max(serverCounter||0, localMax||0) + 1; } // نقيّة — للاختبار
+  function _codeFromNum(n){ return CODE_PREFIX + "-" + String(n).padStart(3,"0"); }
+  function genCode(){ return _codeFromNum(_localCodeMax()+1); }
+  function META_COUNTER(){ return COLLECTION() + "__counter"; }
+  async function allocCode(){
+    const localMax = _localCodeMax();
+    if(typeof db==='undefined' || !db) return _codeFromNum(localMax+1);
+    const ref = db.collection("meta").doc(META_COUNTER());
+    try{
+      const next = await db.runTransaction(async tx=>{
+        const doc = await tx.get(ref);
+        const svr = doc.exists ? (doc.data().counter||0) : 0;
+        const n = _nextCodeNum(svr, localMax);
+        tx.set(ref, { counter:n }, { merge:true });
+        return n;
+      });
+      return _codeFromNum(next);
+    }catch(e){
+      console.warn("allocCode transaction failed — fallback:", e);
+      return _codeFromNum(localMax+1) + "-" + Date.now().toString(36).slice(-3).toUpperCase();
+    }
   }
 
   // ══ قائمة التصنيفات الحالية (افتراضية ∪ الموجودة فعلاً) ══
@@ -433,6 +455,8 @@
         await db.collection(COLLECTION()).doc(id).update(data);
         T("✅ تم تحديث المصنعية","success");
       } else {
+        // كود ذرّي عند غيابه أو بقائه على النمط التلقائي LAB-### — يمنع التكرار عند التزامن.
+        if(!code || /^LAB-\d+$/i.test(code)) data.code = await allocCode();
         data.createdAt = stamp();
         data.createdBy = userLabel();
         await db.collection(COLLECTION()).add(data);
@@ -595,6 +619,7 @@
     triggerImport: triggerImport,
     importExcel: importExcel,
     getItems: function(){ return _items.slice(); },
-    _num: num   // مكشوف للاختبار فقط (hail-tests.js) — دالة نقية
+    _num: num,           // مكشوف للاختبار فقط (hail-tests.js) — دالة نقية
+    _nextCodeNum: _nextCodeNum   // منطق العدّاد الذرّي — للاختبار
   };
 })();

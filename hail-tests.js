@@ -511,6 +511,77 @@ function hailNotify() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   12) معالجة جذر سباقات الكتابة — دمجٌ ذرّي + عدّاد كود ذرّي
+       substitute-budget.js: دمج حسابٍ واحد على حالة الخادم بدل كتابة اللقطة
+       المحلية كاملةً (فقدان تحديث). price-analysis.js/labor-catalog.js: تخصيص
+       الكود عبر عدّاد ذرّي بدل حسابٍ محلي يكرّر عند التزامن.
+   ════════════════════════════════════════════════════════════════════ */
+function writeRaceRoot() {
+  H("12) جذر سباقات الكتابة (دمج ذرّي + عدّاد كود ذرّي)");
+  const vm = require("vm");
+  const docStub = {
+    getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+    addEventListener: () => {}, createElement: () => ({ style: {}, classList: { add() {}, remove() {} }, appendChild() {}, setAttribute() {} })
+  };
+  function loadMod(p, globalName) {
+    if (!p) return null;
+    const src = fs.readFileSync(p, "utf8");
+    const sandbox = { window: {}, document: docStub, console, setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {} };
+    vm.createContext(sandbox);
+    try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل " + globalName, false, String(e.message).slice(0, 120)); return null; }
+    return sandbox.window[globalName];
+  }
+
+  // ── (أ) substitute-budget: الدمج الذرّي يحفظ حسابات الآخرين ──
+  const SB = loadMod(SB_PATH, "substituteBudget");
+  T("substituteBudget._applyUpsert/_applyRemove مكشوفتان",
+    !!(SB && typeof SB._applyUpsert === "function" && typeof SB._applyRemove === "function"));
+  if (SB && SB._applyUpsert) {
+    const server = [{ id: "A", total: 100 }, { id: "B", total: 200 }];
+    const up = SB._applyUpsert(server, { id: "B", total: 250 });          // مسؤول يعدّل B
+    T("★ الدمج: تعديل حسابٍ يبقي الآخر ولا يكرّر",
+      up.length === 2 && up.find(a => a.id === "A").total === 100 && up.find(a => a.id === "B").total === 250,
+      JSON.stringify(up));
+    const add = SB._applyUpsert(server, { id: "C", total: 300 });          // مسؤول آخر يضيف C
+    T("★ الدمج: إضافة حسابٍ على حالة الخادم لا تدهس القائمة",
+      add.length === 3 && !!add.find(a => a.id === "A") && !!add.find(a => a.id === "B") && !!add.find(a => a.id === "C"));
+    const rm = SB._applyRemove(server, "A");
+    T("★ الحذف الذرّي يزيل الهدف وحده", rm.length === 1 && rm[0].id === "B");
+    T("الدمج لا يحوّر مصفوفة الخادم الأصلية", server.length === 2 && server[1].total === 200);
+  }
+
+  // ── (ب) عدّاد الكود الذرّي: max(الخادم, المحلي)+1 ──
+  function checkCounter(fn, label) {
+    if (!fn) { T(label + "._nextCodeNum مكشوفة", false); return; }
+    const cases = [[0, 3, 4], [5, 3, 6], [5, 0, 6], [0, 0, 1], [10, 10, 11]];
+    let bad = null;
+    for (const [svr, loc, exp] of cases) { if (fn(svr, loc) !== exp) { bad = { svr, loc, exp, got: fn(svr, loc) }; break; } }
+    T("★ " + label + ": الكود التالي = max(الخادم, المحلي)+1", !bad, bad ? JSON.stringify(bad) : cases.length + " حالة");
+    T(label + ": عدّاد الخادم المتقدّم على لقطة متخلّفة يمنع التكرار", fn(9, 3) === 10, "=" + fn(9, 3));
+  }
+  const PA = loadMod(PA_PATH, "priceAnalysis");
+  const LC = loadMod(LC_PATH, "laborCatalog");
+  checkCounter(PA && PA._nextCodeNum, "priceAnalysis");
+  checkCounter(LC && LC._nextCodeNum, "laborCatalog");
+
+  // ── (ج) حراسة النمط المصدري ──
+  const sbSrc = SB_PATH ? fs.readFileSync(SB_PATH, "utf8") : "";
+  const paSrc = PA_PATH ? fs.readFileSync(PA_PATH, "utf8") : "";
+  const lcSrc = LC_PATH ? fs.readFileSync(LC_PATH, "utf8") : "";
+  const GW = [
+    ["substitute: الحفظ عبر معاملة ذرّية", sbSrc, "return db.runTransaction(function(tx){", true],
+    ["substitute: زالت الكتابة الكاملة للمصفوفة", sbSrc, "return db.doc(DOC()).set({ accounts: _accounts });", false],
+    ["substitute: الإضافة/التعديل عبر _upsertAccount", sbSrc, "await _upsertAccount(saved);", true],
+    ["substitute: الحذف عبر _removeAccountTx", sbSrc, "_removeAccountTx(id).then(function(){", true],
+    ["price-analysis: تخصيص الكود عبر معاملة", paSrc, "await db.runTransaction(async tx=>{", true],
+    ["price-analysis: الحفظ يخصّص كوداً ذرّياً", paSrc, "data.code = await allocCode();", true],
+    ["labor-catalog: تخصيص الكود عبر معاملة", lcSrc, "await db.runTransaction(async tx=>{", true],
+    ["labor-catalog: الحفظ يخصّص كوداً ذرّياً", lcSrc, "data.code = await allocCode();", true],
+  ];
+  GW.forEach(([n, src, needle, want]) => T(n, src.includes(needle) === want, want ? "" : "يجب ألا يعود"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    8) فحص الثوابت العشوائي
       الأمثلة المكتوبة تُثبت ما خطر ببالنا. هذه تُجرّب ما لم يخطر:
       آلاف التركيبات العشوائية، والحكم ليس قيمة متوقعة مكتوبة بيد،
@@ -703,6 +774,7 @@ function fuzz() {
   substituteBudget();
   numParsing();
   hailNotify();
+  writeRaceRoot();
   fuzz();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
