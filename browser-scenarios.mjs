@@ -349,6 +349,143 @@ check('عدّاد Firestore انتهى عند 25', s6.counterEnd===25, 'العد
 check('عيّنة: '+s6.sample, /^BLG-\d{4}-0001/.test(s6.sample));
 check('شاهد سلبي: المخصِّص الساذج تصادم (تكرار) — فالمحاكي يكشف السباق', s6.naiveUnique<25, 'الفريد الساذج='+s6.naiveUnique+'/25');
 
+/* ══ سيناريو 7: أمر صرف من المخزون — خصم الرصيد ومنع الرصيد السالب ══ */
+log('\n=== السيناريو 7: أمر صرف من المخزون وخصم الرصيد ══');
+const s7 = await page.evaluate(async ()=>{
+  const out={};
+  window.isAdmin=()=>!!(currentUser&&currentUser.role==='admin');
+  window.isWarehouseManager=()=>!!(currentUser&&currentUser.role==='warehouse_manager');
+  const toasts=[]; window.toast=(m)=>toasts.push(String(m));
+  window.renderInventory=()=>{}; window.renderIssueOrders=()=>{};
+  window.printIssueOrder=()=>{}; window.showPage=()=>{}; window.logAudit=()=>{};
+
+  currentUser={name:'أمين المستودع', role:'warehouse_manager'};
+  const INV=INVENTORY_COLLECTION(), LOG=INVENTORY_LOG_COLLECTION(), IO=ISSUE_ORDERS_COLLECTION(), IM=ISSUE_META_DOC();
+  window.__store={};
+
+  // صنفان في المخزون: مسمار (متاح 20) لصرفٍ سليم، وصبغ (متاح 3) لاختبار المنع
+  _inventoryItems=[
+    { id:'itemS', itemName:'مسمار', unit:'علبة', itemCode:'C1', currentQty:20 },
+    { id:'itemT', itemName:'صبغ',  unit:'لتر',  itemCode:'C2', currentQty:3  }
+  ];
+  window.__store[INV+'/itemS']={ itemId:'itemS', itemName:'مسمار', unit:'علبة', currentQty:20 };
+  window.__store[INV+'/itemT']={ itemId:'itemT', itemName:'صبغ',  unit:'لتر',  currentQty:3  };
+  _issueOrders=[];
+
+  // مُعِين: يبني صفّ صنف في نموذج الصرف ويملأه كما يفعل المستخدم
+  const buildRow=(itemId,qty,unit)=>{
+    issueAddItemRow();
+    const rows=document.querySelectorAll('#iss-items-wrap .iss-item-row');
+    const rid=rows[rows.length-1].id;
+    document.getElementById(rid+'-itemid').value=itemId;
+    document.getElementById(rid+'-qty').value=String(qty);
+    document.getElementById(rid+'-unit').value=unit;
+    return rid;
+  };
+  const fillHeader=(recipient)=>{
+    initIssueOrderPage();                 // يبني قائمة المشاريع (تشمل «يدوي») والتاريخ
+    document.getElementById('iss-items-wrap').innerHTML='';   // ابدأ بلا صفوف
+    document.getElementById('iss-recipient').value=recipient;
+    document.getElementById('iss-project').value='__OTHER__';
+    document.getElementById('iss-project-manual').value='مشروع أ';
+  };
+
+  // ── أ) صرف سليم: 5 من المسمار (متاح 20) ──
+  fillHeader('محمد المستلم');
+  buildRow('itemS',5,'علبة');
+  out.beforeS=(window.__store[INV+'/itemS']||{}).currentQty;
+  await issueOrderSubmit();
+  out.afterS=(window.__store[INV+'/itemS']||{}).currentQty;
+  const logs1=Object.keys(window.__store).filter(k=>k.indexOf(LOG+'/')===0).map(k=>window.__store[k]);
+  const outLogsS=logs1.filter(l=>l.type==='out'&&l.itemId==='itemS');
+  out.outLogS=outLogsS.length; out.outQtyS=(outLogsS[0]||{}).qty; out.outRef=(outLogsS[0]||{}).orderRef||'';
+  const orders1=Object.keys(window.__store).filter(k=>k.indexOf(IO+'/')===0);
+  out.orderCount1=orders1.length;
+  out.orderStatus=orders1.length?(window.__store[orders1[0]]||{}).status:'';
+  out.issCounter=(window.__store[IM]||{}).counter;
+
+  // ── ب) منع الرصيد السالب: محاولة صرف 10 من الصبغ (متاح 3 فقط) ──
+  fillHeader('خالد');
+  buildRow('itemT',10,'لتر');
+  await issueOrderSubmit();
+  out.afterT=(window.__store[INV+'/itemT']||{}).currentQty;   // يجب أن يبقى 3
+  const logs2=Object.keys(window.__store).filter(k=>k.indexOf(LOG+'/')===0).map(k=>window.__store[k]);
+  out.outLogT=logs2.filter(l=>l.type==='out'&&l.itemId==='itemT').length;   // يجب 0
+  out.orderCount2=Object.keys(window.__store).filter(k=>k.indexOf(IO+'/')===0).length; // يبقى 1
+  out.blockedMsg=toasts.some(m=>/يتجاوز المتاح/.test(m));
+  return out;
+});
+check('أ) قبل الصرف: رصيد المسمار = 20', s7.beforeS===20);
+check('أ) ★ بعد صرف 5: الرصيد = 15 (خُصم فعلاً)', s7.afterS===15, 'الرصيد='+s7.afterS);
+check('أ) حركة «out» كُتبت بالكمية 5', s7.outLogS===1 && s7.outQtyS===5, 'عدد='+s7.outLogS+' كمية='+s7.outQtyS);
+check('أ) أمر صرف صدر برقم ISS ومربوط بالحركة', /^ISS-\d{4}-\d{4}$/.test(s7.outRef), 'رقم='+s7.outRef);
+check('أ) أمر الصرف أُنشئ بحالة «بانتظار الاعتماد»', s7.orderCount1===1 && s7.orderStatus==='pending');
+check('أ) عدّاد أوامر الصرف تقدّم إلى 1', s7.issCounter===1);
+check('ب) ★ منع الرصيد السالب: رصيد الصبغ بقي 3', s7.afterT===3, 'الرصيد='+s7.afterT);
+check('ب) ★ لم تُكتب حركة صرف للصبغ', s7.outLogT===0);
+check('ب) ★ لم يُنشأ أمر صرف ثانٍ', s7.orderCount2===1, 'عدد الأوامر='+s7.orderCount2);
+check('ب) أُبلغ المستخدم أن الكمية تتجاوز المتاح', s7.blockedMsg===true);
+
+/* ══ سيناريو 8: حذف طلب شراء وعكس أثره على المخزون ══ */
+log('\n=== السيناريو 8: حذف طلب شراء وأثره على المخزون ══');
+const s8 = await page.evaluate(async ()=>{
+  const out={};
+  window.isAdmin=()=>!!(currentUser&&currentUser.role==='admin');
+  window.showConfirm=()=>Promise.resolve(true);   // يؤكّد الحذف
+  window.toast=()=>{}; window.renderPurchases=()=>{}; window.updatePurchaseBadge=()=>{};
+  window.renderInventory=()=>{}; window.closeModal=()=>{}; window.logAudit=()=>{};
+
+  currentUser={name:'المسؤول', role:'admin'};
+  const INV=INVENTORY_COLLECTION(), LOG=INVENTORY_LOG_COLLECTION(), PC=PURCHASES_COLLECTION();
+
+  // مُعِين: يشغّل deletePurchase (غير async) وينتظر اكتمال عكس المخزون + حذف الوثيقة
+  const runDelete=async (poId)=>{
+    deletePurchase(poId);
+    for(let i=0;i<50 && window.__store[PC+'/'+poId]!==undefined;i++){ await new Promise(r=>setTimeout(r,10)); }
+  };
+
+  // ── أ) حذف طلب مستلَم: يُخرِج ما دخل المستودع (6) من رصيد 16 ⇒ 10 ──
+  window.__store={};
+  _inventoryItems=[{ id:'itemK', itemName:'كابل', unit:'متر', currentQty:16 }];
+  window.__store[INV+'/itemK']={ itemId:'itemK', itemName:'كابل', unit:'متر', currentQty:16 };
+  const PO1={ id:'PO-DEL1', building:'مبنى ١', status:'closed', vendor:'مورد',
+    grnDocs:[{ grnRef:'GRN-2026-0001', items:[{ itemId:'itemK', itemName:'كابل', unit:'متر', stockQty:6 }] }],
+    items:[{ itemId:'itemK', itemName:'كابل', unit:'متر', qty:6 }], createdAt:'2026-01-01T08:00:00' };
+  purchases=[PO1];
+  window.__store[PC+'/PO-DEL1']=Object.assign({},PO1);
+  out.before1=(window.__store[INV+'/itemK']||{}).currentQty;
+  await runDelete('PO-DEL1');
+  out.after1=(window.__store[INV+'/itemK']||{}).currentQty;
+  out.poGone1=window.__store[PC+'/PO-DEL1']===undefined;
+  out.inArray1=purchases.some(x=>x.id==='PO-DEL1');
+  const adjLogs=Object.keys(window.__store).filter(k=>k.indexOf(LOG+'/')===0)
+                  .map(k=>window.__store[k]).filter(l=>l.type==='adjust'&&l.relatedPO==='PO-DEL1');
+  out.adjCount1=adjLogs.length; out.adjDelta1=(adjLogs[0]||{}).adjustDelta;
+
+  // ── ب) قصر عند الصفر: نفس العكس (−6) على رصيد 4 ⇒ 0 لا سالب ──
+  window.__store={}; purchases=[];
+  _inventoryItems=[{ id:'itemK', itemName:'كابل', unit:'متر', currentQty:4 }];
+  window.__store[INV+'/itemK']={ itemId:'itemK', itemName:'كابل', unit:'متر', currentQty:4 };
+  const PO2={ id:'PO-DEL2', building:'مبنى ٢', status:'closed', vendor:'مورد',
+    grnDocs:[{ grnRef:'GRN-2026-0002', items:[{ itemId:'itemK', itemName:'كابل', unit:'متر', stockQty:6 }] }],
+    items:[{ itemId:'itemK', itemName:'كابل', unit:'متر', qty:6 }], createdAt:'2026-01-01T08:00:00' };
+  purchases=[PO2];
+  window.__store[PC+'/PO-DEL2']=Object.assign({},PO2);
+  await runDelete('PO-DEL2');
+  out.after2=(window.__store[INV+'/itemK']||{}).currentQty;   // يجب 0 لا −2
+  const adj2=Object.keys(window.__store).filter(k=>k.indexOf(LOG+'/')===0)
+               .map(k=>window.__store[k]).filter(l=>l.type==='adjust'&&l.relatedPO==='PO-DEL2');
+  out.adjDelta2=(adj2[0]||{}).adjustDelta;   // يبقى −6 (الأثر الحقيقي موثّق رغم القصر)
+  return out;
+});
+check('أ) قبل الحذف: رصيد الكابل = 16', s8.before1===16);
+check('أ) ★ بعد حذف الطلب المستلَم: الرصيد = 10 (أُخرج 6 المستلمة)', s8.after1===10, 'الرصيد='+s8.after1);
+check('أ) حركة تسوية «adjust» كُتبت بدلتا −6', s8.adjCount1===1 && s8.adjDelta1===-6, 'دلتا='+s8.adjDelta1);
+check('أ) وثيقة الطلب حُذفت من المخزن', s8.poGone1===true);
+check('أ) الطلب أُزيل من القائمة المحلية', s8.inArray1===false);
+check('ب) ★ القصر عند الصفر: 4 − 6 ⇒ 0 لا سالب', s8.after2===0, 'الرصيد='+s8.after2);
+check('ب) دلتا السجل تبقى −6 (الأثر موثّق رغم القصر)', s8.adjDelta2===-6, 'دلتا='+s8.adjDelta2);
+
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
 if(boot.length) log('(أخطاء إقلاع غير حرجة: '+boot.length+' — متوقّعة من غياب CDN)');
