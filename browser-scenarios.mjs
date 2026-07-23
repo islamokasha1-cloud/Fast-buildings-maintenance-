@@ -118,6 +118,108 @@ const s3 = await page.evaluate(async ()=>{
 check('★ المصدر A = 30 (50 − نقل 20، لا 50 وهمية)', s3.A===30, 'A='+s3.A);
 check('★ الوجهة B = 20 (أُضيف النقل)', s3.B===20, 'B='+s3.B);
 
+/* ══ سيناريو 4: تدفّق اعتماد طلب الشراء (متعدّد الأدوار) ══ */
+log('\n=== السيناريو 4: تدفّق اعتماد طلب الشراء ══');
+const s4 = await page.evaluate(async ()=>{
+  const out={};
+  // استرجع فحوص الأدوار الحقيقية (السيناريو 3 كان دهس isAdmin=()=>true) — القرار يُقاد بالدور
+  window.isAdmin            = ()=> !!(currentUser && currentUser.role==='admin');
+  window.isWarehouseManager = ()=> !!(currentUser && currentUser.role==='warehouse_manager');
+  window.isProcurementOfficer= ()=> !!(currentUser && currentUser.role==='procurement_officer');
+  // كتم التأثيرات الجانبية (بلا تعطيل منطق القرار)
+  window.showConfirm = async ()=>true;
+  const toasts=[]; window.toast=(m,t)=>toasts.push({m:String(m),t});
+  window.renderPurchases=()=>{}; window.updatePurchaseBadge=()=>{};
+  window.logAudit=()=>{}; window._sendPurchaseWorkflowNotif=()=>{}; window.closeModal=()=>{};
+  const PC = PURCHASES_COLLECTION();
+
+  const setSel=(v)=>{ const e=document.getElementById('pu-status'); e.innerHTML='<option value="'+v+'"></option>'; e.value=v; };
+  const setVal=(id,v)=>{ const e=document.getElementById(id); if(e) e.value=(v==null?'':String(v)); };
+  const clearFields=()=>{ ['pu-actual-cost','pu-vendor','pu-invoice','pu-update-notes','pu-update-date','pu-delivery-date'].forEach(id=>setVal(id,'')); };
+  const seed=(po)=>{ purchases=[po]; window.__store[PC+'/'+po.id]=Object.assign({},po); document.getElementById('pu-id').value=po.id; clearFields(); };
+  const cur=(id)=>(purchases.find(x=>x.id===id)||{}).status;
+  const P=(id)=>purchases.find(x=>x.id===id);
+
+  /* ── أ) تدرّج سليم بالأدوار: طلب صغير (500 < عتبة المدير التنفيذي 2000) ── */
+  const POA={ id:'POA', status:'pending_pm', building:'مبنى', items:[{itemName:'x',itemCost:500}], createdAt:'2026-01-01T08:00:00' };
+
+  currentUser={name:'مدير المشاريع', role:'project_manager'};
+  seed(POA);
+  out.pmOffers=getAvailableStatuses('pending_pm',POA).map(s=>s.v);
+  setSel('pm_approved'); setVal('pu-update-notes','اعتماد');
+  await doUpdatePurchaseStatus();
+  out.afterPM=cur('POA');
+  out.approvedAtStamped=!!(P('POA')&&P('POA').approvedAt);
+  const approvedAt1=P('POA').approvedAt;
+
+  currentUser={name:'أمين المستودع', role:'warehouse_manager'};
+  document.getElementById('pu-id').value='POA'; clearFields(); setVal('pu-update-notes','مراجعة');
+  out.whOffers=getAvailableStatuses(cur('POA'),P('POA')).map(s=>s.v);
+  setSel('wh_reviewed');
+  await doUpdatePurchaseStatus();
+  out.afterWH=cur('POA');
+
+  currentUser={name:'مسؤول المشتريات', role:'procurement_officer'};
+  document.getElementById('pu-id').value='POA'; clearFields(); setVal('pu-update-notes','تنفيذ');
+  out.procOffers=getAvailableStatuses(cur('POA'),P('POA')).map(s=>s.v);
+  setSel('proc_executing');
+  await doUpdatePurchaseStatus();
+  out.afterProc=cur('POA');
+  out.approvedAtUnchanged=(P('POA').approvedAt===approvedAt1);
+
+  /* ── ب) بوّابة الصلاحية: دور خاطئ لا يُقدَّم له إجراء ولا يُغيّر الحالة ── */
+  const POB={ id:'POB', status:'pending_pm', building:'م', items:[{itemName:'x',itemCost:300}], createdAt:'2026-01-01T08:00:00' };
+  currentUser={name:'أمين المستودع', role:'warehouse_manager'};
+  seed(POB);
+  out.wrongRoleOffers=getAvailableStatuses('pending_pm',POB).map(s=>s.v);
+  setSel('wh_reviewed'); setVal('pu-update-notes','محاولة تجاوز');
+  await doUpdatePurchaseStatus();
+  out.afterWrongRole=cur('POB');
+
+  /* ── ج) حارس التزامن: مستخدم آخر اعتمد الطلب بينما مودالنا مفتوح ── */
+  const POC={ id:'POC', status:'pending_pm', building:'م', items:[{itemName:'x',itemCost:300}], createdAt:'2026-01-01T08:00:00' };
+  currentUser={name:'مدير المشاريع', role:'project_manager'};
+  seed(POC);
+  window.__store[PC+'/POC'].status='pm_approved';   // كتابة مستخدمٍ آخر سبقتنا
+  setSel('pm_rejected'); setVal('pu-update-notes','رفض متأخّر');
+  await doUpdatePurchaseStatus();
+  out.raceStored=(window.__store[PC+'/POC']||{}).status;   // يجب pm_approved لا rejected
+  out.raceWarned=toasts.some(t=>/مستخدم آخر/.test(t.m));
+
+  /* ── د) توجيه عتبة المدير التنفيذي: طلب كبير (5000 ≥ 2000) ── */
+  const POD={ id:'POD', status:'wh_reviewed', building:'م', items:[{itemName:'x',itemCost:5000}], createdAt:'2026-01-01T08:00:00' };
+  currentUser={name:'مسؤول المشتريات', role:'procurement_officer'};
+  seed(POD);
+  const bigOffers=getAvailableStatuses('wh_reviewed',POD).map(s=>s.v);
+  out.bigOffersCEO=bigOffers.includes('pending_ceo');
+  out.bigOffersNoDirect=!bigOffers.includes('proc_executing');
+
+  /* ── هـ) الرفض بلا سبب مرفوض ── */
+  const POE={ id:'POE', status:'pending_pm', building:'م', items:[{itemName:'x',itemCost:300}], createdAt:'2026-01-01T08:00:00' };
+  currentUser={name:'مدير المشاريع', role:'project_manager'};
+  seed(POE);
+  setSel('pm_rejected'); setVal('pu-update-notes','');   // بلا سبب
+  await doUpdatePurchaseStatus();
+  out.rejectNoReason=cur('POE');
+
+  return out;
+});
+check('أ) المدير يُعرض له «اعتماد» (pm_approved)', s4.pmOffers.includes('pm_approved'));
+check('أ) بعد اعتماد المدير ⇒ pm_approved', s4.afterPM==='pm_approved', 'الحالة='+s4.afterPM);
+check('أ) طابع الاعتماد (approvedAt) خُتم', s4.approvedAtStamped===true);
+check('أ) المستودع يُعرض له «تمت المراجعة»', s4.whOffers.includes('wh_reviewed'));
+check('أ) بعد مراجعة المستودع ⇒ wh_reviewed', s4.afterWH==='wh_reviewed', 'الحالة='+s4.afterWH);
+check('أ) المشتريات يُعرض له «بدء التنفيذ»', s4.procOffers.includes('proc_executing'));
+check('أ) بعد اعتماد المشتريات ⇒ proc_executing', s4.afterProc==='proc_executing', 'الحالة='+s4.afterProc);
+check('أ) ★ طابع الاعتماد لم يتبدّل عبر المراحل', s4.approvedAtUnchanged===true);
+check('ب) ★ الدور الخاطئ لا يُقدَّم له إجراء', s4.wrongRoleOffers.length===0, 'عدد الخيارات='+s4.wrongRoleOffers.length);
+check('ب) ★ الدور الخاطئ لم يُغيّر الحالة', s4.afterWrongRole==='pending_pm', 'الحالة='+s4.afterWrongRole);
+check('ج) ★ حارس التزامن منع دهس اعتماد سابق', s4.raceStored==='pm_approved', 'المخزن='+s4.raceStored);
+check('ج) أُبلغ المستخدم بتغيّر الحالة', s4.raceWarned===true);
+check('د) ★ الطلب الكبير يُوجَّه للمدير التنفيذي', s4.bigOffersCEO===true);
+check('د) ★ الطلب الكبير لا تنفيذ مباشر دون اعتماد', s4.bigOffersNoDirect===true);
+check('هـ) ★ الرفض بلا سبب مرفوض', s4.rejectNoReason==='pending_pm', 'الحالة='+s4.rejectNoReason);
+
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
 if(boot.length) log('(أخطاء إقلاع غير حرجة: '+boot.length+' — متوقّعة من غياب CDN)');
