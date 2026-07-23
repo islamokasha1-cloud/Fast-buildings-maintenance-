@@ -36,7 +36,11 @@ window.__store = {};                       // path -> data (Firestore في ال�
              update:function(ref,d){ writeDoc(ref.path,d,true); },
              delete:function(ref){ delete window.__store[ref.path]; } };
     return Promise.resolve().then(function(){ return fn(tx); });
-  }};
+  }, batch:function(){ return {
+             set:function(ref,d,opt){ writeDoc(ref.path,d,!!(opt&&opt.merge)); },
+             update:function(ref,d){ writeDoc(ref.path,d,true); },
+             delete:function(ref){ delete window.__store[ref.path]; },
+             commit:function(){ return Promise.resolve(); } }; }};
   var firestoreFn=function(){ return fs; };
   firestoreFn.FieldValue=FieldValue;
   firestoreFn.Timestamp={ now:function(){return {toDate:function(){return new Date();}};}, fromDate:function(d){return {toDate:function(){return d;}};} };
@@ -219,6 +223,79 @@ check('ج) أُبلغ المستخدم بتغيّر الحالة', s4.raceWarned
 check('د) ★ الطلب الكبير يُوجَّه للمدير التنفيذي', s4.bigOffersCEO===true);
 check('د) ★ الطلب الكبير لا تنفيذ مباشر دون اعتماد', s4.bigOffersNoDirect===true);
 check('هـ) ★ الرفض بلا سبب مرفوض', s4.rejectNoReason==='pending_pm', 'الحالة='+s4.rejectNoReason);
+
+/* ══ سيناريو 5: تدقيق الاستلام وإصدار سند الاستلام (GRN) + دخول رصيد المخزون ══ */
+log('\n=== السيناريو 5: تدقيق الاستلام وإصدار سند الاستلام ══');
+const s5 = await page.evaluate(async ()=>{
+  const out={};
+  // أدوار حقيقية مقادة بالدور + كتم التأثيرات الجانبية
+  window.isAdmin            = ()=> !!(currentUser && currentUser.role==='admin');
+  window.isWarehouseManager = ()=> !!(currentUser && currentUser.role==='warehouse_manager');
+  window.showConfirm = async ()=>true;
+  const toasts=[]; window.toast=(m)=>toasts.push(String(m));
+  window.renderPurchases=()=>{}; window.updatePurchaseBadge=()=>{};
+  window.addNotification=()=>{}; window.logAudit=()=>{};
+  window.openModal=()=>{}; window.closeModal=()=>{};
+
+  currentUser={name:'أمين المستودع', role:'warehouse_manager'};
+  const INV=INVENTORY_COLLECTION(), LOG=INVENTORY_LOG_COLLECTION(), PC=PURCHASES_COLLECTION();
+  window.__store={};   // ابدأ نظيفاً
+
+  // رصيد ابتدائي للصنف = 10 متر (لنرى أن الاستلام يضيف فوقه لا يدهسه)
+  window.__store[INV+'/itemK']={ itemId:'itemK', itemName:'كابل', unit:'متر', currentQty:10 };
+
+  // طلب في مرحلة الاستلام، بفاتورة رفعتها المشتريات مسبقاً (فتُورَث — بلا رفع ملف)
+  const PO={ id:'PO-RCV', building:'مبنى ١', status:'wh_receiving', vendor:'مورد الطلب',
+    invoicePhotoUrl:'mock://inv.jpg',
+    items:[{ itemName:'كابل', itemType:'كهرباء', itemId:'itemK', qty:6, unit:'متر', unitCost:12, itemCost:72 }],
+    createdAt:'2026-01-01T08:00:00' };
+  purchases=[PO];
+  window.__store[PC+'/PO-RCV']=Object.assign({},PO);
+
+  // افتح نافذة التدقيق — تبني الـ DOM الحقيقي (جدول البنود + صفّ الفاتورة)
+  openWarehouseAudit('PO-RCV');
+
+  // املأ النافذة كما يفعل أمين المستودع
+  document.getElementById('wa-receiver-name').value='أحمد المستلم';
+  document.getElementById('wa-warehouse-name').value='المستودع الرئيسي';
+  const uid=_waInvoices[0].uid;
+  document.querySelector('.wa-inv-vendor[data-uid="'+uid+'"]').value='المورد الفعلي';
+  document.querySelector('.wa-inv-no[data-uid="'+uid+'"]').value='INV-778';
+  // الكميات الافتراضية من openWarehouseAudit: مستلم=6، للمستودع=6، مباشر=0، سعر=12 — نتركها
+
+  out.beforeQty=(window.__store[INV+'/itemK']||{}).currentQty;
+  await doWarehouseAudit();
+
+  const p=purchases.find(x=>x.id==='PO-RCV');
+  const logs=Object.keys(window.__store).filter(k=>k.indexOf(LOG+'/')===0).map(k=>window.__store[k]);
+  const inLogs=logs.filter(l=>l.type==='in');
+  const grnMeta=window.__store[GRN_META_DOC()];
+  out.status        = p.status;
+  out.storedStatus  = (window.__store[PC+'/PO-RCV']||{}).status;
+  out.afterQty      = (window.__store[INV+'/itemK']||{}).currentQty;
+  out.grnCount      = (p.grnDocs||[]).length;
+  out.grnRef        = p.grnRef||'';
+  out.receivedQty   = p.receivedQty;
+  out.receiverName  = p.receiverName;
+  out.actualVendor  = p.actualVendor||'';
+  out.inLogCount    = inLogs.length;
+  out.inLogQty      = inLogs.reduce((s,l)=>s+(l.qty||0),0);
+  out.inLogGrnRef   = (inLogs[0]||{}).grnRef||'';
+  out.grnCounter    = grnMeta?grnMeta.counter:null;
+  return out;
+});
+check('سند الاستلام صدر برقم GRN', /^GRN-\d{4}-\d{4}$/.test(s5.grnRef), 'رقم='+s5.grnRef);
+check('عدّاد سندات الاستلام تقدّم إلى 1', s5.grnCounter===1);
+check('سند واحد أُلحق بالطلب (grnDocs)', s5.grnCount===1);
+check('قبل الاستلام: الرصيد = 10', s5.beforeQty===10);
+check('★ بعد الاستلام: الرصيد = 16 (10 + 6 مستلمة)', s5.afterQty===16, 'الرصيد='+s5.afterQty);
+check('★ حركة مخزون «in» كُتبت بالكمية 6', s5.inLogCount===1 && s5.inLogQty===6, 'عدد='+s5.inLogCount+' كمية='+s5.inLogQty);
+check('حركة المخزون مرتبطة بسند الاستلام', s5.inLogGrnRef===s5.grnRef);
+check('الكمية المستلمة المسجّلة = 6', s5.receivedQty===6, 'المستلم='+s5.receivedQty);
+check('اسم المستلم حُفظ', s5.receiverName==='أحمد المستلم');
+check('المورد الفعلي حُفظ من الفاتورة', s5.actualVendor==='المورد الفعلي', 'المورد='+s5.actualVendor);
+check('★ الطلب أُغلق بعد اكتمال الاستلام', s5.status==='closed', 'الحالة='+s5.status);
+check('الحالة «مغلق» ثبتت في المخزن', s5.storedStatus==='closed');
 
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
