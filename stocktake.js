@@ -662,17 +662,32 @@
 
     // أغلق الجرد وسجّل النتائج
     try{
-      await db.collection(COLL()).doc(take.id).update({
-        status:"applied",
-        counts,
-        results,
-        appliedAt: now,
-        appliedBy: by,
-        approvedBy: meta.approvedBy||by,
-        approverRole: meta.approverRole||_myRole(),
-        adjustedCount: changed,   // التسويات الفعلية (delta≠0) لا مجرّد البنود المفحوصة
-        appliedFailed: failed
-      });
+      if(failed > 0){
+        // فشل جزئي — لا يُوسَم «مطبَّق». يعود لحالته القابلة للإعادة (المطبّق فعلاً
+        // idempotent: إعادة التطبيق تتخطّى ما طُبّق مقابل الطازج وتُعيد الفاشل فقط)،
+        // فلا تُترَك تسويات معلّقة بصمت خلف واجهةٍ تقول «اكتمل». التلقائي يعود «counting»
+        // (يُعيده أمين المستودع)، والمعتمَد يعود «pending_approval» (يُعيده المعتمِد).
+        await db.collection(COLL()).doc(take.id).update({
+          status: meta.auto ? "counting" : "pending_approval",
+          counts,
+          results,
+          adjustedCount: changed,
+          appliedFailed: failed,
+          lastApplyAttemptAt: now
+        });
+      } else {
+        await db.collection(COLL()).doc(take.id).update({
+          status:"applied",
+          counts,
+          results,
+          appliedAt: now,
+          appliedBy: by,
+          approvedBy: meta.approvedBy||by,
+          approverRole: meta.approverRole||_myRole(),
+          adjustedCount: changed,   // التسويات الفعلية (delta≠0) لا مجرّد البنود المفحوصة
+          appliedFailed: 0
+        });
+      }
     }catch(e){ console.warn("close take:",e); }
 
     _applying=false;
