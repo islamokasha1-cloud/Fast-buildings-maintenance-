@@ -737,6 +737,67 @@ function vendorSummary() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
+   ════════════════════════════════════════════════════════════════════ */
+function auditRound2() {
+  H("15) إصلاحات جولة التدقيق الثانية");
+
+  // ── #1 XSS: _jsq يحيّد كسر السلسلة داخل onclick ──
+  const a = HTML.indexOf("function _jsq(str){");
+  if (a < 0) { T("_jsq موجودة", false); }
+  else {
+    const src = HTML.slice(a, HTML.indexOf("\nfunction ", a + 10));
+    let _jsq;
+    try { _jsq = new Function(src + "\nreturn _jsq;")(); }
+    catch (e) { T("تُبنى _jsq", false, String(e.message).slice(0, 100)); }
+    if (typeof _jsq === "function") {
+      const payload = "x'-alert(document.cookie)-'";
+      const dec = _jsq(payload).replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+      let arg = null; try { arg = new Function("f", "return f('" + dec + "')")(x => x); } catch (e) {}
+      T("★ _jsq يمنع كسر السلسلة داخل onclick (XSS)", arg === payload, "arg=" + JSON.stringify(arg));
+      T("_jsq يُبقي القيم النظيفة كما هي", _jsq("بند 12 متر") === "بند 12 متر");
+      T('_jsq يهرّب العلامة المزدوجة', _jsq('a"b') === 'a&quot;b');
+    }
+    T("سِنك اسم البند يستخدم _jsq لا esc", HTML.includes("'${_jsq(item.name"));
+    T("سِنك اسم المشروع يستخدم _jsq", HTML.includes("'${_jsq(proj.name"));
+    T("سِنك اسم/مورّد الكتالوج يستخدم _jsq", HTML.includes("'${_jsq(c.vendor") && HTML.includes("'${_jsq(c.name"));
+  }
+
+  // ── #4 SLA: _closedOnTime يقيس بميزانية ساعات العمل (16 لعادي) لا getSLA (48 تقويمية) ──
+  const b = HTML.indexOf("function _closedOnTime(t){");
+  if (b < 0) { T("_closedOnTime دالة عليا موحّدة", false); }
+  else {
+    const src = HTML.slice(b, HTML.indexOf("\nfunction ", b + 10));
+    let fn;
+    try {
+      fn = new Function("tierOf", "SLA_CONFIG", "_closeWorkH", src + "\nreturn _closedOnTime;")(
+        p => p, { tiers: { 'عادي': { budgetMin: 16 * 60 } } }, t => t._wh);
+    } catch (e) { T("تُبنى _closedOnTime", false, String(e.message).slice(0, 100)); }
+    if (typeof fn === "function") {
+      const mk = wh => ({ priority: 'عادي', status: 'مغلق', createdAt: 1, closedAt: 2, _wh: wh });
+      T("★ «عادي» بعد 20 ساعة عمل = متأخّر (مهلة 16 لا 48)", fn(mk(20)) === false);
+      T("«عادي» خلال 10 ساعات عمل = ملتزم", fn(mk(10)) === true);
+      T("«عادي» عند 16 بالضبط = ملتزم (الحدّ)", fn(mk(16)) === true);
+      T("غير المغلق ليس «ملتزماً»", fn({ priority: 'عادي', status: 'مفتوح', _wh: 1 }) === false);
+    }
+    T("KPI-03 يستخدم _closedOnTime", HTML.includes("closedTix.filter(_closedOnTime)"));
+    T("★ زال قياس الالتزام بـ getSLA التقويمي", !HTML.includes("return h<=getSLA(t.priority);") && !HTML.includes("if(h <= getSLA(t.priority))"));
+  }
+
+  // ── #3 Excel: التصدير يمرّ على المفلتر لا purchases كاملاً ──
+  T("مصدر فلترة التقرير موحّد", HTML.includes("function _purchaseReportFiltered(){"));
+  T("★ تصدير Excel يستخدم المفلتر", HTML.includes("const _rep=_purchaseReportFiltered();") && HTML.includes("_rep.forEach(p=>{"));
+  T("شاشة التقرير تستخدم المصدر الموحّد", HTML.includes("let filtered=_purchaseReportFiltered();"));
+
+  // ── #2 نقل المخزون: إعادة الحساب تعالج transfer، والكتابة تسجّل الوجهة ──
+  T("★ إعادة الحساب تعالج حركة transfer", HTML.includes('} else if(t==="transfer"){'));
+  T("النقل: خصمٌ من المصدر وإضافةٌ للوجهة في إعادة الحساب",
+    HTML.includes("const destId = log.destItemId;") && HTML.includes("balanceMap[destId].qty += qty;"));
+  T("كتابة النقل تسجّل معرّف الوجهة destItemId", HTML.includes("destItemId:destDocId"));
+  T("حارس NaN في إعادة الحساب", HTML.includes("parseFloat(log.qty)||0;"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    8) فحص الثوابت العشوائي
       الأمثلة المكتوبة تُثبت ما خطر ببالنا. هذه تُجرّب ما لم يخطر:
       آلاف التركيبات العشوائية، والحكم ليس قيمة متوقعة مكتوبة بيد،
@@ -932,6 +993,7 @@ function fuzz() {
   writeRaceRoot();
   stocktakeTests();
   vendorSummary();
+  auditRound2();
   fuzz();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
