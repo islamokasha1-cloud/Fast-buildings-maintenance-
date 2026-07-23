@@ -342,6 +342,12 @@ function kpi() {
   T("يلفّ showPage", src.includes("function hookShowPage()") && src.includes("window.showPage = function(id)"));
   T("نقاط ارتساؤه موجودة في index.html",
     HTML.includes('id="grp-po"') && HTML.includes('data-page="purchase-reports"') && HTML.includes("function showPage(id){"));
+  // v1.3: pending_finance في STAGE_ORDER بموضعها الصحيح (بين pending_ceo و proc_executing)
+  // وإلا ابتلع pending_ceo زمنَ انتظار المالية فتشوّه مخطّط متوسط المراحل.
+  T("★ pending_finance ضمن STAGE_ORDER (لا يُبتلَع زمنها)", src.includes('"pending_finance"'));
+  T("pending_finance في موضعها الصحيح بالتسلسل",
+    src.includes('"pending_ceo","pending_finance","proc_executing"'));
+  T("pending_finance حالة حقيقية في index.html", HTML.includes('value="pending_finance"'));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -403,6 +409,29 @@ function substituteBudget() {
     else if (Math.abs(r.closedProfit - (r.closedSell - r.closedCost)) > eps) bad = { why: "profit", r };
   }
   T("ثابت: المستهلك/المتبقي/الربح متماسكة على 500 تركيبة عشوائية", !bad, bad ? JSON.stringify(bad).slice(0, 120) : "");
+
+  // ── v18.9sa: الطلبات الميّتة (ملغى/مرفوض/محذوف) لا تُحسب WIP ولا تُعَدّ ──
+  T("substituteBudget._isDead مكشوفة", typeof SB._isDead === "function");
+  if (typeof SB._isDead === "function") {
+    T("_isDead: ملغى/مرفوض/محذوف = ميّت",
+      SB._isDead({ status: "cancelled" }) && SB._isDead({ status: "rejected" }) && SB._isDead({ status: "ceo_rejected" }) && SB._isDead({ status: "deleted" }));
+    T("_isDead: مغلق/جارٍ ليس ميّتاً",
+      !SB._isDead({ status: "closed" }) && !SB._isDead({ status: "proc_executing" }) && !SB._isDead({ status: "pending_finance" }));
+  }
+  const accD = { margin: 25, total: 500000, openingConsumed: 0 };
+  const posD = [
+    { st: "closed", cost: 10000, est: 9000 },          // مغلق → مستهلك
+    { st: "proc_executing", cost: 0, est: 8000 },      // جارٍ → WIP
+    { st: "cancelled", cost: 0, est: 7000 },           // ميّت → يُستبعَد كلياً
+  ];
+  const isDeadD = p => ["cancelled", "rejected", "deleted"].indexOf(p.st) >= 0;
+  const sD = SB._calcStats(accD, posD, p => p.st === "closed", p => p.cost, p => p.est, isDeadD);
+  T("★ الطلب الميّت لا يُحسَب WIP", sD.wipSell === 8000 * 1.25, "wip=" + sD.wipSell + " (متوقع " + (8000 * 1.25) + ")");
+  T("★ العدّ يستبعد الميّت", sD.count === 2 && sD.deadCount === 1, "count=" + sD.count + " dead=" + sD.deadCount);
+  T("المغلق يُحسَب رغم وجود ميّت", sD.closedSell === 10000 * 1.25 && sD.consumed === 12500);
+  // بلا كاشف ميّت (توقيع قديم 5 وسائط): السلوك السابق يبقى (لا كسر رجعي)
+  const sLegacy = SB._calcStats(accD, posD, p => p.st === "closed", p => p.cost, p => p.est);
+  T("توافق رجعي: بلا isDead يُحسَب كل غير-المغلق WIP", sLegacy.wipSell === (8000 + 7000) * 1.25);
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -630,6 +659,32 @@ function stocktakeTests() {
   // ── حراسة: مسار التطبيق يستهلك العدّ عبر _countAt (لا _num الخام) ──
   T("التطبيق يقصر العدّ عبر _countAt", src.includes("const counted=_countAt(counts, s.itemId);"));
   T("زال قراءة العدّ الخام في التطبيق", !src.includes("const counted=_num(counts[s.itemId]);"));
+
+  // ── v18.9rz: التسوية تُقاس على الرصيد الحيّ الطازج لا لقطة النظام المجمّدة ──
+  T("stocktake._adjustDelta مكشوفة", !!(ST && typeof ST._adjustDelta === "function"));
+  if (ST && ST._adjustDelta) {
+    T("_adjustDelta: الفرق = المعدود − الطازج", ST._adjustDelta(5, 8) === -3 && ST._adjustDelta(10, 7) === 3);
+    T("_adjustDelta: تطابق = صفر (يُتخطّى بلا كتابة)", ST._adjustDelta(5, 5) === 0);
+    T("_adjustDelta: تقريب ثلاث خانات", Math.abs(ST._adjustDelta(0.1, 0.3) - (-0.2)) < 1e-9);
+    // ★ جوهر العطل: معدودٌ يساوي لقطة النظام القديمة (5) بينما انحرف الرصيد الحيّ (8)
+    //   — القرار يُبنى على الطازج فتُطبَّق التسوية (delta≠0)، لا يُتخطّى البند.
+    const snapshotSys = 5, counted = 5, liveFresh = 8;
+    T("★ انحراف اللقطة: معدود=لقطة قديمة لكن الرصيد الحيّ مختلف ⇒ يُسوّى",
+      counted === snapshotSys && ST._adjustDelta(counted, liveFresh) !== 0,
+      "delta=" + ST._adjustDelta(counted, liveFresh));
+  }
+  // حراسة النمط: التطبيق يشمل كل بندٍ معدود (لا يُرشّح بـ systemQty)، ويتحقّق من الطازج
+  T("التطبيق لا يُرشّح بلقطة النظام المجمّدة",
+    !src.includes("return _countAt(counts, s.itemId) !== _num(s.systemQty);"));
+  T("الدلتا تُحسَب مقابل الطازج داخل المعاملة", src.includes("const delta = _adjustDelta(target, fresh);"));
+  T("لا كتابة لبندٍ لم يتغيّر عن الطازج", src.includes("if(delta===0) return false;"));
+  T("عدّ التسويات الفعلية (لا البنود المفحوصة)", src.includes("adjustedCount: changed,"));
+
+  // ── v18.9sa: فشل جزئي في التطبيق لا يُوسَم «مطبَّق» — يعود لحالةٍ قابلة للإعادة ──
+  T("★ الفشل الجزئي لا يُوسَم «مطبَّق»", src.includes("if(failed > 0){"));
+  T("الفشل الجزئي يعود لحالةٍ قابلة للإعادة",
+    src.includes('status: meta.auto ? "counting" : "pending_approval"'));
+  T("النجاح الكامل وحده يُوسَم «مطبَّق»", src.includes('appliedFailed: 0'));
 }
 
 /* ════════════════════════════════════════════════════════════════════

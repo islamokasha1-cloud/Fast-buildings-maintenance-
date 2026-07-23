@@ -56,6 +56,16 @@
   function _isClosed(p){ try{ return (typeof poIsClosed==="function") ? poIsClosed(p) : false; }catch(e){ return false; } }
   function _actualCost(p){ try{ return (typeof poActualCost==="function") ? Number(poActualCost(p))||0 : (Number(p&&p.actualCost)||0); }catch(e){ return 0; } }
   function _estTotal(p){ try{ return (typeof getPOTotal==="function") ? Number(getPOTotal(p))||0 : (Number(p&&p.estCost)||0); }catch(e){ return Number(p&&p.estCost)||0; } }
+  // الطلب «ميّت» = ملغى/مرفوض/محذوف — لا مغلقٌ (لا يُخصَم) ولا جارٍ (لا يُحسَب WIP).
+  // بدونه كان الطلب الملغى يبقى «قيد التنفيذ» أبداً فيضخّم wipSell وعدّ الطلبات.
+  var _DEAD_STATUSES = ["cancelled","deleted","rejected","pm_rejected","wh_rejected","ceo_rejected"];
+  function _isDead(p){
+    try{
+      if(!p) return false;
+      var st = (typeof normalizePOStatus==="function") ? normalizePOStatus(p.status) : (p.status||"");
+      return _DEAD_STATUSES.indexOf(st) >= 0;
+    }catch(e){ return false; }
+  }
 
   function _fmt(n){ return (Number(n)||0).toLocaleString("en-US",{maximumFractionDigits:2}); }
   // أيقونة SVG من طقم المنصة (لغة الأيقونات الموحّدة) — بديل الإيموجي. آمنة إن غاب _ic.
@@ -100,10 +110,11 @@
   // دالة نقية (بلا قراءة globals) لتكون قابلة للاختبار: تأخذ الحساب وقائمة طلباته
   // والدوال المُعينة (مغلق؟ / التكلفة الفعلية / التقديرية). تُستدعى من _stats بالدوال
   // المدعومة بالـ globals، وتُعرَّض كـ _calcStats لفحوص hail-tests.
-  function _calcStats(acc, pos, isClosed, actualCost, estTotal){
+  function _calcStats(acc, pos, isClosed, actualCost, estTotal, isDead){
     var margin = Number(acc && acc.margin)||0, f = 1 + margin/100;
-    var closedCost=0, closedSell=0, closedProfit=0, wipSell=0, closedCount=0, wipCount=0;
+    var closedCost=0, closedSell=0, closedProfit=0, wipSell=0, closedCount=0, wipCount=0, deadCount=0;
     (pos||[]).forEach(function(p){
+      if(isDead && isDead(p)){ deadCount++; return; }   // ملغى/مرفوض/محذوف — لا مغلق ولا WIP
       if(isClosed(p)){
         var c = Number(actualCost(p))||0, s = c*f;
         closedCost += c; closedSell += s; closedProfit += (s-c); closedCount++;
@@ -118,13 +129,14 @@
       margin:margin, total:total, opening:opening,
       closedCost:closedCost, closedSell:closedSell, closedProfit:closedProfit,
       consumed:consumed, remaining: total - consumed,
-      wipSell:wipSell, closedCount:closedCount, wipCount:wipCount, count:(pos||[]).length
+      wipSell:wipSell, closedCount:closedCount, wipCount:wipCount, deadCount:deadCount,
+      count: closedCount + wipCount   // الطلبات الحيّة فقط (تستبعد الميّتة)
     };
   }
 
   function _stats(acc){
     var pos = _pos().filter(function(p){ return p && p.isSubstitute && p.substituteAccountId===acc.id; });
-    return _calcStats(acc, pos, _isClosed, _actualCost, _estTotal);
+    return _calcStats(acc, pos, _isClosed, _actualCost, _estTotal, _isDead);
   }
 
   // الطلبات المستعاضة التي تشير لحسابٍ غير موجود (حُذف مثلاً) — دلوٌ للتنبيه.
@@ -316,18 +328,27 @@
         '<th style="padding:8px;text-align:center">الربح</th>' : '';
 
     var poRows = pos.length ? pos.map(function(p){
-      var closed = _isClosed(p);
+      var dead = _isDead(p);
+      var closed = !dead && _isClosed(p);
       var cost = closed ? _actualCost(p) : _estTotal(p);
       var sell = cost*(1+s.margin/100);
       var items = p.itemName || (Array.isArray(p.items)&&p.items.length?(p.items.length+" بند"):"—");
+      // الطلب الميّت لا يُظهر سعر بيع/ربح (لا يدخل أي رصيد) — شرطة بدل رقمٍ وهمي
       var moneyCells = money
-        ? '<td style="padding:8px;text-align:center">'+_fmt(cost)+'</td>' +
-          '<td style="padding:8px;text-align:center">'+_fmt(sell)+'</td>' +
-          '<td style="padding:8px;text-align:center;color:var(--success)">'+_fmt(sell-cost)+'</td>' : '';
+        ? (dead
+            ? '<td style="padding:8px;text-align:center;color:var(--muted)">—</td>' +
+              '<td style="padding:8px;text-align:center;color:var(--muted)">—</td>' +
+              '<td style="padding:8px;text-align:center;color:var(--muted)">—</td>'
+            : '<td style="padding:8px;text-align:center">'+_fmt(cost)+'</td>' +
+              '<td style="padding:8px;text-align:center">'+_fmt(sell)+'</td>' +
+              '<td style="padding:8px;text-align:center;color:var(--success)">'+_fmt(sell-cost)+'</td>') : '';
+      var statusCell = dead
+        ? '<span style="color:var(--danger,#dc2626)">ملغى/مرفوض</span>'
+        : (closed?'<span style="color:var(--success);font-weight:700">مغلق ✓</span>':'<span style="color:var(--muted)">قيد التنفيذ</span>');
       return '<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="try{openPurchaseDetail(\''+p.id+'\')}catch(e){}">' +
         '<td style="padding:8px;font-weight:600">'+_esc(p.id)+'</td>' +
         '<td style="padding:8px">'+_esc(items)+'</td>' +
-        '<td style="padding:8px;text-align:center">'+(closed?'<span style="color:var(--success);font-weight:700">مغلق ✓</span>':'<span style="color:var(--muted)">قيد التنفيذ</span>')+'</td>' +
+        '<td style="padding:8px;text-align:center">'+statusCell+'</td>' +
         moneyCells +
       '</tr>';
     }).join("")
@@ -573,6 +594,7 @@
     _kindToggle: _kindToggle,
     optionsHtml: optionsHtml, accounts: accounts, accountForProject: accountForProject,
     _calcStats: _calcStats,  // دالة الحساب النقية — لفحوص hail-tests
-    _applyUpsert: _applyUpsert, _applyRemove: _applyRemove   // مبدّلات الدمج النقية — للاختبار
+    _applyUpsert: _applyUpsert, _applyRemove: _applyRemove,  // مبدّلات الدمج النقية — للاختبار
+    _isDead: _isDead         // كاشف الطلب الميّت — للاختبار
   };
 })();

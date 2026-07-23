@@ -16,7 +16,12 @@ const VERSION = "1.9";
 /* ── مراحل سير العمل بالترتيب — لحساب زمن كل مرحلة من timeline ── */
 const STAGE_ORDER = [
   "pending_pm","pm_approved","wh_review","wh_reviewed",
-  "pending_proc","pending_ceo","proc_executing",
+  // v1.3: pending_finance (بانتظار سداد المالية — بين pending_ceo و proc_executing
+  // في التسلسل الفعلي) كانت غائبة عن القائمة، فيبتلع pending_ceo زمنَ انتظار المالية
+  // كلَّه (next يبحث في STAGE_ORDER وحدها فيقفز فوق الحدث)، فيتضخّم «زمن اعتماد المدير»
+  // ويختفي «زمن المالية» من مخطّط متوسط المراحل — رغم أن بطاقة المالية تقيسه صحيحاً،
+  // فيتناقض العرضان. نفس صنف عطل pending_extra أدناه.
+  "pending_proc","pending_ceo","pending_finance","proc_executing",
   // v1.2: pending_extra (بوّابة البتّ في البند الإضافي — v18.9nz) كانت غائبة عن
   // القائمة، فيبتلع wh_auditing زمنَ البتّ كلَّه: next يبحث في STAGE_ORDER وحدها
   // فيقفز فوق الحدث. و v18.9od أعطتها وقودها — code صريح على الانتقال.
