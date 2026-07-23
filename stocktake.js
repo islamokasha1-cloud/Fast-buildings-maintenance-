@@ -80,6 +80,10 @@
   // (كتابةً أو استيراداً؛ min="0" مجرّد تلميح HTML). يقصر أي مُدخَل سالب إلى صفر
   // عند كل استهلاك (فلتر الأهداف، النتائج، التطبيق) فيتّسق الرصيد والسجل والتقرير.
   function _countAt(counts, id){ return Math.max(0, _num(counts[id])); }
+  // دلتا التسوية = المعدود − الرصيد **الطازج الحيّ** (لا لقطة النظام المجمّدة وقت
+  // إنشاء الجرد)، مقرّبة لثلاث خانات. القرار «هل نُسوّي؟» = دلتا ≠ 0 مقابل الطازج —
+  // فالبند يُصحَّح متى خالف معدوده الرصيدَ الحيّ، ولو صادف أن معدوده = اللقطة القديمة.
+  function _adjustDelta(countedClamped, fresh){ return Math.round((_num(countedClamped) - _num(fresh))*1000)/1000; }
   function _fmt(n){ return (_num(n)).toLocaleString("en-US",{maximumFractionDigits:3}); }
   // أيقونة SVG من طقم المنصة (بديل الإيموجي) — آمنة إن غاب _ic.
   function _icn(name,cls){ try{ return (typeof _ic==="function") ? _ic(name,cls) : ""; }catch(e){ return ""; } }
@@ -591,11 +595,13 @@
     _applying=true;
     if(typeof db==="undefined" || !db){ _applying=false; _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return; }
 
-    // ابنِ قائمة البنود ذات الفرق فقط
-    const targets = (take.snapshot||[]).filter(s=>{
-      if(!Object.prototype.hasOwnProperty.call(counts, s.itemId)) return false;
-      return _countAt(counts, s.itemId) !== _num(s.systemQty);
-    });
+    // نطبّق على كل بندٍ معدود، ولا نُرشّح بلقطة النظام المجمّدة (systemQty) وقت إنشاء
+    // الجرد. كان الترشيح بها يُسقط البند لو تصادف أن معدوده = اللقطة القديمة بينما انحرف
+    // الرصيد الحيّ بعدها (وصل طلب شراء أثناء العدّ) — فيبقى الرصيد الخطأ رغم أن العدّ
+    // حقيقة مطلقة. الآن كل بندٍ معدود يُتحقَّق من الرصيد **الحيّ** داخل المعاملة، والكتابة
+    // تجري فقط إن اختلف فعلاً عن الطازج (delta≠0) فلا كتابةَ لبندٍ لم يتغيّر.
+    const targets = (take.snapshot||[]).filter(s=>
+      Object.prototype.hasOwnProperty.call(counts, s.itemId));
 
     const now=_now(), by=_me();
     const results = (take.snapshot||[]).map(s=>{
@@ -605,17 +611,19 @@
       return { itemId:s.itemId, itemName:s.itemName, unit:s.unit, systemQty:_num(s.systemQty), countedQty:counted, delta:has?c.delta:0, big:has?c.big:false };
     });
 
-    let done=0, failed=0;
+    let done=0, failed=0, changed=0;
     _toast("⏳ جارٍ تطبيق التسويات...","info");
     for(const s of targets){
       const counted=_countAt(counts, s.itemId);   // مقصور ≥ 0 — لا يُكتب رصيد سالب
       try{
-        await db.runTransaction(async tx=>{
+        const didChange = await db.runTransaction(async tx=>{
           const invRef = db.collection(INVENTORY_COLLECTION()).doc(s.itemId);
           const snap = await tx.get(invRef);
           const fresh = snap.exists ? _num(snap.data().currentQty) : 0;
           const target = counted;
-          const delta = Math.round((target-fresh)*1000)/1000;
+          const delta = _adjustDelta(target, fresh);   // مقابل الطازج الحيّ لا اللقطة
+          // الرصيد الحيّ يطابق المعدود فعلاً — لا كتابة (يشمل حالة لا-تغيّر).
+          if(delta===0) return false;
           // ثبّت الرصيد = المعدود (إسناد مطلق)
           if(snap.exists){
             tx.update(invRef, { currentQty: target, lastUpdated: now });
@@ -626,29 +634,29 @@
               warehouseName:take.warehouseName, lastUpdated:now
             });
           }
-          // قيد حركة تسوية — فقط إذا اختلف عن الطازج فعلاً
-          if(delta!==0){
-            const logRef = db.collection(INVENTORY_LOG_COLLECTION()).doc();
-            tx.set(logRef, {
-              type:"adjust",
-              adjustDelta: delta,
-              qty: Math.abs(delta),
-              itemId: s.itemId,
-              itemName: s.itemName,
-              itemCode: (s.itemCode||""),
-              category: (s.category||""),
-              unit: (s.unit||""),
-              warehouseName: take.warehouseName,
-              relatedPO:"", projectId:"", location:"",
-              source:"stocktake",
-              stocktakeId: take.id,
-              notes:"تسوية جرد شهري — النظام: "+_fmt(s.systemQty)+" / المعدود: "+_fmt(target),
-              performedBy: by,
-              date: now
-            });
-          }
+          const logRef = db.collection(INVENTORY_LOG_COLLECTION()).doc();
+          tx.set(logRef, {
+            type:"adjust",
+            adjustDelta: delta,
+            qty: Math.abs(delta),
+            itemId: s.itemId,
+            itemName: s.itemName,
+            itemCode: (s.itemCode||""),
+            category: (s.category||""),
+            unit: (s.unit||""),
+            warehouseName: take.warehouseName,
+            relatedPO:"", projectId:"", location:"",
+            source:"stocktake",
+            stocktakeId: take.id,
+            // الرصيد «قبل» = الطازج الحيّ (لا اللقطة المجمّدة) فيتّسق مع الدلتا الفعلية
+            notes:"تسوية جرد شهري — الرصيد قبل: "+_fmt(fresh)+" / المعدود: "+_fmt(target),
+            performedBy: by,
+            date: now
+          });
+          return true;
         });
         done++;
+        if(didChange) changed++;
       }catch(e){ console.warn("apply item:",s.itemId,e); failed++; }
     }
 
@@ -662,15 +670,15 @@
         appliedBy: by,
         approvedBy: meta.approvedBy||by,
         approverRole: meta.approverRole||_myRole(),
-        adjustedCount: targets.length,
+        adjustedCount: changed,   // التسويات الفعلية (delta≠0) لا مجرّد البنود المفحوصة
         appliedFailed: failed
       });
     }catch(e){ console.warn("close take:",e); }
 
     _applying=false;
-    _audit("تطبيق تسويات جرد","المستودع: "+take.warehouseName+" — بنود مُسوّاة: "+done+(failed?(" — فشل: "+failed):""));
-    if(failed) _toast("⚠ طُبّق "+done+" بند وفشل "+failed+" — أعد المحاولة","warn");
-    else       _toast("✅ اكتمل الجرد — سُوّي "+done+" بند","success");
+    _audit("تطبيق تسويات جرد","المستودع: "+take.warehouseName+" — بنود مُسوّاة: "+changed+(failed?(" — فشل: "+failed):""));
+    if(failed) _toast("⚠ سُوّي "+changed+" بند وفشل "+failed+" — أعد المحاولة","warn");
+    else       _toast("✅ اكتمل الجرد — سُوّي "+changed+" بند","success");
     render();
   }
 
@@ -909,6 +917,6 @@
     startSync, render, open, back,
     startNew, saveCounts, submit, approve, reject, cancel, print,
     _count, _import, _uploadSigned, _delete,
-    _classify, _countAt, _num   // دوال نقية — مكشوفة لفحوص hail-tests
+    _classify, _countAt, _num, _adjustDelta   // دوال نقية — مكشوفة لفحوص hail-tests
   };
 })();
