@@ -6,6 +6,18 @@
 
 ---
 
+## 🏆 نجاح كامل end-to-end (2026-07-24): أول إشعار فني وصل فعلياً!
+إسناد بلاغ لفني في «حائل» → مشغّل Firestore → wa_outbox → waSender → WhatsApp Cloud API
+→ **وصلت رسالة على جوال الفني `966591737592`**. المنظومة حيّة على الخادم.
+- القالب الحالي: `hello_world` (تجريبي). القالب العربي `ticket_assigned` **قُدّم لـ Meta
+  (In review) بتاريخ 2026-07-24** — فئة Utility، لغة `ar`، ٥ متغيّرات {{1}}–{{5}}.
+  **عند اعتماده:** بدّل `.env` إلى `WA_TEMPLATE=ticket_assigned` و`WA_TEMPLATE_LANG=ar`
+  ثم `firebase deploy --only functions`.
+- ✅ **التوكن الدائم أُنجز (2026-07-24):** System User `wa-sender` (ID 61588748282140)
+  بصلاحية Admin + إسناد (التطبيق + WABA + الرقم) Full access + توكن دائم
+  (`whatsapp_business_messaging` + `whatsapp_business_management`, Never expire) محفوظ في
+  Secret Manager (`WHATSAPP_TOKEN` v3) والدوال منشورة به. **لا خوف من انتهاء التوكن.**
+
 ## 🎉 تحديث حاسم (2026-07-24 مساءً): المسار المباشر نجح!
 
 **العائق القديم (حظر حساب Meta) تم تجاوزه بحساب جديد نظيف.** المسار المباشر عبر
@@ -55,6 +67,11 @@ WhatsApp Cloud API **يعمل الآن فعلياً** — وصلت رسالة ا
 ## 3) ✅ ما أُنجز
 - خطة تصميم كاملة في `docs/whatsapp-notifications-plan.md`.
 - **حساب Meta جديد + تطبيق + رقم اختبار + إرسال ناجح** (انظر التحديث الحاسم أعلاه).
+- **🚀 المرحلة ٢ نُشِرت فعلياً على Firebase (2026-07-24):** الدوال الأربع حيّة على مشروع
+  `fast-buildings` (منطقة us-central1): `ticketAssignUpdate_hail_tickets` ·
+  `ticketAssignCreate_hail_tickets` · `waSender` · `waRetry`. خطة Blaze مفعّلة،
+  سرّ `WHATSAPP_TOKEN` محفوظ، الواجهات مفعّلة. `WA_TEMPLATE=hello_world` للتجربة الأولى.
+- **شاشة إدارة أرقام الفنيين** في لوحة الأدمن (PR #53 — بانتظار الدمج في main لتظهر مباشرة).
 - **✅ كود المرحلة ٢ (شريحة «إسناد الفني») مكتوب في `functions/`** (لم يُنشر بعد):
   - `functions/index.js` — مشغّلات البلاغات (notifyRouter) + `waSender` + `waRetry`.
   - `functions/lib/whatsapp.js` — مُرسِل Cloud API (نقطة الإرسال المحايدة).
