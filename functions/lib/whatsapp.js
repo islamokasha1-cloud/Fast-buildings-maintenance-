@@ -25,9 +25,15 @@ async function sendTemplate({ token, to, template, lang, params }) {
 
   const url = `https://graph.facebook.com/${WA.graphVersion}/${WA.phoneNumberId}/messages`;
 
-  // بناء مكوّن جسم القالب فقط إن وُجدت متغيّرات (hello_world مثلاً بلا متغيّرات).
+  // قوالب اختبار Meta الجاهزة بلا متغيّرات — إرسال أي parameters لها يرفضه Meta.
+  // نتجاهل المتغيّرات لها تلقائياً حتى تعمل تجربة hello_world من أول مرة.
+  const NO_PARAM_TEMPLATES = new Set(["hello_world"]);
+  const skipParams =
+    NO_PARAM_TEMPLATES.has(template) || process.env.WA_TEMPLATE_NO_PARAMS === "true";
+
+  // بناء مكوّن جسم القالب فقط إن وُجدت متغيّرات ولم يكن القالب بلا متغيّرات.
   const components =
-    Array.isArray(params) && params.length
+    !skipParams && Array.isArray(params) && params.length
       ? [
           {
             type: "body",
