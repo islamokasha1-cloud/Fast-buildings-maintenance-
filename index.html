@@ -25933,19 +25933,46 @@ function _renderPurchaseUsersListUI(el){
     const i = USERS.indexOf(u);
     const roleLabel = _PU_ROLES[u.role]||u.role;
     return `
-    <div style="background:var(--surface2);border-radius:10px;padding:10px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-      <div>
-        <span style="font-weight:800;font-size:13px">${esc(u.name)}</span>
-        <span style="font-size:11px;color:var(--muted);margin-right:8px">@${esc(u.user)}</span>
-        <span style="font-size:10px;background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:6px;font-weight:700">${esc(roleLabel)}</span>
+    <div style="background:var(--surface2);border-radius:10px;padding:10px 14px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div>
+          <span style="font-weight:800;font-size:13px">${esc(u.name)}</span>
+          <span style="font-size:11px;color:var(--muted);margin-right:8px">@${esc(u.user)}</span>
+          <span style="font-size:10px;background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:6px;font-weight:700">${esc(roleLabel)}</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${u.role!=='admin'?`<button class="btn btn-ghost btn-sm" onclick="openEditUserPerms(${i})" style="font-size:11px">🔐 الصلاحيات</button>`:''}
+          <button class="btn btn-ghost btn-sm" onclick="puChangePassword(${i})" style="font-size:11px">🔑 كلمة المرور</button>
+          <button class="btn btn-danger btn-sm" onclick="puDeleteUser(${i})" style="font-size:11px">🗑 حذف</button>
+        </div>
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${u.role!=='admin'?`<button class="btn btn-ghost btn-sm" onclick="openEditUserPerms(${i})" style="font-size:11px">🔐 الصلاحيات</button>`:''}
-        <button class="btn btn-ghost btn-sm" onclick="puChangePassword(${i})" style="font-size:11px">🔑 كلمة المرور</button>
-        <button class="btn btn-danger btn-sm" onclick="puDeleteUser(${i})" style="font-size:11px">🗑 حذف</button>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+        <span style="font-size:14px" title="رقم واتساب لإشعارات الشراء">📱</span>
+        <input class="form-input" value="${esc(u.phone||"")}" id="pu-user-phone-${i}" placeholder="9665XXXXXXXX" inputmode="tel" dir="ltr" style="flex:1;padding:4px 8px;font-size:12px">
+        <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--muted)">
+          <input type="checkbox" id="pu-user-optin-${i}" ${u.waOptIn?"checked":""}> تفعيل واتساب
+        </label>
+        <button class="btn btn-primary btn-sm" onclick="puSaveUserWa(${i})" style="white-space:nowrap;font-size:11px">💾 رقم</button>
       </div>
     </div>`;
   }).join("");
+}
+
+// حفظ رقم واتساب مستخدم الشراء + مزامنته مع meta/users (يقرؤه خادم إشعارات الشراء)
+async function puSaveUserWa(idx){
+  const u=USERS[idx]; if(!u){ toast("⚠ مستخدم غير موجود","warn"); return; }
+  let phone=(document.getElementById(`pu-user-phone-${idx}`)?.value||"").trim().replace(/[^\d+]/g,"");
+  const optIn=!!document.getElementById(`pu-user-optin-${idx}`)?.checked;
+  if(phone && !/^\+?\d{8,15}$/.test(phone)){ toast("⚠ رقم غير صالح — استخدم الصيغة الدولية مثل 9665XXXXXXXX","warn"); return; }
+  if(optIn && !phone){ toast("⚠ أدخل الرقم قبل تفعيل واتساب","warn"); return; }
+  u.phone=phone||null; u.waOptIn=optIn; if(optIn) u.waConsentAt=new Date().toISOString();
+  try{
+    await saveUsers();
+    try{ await _upsertUserCentral(u); }catch(_e){ console.warn("central upsert wa:",_e); }
+    logAudit("تحديث رقم واتساب مستخدم مشتريات",`المستخدم: ${u.name}${phone?(" — "+phone):""} — ${optIn?"مُفعّل":"معطّل"}`);
+    toast("✅ تم حفظ رقم واتساب","success");
+  }catch(e){ console.warn("puSaveUserWa error:",e); toast("⚠ خطأ في حفظ الرقم","warn"); }
+  renderPurchaseUsersList();
 }
 
 async function puAddUser(){
