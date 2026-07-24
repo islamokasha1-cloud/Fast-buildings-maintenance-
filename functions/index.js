@@ -1,0 +1,215 @@
+"use strict";
+/**
+ * طبقة إشعارات واتساب — Cloud Functions (2nd gen).
+ *
+ * المسار الكامل لحدث «إسناد فني»:
+ *   tickets/<...>_tickets (onUpdate/onCreate)  →  notifyRouter  →  wa_outbox
+ *   wa_outbox (onCreate)                        →  waSender      →  WhatsApp Cloud API
+ *
+ * كل شيء محايد تجاه المزوّد؛ التوكن سرّ يُحقن من Secret Manager (لا في الكود ولا المتصفح).
+ */
+const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { defineSecret } = require("firebase-functions/params");
+const { logger } = require("firebase-functions");
+const admin = require("firebase-admin");
+
+const cfg = require("./lib/config");
+const { enqueue } = require("./lib/outbox");
+const { sendTemplate } = require("./lib/whatsapp");
+
+admin.initializeApp();
+const db = admin.firestore();
+
+const WHATSAPP_TOKEN = defineSecret("WHATSAPP_TOKEN");
+
+/* ═══════════════════════ أدوات مساعدة ═══════════════════════ */
+
+/** مفتاح القتل العام: meta/wa_settings.enabled === false يوقف كل الإرسال. */
+async function isEnabled() {
+  try {
+    const snap = await db.doc(cfg.SETTINGS_DOC).get();
+    if (snap.exists && snap.data().enabled === false) return false;
+  } catch (_) {
+    /* غياب المستند = مُفعّل افتراضياً */
+  }
+  return true;
+}
+
+/** يبني اسم export آمن من اسم المجموعة. */
+function safeName(coll) {
+  return coll.replace(/[^a-zA-Z0-9]/g, "_");
+}
+
+/**
+ * منطق التوجيه لحدث إسناد الفني.
+ * @param {object|null} before  حالة البلاغ قبل التغيير (null عند الإنشاء).
+ * @param {object} after        حالة البلاغ بعد التغيير.
+ */
+async function routeTicketAssignment(before, after) {
+  const newTech = (after && after.tech) || null;
+  const prevTech = (before && before.tech) || null;
+
+  // نرسل فقط عند إسناد فعلي: الفني تغيّر وله قيمة (ليس null).
+  if (!newTech) return;
+  if (before && prevTech === newTech) return; // لم يتغيّر ⇒ تجاهل
+
+  if (!(await isEnabled())) {
+    logger.info("wa: مفتاح القتل مُفعّل — تخطّي الإرسال");
+    return;
+  }
+
+  // مطابقة الفني بالاسم في مجموعة technicians.
+  const techName = String(newTech).trim();
+  const techSnap = await db.collection(cfg.TECHNICIANS_COLLECTION).doc(techName).get();
+  if (!techSnap.exists) {
+    logger.warn(`wa: لا يوجد مستند فني باسم "${techName}" — تخطّي`);
+    return;
+  }
+  const tech = techSnap.data();
+  if (!tech.phone || tech.waOptIn !== true) {
+    logger.info(`wa: الفني "${techName}" بلا هاتف أو لم يوافق (waOptIn) — تخطّي`);
+    return;
+  }
+
+  // متغيّرات القالب ticket_assigned: {{1}}اسم {{2}}رقم {{3}}النوع {{4}}المبنى {{5}}الأولوية
+  const params = [
+    techName,
+    String(after.id || ""),
+    String(after.workType || after.type || "—"),
+    String(after.building || "—"),
+    String(after.priority || "—"),
+  ];
+
+  const { queued } = await enqueue(db, {
+    to: tech.phone,
+    recipientRef: `${cfg.TECHNICIANS_COLLECTION}/${techName}`,
+    template: cfg.WA.template,
+    lang: cfg.WA.templateLang,
+    params,
+    event: {
+      type: "ticket_assigned",
+      entityId: String(after.id || techSnap.id),
+      transition: `${prevTech || ""}->${newTech}`,
+    },
+  });
+
+  logger.info(`wa: ${queued ? "أُضيف للطابور" : "تكرار مُتجاهَل"} — بلاغ ${after.id} → ${techName}`);
+}
+
+/* ═══════════════════════ مشغّلات البلاغات (notifyRouter) ═══════════════════════ */
+// نُصدِّر مشغّلاً لكل مجموعة بلاغات مُهيّأة (متعدّد المشاريع) — تحديثاً وإنشاءً.
+cfg.TICKET_COLLECTIONS.forEach((coll) => {
+  const key = safeName(coll);
+
+  exports[`ticketAssignUpdate_${key}`] = onDocumentUpdated(
+    `${coll}/{ticketId}`,
+    async (event) => {
+      const before = event.data.before.exists ? event.data.before.data() : null;
+      const after = event.data.after.exists ? event.data.after.data() : null;
+      if (!after) return; // حذف ⇒ لا شيء
+      await routeTicketAssignment(before, after);
+    }
+  );
+
+  exports[`ticketAssignCreate_${key}`] = onDocumentCreated(
+    `${coll}/{ticketId}`,
+    async (event) => {
+      const after = event.data && event.data.exists ? event.data.data() : null;
+      if (!after) return;
+      // بلاغ أُنشئ ومعه فنيّ مُسنَد مباشرة.
+      await routeTicketAssignment(null, after);
+    }
+  );
+});
+
+/* ═══════════════════════ المُرسِل (waSender) ═══════════════════════ */
+exports.waSender = onDocumentCreated(
+  { document: `${cfg.OUTBOX_COLLECTION}/{id}`, secrets: [WHATSAPP_TOKEN] },
+  async (event) => {
+    const ref = event.data.ref;
+    const doc = event.data.data();
+    if (!doc || doc.status !== "queued") return; // نرسل المُدرَج فقط
+    await deliver(ref, doc);
+  }
+);
+
+/** يقرأ الرسائل العالقة ويعيد محاولتها (إعادة المحاولة + شبكة صمود). كل دقيقتين. */
+exports.waRetry = onSchedule(
+  { schedule: "every 2 minutes", secrets: [WHATSAPP_TOKEN] },
+  async () => {
+    const cutoff = new Date(Date.now() - 60 * 1000); // أقدم من دقيقة
+    const snap = await db
+      .collection(cfg.OUTBOX_COLLECTION)
+      .where("status", "==", "queued")
+      .where("createdAt", "<", cutoff)
+      .limit(20)
+      .get();
+    for (const d of snap.docs) {
+      await deliver(d.ref, d.data());
+    }
+  }
+);
+
+/**
+ * إرسال فعلي لرسالة صادرة واحدة + تحديث حالتها + أرشفة في wa_log.
+ */
+async function deliver(ref, doc) {
+  const attempts = (doc.attempts || 0) + 1;
+
+  const result = await sendTemplate({
+    token: WHATSAPP_TOKEN.value(),
+    to: doc.to,
+    template: doc.template,
+    lang: doc.lang,
+    params: doc.params,
+  });
+
+  const now = new Date();
+  if (result.ok) {
+    await ref.update({
+      status: "sent",
+      providerMessageId: result.id || null,
+      attempts,
+      sentAt: now,
+      updatedAt: now,
+      lastError: null,
+    });
+    await archive(ref.id, doc, "sent", result.id, null, attempts);
+    logger.info(`wa: أُرسلت ${ref.id} → ${doc.to} (msg ${result.id || "?"})`);
+  } else {
+    const failed = attempts >= cfg.MAX_ATTEMPTS;
+    await ref.update({
+      status: failed ? "failed" : "queued", // يبقى queued ليعيد waRetry المحاولة
+      attempts,
+      lastError: result.error || "unknown",
+      updatedAt: now,
+    });
+    if (failed) {
+      await archive(ref.id, doc, "failed", null, result.error, attempts);
+      logger.error(`wa: فشل نهائي ${ref.id} → ${doc.to}: ${result.error}`);
+    } else {
+      logger.warn(`wa: فشل مؤقت ${ref.id} (محاولة ${attempts}): ${result.error}`);
+    }
+  }
+}
+
+/** أرشيف نهائي لكل نتيجة إرسال (للتدقيق واللوحات). */
+async function archive(outboxId, doc, status, msgId, error, attempts) {
+  try {
+    await db.collection(cfg.LOG_COLLECTION).add({
+      outboxId,
+      to: doc.to,
+      recipientRef: doc.recipientRef || null,
+      template: doc.template,
+      event: doc.event || null,
+      status,
+      providerMessageId: msgId || null,
+      error: error || null,
+      attempts,
+      at: new Date(),
+    });
+  } catch (e) {
+    logger.warn(`wa: تعذّر الأرشفة في ${cfg.LOG_COLLECTION}: ${e.message}`);
+  }
+}
