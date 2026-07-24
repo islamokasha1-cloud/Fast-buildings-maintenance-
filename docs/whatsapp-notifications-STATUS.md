@@ -55,6 +55,11 @@ WhatsApp Cloud API **يعمل الآن فعلياً** — وصلت رسالة ا
 ## 3) ✅ ما أُنجز
 - خطة تصميم كاملة في `docs/whatsapp-notifications-plan.md`.
 - **حساب Meta جديد + تطبيق + رقم اختبار + إرسال ناجح** (انظر التحديث الحاسم أعلاه).
+- **🚀 المرحلة ٢ نُشِرت فعلياً على Firebase (2026-07-24):** الدوال الأربع حيّة على مشروع
+  `fast-buildings` (منطقة us-central1): `ticketAssignUpdate_hail_tickets` ·
+  `ticketAssignCreate_hail_tickets` · `waSender` · `waRetry`. خطة Blaze مفعّلة،
+  سرّ `WHATSAPP_TOKEN` محفوظ، الواجهات مفعّلة. `WA_TEMPLATE=hello_world` للتجربة الأولى.
+- **شاشة إدارة أرقام الفنيين** في لوحة الأدمن (PR #53 — بانتظار الدمج في main لتظهر مباشرة).
 - **✅ كود المرحلة ٢ (شريحة «إسناد الفني») مكتوب في `functions/`** (لم يُنشر بعد):
   - `functions/index.js` — مشغّلات البلاغات (notifyRouter) + `waSender` + `waRetry`.
   - `functions/lib/whatsapp.js` — مُرسِل Cloud API (نقطة الإرسال المحايدة).
