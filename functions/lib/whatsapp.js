@@ -13,9 +13,10 @@ const { WA } = require("./config");
  * @param {string} p.template    اسم القالب المعتمد.
  * @param {string} p.lang        رمز لغة القالب (مثل "ar" أو "en_US").
  * @param {string[]} p.params    متغيّرات جسم القالب بالترتيب {{1}},{{2}}...
+ * @param {string} [p.buttonParam] قيمة متغيّر زر الرابط الديناميكي (deep link) — لاحقة الـ URL.
  * @returns {Promise<{ok:boolean, id?:string, error?:string, status?:number}>}
  */
-async function sendTemplate({ token, to, template, lang, params }) {
+async function sendTemplate({ token, to, template, lang, params, buttonParam }) {
   if (!WA.phoneNumberId) {
     return { ok: false, error: "WHATSAPP_PHONE_NUMBER_ID غير مضبوط" };
   }
@@ -41,6 +42,16 @@ async function sendTemplate({ token, to, template, lang, params }) {
           },
         ]
       : [];
+
+  // زر رابط ديناميكي (deep link): لاحقة تُلحق بالـ URL في القالب المعتمَد.
+  if (!skipParams && buttonParam) {
+    components.push({
+      type: "button",
+      sub_type: "url",
+      index: "0",
+      parameters: [{ type: "text", text: String(buttonParam) }],
+    });
+  }
 
   const body = {
     messaging_product: "whatsapp",
