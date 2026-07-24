@@ -9,7 +9,10 @@
 ## 🏆 نجاح كامل end-to-end (2026-07-24): أول إشعار فني وصل فعلياً!
 إسناد بلاغ لفني في «حائل» → مشغّل Firestore → wa_outbox → waSender → WhatsApp Cloud API
 → **وصلت رسالة على جوال الفني `966591737592`**. المنظومة حيّة على الخادم.
-- القالب الحالي: `hello_world` (تجريبي). **التالي:** اعتماد قالب عربي `ticket_assigned`.
+- القالب الحالي: `hello_world` (تجريبي). القالب العربي `ticket_assigned` **قُدّم لـ Meta
+  (In review) بتاريخ 2026-07-24** — فئة Utility، لغة `ar`، ٥ متغيّرات {{1}}–{{5}}.
+  **عند اعتماده:** بدّل `.env` إلى `WA_TEMPLATE=ticket_assigned` و`WA_TEMPLATE_LANG=ar`
+  ثم `firebase deploy --only functions`.
 - ✅ **التوكن الدائم أُنجز (2026-07-24):** System User `wa-sender` (ID 61588748282140)
   بصلاحية Admin + إسناد (التطبيق + WABA + الرقم) Full access + توكن دائم
   (`whatsapp_business_messaging` + `whatsapp_business_management`, Never expire) محفوظ في
