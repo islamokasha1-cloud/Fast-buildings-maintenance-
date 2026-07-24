@@ -10,7 +10,10 @@
 إسناد بلاغ لفني في «حائل» → مشغّل Firestore → wa_outbox → waSender → WhatsApp Cloud API
 → **وصلت رسالة على جوال الفني `966591737592`**. المنظومة حيّة على الخادم.
 - القالب الحالي: `hello_world` (تجريبي). **التالي:** اعتماد قالب عربي `ticket_assigned`.
-- التوكن الحالي: **مؤقت (٢٤ ساعة)**. **التالي:** توكن دائم (System User) قبل انتهائه.
+- ✅ **التوكن الدائم أُنجز (2026-07-24):** System User `wa-sender` (ID 61588748282140)
+  بصلاحية Admin + إسناد (التطبيق + WABA + الرقم) Full access + توكن دائم
+  (`whatsapp_business_messaging` + `whatsapp_business_management`, Never expire) محفوظ في
+  Secret Manager (`WHATSAPP_TOKEN` v3) والدوال منشورة به. **لا خوف من انتهاء التوكن.**
 
 ## 🎉 تحديث حاسم (2026-07-24 مساءً): المسار المباشر نجح!
 
