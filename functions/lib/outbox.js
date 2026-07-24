@@ -35,6 +35,7 @@ async function enqueue(db, payload) {
     template: payload.template,
     lang: payload.lang,
     params: payload.params || [],
+    buttonParam: payload.buttonParam || null,
     event: payload.event || null,
     status: "queued", // queued → sent → delivered | failed | skipped
     attempts: 0,

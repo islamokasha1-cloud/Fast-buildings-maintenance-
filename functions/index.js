@@ -17,6 +17,7 @@ const admin = require("firebase-admin");
 const cfg = require("./lib/config");
 const { enqueue } = require("./lib/outbox");
 const { sendTemplate } = require("./lib/whatsapp");
+const { routePurchase } = require("./lib/purchases");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -123,6 +124,32 @@ cfg.TICKET_COLLECTIONS.forEach((coll) => {
   );
 });
 
+/* ═══════════════════════ مشغّلات الشراء (المرحلة ٣) ═══════════════════════ */
+// إشعار المعنيين بطلب الشراء حسب مسار الحالة + إشعار صاحب الطلب عند الرفض/الإغلاق.
+const _poDeps = () => ({ db, logger, isEnabled });
+
+exports.poRouteUpdate = onDocumentUpdated(
+  `${cfg.PURCHASES_COLLECTION}/{poId}`,
+  async (event) => {
+    const before = event.data.before.exists ? event.data.before.data() : null;
+    const after = event.data.after.exists ? event.data.after.data() : null;
+    if (!after) return;
+    if (!after.id) after.id = event.params.poId;
+    await routePurchase(before, after, _poDeps());
+  }
+);
+
+exports.poRouteCreate = onDocumentCreated(
+  `${cfg.PURCHASES_COLLECTION}/{poId}`,
+  async (event) => {
+    const after = event.data && event.data.exists ? event.data.data() : null;
+    if (!after) return;
+    if (!after.id) after.id = event.params.poId;
+    // طلب أُنشئ مباشرة بحالة تحتاج إشعاراً (عادةً pending_pm).
+    await routePurchase(null, after, _poDeps());
+  }
+);
+
 /* ═══════════════════════ المُرسِل (waSender) ═══════════════════════ */
 exports.waSender = onDocumentCreated(
   { document: `${cfg.OUTBOX_COLLECTION}/{id}`, secrets: [WHATSAPP_TOKEN] },
@@ -163,6 +190,7 @@ async function deliver(ref, doc) {
     template: doc.template,
     lang: doc.lang,
     params: doc.params,
+    buttonParam: doc.buttonParam || null,
   });
 
   const now = new Date();
