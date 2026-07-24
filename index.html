@@ -11666,6 +11666,7 @@ function renderAdminPanel(){
   renderAdminBuildingsList();
   renderAdminSupervisorsList();
   renderAdminTechsList();
+  loadTechWa().then(renderAdminTechsList); // تحميل أرقام واتساب ثم إعادة العرض
   renderAdminWorkTypesList();
   renderAdminUsersList();
   renderAdminProjectsList();
@@ -11836,6 +11837,17 @@ async function saveUserPerms(idx){
   else toast("✅ تم حفظ الصلاحيات والمشاريع","success");
 }
 
+// أرقام واتساب الفنيين — مجموعة technicians (نفس التي يقرؤها خادم الإشعارات): name -> {phone, waOptIn}
+let _techWa = {};
+async function loadTechWa(){
+  if(!db) return;
+  try{
+    const snap = await db.collection("technicians").get();
+    _techWa = {};
+    snap.forEach(d=>{ const x=d.data()||{}; _techWa[d.id]={phone:x.phone||"", waOptIn:x.waOptIn===true}; });
+  }catch(e){ console.warn("loadTechWa error:", e); }
+}
+
 function renderAdminTechsList(){
   const el = document.getElementById("admin-techs-list");
   if(!el) return;
@@ -11844,10 +11856,20 @@ function renderAdminTechsList(){
       <div style="font-weight:700;font-size:13px;margin-bottom:8px">${esc(wdata.icon)} ${esc(wt)}</div>
       <div id="admin-tech-list-${wi}" style="margin-bottom:8px">
         ${wdata.techs.map((t,ti)=>`
-          <div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border)">
-            <input class="form-input" value="${esc(t)}" id="admin-tech-${wi}-${ti}" style="flex:1;padding:4px 8px;font-size:12px">
-            <button class="btn btn-ghost btn-sm" onclick="adminSaveTech(${wi},${ti})" style="white-space:nowrap;font-size:11px">💾</button>
-            <button class="btn btn-delete btn-sm" onclick="adminDeleteTech(${wi},${ti})" style="white-space:nowrap;font-size:11px">🗑</button>
+          <div style="padding:6px 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:6px">
+              <input class="form-input" value="${esc(t)}" id="admin-tech-${wi}-${ti}" style="flex:1;padding:4px 8px;font-size:12px">
+              <button class="btn btn-ghost btn-sm" onclick="adminSaveTech(${wi},${ti})" style="white-space:nowrap;font-size:11px">💾</button>
+              <button class="btn btn-delete btn-sm" onclick="adminDeleteTech(${wi},${ti})" style="white-space:nowrap;font-size:11px">🗑</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:5px">
+              <span style="font-size:14px" title="رقم واتساب">📱</span>
+              <input class="form-input" value="${esc((_techWa[t]&&_techWa[t].phone)||"")}" id="admin-tech-phone-${wi}-${ti}" placeholder="9665XXXXXXXX" inputmode="tel" dir="ltr" style="flex:1;padding:4px 8px;font-size:12px">
+              <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--muted)">
+                <input type="checkbox" id="admin-tech-optin-${wi}-${ti}" ${(_techWa[t]&&_techWa[t].waOptIn)?"checked":""}> تفعيل واتساب
+              </label>
+              <button class="btn btn-primary btn-sm" onclick="adminSaveTechWa(${wi},${ti})" style="white-space:nowrap;font-size:11px">💾 رقم</button>
+            </div>
           </div>`).join("")}
       </div>
       <div style="display:flex;gap:6px">
@@ -11889,6 +11911,28 @@ async function adminAddTech(wi){
   try{ await saveSettings(); toast("✅ تم إضافة الفني","success"); }
   catch(e){ WORK_TYPES[wt].techs.pop(); toast("⚠ خطأ في الحفظ","warn"); }
   renderAdminTechsList();
+}
+
+// حفظ رقم واتساب الفني وموافقته في مجموعة technicians (يقرؤها خادم الإشعارات)
+async function adminSaveTechWa(wi,ti){
+  const wt=Object.keys(WORK_TYPES)[wi];
+  const name=(WORK_TYPES[wt].techs[ti]||"").trim();
+  if(!name){ toast("⚠ احفظ اسم الفني أولاً","warn"); return; }
+  let phone=(document.getElementById(`admin-tech-phone-${wi}-${ti}`)?.value||"").trim().replace(/[^\d+]/g,"");
+  const optIn=!!document.getElementById(`admin-tech-optin-${wi}-${ti}`)?.checked;
+  if(phone && !/^\+?\d{8,15}$/.test(phone)){ toast("⚠ رقم غير صالح — استخدم الصيغة الدولية مثل 9665XXXXXXXX","warn"); return; }
+  if(optIn && !phone){ toast("⚠ أدخل الرقم قبل تفعيل واتساب","warn"); return; }
+  if(!db){ toast("⚠ لا اتصال بقاعدة البيانات","warn"); return; }
+  try{
+    await db.collection("technicians").doc(name).set({
+      phone: phone||null,
+      waOptIn: optIn,
+      waConsentAt: optIn ? new Date().toISOString() : null
+    },{merge:true});
+    _techWa[name]={phone, waOptIn:optIn};
+    logAudit("تحديث رقم واتساب فني", `الفني: ${name}${phone?(" — "+phone):""} — ${optIn?"مُفعّل":"معطّل"}`);
+    toast("✅ تم حفظ رقم واتساب الفني","success");
+  }catch(e){ console.warn("adminSaveTechWa error:", e); toast("⚠ خطأ في حفظ الرقم","warn"); }
 }
 
 function renderAdminProjectsList(){
