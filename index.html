@@ -11777,8 +11777,60 @@ function renderAdminUsersList(){
         </div>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">${permBadges}</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+        <span style="font-size:14px" title="رقم واتساب">📱</span>
+        <input class="form-input" value="${esc(u.phone||"")}" id="admin-user-phone-${i}" placeholder="9665XXXXXXXX" inputmode="tel" dir="ltr" style="flex:1;padding:4px 8px;font-size:12px">
+        <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--muted)">
+          <input type="checkbox" id="admin-user-optin-${i}" ${u.waOptIn?"checked":""}> تفعيل واتساب
+        </label>
+        <button class="btn btn-primary btn-sm" onclick="adminSaveUserWa(${i})" style="white-space:nowrap;font-size:11px">💾 رقم</button>
+      </div>
     </div>`;
   }).join("");
+}
+
+// حفظ رقم واتساب المستخدم وموافقته في مستند المستخدمين (يقرؤه خادم إشعارات الشراء)
+async function adminSaveUserWa(idx){
+  const u=USERS[idx]; if(!u){ toast("⚠ مستخدم غير موجود","warn"); return; }
+  let phone=(document.getElementById(`admin-user-phone-${idx}`)?.value||"").trim().replace(/[^\d+]/g,"");
+  const optIn=!!document.getElementById(`admin-user-optin-${idx}`)?.checked;
+  if(phone && !/^\+?\d{8,15}$/.test(phone)){ toast("⚠ رقم غير صالح — استخدم الصيغة الدولية مثل 9665XXXXXXXX","warn"); return; }
+  if(optIn && !phone){ toast("⚠ أدخل الرقم قبل تفعيل واتساب","warn"); return; }
+  u.phone=phone||null; u.waOptIn=optIn; if(optIn) u.waConsentAt=new Date().toISOString();
+  try{
+    await saveUsers();
+    logAudit("تحديث رقم واتساب مستخدم",`المستخدم: ${u.name}${phone?(" — "+phone):""} — ${optIn?"مُفعّل":"معطّل"}`);
+    toast("✅ تم حفظ رقم واتساب المستخدم","success");
+  }catch(e){ console.warn("adminSaveUserWa error:",e); toast("⚠ خطأ في حفظ الرقم","warn"); }
+  renderAdminUsersList();
+}
+
+// ═══════════ Deep link: فتح طلب شراء محدّد من رابط ?po=<poId> (زر الواتساب) ═══════════
+window._pendingPO = (function(){ try{ return new URLSearchParams(location.search).get("po")||null; }catch(e){ return null; } })();
+function _openPendingPO(_retried){
+  const poId = window._pendingPO;
+  if(!poId) return;
+  if(typeof currentUser==="undefined" || !currentUser) return; // ننتظر تسجيل الدخول
+  const found = (typeof purchases!=="undefined") && Array.isArray(purchases) && purchases.find(p=>p && p.id===poId);
+  if(found){
+    window._pendingPO = null;
+    try{ showPage("purchases"); }catch(e){}
+    setTimeout(()=>{ try{ openPurchaseDetail(poId); }catch(e){ console.warn("deep link open failed:",e); } }, 350);
+    try{ history.replaceState(null,"",location.pathname); }catch(e){} // نظّف الرابط
+  } else if(!_retried && typeof loadPurchases==="function"){
+    loadPurchases(()=>_openPendingPO(true)); // حمّل الطلبات ثم أعد المحاولة مرة واحدة
+  } else {
+    window._pendingPO = null;
+    try{ toast("⚠ تعذّر إيجاد الطلب "+poId+" — قد يكون في مشروع آخر","warn"); }catch(e){}
+  }
+}
+if(window._pendingPO){
+  let _dlTries=0;
+  const _dlTimer=setInterval(()=>{
+    _dlTries++;
+    if(!window._pendingPO || _dlTries>90){ clearInterval(_dlTimer); return; } // حتى ٩٠ ثانية
+    if(typeof currentUser!=="undefined" && currentUser){ clearInterval(_dlTimer); _openPendingPO(); }
+  }, 1000);
 }
 
 function openEditUserPerms(idx){
