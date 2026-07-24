@@ -9,10 +9,31 @@
 
 ## 0) المتطلّبات لمرة واحدة
 - خطة **Blaze** مفعّلة على مشروع Firebase `fast-buildings` (Cloud Functions تتطلبها).
-- **Node.js 20** و**Firebase CLI** على جهازك: `npm i -g firebase-tools` ثم `firebase login`.
+- بيئة فيها **Node.js 20** و**Firebase CLI**. خياران:
+  - **كمبيوتر:** `npm i -g firebase-tools` ثم `firebase login`.
+  - **بلا كمبيوتر (من الآيباد/الجوال):** استخدم **Google Cloud Shell** — طرفية في المتصفح
+    فيها Node و`firebase`/`gcloud` جاهزة. انظر §A بالأسفل.
 - من لوحة WhatsApp (Meta for Developers) بعد نجاح رقم الاختبار، جهّز:
   - **Phone Number ID** (مثال حالي: `1215289975003425`)
-  - **Access Token** (مؤقت للتجربة، دائم للإنتاج — انظر §5)
+  - **Access Token** (مؤقت للتجربة، دائم للإنتاج — انظر §6)
+
+---
+
+## §A) النشر من الآيباد/الجوال عبر Google Cloud Shell (بلا كمبيوتر)
+1. **فعّل Blaze أولاً:** افتح `https://console.firebase.google.com` ← مشروع **fast-buildings**
+   ← Upgrade ← خطة **Blaze** (تتطلب بطاقة؛ الاستخدام الصغير ضمن الطبقة المجانية غالباً).
+2. افتح **`https://shell.cloud.google.com`** بحساب Google المالك لمشروع `fast-buildings`
+   ← اقبل التفعيل ← تظهر طرفية في المتصفح.
+3. في الطرفية:
+   ```bash
+   gcloud config set project fast-buildings
+   git clone <رابط-هذا-المستودع> && cd <اسم-المجلد>/functions
+   npm install
+   # اربط أدوات firebase (إن لزم تسجيل دخول): firebase login --no-localhost  ثم اتبع الرابط
+   ```
+4. اضبط القيم والسرّ ثم انشر (تكملة الخطوات §2–§4 أدناه، كلها تعمل داخل Cloud Shell).
+
+> ملاحظة: كل الأوامر في الأقسام التالية تعمل حرفياً داخل Cloud Shell كما على الكمبيوتر.
 
 ---
 
