@@ -147,14 +147,30 @@ function rollupByCategory(projId){
   return m;
 }
 
-/* ════════════ تحميل/حفظ الموازنة ════════════ */
-// مفتاح مستند آمن: المشروع اليدوي يُخزَّن بـ "mpn_<الاسم>" (لا بادئة "__" المحجوزة في
-// Firestore، ولا "/") — فتُحفظ موازنته كأي مشروع دون تعارض.
-function budgetDocPath(projId){
+/* ════════════ مفاتيح المستندات ════════════ */
+// مفتاح مستند آمن: المشروع اليدوي بـ "mpn_<الاسم>" (لا بادئة "__" المحجوزة في Firestore،
+// ولا "/" ولا "." في مسار/مفتاح المستند).
+function _safeKey(projId){
   let key = String(projId);
   if(key.indexOf(MANUAL_PREFIX)===0) key = "mpn_" + key.slice(MANUAL_PREFIX.length);
-  key = key.replace(/\//g,"_");
-  return "meta/"+key+"_budget";
+  return key.replace(/[\/.]/g,"_");
+}
+function budgetDocPath(projId){ return "meta/"+_safeKey(projId)+"_budget"; }
+function scheduleDocPath(projId){ return "meta/"+_safeKey(projId)+"_schedule"; }
+
+/* ════════════ نوع المشروع (مقاولات/ترميم/صيانة) ════════════ */
+// يُخزَّن في مستند الموازنة نفسه (سجلّ بيانات المشروع). غير المصنّف = صيانة (بلا جدول).
+function projectType(projId){ const b=_budgetCache[projId]; return (b&&b.type) ? b.type : ""; }
+function needsSchedule(projId){ const t=projectType(projId); return t==="construction"||t==="renovation"; }
+async function saveType(projId, type){
+  const database=_db(); if(!database){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
+  const u=_user();
+  try{
+    await database.doc(budgetDocPath(projId)).set({ type, updatedAt:new Date().toISOString(), updatedBy:(u&&u.name)||(u&&u.email)||"" }, { merge:true });
+    _budgetCache[projId] = Object.assign(_budgetCache[projId]||{categories:[],boq:[]}, { type });
+    _audit("تصنيف نوع مشروع", _projName(projId)+" → "+(PROJECT_TYPES[type]||type));
+    return true;
+  }catch(e){ console.warn("saveType",e); _toast("⚠ تعذّر حفظ النوع","warn"); return false; }
 }
 
 async function loadBudget(projId){
@@ -163,9 +179,35 @@ async function loadBudget(projId){
   try{
     const snap = await database.doc(budgetDocPath(projId)).get();
     const d = (snap&&snap.exists) ? (snap.data()||{}) : {};
-    _budgetCache[projId] = { categories: Array.isArray(d.categories)?d.categories:[], boq: Array.isArray(d.boq)?d.boq:[] };
+    _budgetCache[projId] = { categories: Array.isArray(d.categories)?d.categories:[], boq: Array.isArray(d.boq)?d.boq:[], type: d.type||"" };
   }catch(e){ console.warn("loadBudget",e); _budgetCache[projId]=_budgetCache[projId]||{categories:[],boq:[]}; }
   return _budgetCache[projId];
+}
+
+/* ════════════ الجدول الزمني (لمشاريع الإنشاءات/الترميم فقط) ════════════ */
+const _scheduleCache = {}; // projId → {phases:[...], generatedByAI, updatedAt}
+async function loadSchedule(projId){
+  const database=_db();
+  if(!database){ _scheduleCache[projId]=_scheduleCache[projId]||{phases:[]}; return _scheduleCache[projId]; }
+  try{
+    const snap = await database.doc(scheduleDocPath(projId)).get();
+    const d = (snap&&snap.exists) ? (snap.data()||{}) : {};
+    _scheduleCache[projId] = { phases: Array.isArray(d.phases)?d.phases:[], generatedByAI: !!d.generatedByAI };
+  }catch(e){ console.warn("loadSchedule",e); _scheduleCache[projId]=_scheduleCache[projId]||{phases:[]}; }
+  return _scheduleCache[projId];
+}
+async function saveSchedule(projId, phases, generatedByAI){
+  const database=_db(); if(!database){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
+  const u=_user();
+  try{
+    await database.doc(scheduleDocPath(projId)).set({
+      phases, generatedByAI: !!generatedByAI,
+      updatedAt:new Date().toISOString(), updatedBy:(u&&u.name)||(u&&u.email)||""
+    }, { merge:true });
+    _scheduleCache[projId] = { phases, generatedByAI: !!generatedByAI };
+    _audit("تحديث جدول زمني", _projName(projId)+" — "+phases.length+" مرحلة");
+    return true;
+  }catch(e){ console.warn("saveSchedule",e); _toast("⚠ تعذّر حفظ الجدول","warn"); return false; }
 }
 
 async function saveBudget(projId, categories){
@@ -236,9 +278,9 @@ function paintList(projects){
   wrap.innerHTML = projects.map((p,i)=>{
     const r=projectRollup(p.id);
     const barColor = r.pct>100 ? "var(--danger)" : (r.pct>=80 ? "var(--warn)" : "var(--accent)");
-    const badge = p.manual
-      ? '<span class="badge" style="background:var(--surface2);color:var(--muted)">'+_icon('edit')+' يدوي</span>'
-      : typeBadge(p.type);
+    const _t=effType(p.id);
+    const badge = (_t?typeBadge(_t):"")
+      + (p.manual ? (_t?" ":"")+'<span class="badge" style="background:var(--surface2);color:var(--muted)">'+_icon('edit')+' يدوي</span>' : "");
     return `
     <div class="pm-card" style="--sc:${barColor}" onclick="projectMgmt.openAt(${i})">
       <div class="pm-card-top">
@@ -260,6 +302,7 @@ function paintList(projects){
 /* ── بطاقة مشروع واحد ── */
 function open(projId){
   _curId=projId; _curTab="overview"; _editing=false;
+  _schedEditing=false; _schedGenForm=false; _schedDraft=null;
   const el=document.getElementById("page-"+PAGE_ID);
   if(!(projId in _budgetCache)){
     loadBudget(projId).then(()=>{ if(_curId===projId) renderCard(el); });
@@ -291,18 +334,19 @@ function renderCard(el){
   el.innerHTML = `
     <div class="pm-head">
       <button class="btn btn-ghost btn-sm pm-back" onclick="projectMgmt.back()">${_icon('folderOpen')} كل المشاريع</button>
-      <h2 class="pm-title">${_esc(name)} ${p?(p.manual?'<span class="badge" style="background:var(--surface2);color:var(--muted)">'+_icon('edit')+' يدوي</span>':typeBadge(p.type)):""}</h2>
+      <h2 class="pm-title">${_esc(name)} ${_projBadges(_curId)}</h2>
       ${p&&p.client?`<div class="pm-sub">${_icon('users')} ${_esc(p.client)}${p.location?' — '+_icon('pin')+' '+_esc(p.location):''}</div>`:""}
     </div>
     <div class="pm-tabs">
       <button class="pm-tab ${_curTab==='overview'?'on':''}" data-tab="overview" onclick="projectMgmt.tab('overview')">نظرة عامة</button>
       <button class="pm-tab ${_curTab==='budget'?'on':''}" data-tab="budget" onclick="projectMgmt.tab('budget')">الموازنة</button>
+      ${needsSchedule(_curId)?`<button class="pm-tab ${_curTab==='schedule'?'on':''}" data-tab="schedule" onclick="projectMgmt.tab('schedule')">الجدول الزمني</button>`:""}
     </div>
     <div id="pm-tab-body"></div>`;
   renderTabBody();
 }
 function tab(t){
-  _curTab=t; _editing=false;
+  _curTab=t; _editing=false; _schedEditing=false; _schedGenForm=false; _schedDraft=null;
   // حدّث تمييز أزرار التبويب (renderTabBody يعيد الجسم فقط)
   document.querySelectorAll("#page-"+PAGE_ID+" .pm-tab").forEach(b=>{
     b.classList.toggle("on", b.dataset.tab===t);
@@ -314,7 +358,14 @@ function renderTabBody(){
   const body=document.getElementById("pm-tab-body");
   if(!body) return;
   if(_curTab==="overview") body.innerHTML = overviewHTML();
-  else body.innerHTML = budgetHTML();
+  else if(_curTab==="budget") body.innerHTML = budgetHTML();
+  else if(_curTab==="schedule"){
+    if(_curId in _scheduleCache) body.innerHTML = scheduleHTML();
+    else {
+      body.innerHTML = `<div class="pm-hint" style="margin-top:0">جارٍ تحميل الجدول…</div>`;
+      loadSchedule(_curId).then(()=>{ if(_curTab==="schedule"){ const b=document.getElementById("pm-tab-body"); if(b) b.innerHTML=scheduleHTML(); } });
+    }
+  }
 }
 
 function overviewHTML(){
@@ -329,7 +380,20 @@ function overviewHTML(){
       ${sub?`<div class="click-hint">${sub}</div>`:""}
     </div>`;
   const over = r.planned>0 && (r.actual+r.committed)>r.planned;
+  // شريط تصنيف نوع المشروع — الجدول الزمني يظهر لمقاولات/ترميم فقط
+  const t=effType(_curId);
+  const typeCtrl = _canEdit()
+    ? `<select class="form-input pm-type-sel" onchange="projectMgmt.setType(this.value)">
+         <option value="" ${!t?'selected':''}>— غير مصنّف (صيانة) —</option>
+         <option value="construction" ${t==='construction'?'selected':''}>مقاولات</option>
+         <option value="renovation" ${t==='renovation'?'selected':''}>ترميم</option>
+         <option value="maintenance" ${t==='maintenance'?'selected':''}>صيانة</option>
+       </select>`
+    : `<b style="color:var(--text)">${t?PROJECT_TYPES[t]:'صيانة'}</b>`;
+  const typeBar = `<div class="pm-typebar">${_icon('building2')} نوع المشروع: ${typeCtrl}
+    ${needsSchedule(_curId)?'<span class="pm-hint-inline">— له تبويب «الجدول الزمني»</span>':'<span class="pm-hint-inline">— الصيانة بلا جدول زمني</span>'}</div>`;
   return `
+    ${typeBar}
     <div class="pm-stats">
       ${card("الموازنة المخطّطة (ريال)", r.planned, "var(--primary)", "")}
       ${card("المصروف الفعلي (مغلق)", r.actual, "var(--accent)", spentPct+"% من الموازنة")}
@@ -415,7 +479,7 @@ function editBudget(){ _editing=true; renderTabBody(); }
 function cancelEdit(){ _editing=false; renderTabBody(); }
 
 async function saveBudgetEdit(){
-  const inputs=document.querySelectorAll("#pm-tab-body .pm-inp");
+  const inputs=document.querySelectorAll("#pm-tab-body input[data-cat]");
   const categories = BUDGET_CATEGORIES.map(cat=>{
     let planned=0;
     inputs.forEach(inp=>{ if(inp.dataset.cat===cat.key) planned=Number(inp.value)||0; });
@@ -423,6 +487,223 @@ async function saveBudgetEdit(){
   });
   const ok = await saveBudget(_curId, categories);
   if(ok){ _editing=false; _toast("✅ حُفظت الموازنة","success"); renderTabBody(); }
+}
+
+/* ════════════════════════════════════════════════════════════
+   الجدول الزمني (لمشاريع الإنشاءات/الترميم) — عرض/توليد بالـ AI/تحرير/متابعة
+   ════════════════════════════════════════════════════════════ */
+let _schedEditing=false, _schedGenForm=false, _schedDraft=null, _uidC=0;
+function _uid(){ return "ph_"+Date.now()+"_"+(_uidC++); }
+function _parseD(s){ const d=new Date(String(s||"")+"T12:00:00"); return isNaN(d.getTime())?new Date():d; }
+function _fmtD(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function _addDays(s,n){ const d=_parseD(s); d.setDate(d.getDate()+(parseInt(n)||0)); return _fmtD(d); }
+function _phaseEnd(ph){ return _addDays(ph.start, Math.max(1,parseInt(ph.durationDays)||1)); }
+function _normDate(v, fallback){ const d=new Date(String(v||"")+"T12:00:00"); return isNaN(d.getTime()) ? (fallback||_fmtD(new Date())) : _fmtD(d); }
+function _extractJSON(txt){
+  if(!txt) return null;
+  let t=String(txt).replace(/```json/gi,"```").replace(/```/g,"").trim();
+  const a=t.indexOf("{"), b=t.lastIndexOf("}");
+  if(a<0||b<0) return null;
+  try{ return JSON.parse(t.slice(a,b+1)); }catch(e){ return null; }
+}
+function _phaseStatus(ph){
+  const start=_parseD(ph.start), end=_parseD(_phaseEnd(ph)), now=new Date();
+  const prog=Math.max(0,Math.min(100,Number(ph.progress)||0));
+  if(prog>=100) return { lbl:"مكتملة", color:"var(--accent)" };
+  if(now<start)  return { lbl:"لم تبدأ", color:"var(--muted)" };
+  const span=Math.max(end-start,1), expected=Math.max(0,Math.min(100,(now-start)/span*100));
+  if(prog >= expected-10) return { lbl:"على المسار", color:"var(--info)" };
+  return { lbl:"متأخّرة", color:"var(--danger)" };
+}
+function scheduleOverall(phases){ return phases.length ? Math.round(phases.reduce((a,p)=>a+(Math.max(0,Math.min(100,Number(p.progress)||0))),0)/phases.length) : 0; }
+
+function _ganttStrip(phases){
+  const starts=phases.map(p=>_parseD(p.start).getTime());
+  const ends=phases.map(p=>_parseD(_phaseEnd(p)).getTime());
+  const min=Math.min.apply(null,starts), max=Math.max.apply(null,ends), span=Math.max(max-min,86400000);
+  return `<div class="pm-gantt">`+phases.map(p=>{
+    const st=_parseD(p.start).getTime(), en=_parseD(_phaseEnd(p)).getTime();
+    const right=(st-min)/span*100, width=Math.max((en-st)/span*100,1.5);
+    const stt=_phaseStatus(p), prog=Math.max(0,Math.min(100,Number(p.progress)||0));
+    return `<div class="pm-gseg" title="${_esc(p.name)}" style="right:${right}%;width:${width}%;background:${stt.color}"><i style="width:${prog}%"></i></div>`;
+  }).join("")+`</div>`;
+}
+
+function scheduleHTML(){
+  const s=_scheduleCache[_curId]||{phases:[]};
+  const phases=s.phases||[];
+  const canEdit=_canEdit();
+  if(_schedGenForm) return _genFormHTML();
+  if(_schedEditing) return _schedEditHTML(_schedDraft||[], canEdit);
+  if(!phases.length){
+    return `
+      <div class="pm-hint" style="margin-top:0">لا يوجد جدول زمني بعد. ولّد جدولاً مبدئياً بالذكاء الاصطناعي ثم عدّله، أو أضف المراحل يدوياً.</div>
+      ${canEdit?`<div class="pm-sched-tools">
+        <button class="btn btn-primary btn-sm" onclick="projectMgmt.aiGenSchedule()">${_icon('activity')} توليد بالذكاء الاصطناعي</button>
+        <button class="btn btn-ghost btn-sm" onclick="projectMgmt.editSchedule()">${_icon('plus')} إضافة يدوياً</button>
+      </div>`:`<span class="pm-hint-inline">لا مراحل بعد — التحرير للأدمن أو مدير المشاريع.</span>`}`;
+  }
+  const overall=scheduleOverall(phases);
+  return `
+    ${canEdit?`<div class="pm-sched-tools">
+      <button class="btn btn-primary btn-sm" onclick="projectMgmt.editSchedule()">${_icon('edit')} تعديل المراحل</button>
+      <button class="btn btn-ghost btn-sm" onclick="projectMgmt.aiGenSchedule()">${_icon('activity')} إعادة توليد بالـ AI</button>
+    </div>`:''}
+    <div class="pm-sched-overall">
+      <div class="pm-sched-overall-lbl">إجمالي الإنجاز <b>${overall}%</b> · ${phases.length} مرحلة</div>
+      <div class="pm-progress"><div class="pm-progress-fill" style="width:${overall}%;background:var(--accent)"></div></div>
+    </div>
+    ${_ganttStrip(phases)}
+    <div class="pm-phases">
+      ${phases.map((p,i)=>{
+        const stt=_phaseStatus(p), prog=Math.max(0,Math.min(100,Number(p.progress)||0));
+        return `<div class="pm-phase">
+          <div class="pm-phase-head">
+            <span class="pm-phase-name">${_esc(p.name)}</span>
+            <span class="badge" style="background:var(--surface2);color:${stt.color}">${stt.lbl}</span>
+          </div>
+          <div class="pm-phase-meta">${_esc(p.start)} ← ${_esc(_phaseEnd(p))} · ${Math.max(1,parseInt(p.durationDays)||1)} يوم</div>
+          <div class="pm-phase-progline">
+            <div class="pm-bar" style="flex:1"><div class="pm-bar-fill" style="width:${prog}%;background:${stt.color}"></div></div>
+            ${canEdit
+              ? `<input type="number" min="0" max="100" class="form-input pm-prog-inp" value="${prog}" onchange="projectMgmt.setProgress(${i}, this.value)"><span class="pm-phase-progv">%</span>`
+              : `<span class="pm-phase-progv">${prog}%</span>`}
+          </div>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
+function _genFormHTML(){
+  const def=_fmtD(new Date());
+  return `
+    <div class="pm-gen-form">
+      <div class="pm-hint" style="margin-top:0">أدخل بيانات المشروع ليقترح الذكاء الاصطناعي المراحل — تقدر تعدّلها بعدها.</div>
+      <label class="pm-gen-l">نطاق العمل باختصار</label>
+      <textarea id="pm-gen-scope" class="form-input" rows="2" placeholder="مثال: فيلا دورين 400م² — أساسات + هيكل خرساني + مبانٍ + كهرباء وسباكة + محارة + تشطيبات"></textarea>
+      <div class="pm-gen-row">
+        <div><label class="pm-gen-l">تاريخ البدء</label><input type="date" id="pm-gen-start" class="form-input" value="${def}"></div>
+        <div><label class="pm-gen-l">المدة التقديرية (شهور)</label><input type="number" min="1" id="pm-gen-months" class="form-input" value="6"></div>
+      </div>
+      <div class="pm-sched-tools" style="margin-top:12px">
+        <button class="btn btn-primary btn-sm" id="pm-gen-btn" onclick="projectMgmt.doAiGen()">${_icon('activity')} ولّد الجدول</button>
+        <button class="btn btn-ghost btn-sm" onclick="projectMgmt.cancelGen()">إلغاء</button>
+      </div>
+    </div>`;
+}
+
+function _schedEditHTML(phases, canEdit){
+  return `
+    <div class="pm-sched-tools">
+      <button class="btn btn-primary btn-sm" onclick="projectMgmt.saveScheduleEdit()">${_icon('checkCircle')} حفظ</button>
+      <button class="btn btn-ghost btn-sm" onclick="projectMgmt.cancelScheduleEdit()">إلغاء</button>
+      <button class="btn btn-ghost btn-sm" onclick="projectMgmt.addPhase()">${_icon('plus')} إضافة مرحلة</button>
+    </div>
+    <div class="pm-table-wrap"><table class="pm-table">
+      <thead><tr><th>المرحلة</th><th>البدء</th><th>مدة (يوم)</th><th></th></tr></thead>
+      <tbody>
+        ${phases.map((p,i)=>`<tr>
+          <td><input class="form-input" data-f="name" data-i="${i}" value="${_esc(p.name)}"></td>
+          <td><input type="date" class="form-input" data-f="start" data-i="${i}" value="${_esc(p.start)}"></td>
+          <td><input type="number" min="1" class="form-input pm-inp-w" data-f="durationDays" data-i="${i}" value="${Math.max(1,parseInt(p.durationDays)||1)}"></td>
+          <td><button class="btn btn-ghost btn-sm" title="حذف" onclick="projectMgmt.delPhase(${i})">${_icon('trash')}</button></td>
+        </tr>`).join("")}
+        ${phases.length?"":`<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:16px">لا مراحل — اضغط «إضافة مرحلة».</td></tr>`}
+      </tbody>
+    </table></div>`;
+}
+
+function _syncDraftFromInputs(){
+  if(!_schedDraft) return;
+  document.querySelectorAll("#pm-tab-body input[data-i]").forEach(inp=>{
+    const i=parseInt(inp.dataset.i), f=inp.dataset.f;
+    if(!_schedDraft[i]) return;
+    _schedDraft[i][f] = (f==="durationDays") ? Math.max(1,parseInt(inp.value)||1) : inp.value;
+  });
+}
+function editSchedule(){
+  const s=_scheduleCache[_curId]||{phases:[]};
+  _schedDraft = (s.phases||[]).map(p=>({ id:p.id||_uid(), name:p.name, start:p.start, durationDays:Math.max(1,parseInt(p.durationDays)||1), progress:Math.max(0,Math.min(100,Number(p.progress)||0)) }));
+  _schedEditing=true; _schedGenForm=false; renderTabBody();
+}
+function addPhase(){
+  _syncDraftFromInputs();
+  if(!_schedDraft) _schedDraft=[];
+  const last=_schedDraft[_schedDraft.length-1];
+  const start = last ? _phaseEnd(last) : _fmtD(new Date());
+  _schedDraft.push({ id:_uid(), name:"مرحلة جديدة", start, durationDays:7, progress:0 });
+  renderTabBody();
+}
+function delPhase(i){ _syncDraftFromInputs(); if(_schedDraft){ _schedDraft.splice(i,1); renderTabBody(); } }
+function cancelScheduleEdit(){ _schedEditing=false; _schedDraft=null; renderTabBody(); }
+async function saveScheduleEdit(){
+  _syncDraftFromInputs();
+  const phases=(_schedDraft||[]).filter(p=> String(p.name||"").trim()).map(p=>({
+    id:p.id||_uid(), name:String(p.name).trim(), start:_normDate(p.start), durationDays:Math.max(1,parseInt(p.durationDays)||1), progress:Math.max(0,Math.min(100,Number(p.progress)||0))
+  }));
+  const ok=await saveSchedule(_curId, phases, false);
+  if(ok){ _schedEditing=false; _schedDraft=null; _toast("✅ حُفظ الجدول","success"); renderTabBody(); }
+}
+async function setProgress(i, val){
+  const s=_scheduleCache[_curId]; if(!s||!s.phases||!s.phases[i]) return;
+  s.phases[i].progress = Math.max(0,Math.min(100,parseInt(val)||0));
+  const ok=await saveSchedule(_curId, s.phases, s.generatedByAI);
+  if(ok) renderTabBody();
+}
+function aiGenSchedule(){ _schedGenForm=true; _schedEditing=false; renderTabBody(); }
+function cancelGen(){ _schedGenForm=false; renderTabBody(); }
+async function doAiGen(){
+  if(typeof _aiText!=="function"){ _toast("⚠ الذكاء الاصطناعي غير مُفعّل — فعّله من: الإدارة › إعدادات الذكاء الاصطناعي","warn"); return; }
+  const scope=(document.getElementById("pm-gen-scope")||{}).value||"";
+  const start=_normDate((document.getElementById("pm-gen-start")||{}).value||"");
+  const months=parseInt((document.getElementById("pm-gen-months")||{}).value)||6;
+  const p=_proj(_curId), t=effType(_curId), tLbl=PROJECT_TYPES[t]||"مشروع";
+  const btn=document.getElementById("pm-gen-btn"); if(btn){ btn.disabled=true; btn.textContent="⏳ جارٍ التوليد…"; }
+  try{
+    const prompt =
+      "أنت مخطّط مشاريع إنشاءات محترف. أنشئ جدولاً زمنياً مبدئياً لمشروع \""+(p?p.name:"")+"\" (نوع: "+tLbl+").\n"+
+      "نطاق العمل: "+(scope||"غير محدّد")+"\n"+
+      "تاريخ البدء: "+start+"\nالمدة التقديرية الإجمالية: "+months+" شهر.\n"+
+      "أعطِ المراحل الرئيسية بالترتيب المنطقي للتنفيذ (بين 5 و 12 مرحلة)، بأسماء عربية مختصرة.\n"+
+      "اجعل تواريخ البدء متتابعة منطقياً بدءاً من تاريخ البدء، ومجموع المدد قريباً من المدة التقديرية.\n"+
+      "أعِد JSON فقط بلا أي شرح، بهذا الشكل تماماً:\n"+
+      "{\"phases\":[{\"name\":\"اسم المرحلة\",\"start\":\"YYYY-MM-DD\",\"durationDays\":30}]}";
+    const txt=await _aiText([{role:"user",content:prompt}], {maxTokens:1500, temperature:0.2});
+    const j=_extractJSON(txt);
+    if(!j || !Array.isArray(j.phases) || !j.phases.length){ _toast("⚠ تعذّر توليد الجدول — حاول مرة أخرى","warn"); if(btn){ btn.disabled=false; btn.innerHTML=_icon('activity')+" ولّد الجدول"; } return; }
+    let cursor=start;
+    const phases=j.phases.slice(0,40).map(ph=>{
+      const st=_normDate(ph.start, cursor);
+      const dur=Math.max(1,parseInt(ph.durationDays)||7);
+      cursor=_addDays(st,dur);
+      return { id:_uid(), name:String(ph.name||"مرحلة").trim().slice(0,80), start:st, durationDays:dur, progress:0 };
+    });
+    const ok=await saveSchedule(_curId, phases, true);
+    if(ok){ _schedGenForm=false; _toast("✅ تم توليد الجدول — راجعه وعدّله","success"); renderTabBody(); }
+    else if(btn){ btn.disabled=false; btn.innerHTML=_icon('activity')+" ولّد الجدول"; }
+  }catch(e){
+    console.warn("doAiGen",e);
+    _toast("⚠ خطأ في التوليد: "+((e&&e.message)||""),"warn");
+    if(btn){ btn.disabled=false; btn.innerHTML=_icon('activity')+" ولّد الجدول"; }
+  }
+}
+
+/* نوع المشروع */
+function effType(projId){ return projectType(projId) || ((_proj(projId)||{}).type||""); }
+function _projBadges(projId){
+  const p=_proj(projId); if(!p) return "";
+  const t=effType(projId);
+  let out = t ? typeBadge(t) : "";
+  if(p.manual) out += (out?" ":"")+'<span class="badge" style="background:var(--surface2);color:var(--muted)">'+_icon('edit')+' يدوي</span>';
+  return out;
+}
+async function setType(type){
+  const ok=await saveType(_curId, type);
+  if(ok){
+    if(_curTab==="schedule" && !needsSchedule(_curId)) _curTab="overview";
+    _toast("✅ حُفظ نوع المشروع","success");
+    const el=document.getElementById("page-"+PAGE_ID); if(el) renderCard(el);
+  }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -490,7 +771,27 @@ function injectCSS(){
 .pm-dim{color:var(--muted)}
 .pm-tr-unc td{background:var(--surface2)}
 .form-input.pm-inp-w{width:110px;padding:6px 9px;font-size:12px;direction:ltr;text-align:left}
-@media (max-width:760px){ .pm-cards{grid-template-columns:1fr} }
+.pm-typebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--surface2);border-radius:10px;padding:9px 13px;margin-bottom:14px;font-size:12px;color:var(--muted)}
+.pm-type-sel{width:auto;min-width:150px;padding:6px 10px;font-size:12px}
+.pm-sched-tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.pm-sched-overall{margin-bottom:14px}
+.pm-sched-overall-lbl{font-size:12px;color:var(--muted);margin-bottom:6px}
+.pm-sched-overall-lbl b{color:var(--text);font-size:15px;font-family:'JetBrains Mono',monospace}
+.pm-gantt{position:relative;height:26px;background:var(--surface2);border-radius:8px;margin-bottom:16px;overflow:hidden;border:1px solid var(--border)}
+.pm-gseg{position:absolute;top:3px;height:18px;border-radius:5px;opacity:.9;overflow:hidden;min-width:4px}
+.pm-gseg i{display:block;height:100%;background:rgba(255,255,255,.4)}
+.pm-phases{display:flex;flex-direction:column;gap:10px}
+.pm-phase{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+.pm-phase-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px}
+.pm-phase-name{font-weight:700;color:var(--text);font-size:13px}
+.pm-phase-meta{font-size:11px;color:var(--muted);margin-bottom:9px;direction:ltr;text-align:right;font-family:'JetBrains Mono',monospace}
+.pm-phase-progline{display:flex;align-items:center;gap:8px}
+.pm-prog-inp{width:60px;padding:5px 8px;font-size:12px;direction:ltr;text-align:center}
+.pm-phase-progv{font-size:12px;font-weight:700;color:var(--muted)}
+.pm-gen-form{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)}
+.pm-gen-l{display:block;font-size:11px;font-weight:700;color:var(--muted);margin:10px 0 4px}
+.pm-gen-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:760px){ .pm-cards{grid-template-columns:1fr} .pm-gen-row{grid-template-columns:1fr} }
 `;
   document.head.appendChild(st);
 }
@@ -598,6 +899,9 @@ else init();
 window.projectMgmt = {
   render, open, openAt, back, tab, openFromLanding,
   editBudget, cancelEdit, saveBudgetEdit,
+  setType,
+  aiGenSchedule, doAiGen, cancelGen, editSchedule, addPhase, delPhase,
+  saveScheduleEdit, cancelScheduleEdit, setProgress,
   startSync(){ /* لا مزامنة مستقلة — يقرأ purchases و_projectsList الحيّة */ },
   // مكشوفة لفحوص hail-tests (دوال نقية)
   _projectRollup: projectRollup,
