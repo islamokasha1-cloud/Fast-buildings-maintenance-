@@ -161,7 +161,8 @@ function scheduleDocPath(projId){ return "meta/"+_safeKey(projId)+"_schedule"; }
 /* ════════════ نوع المشروع (مقاولات/ترميم/صيانة) ════════════ */
 // يُخزَّن في مستند الموازنة نفسه (سجلّ بيانات المشروع). غير المصنّف = صيانة (بلا جدول).
 function projectType(projId){ const b=_budgetCache[projId]; return (b&&b.type) ? b.type : ""; }
-function needsSchedule(projId){ const t=projectType(projId); return t==="construction"||t==="renovation"; }
+// النوع الفعّال: من مستند الموازنة (تعديل البطاقة) أو من سجل المشروع (اختير عند الإنشاء)
+function needsSchedule(projId){ const t=effType(projId); return t==="construction"||t==="renovation"; }
 async function saveType(projId, type){
   const database=_db(); if(!database){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
   const u=_user();
