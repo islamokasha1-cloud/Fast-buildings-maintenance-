@@ -148,7 +148,7 @@ const MANUAL_PREFIX = "__MPN__:";
 function _manualNames(){ try{ return (typeof _manualProjectNamesAll==="function") ? _manualProjectNamesAll() : []; }catch(e){ return []; } }
 // قائمة موحّدة: مسجّلة (manual:false) + يدوية (manual:true) — بلا تكرار الاسم
 function allProjects(){
-  const reg = getProjects().map(p=>({ id:p.id, name:p.name||p.id, type:p.type, client:p.client, location:p.location, manual:false }));
+  const reg = getProjects().map(p=>({ id:p.id, name:p.name||p.id, type:p.type, client:p.client, location:p.location, contractStart:p.contractStart, contractMonths:p.contractMonths, desc:p.desc, manual:false }));
   const regNames = new Set(reg.map(p=>String(p.name||"").trim()));
   const manual = _manualNames()
     .map(nm=>String(nm||"").trim())
@@ -648,16 +648,27 @@ function scheduleHTML(){
     </div>`;
 }
 
+function _budgetLinesFor(projId){
+  const b=_budgetCache[projId]||{categories:[]};
+  return (b.categories||[]).filter(c=>Number(c.planned)>0)
+    .map(c=>({ name: CAT_NAME[c.key]||c.name||c.key, planned:Number(c.planned) }));
+}
 function _genFormHTML(){
-  const def=_fmtD(new Date());
+  const p=_proj(_curId)||{};
+  const lines=_budgetLinesFor(_curId);
+  const defStart=_normDate(p.contractStart||"", _fmtD(new Date()));
+  const defMonths=parseInt(p.contractMonths)||6;
+  const note = lines.length
+    ? `<div class="pm-hint" style="margin-top:0">سيقرأ الذكاء الاصطناعي <b>موازنة المشروع</b> (${lines.length} بند مرصود) ويولّد مراحل مطابقة للتخصصات وبأوزان قريبة من الميزانية. النطاق النصّي اختياري يُكمّلها.</div>`
+    : `<div class="pm-hint" style="margin-top:0">لا توجد موازنة مرصودة بعد — يُفضّل إدخال الموازنة أولاً لدقّة أعلى. مؤقتاً اكتب نطاق العمل ليقترح الذكاء الاصطناعي المراحل.</div>`;
   return `
     <div class="pm-gen-form">
-      <div class="pm-hint" style="margin-top:0">أدخل بيانات المشروع ليقترح الذكاء الاصطناعي المراحل — تقدر تعدّلها بعدها.</div>
-      <label class="pm-gen-l">نطاق العمل باختصار</label>
-      <textarea id="pm-gen-scope" class="form-input" rows="2" placeholder="مثال: فيلا دورين 400م² — أساسات + هيكل خرساني + مبانٍ + كهرباء وسباكة + محارة + تشطيبات"></textarea>
+      ${note}
+      <label class="pm-gen-l">نطاق العمل (اختياري)</label>
+      <textarea id="pm-gen-scope" class="form-input" rows="2" placeholder="مثال: فيلا دورين 400م² — أساسات + هيكل خرساني + مبانٍ + تشطيبات"></textarea>
       <div class="pm-gen-row">
-        <div><label class="pm-gen-l">تاريخ البدء</label><input type="date" id="pm-gen-start" class="form-input" value="${def}"></div>
-        <div><label class="pm-gen-l">المدة التقديرية (شهور)</label><input type="number" min="1" id="pm-gen-months" class="form-input" value="6"></div>
+        <div><label class="pm-gen-l">تاريخ البدء</label><input type="date" id="pm-gen-start" class="form-input" value="${defStart}"></div>
+        <div><label class="pm-gen-l">المدة التقديرية (شهور)${p.contractMonths?' — من العقد':''}</label><input type="number" min="1" id="pm-gen-months" class="form-input" value="${defMonths}"></div>
       </div>
       <div class="pm-sched-tools" style="margin-top:12px">
         <button class="btn btn-primary btn-sm" id="pm-gen-btn" onclick="projectMgmt.doAiGen()">${_icon('activity')} ولّد الجدول</button>
@@ -732,11 +743,18 @@ async function doAiGen(){
   const start=_normDate((document.getElementById("pm-gen-start")||{}).value||"");
   const months=parseInt((document.getElementById("pm-gen-months")||{}).value)||6;
   const p=_proj(_curId), t=effType(_curId), tLbl=PROJECT_TYPES[t]||"مشروع";
+  // نغذّي الـ AI بموازنة المشروع (التخصصات وأوزانها المالية) فتخرج المراحل مطابقة للواقع
+  const lines=_budgetLinesFor(_curId);
+  const budgetStr = lines.length ? lines.map(c=>c.name+": "+c.planned.toLocaleString('en-US')).join("، ") : "";
   const btn=document.getElementById("pm-gen-btn"); if(btn){ btn.disabled=true; btn.textContent="⏳ جارٍ التوليد…"; }
   try{
     const prompt =
       "أنت مخطّط مشاريع إنشاءات محترف. أنشئ جدولاً زمنياً مبدئياً لمشروع \""+(p?p.name:"")+"\" (نوع: "+tLbl+").\n"+
-      "نطاق العمل: "+(scope||"غير محدّد")+"\n"+
+      (budgetStr
+        ? "بنود الموازنة المرصودة (تخصص: مبلغ بالريال): "+budgetStr+"\n"+
+          "اجعل المراحل مغطّية لهذه التخصصات، ووزّع مدد المراحل بما يتناسب مع أوزانها المالية مع الترتيب المنطقي للتنفيذ.\n"
+        : "")+
+      "نطاق العمل: "+(scope||(budgetStr?"مستنتَج من بنود الموازنة أعلاه":"غير محدّد"))+"\n"+
       "تاريخ البدء: "+start+"\nالمدة التقديرية الإجمالية: "+months+" شهر.\n"+
       "أعطِ المراحل الرئيسية بالترتيب المنطقي للتنفيذ (بين 5 و 12 مرحلة)، بأسماء عربية مختصرة.\n"+
       "اجعل تواريخ البدء متتابعة منطقياً بدءاً من تاريخ البدء، ومجموع المدد قريباً من المدة التقديرية.\n"+
