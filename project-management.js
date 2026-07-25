@@ -230,6 +230,22 @@ function open(projId){
 }
 function back(){ _curId=null; _editing=false; render(); }
 
+// فتح إدارة المشاريع من الصفحة الخارجية (منتقي المشاريع) — كيان شامل لكل المشاريع
+// مثل «المشتريات المركزية». نعيد استخدام openGlobalPurchases لأنها تنقل من المنتقي إلى
+// هيكل التطبيق وتشغّل مزامنة المشتريات (مصدر المصروف الفعلي)، ثم نعرض صفحة المشاريع.
+async function openFromLanding(){
+  if(!_canAccess()){ _toast("🔒 هذا القسم متاح للأدمن فقط حالياً","warn"); return; }
+  try{ if(typeof openGlobalPurchases==="function"){ await openGlobalPurchases(); } }
+  catch(e){ console.warn("openFromLanding/openGlobalPurchases",e); }
+  try{ showPage("projects"); }catch(e){}
+  // تسمية الهيدر لسياق المشاريع (openGlobalPurchases يضبطها على «المشتريات المركزية»)
+  try{ const lbl=document.getElementById("current-project-label"); if(lbl) lbl.textContent="إدارة المشاريع"; }catch(e){}
+  // بيانات المشتريات تصل عبر onSnapshot تدريجياً — أعِد الرسم لتحديث الأرقام
+  setTimeout(()=>{ if(_curId==null && _onProjectsPage()) render(); }, 1200);
+  setTimeout(()=>{ if(_curId==null && _onProjectsPage()) render(); }, 3000);
+}
+function _onProjectsPage(){ const pg=document.getElementById("page-"+PAGE_ID); return !!pg && pg.classList.contains("active"); }
+
 function renderCard(el){
   const p=_proj(_curId);
   const name = p ? (p.name||_curId) : _curId;
@@ -473,6 +489,32 @@ function injectSidebarGroup(){
   else { nav.appendChild(hdr); nav.appendChild(grp); }
 }
 
+/* ══ حقن زر «إدارة المشاريع» في الصفحة الخارجية (منتقي المشاريع) ══
+   كيانٌ شامل لكل المشاريع بجوار زر «المشتريات المركزية» — بنفس طرازه للاتساق. */
+function injectLandingButton(){
+  if(!_canAccess()){ const ex=document.getElementById("pm-landing-btn-wrap"); if(ex) ex.remove(); return; }
+  if(document.getElementById("pm-landing-btn-wrap")) return;
+  const gpWrap = document.getElementById("global-purchases-btn-wrap"); // زر المشتريات المركزية
+  const anchor = gpWrap || document.getElementById("project-add-btn");
+  if(!anchor || !anchor.parentElement) return;
+  const wrap = document.createElement("div");
+  wrap.id = "pm-landing-btn-wrap";
+  wrap.style.cssText = "margin:8px 0 4px;width:100%";
+  wrap.innerHTML =
+    '<button onclick="projectMgmt.openFromLanding()" style="width:100%;background:linear-gradient(135deg,#22497f 0%,#1b3a6b 55%,#142c52 100%);color:#fff;border:none;border-radius:14px;padding:14px 18px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:12px;box-shadow:0 8px 22px rgba(27,58,107,0.28), inset 0 1px 0 rgba(255,255,255,0.12);transition:opacity .15s" onmouseover="this.style.opacity=\'.9\'" onmouseout="this.style.opacity=\'1\'">' +
+      '<span style="width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.13);display:flex;align-items:center;justify-content:center;flex-shrink:0">' + _svg('building2') + '</span>' +
+      '<div style="text-align:right">' +
+        '<div>إدارة المشاريع</div>' +
+        '<div style="font-size:11px;opacity:.8;font-weight:400;margin-top:2px">الموازنة والتكلفة الفعلية لكل مشروع</div>' +
+      '</div>' +
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:auto;opacity:.7"><polyline points="9 18 15 12 9 6"/></svg>' +
+    '</button>';
+  // ضعه مباشرةً بعد زر المشتريات المركزية (أو بعد زر الإضافة إن غاب)
+  anchor.parentElement.insertBefore(wrap, anchor.nextSibling);
+  // اضبط حجم أيقونة الـ SVG داخل الشارة (عناصر _svg بلا أبعاد صريحة)
+  const ic = wrap.querySelector('span > svg'); if(ic){ ic.setAttribute('width','19'); ic.setAttribute('height','19'); ic.setAttribute('stroke-width','2'); }
+}
+
 /* ══ لفّ showPage دون تعديل النواة ══ */
 function hookShowPage(){
   if(window._pmHooked || typeof window.showPage!=="function") return;
@@ -504,9 +546,10 @@ function hookShowPage(){
 function init(){
   ensurePage();
   injectSidebarGroup();
+  injectLandingButton();
   hookShowPage();
-  // القائمة الجانبية قد يُعاد بناؤها بعد الدخول — أعِد الحقن عند التغيير
-  const obs=new MutationObserver(()=>{ injectSidebarGroup(); hookShowPage(); });
+  // القائمة الجانبية والصفحة الخارجية قد يُعاد بناؤهما بعد الدخول — أعِد الحقن عند التغيير
+  const obs=new MutationObserver(()=>{ injectSidebarGroup(); injectLandingButton(); hookShowPage(); });
   obs.observe(document.body,{childList:true,subtree:true});
 }
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", init);
@@ -514,7 +557,7 @@ else init();
 
 /* ════════════ الواجهة العامة ════════════ */
 window.projectMgmt = {
-  render, open, back, tab,
+  render, open, back, tab, openFromLanding,
   editBudget, cancelEdit, saveBudgetEdit,
   startSync(){ /* لا مزامنة مستقلة — يقرأ purchases و_projectsList الحيّة */ },
   // مكشوفة لفحوص hail-tests (دوال نقية)
