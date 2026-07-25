@@ -26,7 +26,7 @@ const VERSION = "0.1";
 
 /* ── البنود العامة الثابتة (العمود الفقري — معتمدة §٦ من مستند التصوّر) ── */
 const BUDGET_CATEGORIES = [
-  { key:"materials",     name:"خامات عامة" },
+  { key:"materials",     name:"مواد بناء" },
   { key:"plumbing",      name:"سباكة" },
   { key:"electrical",    name:"كهرباء" },
   { key:"hvac",          name:"تكييف" },
@@ -37,6 +37,7 @@ const BUDGET_CATEGORIES = [
   { key:"labor",         name:"مصنعيات/عمالة" },
   { key:"subcontractor", name:"مقاول باطن" },
   { key:"equipment",     name:"معدات/إيجارات" },
+  { key:"cleaning",      name:"مواد نظافة" },
   { key:"overhead",      name:"مصاريف إدارية" },
 ];
 const UNCATEGORIZED = { key:"uncategorized", name:"غير مصنّف" };
@@ -53,6 +54,7 @@ const DEFAULT_TYPE_MAP = {
   "مواد تكييف":"hvac",
   "أدوات":"equipment",
   "خدمات":"subcontractor",
+  "مواد نظافة":"cleaning",
   "مواد مختلفة":"materials",
   "أخرى":"uncategorized"
 };
@@ -879,7 +881,7 @@ function injectCSS(){
 .pm-table tbody tr:last-child td{border-bottom:none}
 .pm-table tfoot td{font-weight:800;background:var(--surface2);color:var(--text)}
 .pm-td-name{font-weight:700;color:var(--text)}
-.pm-num{direction:ltr;text-align:left;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--text)}
+.pm-num{direction:ltr;text-align:right;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--text)}
 .pm-dim{color:var(--muted)}
 .pm-tr-unc td{background:var(--surface2)}
 .form-input.pm-inp-w{width:110px;padding:6px 9px;font-size:12px;direction:ltr;text-align:left}
