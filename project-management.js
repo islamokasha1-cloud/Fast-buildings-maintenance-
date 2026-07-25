@@ -30,6 +30,7 @@ const BUDGET_CATEGORIES = [
   { key:"plumbing",      name:"سباكة" },
   { key:"electrical",    name:"كهرباء" },
   { key:"hvac",          name:"تكييف" },
+  { key:"mechanical",    name:"مواد ميكانيكية" },
   { key:"plaster",       name:"محارة/بياض" },
   { key:"finishes",      name:"تشطيبات" },
   { key:"carpentry",     name:"نجارة" },
@@ -38,6 +39,7 @@ const BUDGET_CATEGORIES = [
   { key:"subcontractor", name:"مقاول باطن" },
   { key:"equipment",     name:"معدات/إيجارات" },
   { key:"cleaning",      name:"مواد نظافة" },
+  { key:"misc",          name:"مواد مختلفة" },
   { key:"overhead",      name:"مصاريف إدارية" },
 ];
 const UNCATEGORIZED = { key:"uncategorized", name:"غير مصنّف" };
@@ -50,12 +52,12 @@ const DEFAULT_TYPE_MAP = {
   "مواد كهربائية":"electrical",
   "مواد سباكة":"plumbing",
   "مواد بناء":"materials",
-  "مواد ميكانيكية":"equipment",
+  "مواد ميكانيكية":"mechanical",
   "مواد تكييف":"hvac",
   "أدوات":"equipment",
   "خدمات":"subcontractor",
   "مواد نظافة":"cleaning",
-  "مواد مختلفة":"materials",
+  "مواد مختلفة":"misc",
   "أخرى":"uncategorized"
 };
 let _catMap = null; // تجاوزات الأدمن المحمّلة من meta/pm_category_map (تُدمَج فوق الافتراضي)
