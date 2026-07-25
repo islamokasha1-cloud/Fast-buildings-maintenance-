@@ -107,6 +107,18 @@ let _editing = false;    // وضع تحرير الموازنة
 let _lastList = [];      // آخر قائمة معروضة (للفتح بالفهرس)
 let _manualLoaded = false; // حُمّلت أسماء المشاريع اليدوية من meta؟
 let _mapView = false;    // شاشة «ربط أنواع البنود بالموازنة» مفتوحة؟
+let _usageView = false;  // شاشة «استهلاك الذكاء الاصطناعي» مفتوحة؟
+let _usageData = null;   // meta/ai_usage المحمّل
+// أسعار تقديرية لفئة Sonnet (دولار لكل مليون توكن) — للعرض التقريبي فقط
+const AI_RATE_IN = 3, AI_RATE_OUT = 15;
+function _aiUsageDocPath(){ return (typeof IS_DEV!=="undefined" && IS_DEV) ? "meta/ai_usage_dev" : "meta/ai_usage"; }
+function _estCostUSD(inT,outT){ return ((Number(inT)||0)/1e6*AI_RATE_IN) + ((Number(outT)||0)/1e6*AI_RATE_OUT); }
+function _usd(n){ return "$"+(Number(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+async function loadUsage(){
+  const database=_db(); if(!database){ _usageData=_usageData||{}; return; }
+  try{ const snap=await database.doc(_aiUsageDocPath()).get(); _usageData=(snap&&snap.exists)?(snap.data()||{}):{}; }
+  catch(e){ console.warn("loadUsage",e); _usageData=_usageData||{}; }
+}
 
 /* ════════════ أغلفة آمنة لخدمات النواة ════════════ */
 function _db(){ return (typeof db!=="undefined" && db) ? db : null; }
@@ -306,7 +318,8 @@ function render(){
   ensurePage();
   const el=document.getElementById("page-"+PAGE_ID);
   if(!el) return;
-  if(_mapView) renderCatMap(el);
+  if(_usageView) renderUsage(el);
+  else if(_mapView) renderCatMap(el);
   else if(_curId) renderCard(el);
   else renderList(el);
 }
@@ -325,7 +338,10 @@ function renderList(el){
     <div class="pm-head">
       <h2 class="pm-title">${_icon('building2')} إدارة المشاريع</h2>
       <div class="pm-sub">الموازنة والمصروف الفعلي لكل مشروع — المصروف مسحوبٌ مباشرةً من المشتريات</div>
-      ${_canEdit()?`<button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="projectMgmt.openCatMap()">${_icon('tag')} ربط أنواع البنود بالموازنة</button>`:""}
+      ${_canEdit()?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn btn-ghost btn-sm" onclick="projectMgmt.openCatMap()">${_icon('tag')} ربط أنواع البنود بالموازنة</button>
+        <button class="btn btn-ghost btn-sm" onclick="projectMgmt.openUsage()">${_icon('activity')} استهلاك الذكاء الاصطناعي</button>
+      </div>`:""}
     </div>
     <div id="pm-list" class="pm-cards"></div>`;
 
@@ -775,7 +791,7 @@ async function doAiGen(){
     let phases=null, lastErr="";
     for(let attempt=1; attempt<=2 && !phases; attempt++){
       let txt="";
-      try{ txt=await _aiText([{role:"user",content:prompt}], {maxTokens:2500, temperature:0.25}); }
+      try{ txt=await _aiText([{role:"user",content:prompt}], {maxTokens:2500, temperature:0.25, feature:"الجدول الزمني"}); }
       catch(callErr){ lastErr=(callErr&&callErr.message)||"تعذّر الاتصال بالذكاء الاصطناعي"; console.warn("doAiGen call#"+attempt,callErr); continue; }
       try{ console.log("[projectMgmt] AI schedule raw #"+attempt+":", txt); }catch(_e){}
       const j=_extractJSON(txt);
@@ -849,8 +865,72 @@ function renderCatMap(el){
     </table></div>
     <div class="pm-hint">الافتراض ذكيّ للأنواع المدمجة؛ عدّل أي ربط ثم احفظ. الأنواع المخصّصة تبدأ «غير مصنّف».</div>`;
 }
+/* ── شاشة «استهلاك الذكاء الاصطناعي» (للأدمن) ── */
+function renderUsage(el){
+  const d=_usageData||{};
+  const tot=d.total||{calls:0,inTok:0,outTok:0};
+  const totCost=_estCostUSD(tot.inTok,tot.outTok);
+  const months=d.months||{};
+  const mkeys=Object.keys(months).sort().reverse();
+  // تجميع حسب الميزة عبر كل الشهور
+  const feat={};
+  mkeys.forEach(k=>{ const f=(months[k]&&months[k].features)||{}; Object.keys(f).forEach(name=>{
+    if(!feat[name]) feat[name]={calls:0,inTok:0,outTok:0};
+    feat[name].calls+=Number(f[name].calls)||0; feat[name].inTok+=Number(f[name].inTok)||0; feat[name].outTok+=Number(f[name].outTok)||0;
+  }); });
+  const fkeys=Object.keys(feat).sort((a,b)=>_estCostUSD(feat[b].inTok,feat[b].outTok)-_estCostUSD(feat[a].inTok,feat[a].outTok));
+  const card=(lbl,val,sc,sub)=>`<div class="stat-card" style="--sc:${sc}"><div class="sl">${lbl}</div><div class="sv">${val}</div>${sub?`<div class="click-hint">${sub}</div>`:""}</div>`;
+  const empty = !tot.calls;
+  el.innerHTML = `
+    <div class="pm-head">
+      <button class="btn btn-ghost btn-sm pm-back" onclick="projectMgmt.closeUsage()">${_icon('folderOpen')} كل المشاريع</button>
+      <h2 class="pm-title">${_icon('activity')} استهلاك الذكاء الاصطناعي</h2>
+      <div class="pm-sub">تقديري للمتابعة — الفاتورة الرسمية من Anthropic (console.anthropic.com). ${d.lastAt?'آخر استخدام: '+_esc(String(d.lastAt).slice(0,10)):''}</div>
+    </div>
+    ${empty ? `<div class="pm-hint" style="margin-top:0">لا يوجد استهلاك مسجّل بعد. سيبدأ التسجيل تلقائياً مع أول استخدام للذكاء الاصطناعي بعد هذا التحديث.</div>` : `
+    <div class="pm-stats">
+      ${card("عدد النداءات", money(tot.calls), "var(--primary)", "")}
+      ${card("توكنز الإدخال", money(tot.inTok), "var(--info)", "")}
+      ${card("توكنز الإخراج", money(tot.outTok), "var(--warn)", "")}
+      ${card("التكلفة التقديرية", _usd(totCost), "var(--accent)", "≈ إجمالي")}
+    </div>
+    <div class="pm-table-wrap"><table class="pm-table">
+      <thead><tr><th>الشهر</th><th>نداءات</th><th>إدخال</th><th>إخراج</th><th>تكلفة تقديرية</th></tr></thead>
+      <tbody>
+        ${mkeys.map(k=>{const m=months[k]||{};return `<tr>
+          <td class="pm-td-name">${_esc(k)}</td>
+          <td class="pm-num">${money(m.calls)}</td>
+          <td class="pm-num">${money(m.inTok)}</td>
+          <td class="pm-num">${money(m.outTok)}</td>
+          <td class="pm-num">${_usd(_estCostUSD(m.inTok,m.outTok))}</td>
+        </tr>`;}).join("")}
+      </tbody>
+    </table></div>
+    <div class="pm-sched-overall-lbl" style="margin:16px 0 6px">حسب الميزة (كل الفترات)</div>
+    <div class="pm-table-wrap"><table class="pm-table">
+      <thead><tr><th>الميزة</th><th>نداءات</th><th>إدخال</th><th>إخراج</th><th>تكلفة تقديرية</th></tr></thead>
+      <tbody>
+        ${fkeys.map(n=>{const f=feat[n];return `<tr>
+          <td class="pm-td-name">${_esc(n)}</td>
+          <td class="pm-num">${money(f.calls)}</td>
+          <td class="pm-num">${money(f.inTok)}</td>
+          <td class="pm-num">${money(f.outTok)}</td>
+          <td class="pm-num">${_usd(_estCostUSD(f.inTok,f.outTok))}</td>
+        </tr>`;}).join("")}
+      </tbody>
+    </table></div>`}
+    <div class="pm-hint">التكلفة تقديرية بأسعار فئة Sonnet (~$${AI_RATE_IN}/مليون إدخال، ~$${AI_RATE_OUT}/مليون إخراج). الأرقام الرسمية للفوترة من حساب Anthropic.</div>`;
+}
+function openUsage(){
+  _usageView=true; _curId=null; _mapView=false;
+  const el=document.getElementById("page-"+PAGE_ID);
+  loadUsage().then(()=>{ if(_usageView && el) renderUsage(el); });
+  if(el) renderUsage(el);
+}
+function closeUsage(){ _usageView=false; render(); }
+
 function openCatMap(){
-  _mapView=true; _curId=null;
+  _mapView=true; _curId=null; _usageView=false;
   const el=document.getElementById("page-"+PAGE_ID);
   if(_catMap===null){ loadCatMap().then(()=>{ if(_mapView && el) renderCatMap(el); }); }
   if(el) renderCatMap(el);
@@ -1061,6 +1141,7 @@ window.projectMgmt = {
   editBudget, cancelEdit, saveBudgetEdit,
   setType,
   openCatMap, closeCatMap, saveCatMapEdit,
+  openUsage, closeUsage,
   aiGenSchedule, doAiGen, cancelGen, editSchedule, addPhase, delPhase,
   saveScheduleEdit, cancelScheduleEdit, setProgress,
   startSync(){ /* لا مزامنة مستقلة — يقرأ purchases و_projectsList الحيّة */ },
