@@ -65,6 +65,12 @@ function _user(){ try{ return currentUser||null; }catch(e){ return null; } }
 function _role(){ const u=_user(); return u&&u.role ? u.role : ""; }
 function _canEdit(){ const r=_role(); return r==="admin"||r==="project_manager"; }
 
+// ── بوابة الوصول (مؤقّتة — مرحلة ١) ──
+// القسم مقفول على الأدمن للاختبار الحيّ ببيانات حقيقية قبل فتحه للفريق.
+// ★ للفتح للكل لاحقاً: اجعل RESTRICT_TO = []  (سطر واحد) — عندها يراه كل مستخدمٍ له دور.
+const RESTRICT_TO = ["admin"];
+function _canAccess(){ return RESTRICT_TO.length===0 ? !!_role() : RESTRICT_TO.indexOf(_role())!==-1; }
+
 // أيقونات المنصة (SVG) بدل الإيموجي — تعيد استخدام _ic/_svgIcon العامّتين في index.html
 // (نفس ما تفعله ICG في purchase-kpi.js). ترجع "" بأمان إن لم تكن محمّلة (اختبارات/jsdom).
 function _icon(name,cls){ try{ return (typeof _ic==="function") ? _ic(name,cls) : ""; }catch(e){ return ""; } }
@@ -436,6 +442,12 @@ function injectCSS(){
 
 /* ══ حقن مجموعة «إدارة المشاريع» في القائمة الجانبية ══ */
 function injectSidebarGroup(){
+  // القفل: أزِل المجموعة إن ظهرت لغير المصرّح (مثلاً بعد تبديل المستخدم)، ولا تحقنها
+  if(!_canAccess()){
+    const h=document.getElementById("hdr-grp-projects"); if(h) h.remove();
+    const g=document.getElementById("grp-projects");     if(g) g.remove();
+    return;
+  }
   if(document.getElementById("hdr-grp-projects")) return;
   const nav=document.querySelector(".sidebar-nav");
   if(!nav) return;
@@ -466,6 +478,11 @@ function hookShowPage(){
   if(window._pmHooked || typeof window.showPage!=="function") return;
   const orig=window.showPage;
   window.showPage=function(id){
+    // القفل: منع الوصول المباشر لغير المصرّح (deep-link/بقايا) — تحويل للوحة
+    if(id===PAGE_ID && !_canAccess()){
+      try{ toast("🔒 هذا القسم متاح للأدمن فقط حالياً","warn"); }catch(e){}
+      return orig.apply(this, ["dashboard"]);
+    }
     orig.apply(this, arguments);
     if(id===PAGE_ID){
       const pg=document.getElementById("page-"+PAGE_ID);
