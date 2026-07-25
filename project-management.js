@@ -311,6 +311,39 @@ async function saveBudget(projId, categories){
 function _projName(projId){ const p=_proj(projId); return p ? (p.name||projId) : projId; }
 function _proj(projId){ return allProjects().find(x=>x.id===projId)||null; }
 
+/* ════════════ المقايسة التفصيلية (BOQ) ════════════
+   بنودٌ تفصيلية لكل مشروع، كلٌّ مصنّفٌ تحت بند موازنة. عند الحفظ تُحسب مجاميع كل بند
+   عام وتُكتَب في موازنة المشروع (الموازنة المخطّطة = مجموع بنود المقايسة تحتها). */
+const _boqCache = {}; // projId → {items:[{id,desc,categoryKey,unit,qty,unitPrice}]}
+let _boqEditing=false, _boqDraft=null;
+function boqDocPath(projId){ return "meta/"+_safeKey(projId)+"_boq"; }
+function _boqLineTotal(it){ return (Number(it.qty)||0) * (Number(it.unitPrice)||0); }
+async function loadBoq(projId){
+  const database=_db();
+  if(!database){ _boqCache[projId]=_boqCache[projId]||{items:[]}; return _boqCache[projId]; }
+  try{
+    const snap=await database.doc(boqDocPath(projId)).get();
+    const d=(snap&&snap.exists)?(snap.data()||{}):{};
+    _boqCache[projId]={ items: Array.isArray(d.items)?d.items:[] };
+  }catch(e){ console.warn("loadBoq",e); _boqCache[projId]=_boqCache[projId]||{items:[]}; }
+  return _boqCache[projId];
+}
+async function saveBoq(projId, items){
+  const database=_db(); if(!database){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
+  const u=_user();
+  try{
+    await database.doc(boqDocPath(projId)).set({ items, updatedAt:new Date().toISOString(), updatedBy:(u&&u.name)||"" }, { merge:true });
+    _boqCache[projId]={ items };
+    // مزامنة الموازنة: كل بند عام = مجموع بنود مقايسته؛ البنود بلا مقايسة تبقى بقيمتها اليدوية
+    const sums={};
+    items.forEach(it=>{ const k=it.categoryKey; if(k && CAT_NAME[k] && k!=="uncategorized") sums[k]=(sums[k]||0)+_boqLineTotal(it); });
+    const existing={}; ((_budgetCache[projId]||{}).categories||[]).forEach(c=>existing[c.key]=Number(c.planned)||0);
+    const cats=BUDGET_CATEGORIES.map(cat=>({ key:cat.key, name:cat.name, planned: (cat.key in sums)? sums[cat.key] : (existing[cat.key]||0) }));
+    await saveBudget(projId, cats);
+    return true;
+  }catch(e){ console.warn("saveBoq",e); _toast("⚠ تعذّر حفظ المقايسة","warn"); return false; }
+}
+
 /* ════════════════════════════════════════════════════════════
    العرض
    ════════════════════════════════════════════════════════════ */
@@ -389,7 +422,7 @@ function paintList(projects){
 /* ── بطاقة مشروع واحد ── */
 function open(projId){
   _curId=projId; _curTab="overview"; _editing=false;
-  _schedEditing=false; _schedGenForm=false; _schedDraft=null; _genErr="";
+  _schedEditing=false; _schedGenForm=false; _schedDraft=null; _genErr=""; _boqEditing=false; _boqDraft=null;
   const el=document.getElementById("page-"+PAGE_ID);
   if(!(projId in _budgetCache)){
     loadBudget(projId).then(()=>{ if(_curId===projId) renderCard(el); });
@@ -426,6 +459,7 @@ function renderCard(el){
     </div>
     <div class="pm-tabs">
       <button class="pm-tab ${_curTab==='overview'?'on':''}" data-tab="overview" onclick="projectMgmt.tab('overview')">نظرة عامة</button>
+      <button class="pm-tab ${_curTab==='boq'?'on':''}" data-tab="boq" onclick="projectMgmt.tab('boq')">المقايسة</button>
       <button class="pm-tab ${_curTab==='budget'?'on':''}" data-tab="budget" onclick="projectMgmt.tab('budget')">الموازنة</button>
       ${needsSchedule(_curId)?`<button class="pm-tab ${_curTab==='schedule'?'on':''}" data-tab="schedule" onclick="projectMgmt.tab('schedule')">الجدول الزمني</button>`:""}
     </div>
@@ -433,7 +467,7 @@ function renderCard(el){
   renderTabBody();
 }
 function tab(t){
-  _curTab=t; _editing=false; _schedEditing=false; _schedGenForm=false; _schedDraft=null; _genErr="";
+  _curTab=t; _editing=false; _schedEditing=false; _schedGenForm=false; _schedDraft=null; _genErr=""; _boqEditing=false; _boqDraft=null;
   // حدّث تمييز أزرار التبويب (renderTabBody يعيد الجسم فقط)
   document.querySelectorAll("#page-"+PAGE_ID+" .pm-tab").forEach(b=>{
     b.classList.toggle("on", b.dataset.tab===t);
@@ -446,6 +480,13 @@ function renderTabBody(){
   if(!body) return;
   if(_curTab==="overview") body.innerHTML = overviewHTML();
   else if(_curTab==="budget") body.innerHTML = budgetHTML();
+  else if(_curTab==="boq"){
+    if(_curId in _boqCache) body.innerHTML = boqHTML();
+    else {
+      body.innerHTML = `<div class="pm-hint" style="margin-top:0">جارٍ تحميل المقايسة…</div>`;
+      loadBoq(_curId).then(()=>{ if(_curTab==="boq"){ const b=document.getElementById("pm-tab-body"); if(b) b.innerHTML=boqHTML(); } });
+    }
+  }
   else if(_curTab==="schedule"){
     if(_curId in _scheduleCache) body.innerHTML = scheduleHTML();
     else {
@@ -574,6 +615,88 @@ async function saveBudgetEdit(){
   });
   const ok = await saveBudget(_curId, categories);
   if(ok){ _editing=false; _toast("✅ حُفظت الموازنة","success"); renderTabBody(); }
+}
+
+/* ── المقايسة التفصيلية: عرض/تحرير ── */
+function boqHTML(){
+  const items=((_boqCache[_curId]||{}).items)||[];
+  const canEdit=_canEdit();
+  if(_boqEditing) return _boqEditHTML(_boqDraft||[]);
+  const toolbar = canEdit
+    ? `<div class="pm-sched-tools"><button class="btn btn-primary btn-sm" onclick="projectMgmt.editBoq()">${_icon('edit')} تعديل المقايسة</button></div>`
+    : "";
+  if(!items.length){
+    return toolbar + `<div class="pm-hint" style="margin-top:0">لا توجد مقايسة بعد. ${canEdit?'اضغط «تعديل المقايسة» لإضافة البنود — وستُحسب الموازنة تلقائياً منها.':'التحرير للأدمن أو مدير المشاريع.'}</div>`;
+  }
+  const byCat={}; items.forEach(it=>{ const k=(it.categoryKey&&CAT_NAME[it.categoryKey])?it.categoryKey:"uncategorized"; (byCat[k]=byCat[k]||[]).push(it); });
+  const cats=BUDGET_CATEGORIES.concat([UNCATEGORIZED]).filter(c=>byCat[c.key]);
+  let grand=0;
+  const sections=cats.map(c=>{
+    let sub=0;
+    const rows=byCat[c.key].map(it=>{ const t=_boqLineTotal(it); sub+=t; return `<tr>
+        <td class="pm-td-name">${_esc(it.desc)}</td>
+        <td class="pm-num">${_esc(it.unit||"")}</td>
+        <td class="pm-num">${money(it.qty)}</td>
+        <td class="pm-num">${money(it.unitPrice)}</td>
+        <td class="pm-num">${money(t)}</td>
+      </tr>`; }).join("");
+    grand+=sub;
+    return `<tr class="pm-boq-cat"><td colspan="4">${_esc(c.name)}</td><td class="pm-num">${money(sub)}</td></tr>`+rows;
+  }).join("");
+  return toolbar + `<div class="pm-table-wrap"><table class="pm-table">
+      <thead><tr><th>البند</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>
+      <tbody>${sections}</tbody>
+      <tfoot><tr><td class="pm-td-name" colspan="4">إجمالي المقايسة</td><td class="pm-num">${money(grand)}</td></tr></tfoot>
+    </table></div>
+    <div class="pm-hint">«الموازنة المخطّطة» تُحسب تلقائياً من هذه المقايسة (كل بند عام = مجموع بنوده). قريباً: استيراد Excel واستخراج بالذكاء الاصطناعي.</div>`;
+}
+function _boqEditHTML(items){
+  const catOpts=(sel)=> BUDGET_CATEGORIES.map(c=>`<option value="${c.key}" ${sel===c.key?'selected':''}>${_esc(c.name)}</option>`).join("");
+  return `
+    <div class="pm-sched-tools">
+      <button class="btn btn-primary btn-sm" onclick="projectMgmt.saveBoqEdit()">${_icon('checkCircle')} حفظ</button>
+      <button class="btn btn-ghost btn-sm" onclick="projectMgmt.cancelBoqEdit()">إلغاء</button>
+      <button class="btn btn-ghost btn-sm" onclick="projectMgmt.addBoqLine()">${_icon('plus')} إضافة بند</button>
+    </div>
+    <div class="pm-table-wrap"><table class="pm-table">
+      <thead><tr><th>البند</th><th>البند العام</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th></th></tr></thead>
+      <tbody>
+        ${items.map((it,i)=>`<tr>
+          <td><input class="form-input" data-f="desc" data-i="${i}" value="${_esc(it.desc||'')}"></td>
+          <td><select class="form-input" data-f="categoryKey" data-i="${i}">${catOpts(it.categoryKey||'materials')}</select></td>
+          <td><input class="form-input pm-inp-w" data-f="unit" data-i="${i}" value="${_esc(it.unit||'')}"></td>
+          <td><input type="number" min="0" class="form-input pm-inp-w" data-f="qty" data-i="${i}" value="${it.qty!=null?it.qty:''}"></td>
+          <td><input type="number" min="0" class="form-input pm-inp-w" data-f="unitPrice" data-i="${i}" value="${it.unitPrice!=null?it.unitPrice:''}"></td>
+          <td><button class="btn btn-ghost btn-sm" title="حذف" onclick="projectMgmt.delBoqLine(${i})">${_icon('trash')}</button></td>
+        </tr>`).join("")}
+        ${items.length?"":`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">لا بنود — اضغط «إضافة بند».</td></tr>`}
+      </tbody>
+    </table></div>
+    <div class="pm-hint">صنّف كل بند تحت بند موازنة — الموازنة تتجمّع منها تلقائياً عند الحفظ.</div>`;
+}
+function _syncBoqDraft(){
+  if(!_boqDraft) return;
+  document.querySelectorAll("#pm-tab-body [data-i]").forEach(inp=>{
+    const i=parseInt(inp.dataset.i), f=inp.dataset.f; if(!_boqDraft[i]||!f) return;
+    _boqDraft[i][f] = (f==="qty"||f==="unitPrice") ? (Number(inp.value)||0) : inp.value;
+  });
+}
+function editBoq(){
+  const items=((_boqCache[_curId]||{}).items)||[];
+  _boqDraft = items.map(it=>({ id:it.id||_uid(), desc:it.desc||"", categoryKey:it.categoryKey||"materials", unit:it.unit||"", qty:Number(it.qty)||0, unitPrice:Number(it.unitPrice)||0 }));
+  _boqEditing=true; renderTabBody();
+}
+function addBoqLine(){ _syncBoqDraft(); if(!_boqDraft) _boqDraft=[]; _boqDraft.push({ id:_uid(), desc:"", categoryKey:"materials", unit:"", qty:0, unitPrice:0 }); renderTabBody(); }
+function delBoqLine(i){ _syncBoqDraft(); if(_boqDraft){ _boqDraft.splice(i,1); renderTabBody(); } }
+function cancelBoqEdit(){ _boqEditing=false; _boqDraft=null; renderTabBody(); }
+async function saveBoqEdit(){
+  _syncBoqDraft();
+  const items=(_boqDraft||[]).filter(it=>String(it.desc||"").trim()).map(it=>({
+    id:it.id||_uid(), desc:String(it.desc).trim(), categoryKey:it.categoryKey||"materials",
+    unit:String(it.unit||"").trim(), qty:Number(it.qty)||0, unitPrice:Number(it.unitPrice)||0
+  }));
+  const ok=await saveBoq(_curId, items);
+  if(ok){ _boqEditing=false; _boqDraft=null; _toast("✅ حُفظت المقايسة والموازنة","success"); renderTabBody(); }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1016,6 +1139,7 @@ function injectCSS(){
 .pm-num{direction:ltr;text-align:right;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--text)}
 .pm-dim{color:var(--muted)}
 .pm-tr-unc td{background:var(--surface2)}
+.pm-boq-cat td{background:var(--surface2);font-weight:800;color:var(--primary)}
 .form-input.pm-inp-w{width:110px;padding:6px 9px;font-size:12px;direction:ltr;text-align:left}
 .pm-typebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--surface2);border-radius:10px;padding:9px 13px;margin-bottom:14px;font-size:12px;color:var(--muted)}
 .pm-type-sel{width:auto;min-width:150px;padding:6px 10px;font-size:12px}
@@ -1160,6 +1284,7 @@ else init();
 window.projectMgmt = {
   render, open, openAt, back, tab, openFromLanding,
   editBudget, cancelEdit, saveBudgetEdit,
+  editBoq, addBoqLine, delBoqLine, cancelBoqEdit, saveBoqEdit,
   setType,
   openCatMap, closeCatMap, saveCatMapEdit,
   openUsage, closeUsage, openUsageFromNav,
