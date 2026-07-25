@@ -772,6 +772,16 @@ html[data-theme="dark"] .login-error{background:#3a1717;border-color:#6e2a2a}
 .project-card-icon svg{width:27px;height:27px}
 .project-card-icon img{width:40px;height:40px;object-fit:contain;border-radius:9px}
 .project-card:hover .project-card-icon{background:rgba(27,58,107,0.12)}
+/* أيقونة المشروع في قائمة الإدارة — شريحة مصغّرة بنفس لغة الشريحة الرئيسية */
+.proj-list-ico{width:38px;height:38px;flex-shrink:0;border-radius:10px;background:rgba(27,58,107,0.08);color:var(--primary);display:inline-flex;align-items:center;justify-content:center}
+.proj-list-ico svg{width:20px;height:20px}
+.proj-list-ico img{width:28px;height:28px;object-fit:contain;border-radius:7px}
+/* شبكة منتقي أيقونة المشروع في نافذتَي الإضافة/التعديل */
+.proj-icon-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:8px;margin-top:4px}
+.proj-icon-opt{aspect-ratio:1;border:1px solid var(--border);border-radius:11px;background:var(--surface);color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .12s,border-color .12s,background .12s,color .12s;padding:0}
+.proj-icon-opt svg{width:22px;height:22px;stroke-width:2}
+.proj-icon-opt:hover{transform:translateY(-2px);color:var(--primary);border-color:rgba(27,58,107,0.35)}
+.proj-icon-opt.selected{background:rgba(27,58,107,0.08);border-color:var(--primary);color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
 .proj-menu-btn{background:rgba(27,58,107,0.06);border:1px solid var(--border);border-radius:9px;width:28px;height:28px;cursor:pointer;color:var(--muted);display:flex;align-items:center;justify-content:center;font-family:inherit;transition:background .15s,color .15s}
 .proj-menu-btn svg{width:15px;height:15px}
 .proj-menu-btn:hover{background:rgba(27,58,107,0.12);color:var(--primary)}
@@ -8441,6 +8451,97 @@ function _svgIcon(name){ const p=_ICON[name]; return p?('<svg viewBox="0 0 24 24
 // ══ v18.9mp: أيقونة مضمّنة داخل نص — بديل الإيموجي بلغة أيقونات المنصة ══
 function _ic(name,cls){ const p=_ICON[name]; return p?('<span class="ic'+(cls?" "+cls:"")+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg></span>'):''; }
 
+// ══ أيقونات المشاريع — بلغة أيقونات المنصة (خطّية، currentColor) بدل الإيموجي ══
+// المستخدم يختار مفتاحاً من هذا الكتالوج؛ والمشاريع القديمة (تخزّن إيموجي) تُترجَم تلقائياً.
+const PROJECT_ICON_DEFAULT = "building2";
+const PROJECT_ICONS = [
+  {key:"building2",  label:"مبنى"},
+  {key:"landmark",   label:"جهة حكومية"},
+  {key:"store",      label:"مركز / محل"},
+  {key:"warehouse",  label:"مستودع"},
+  {key:"droplet",    label:"مياه"},
+  {key:"hardHat",    label:"مقاولات"},
+  {key:"hammer",     label:"أعمال إنشائية"},
+  {key:"wrench",     label:"صيانة"},
+  {key:"zap",        label:"كهرباء"},
+  {key:"wind",       label:"تكييف"},
+  {key:"elevator",   label:"مصاعد"},
+  {key:"tile",       label:"بلاط"},
+  {key:"paintbrush", label:"دهانات"},
+  {key:"frame",      label:"ألومنيوم"},
+  {key:"layers",     label:"مراحل"},
+  {key:"shield",     label:"أمن وسلامة"},
+  {key:"camera",     label:"مراقبة"},
+  {key:"truck",      label:"نقل"},
+  {key:"pin",        label:"موقع"},
+  {key:"briefcase",  label:"إدارة"}
+];
+// خريطة الإيموجي القديمة → مفتاح أيقونة المنصة (توافق رجعي مع مشاريع مخزّنة سابقاً)
+const EMOJI_TO_PROJECT_ICON = {
+  "🏗":"hardHat","🚧":"hardHat",
+  "🏛":"landmark","🏦":"landmark","⚖":"landmark",
+  "🏬":"store","🏪":"store",
+  "🏢":"building2","🏣":"building2","🏤":"building2","🏠":"building2","🏡":"building2","🏘":"building2","🏨":"building2","🏥":"building2","🏫":"building2","🕌":"building2",
+  "🚿":"droplet","🚽":"droplet","💧":"droplet","🛁":"droplet","🚰":"droplet",
+  "⚡":"zap","🔌":"zap","💡":"zap",
+  "❄":"wind","🌬":"wind","💨":"wind",
+  "🔧":"wrench","🛠":"wrench","⚙":"wrench",
+  "🔨":"hammer",
+  "🧱":"tile","🔲":"tile",
+  "🪟":"frame",
+  "🛗":"elevator",
+  "📦":"warehouse","🏭":"warehouse",
+  "🎨":"paintbrush","🖌":"paintbrush",
+  "📷":"camera","📹":"camera","📸":"camera",
+  "🚚":"truck","🚛":"truck","🚐":"truck",
+  "🛡":"shield",
+  "📋":"briefcase","💼":"briefcase",
+  "📍":"pin","🗺":"pin"
+};
+// حوّل أي قيمة icon مخزّنة → مفتاح أيقونة معتمد (لا يشمل صور data:)
+function projectIconKey(icon){
+  if(!icon || (typeof icon==="string" && icon.startsWith("data:"))) return null;
+  const raw = String(icon).trim();
+  if(_ICON[raw]) return raw;                                   // مفتاح منصة جاهز
+  const bare = raw.replace(/[️‍⃣]/g,"");        // إزالة محدّدات الإيموجي (variation/ZWJ/keycap)
+  if(EMOJI_TO_PROJECT_ICON[bare]) return EMOJI_TO_PROJECT_ICON[bare];
+  const first = Array.from(bare)[0];                           // أول رمز (يغطّي الإيموجي المركّبة)
+  if(first && EMOJI_TO_PROJECT_ICON[first]) return EMOJI_TO_PROJECT_ICON[first];
+  return null;
+}
+// SVG داخلي لأيقونة مشروع (يرجع لأيقونة المبنى الافتراضية عند تعذّر التعرّف)
+function projectIconSvg(icon){
+  const key = projectIconKey(icon) || PROJECT_ICON_DEFAULT;
+  const p = _ICON[key] || _ICON[PROJECT_ICON_DEFAULT];
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+p+'</svg>';
+}
+// ماركب أيقونة المشروع الكامل لشريحة العرض (يدعم الشعارات المرفوعة كصور)
+function projectIconMarkup(icon, name){
+  if(icon && typeof icon==="string" && icon.startsWith("data:"))
+    return '<img src="'+safeUrl(icon)+'" alt="'+esc(name||"")+'">';
+  return projectIconSvg(icon);
+}
+// شبكة اختيار أيقونة المشروع — تُخزّن مفتاح الأيقونة في input مخفي
+function projectIconPickerHTML(current, hiddenId){
+  const sel = projectIconKey(current) || PROJECT_ICON_DEFAULT;
+  const opts = PROJECT_ICONS.map(o=>{
+    const on = o.key===sel;
+    return '<button type="button" class="proj-icon-opt'+(on?" selected":"")+'" role="radio" aria-checked="'+on+'"'
+      +' title="'+esc(o.label)+'" aria-label="'+esc(o.label)+'"'
+      +' onclick="selectProjectIcon(this,\''+hiddenId+'\',\''+o.key+'\')">'
+      +'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+_ICON[o.key]+'</svg></button>';
+  }).join("");
+  return '<input type="hidden" id="'+hiddenId+'" value="'+esc(sel)+'">'
+    +'<div class="proj-icon-picker" role="radiogroup" aria-label="أيقونة المشروع">'+opts+'</div>';
+}
+function selectProjectIcon(btn, hiddenId, key){
+  const hid = document.getElementById(hiddenId);
+  if(hid) hid.value = key;
+  const grid = btn.closest(".proj-icon-picker");
+  if(grid) grid.querySelectorAll(".proj-icon-opt").forEach(b=>{ b.classList.remove("selected"); b.setAttribute("aria-checked","false"); });
+  btn.classList.add("selected"); btn.setAttribute("aria-checked","true");
+}
+
 // ══ v18.9nn: قائمة إجراءات الصف (kebab) — مضيف واحد مثبّت في <body> ══
 // لماذا في <body> ولماذا position:fixed: جداول الصفحات ملفوفة بـ overflow-x:auto،
 // فأي قائمة position:absolute داخل صف تُقصّ عند حافة الملفوف بدل أن تطفو فوقه.
@@ -11996,7 +12097,7 @@ function renderAdminProjectsList(){
   }
   el.innerHTML = _projectsList.map((proj,i)=>`
     <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);margin-bottom:8px;background:var(--surface2)">
-      <span style="font-size:22px">${esc(proj.icon||"🏗️")}</span>
+      <span class="proj-list-ico">${projectIconMarkup(proj.icon, proj.name)}</span>
       <div style="flex:1;min-width:0">
         <div style="font-weight:800;font-size:13px">${esc(proj.name)}</div>
         <div style="font-size:10px;color:var(--muted)">${esc(proj.id)} ${proj.desc?"— "+esc(proj.desc):""}</div>
@@ -12384,7 +12485,7 @@ function renderProjectGrid(user){
   grid.innerHTML = visibleProjects.map(proj => `
     <div class="project-card" style="position:relative;padding-bottom:20px">
       <div onclick="selectProject('${esc(proj.id)}')" style="cursor:pointer">
-        <div class="project-card-icon">${proj.icon&&proj.icon.startsWith("data:") ? `<img src="${proj.icon}" alt="${esc(proj.name)}">` : (proj.icon ? esc(proj.icon) : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 21v-4h6v4"/><path d="M8 7h2M14 7h2M8 11h2M14 11h2"/></svg>`)}</div>
+        <div class="project-card-icon">${projectIconMarkup(proj.icon, proj.name)}</div>
         <div class="project-card-name">${esc(proj.name)}</div>
         <div class="project-card-desc">${esc(proj.desc||"")}</div>
       </div>
@@ -12700,7 +12801,7 @@ function openAddProjectModal(){
   overlay.style.cssText = "z-index:2000;display:flex";
   overlay.innerHTML = `
     <div class="proj-modal">
-      <h3>🏗️ إضافة مشروع جديد</h3>
+      <h3>${_ic("hardHat")} إضافة مشروع جديد</h3>
       <div class="form-group">
         <label class="form-label">معرّف المشروع (بالإنجليزي، بدون مسافات) *</label>
         <input class="form-input" id="np-id" placeholder="مثال: riyadh أو project2" dir="ltr">
@@ -12710,8 +12811,8 @@ function openAddProjectModal(){
         <input class="form-input" id="np-name" placeholder="مثال: مشروع الرياض">
       </div>
       <div class="form-group">
-        <label class="form-label">أيقونة (emoji)</label>
-        <input class="form-input" id="np-icon" placeholder="🏗️" style="width:80px">
+        <label class="form-label">أيقونة المشروع</label>
+        ${projectIconPickerHTML(PROJECT_ICON_DEFAULT, "np-icon")}
       </div>
       <div class="form-group">
         <label class="form-label">وصف مختصر</label>
@@ -12752,7 +12853,7 @@ function openAddProjectModal(){
 async function adminSaveNewProject(){
   const id    = (document.getElementById("np-id")?.value||"").trim().toLowerCase().replace(/\s+/g,"_");
   const name  = (document.getElementById("np-name")?.value||"").trim();
-  const icon  = (document.getElementById("np-icon")?.value||"🏗️").trim();
+  const icon  = (document.getElementById("np-icon")?.value||PROJECT_ICON_DEFAULT).trim();
   const desc  = (document.getElementById("np-desc")?.value||"").trim();
   const type  = (document.getElementById("np-type")?.value||"maintenance").trim();
   const cName = (document.getElementById("np-contract-name")?.value||"").trim();
@@ -12801,13 +12902,13 @@ function openEditProjectModal(projId){
       </div>
       <div class="form-group">
         <label class="form-label">أيقونة</label>
-        <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
-          <div style="flex:1;min-width:160px">
-            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">رمز Emoji (أو اتركه فارغاً إذا رفعت صورة)</div>
-            <input class="form-input" id="ep-icon" value="${currentIconIsImage ? "" : esc(proj.icon||"🏗️")}" style="width:100px;text-align:center;font-size:20px" placeholder="🏗️">
+        <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">اختر أيقونة من مكتبة المنصة</div>
+            ${projectIconPickerHTML(currentIconIsImage ? PROJECT_ICON_DEFAULT : proj.icon, "ep-icon")}
           </div>
-          <div style="flex:2;min-width:200px">
-            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">أو ارفع صورة للأيقونة (PNG/JPG — تُحوَّل لـ Base64)</div>
+          <div style="flex:1;min-width:200px">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">أو ارفع شعاراً للأيقونة (PNG/JPG — تُحوَّل لـ Base64)</div>
             <input type="file" id="ep-icon-file" accept="image/png,image/jpeg,image/webp,image/svg+xml"
               style="font-size:11px;font-family:inherit;width:100%" onchange="previewProjectIcon(this)">
             <div id="ep-icon-preview" style="margin-top:8px;text-align:center;min-height:60px">
@@ -12873,9 +12974,7 @@ function previewProjectIcon(input){
     const preview = document.getElementById("ep-icon-preview");
     if(preview) preview.innerHTML = `<img src="${b64}" alt="معاينة الشعار" style="width:64px;height:64px;object-fit:contain;border-radius:8px;border:1px solid var(--border)">`;
     if(overlay) overlay._currentIconBase64 = b64;
-    // امسح الـ emoji إذا رفع المستخدم صورة
-    const emojiInput = document.getElementById("ep-icon");
-    if(emojiInput) emojiInput.value = "";
+    // الصورة المرفوعة تأخذ الأولوية عند الحفظ؛ نُبقي مفتاح الأيقونة كبديل إن أُزيلت الصورة لاحقاً
   };
   reader.readAsDataURL(file);
 }
@@ -12888,9 +12987,9 @@ function clearProjectIconImage(){
   if(preview) preview.innerHTML = `<span style="font-size:11px;color:var(--muted)">لا توجد صورة مرفوعة</span>`;
   const fileInput = document.getElementById("ep-icon-file");
   if(fileInput) fileInput.value = "";
-  // استعادة حقل الـ emoji
+  // استعادة اختيار الأيقونة الافتراضية
   const emojiInput = document.getElementById("ep-icon");
-  if(emojiInput && !emojiInput.value) emojiInput.value = "🏗️";
+  if(emojiInput && !emojiInput.value) emojiInput.value = PROJECT_ICON_DEFAULT;
 }
 
 async function adminUpdateProject(projId){
@@ -12901,7 +13000,7 @@ async function adminUpdateProject(projId){
   // تحديد الأيقونة: إذا رُفعت صورة تأخذ الأولوية، وإلا يُستخدم الـ emoji
   const base64Icon = overlay ? overlay._currentIconBase64 : null;
   const emojiVal   = (document.getElementById("ep-icon")?.value||"").trim();
-  const finalIcon  = base64Icon ? base64Icon : (emojiVal || "🏗️");
+  const finalIcon  = base64Icon ? base64Icon : (emojiVal || PROJECT_ICON_DEFAULT);
   _projectsList[idx] = {
     ..._projectsList[idx],
     name:          (document.getElementById("ep-name")?.value||"").trim()           || _projectsList[idx].name,
