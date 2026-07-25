@@ -338,10 +338,7 @@ function renderList(el){
     <div class="pm-head">
       <h2 class="pm-title">${_icon('building2')} إدارة المشاريع</h2>
       <div class="pm-sub">الموازنة والمصروف الفعلي لكل مشروع — المصروف مسحوبٌ مباشرةً من المشتريات</div>
-      ${_canEdit()?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-        <button class="btn btn-ghost btn-sm" onclick="projectMgmt.openCatMap()">${_icon('tag')} ربط أنواع البنود بالموازنة</button>
-        <button class="btn btn-ghost btn-sm" onclick="projectMgmt.openUsage()">${_icon('activity')} استهلاك الذكاء الاصطناعي</button>
-      </div>`:""}
+      ${_canEdit()?`<button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="projectMgmt.openCatMap()">${_icon('tag')} ربط أنواع البنود بالموازنة</button>`:""}
     </div>
     <div id="pm-list" class="pm-cards"></div>`;
 
@@ -928,6 +925,15 @@ function openUsage(){
   if(el) renderUsage(el);
 }
 function closeUsage(){ _usageView=false; render(); }
+// فتح الاستهلاك من قائمة «النظام» — يُظهر صفحة إدارة المشاريع ثم شاشة الاستهلاك
+function openUsageFromNav(){
+  if(!_canAccess()){ _toast("🔒 هذا القسم متاح للأدمن فقط حالياً","warn"); return; }
+  _usageView=true; _curId=null; _mapView=false;
+  try{ showPage("projects"); }catch(e){}
+  const el=document.getElementById("page-"+PAGE_ID);
+  loadUsage().then(()=>{ if(_usageView && el) renderUsage(el); });
+  if(el) renderUsage(el);
+}
 
 function openCatMap(){
   _mapView=true; _curId=null; _usageView=false;
@@ -1069,6 +1075,20 @@ function injectSidebarGroup(){
   else { nav.appendChild(hdr); nav.appendChild(grp); }
 }
 
+/* ══ حقن زر «استهلاك الذكاء الاصطناعي» في قائمة «النظام» (للأدمن) ══ */
+function injectSystemButton(){
+  if(!_canAccess()){ const ex=document.getElementById("nav-ai-usage-btn"); if(ex) ex.remove(); return; }
+  if(document.getElementById("nav-ai-usage-btn")) return;
+  const grp=document.getElementById("grp-system");
+  if(!grp) return;
+  const btn=document.createElement("button");
+  btn.className="sidebar-nav-btn sidebar-child";
+  btn.id="nav-ai-usage-btn";
+  btn.innerHTML='<span class="s-icon">'+_svg('activity')+'</span> استهلاك الذكاء الاصطناعي';
+  btn.onclick=()=>{ try{ openUsageFromNav(); }catch(e){} };
+  grp.appendChild(btn);
+}
+
 /* ══ حقن زر «إدارة المشاريع» في الصفحة الخارجية (منتقي المشاريع) ══
    كيانٌ شامل لكل المشاريع بجوار زر «المشتريات المركزية» — بنفس طرازه للاتساق. */
 function injectLandingButton(){
@@ -1126,10 +1146,11 @@ function hookShowPage(){
 function init(){
   ensurePage();
   injectSidebarGroup();
+  injectSystemButton();
   injectLandingButton();
   hookShowPage();
   // القائمة الجانبية والصفحة الخارجية قد يُعاد بناؤهما بعد الدخول — أعِد الحقن عند التغيير
-  const obs=new MutationObserver(()=>{ injectSidebarGroup(); injectLandingButton(); hookShowPage(); });
+  const obs=new MutationObserver(()=>{ injectSidebarGroup(); injectSystemButton(); injectLandingButton(); hookShowPage(); });
   obs.observe(document.body,{childList:true,subtree:true});
 }
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", init);
@@ -1141,7 +1162,7 @@ window.projectMgmt = {
   editBudget, cancelEdit, saveBudgetEdit,
   setType,
   openCatMap, closeCatMap, saveCatMapEdit,
-  openUsage, closeUsage,
+  openUsage, closeUsage, openUsageFromNav,
   aiGenSchedule, doAiGen, cancelGen, editSchedule, addPhase, delPhase,
   saveScheduleEdit, cancelScheduleEdit, setProgress,
   startSync(){ /* لا مزامنة مستقلة — يقرأ purchases و_projectsList الحيّة */ },
