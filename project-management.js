@@ -623,10 +623,13 @@ function boqHTML(){
   const canEdit=_canEdit();
   if(_boqEditing) return _boqEditHTML(_boqDraft||[]);
   const toolbar = canEdit
-    ? `<div class="pm-sched-tools"><button class="btn btn-primary btn-sm" onclick="projectMgmt.editBoq()">${_icon('edit')} تعديل المقايسة</button></div>`
+    ? `<div class="pm-sched-tools">
+        <button class="btn btn-primary btn-sm" onclick="projectMgmt.editBoq()">${_icon('edit')} تعديل المقايسة</button>
+        <button class="btn btn-ghost btn-sm" onclick="projectMgmt.importBoqExcel()">${_icon('download')} استيراد Excel</button>
+      </div>`
     : "";
   if(!items.length){
-    return toolbar + `<div class="pm-hint" style="margin-top:0">لا توجد مقايسة بعد. ${canEdit?'اضغط «تعديل المقايسة» لإضافة البنود — وستُحسب الموازنة تلقائياً منها.':'التحرير للأدمن أو مدير المشاريع.'}</div>`;
+    return toolbar + `<div class="pm-hint" style="margin-top:0">لا توجد مقايسة بعد. ${canEdit?'اضغط «تعديل المقايسة» لإضافة البنود يدوياً، أو «استيراد Excel» — وستُحسب الموازنة تلقائياً منها.<br>أعمدة Excel المتوقّعة: <b>البند · البند العام · الوحدة · الكمية · سعر الوحدة</b>.':'التحرير للأدمن أو مدير المشاريع.'}</div>`;
   }
   const byCat={}; items.forEach(it=>{ const k=(it.categoryKey&&CAT_NAME[it.categoryKey])?it.categoryKey:"uncategorized"; (byCat[k]=byCat[k]||[]).push(it); });
   const cats=BUDGET_CATEGORIES.concat([UNCATEGORIZED]).filter(c=>byCat[c.key]);
@@ -657,6 +660,7 @@ function _boqEditHTML(items){
       <button class="btn btn-primary btn-sm" onclick="projectMgmt.saveBoqEdit()">${_icon('checkCircle')} حفظ</button>
       <button class="btn btn-ghost btn-sm" onclick="projectMgmt.cancelBoqEdit()">إلغاء</button>
       <button class="btn btn-ghost btn-sm" onclick="projectMgmt.addBoqLine()">${_icon('plus')} إضافة بند</button>
+      <button class="btn btn-ghost btn-sm" onclick="projectMgmt.importBoqExcel()">${_icon('download')} استيراد Excel</button>
     </div>
     <div class="pm-table-wrap"><table class="pm-table">
       <thead><tr><th>البند</th><th>البند العام</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th></th></tr></thead>
@@ -697,6 +701,78 @@ async function saveBoqEdit(){
   }));
   const ok=await saveBoq(_curId, items);
   if(ok){ _boqEditing=false; _boqDraft=null; _toast("✅ حُفظت المقايسة والموازنة","success"); renderTabBody(); }
+}
+
+/* ── استيراد المقايسة من Excel (يعيد استخدام مكتبة XLSX المحمّلة) ── */
+function _boqNorm(s){ return String(s||"").trim().replace(/[أإآا]/g,"ا").replace(/ة/g,"ه").replace(/ى/g,"ي").replace(/\s+/g,"").toLowerCase(); }
+function _boqNum(v){ if(v==null) return 0; const n=parseFloat(String(v).replace(/[^\d.\-]/g,"")); return isNaN(n)?0:n; }
+function _catKeyFromName(name){
+  const n=String(name||"").trim(); if(!n) return "materials";
+  const nn=_boqNorm(n);
+  const found=BUDGET_CATEGORIES.find(c=>_boqNorm(c.name)===nn || _boqNorm(c.name).indexOf(nn)!==-1 || nn.indexOf(_boqNorm(c.name))!==-1);
+  if(found) return found.key;
+  if(DEFAULT_TYPE_MAP[n]) return DEFAULT_TYPE_MAP[n];
+  for(const t of Object.keys(DEFAULT_TYPE_MAP)){ if(_boqNorm(t)===nn) return DEFAULT_TYPE_MAP[t]; }
+  return "materials";
+}
+function _parseBoqRows(rows){
+  if(!rows||!rows.length) return [];
+  // اتحاد كل العناوين
+  const headers=[]; const seen={}; rows.forEach(r=>Object.keys(r).forEach(h=>{ if(!seen[h]){ seen[h]=1; headers.push(h); } }));
+  const used={};
+  // يختار عموداً واحداً للحقل (exact ثم substring) ويحجزه فلا يُعاد استخدامه لحقلٍ آخر
+  const pick=(keys)=>{
+    const nk=keys.map(_boqNorm);
+    for(const h of headers){ if(used[h]) continue; const nh=_boqNorm(h); if(nk.some(k=>nh===k)){ used[h]=1; return h; } }
+    for(const h of headers){ if(used[h]) continue; const nh=_boqNorm(h); if(nk.some(k=>k&&nh.indexOf(k)!==-1)){ used[h]=1; return h; } }
+    return null;
+  };
+  // ترتيب مهم: الأكثر تحديداً أولاً كي لا تُختطف أعمدتها («سعر الوحدة» قبل «الوحدة»)
+  const cCat  =pick(["البندالعام","التصنيف","النوع","القسم","تصنيف","category","type"]);
+  const cPrice=pick(["سعرالوحدة","السعر","سعر","price","rate","unitprice"]);
+  const cQty  =pick(["الكمية","العدد","كمية","qty","quantity"]);
+  const cUnit =pick(["الوحدة","وحدة","unit"]);
+  const cDesc =pick(["البند","الوصف","البيان","الصنف","المادة","اسمالبند","description","item","name"]);
+  const out=[];
+  rows.forEach(row=>{
+    const desc=cDesc?row[cDesc]:"";
+    if(!String(desc||"").trim()) return;
+    out.push({
+      id:_uid(),
+      desc:String(desc).trim().slice(0,120),
+      categoryKey:_catKeyFromName(cCat?row[cCat]:""),
+      unit:String((cUnit?row[cUnit]:"")||"").trim().slice(0,20),
+      qty:_boqNum(cQty?row[cQty]:0),
+      unitPrice:_boqNum(cPrice?row[cPrice]:0)
+    });
+  });
+  return out;
+}
+function importBoqExcel(){
+  if(!_canEdit()){ _toast("🔒 التحرير للأدمن أو مدير المشاريع","warn"); return; }
+  if(typeof XLSX==="undefined"){ _toast("⚠ مكتبة Excel غير محمّلة — حدّث الصفحة وأعد المحاولة","warn"); return; }
+  const inp=document.createElement("input");
+  inp.type="file"; inp.accept=".xlsx,.xls,.csv"; inp.style.display="none";
+  inp.onchange=function(){
+    const f=inp.files&&inp.files[0]; if(!f) return;
+    const reader=new FileReader();
+    reader.onload=function(e){
+      try{
+        const wb=XLSX.read(new Uint8Array(e.target.result),{type:"array"});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+        const items=_parseBoqRows(rows);
+        if(!items.length){ _toast("⚠ لم أتعرّف على بنود — تأكد أن الصف الأول عناوين: البند/البند العام/الوحدة/الكمية/سعر الوحدة","warn"); return; }
+        if(!_boqEditing){ editBoq(); } else { _syncBoqDraft(); }
+        _boqDraft=(_boqDraft||[]).concat(items);
+        _boqEditing=true; renderTabBody();
+        _toast("✅ استُورد "+items.length+" بند من Excel — راجعها ثم اضغط «حفظ»","success");
+      }catch(err){ console.warn("importBoqExcel",err); _toast("⚠ تعذّر قراءة الملف: "+((err&&err.message)||""),"warn"); }
+    };
+    reader.readAsArrayBuffer(f);
+  };
+  document.body.appendChild(inp); inp.click();
+  setTimeout(()=>{ try{ inp.remove(); }catch(_e){} }, 60000);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1284,7 +1360,8 @@ else init();
 window.projectMgmt = {
   render, open, openAt, back, tab, openFromLanding,
   editBudget, cancelEdit, saveBudgetEdit,
-  editBoq, addBoqLine, delBoqLine, cancelBoqEdit, saveBoqEdit,
+  editBoq, addBoqLine, delBoqLine, cancelBoqEdit, saveBoqEdit, importBoqExcel,
+  _parseBoqRows,
   setType,
   openCatMap, closeCatMap, saveCatMapEdit,
   openUsage, closeUsage, openUsageFromNav,
