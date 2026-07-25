@@ -376,7 +376,7 @@ function paintList(projects){
 /* ── بطاقة مشروع واحد ── */
 function open(projId){
   _curId=projId; _curTab="overview"; _editing=false;
-  _schedEditing=false; _schedGenForm=false; _schedDraft=null;
+  _schedEditing=false; _schedGenForm=false; _schedDraft=null; _genErr="";
   const el=document.getElementById("page-"+PAGE_ID);
   if(!(projId in _budgetCache)){
     loadBudget(projId).then(()=>{ if(_curId===projId) renderCard(el); });
@@ -420,7 +420,7 @@ function renderCard(el){
   renderTabBody();
 }
 function tab(t){
-  _curTab=t; _editing=false; _schedEditing=false; _schedGenForm=false; _schedDraft=null;
+  _curTab=t; _editing=false; _schedEditing=false; _schedGenForm=false; _schedDraft=null; _genErr="";
   // حدّث تمييز أزرار التبويب (renderTabBody يعيد الجسم فقط)
   document.querySelectorAll("#page-"+PAGE_ID+" .pm-tab").forEach(b=>{
     b.classList.toggle("on", b.dataset.tab===t);
@@ -566,7 +566,7 @@ async function saveBudgetEdit(){
 /* ════════════════════════════════════════════════════════════
    الجدول الزمني (لمشاريع الإنشاءات/الترميم) — عرض/توليد بالـ AI/تحرير/متابعة
    ════════════════════════════════════════════════════════════ */
-let _schedEditing=false, _schedGenForm=false, _schedDraft=null, _uidC=0;
+let _schedEditing=false, _schedGenForm=false, _schedDraft=null, _uidC=0, _genErr="";
 function _uid(){ return "ph_"+Date.now()+"_"+(_uidC++); }
 function _parseD(s){ const d=new Date(String(s||"")+"T12:00:00"); return isNaN(d.getTime())?new Date():d; }
 function _fmtD(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
@@ -576,9 +576,13 @@ function _normDate(v, fallback){ const d=new Date(String(v||"")+"T12:00:00"); re
 function _extractJSON(txt){
   if(!txt) return null;
   let t=String(txt).replace(/```json/gi,"```").replace(/```/g,"").trim();
+  const strip=s=>s.replace(/,\s*([}\]])/g,"$1"); // إزالة الفواصل الزائدة قبل } أو ]
   const a=t.indexOf("{"), b=t.lastIndexOf("}");
-  if(a<0||b<0) return null;
-  try{ return JSON.parse(t.slice(a,b+1)); }catch(e){ return null; }
+  if(a>=0 && b>a){ try{ return JSON.parse(strip(t.slice(a,b+1))); }catch(e){} }
+  // محاولة أخيرة: التقط مصفوفة المراحل مباشرةً ولفّها
+  const m=t.match(/\[\s*\{[\s\S]*\}\s*\]/);
+  if(m){ try{ return { phases: JSON.parse(strip(m[0])) }; }catch(e){} }
+  return null;
 }
 function _phaseStatus(ph){
   const start=_parseD(ph.start), end=_parseD(_phaseEnd(ph)), now=new Date();
@@ -661,9 +665,16 @@ function _genFormHTML(){
   const note = lines.length
     ? `<div class="pm-hint" style="margin-top:0">سيقرأ الذكاء الاصطناعي <b>موازنة المشروع</b> (${lines.length} بند مرصود) ويولّد مراحل مطابقة للتخصصات وبأوزان قريبة من الميزانية. النطاق النصّي اختياري يُكمّلها.</div>`
     : `<div class="pm-hint" style="margin-top:0">لا توجد موازنة مرصودة بعد — يُفضّل إدخال الموازنة أولاً لدقّة أعلى. مؤقتاً اكتب نطاق العمل ليقترح الذكاء الاصطناعي المراحل.</div>`;
+  const errBox = _genErr
+    ? `<div class="pm-alert">${_icon('alertTriangle')} ${_esc(_genErr)}</div>
+       <div class="pm-sched-tools" style="margin-top:0;margin-bottom:12px">
+         <button class="btn btn-ghost btn-sm" onclick="projectMgmt.editSchedule()">${_icon('plus')} أضف المراحل يدوياً</button>
+       </div>`
+    : "";
   return `
     <div class="pm-gen-form">
       ${note}
+      ${errBox}
       <label class="pm-gen-l">نطاق العمل (اختياري)</label>
       <textarea id="pm-gen-scope" class="form-input" rows="2" placeholder="مثال: فيلا دورين 400م² — أساسات + هيكل خرساني + مبانٍ + تشطيبات"></textarea>
       <div class="pm-gen-row">
@@ -709,7 +720,7 @@ function _syncDraftFromInputs(){
 function editSchedule(){
   const s=_scheduleCache[_curId]||{phases:[]};
   _schedDraft = (s.phases||[]).map(p=>({ id:p.id||_uid(), name:p.name, start:p.start, durationDays:Math.max(1,parseInt(p.durationDays)||1), progress:Math.max(0,Math.min(100,Number(p.progress)||0)) }));
-  _schedEditing=true; _schedGenForm=false; renderTabBody();
+  _schedEditing=true; _schedGenForm=false; _genErr=""; renderTabBody();
 }
 function addPhase(){
   _syncDraftFromInputs();
@@ -735,8 +746,8 @@ async function setProgress(i, val){
   const ok=await saveSchedule(_curId, s.phases, s.generatedByAI);
   if(ok) renderTabBody();
 }
-function aiGenSchedule(){ _schedGenForm=true; _schedEditing=false; renderTabBody(); }
-function cancelGen(){ _schedGenForm=false; renderTabBody(); }
+function aiGenSchedule(){ _schedGenForm=true; _schedEditing=false; _genErr=""; renderTabBody(); }
+function cancelGen(){ _schedGenForm=false; _genErr=""; renderTabBody(); }
 async function doAiGen(){
   if(typeof _aiText!=="function"){ _toast("⚠ الذكاء الاصطناعي غير مُفعّل — فعّله من: الإدارة › إعدادات الذكاء الاصطناعي","warn"); return; }
   const scope=(document.getElementById("pm-gen-scope")||{}).value||"";
@@ -760,23 +771,38 @@ async function doAiGen(){
       "اجعل تواريخ البدء متتابعة منطقياً بدءاً من تاريخ البدء، ومجموع المدد قريباً من المدة التقديرية.\n"+
       "أعِد JSON فقط بلا أي شرح، بهذا الشكل تماماً:\n"+
       "{\"phases\":[{\"name\":\"اسم المرحلة\",\"start\":\"YYYY-MM-DD\",\"durationDays\":30}]}";
-    const txt=await _aiText([{role:"user",content:prompt}], {maxTokens:1500, temperature:0.2});
-    const j=_extractJSON(txt);
-    if(!j || !Array.isArray(j.phases) || !j.phases.length){ _toast("⚠ تعذّر توليد الجدول — حاول مرة أخرى","warn"); if(btn){ btn.disabled=false; btn.innerHTML=_icon('activity')+" ولّد الجدول"; } return; }
-    let cursor=start;
-    const phases=j.phases.slice(0,40).map(ph=>{
-      const st=_normDate(ph.start, cursor);
-      const dur=Math.max(1,parseInt(ph.durationDays)||7);
-      cursor=_addDays(st,dur);
-      return { id:_uid(), name:String(ph.name||"مرحلة").trim().slice(0,80), start:st, durationDays:dur, progress:0 };
-    });
+    // محاولتان: النماذج أحياناً تُرجع نصّاً غير صالح؛ المحاولة الثانية غالباً تنجح
+    let phases=null, lastErr="";
+    for(let attempt=1; attempt<=2 && !phases; attempt++){
+      let txt="";
+      try{ txt=await _aiText([{role:"user",content:prompt}], {maxTokens:2500, temperature:0.25}); }
+      catch(callErr){ lastErr=(callErr&&callErr.message)||"تعذّر الاتصال بالذكاء الاصطناعي"; console.warn("doAiGen call#"+attempt,callErr); continue; }
+      try{ console.log("[projectMgmt] AI schedule raw #"+attempt+":", txt); }catch(_e){}
+      const j=_extractJSON(txt);
+      if(j && Array.isArray(j.phases) && j.phases.length){
+        let cursor=start;
+        phases=j.phases.slice(0,40).map(ph=>{
+          const st=_normDate(ph.start, cursor);
+          const dur=Math.max(1,parseInt(ph.durationDays)||7);
+          cursor=_addDays(st,dur);
+          return { id:_uid(), name:String(ph.name||"مرحلة").trim().slice(0,80), start:st, durationDays:dur, progress:0 };
+        });
+      } else { lastErr="تعذّر قراءة رد الذكاء الاصطناعي"; }
+    }
+    if(!phases){
+      _genErr = "تعذّر التوليد التلقائي"+(lastErr?" ("+lastErr+")":"")+". جرّب مرة أخرى، أو أضف المراحل يدوياً.";
+      _toast("⚠ "+_genErr,"warn");
+      renderTabBody();
+      return;
+    }
     const ok=await saveSchedule(_curId, phases, true);
-    if(ok){ _schedGenForm=false; _toast("✅ تم توليد الجدول — راجعه وعدّله","success"); renderTabBody(); }
+    if(ok){ _schedGenForm=false; _genErr=""; _toast("✅ تم توليد الجدول — راجعه وعدّله","success"); renderTabBody(); }
     else if(btn){ btn.disabled=false; btn.innerHTML=_icon('activity')+" ولّد الجدول"; }
   }catch(e){
     console.warn("doAiGen",e);
-    _toast("⚠ خطأ في التوليد: "+((e&&e.message)||""),"warn");
-    if(btn){ btn.disabled=false; btn.innerHTML=_icon('activity')+" ولّد الجدول"; }
+    _genErr = "خطأ في التوليد: "+((e&&e.message)||"غير معروف")+". يمكنك إضافة المراحل يدوياً.";
+    _toast("⚠ "+_genErr,"warn");
+    renderTabBody();
   }
 }
 
