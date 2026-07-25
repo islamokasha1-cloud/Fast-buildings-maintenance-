@@ -54,6 +54,8 @@ let _curId  = null;      // معرّف المشروع المفتوح (null = ش�
 let _curTab = "overview";
 const _budgetCache = {}; // projectId → {categories:[{key,name,planned}], boq:[]}
 let _editing = false;    // وضع تحرير الموازنة
+let _lastList = [];      // آخر قائمة معروضة (للفتح بالفهرس)
+let _manualLoaded = false; // حُمّلت أسماء المشاريع اليدوية من meta؟
 
 /* ════════════ أغلفة آمنة لخدمات النواة ════════════ */
 function _db(){ return (typeof db!=="undefined" && db) ? db : null; }
@@ -87,10 +89,33 @@ function poTotal(p){ try{ return getPOTotal(p)||0; }catch(e){ return Number(p&&p
 
 function money(n){ return (Number(n)||0).toLocaleString('en-US',{maximumFractionDigits:0}); }
 
+/* ════════════ المشاريع: المسجّلة + المُدخَلة يدوياً ════════════ */
+// المشروع اليدوي: طلباته عليها projectId==="__OTHER__" (أو isCustomProject) وname في projectName.
+// نعرّفه بمعرّفٍ اصطناعي "__MPN__:"+الاسم، ويأتي من _manualProjectNamesAll() الجاهزة
+// (تجمع أسماء meta + المشتقّة من الطلبات). فتظهر مشاريع المشتريات اليدوية جنب المسجّلة.
+const MANUAL_PREFIX = "__MPN__:";
+function _manualNames(){ try{ return (typeof _manualProjectNamesAll==="function") ? _manualProjectNamesAll() : []; }catch(e){ return []; } }
+// قائمة موحّدة: مسجّلة (manual:false) + يدوية (manual:true) — بلا تكرار الاسم
+function allProjects(){
+  const reg = getProjects().map(p=>({ id:p.id, name:p.name||p.id, type:p.type, client:p.client, location:p.location, manual:false }));
+  const regNames = new Set(reg.map(p=>String(p.name||"").trim()));
+  const manual = _manualNames()
+    .map(nm=>String(nm||"").trim())
+    .filter(nm=> nm && !regNames.has(nm))
+    .map(nm=>({ id:MANUAL_PREFIX+nm, name:nm, manual:true }));
+  return reg.concat(manual);
+}
+
 /* ════════════ الحسابات المالية (مصدر واحد: المشتريات) ════════════ */
-// كل طلبات الشراء المربوطة بمشروع (باستبعاد المحذوف)
+// كل طلبات الشراء المربوطة بمشروع (مسجّل بالمعرّف، أو يدوي بالاسم) — باستبعاد المحذوف
 function poForProject(projId){
-  return getPurchases().filter(p=> p && p.projectId===projId && p.status!=="deleted");
+  const all = getPurchases().filter(p=> p && p.status!=="deleted");
+  const proj = _proj(projId);
+  if(proj && proj.manual){
+    const nm = String(proj.name||"").trim();
+    return all.filter(p=> (p.projectId==="__OTHER__" || p.isCustomProject) && String(p.projectName||"").trim()===nm);
+  }
+  return all.filter(p=> p.projectId===projId);
 }
 // إجمالي الموازنة المخطّطة للمشروع = مجموع البنود العامة المخزّنة
 function budgetTotal(projId){
@@ -123,7 +148,14 @@ function rollupByCategory(projId){
 }
 
 /* ════════════ تحميل/حفظ الموازنة ════════════ */
-function budgetDocPath(projId){ return "meta/"+projId+"_budget"; }
+// مفتاح مستند آمن: المشروع اليدوي يُخزَّن بـ "mpn_<الاسم>" (لا بادئة "__" المحجوزة في
+// Firestore، ولا "/") — فتُحفظ موازنته كأي مشروع دون تعارض.
+function budgetDocPath(projId){
+  let key = String(projId);
+  if(key.indexOf(MANUAL_PREFIX)===0) key = "mpn_" + key.slice(MANUAL_PREFIX.length);
+  key = key.replace(/\//g,"_");
+  return "meta/"+key+"_budget";
+}
 
 async function loadBudget(projId){
   const database=_db();
@@ -152,11 +184,8 @@ async function saveBudget(projId, categories){
   }catch(e){ console.warn("saveBudget",e); _toast("⚠ تعذّر حفظ الموازنة: "+((e&&e.message)||""),"warn"); return false; }
 }
 
-function _projName(projId){
-  const p=getProjects().find(x=>x.id===projId);
-  return p ? (p.name||projId) : projId;
-}
-function _proj(projId){ return getProjects().find(x=>x.id===projId)||null; }
+function _projName(projId){ const p=_proj(projId); return p ? (p.name||projId) : projId; }
+function _proj(projId){ return allProjects().find(x=>x.id===projId)||null; }
 
 /* ════════════════════════════════════════════════════════════
    العرض
@@ -171,7 +200,12 @@ function render(){
 
 /* ── قائمة المشاريع ── */
 function renderList(el){
-  const projects=getProjects();
+  // حمّل أسماء المشاريع اليدوية مرة (meta) ثم أعد الرسم — المشتقّة من الطلبات تظهر فوراً
+  if(!_manualLoaded && typeof _loadManualProjectNames==="function"){
+    _manualLoaded=true;
+    _loadManualProjectNames().then(()=>{ if(_curId==null) renderList(el); }).catch(()=>{});
+  }
+  const projects=allProjects();
   el.innerHTML = `
     <div class="pm-head">
       <h2 class="pm-title">${_icon('building2')} إدارة المشاريع</h2>
@@ -185,7 +219,7 @@ function renderList(el){
       loadProjects().then(()=>{ if(_curId==null) renderList(el); }).catch(()=>{});
     }
     document.getElementById("pm-list").innerHTML =
-      `<div class="pm-empty">لا توجد مشاريع بعد — تُضاف من شاشة اختيار المشروع.</div>`;
+      `<div class="pm-empty">لا توجد مشاريع بعد — تُضاف من شاشة اختيار المشروع، أو تُدخَل يدوياً في طلب الشراء.</div>`;
     return;
   }
 
@@ -198,14 +232,18 @@ function renderList(el){
 function paintList(projects){
   const wrap=document.getElementById("pm-list");
   if(!wrap) return;
-  wrap.innerHTML = projects.map(p=>{
+  _lastList = projects; // نفتح بالفهرس لا بالمعرّف (الأسماء اليدوية قد تحمل محارف تكسر onclick)
+  wrap.innerHTML = projects.map((p,i)=>{
     const r=projectRollup(p.id);
     const barColor = r.pct>100 ? "var(--danger)" : (r.pct>=80 ? "var(--warn)" : "var(--accent)");
+    const badge = p.manual
+      ? '<span class="badge" style="background:var(--surface2);color:var(--muted)">'+_icon('edit')+' يدوي</span>'
+      : typeBadge(p.type);
     return `
-    <div class="pm-card" style="--sc:${barColor}" onclick="projectMgmt.open('${_esc(p.id)}')">
+    <div class="pm-card" style="--sc:${barColor}" onclick="projectMgmt.openAt(${i})">
       <div class="pm-card-top">
         <div class="pm-card-name">${_esc(p.name||p.id)}</div>
-        ${typeBadge(p.type)}
+        ${badge}
       </div>
       ${p.client?`<div class="pm-card-client">${_icon('users')} ${_esc(p.client)}</div>`:""}
       <div class="pm-mini">
@@ -228,6 +266,7 @@ function open(projId){
   }
   renderCard(el);
 }
+function openAt(i){ const p=_lastList[i]; if(p) open(p.id); }
 function back(){ _curId=null; _editing=false; render(); }
 
 // فتح إدارة المشاريع من الصفحة الخارجية (منتقي المشاريع) — كيان شامل لكل المشاريع
@@ -252,7 +291,7 @@ function renderCard(el){
   el.innerHTML = `
     <div class="pm-head">
       <button class="btn btn-ghost btn-sm pm-back" onclick="projectMgmt.back()">${_icon('folderOpen')} كل المشاريع</button>
-      <h2 class="pm-title">${_esc(name)} ${p?typeBadge(p.type):""}</h2>
+      <h2 class="pm-title">${_esc(name)} ${p?(p.manual?'<span class="badge" style="background:var(--surface2);color:var(--muted)">'+_icon('edit')+' يدوي</span>':typeBadge(p.type)):""}</h2>
       ${p&&p.client?`<div class="pm-sub">${_icon('users')} ${_esc(p.client)}${p.location?' — '+_icon('pin')+' '+_esc(p.location):''}</div>`:""}
     </div>
     <div class="pm-tabs">
@@ -557,7 +596,7 @@ else init();
 
 /* ════════════ الواجهة العامة ════════════ */
 window.projectMgmt = {
-  render, open, back, tab, openFromLanding,
+  render, open, openAt, back, tab, openFromLanding,
   editBudget, cancelEdit, saveBudgetEdit,
   startSync(){ /* لا مزامنة مستقلة — يقرأ purchases و_projectsList الحيّة */ },
   // مكشوفة لفحوص hail-tests (دوال نقية)
