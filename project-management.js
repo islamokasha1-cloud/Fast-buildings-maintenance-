@@ -41,7 +41,13 @@ const BUDGET_CATEGORIES = [
 const UNCATEGORIZED = { key:"uncategorized", name:"غير مصنّف" };
 const CAT_NAME = (()=>{ const m={}; BUDGET_CATEGORIES.concat([UNCATEGORIZED]).forEach(c=>m[c.key]=c.name); return m; })();
 
-const PROJECT_TYPES = { construction:"🏗️ مقاولات", renovation:"🛠️ ترميم", maintenance:"🔧 صيانة" };
+const PROJECT_TYPES = { construction:"مقاولات", renovation:"ترميم", maintenance:"صيانة" };
+const TYPE_ICON    = { construction:"building2", renovation:"hammer", maintenance:"wrench" };
+// شارة النوع بأيقونة المنصة (SVG) بدل الإيموجي
+function typeBadge(type){
+  const lbl=PROJECT_TYPES[type]; if(!lbl) return "";
+  return `<span class="badge" style="background:var(--surface2);color:var(--muted)">${_icon(TYPE_ICON[type])} ${lbl}</span>`;
+}
 
 /* ── حالة الوحدة ── */
 let _curId  = null;      // معرّف المشروع المفتوح (null = شاشة القائمة)
@@ -58,6 +64,11 @@ function _confirm(o){ try{ return showConfirm(o); }catch(e){ return Promise.reso
 function _user(){ try{ return currentUser||null; }catch(e){ return null; } }
 function _role(){ const u=_user(); return u&&u.role ? u.role : ""; }
 function _canEdit(){ const r=_role(); return r==="admin"||r==="project_manager"; }
+
+// أيقونات المنصة (SVG) بدل الإيموجي — تعيد استخدام _ic/_svgIcon العامّتين في index.html
+// (نفس ما تفعله ICG في purchase-kpi.js). ترجع "" بأمان إن لم تكن محمّلة (اختبارات/jsdom).
+function _icon(name,cls){ try{ return (typeof _ic==="function") ? _ic(name,cls) : ""; }catch(e){ return ""; } }
+function _svg(name){ try{ return (typeof _svgIcon==="function") ? _svgIcon(name) : ""; }catch(e){ return ""; } }
 
 function getPurchases(){ try{ return Array.isArray(purchases)?purchases:[]; }catch(e){ return []; } }
 function getProjects(){ try{ return Array.isArray(window._projectsList)?window._projectsList:[]; }catch(e){ return []; } }
@@ -157,7 +168,7 @@ function renderList(el){
   const projects=getProjects();
   el.innerHTML = `
     <div class="pm-head">
-      <h2 class="pm-title">🏗️ إدارة المشاريع</h2>
+      <h2 class="pm-title">${_icon('building2')} إدارة المشاريع</h2>
       <div class="pm-sub">الموازنة والمصروف الفعلي لكل مشروع — المصروف مسحوبٌ مباشرةً من المشتريات</div>
     </div>
     <div id="pm-list" class="pm-cards"></div>`;
@@ -184,14 +195,13 @@ function paintList(projects){
   wrap.innerHTML = projects.map(p=>{
     const r=projectRollup(p.id);
     const barColor = r.pct>100 ? "var(--danger)" : (r.pct>=80 ? "var(--warn)" : "var(--accent)");
-    const typeLbl = PROJECT_TYPES[p.type]||"";
     return `
     <div class="pm-card" style="--sc:${barColor}" onclick="projectMgmt.open('${_esc(p.id)}')">
       <div class="pm-card-top">
         <div class="pm-card-name">${_esc(p.name||p.id)}</div>
-        ${typeLbl?`<span class="badge" style="background:var(--surface2);color:var(--muted)">${typeLbl}</span>`:""}
+        ${typeBadge(p.type)}
       </div>
-      ${p.client?`<div class="pm-card-client">👤 ${_esc(p.client)}</div>`:""}
+      ${p.client?`<div class="pm-card-client">${_icon('users')} ${_esc(p.client)}</div>`:""}
       <div class="pm-mini">
         <div><span class="pm-mini-l">الموازنة</span><span class="pm-mini-v">${money(r.planned)}</span></div>
         <div><span class="pm-mini-l">المصروف</span><span class="pm-mini-v">${money(r.actual)}</span></div>
@@ -217,12 +227,11 @@ function back(){ _curId=null; _editing=false; render(); }
 function renderCard(el){
   const p=_proj(_curId);
   const name = p ? (p.name||_curId) : _curId;
-  const typeLbl = p && PROJECT_TYPES[p.type] ? PROJECT_TYPES[p.type] : "";
   el.innerHTML = `
     <div class="pm-head">
-      <button class="btn btn-ghost btn-sm pm-back" onclick="projectMgmt.back()">→ كل المشاريع</button>
-      <h2 class="pm-title">${_esc(name)} ${typeLbl?`<span class="badge" style="background:var(--surface2);color:var(--muted)">${typeLbl}</span>`:""}</h2>
-      ${p&&p.client?`<div class="pm-sub">👤 ${_esc(p.client)} ${p.location?' — 📍 '+_esc(p.location):''}</div>`:""}
+      <button class="btn btn-ghost btn-sm pm-back" onclick="projectMgmt.back()">${_icon('folderOpen')} كل المشاريع</button>
+      <h2 class="pm-title">${_esc(name)} ${p?typeBadge(p.type):""}</h2>
+      ${p&&p.client?`<div class="pm-sub">${_icon('users')} ${_esc(p.client)}${p.location?' — '+_icon('pin')+' '+_esc(p.location):''}</div>`:""}
     </div>
     <div class="pm-tabs">
       <button class="pm-tab ${_curTab==='overview'?'on':''}" data-tab="overview" onclick="projectMgmt.tab('overview')">نظرة عامة</button>
@@ -270,7 +279,7 @@ function overviewHTML(){
       <div class="pm-progress"><div class="pm-progress-fill" style="width:${Math.min(r.pct,100)}%;background:${barColor}"></div></div>
       <div class="pm-progress-lbl">${r.pct}% من الموازنة (مصروف + مرتبط)</div>
     </div>
-    ${over?`<div class="pm-alert">⚠️ تنبيه: المصروف والمرتبط تجاوزا الموازنة المخطّطة — تحذير فقط، لا يمنع أي إجراء.</div>`:""}
+    ${over?`<div class="pm-alert">${_icon('alertTriangle')} تنبيه: المصروف والمرتبط تجاوزا الموازنة المخطّطة — تحذير فقط، لا يمنع أي إجراء.</div>`:""}
     ${r.planned<=0?`<div class="pm-hint">لم تُدخَل موازنة بعد. افتح تبويب «الموازنة» وأدخل تقديراتك لكل بند.</div>`:""}`;
 }
 
@@ -316,9 +325,9 @@ function budgetHTML(){
 
   const editBtns = _canEdit()
     ? (_editing
-        ? `<button class="btn btn-primary btn-sm" onclick="projectMgmt.saveBudgetEdit()">💾 حفظ</button>
+        ? `<button class="btn btn-primary btn-sm" onclick="projectMgmt.saveBudgetEdit()">${_icon('checkCircle')} حفظ</button>
            <button class="btn btn-ghost btn-sm" onclick="projectMgmt.cancelEdit()">إلغاء</button>`
-        : `<button class="btn btn-primary btn-sm" onclick="projectMgmt.editBudget()">✏️ تعديل الموازنة</button>`)
+        : `<button class="btn btn-primary btn-sm" onclick="projectMgmt.editBudget()">${_icon('edit')} تعديل الموازنة</button>`)
     : `<span class="pm-hint-inline">العرض فقط — التعديل لمدير المشاريع أو الأدمن</span>`;
 
   return `
@@ -434,7 +443,7 @@ function injectSidebarGroup(){
   hdr.className="sidebar-group-header collapsed";
   hdr.id="hdr-grp-projects";
   hdr.setAttribute("onclick","toggleSidebarGroup('grp-projects')");
-  hdr.innerHTML='<span class="s-icon">🏗️</span> إدارة المشاريع <span class="grp-arrow" id="arrow-grp-projects">▾</span>';
+  hdr.innerHTML='<span class="s-icon">'+_svg('building2')+'</span> إدارة المشاريع <span class="grp-arrow" id="arrow-grp-projects">▾</span>';
   const grp=document.createElement("div");
   grp.className="sidebar-group collapsed";
   grp.id="grp-projects";
@@ -443,7 +452,7 @@ function injectSidebarGroup(){
   btn.className="sidebar-nav-btn sidebar-child";
   btn.id="nav-projects-btn";
   btn.dataset.page=PAGE_ID;
-  btn.innerHTML='<span class="s-icon">📋</span> المشاريع';
+  btn.innerHTML='<span class="s-icon">'+_svg('clipboardList')+'</span> المشاريع';
   btn.onclick=()=>{ try{ showPage(PAGE_ID); }catch(e){} };
   grp.appendChild(btn);
   // نضعها بعد مجموعة المشتريات (grp-po) إن وُجدت، وإلا في نهاية القائمة
