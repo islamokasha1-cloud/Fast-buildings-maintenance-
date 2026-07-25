@@ -29,6 +29,7 @@ const BUDGET_CATEGORIES = [
   { key:"materials",     name:"خامات عامة" },
   { key:"plumbing",      name:"سباكة" },
   { key:"electrical",    name:"كهرباء" },
+  { key:"hvac",          name:"تكييف" },
   { key:"plaster",       name:"محارة/بياض" },
   { key:"finishes",      name:"تشطيبات" },
   { key:"carpentry",     name:"نجارة" },
@@ -40,6 +41,51 @@ const BUDGET_CATEGORIES = [
 ];
 const UNCATEGORIZED = { key:"uncategorized", name:"غير مصنّف" };
 const CAT_NAME = (()=>{ const m={}; BUDGET_CATEGORIES.concat([UNCATEGORIZED]).forEach(c=>m[c.key]=c.name); return m; })();
+
+// خريطة نوع البند (في طلب الشراء) → بند الموازنة — افتراض ذكي، يعدّله الأدمن (meta/pm_category_map).
+// التوزيع يتم لكل بندٍ حسب نوعه فيُقسَّم الطلب الواحد على أكثر من بند موازنة تلقائياً — ويشمل
+// الطلبات القديمة (لها أنواع بنود أصلاً) فتظهر لها قيم فوراً بلا إدخال يدوي.
+const DEFAULT_TYPE_MAP = {
+  "مواد كهربائية":"electrical",
+  "مواد سباكة":"plumbing",
+  "مواد بناء":"materials",
+  "مواد ميكانيكية":"equipment",
+  "مواد تكييف":"hvac",
+  "أدوات":"equipment",
+  "خدمات":"subcontractor",
+  "مواد مختلفة":"materials",
+  "أخرى":"uncategorized"
+};
+let _catMap = null; // تجاوزات الأدمن المحمّلة من meta/pm_category_map (تُدمَج فوق الافتراضي)
+function catMapDocPath(){ return "meta/pm_category_map"; }
+function _catForItemType(t){
+  const nm=String(t||"").trim();
+  if(_catMap && _catMap[nm] && CAT_NAME[_catMap[nm]]) return _catMap[nm];
+  return DEFAULT_TYPE_MAP[nm] || "uncategorized";
+}
+// كل أنواع البنود (مدمجة + مخصّصة) من النواة إن توفّرت، وإلا مفاتيح الخريطة الافتراضية
+function _itemTypes(){
+  try{ if(typeof _allCatTypes==="function"){ return _allCatTypes().map(t=>String(t.name)).filter(Boolean); } }catch(e){}
+  return Object.keys(DEFAULT_TYPE_MAP);
+}
+async function loadCatMap(){
+  const database=_db(); if(!database){ _catMap=_catMap||{}; return _catMap; }
+  try{
+    const snap=await database.doc(catMapDocPath()).get();
+    const d=(snap&&snap.exists)?(snap.data()||{}):{};
+    _catMap = (d.map && typeof d.map==="object") ? d.map : {};
+  }catch(e){ console.warn("loadCatMap",e); _catMap=_catMap||{}; }
+  return _catMap;
+}
+async function saveCatMap(map){
+  const database=_db(); if(!database){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
+  const u=_user();
+  try{
+    await database.doc(catMapDocPath()).set({ map, updatedAt:new Date().toISOString(), updatedBy:(u&&u.name)||"" }, { merge:true });
+    _catMap=map; _audit("تعديل خريطة بنود الموازنة","");
+    return true;
+  }catch(e){ console.warn("saveCatMap",e); _toast("⚠ تعذّر الحفظ","warn"); return false; }
+}
 
 const PROJECT_TYPES = { construction:"مقاولات", renovation:"ترميم", maintenance:"صيانة" };
 const TYPE_ICON    = { construction:"building2", renovation:"hammer", maintenance:"wrench" };
@@ -56,6 +102,7 @@ const _budgetCache = {}; // projectId → {categories:[{key,name,planned}], boq:
 let _editing = false;    // وضع تحرير الموازنة
 let _lastList = [];      // آخر قائمة معروضة (للفتح بالفهرس)
 let _manualLoaded = false; // حُمّلت أسماء المشاريع اليدوية من meta؟
+let _mapView = false;    // شاشة «ربط أنواع البنود بالموازنة» مفتوحة؟
 
 /* ════════════ أغلفة آمنة لخدمات النواة ════════════ */
 function _db(){ return (typeof db!=="undefined" && db) ? db : null; }
@@ -135,14 +182,32 @@ function projectRollup(projId){
   const pct = planned>0 ? Math.round(((actual+committed)/planned)*100) : 0;
   return { planned, actual, committed, remaining, pct };
 }
-// توزيع الفعلي/المرتبط على البنود (بند الطلب = budgetCategoryKey، وإلا «غير مصنّف»)
+// توزيع الفعلي/المرتبط على بنود الموازنة حسب **نوع كل بند** في الطلب (لا اختيار يدوي):
+// لكل طلب نحسب وزن كل بند موازنة من مجموع تكاليف أصنافه، ثم:
+//   • المغلق: نوزّع التكلفة الفعلية (الفاتورة) على البنود بنسبة أوزان الأصناف.
+//   • الجاري: نوزّع تكلفة كل صنف على بند موازنته مباشرةً.
+// طلبٌ بلا أصناف (قديم جداً) يرجع لـ budgetCategoryKey إن وُجد، وإلا «غير مصنّف».
 function rollupByCategory(projId){
   const m={};
   const ensure=k=>{ if(!m[k]) m[k]={actual:0, committed:0}; return m[k]; };
   poForProject(projId).forEach(p=>{
-    const k = (p.budgetCategoryKey && CAT_NAME[p.budgetCategoryKey]) ? p.budgetCategoryKey : "uncategorized";
-    if(poClosed(p)) ensure(k).actual += poActual(p);
-    else if(poWip(p)) ensure(k).committed += poTotal(p);
+    const items = Array.isArray(p.items) ? p.items.filter(Boolean) : [];
+    if(items.length){
+      const perCat={}; let tot=0;
+      items.forEach(it=>{ const c=Number(it.itemCost)||0; const cat=_catForItemType(it.itemType); perCat[cat]=(perCat[cat]||0)+c; tot+=c; });
+      if(poClosed(p)){
+        const actual=poActual(p);
+        if(tot>0) Object.keys(perCat).forEach(cat=>{ ensure(cat).actual += actual*(perCat[cat]/tot); });
+        else ensure("uncategorized").actual += actual;
+      } else if(poWip(p)){
+        if(tot>0) Object.keys(perCat).forEach(cat=>{ ensure(cat).committed += perCat[cat]; });
+        else ensure("uncategorized").committed += poTotal(p);
+      }
+    } else {
+      const k = (p.budgetCategoryKey && CAT_NAME[p.budgetCategoryKey]) ? p.budgetCategoryKey : "uncategorized";
+      if(poClosed(p)) ensure(k).actual += poActual(p);
+      else if(poWip(p)) ensure(k).committed += poTotal(p);
+    }
   });
   return m;
 }
@@ -237,7 +302,8 @@ function render(){
   ensurePage();
   const el=document.getElementById("page-"+PAGE_ID);
   if(!el) return;
-  if(_curId) renderCard(el);
+  if(_mapView) renderCatMap(el);
+  else if(_curId) renderCard(el);
   else renderList(el);
 }
 
@@ -248,11 +314,14 @@ function renderList(el){
     _manualLoaded=true;
     _loadManualProjectNames().then(()=>{ if(_curId==null) renderList(el); }).catch(()=>{});
   }
+  // حمّل خريطة بنود الموازنة مرة (تجاوزات الأدمن) — الافتراضي يعمل قبلها
+  if(_catMap===null){ loadCatMap().then(()=>{ if(_curId==null && !_mapView) renderList(el); }).catch(()=>{}); }
   const projects=allProjects();
   el.innerHTML = `
     <div class="pm-head">
       <h2 class="pm-title">${_icon('building2')} إدارة المشاريع</h2>
       <div class="pm-sub">الموازنة والمصروف الفعلي لكل مشروع — المصروف مسحوبٌ مباشرةً من المشتريات</div>
+      ${_canEdit()?`<button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="projectMgmt.openCatMap()">${_icon('tag')} ربط أنواع البنود بالموازنة</button>`:""}
     </div>
     <div id="pm-list" class="pm-cards"></div>`;
 
@@ -707,6 +776,48 @@ async function setType(type){
   }
 }
 
+/* ── محرّر خريطة «نوع البند → بند الموازنة» (للأدمن) ── */
+function renderCatMap(el){
+  const types=_itemTypes();
+  const opts=(sel)=> '<option value="">— غير مصنّف —</option>'+BUDGET_CATEGORIES.map(c=>`<option value="${c.key}" ${sel===c.key?'selected':''}>${_esc(c.name)}</option>`).join("");
+  el.innerHTML = `
+    <div class="pm-head">
+      <button class="btn btn-ghost btn-sm pm-back" onclick="projectMgmt.closeCatMap()">${_icon('folderOpen')} كل المشاريع</button>
+      <h2 class="pm-title">${_icon('tag')} ربط أنواع البنود ببنود الموازنة</h2>
+      <div class="pm-sub">كل نوع بند في طلب الشراء يُنسَب لبند الموازنة المختار — فيتوزّع المصروف تلقائياً (يشمل الطلبات الحالية).</div>
+    </div>
+    <div class="pm-budget-tools">
+      <button class="btn btn-primary btn-sm" onclick="projectMgmt.saveCatMapEdit()">${_icon('checkCircle')} حفظ</button>
+      <button class="btn btn-ghost btn-sm" onclick="projectMgmt.closeCatMap()">إلغاء</button>
+    </div>
+    <div class="pm-table-wrap"><table class="pm-table">
+      <thead><tr><th>نوع البند (في طلب الشراء)</th><th>بند الموازنة</th></tr></thead>
+      <tbody>
+        ${types.map(t=>`<tr>
+          <td class="pm-td-name">${_esc(t)}</td>
+          <td><select class="form-input" data-type="${_esc(t)}">${opts(_catForItemType(t))}</select></td>
+        </tr>`).join("")}
+      </tbody>
+    </table></div>
+    <div class="pm-hint">الافتراض ذكيّ للأنواع المدمجة؛ عدّل أي ربط ثم احفظ. الأنواع المخصّصة تبدأ «غير مصنّف».</div>`;
+}
+function openCatMap(){
+  _mapView=true; _curId=null;
+  const el=document.getElementById("page-"+PAGE_ID);
+  if(_catMap===null){ loadCatMap().then(()=>{ if(_mapView && el) renderCatMap(el); }); }
+  if(el) renderCatMap(el);
+}
+function closeCatMap(){ _mapView=false; render(); }
+async function saveCatMapEdit(){
+  const map={};
+  document.querySelectorAll("#page-"+PAGE_ID+" select[data-type]").forEach(sel=>{
+    const t=sel.getAttribute("data-type"), v=sel.value;
+    if(t && v) map[t]=v; // الفارغ = «غير مصنّف» (افتراضي) فلا يُخزَّن
+  });
+  const ok=await saveCatMap(map);
+  if(ok){ _mapView=false; _toast("✅ حُفظت خريطة البنود","success"); render(); }
+}
+
 /* ════════════════════════════════════════════════════════════
    التركيب الذاتي: صفحة + مجموعة قائمة جانبية + لفّ showPage
    ════════════════════════════════════════════════════════════ */
@@ -901,6 +1012,7 @@ window.projectMgmt = {
   render, open, openAt, back, tab, openFromLanding,
   editBudget, cancelEdit, saveBudgetEdit,
   setType,
+  openCatMap, closeCatMap, saveCatMapEdit,
   aiGenSchedule, doAiGen, cancelGen, editSchedule, addPhase, delPhase,
   saveScheduleEdit, cancelScheduleEdit, setProgress,
   startSync(){ /* لا مزامنة مستقلة — يقرأ purchases و_projectsList الحيّة */ },
