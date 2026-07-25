@@ -626,6 +626,7 @@ function boqHTML(){
     ? `<div class="pm-sched-tools">
         <button class="btn btn-primary btn-sm" onclick="projectMgmt.editBoq()">${_icon('edit')} تعديل المقايسة</button>
         <button class="btn btn-ghost btn-sm" onclick="projectMgmt.importBoqExcel()">${_icon('download')} استيراد Excel</button>
+        <button class="btn btn-ghost btn-sm" onclick="projectMgmt.downloadBoqTemplate()">${_icon('fileText')} تحميل قالب</button>
       </div>`
     : "";
   if(!items.length){
@@ -661,6 +662,7 @@ function _boqEditHTML(items){
       <button class="btn btn-ghost btn-sm" onclick="projectMgmt.cancelBoqEdit()">إلغاء</button>
       <button class="btn btn-ghost btn-sm" onclick="projectMgmt.addBoqLine()">${_icon('plus')} إضافة بند</button>
       <button class="btn btn-ghost btn-sm" onclick="projectMgmt.importBoqExcel()">${_icon('download')} استيراد Excel</button>
+      <button class="btn btn-ghost btn-sm" onclick="projectMgmt.downloadBoqTemplate()">${_icon('fileText')} تحميل قالب</button>
     </div>
     <div class="pm-table-wrap"><table class="pm-table">
       <thead><tr><th>البند</th><th>البند العام</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th></th></tr></thead>
@@ -773,6 +775,29 @@ function importBoqExcel(){
   };
   document.body.appendChild(inp); inp.click();
   setTimeout(()=>{ try{ inp.remove(); }catch(_e){} }, 60000);
+}
+// قالب Excel جاهز لملء المقايسة (أعمدة صحيحة + أمثلة + ورقة بأسماء بنود الموازنة)
+function downloadBoqTemplate(){
+  if(typeof XLSX==="undefined"){ _toast("⚠ مكتبة Excel غير محمّلة — حدّث الصفحة","warn"); return; }
+  try{
+    const aoa=[
+      ["البند","البند العام","الوحدة","الكمية","سعر الوحدة"],
+      ["تمديد كابل نحاس 3 فاز","كهرباء","متر",200,45],
+      ["مواسير صرف 4 بوصة","سباكة","متر",150,28],
+      ["دهان بلاستيك 3 وجه","تشطيبات","م2",800,22],
+      ["","","","",""]
+    ];
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols']=[{wch:34},{wch:16},{wch:10},{wch:10},{wch:12}];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "المقايسة");
+    const catAoa=[["أسماء «البند العام» المسموحة — انسخها كما هي في العمود الثاني"]]
+      .concat(BUDGET_CATEGORIES.map(c=>[c.name]));
+    const ws2=XLSX.utils.aoa_to_sheet(catAoa); ws2['!cols']=[{wch:36}];
+    XLSX.utils.book_append_sheet(wb, ws2, "البنود العامة");
+    XLSX.writeFile(wb, "قالب_المقايسة.xlsx");
+    _toast("✅ نُزّل قالب المقايسة — املأه ثم استورده","success");
+  }catch(e){ console.warn("downloadBoqTemplate",e); _toast("⚠ تعذّر توليد القالب","warn"); }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1360,7 +1385,7 @@ else init();
 window.projectMgmt = {
   render, open, openAt, back, tab, openFromLanding,
   editBudget, cancelEdit, saveBudgetEdit,
-  editBoq, addBoqLine, delBoqLine, cancelBoqEdit, saveBoqEdit, importBoqExcel,
+  editBoq, addBoqLine, delBoqLine, cancelBoqEdit, saveBoqEdit, importBoqExcel, downloadBoqTemplate,
   _parseBoqRows,
   setType,
   openCatMap, closeCatMap, saveCatMapEdit,
