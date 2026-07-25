@@ -186,10 +186,10 @@ function paintList(projects){
     const barColor = r.pct>100 ? "var(--danger)" : (r.pct>=80 ? "var(--warn)" : "var(--accent)");
     const typeLbl = PROJECT_TYPES[p.type]||"";
     return `
-    <div class="pm-card" onclick="projectMgmt.open('${_esc(p.id)}')">
+    <div class="pm-card" style="--sc:${barColor}" onclick="projectMgmt.open('${_esc(p.id)}')">
       <div class="pm-card-top">
         <div class="pm-card-name">${_esc(p.name||p.id)}</div>
-        ${typeLbl?`<span class="pm-badge">${typeLbl}</span>`:""}
+        ${typeLbl?`<span class="badge" style="background:var(--surface2);color:var(--muted)">${typeLbl}</span>`:""}
       </div>
       ${p.client?`<div class="pm-card-client">👤 ${_esc(p.client)}</div>`:""}
       <div class="pm-mini">
@@ -220,8 +220,8 @@ function renderCard(el){
   const typeLbl = p && PROJECT_TYPES[p.type] ? PROJECT_TYPES[p.type] : "";
   el.innerHTML = `
     <div class="pm-head">
-      <button class="pm-back" onclick="projectMgmt.back()">→ كل المشاريع</button>
-      <h2 class="pm-title">${_esc(name)} ${typeLbl?`<span class="pm-badge">${typeLbl}</span>`:""}</h2>
+      <button class="btn btn-ghost btn-sm pm-back" onclick="projectMgmt.back()">→ كل المشاريع</button>
+      <h2 class="pm-title">${_esc(name)} ${typeLbl?`<span class="badge" style="background:var(--surface2);color:var(--muted)">${typeLbl}</span>`:""}</h2>
       ${p&&p.client?`<div class="pm-sub">👤 ${_esc(p.client)} ${p.location?' — 📍 '+_esc(p.location):''}</div>`:""}
     </div>
     <div class="pm-tabs">
@@ -251,19 +251,20 @@ function overviewHTML(){
   const r=projectRollup(_curId);
   const spentPct = r.planned>0 ? Math.round((r.actual/r.planned)*100) : 0;
   const barColor = r.pct>100 ? "var(--danger)" : (r.pct>=80 ? "var(--warn)" : "var(--accent)");
-  const card=(lbl,val,cls,sub)=>`
-    <div class="pm-stat ${cls||''}">
-      <div class="pm-stat-v">${money(val)}</div>
-      <div class="pm-stat-l">${lbl}</div>
-      ${sub?`<div class="pm-stat-s">${sub}</div>`:""}
+  // بطاقات .stat-card الأصلية (شريط علوي ملوّن var(--sc) + .sl/.sv بوزن 900)
+  const card=(lbl,val,sc,sub)=>`
+    <div class="stat-card" style="--sc:${sc}">
+      <div class="sl">${lbl}</div>
+      <div class="sv">${money(val)}</div>
+      ${sub?`<div class="click-hint">${sub}</div>`:""}
     </div>`;
   const over = r.planned>0 && (r.actual+r.committed)>r.planned;
   return `
     <div class="pm-stats">
-      ${card("الموازنة المخطّطة (ريال)", r.planned, "", "")}
-      ${card("المصروف الفعلي (مغلق)", r.actual, "good", spentPct+"% من الموازنة")}
-      ${card("المرتبط (طلبات جارية)", r.committed, "warn", "")}
-      ${card("المتبقّي", r.remaining, r.remaining<0?"bad":"", "")}
+      ${card("الموازنة المخطّطة (ريال)", r.planned, "var(--primary)", "")}
+      ${card("المصروف الفعلي (مغلق)", r.actual, "var(--accent)", spentPct+"% من الموازنة")}
+      ${card("المرتبط (طلبات جارية)", r.committed, "var(--warn)", "")}
+      ${card("المتبقّي", r.remaining, r.remaining<0?"var(--danger)":"var(--accent)", "")}
     </div>
     <div class="pm-progress-wrap">
       <div class="pm-progress"><div class="pm-progress-fill" style="width:${Math.min(r.pct,100)}%;background:${barColor}"></div></div>
@@ -286,7 +287,7 @@ function budgetHTML(){
     const spent = cr.actual, committed=cr.committed;
     const remaining = planned - spent - committed;
     const val = _editing
-      ? `<input type="number" min="0" class="pm-inp" data-cat="${cat.key}" value="${planned||''}" placeholder="0">`
+      ? `<input type="number" min="0" class="form-input pm-inp-w" data-cat="${cat.key}" value="${planned||''}" placeholder="0">`
       : money(planned);
     return `
       <tr>
@@ -315,9 +316,9 @@ function budgetHTML(){
 
   const editBtns = _canEdit()
     ? (_editing
-        ? `<button class="pm-btn pm-btn-primary" onclick="projectMgmt.saveBudgetEdit()">💾 حفظ</button>
-           <button class="pm-btn pm-btn-ghost" onclick="projectMgmt.cancelEdit()">إلغاء</button>`
-        : `<button class="pm-btn pm-btn-primary" onclick="projectMgmt.editBudget()">✏️ تعديل الموازنة</button>`)
+        ? `<button class="btn btn-primary btn-sm" onclick="projectMgmt.saveBudgetEdit()">💾 حفظ</button>
+           <button class="btn btn-ghost btn-sm" onclick="projectMgmt.cancelEdit()">إلغاء</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="projectMgmt.editBudget()">✏️ تعديل الموازنة</button>`)
     : `<span class="pm-hint-inline">العرض فقط — التعديل لمدير المشاريع أو الأدمن</span>`;
 
   return `
@@ -370,59 +371,55 @@ function ensurePage(){
 function injectCSS(){
   if(document.getElementById("pm-css")) return;
   const st=document.createElement("style"); st.id="pm-css";
+  // النمط يعيد استخدام توكنز النظام (--primary/--surface/--muted...) وكلاساته الجاهزة
+  // (.stat-card / .btn / .badge / .form-input) فيبقى مطابقاً للمنصة تلقائياً في الثيمين.
   st.textContent = `
 #page-${PAGE_ID}{direction:rtl}
-.pm-head{margin-bottom:14px}
-.pm-title{font-size:20px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--text);margin:0}
-.pm-sub{font-size:12px;color:var(--muted);margin-top:4px}
-.pm-back{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-family:'Cairo',sans-serif;font-size:12px;color:var(--text);cursor:pointer;margin-bottom:8px}
-.pm-back:hover{background:var(--surface)}
-.pm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
-.pm-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--shadow);cursor:pointer;transition:transform .1s,box-shadow .1s}
-.pm-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,0.12)}
-.pm-card-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
-.pm-card-name{font-size:15px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--text)}
-.pm-badge{font-size:10px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:2px 8px;color:var(--muted);white-space:nowrap}
-.pm-card-client{font-size:11px;color:var(--muted);margin-bottom:10px}
-.pm-mini{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
-.pm-mini>div{display:flex;flex-direction:column}
-.pm-mini-l{font-size:10px;color:var(--muted)}
-.pm-mini-v{font-size:14px;font-weight:700;font-family:'Cairo',sans-serif;color:var(--text);direction:ltr;text-align:right}
-.pm-bar{height:7px;background:var(--surface2);border-radius:20px;overflow:hidden}
-.pm-bar-fill{height:100%;border-radius:20px;transition:width .3s}
-.pm-bar-lbl{font-size:10px;color:var(--muted);margin-top:4px}
+.pm-head{margin-bottom:16px}
+.pm-title{font-size:19px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary);margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pm-sub{font-size:12px;color:var(--muted);margin-top:5px}
+.pm-back{margin-bottom:10px}
+.pm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px}
+.pm-card{background:var(--surface);border:1px solid var(--border);border-top:3px solid var(--sc,var(--primary));border-radius:16px;padding:18px 16px;box-shadow:0 10px 26px rgba(20,30,55,0.08);cursor:pointer;transition:transform .18s,box-shadow .18s}
+.pm-card:hover{transform:translateY(-4px);box-shadow:0 18px 40px rgba(20,30,55,0.14)}
+.pm-card-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+.pm-card-name{font-size:15px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary)}
+.pm-card-client{font-size:11px;color:var(--muted);margin-bottom:12px}
+.pm-mini{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.pm-mini>div{display:flex;flex-direction:column;gap:2px}
+.pm-mini-l{font-size:10px;color:var(--muted);font-weight:600}
+.pm-mini-v{font-size:15px;font-weight:800;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--text);direction:ltr;text-align:right}
+.pm-bar{height:8px;background:var(--surface2);border-radius:20px;overflow:hidden}
+.pm-bar-fill{height:100%;border-radius:20px;transition:width .4s}
+.pm-bar-lbl{font-size:10px;color:var(--muted);margin-top:5px}
 .pm-warn-txt{color:var(--warn)}
-.pm-empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:40px;font-size:13px}
-.pm-tabs{display:flex;gap:6px;border-bottom:1px solid var(--border);margin-bottom:14px}
-.pm-tab{background:none;border:none;border-bottom:2px solid transparent;padding:8px 14px;font-family:'Cairo',sans-serif;font-size:13px;color:var(--muted);cursor:pointer;margin-bottom:-1px}
-.pm-tab.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:700}
-.pm-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
-.pm-stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
-.pm-stat-v{font-size:22px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary);direction:ltr;text-align:right}
-.pm-stat-l{font-size:11px;color:var(--muted);margin-top:2px}
-.pm-stat-s{font-size:10px;color:var(--muted);margin-top:4px}
-.pm-stat.good .pm-stat-v{color:var(--accent)} .pm-stat.bad .pm-stat-v{color:var(--danger)} .pm-stat.warn .pm-stat-v{color:var(--warn)}
+.pm-empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:44px;font-size:13px}
+.pm-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin:14px 0 16px}
+.pm-tab{background:none;border:none;border-bottom:2px solid transparent;padding:9px 16px;font-family:'Cairo',sans-serif;font-size:13px;font-weight:700;color:var(--muted);cursor:pointer;margin-bottom:-1px}
+.pm-tab:hover{color:var(--text)}
+.pm-tab.on{color:var(--primary);border-bottom-color:var(--primary)}
+.pm-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.pm-stats .stat-card{cursor:default}
+.pm-stats .sv{font-variant-numeric:tabular-nums;direction:ltr;text-align:right}
 .pm-progress-wrap{margin-bottom:14px}
 .pm-progress{height:12px;background:var(--surface2);border-radius:20px;overflow:hidden}
-.pm-progress-fill{height:100%;border-radius:20px;transition:width .3s}
-.pm-progress-lbl{font-size:11px;color:var(--muted);margin-top:5px}
-.pm-alert{background:#fff7ed;border:1px solid #fdba74;color:#9a3412;border-radius:10px;padding:10px 14px;font-size:12px;margin-bottom:10px}
-.pm-hint{background:var(--surface2);border-radius:10px;padding:10px 14px;font-size:11px;color:var(--muted);margin-top:12px;line-height:1.7}
+.pm-progress-fill{height:100%;border-radius:20px;transition:width .4s}
+.pm-progress-lbl{font-size:11px;color:var(--muted);margin-top:6px}
+.pm-alert{background:var(--surface2);border:1px solid var(--warn);color:var(--warn);border-radius:10px;padding:11px 14px;font-size:12px;font-weight:600;margin-bottom:10px}
+.pm-hint{background:var(--surface2);border-radius:10px;padding:11px 14px;font-size:11px;color:var(--muted);margin-top:14px;line-height:1.8}
 .pm-hint-inline{font-size:11px;color:var(--muted)}
-.pm-budget-tools{display:flex;gap:8px;align-items:center;margin-bottom:12px}
-.pm-btn{border:none;border-radius:8px;padding:7px 14px;font-family:'Cairo',sans-serif;font-size:12px;cursor:pointer}
-.pm-btn-primary{background:var(--primary);color:#fff}
-.pm-btn-ghost{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
-.pm-table-wrap{overflow-x:auto}
+.pm-budget-tools{display:flex;gap:8px;align-items:center;margin-bottom:14px}
+.pm-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow-x:auto}
 .pm-table{width:100%;border-collapse:collapse;font-size:12px}
-.pm-table th{background:var(--surface2);padding:9px 10px;text-align:right;font-weight:700;color:var(--muted);font-size:11px;border-bottom:1px solid var(--border);white-space:nowrap}
-.pm-table td{padding:8px 10px;border-bottom:1px solid var(--border)}
-.pm-table tfoot td{font-weight:800;background:var(--surface2)}
-.pm-td-name{font-weight:600;color:var(--text)}
-.pm-num{direction:ltr;text-align:left;font-family:'Cairo',sans-serif}
+.pm-table th{background:var(--surface2);padding:10px 12px;text-align:right;font-weight:700;color:var(--muted);font-size:11px;border-bottom:1px solid var(--border);white-space:nowrap}
+.pm-table td{padding:9px 12px;border-bottom:1px solid var(--border)}
+.pm-table tbody tr:last-child td{border-bottom:none}
+.pm-table tfoot td{font-weight:800;background:var(--surface2);color:var(--text)}
+.pm-td-name{font-weight:700;color:var(--text)}
+.pm-num{direction:ltr;text-align:left;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--text)}
 .pm-dim{color:var(--muted)}
-.pm-tr-unc td{background:#fffbeb}
-.pm-inp{width:110px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-family:'Cairo',sans-serif;font-size:12px;direction:ltr;text-align:left}
+.pm-tr-unc td{background:var(--surface2)}
+.form-input.pm-inp-w{width:110px;padding:6px 9px;font-size:12px;direction:ltr;text-align:left}
 @media (max-width:760px){ .pm-cards{grid-template-columns:1fr} }
 `;
   document.head.appendChild(st);
