@@ -625,12 +625,13 @@ function boqHTML(){
   const toolbar = canEdit
     ? `<div class="pm-sched-tools">
         <button class="btn btn-primary btn-sm" onclick="projectMgmt.editBoq()">${_icon('edit')} تعديل المقايسة</button>
+        <button class="btn btn-ghost btn-sm" onclick="projectMgmt.aiExtractBoq()">${_icon('activity')} استخراج بالذكاء الاصطناعي</button>
         <button class="btn btn-ghost btn-sm" onclick="projectMgmt.importBoqExcel()">${_icon('download')} استيراد Excel</button>
         <button class="btn btn-ghost btn-sm" onclick="projectMgmt.downloadBoqTemplate()">${_icon('fileText')} تحميل قالب</button>
       </div>`
     : "";
   if(!items.length){
-    return toolbar + `<div class="pm-hint" style="margin-top:0">لا توجد مقايسة بعد. ${canEdit?'اضغط «تعديل المقايسة» لإضافة البنود يدوياً، أو «استيراد Excel» — وستُحسب الموازنة تلقائياً منها.<br>أعمدة Excel المتوقّعة: <b>البند · البند العام · الوحدة · الكمية · سعر الوحدة</b>.':'التحرير للأدمن أو مدير المشاريع.'}</div>`;
+    return toolbar + `<div class="pm-hint" style="margin-top:0">لا توجد مقايسة بعد. ${canEdit?'اضغط «تعديل المقايسة» لإضافة البنود يدوياً، أو «استخراج بالذكاء الاصطناعي» (ارفع صورة/PDF للمقايسة)، أو «استيراد Excel» — وستُحسب الموازنة تلقائياً منها.<br>أعمدة Excel المتوقّعة: <b>البند · البند العام · الوحدة · الكمية · سعر الوحدة</b>.':'التحرير للأدمن أو مدير المشاريع.'}</div>`;
   }
   const byCat={}; items.forEach(it=>{ const k=(it.categoryKey&&CAT_NAME[it.categoryKey])?it.categoryKey:"uncategorized"; (byCat[k]=byCat[k]||[]).push(it); });
   const cats=BUDGET_CATEGORIES.concat([UNCATEGORIZED]).filter(c=>byCat[c.key]);
@@ -652,7 +653,7 @@ function boqHTML(){
       <tbody>${sections}</tbody>
       <tfoot><tr><td class="pm-td-name" colspan="4">إجمالي المقايسة</td><td class="pm-num">${money(grand)}</td></tr></tfoot>
     </table></div>
-    <div class="pm-hint">«الموازنة المخطّطة» تُحسب تلقائياً من هذه المقايسة (كل بند عام = مجموع بنوده). قريباً: استيراد Excel واستخراج بالذكاء الاصطناعي.</div>`;
+    <div class="pm-hint">«الموازنة المخطّطة» تُحسب تلقائياً من هذه المقايسة (كل بند عام = مجموع بنوده). يمكنك الإضافة يدوياً، أو الاستخراج بالذكاء الاصطناعي من صورة/PDF، أو الاستيراد من Excel.</div>`;
 }
 function _boqEditHTML(items){
   const catOpts=(sel)=> BUDGET_CATEGORIES.map(c=>`<option value="${c.key}" ${sel===c.key?'selected':''}>${_esc(c.name)}</option>`).join("");
@@ -661,6 +662,7 @@ function _boqEditHTML(items){
       <button class="btn btn-primary btn-sm" onclick="projectMgmt.saveBoqEdit()">${_icon('checkCircle')} حفظ</button>
       <button class="btn btn-ghost btn-sm" onclick="projectMgmt.cancelBoqEdit()">إلغاء</button>
       <button class="btn btn-ghost btn-sm" onclick="projectMgmt.addBoqLine()">${_icon('plus')} إضافة بند</button>
+      <button class="btn btn-ghost btn-sm" onclick="projectMgmt.aiExtractBoq()">${_icon('activity')} استخراج بالذكاء الاصطناعي</button>
       <button class="btn btn-ghost btn-sm" onclick="projectMgmt.importBoqExcel()">${_icon('download')} استيراد Excel</button>
       <button class="btn btn-ghost btn-sm" onclick="projectMgmt.downloadBoqTemplate()">${_icon('fileText')} تحميل قالب</button>
     </div>
@@ -798,6 +800,60 @@ function downloadBoqTemplate(){
     XLSX.writeFile(wb, "قالب_المقايسة.xlsx");
     _toast("✅ نُزّل قالب المقايسة — املأه ثم استورده","success");
   }catch(e){ console.warn("downloadBoqTemplate",e); _toast("⚠ تعذّر توليد القالب","warn"); }
+}
+
+/* ── استخراج المقايسة من صورة/PDF بالذكاء الاصطناعي ── */
+function aiExtractBoq(){
+  if(!_canEdit()){ _toast("🔒 التحرير للأدمن أو مدير المشاريع","warn"); return; }
+  if(typeof _callAnthropicAPI!=="function"){ _toast("⚠ الذكاء الاصطناعي غير مُفعّل — فعّله من: الإدارة › إعدادات الذكاء الاصطناعي","warn"); return; }
+  const inp=document.createElement("input");
+  inp.type="file"; inp.accept="image/*,application/pdf"; inp.style.display="none";
+  inp.onchange=function(){
+    const f=inp.files&&inp.files[0]; if(!f) return;
+    const reader=new FileReader();
+    reader.onload=async function(e){
+      const btnNote=()=>{};
+      try{
+        _toast("⏳ جارٍ استخراج المقايسة بالذكاء الاصطناعي — قد يستغرق ثوانٍ…","info");
+        try{ if(typeof _ensureAIProxy==="function") await _ensureAIProxy(); }catch(_e){}
+        const dataUrl=String(e.target.result||"");
+        const comma=dataUrl.indexOf(","); const b64=comma>=0?dataUrl.slice(comma+1):dataUrl;
+        const isPdf=(f.type==="application/pdf")||/\.pdf$/i.test(f.name||"");
+        const mime=isPdf?"application/pdf":((f.type&&f.type.indexOf("image/")===0)?f.type:"image/jpeg");
+        const catList=BUDGET_CATEGORIES.map(c=>c.name).join("، ");
+        const prompt=
+          "أنت خبير حصر كميات (BOQ). استخرج بنود المقايسة من الملف المرفق (صورة/PDF).\n"+
+          "لكل بند: الوصف، الوحدة، الكمية، سعر الوحدة، وصنّفه تحت أحد بنود الموازنة التالية فقط (اكتب الاسم كما هو): "+catList+".\n"+
+          "إن غاب سعر أو كمية اجعلها 0. تجاهل صفوف العناوين والمجاميع.\n"+
+          "أعِد JSON فقط بلا أي شرح، بهذا الشكل تماماً:\n"+
+          "{\"items\":[{\"desc\":\"وصف البند\",\"category\":\"كهرباء\",\"unit\":\"متر\",\"qty\":10,\"unitPrice\":45}]}";
+        const block=isPdf
+          ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:b64 } }
+          : { type:"image", source:{ type:"base64", media_type:mime, data:b64 } };
+        const res=await _callAnthropicAPI(null,
+          { model:"claude-sonnet-4-6", max_tokens:4000, messages:[{ role:"user", content:[block,{type:"text",text:prompt}] }] },
+          isPdf?"pdfs-2024-09-25":null, "استخراج المقايسة");
+        if(!res.ok){ const er=await res.json().catch(()=>({})); throw new Error((er&&er.error&&er.error.message)||("HTTP "+res.status)); }
+        const data=await res.json();
+        const txt=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n");
+        const j=_extractJSON(txt);
+        const arr = j ? (Array.isArray(j.items)?j.items : (Array.isArray(j.phases)?j.phases : null)) : null;
+        if(!arr || !arr.length){ _toast("⚠ لم أستخرج بنوداً — جرّب صورة أوضح أو أدخل يدوياً","warn"); return; }
+        const items=arr.slice(0,400).map(it=>({
+          id:_uid(), desc:String(it.desc||it.name||"").trim().slice(0,120),
+          categoryKey:_catKeyFromName(it.category||it.categoryKey), unit:String(it.unit||"").trim().slice(0,20),
+          qty:Number(it.qty)||0, unitPrice:Number(it.unitPrice)||0
+        })).filter(it=>it.desc);
+        if(!items.length){ _toast("⚠ لم أستخرج بنوداً صالحة","warn"); return; }
+        if(!_boqEditing){ editBoq(); } else { _syncBoqDraft(); }
+        _boqDraft=(_boqDraft||[]).concat(items); _boqEditing=true; renderTabBody();
+        _toast("✅ استُخرج "+items.length+" بند — راجعها ثم اضغط «حفظ»","success");
+      }catch(err){ console.warn("aiExtractBoq",err); _toast("⚠ تعذّر الاستخراج: "+((err&&err.message)||""),"warn"); }
+    };
+    reader.readAsDataURL(f);
+  };
+  document.body.appendChild(inp); inp.click();
+  setTimeout(()=>{ try{ inp.remove(); }catch(_e){} }, 120000);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1385,7 +1441,7 @@ else init();
 window.projectMgmt = {
   render, open, openAt, back, tab, openFromLanding,
   editBudget, cancelEdit, saveBudgetEdit,
-  editBoq, addBoqLine, delBoqLine, cancelBoqEdit, saveBoqEdit, importBoqExcel, downloadBoqTemplate,
+  editBoq, addBoqLine, delBoqLine, cancelBoqEdit, saveBoqEdit, importBoqExcel, downloadBoqTemplate, aiExtractBoq,
   _parseBoqRows,
   setType,
   openCatMap, closeCatMap, saveCatMapEdit,
