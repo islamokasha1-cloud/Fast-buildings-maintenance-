@@ -782,6 +782,29 @@ html[data-theme="dark"] .login-error{background:#3a1717;border-color:#6e2a2a}
 .proj-icon-opt svg{width:22px;height:22px;stroke-width:2}
 .proj-icon-opt:hover{transform:translateY(-2px);color:var(--primary);border-color:rgba(27,58,107,0.35)}
 .proj-icon-opt.selected{background:rgba(27,58,107,0.08);border-color:var(--primary);color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+/* ═══ منتقي نوع العمل — قائمة مخصّصة بأيقونات المنصة (بديل الإيموجي داخل select) ═══ */
+.icon-select{position:relative;width:100%}
+.icon-select-native{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.icon-select-trigger{display:flex;align-items:center;gap:9px;text-align:start;cursor:pointer;font-family:inherit;font-size:13px}
+.icon-select-trigger .wt-ico{width:26px;height:26px;flex-shrink:0;border-radius:7px;background:rgba(27,58,107,0.08);color:var(--primary);display:inline-flex;align-items:center;justify-content:center}
+.icon-select-trigger .wt-ico:empty{display:none}
+.icon-select-trigger .wt-ico svg{width:16px;height:16px}
+.icon-select-trigger .wt-lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.icon-select-trigger .wt-lbl.ph{color:var(--muted)}
+.icon-select-trigger .ic-chev{flex-shrink:0;color:var(--muted);display:inline-flex;transition:transform .18s}
+.icon-select.open .icon-select-trigger{border-color:var(--primary);box-shadow:0 0 0 3px rgba(27,58,107,0.08)}
+.icon-select.open .ic-chev{transform:rotate(180deg)}
+.icon-select-panel{position:absolute;z-index:60;top:calc(100% + 5px);inset-inline:0;background:#fff;border:1px solid var(--border);border-radius:11px;box-shadow:0 14px 38px rgba(20,30,55,0.18);padding:6px;max-height:290px;overflow-y:auto;display:none}
+.icon-select.open .icon-select-panel{display:block;animation:isFade .14s ease}
+@keyframes isFade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.icon-select-opt{display:flex;align-items:center;gap:10px;width:100%;text-align:start;padding:8px 9px;border:none;border-radius:8px;background:none;cursor:pointer;font-family:inherit;font-size:13px;color:var(--text);transition:background .12s}
+.icon-select-opt .wt-ico{width:30px;height:30px;flex-shrink:0;border-radius:8px;background:rgba(27,58,107,0.07);color:var(--primary);display:inline-flex;align-items:center;justify-content:center}
+.icon-select-opt .wt-ico svg{width:17px;height:17px}
+.icon-select-opt .wt-ico:empty{display:none}
+.icon-select-opt .wt-lbl{flex:1;min-width:0}
+.icon-select-opt:hover,.icon-select-opt.active{background:rgba(27,58,107,0.07)}
+.icon-select-opt.selected{background:rgba(27,58,107,0.10);font-weight:700;color:var(--primary)}
+.icon-select-opt.selected .wt-ico{background:var(--primary);color:#fff}
 .proj-menu-btn{background:rgba(27,58,107,0.06);border:1px solid var(--border);border-radius:9px;width:28px;height:28px;cursor:pointer;color:var(--muted);display:flex;align-items:center;justify-content:center;font-family:inherit;transition:background .15s,color .15s}
 .proj-menu-btn svg{width:15px;height:15px}
 .proj-menu-btn:hover{background:rgba(27,58,107,0.12);color:var(--primary)}
@@ -6232,9 +6255,91 @@ function fmtDate(d){
 function fmtDateOnly(d){
   return new Date(d).toLocaleDateString("ar-SA-u-ca-gregory-nu-latn",{year:"numeric",month:"short",day:"numeric"});
 }
-const WORK_SVG={"أعمال الكهرباء":"zap","أعمال التكييف":"wind","أعمال السباكة":"droplet","أعمال النجارة":"hammer","أعمال البلاط":"tile","أعمال الحدادة":"hammer","أعمال المصاعد":"elevator","أعمال كاميرات وتيار خفيف":"video","أعمال الألومنيوم":"frame","أعمال دهانات":"paintbrush","أخرى":"wrench"};
+const WORK_SVG={"أعمال الكهرباء":"zap","أعمال التكييف":"wind","أعمال السباكة":"droplet","أعمال النجارة":"hammer","أعمال البلاط":"tile","أعمال الحدادة":"wrench","أعمال المصاعد":"elevator","أعمال كاميرات وتيار خفيف":"video","أعمال الألومنيوم":"frame","أعمال دهانات":"paintbrush","أخرى":"wrench"};
+// خريطة إيموجي أنواع العمل → مفتاح أيقونة المنصة (احتياط لأنواع العمل المخصّصة التي يضيفها المستخدم)
+const WORK_EMOJI_ICON={"🚿":"droplet","🚰":"droplet","🚽":"droplet","🪠":"droplet","💧":"droplet","🛁":"droplet","⚡":"zap","🔌":"zap","❄":"wind","🌬":"wind","💨":"wind","🪚":"hammer","🔨":"hammer","🔩":"wrench","🛠":"wrench","🔧":"wrench","⚙":"wrench","🪛":"wrench","🧱":"tile","🔲":"tile","🪟":"frame","🛗":"elevator","📷":"video","📹":"video","📸":"video","🎨":"paintbrush","🖌":"paintbrush","🪜":"paintbrush","⛏":"hammer","🚧":"hardHat"};
+// يحوّل اسم نوع العمل (وإيموجيه إن وُجد) → مفتاح أيقونة معتمد
+function workIconKey(name,emoji){
+  if(name && WORK_SVG[name]) return WORK_SVG[name];
+  if(emoji){ const b=String(emoji).replace(/[️‍⃣]/g,""); if(WORK_EMOJI_ICON[b]) return WORK_EMOJI_ICON[b]; const f=Array.from(b)[0]; if(f&&WORK_EMOJI_ICON[f]) return WORK_EMOJI_ICON[f]; }
+  return "wrench";
+}
+function workIconSvg(name,emoji){ const p=_ICON[workIconKey(name,emoji)]||_ICON.wrench; return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+p+'</svg>'; }
 function typeIconText(wt){ return (WORK_TYPES[wt]||{icon:"🔧"}).icon; }
-function typeIcon(wt){ const pth=_ICON[WORK_SVG[wt]||"wrench"]; return pth?'<svg class="wt-svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+pth+'</svg>':""; }
+function typeIcon(wt){ const pth=_ICON[workIconKey(wt,(WORK_TYPES[wt]||{}).icon)]; return pth?'<svg class="wt-svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+pth+'</svg>':""; }
+
+// ══ منتقي مخصّص يعرض أيقونات SVG للمنصة بدل الإيموجي، مع إبقاء الـ <select> الأصلي مصدراً للحقيقة ══
+const _IS_CHEV='<svg class="ic-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+// يستخرج {icon,label} من <option> نوع عمل (النص قد يبدأ بإيموجي قديم يُجرّد للعرض)
+function _wtOptResolve(o){
+  const text=(o.textContent||"").trim();
+  if(!o.value) return {icon:"",label:text};
+  const label=text.replace(/^[^\p{L}\p{N}]+\s*/u,"").trim()||text;
+  const emoji=(text.match(/^([^\p{L}\p{N}\s]+)/u)||[])[1]||"";
+  return {icon:workIconSvg(label,emoji),label};
+}
+function enhanceWorkSelect(id){ const s=document.getElementById(id); if(s) enhanceIconSelect(s,_wtOptResolve); }
+function enhanceIconSelect(select,resolve){
+  if(!select) return;
+  if(select._iconEnhanced){ syncIconSelect(select); return; }
+  select._iconEnhanced=true; select._iconResolve=resolve;
+  const box=document.createElement("div"); box.className="icon-select"; box._ownerSelect=select;
+  const trigger=document.createElement("button");
+  trigger.type="button"; trigger.className="icon-select-trigger form-select";
+  trigger.setAttribute("aria-haspopup","listbox"); trigger.setAttribute("aria-expanded","false");
+  const panel=document.createElement("div"); panel.className="icon-select-panel"; panel.setAttribute("role","listbox");
+  select.parentNode.insertBefore(box,select);
+  box.appendChild(trigger); box.appendChild(panel); box.appendChild(select);
+  select.classList.add("icon-select-native"); select.setAttribute("tabindex","-1"); select.setAttribute("aria-hidden","true");
+  select._iconBox=box; select._iconTrigger=trigger; select._iconPanel=panel;
+  trigger.addEventListener("click",e=>{ e.preventDefault(); e.stopPropagation(); _toggleIconSelect(select); });
+  trigger.addEventListener("keydown",e=>_iconSelectKey(e,select));
+  syncIconSelect(select);
+}
+function syncIconSelect(select){
+  if(!select||!select._iconEnhanced) return;
+  const resolve=select._iconResolve, panel=select._iconPanel, trigger=select._iconTrigger;
+  panel.innerHTML="";
+  [...select.options].forEach((o,i)=>{
+    const r=resolve(o); const on=i===select.selectedIndex;
+    const row=document.createElement("button");
+    row.type="button"; row.className="icon-select-opt"+(on?" selected":"");
+    row.setAttribute("role","option"); row.setAttribute("aria-selected",on?"true":"false"); row.dataset.idx=i;
+    row.innerHTML='<span class="wt-ico">'+(r.icon||"")+'</span><span class="wt-lbl">'+esc(r.label)+'</span>';
+    row.addEventListener("click",e=>{ e.stopPropagation(); _pickIconSelect(select,i); });
+    panel.appendChild(row);
+  });
+  const sel=select.options[select.selectedIndex]||select.options[0];
+  const r=sel?resolve(sel):{icon:"",label:""}; const hasVal=!!select.value;
+  trigger.innerHTML='<span class="wt-ico">'+(hasVal?(r.icon||""):"")+'</span><span class="wt-lbl'+(hasVal?"":" ph")+'">'+esc(r.label||"")+'</span>'+_IS_CHEV;
+}
+function _pickIconSelect(select,i){
+  if(select.selectedIndex!==i){ select.selectedIndex=i; select.dispatchEvent(new Event("change",{bubbles:true})); }
+  syncIconSelect(select); _closeIconSelect(select); select._iconTrigger.focus();
+}
+function _openIconSelect(select){
+  document.querySelectorAll(".icon-select.open").forEach(b=>{ if(b!==select._iconBox){ b.classList.remove("open"); const t=b.querySelector(".icon-select-trigger"); if(t)t.setAttribute("aria-expanded","false"); } });
+  select._iconBox.classList.add("open"); select._iconTrigger.setAttribute("aria-expanded","true");
+  const so=select._iconPanel.querySelector(".icon-select-opt.selected")||select._iconPanel.querySelector(".icon-select-opt");
+  if(so) so.scrollIntoView({block:"nearest"});
+}
+function _closeIconSelect(select){ select._iconBox.classList.remove("open"); select._iconTrigger.setAttribute("aria-expanded","false"); select._iconPanel.querySelectorAll(".icon-select-opt.active").forEach(o=>o.classList.remove("active")); }
+function _toggleIconSelect(select){ select._iconBox.classList.contains("open")?_closeIconSelect(select):_openIconSelect(select); }
+function _iconSelectKey(e,select){
+  const open=select._iconBox.classList.contains("open");
+  const opts=[...select._iconPanel.querySelectorAll(".icon-select-opt")];
+  let ai=opts.findIndex(o=>o.classList.contains("active"));
+  if(e.key==="ArrowDown"||e.key==="ArrowUp"){
+    e.preventDefault();
+    if(!open){ _openIconSelect(select); ai=select.selectedIndex; }
+    else { const base=ai<0?select.selectedIndex:ai; ai=e.key==="ArrowDown"?Math.min(opts.length-1,base+1):Math.max(0,base-1); }
+    opts.forEach(o=>o.classList.remove("active"));
+    if(opts[ai]){ opts[ai].classList.add("active"); opts[ai].scrollIntoView({block:"nearest"}); }
+  } else if(e.key==="Enter"||e.key===" "){
+    e.preventDefault(); if(!open) _openIconSelect(select); else if(ai>=0) _pickIconSelect(select,ai);
+  } else if(e.key==="Escape"){ if(open){ e.preventDefault(); _closeIconSelect(select); } }
+}
+document.addEventListener("click",e=>{ document.querySelectorAll(".icon-select.open").forEach(box=>{ if(!box.contains(e.target)){ box.classList.remove("open"); const t=box.querySelector(".icon-select-trigger"); if(t)t.setAttribute("aria-expanded","false"); } }); });
 
 const _DEFAULT_CONTRACT_NAME  = "أعمال التشغيل والصيانة لمباني أمانة منطقة حائل (المرحلة الأولى)";
 const _DEFAULT_CONTRACT_START = new Date(2025,10,9);
@@ -9138,7 +9243,7 @@ async function submitTicket(){
 }
 
 function clearForm(){
-  ["n-building","n-type","n-priority","n-tech","n-supervisor","n-maint-type"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
+  ["n-building","n-type","n-priority","n-tech","n-supervisor","n-maint-type"].forEach(id=>{const el=document.getElementById(id);if(el){el.value="";syncIconSelect(el);}});
   ["n-location","n-desc","n-notes","n-date","n-time","n-reporter"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
   clearSelectedAsset();
   document.getElementById("tech-label").textContent="الفني المسؤول";
@@ -10879,6 +10984,7 @@ function openEditTicket(id){
 
   const tySel=document.getElementById("edit-type");
   tySel.innerHTML=Object.keys(WORK_TYPES).map(k=>`<option value="${esc(k)}" ${k===t.workType?"selected":""}>${esc(WORK_TYPES[k].icon)} ${esc(k)}</option>`).join("");
+  enhanceIconSelect(tySel,_wtOptResolve);
 
   document.getElementById("edit-location").value=t.location||"";
   document.getElementById("edit-maint-type").value=t.maintType||"تصحيحية";
@@ -11563,18 +11669,26 @@ function repopulateAllSelects(){
   const paeb = document.getElementById("pae-building");
   if(paeb){ const v=paeb.value; paeb.innerHTML=`<option value="">اختر المبنى...</option>`+BUILDINGS.map(b=>`<option>${esc(b)}</option>`).join(""); paeb.value=v; }
 
-  const wtSelectors=["n-type","edit-type","ppm-work-type","f-type","r-type"];
-  wtSelectors.forEach(sid=>{
+  // منتقيات نوع العمل (إنشاء/تعديل البلاغ + خطة PPM) — قائمة مخصّصة بأيقونات SVG
+  const wtPickers=["n-type","edit-type","ppm-work-type"];
+  wtPickers.forEach(sid=>{
     const sel=document.getElementById(sid);
     if(!sel) return;
     const v=sel.value;
     if(sid==="n-type"){
       sel.innerHTML=`<option value="">اختر نوع العمل...</option>`+Object.entries(WORK_TYPES).map(([k,w])=>`<option value="${esc(w.icon)} ${esc(k)}">${esc(w.icon)} ${esc(k)}</option>`).join("");
-    } else if(sid==="f-type"||sid==="r-type"){
-      sel.innerHTML=`<option value="">كل الأعمال</option>`+Object.entries(WORK_TYPES).map(([k,w])=>`<option value="${esc(k)}">${esc(w.icon)} ${esc(k)}</option>`).join("");
     } else {
       sel.innerHTML=Object.entries(WORK_TYPES).map(([k,w])=>`<option value="${esc(k)}">${esc(w.icon)} ${esc(k)}</option>`).join("");
     }
+    sel.value=v;
+    enhanceIconSelect(sel,_wtOptResolve);
+  });
+  // فلاتر نوع العمل — نص عربي نظيف بلا إيموجي (لا تُحوَّل لقائمة أيقونات)
+  ["f-type","r-type"].forEach(sid=>{
+    const sel=document.getElementById(sid);
+    if(!sel) return;
+    const v=sel.value;
+    sel.innerHTML=`<option value="">كل الأعمال</option>`+Object.keys(WORK_TYPES).map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join("");
     sel.value=v;
   });
 }
@@ -13433,7 +13547,7 @@ function initReportFilters(){
   if(rt){
     const rt_val=rt.value;
     rt.innerHTML='<option value="">كل الأعمال</option>';
-    Object.keys(WORK_TYPES).forEach(k=>{const o=document.createElement("option");o.value=k;o.textContent=WORK_TYPES[k].icon+" "+k;rt.appendChild(o);});
+    Object.keys(WORK_TYPES).forEach(k=>{const o=document.createElement("option");o.value=k;o.textContent=k;rt.appendChild(o);});
     rt.value=rt_val;
   }
   const now=new Date();
@@ -13448,7 +13562,7 @@ function initReportFilters(){
   if(prt){
     const prt_val=prt.value;
     prt.innerHTML='<option value="">كل الأعمال</option>';
-    Object.keys(WORK_TYPES).forEach(k=>{const o=document.createElement("option");o.value=k;o.textContent=WORK_TYPES[k].icon+" "+k;prt.appendChild(o);});
+    Object.keys(WORK_TYPES).forEach(k=>{const o=document.createElement("option");o.value=k;o.textContent=k;prt.appendChild(o);});
     prt.value=prt_val;
   }
   const prfrom=document.getElementById("pr-from");
@@ -31580,7 +31694,7 @@ function openAddPPMModal(){
   }
 
   const wtSel=document.getElementById("ppm-work-type");
-  if(wtSel) wtSel.innerHTML=`<option value="">-- اختر --</option>`+Object.keys(WORK_TYPES).map(k=>`<option value="${esc(k)}">${esc(WORK_TYPES[k].icon)} ${esc(k)}</option>`).join("");
+  if(wtSel){ wtSel.innerHTML=`<option value="">-- اختر --</option>`+Object.keys(WORK_TYPES).map(k=>`<option value="${esc(k)}">${esc(WORK_TYPES[k].icon)} ${esc(k)}</option>`).join(""); enhanceIconSelect(wtSel,_wtOptResolve); }
 
   const tSel=document.getElementById("ppm-tech");
   if(tSel) tSel.innerHTML=`<option value="">-- اختر --</option>`+ALL_TECHS.map(t=>`<option>${esc(t)}</option>`).join("");
@@ -31620,7 +31734,7 @@ function openEditPPMModal(id){
   }
 
   const wtSel=document.getElementById("ppm-work-type");
-  if(wtSel) wtSel.innerHTML=`<option value="">-- اختر --</option>`+Object.keys(WORK_TYPES).map(k=>`<option value="${esc(k)}" ${k===p.workType?"selected":""}>${esc(WORK_TYPES[k].icon)} ${esc(k)}</option>`).join("");
+  if(wtSel){ wtSel.innerHTML=`<option value="">-- اختر --</option>`+Object.keys(WORK_TYPES).map(k=>`<option value="${esc(k)}" ${k===p.workType?"selected":""}>${esc(WORK_TYPES[k].icon)} ${esc(k)}</option>`).join(""); enhanceIconSelect(wtSel,_wtOptResolve); }
 
   const tSel=document.getElementById("ppm-tech");
   if(tSel) tSel.innerHTML=`<option value="">-- اختر --</option>`+ALL_TECHS.map(t=>`<option ${t===p.tech?"selected":""}>${esc(t)}</option>`).join("");
