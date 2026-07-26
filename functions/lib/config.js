@@ -58,39 +58,41 @@ const PO = {
 
 /**
  * توجيه: حالة الطلب الجديدة → { role: الدور المطلوب, action: نص الإجراء في الرسالة }.
- * من ينتظر دوره الآن يُنبَّه (رسالة واحدة لكل مرحلة). متفق عليه 2026-07-24.
+ * من ينتظر دوره الآن يُنبَّه (رسالة واحدة لكل مرحلة).
+ * الأسماء مطابقة لرموز الحالة الفعلية في index.html (دالة أزرار الإجراء) — تحقّق 2026-07-26.
+ * المسار: pending_pm→(اعتماد)→pm_approved→(مستودع)→wh_reviewed→(مشتريات)→
+ *         pending_ceo/pending_finance/proc_executing→wh_receiving→closed.
  */
 const PO_ROUTING = {
   pending_pm: { role: "project_manager", action: "موافقتك" },
-  wh_review: { role: "warehouse_manager", action: "مراجعتك" },
-  pending_proc: { role: "procurement_officer", action: "اعتمادك" },
+  pm_approved: { role: "warehouse_manager", action: "مراجعتك" }, // بعد اعتماد مدير المشاريع
+  wh_review: { role: "warehouse_manager", action: "مراجعتك" }, // مرادف قديم لنفس المرحلة
+  wh_reviewed: { role: "procurement_officer", action: "اعتمادك" }, // بعد اعتماد المستودع
+  pending_proc: { role: "procurement_officer", action: "اعتمادك" }, // مرادف قديم
   pending_ceo: { role: "ceo", action: "اعتمادك" },
   pending_finance: { role: "finance", action: "سدادك" },
-  finance_returned: { role: "procurement_officer", action: "متابعتك" },
-  wh_receiving: { role: "warehouse_manager", action: "استلامك" },
+  finance_returned: { role: "procurement_officer", action: "متابعتك" }, // المالية أعادته
+  proc_executing: { role: "procurement_officer", action: "بدء التنفيذ" }, // تنفيذ الشراء
+  wh_receiving: { role: "warehouse_manager", action: "استلامك" }, // إشعار المستودع بالاستلام
   pending_extra: { role: "ceo", action: "قرارك" },
 };
 
 /** حالات يُنبَّه فيها صاحب الطلب (createdBy) — الرفض والإغلاق فقط. */
 const PO_NOTIFY_REQUESTER = new Set([
-  "rejected",
   "pm_rejected",
   "wh_rejected",
   "ceo_rejected",
-  "rejected_final",
+  "rejected",
   "closed",
-  "closed_after_receipt",
 ]);
 
 /** تسميات الحالة العربية (للرسالة إلى صاحب الطلب). */
 const PO_STATUS_LABELS = {
-  rejected: "مرفوض",
   pm_rejected: "مرفوض من مدير المشاريع",
   wh_rejected: "مرفوض من المستودع",
   ceo_rejected: "مرفوض من المدير التنفيذي",
-  rejected_final: "مرفوض نهائياً",
+  rejected: "مرفوض نهائياً",
   closed: "مغلق",
-  closed_after_receipt: "مغلق بعد الاستلام",
 };
 
 module.exports = {
