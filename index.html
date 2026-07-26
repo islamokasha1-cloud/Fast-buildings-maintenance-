@@ -11996,7 +11996,7 @@ function renderAdminUsersList(){
         <span style="font-size:14px" title="رقم واتساب">📱</span>
         <input class="form-input" value="${esc(u.phone||"")}" id="admin-user-phone-${i}" placeholder="9665XXXXXXXX" inputmode="tel" dir="ltr" style="flex:1;padding:4px 8px;font-size:12px">
         <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--muted)">
-          <input type="checkbox" id="admin-user-optin-${i}" ${u.waOptIn?"checked":""}> تفعيل واتساب
+          <input type="checkbox" id="admin-user-optin-${i}" ${u.waOptIn?"checked":""} onchange="adminSaveUserWa(${i})"> تفعيل واتساب
         </label>
         <button class="btn btn-primary btn-sm" onclick="adminSaveUserWa(${i})" style="white-space:nowrap;font-size:11px">💾 رقم</button>
       </div>
@@ -26276,7 +26276,7 @@ function _renderPurchaseUsersListUI(el){
         <span style="font-size:14px" title="رقم واتساب لإشعارات الشراء">📱</span>
         <input class="form-input" value="${esc(u.phone||"")}" id="pu-user-phone-${i}" placeholder="9665XXXXXXXX" inputmode="tel" dir="ltr" style="flex:1;padding:4px 8px;font-size:12px">
         <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--muted)">
-          <input type="checkbox" id="pu-user-optin-${i}" ${u.waOptIn?"checked":""}> تفعيل واتساب
+          <input type="checkbox" id="pu-user-optin-${i}" ${u.waOptIn?"checked":""} onchange="puSaveUserWa(${i})"> تفعيل واتساب
         </label>
         <button class="btn btn-primary btn-sm" onclick="puSaveUserWa(${i})" style="white-space:nowrap;font-size:11px">💾 رقم</button>
       </div>
