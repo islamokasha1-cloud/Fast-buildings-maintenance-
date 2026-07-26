@@ -3376,7 +3376,7 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
           <div class="form-row" style="margin-bottom:8px">
             <div class="form-group">
               <label class="form-label">الكمية <span>*</span></label>
-              <input class="form-input" type="number" id="np-qty" min="1" step="1" placeholder="0" oninput="calcItemTotals()">
+              <input class="form-input" type="number" id="np-qty" min="0" step="any" placeholder="0" oninput="calcItemTotals()">
             </div>
             <div class="form-group">
               <label class="form-label">الوحدة <span>*</span></label>
@@ -19392,6 +19392,7 @@ function openIssueOrderDetail(orderId){
     <div class="d-grid" style="margin-bottom:14px">
       <div class="d-item"><div class="dl">المستلم</div><div class="dv">${esc(o.recipient||"—")}</div></div>
       <div class="d-item"><div class="dl">المشروع</div><div class="dv">${esc(o.projectId||"—")}</div></div>
+      <div class="d-item"><div class="dl">الموقع / الغرض</div><div class="dv">${esc(o.location||"—")}</div></div>
       <div class="d-item"><div class="dl">التاريخ</div><div class="dv">${o.date?fmtDateOnly(o.date):"—"}</div></div>
       <div class="d-item"><div class="dl">أصدره</div><div class="dv">${esc(o.issuedBy||"—")}</div></div>
       <div class="d-item"><div class="dl">الحالة</div><div class="dv"><span class="badge ${m.cls}"><span class="badge-dot"></span>${m.t}</span></div></div>
@@ -20537,12 +20538,9 @@ function addPurchaseItem(){
 
   if(!itemType){ toast("⚠ اختر نوع الخامة","warn"); return; }
   if(!itemName){ toast("⚠ أدخل اسم المادة","warn"); return; }
-  // v18.9og: parseInt كان يقصّ «2.5» إلى «2» بلا رسالة — والاستلام يقبل الكسر
-  // فيصير المطلوب ٢ والمستلم ٢٫٥ ولا أحد يعرف أين ضاع النصف. الكمية صحيحةٌ
-  // بقرارٍ صريح، فلتُقَل صراحةً.
+  // الكمية تقبل الكسور (مثل 2.16) — بعض الوحدات (متر/كجم/لتر) تُطلب بكسور.
   const _qf = parseFloat(qty);
   if(!qty || !(_qf > 0)){ toast("⚠ أدخل الكمية","warn"); return; }
-  if(!Number.isInteger(_qf)){ toast("⚠ الكمية عدد صحيح — الكسور غير مدعومة في طلب الشراء","warn"); return; }
   if(!unit){ toast("⚠ اختر الوحدة","warn"); return; }
 
   const qtyNum   = _qf;
@@ -27457,7 +27455,7 @@ function _waExtraForm(catId){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group" style="margin-bottom:10px">
           <label class="form-label">الكمية الواصلة <span style="color:var(--danger)">*</span></label>
-          <input class="form-input" type="number" min="0" step="0.01" id="_wax-qty" style="font-family:monospace;direction:ltr">
+          <input class="form-input" type="number" min="0" step="any" id="_wax-qty" style="font-family:monospace;direction:ltr">
         </div>
         <div class="form-group" style="margin-bottom:10px">
           <label class="form-label">سعر الوحدة قبل الضريبة <span style="color:var(--danger)">*</span></label>
@@ -27532,12 +27530,12 @@ function waRenderExtras(){
       <td style="padding:6px 8px;text-align:center;color:var(--muted)">—<div style="font-size:9px;color:#b45309;font-weight:700">لم يُطلب</div></td>
       <td style="padding:6px 8px;text-align:center">
         <input type="number" class="form-input wa-rcv-qty" data-idx="${i}" data-req="0" data-prev="0" data-ordered="0" data-unit="${esc(x.unit||"")}"
-          min="0" step="0.01" value="${x.rcv}" style="width:70px;text-align:center;padding:4px 6px" oninput="waUpdateRow(${i},'rcv')"></td>
+          min="0" step="any" value="${x.rcv}" style="width:70px;text-align:center;padding:4px 6px" oninput="waUpdateRow(${i},'rcv')"></td>
       <td style="padding:6px 8px;text-align:center;background:#f0fdf4">
-        <input type="number" class="form-input wa-stock-qty" data-idx="${i}" min="0" step="0.01" value="${x.stock}"
+        <input type="number" class="form-input wa-stock-qty" data-idx="${i}" min="0" step="any" value="${x.stock}"
           style="width:70px;text-align:center;padding:4px 6px;border-color:#16a34a" oninput="waUpdateRow(${i},'stock')"></td>
       <td style="padding:6px 8px;text-align:center;background:#fffbeb">
-        <input type="number" class="form-input wa-direct-qty" data-idx="${i}" min="0" step="0.01" value="${x.direct}"
+        <input type="number" class="form-input wa-direct-qty" data-idx="${i}" min="0" step="any" value="${x.direct}"
           style="width:70px;text-align:center;padding:4px 6px;border-color:#b45309" oninput="waUpdateRow(${i},'direct')"></td>
       <td style="padding:6px 8px;text-align:center">
         <input type="number" class="form-input wa-unit-price" data-idx="${i}" min="0" step="0.01" value="${x.price}"
@@ -27624,20 +27622,20 @@ function openWarehouseAudit(poId){
         <td style="padding:6px 8px;text-align:center">
           <input type="number" class="form-input wa-rcv-qty" data-idx="${origIdx}"
             data-req="${remQty}" data-prev="${prevRcv}" data-ordered="${buyQty}" data-unit="${esc(it.unit||"")}"
-            min="0" step="0.01" value="${remQty}"
+            min="0" step="any" value="${remQty}"
             style="width:70px;text-align:center;padding:4px 6px"
             oninput="waUpdateRow(${origIdx},'rcv')">
         </td>
         <td style="padding:6px 8px;text-align:center;background:#f0fdf4">
           <input type="number" class="form-input wa-stock-qty" data-idx="${origIdx}"
-            min="0" step="0.01" value="${remQty}"
+            min="0" step="any" value="${remQty}"
             style="width:70px;text-align:center;padding:4px 6px;border-color:#16a34a"
             oninput="waUpdateRow(${origIdx},'stock')"
             title="يُملأ تلقائياً = المستلم − الاستخدام المباشر. يمكن تعديله يدوياً، لكن مجموع (المستودع + المباشر) يجب أن يساوي المستلم.">
         </td>
         <td style="padding:6px 8px;text-align:center;background:#fffbeb">
           <input type="number" class="form-input wa-direct-qty" data-idx="${origIdx}"
-            min="0" step="0.01" value="0"
+            min="0" step="any" value="0"
             style="width:70px;text-align:center;padding:4px 6px;border-color:#b45309"
             oninput="waUpdateRow(${origIdx},'direct')"
             title="الكمية التي استُخدمت مباشرة في الموقع — لا تتجاوز المستلم، وتُنقص من خانة المستودع تلقائياً">
@@ -29033,7 +29031,7 @@ function paeRenderItems(){
       <div class="form-row" style="margin-bottom:6px">
         <div class="form-group">
           <label class="form-label" style="font-size:11px">الكمية</label>
-          <input class="form-input" style="font-size:12px" type="number" min="1" step="1" value="${item.qty||1}" oninput="_paeItems[${i}].qty=parseFloat(this.value)||1;paeCalcItem(${i})" id="pae-qty-${i}">
+          <input class="form-input" style="font-size:12px" type="number" min="0" step="any" value="${item.qty||1}" oninput="_paeItems[${i}].qty=parseFloat(this.value)||1;paeCalcItem(${i})" id="pae-qty-${i}">
         </div>
         <div class="form-group">
           <label class="form-label" style="font-size:11px">الوحدة</label>
@@ -29176,10 +29174,10 @@ async function doAdminEditPurchase(){
     }
   }
 
-  // v18.9og: الكمية صحيحة بقرارٍ صريح — فتُمنع هنا برسالة لا بقصٍّ صامت
-  const _bad = _paeItems.findIndex(it=>!Number.isInteger(parseFloat(it.qty)));
+  // الكمية تقبل الكسور (مثل 2.16) — يُمنع فقط الصفر أو القيم غير الصالحة
+  const _bad = _paeItems.findIndex(it=>!(parseFloat(it.qty) > 0));
   if(_bad >= 0){
-    toast(`⚠ البند #${_bad+1} — الكمية عدد صحيح، والكسور غير مدعومة في طلب الشراء`,"warn"); return;
+    toast(`⚠ البند #${_bad+1} — أدخل كمية صحيحة أكبر من صفر`,"warn"); return;
   }
 
   // إعادة إيجاد الطلب بعد await (showConfirm) — قد يكون onSnapshot استبدل purchases
