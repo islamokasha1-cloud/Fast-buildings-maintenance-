@@ -1045,6 +1045,81 @@ function fuzz() {
   })();
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   18) عزل ملخّصات الأشهر (Rollups) — أرشفة شهر لا تمسّ أرشيف/ملخّص شهر آخر
+       يُنفّذ دوال الحساب الحقيقية من index.html، ويحرس نمط الكتابة المعزول.
+   ════════════════════════════════════════════════════════════════════ */
+function rollupMonthIsolation() {
+  H("18) عزل ملخّصات الأشهر — أرشفة يوليو لا تمسّ يونيو");
+
+  const mkSrc     = slice("function monthKey(dateStr){", "// Arabic month name");
+  const rollupSrc = slice("function _emptyRollup(ym){", "// كتابة rollup لشهر معيّن");
+  if (!mkSrc || !rollupSrc) { T("تُستخرَج دوال الـ rollup", false, "تغيّرت العلامات في index.html؟"); return; }
+
+  let R;
+  try {
+    // _emptyRollup يعتمد CURRENT_PROJECT/ROLLUP_FV، و_accumTicket يعتمد _closeWorkH/_closedOnTime
+    // (حقول زمنية لا تؤثر على حقول العدّ الهيكلية موضع هذا الفحص).
+    R = new Function("CURRENT_PROJECT", "ROLLUP_FV", "_closeWorkH", "_closedOnTime",
+      mkSrc + "\n" + rollupSrc +
+      "\nreturn {monthKey,_emptyRollup,_accumTicket,_computeRollupForMonth};"
+    )({ id: "hail" }, 2, () => 5, () => true);
+  } catch (e) { T("تُبنى دوال الـ rollup", false, String(e.message).slice(0, 120)); return; }
+
+  const { monthKey, _computeRollupForMonth } = R;
+
+  // محاكاة أمينة لكتابة Firestore: doc(ym).set(r,{merge:false}) = استبدال المفتاح ym وحده لا غير
+  const rollupsDB = {};   // مجموعة الملخّصات: المفتاح = اسم الشهر
+  const ticketsDB = [];   // مستندات البلاغات
+  function writeRollupForMonth(ym) {
+    const list = ticketsDB.filter(t => t.archiveMonth === ym);   // where("archiveMonth","==",ym)
+    if (!list.length) return;
+    rollupsDB[ym] = _computeRollupForMonth(ym, list);            // doc(ym).set(r,{merge:false})
+  }
+  function archiveMonth(ym) {
+    let n = 0;
+    ticketsDB.forEach(t => {
+      if (t.archived || t.status !== "مغلق") return;
+      if (monthKey(t.createdAt) !== ym) return;
+      t.archived = true; t.archiveMonth = ym; n++;
+    });
+    if (n) writeRollupForMonth(ym);
+    return n;
+  }
+
+  ticketsDB.push(
+    // يونيو: 3 بلاغات مغلقة (تصحيحية/وقائية/معاد فتحه)
+    { id: "J1", status: "مغلق", createdAt: "2026-06-05", maintType: "تصحيحية", building: "مبنى أ", rating: 5, reopenCount: 0, closedAt: "2026-06-06" },
+    { id: "J2", status: "مغلق", createdAt: "2026-06-12", maintType: "وقائية",  building: "مبنى ب", rating: 4, reopenCount: 0, closedAt: "2026-06-13" },
+    { id: "J3", status: "مغلق", createdAt: "2026-06-20", maintType: "تصحيحية", building: "مبنى أ", rating: 0, reopenCount: 1, closedAt: "2026-06-22" },
+    // يوليو: بلاغان مغلقان
+    { id: "Y1", status: "مغلق", createdAt: "2026-07-03", maintType: "تصحيحية", building: "مبنى ج", rating: 3, reopenCount: 0, closedAt: "2026-07-04" },
+    { id: "Y2", status: "مغلق", createdAt: "2026-07-15", maintType: "وقائية",  building: "مبنى أ", rating: 5, reopenCount: 0, closedAt: "2026-07-16" },
+  );
+
+  archiveMonth("2026-06");
+  const juneSnapshot = JSON.stringify(rollupsDB["2026-06"]);
+  T("بعد أرشفة يونيو: أُنشئ ملخّص 2026-06 بعدد 3", !!rollupsDB["2026-06"] && rollupsDB["2026-06"].count === 3);
+  T("لم يُنشأ ملخّص يوليو قبل أرشفته", !rollupsDB["2026-07"]);
+
+  archiveMonth("2026-07");
+  T("★ بعد أرشفة يوليو: ملخّص يونيو لم يتغيّر إطلاقاً (بايت-ببايت)",
+    JSON.stringify(rollupsDB["2026-06"]) === juneSnapshot, "يونيو=" + JSON.stringify(rollupsDB["2026-06"]));
+  T("ملخّص يونيو ما زال count=3", !!rollupsDB["2026-06"] && rollupsDB["2026-06"].count === 3);
+  T("أُنشئ ملخّص يوليو count=2", !!rollupsDB["2026-07"] && rollupsDB["2026-07"].count === 2);
+  T("بلاغات يونيو الثلاثة ما زالت archiveMonth=2026-06", ticketsDB.filter(t => t.archiveMonth === "2026-06").length === 3);
+  T("لم يُحذف أي بلاغ عند الأرشفة", ticketsDB.length === 5);
+
+  writeRollupForMonth("2026-07"); // إعادة كتابة يوليو مجدداً
+  T("★ إعادة كتابة ملخّص يوليو ثانيةً لا تغيّر يونيو", JSON.stringify(rollupsDB["2026-06"]) === juneSnapshot);
+
+  // ── حراسة نمط الكتابة في المصدر: يجب أن يبقى معزولاً لشهر واحد ──
+  T("writeRollupForMonth يستعلم عن شهر واحد فقط", HTML.includes('.where("archiveMonth","==",ym).get()'));
+  T("★ الكتابة تستبدل مستند الشهر نفسه فقط (doc(ym).set merge:false)", HTML.includes("doc(ym).set(r,{merge:false})"));
+  T("تنظيف Rollups اليتيمة يحذف شهراً فقط بعد التأكد أنه بلا بلاغات",
+    HTML.includes('.where("archiveMonth","==",ym).limit(1)') && HTML.includes("doc(ym).delete()"));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -1061,6 +1136,7 @@ function fuzz() {
   dateBucketing();
   auditRound2Medium();
   fuzz();
+  rollupMonthIsolation();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }
