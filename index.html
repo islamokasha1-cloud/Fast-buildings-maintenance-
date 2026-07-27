@@ -3093,10 +3093,10 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
         <div class="st-val" id="po-dash-overdue" style="color:var(--danger)">0</div>
         <div class="st-lbl">طلبات متأخرة</div>
       </div>
-      <div class="stat-tile" id="po-dash-approved-box" style="--_c:var(--accent);cursor:pointer" onclick="_poApprovedFilter()" title="اضغط لعرض المعتمدة هذا الشهر فقط — اضغط مجدداً للإلغاء">
+      <div class="stat-tile" id="po-dash-approved-box" style="--_c:var(--accent);cursor:pointer" onclick="_poStageFilter('closed')" title="اضغط لعرض الطلبات المغلقة فقط — اضغط مجدداً للإلغاء">
         <div class="st-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
         <div class="st-val" id="po-dash-approved" style="color:var(--accent)">0</div>
-        <div class="st-lbl">معتمدة هذا الشهر</div>
+        <div class="st-lbl">الطلبات المغلقة</div>
       </div>
       <div class="stat-tile" id="po-dash-amount-box" style="--_c:var(--accent)">
         <div class="st-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01"/><path d="M18 12h.01"/></svg></div>
@@ -24292,8 +24292,9 @@ function renderPurchasesDashboard(){
   // v18.9np: من PO_STAGES — كان اتحاداً مكتوباً يدوياً يكرّر pending_pm/wh_review/pending_proc/pending_ceo
   // ويُسقط ordered/approved/approved_old رغم أنها ليست في PO_FINAL_STATUSES (أي أنها جارية فعلاً)
   const pending = dashData.filter(poStageIsWip).length;
-  // v18.9np: الشرط انتقل إلى poApprovedThisMonth ليقرأه العدّاد ونقرُ البطاقة معاً
-  const approvedThisMonth = dashData.filter(p=>poApprovedThisMonth(p, thisMonth)).length;
+  // v18.9sz: البطاقة صارت «الطلبات المغلقة» — عدد الطلبات المغلقة فعلياً (poIsClosed)، نفس تعريف
+  // «مغلق» في بطاقة «إجمالي المبالغ المغلقة» المجاورة (لا تعريفَين للإغلاق). كانت «معتمدة هذا الشهر».
+  const closedCount = dashData.filter(poIsClosed).length;
   // v18.9mf: المؤشرات المالية تحسب الطلبات المغلقة فقط (استلام كامل + فاتورة مورد مسجلة في تدقيق المستودع)
   // v18.9nx: التصنيف والتكلفة من المصدر الموحّد poIsClosed/poActualCost — نفس ما يحسبه التقرير
   // بالضبط، وبالتكلفة الفعلية بعد التوريد لا المقدّرة.
@@ -24305,7 +24306,7 @@ function renderPurchasesDashboard(){
   const setEl=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
   setEl("po-dash-total", total);
   setEl("po-dash-pending", pending);
-  setEl("po-dash-approved", approvedThisMonth);
+  setEl("po-dash-approved", closedCount);
   setEl("po-dash-overdue", overdueCount);
   // إبراز البطاقة عند تفعيل فلترها
   const ovBox=document.getElementById("po-dash-overdue-box");
@@ -24314,7 +24315,7 @@ function renderPurchasesDashboard(){
   const pdBox=document.getElementById("po-dash-pending-box");
   if(pdBox) pdBox.classList.toggle("tile-active-filter", _pfStatus==="_stage_wip");
   const apBox=document.getElementById("po-dash-approved-box");
-  if(apBox) apBox.classList.toggle("tile-active-filter", !!window._poApprovedMonthOnly);
+  if(apBox) apBox.classList.toggle("tile-active-filter", _pfStatus==="_stage_closed");
   // v18.9np: مخطط المسار — يقرأ dashData نفسها فيحترم فلتر المشروع
   renderPOStageFlow(dashData);
   // v18.9qr: بطاقة ملخّص المفتوحة/المتأخرة — بجانب المسار، من dashData نفسها

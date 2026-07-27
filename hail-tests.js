@@ -903,16 +903,25 @@ function invoiceFileSource() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   19) بطاقة «معتمدة هذا الشهر» — أيقونة القفل (كأيقونة البلاغات المغلقة) (v18.9sz)
+   19) بطاقة «الطلبات المغلقة» — عددٌ ولونٌ وفلترٌ للطلبات المغلقة (v18.9sz)
+       كانت «معتمدة هذا الشهر»؛ صارت تحسب عدد الطلبات المغلقة (poIsClosed)
+       بأيقونة القفل، ونقرُها يفلتر القائمة على المرحلة المغلقة.
    ════════════════════════════════════════════════════════════════════ */
-function approvedCardIcon() {
-  H("19) أيقونة بطاقة «معتمدة هذا الشهر»");
+function closedOrdersCard() {
+  H("19) بطاقة «الطلبات المغلقة»");
   const i = HTML.indexOf('id="po-dash-approved-box"');
-  const tile = i >= 0 ? HTML.slice(i, HTML.indexOf("</div>", HTML.indexOf('class="st-lbl"', i))) : "";
-  T("★ بطاقة «معتمدة هذا الشهر» تستخدم أيقونة القفل (مغلق)",
-    tile.includes('<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'));
-  T("لم تعد تستخدم أيقونة الدائرة-صح القديمة",
-    !tile.includes('<path d="m9 11 3 3L22 4"/>'));
+  const tile = i >= 0 ? HTML.slice(i, HTML.indexOf("</div>", HTML.indexOf('class="st-lbl"', i)) + 6) : "";
+  T("★ العنوان صار «الطلبات المغلقة» (لا «معتمدة هذا الشهر»)",
+    tile.includes(">الطلبات المغلقة<") && !tile.includes("معتمدة هذا الشهر"));
+  T("تستخدم أيقونة القفل (مغلق)", tile.includes('<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'));
+  T("نقرُ البطاقة يفلتر على المرحلة المغلقة", tile.includes(`onclick="_poStageFilter('closed')"`));
+
+  // العدّاد = الطلبات المغلقة فعلياً (poIsClosed) — نفس تعريف بطاقة المبالغ المغلقة
+  T("★ العدّاد = عدد الطلبات المغلقة (poIsClosed)",
+    HTML.includes("const closedCount = dashData.filter(poIsClosed).length;") &&
+    HTML.includes('setEl("po-dash-approved", closedCount);'));
+  T("إبراز البطاقة عند تفعيل فلتر المغلقة",
+    HTML.includes('apBox.classList.toggle("tile-active-filter", _pfStatus==="_stage_closed")'));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1314,7 +1323,7 @@ function rollupMonthIsolation() {
   manualProjectCosts();
   listenerChurn();
   invoiceFileSource();
-  approvedCardIcon();
+  closedOrdersCard();
   auditRound2();
   dateBucketing();
   auditRound2Medium();
