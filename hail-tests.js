@@ -903,6 +903,19 @@ function invoiceFileSource() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   19) بطاقة «معتمدة هذا الشهر» — أيقونة القفل (كأيقونة البلاغات المغلقة) (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function approvedCardIcon() {
+  H("19) أيقونة بطاقة «معتمدة هذا الشهر»");
+  const i = HTML.indexOf('id="po-dash-approved-box"');
+  const tile = i >= 0 ? HTML.slice(i, HTML.indexOf("</div>", HTML.indexOf('class="st-lbl"', i))) : "";
+  T("★ بطاقة «معتمدة هذا الشهر» تستخدم أيقونة القفل (مغلق)",
+    tile.includes('<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'));
+  T("لم تعد تستخدم أيقونة الدائرة-صح القديمة",
+    !tile.includes('<path d="m9 11 3 3L22 4"/>'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
    ════════════════════════════════════════════════════════════════════ */
 function auditRound2() {
@@ -1301,6 +1314,7 @@ function rollupMonthIsolation() {
   manualProjectCosts();
   listenerChurn();
   invoiceFileSource();
+  approvedCardIcon();
   auditRound2();
   dateBucketing();
   auditRound2Medium();
