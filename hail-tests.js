@@ -858,6 +858,40 @@ function listenerChurn() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   18) ملف الفاتورة — مصدره المستودع فقط، وبلا اسم مورد مقترح (v18.9sz)
+       رفع المشتريات للفاتورة يبقى في «المرفقات» فقط؛ «ملف الفاتورة» يسجّله
+       المستودع عند التدقيق. ولا يُكتب اسم المورد بجانب الفاتورة (قد يختلف المورّد الفعلي).
+   ════════════════════════════════════════════════════════════════════ */
+function invoiceFileSource() {
+  H("18) ملف الفاتورة — مصدره المستودع فقط");
+  const slice = (name) => {
+    const i = HTML.indexOf("function " + name + "(");
+    if (i < 0) return "";
+    return HTML.slice(i, HTML.indexOf("\nfunction ", i + 10));
+  };
+
+  // ── لا اسم مورد بجانب ملف الفاتورة في بطاقة تفاصيل الطلب ──
+  T("★ بطاقة «ملف الفاتورة» لا تعرض اسم المورد (قد يكون المورّد الفعلي مختلفاً)",
+    !HTML.includes('${_ic("store","ic-sm ic-muted")} ${esc(v.vendor)}'));
+  T("بطاقة «ملف الفاتورة» ما زالت تعرض رقم الفاتورة والسند",
+    HTML.includes("رقم الفاتورة: <b style=\"font-family:'JetBrains Mono',monospace\">${esc(v.invoiceNo)}</b>") && HTML.includes("السند: <b"));
+
+  // ── رفع المشتريات للفاتورة → المرفقات فقط، لا «ملف الفاتورة» ──
+  {
+    const dnw = slice("doNotifyWarehouse");
+    T("★ doNotifyWarehouse لا يكتب p.invoicePhotoUrl (لا يصبح «ملف الفاتورة»)", !dnw.includes("p.invoicePhotoUrl = att.url"));
+    T("doNotifyWarehouse يحفظ الفاتورة في المرفقات", dnw.includes("p.attachments.push(att)"));
+    T("doNotifyWarehouse يوسم مرفق المشتريات بوضوح", dnw.includes('att.label = "فاتورة المورد — مرفوعة من المشتريات (مرجع)"'));
+  }
+
+  // ── «ملف الفاتورة» الرسمي ما زال يُشتق من سندات المستودع (grnDocs) ──
+  T("p.invoices تُشتق من grnDocs (رفع المستودع)",
+    HTML.includes("pCurrent.invoices = (pCurrent.grnDocs||[]).map(g=>({ grnRef:g.grnRef, invoiceNo:g.invoiceNo||\"\", vendor:g.vendor||\"\", at:g.createdAt||\"\", photoUrl:g.invoicePhotoUrl||\"\" }))"));
+  T("سند الاستلام يحمل فاتورته من نموذج التدقيق (v.photoUrl)",
+    HTML.includes("invoicePhotoUrl: v.photoUrl, // v18.9nr"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
    ════════════════════════════════════════════════════════════════════ */
 function auditRound2() {
@@ -1255,6 +1289,7 @@ function rollupMonthIsolation() {
   vendorSummary();
   manualProjectCosts();
   listenerChurn();
+  invoiceFileSource();
   auditRound2();
   dateBucketing();
   auditRound2Medium();
