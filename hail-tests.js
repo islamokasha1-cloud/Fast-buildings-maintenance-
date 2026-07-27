@@ -1085,6 +1085,11 @@ function kpiSpendClosedOnly() {
   T("★ onSnapshot يعيد رسم مؤشرات الأداء إن كانت صفحتها مفتوحة",
     HTML.includes('document.getElementById("page-purchase-kpi").classList.contains("active")') &&
     HTML.includes("window.purchaseKPI && window.purchaseKPI.render) window.purchaseKPI.render();"));
+  // v18.9te: كتم رفض App Check/reCAPTCHA العابر فقط (لا يبتلع أي خطأ آخر)
+  T("★ يُكتم رفض reCAPTCHA/App Check العابر حصراً عبر unhandledrejection",
+    HTML.includes('window.addEventListener("unhandledrejection"') &&
+    HTML.includes("/recaptcha|appcheck|app-?check/i.test(m)") &&
+    HTML.includes("ev.preventDefault();"));
   T("الفرع الاحتياطي يستخدم الفعلي _kpiActual لا التقديري _kpiSpendOf",
     ksrc.includes("const v=_kpiVendorOf(p), c=_kpiActual(p);") &&
     !ksrc.includes("const v=_kpiVendorOf(p), c=_kpiSpendOf(p);"));
