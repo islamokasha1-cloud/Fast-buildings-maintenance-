@@ -806,6 +806,103 @@ function manualProjectCosts() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   17) تقليل احتكاك مستمعي Firestore — المجموعات العامة تُركَّب مرة وتبقى حيّة (v18.9sz)
+       يخفّف خلل SDK الداخلي (INTERNAL ASSERTION ca9/b815) بمنع تركيب/فكّ متكرّر
+       لمستمعي global_* عند تبديل المشروع/الوضع أو زرّ التحديث.
+   ════════════════════════════════════════════════════════════════════ */
+function listenerChurn() {
+  H("17) تقليل احتكاك مستمعي Firestore (ca9/b815)");
+  const slice = (name) => {
+    const i = HTML.indexOf("function " + name + "(");
+    if (i < 0) return "";
+    return HTML.slice(i, HTML.indexOf("\nfunction ", i + 10));
+  };
+
+  // ── حراس idempotent على دوال المزامنة العامة (لا تُعيد التركيب إن كان المستمع حيّاً) ──
+  T("startPurchaseSync يخرج مبكّراً إن كان _poUnsub حيّاً", slice("startPurchaseSync").includes("if(_poUnsub) return;"));
+  T("loadRFQs يخرج مبكّراً إن كان _rfqUnsub حيّاً", slice("loadRFQs").includes("if(_rfqUnsub) return;"));
+  T("startIssueOrdersSync يخرج مبكّراً إن كان حيّاً", slice("startIssueOrdersSync").includes("if(_issueOrdersUnsub) return;"));
+  T("loadCatalogTypes يخرج مبكّراً إن كان حيّاً", slice("loadCatalogTypes").includes("if(_catTypesUnsub) return;"));
+  T("loadItemCatalog حارس idempotent (يحترم onDone)", slice("loadItemCatalog").includes("if(_catalogUnsub){ if(onDone) onDone(); return; }"));
+  {
+    const inv = slice("startInventorySync");
+    T("startInventorySync: المخزون/السجل/المستودعات كلها بحارس !_x", inv.includes("if(!_invUnsub) _invUnsub =") && inv.includes("if(!_invLogUnsub) _invLogUnsub =") && inv.includes("if(!_whUnsub) _whUnsub ="));
+    T("★ startInventorySync لم يعد يفكّ ثم يُعيد التركيب", !inv.includes("if(_invUnsub) _invUnsub();"));
+  }
+  {
+    const cus = slice("startCustodySync");
+    T("startCustodySync بحارس !_x للعهد والنسخ الموقّعة", cus.includes("if(!_custodyUnsub) _custodyUnsub =") && cus.includes("if(!_custodySignedUnsub) _custodySignedUnsub ="));
+  }
+
+  // ── تبديل المشروع لا يفكّ المستمعين العامّين ولا يصفّر بياناتهم ──
+  {
+    const sw = slice("switchProject");
+    T("★ switchProject لا يفكّ مستمع المشتريات (عام)", !sw.includes("_poUnsub"));
+    T("★ switchProject لا يفكّ مستمع المخزون (عام)", !sw.includes("_invUnsub"));
+    T("switchProject لا يفكّ الكتالوج/التسعير/العهد/أوامر الصرف", !sw.includes("_catalogUnsub") && !sw.includes("_rfqUnsub") && !sw.includes("_custodyUnsub") && !sw.includes("_issueOrdersUnsub"));
+    T("switchProject لا يصفّر بيانات المشتريات/المخزون العامة", !sw.includes("purchases = []") && !sw.includes("_inventoryItems = []"));
+    T("switchProject ما زال يفكّ المستمعين المرتبطين بالمشروع", sw.includes("_ticketsUnsub(); _ticketsUnsub=null;") && sw.includes("_assetsUnsub(); _assetsUnsub=null;") && sw.includes("_ppmUnsub(); _ppmUnsub=null;"));
+    T("switchProject ما زال يصفّر بيانات المشروع", sw.includes("tickets = []; assets = []; ppmPlans = [];"));
+  }
+
+  // ── الخروج من الوضع المركزي لا يفكّ المستمعين العامّين ──
+  {
+    const ex = slice("exitGlobalPurchases");
+    T("★ exitGlobalPurchases لا يفكّ المستمعين العامّين", !ex.includes("_poUnsub") && !ex.includes("_invUnsub") && !ex.includes("_rfqUnsub"));
+    T("exitGlobalPurchases ما زال يفكّ مستمع الإشعارات المرتبط بالمشروع", ex.includes("_notifUnsub(); _notifUnsub=null;"));
+  }
+
+  // ── تسجيل الخروج يفكّ كل شيء (ليُعاد التركيب عند الدخول التالي) ──
+  T("★ logout يفكّ المستمعين العامّين (إعادة تركيب عند الدخول)", slice("logout").includes("_poUnsub(); _poUnsub=null;"));
+  T("logoutToLogin يفكّ المستمعين العامّين أيضاً", slice("logoutToLogin").includes("_poUnsub(); _poUnsub=null;"));
+
+  // ── «حفظ التحديث» لا يتجمّد إن تجمّد عميل Firestore أو تعثّرت الشبكة (مهلة على القراءة الطازجة) ──
+  {
+    const upd = slice("doUpdatePurchaseStatus");
+    T("★ doUpdatePurchaseStatus يحدّ القراءة الطازجة بمهلة (يمنع تجمّد النافذة)",
+      upd.includes("Promise.race([") && upd.includes('new Error("fresh-read-timeout")'));
+    T("doUpdatePurchaseStatus يمضي بالنسخة المحلية عند تعذّر القراءة (catch يحرس)",
+      upd.includes('catch(e){ console.warn("doUpdatePurchaseStatus: fresh-read error/timeout"'));
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   18) ملف الفاتورة — مصدره المستودع فقط، وبلا اسم مورد مقترح (v18.9sz)
+       رفع المشتريات للفاتورة يبقى في «المرفقات» فقط؛ «ملف الفاتورة» يسجّله
+       المستودع عند التدقيق. ولا يُكتب اسم المورد بجانب الفاتورة (قد يختلف المورّد الفعلي).
+   ════════════════════════════════════════════════════════════════════ */
+function invoiceFileSource() {
+  H("18) ملف الفاتورة — مصدره المستودع فقط");
+  const slice = (name) => {
+    const i = HTML.indexOf("function " + name + "(");
+    if (i < 0) return "";
+    return HTML.slice(i, HTML.indexOf("\nfunction ", i + 10));
+  };
+
+  // ── لا اسم مورد بجانب ملف الفاتورة في بطاقة تفاصيل الطلب ──
+  T("★ بطاقة «ملف الفاتورة» لا تعرض اسم المورد (قد يكون المورّد الفعلي مختلفاً)",
+    !HTML.includes('${_ic("store","ic-sm ic-muted")} ${esc(v.vendor)}'));
+  T("بطاقة «ملف الفاتورة» ما زالت تعرض رقم الفاتورة والسند",
+    HTML.includes("رقم الفاتورة: <b style=\"font-family:'JetBrains Mono',monospace\">${esc(v.invoiceNo)}</b>") && HTML.includes("السند: <b"));
+
+  // ── رفع المشتريات للفاتورة → المرفقات فقط، لا «ملف الفاتورة» ──
+  {
+    const dnw = slice("doNotifyWarehouse");
+    T("★ doNotifyWarehouse لا يكتب p.invoicePhotoUrl (لا يصبح «ملف الفاتورة»)", !dnw.includes("p.invoicePhotoUrl = att.url"));
+    T("doNotifyWarehouse يحفظ الفاتورة في المرفقات", dnw.includes("p.attachments.push(att)"));
+    T("doNotifyWarehouse يوسم مرفق المشتريات بوضوح", dnw.includes('att.label = "فاتورة المورد — مرفوعة من المشتريات (مرجع)"'));
+    T("★ doNotifyWarehouse لا يُدخل المورّد (يسجّله المستودع)", !dnw.includes("p.actualVendor = vendor"));
+    T("نافذة إشعار المستودع أزالت حقل «المورد الفعلي»", !HTML.includes('id="nw-vendor"'));
+  }
+
+  // ── «ملف الفاتورة» الرسمي ما زال يُشتق من سندات المستودع (grnDocs) ──
+  T("p.invoices تُشتق من grnDocs (رفع المستودع)",
+    HTML.includes("pCurrent.invoices = (pCurrent.grnDocs||[]).map(g=>({ grnRef:g.grnRef, invoiceNo:g.invoiceNo||\"\", vendor:g.vendor||\"\", at:g.createdAt||\"\", photoUrl:g.invoicePhotoUrl||\"\" }))"));
+  T("سند الاستلام يحمل فاتورته من نموذج التدقيق (v.photoUrl)",
+    HTML.includes("invoicePhotoUrl: v.photoUrl, // v18.9nr"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
    ════════════════════════════════════════════════════════════════════ */
 function auditRound2() {
@@ -1202,6 +1299,8 @@ function rollupMonthIsolation() {
   stocktakeTests();
   vendorSummary();
   manualProjectCosts();
+  listenerChurn();
+  invoiceFileSource();
   auditRound2();
   dateBucketing();
   auditRound2Medium();
