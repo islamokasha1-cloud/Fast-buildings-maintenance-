@@ -737,6 +737,75 @@ function vendorSummary() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   16) تكاليف المشاريع المُدخَلة يدوياً — تدخل كل الحسابات والمؤشّرات (v18.9sz)
+       مصدرٌ واحدٌ لتصنيف «المشروع اليدوي» (poIsCustomProject) وتسميته
+       (poProjectDisplayName)، والتحويل من طلب تسعير يحافظ على الشكل القياسي.
+   ════════════════════════════════════════════════════════════════════ */
+function manualProjectCosts() {
+  H("16) تكاليف المشاريع اليدوية في كل الحسابات");
+
+  // ── poIsCustomProject: العلَم أو __OTHER__ (لا __OTHER__ وحده) ──
+  const a = HTML.indexOf("function poIsCustomProject(p){");
+  if (a < 0) { T("poIsCustomProject موجودة في index.html", false, "لم تُعثر"); return; }
+  const srcA = HTML.slice(a, HTML.indexOf("\nfunction ", a + 10));
+  let isCustom;
+  try { isCustom = new Function(srcA + "\nreturn poIsCustomProject;")(); }
+  catch (e) { T("تُبنى poIsCustomProject", false, String(e.message).slice(0, 120)); return; }
+  T("تُبنى poIsCustomProject", typeof isCustom === "function");
+  T("يدوي بالعلَم isCustomProject", isCustom({ isCustomProject: true, projectId: "" }) === true);
+  T("يدوي بسنتينل __OTHER__", isCustom({ projectId: "__OTHER__" }) === true);
+  T("★ يدوي بالعلَم رغم غياب __OTHER__ (المحوَّل من تسعير)", isCustom({ isCustomProject: true, projectId: "hail" }) === true);
+  T("رسمي (معرّف حقيقي) ليس يدوياً", isCustom({ projectId: "hail" }) === false);
+  T("projectId فارغ بلا علَم ليس يدوياً (لا يُخلط بـ hail الافتراضي)", isCustom({ projectId: "" }) === false);
+
+  // ── poProjectDisplayName: يدوي بالاسم، رسمي بالمعرّف ──
+  const b = HTML.indexOf("function poProjectDisplayName(p){");
+  if (b < 0) { T("poProjectDisplayName موجودة", false); }
+  else {
+    const srcB = HTML.slice(b, HTML.indexOf("\nfunction ", b + 10));
+    let dispName;
+    try { dispName = new Function("poIsCustomProject", "_getProjName", srcB + "\nreturn poProjectDisplayName;")(isCustom, id => id === "hail" ? "مشروع هايل" : ""); }
+    catch (e) { T("تُبنى poProjectDisplayName", false, String(e.message).slice(0, 120)); }
+    if (typeof dispName === "function") {
+      T("اسم اليدوي من projectName", dispName({ isCustomProject: true, projectName: "فيلا العميل" }) === "فيلا العميل");
+      T("★ اليدوي لا يُنسَب لمشروع هايل الافتراضي", dispName({ projectId: "__OTHER__", projectName: "استراحة" }) === "استراحة");
+      T("اسم الرسمي من المعرّف", dispName({ projectId: "hail" }) === "مشروع هايل");
+    }
+  }
+
+  // ── التحويل من طلب تسعير يطبّق الشكل القياسي للمشروع اليدوي ──
+  T("طلب التسعير يحمل علَم isCustomProject", HTML.includes('isCustomProject: projVal==="__OTHER__"'));
+  T("كشف اليدوي عند التحويل (العلَم أو غياب projectId مع اسم)",
+    HTML.includes("const _rfIsCustom = !!(rf.isCustomProject || (!rf.projectId && (rf.projectName||\"\").trim()));"));
+  T("★ التحويل يطبّق projectId:__OTHER__ لليدوي", HTML.includes('projectId: _rfIsCustom ? "__OTHER__" : (rf.projectId||"")'));
+  T("التحويل يحفظ isCustomProject وprojectName", HTML.includes("isCustomProject: _rfIsCustom,") && HTML.includes("projectName: rf.projectName || projName,"));
+
+  // ── كل شاشات التقرير/التصدير تقرأ المصدر الموحّد (لا __OTHER__ وحده) ──
+  T("ملخّص المشروع (شاشة) يستخدم poProjectDisplayName",
+    HTML.includes("const pname=poProjectDisplayName(p);   // v18.9sz: المصدر الموحّد (يدوي بالاسم، رسمي بالمعرّف)"));
+  T("ملخّص المشروع (PDF) يستخدم poProjectDisplayName",
+    HTML.includes("const pname=poProjectDisplayName(p);   // v18.9sz: المصدر الموحّد"));
+  T("صفوف تفاصيل التقرير (شاشة+PDF) تستخدم poProjectDisplayName",
+    HTML.includes("const pProjName=poProjectDisplayName(p)") && HTML.includes("const pProjName2=poProjectDisplayName(p)"));
+  T("★ فلتر التقرير يصنّف اليدوي بالمصدر الموحّد",
+    HTML.includes("if(!poIsCustomProject(p)||( p.projectName||\"غير محدد\")!==cname) return false;"));
+  T("قائمة مشاريع التقرير تميّز كل يدوي (لا تُنطوى في __OTHER__)",
+    HTML.includes("if(poIsCustomProject(p)){   // v18.9sz: المصدر الموحّد — العلَم أو __OTHER__ (كان __OTHER__ وحده)"));
+
+  // ── لوحة المعلومات: «إجمالي المبالغ المغلقة» يجمع كل المغلق بلا بوّابة مشروع ──
+  T("إجمالي المبالغ المغلقة يجمع كل الطلبات المغلقة (يشمل اليدوية)",
+    HTML.includes("const totalAmount = dashData.filter(poIsClosed).reduce((s,p)=>s+poActualCost(p),0);"));
+
+  // ── مؤشرات الأداء: تميّز كل مشروع يدوي بمفتاحه ──
+  if (KPI_PATH) {
+    const ksrc = fs.readFileSync(KPI_PATH, "utf8");
+    T("KPI: مصدر موحّد لتصنيف اليدوي", ksrc.includes("function _pkpiIsCustom(p){ return !!p && (p.isCustomProject === true || p.projectId === \"__OTHER__\"); }"));
+    T("★ KPI: كل مشروع يدوي بمفتاح __CUSTOM__ منفصل", ksrc.includes('const key="__CUSTOM__:"+(p.projectName||"غير محدد");'));
+    T("KPI: الفلتر يميّز اليدوي بالاسم", ksrc.includes("list=list.filter(p=>_pkpiIsCustom(p) && (p.projectName||\"غير محدد\")===cname);"));
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
    15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
    ════════════════════════════════════════════════════════════════════ */
 function auditRound2() {
@@ -1132,6 +1201,7 @@ function rollupMonthIsolation() {
   writeRaceRoot();
   stocktakeTests();
   vendorSummary();
+  manualProjectCosts();
   auditRound2();
   dateBucketing();
   auditRound2Medium();
