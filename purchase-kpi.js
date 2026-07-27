@@ -585,11 +585,16 @@ function init(){
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", init);
 else init();
 
-/* الواجهة العامة — نفس نمط laborCatalog و priceAnalysis */
+/* الواجهة العامة — نفس نمط laborCatalog و priceAnalysis.
+   v18.9tg: build = بصمة البناء المخبوزة في مصدر الوحدة (تُطابق APP_VERSION عند كل إصدار).
+   الكاشف في index.html (يصل المتصفّح طازجاً دائماً) يقارنها بـ APP_VERSION فيكشف نسخةً
+   قديمةً مخزّنةً من هذه الوحدة (كاشٌ يتجاهل ?v= أو نشرٌ لم يرفع الوحدة) بدل «مخطّط فارغ» صامت. */
+const MODULE_BUILD = "v18.9tg";
 window.purchaseKPI = {
   render,
   startSync(){ /* لا مزامنة مستقلة — يقرأ purchases الحية مباشرة */ },
-  version: VERSION
+  version: VERSION,
+  build: MODULE_BUILD
 };
 
 })();
