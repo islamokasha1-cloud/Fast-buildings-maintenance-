@@ -16761,6 +16761,9 @@ function getAvailableStatuses(currentStatus, po){
     if(currentStatus === "proc_executing"){
       return [
         {v:"wh_receiving", l:"🚚 تم الشراء — إشعار المستودع بالاستلام"},
+        // v18.9sz: بعد اعتماد التنفيذي يصبح الطلب «قيد تنفيذ المشتريات» — أُتيح لمسؤول
+        // المشتريات إحالته للمالية للسداد من هنا (كان الخيار غائباً في هذه المرحلة).
+        {v:"__SEND_TO_FINANCE__", l:"💳 إحالة للمالية للسداد"},
         {v:"rejected",                l:"❌ رفض نهائي"},
       ];
     }

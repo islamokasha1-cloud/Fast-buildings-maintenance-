@@ -978,6 +978,30 @@ function waExtrasPreserveQty() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   23) مسؤول المشتريات يحيل الطلب «قيد التنفيذ» للمالية للسداد (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function procToFinance() {
+  H("23) الإحالة للمالية من «قيد تنفيذ المشتريات»");
+  const i = HTML.indexOf("function getAvailableStatuses(");
+  const src = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
+  let fn;
+  try {
+    fn = new Function("currentUser", "getPOTotal", "PO_CEO_THRESHOLD", src + "\nreturn getAvailableStatuses;")(
+      { role: "procurement_officer" }, () => 1000, 50000);
+  } catch (e) { T("تُبنى getAvailableStatuses", false, String(e.message).slice(0, 120)); return; }
+  T("تُبنى getAvailableStatuses", typeof fn === "function");
+  if (typeof fn !== "function") return;
+
+  const opts = fn("proc_executing", {}).map(o => o.v);
+  T("★ مسؤول المشتريات في «قيد التنفيذ» يملك «إحالة للمالية للسداد»", opts.includes("__SEND_TO_FINANCE__"));
+  T("ما زال يملك «تم الشراء — إشعار المستودع»", opts.includes("wh_receiving"));
+  // لا يُمنح لدورٍ لا يملكه (المستودع مثلاً) في هذه المرحلة
+  const whFn = new Function("currentUser", "getPOTotal", "PO_CEO_THRESHOLD", src + "\nreturn getAvailableStatuses;")(
+    { role: "warehouse_manager" }, () => 1000, 50000);
+  T("لا يظهر الخيار لمسؤول المستودع في «قيد التنفيذ»", !whFn("proc_executing", {}).map(o => o.v).includes("__SEND_TO_FINANCE__"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
    ════════════════════════════════════════════════════════════════════ */
 function auditRound2() {
@@ -1380,6 +1404,7 @@ function rollupMonthIsolation() {
   extrasCardGating();
   adminEditKeepsStatus();
   waExtrasPreserveQty();
+  procToFinance();
   auditRound2();
   dateBucketing();
   auditRound2Medium();
