@@ -81,6 +81,31 @@ const DAY = 86400000;
 // يحسبان الطلبات المغلقة فقط بتكلفتها الفعلية. كان totalAct يجمع actualCost لكل الطلبات (بأي حالة).
 function _kpiClosed(p){ try{ if(typeof poIsClosed==="function") return !!poIsClosed(p); }catch(e){} const s=(p&&p.status)||""; return s==="closed"||s==="closed_after_receipt"; }
 function _kpiActual(p){ try{ if(typeof poActualCost==="function") return Number(poActualCost(p))||0; }catch(e){} return Number(p&&p.actualCost)||0; }
+/* v18.9tb: اسمُ مورّدٍ لطلبٍ من أي مسار إنشاء — فالمورّد قد يُخزَّن في حقولٍ مختلفة:
+   الفعلي عند الاستلام (actualVendor / vendors[] / grnDocs[].vendor)، أو المقترح عند
+   الإنشاء (vendor)، أو supplier للطلبات المحوّلة من عرض أسعار، أو على مستوى البند
+   (items[].vendor). فبدل قصر القراءة على actualVendor||vendor — وهما فارغان غالباً —
+   نأخذ أول قيمةٍ غير فارغة، وإلا «غير محدد» فلا يسقط إنفاقٌ لأن الاسم خالٍ. */
+function _kpiVendorOf(p){
+  if(!p) return "غير محدد";
+  const first = v => (v!=null && (""+v).trim()) ? (""+v).trim() : "";
+  let v = first(p.actualVendor);
+  if(!v && Array.isArray(p.vendors)) for(const x of p.vendors){ v=first(typeof x==="string"?x:(x&&(x.vendor||x.name))); if(v) break; }
+  if(!v) v = first(p.supplier);
+  if(!v) v = first(p.vendor);
+  if(!v && Array.isArray(p.grnDocs)) for(const g of p.grnDocs){ v=first(g&&g.vendor); if(v) break; }
+  if(!v && Array.isArray(p.items)) for(const it of p.items){ v=first(it&&(it.vendor||it.supplier)); if(v) break; }
+  return v || "غير محدد";
+}
+/* v18.9tb: إنفاقٌ أفضل-جهداً — الفعلي إن وُجد، وإلا التقديري، وإلا مجموع البنود. */
+function _kpiSpendOf(p){
+  if(!p) return 0;
+  let c = Number(p.actualCost)||0;
+  if(!(c>0)){ try{ if(typeof getPOTotal==="function") c=Number(getPOTotal(p))||0; }catch(e){} }
+  if(!(c>0)) c = Number(p.estCost)||0;
+  if(!(c>0) && Array.isArray(p.items)) c = p.items.reduce((s,it)=>s+(Number(it&&(it.total))||((Number(it&&it.qty)||0)*(Number(it&&(it.price||it.unitPrice))||0))),0);
+  return c>0 ? c : 0;
+}
 
 /* ══ استخراج بيانات التحليل من طلب واحد ══ */
 function analyzeOrder(p){
@@ -201,13 +226,13 @@ function computeKPIs(list){
     let parts=null;
     try{ if(typeof poVendorBreakdown==="function") parts=poVendorBreakdown(p); }catch(e){}
     if(parts && parts.length && parts.some(x=>x&&(Number(x.cost)||0)>0)){
-      parts.forEach(x=>{ const v=((x&&x.vendor)||"").trim(), c=Number(x&&x.cost)||0; if(v&&c>0) byVendor[v]=(byVendor[v]||0)+c; });
+      /* توزيعٌ فعليٌّ بالسندات — بحصص كل مورّد. الاسم الخالي يُنسب لـ«غير محدد» فلا يسقط. */
+      parts.forEach(x=>{ const v=((x&&x.vendor)||"").trim()||_kpiVendorOf(p), c=Number(x&&x.cost)||0; if(c>0) byVendor[v]=(byVendor[v]||0)+c; });
     } else {
-      const v=((p.actualVendor||p.vendor||"")+"").trim();
-      let c=Number(p.actualCost)||0;
-      if(!(c>0)){ try{ if(typeof getPOTotal==="function") c=Number(getPOTotal(p))||0; }catch(e){} }
-      if(!(c>0)) c=Number(p.estCost)||0;
-      if(v&&c>0) byVendor[v]=(byVendor[v]||0)+c;
+      /* v18.9tb: لا سندات — يُنسب إنفاقُه الأفضل-جهداً لمورّده من أي حقل. وحتى إن غاب
+         الاسم يُجمَع تحت «غير محدد» بدل أن يُسقَط الإنفاق (كان `if(v&&c>0)` يُهمله). */
+      const v=_kpiVendorOf(p), c=_kpiSpendOf(p);
+      if(c>0) byVendor[v]=(byVendor[v]||0)+c;
     }
   });
   const vendors = Object.entries(byVendor).sort((x,y)=>y[1]-x[1]);
