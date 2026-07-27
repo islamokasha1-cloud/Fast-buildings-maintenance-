@@ -1002,6 +1002,44 @@ function procToFinance() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   24) أوامر الصرف: عمود «المستودع» يعرض المستودع لا اسم من صرف (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function issueOrderWarehouseCol() {
+  H("24) عمود المستودع في أوامر الصرف");
+  const sub = (()=>{ const i=HTML.indexOf("async function issueOrderSubmit("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ يُلتقط اسم المستودع من الصنف عند الصرف", sub.includes('warehouseName:(src.warehouseName||"").trim()'));
+  T("اسم المستودع يُحفظ في وثيقة الأمر", sub.includes('warehouseName:it.warehouseName||""'));
+  const ren = (()=>{ const i=HTML.indexOf("function renderIssueOrders("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ عمود «المستودع» يعرض مستودعات أصناف الأمر", ren.includes("const _issWhNames=[...new Set((o.items||[]).map(i=>{") && ren.includes("${_issWhCell}"));
+  T("لم يعد يعرض «من صرف» (issuedBy) في عمود المستودع", !ren.includes('<td style="text-align:center;padding:10px 8px;font-size:11px">${esc(o.issuedBy||"—")}</td>'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   25) أمر الصرف: قائمة المشروع تشمل المشاريع اليدوية المحفوظة (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function issueOrderManualProject() {
+  H("25) مشروع أمر الصرف يشمل اليدوية");
+  const i = HTML.indexOf("function _issProjectOptionsHTML(");
+  const src = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
+  let fn;
+  try {
+    fn = new Function("window", "_manualProjectNamesAll", "esc", src + "\nreturn _issProjectOptionsHTML;")(
+      { _projectsList: [{ id: "hail", name: "مشروع رسمي" }] },
+      () => ["مشروع يدوي", "مشروع رسمي"], x => x);
+  } catch (e) { T("تُبنى _issProjectOptionsHTML", false, String(e.message).slice(0, 120)); return; }
+  T("تُبنى _issProjectOptionsHTML", typeof fn === "function");
+  if (typeof fn !== "function") return;
+  const html = fn();
+  T("تحوي المشروع الرسمي", html.includes('<option value="مشروع رسمي">مشروع رسمي</option>'));
+  T("★ تحوي المشروع اليدوي المحفوظ", html.includes('<option value="مشروع يدوي">مشروع يدوي (يدوي)</option>'));
+  T("لا تُكرّر اسماً رسمياً كيدوي", !html.includes('مشروع رسمي (يدوي)'));
+  T("تُبقي خيار الإدخال اليدوي", html.includes('<option value="__OTHER__">إدخال يدوي...</option>'));
+  const init = (()=>{ const j=HTML.indexOf("function initIssueOrderPage("); return j<0?"":HTML.slice(j, HTML.indexOf("\nfunction ", j+10)); })();
+  T("initIssueOrderPage يبني القائمة من المصدر الموحّد ويعيد بناءها بعد تحميل meta",
+    init.includes("_issProjectOptionsHTML()") && init.includes("_loadManualProjectNames().then(_fill)"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
    ════════════════════════════════════════════════════════════════════ */
 function auditRound2() {
@@ -1405,6 +1443,8 @@ function rollupMonthIsolation() {
   adminEditKeepsStatus();
   waExtrasPreserveQty();
   procToFinance();
+  issueOrderWarehouseCol();
+  issueOrderManualProject();
   auditRound2();
   dateBucketing();
   auditRound2Medium();
