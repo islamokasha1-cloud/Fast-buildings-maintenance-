@@ -18954,17 +18954,29 @@ async function reserveIssueId(){
 }
 
 // ── تهيئة صفحة أمر الصرف ──
+// v18.9sz: خيارات مشروع أمر الصرف — رسمية + يدوية محفوظة (المصدر الموحّد _manualProjectNamesAll).
+// أمر الصرف يخزّن المشروع بالاسم، فقيمة الخيار = الاسم (كالرسمي) لا بادئةٌ خاصة.
+function _issProjectOptionsHTML(){
+  const reg = (window._projectsList||[]);
+  const regNames = new Set(reg.map(p=>String(p.name||p.id).trim()));
+  const manual = (typeof _manualProjectNamesAll==="function" ? _manualProjectNamesAll() : [])
+    .map(nm=>String(nm||"").trim())
+    .filter(nm=>nm && !regNames.has(nm));
+  return '<option value="">— اختر المشروع —</option>'
+    + reg.map(p=>`<option value="${esc(p.name||p.id)}">${esc(p.name||p.id)}</option>`).join("")
+    + manual.map(nm=>`<option value="${esc(nm)}">${esc(nm)} (يدوي)</option>`).join("")
+    + '<option value="__OTHER__">إدخال يدوي...</option>';
+}
 function initIssueOrderPage(){
   const d=document.getElementById("iss-date");
   if(d && !d.value) d.value=new Date().toISOString().slice(0,10);
   const sel=document.getElementById("iss-project");
   if(sel){
-    const cur=sel.value;
-    sel.innerHTML='<option value="">— اختر المشروع —</option>'+
-      (window._projectsList||[]).map(p=>`<option value="${esc(p.name||p.id)}">${esc(p.name||p.id)}</option>`).join("")+
-      '<option value="__OTHER__">إدخال يدوي...</option>';
-    if(cur) sel.value=cur;
+    const _fill=()=>{ const c=sel.value; sel.innerHTML=_issProjectOptionsHTML(); if(c) sel.value=c; };
+    _fill();
     sel.onchange=()=>{ const m=document.getElementById("iss-project-manual"); if(m) m.style.display=sel.value==="__OTHER__"?"block":"none"; };
+    // حمّل الأسماء اليدوية من meta ثم أعد البناء — تظهر المشاريع اليدوية المحفوظة (لا المشتقّة من الطلبات وحدها)
+    if(typeof _loadManualProjectNames==="function"){ _loadManualProjectNames().then(_fill).catch(()=>{}); }
   }
   const wrap=document.getElementById("iss-items-wrap");
   if(wrap && !wrap.children.length) issueAddItemRow();
