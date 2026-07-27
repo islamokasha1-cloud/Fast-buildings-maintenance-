@@ -1070,9 +1070,35 @@ function kpiSpendClosedOnly() {
     ksrc.includes('if(typeof poVendorBreakdown==="function") parts=poVendorBreakdown(p);'));
   T("لم يعد يقرأ p.vendor المقترح (a.vendor && a.spend) لمؤشر الموردين",
     !ksrc.includes("A.forEach(a=>{ if(a.vendor && a.spend>0) byVendor"));
-  T("احتياط المورّد الفعلي (actualVendor ثم vendor) بالإنفاق الأفضل-جهداً",
-    ksrc.includes("const v=((p.actualVendor||p.vendor||\"\")+\"\").trim();") &&
+  // v18.9tb: المورّد يُقرأ من أي حقل ولا يُسقَط إنفاقٌ باسمٍ خالٍ (كان `if(v&&c>0)` يُهمله)
+  T("★ _kpiVendorOf يقرأ كل حقول المورّد (actualVendor/vendors/supplier/vendor/grn/بند)",
+    ksrc.includes("function _kpiVendorOf(p)") &&
+    ksrc.includes("first(p.actualVendor)") && ksrc.includes("first(p.supplier)") &&
+    ksrc.includes("first(p.vendor)") && ksrc.includes('return v || "غير محدد"'));
+  T("★ الفرع الاحتياطي ينسب الإنفاق دون إسقاطٍ باسمٍ خالٍ",
+    ksrc.includes("const v=_kpiVendorOf(p), c=_kpiSpendOf(p);") &&
+    ksrc.includes("if(c>0) byVendor[v]=(byVendor[v]||0)+c;"));
+  T("_kpiSpendOf أفضل-جهداً (فعلي ثم تقديري ثم مجموع البنود)",
+    ksrc.includes("function _kpiSpendOf(p)") &&
     ksrc.includes('if(typeof getPOTotal==="function") c=Number(getPOTotal(p))||0;'));
+  // اختبار سلوكي: مغلق بلا مورّد وبتكلفة يُنسب لـ«غير محدد» لا يُسقَط
+  {
+    let _vend, _spend;
+    try {
+      _vend = new Function("getPOTotal", sl("function _kpiVendorOf(", "/* v18.9tb: إنفاقٌ أفضل") + "\nreturn _kpiVendorOf;")(undefined);
+      _spend = new Function("getPOTotal", sl("function _kpiSpendOf(", "\n/* ══") + "\nreturn _kpiSpendOf;")(undefined);
+    } catch (e) { T("تُبنى _kpiVendorOf/_kpiSpendOf", false, String(e.message).slice(0, 120)); }
+    if (typeof _vend === "function") {
+      T("_kpiVendorOf: supplier عند غياب actualVendor/vendor", _vend({ supplier: "مورّد عرض" }) === "مورّد عرض");
+      T("_kpiVendorOf: vendors[] أولاً", _vend({ vendors: [{ vendor: "أ" }], vendor: "ب" }) === "أ");
+      T("_kpiVendorOf: بند عند غياب الحقول العليا", _vend({ items: [{ vendor: "بند-مورّد" }] }) === "بند-مورّد");
+      T("_kpiVendorOf: «غير محدد» عند غياب الكل", _vend({ actualCost: 500 }) === "غير محدد");
+    }
+    if (typeof _spend === "function") {
+      T("_kpiSpendOf: actualCost أولاً", _spend({ actualCost: 700 }) === 700);
+      T("_kpiSpendOf: مجموع البنود احتياطاً", _spend({ items: [{ qty: 2, price: 50 }, { total: 100 }] }) === 200);
+    }
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════
