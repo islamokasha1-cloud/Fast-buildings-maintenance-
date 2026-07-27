@@ -189,18 +189,24 @@ function computeKPIs(list){
   const withDue = closed.filter(a=>a.onTime!=null);
   const onTimeRate = withDue.length ? (withDue.filter(a=>a.onTime).length/withDue.length)*100 : null;
 
-  /* الإنفاق حسب المورد — v18.9sz: المورّد الفعلي من سندات الاستلام عبر المصدر الموحّد
-     poVendorBreakdown (يوزّع الطلب المغلق على مورّديه الفعليين). كان يقرأ a.vendor = p.vendor
-     (المورّد المقترح عند الإنشاء) وهو فارغٌ غالباً — فتختفي مؤشرات الموردين كلها. مغلق فقط،
-     كبقية «الإنفاق الفعلي». احتياطٌ عند غياب الدالة: actualVendor ثم vendor للطلب المغلق. */
+  /* الإنفاق حسب المورد — v18.9sz: بالمورّد **الفعلي** لا المقترح. كان يقرأ p.vendor (المورّد المقترح
+     عند الإنشاء) وهو فارغٌ غالباً فتختفي المؤشرات؛ ولمّا صار مغلقاً-فقط ظهرت الأسماء بلا قيم لأن أغلب
+     الطلبات لم تُغلق بعد. وهذا مؤشّر **تركّز مخاطر توريد**، فيشمل الملتزَم لا المغلق وحده:
+       • الطلب المغلق بسندات: يُوزَّع على مورّديه الفعليين بحصصهم (poVendorBreakdown).
+       • غير ذلك: يُنسب إنفاقُه الأفضل-جهداً (الفعلي إن وُجد، وإلا التقديري getPOTotal/estCost)
+         للمورّد الفعلي (actualVendor) ثم المقترح (vendor). فلا يبقى المؤشر خالياً ولا بلا قيم. */
   const byVendor = {};
   list.forEach(p=>{
+    if(!p) return;
     let parts=null;
     try{ if(typeof poVendorBreakdown==="function") parts=poVendorBreakdown(p); }catch(e){}
     if(parts && parts.length && parts.some(x=>x&&(Number(x.cost)||0)>0)){
       parts.forEach(x=>{ const v=((x&&x.vendor)||"").trim(), c=Number(x&&x.cost)||0; if(v&&c>0) byVendor[v]=(byVendor[v]||0)+c; });
-    } else if(_kpiClosed(p)){
-      const v=((p.actualVendor||p.vendor||"")+"").trim(), c=_kpiActual(p);
+    } else {
+      const v=((p.actualVendor||p.vendor||"")+"").trim();
+      let c=Number(p.actualCost)||0;
+      if(!(c>0)){ try{ if(typeof getPOTotal==="function") c=Number(getPOTotal(p))||0; }catch(e){} }
+      if(!(c>0)) c=Number(p.estCost)||0;
       if(v&&c>0) byVendor[v]=(byVendor[v]||0)+c;
     }
   });
