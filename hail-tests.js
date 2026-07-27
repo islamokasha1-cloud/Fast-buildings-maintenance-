@@ -941,6 +941,25 @@ function extrasCardGating() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   21) تعديل المسؤول لطلب الشراء لا يُخرجه من مساره — قائمة الحالة من PO_STATUS (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function adminEditKeepsStatus() {
+  H("21) تعديل المسؤول لا يُخرج الطلب من مساره");
+  const i = HTML.indexOf("function openAdminEditPurchase(");
+  const fn = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
+  T("★ قائمة الحالة تُبنى من المصدر الموحّد PO_STATUS",
+    fn.includes("Object.keys(PO_STATUS).map(k=>`<option value=\"${esc(k)}\">${esc(PO_STATUS[k])}</option>`)"));
+  T("★ الحالة الحالية (المطبَّعة) تُضبط ومحفوظة",
+    fn.includes("const _paeCur = normalizePOStatus(p.status) || \"pending_pm\";") &&
+    fn.includes("paeStatusSel.value = _paeCur;"));
+  T("لم تعد تُضبط قيمة الحالة على قائمة قديمة (p.status||new_request)",
+    !fn.includes('document.getElementById("pae-status").value     = p.status||"new_request";'));
+  // قائمة pae-status في الـ HTML فارغة (تُبنى ديناميكياً) — لا خيارات ثابتة قديمة داخلها
+  T("★ قائمة pae-status فارغة في الـ HTML (تُملأ من PO_STATUS)",
+    HTML.includes('<select class="form-select" id="pae-status"></select>'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
    ════════════════════════════════════════════════════════════════════ */
 function auditRound2() {
@@ -1341,6 +1360,7 @@ function rollupMonthIsolation() {
   invoiceFileSource();
   closedOrdersCard();
   extrasCardGating();
+  adminEditKeepsStatus();
   auditRound2();
   dateBucketing();
   auditRound2Medium();

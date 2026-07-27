@@ -5447,16 +5447,8 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
         </div>
         <div class="form-group">
           <label class="form-label">الحالة</label>
-          <select class="form-select" id="pae-status">
-            <optgroup label="سير العمل الجديد">
-              <option value="draft">مسودة</option><option value="in_review">قيد المراجعة</option><option value="approved">معتمد</option>
-              <option value="rejected">مرفوض</option><option>منفذ</option><option value="closed">مغلق</option>
-            </optgroup>
-            <optgroup label="حالات قديمة">
-              <option value="new_request">طلب جديد</option><option value="approving">قيد الموافقة</option><option value="approved_old">تمت الموافقة</option>
-              <option value="ordered">تم الطلب</option><option value="delivered">تم التسليم</option><option value="cancelled">ملغي</option>
-            </optgroup>
-          </select>
+          <!-- v18.9sz: الخيارات تُبنى ديناميكياً من PO_STATUS في openAdminEditPurchase (المصدر الموحّد) -->
+          <select class="form-select" id="pae-status"></select>
         </div>
       </div>
       <div class="form-row">
@@ -28966,7 +28958,18 @@ function openAdminEditPurchase(poId){
 
   document.getElementById("pae-priority").value   = p.priority||"عادي 🟢";
   document.getElementById("pae-supervisor").value = p.supervisor||"";
-  document.getElementById("pae-status").value     = p.status||"new_request";
+  // v18.9sz: املأ قائمة الحالة من المصدر الموحّد PO_STATUS بدل قائمةٍ ثابتةٍ قديمة لا تحوي
+  // حالات المسار الحالي (pending_pm/pm_approved/wh_review...). كانت select.value=p.status يفشل
+  // بصمت لأن الحالة الحديثة ليست خياراً، فتُحفظ حالةٌ فارغة عند الحفظ فيخرج الطلب من مساره.
+  // الآن كل الحالات القياسية خيارات، والحالة الحالية محفوظة كما هي (بلا إعادة تعيين للمسار).
+  const paeStatusSel = document.getElementById("pae-status");
+  if(paeStatusSel){
+    const _paeCur = normalizePOStatus(p.status) || "pending_pm";
+    let _paeOpts = Object.keys(PO_STATUS).map(k=>`<option value="${esc(k)}">${esc(PO_STATUS[k])}</option>`).join("");
+    if(!PO_STATUS[_paeCur]) _paeOpts += `<option value="${esc(_paeCur)}">${esc(_paeCur)}</option>`; // حالة قديمة نادرة — لا تُفقَد
+    paeStatusSel.innerHTML = _paeOpts;
+    paeStatusSel.value = _paeCur;
+  }
   document.getElementById("pae-actual-cost").value= p.actualCost||"";
   document.getElementById("pae-vendor").value     = p.vendor||"";
   document.getElementById("pae-invoice").value    = p.invoice||"";
