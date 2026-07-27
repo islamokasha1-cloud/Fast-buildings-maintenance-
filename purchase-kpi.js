@@ -76,6 +76,12 @@ function parseTS(v){
 }
 const DAY = 86400000;
 
+// v18.9sz: «مغلق» و«التكلفة الفعلية» من المصدر الموحّد في index.html (poIsClosed/poActualCost)،
+// فيتطابق «إجمالي الإنفاق (فعلي)» هنا مع «إجمالي المبالغ المغلقة» في لوحة المشتريات — الاثنان
+// يحسبان الطلبات المغلقة فقط بتكلفتها الفعلية. كان totalAct يجمع actualCost لكل الطلبات (بأي حالة).
+function _kpiClosed(p){ try{ if(typeof poIsClosed==="function") return !!poIsClosed(p); }catch(e){} const s=(p&&p.status)||""; return s==="closed"||s==="closed_after_receipt"; }
+function _kpiActual(p){ try{ if(typeof poActualCost==="function") return Number(poActualCost(p))||0; }catch(e){} return Number(p&&p.actualCost)||0; }
+
 /* ══ استخراج بيانات التحليل من طلب واحد ══ */
 function analyzeOrder(p){
   const created = parseTS(p.createdAt);
@@ -103,8 +109,9 @@ function analyzeOrder(p){
   }
 
   /* زمن الإغلاق */
-  const closedEv = tl.find(t=>t.code==="closed");
-  const closedAt = closedEv ? closedEv.at : (status==="closed" ? parseTS(p.updatedAt) : null);
+  const _clo = _kpiClosed(p);   // v18.9sz: المصدر الموحّد (يشمل closed_after_receipt)
+  const closedEv = tl.find(t=>t.code==="closed"||t.code==="closed_after_receipt");
+  const closedAt = closedEv ? closedEv.at : (_clo ? parseTS(p.updatedAt) : null);
   const cycleDays = (created && closedAt && closedAt>=created) ? (closedAt-created)/DAY : null;
 
   /* الالتزام بموعد التوريد المتوقع */
@@ -115,6 +122,7 @@ function analyzeOrder(p){
   const est = Number(p.estCost)||0;
   const act = Number(p.actualCost)||0;
   const spend = act>0 ? act : est;
+  const actClosed = _clo ? _kpiActual(p) : 0;   // v18.9sz: تكلفة فعلية للمغلق فقط (كاللوحة)
 
   /* v1.3: الطلب قابل للقياس إن حمل رمزاً صريحاً واحداً على الأقل — أي أُنشئ أو
      تحرّك بعد v18.9od. والطلب الأقدم يُستثنى من كل ما يُشتقّ من المسار بدل أن
@@ -127,9 +135,9 @@ function analyzeOrder(p){
     id:p.id, created, status, closedAt, cycleDays, stageDur, coded,
     rejected: rejectedStages,
     firstPass: rejectedStages.length===0 && status!=="cancelled",
-    isClosed: status==="closed",
+    isClosed: _clo,
     isOpen: !TERMINAL_CODES.includes(status) && status!=="cancelled",
-    est, act, spend,
+    est, act, spend, actClosed,
     variancePct: (est>0 && act>0) ? ((act-est)/est)*100 : null,
     onTime,
     vendor:(p.vendor||"").trim(),
@@ -181,9 +189,21 @@ function computeKPIs(list){
   const withDue = closed.filter(a=>a.onTime!=null);
   const onTimeRate = withDue.length ? (withDue.filter(a=>a.onTime).length/withDue.length)*100 : null;
 
-  /* الإنفاق حسب المورد */
+  /* الإنفاق حسب المورد — v18.9sz: المورّد الفعلي من سندات الاستلام عبر المصدر الموحّد
+     poVendorBreakdown (يوزّع الطلب المغلق على مورّديه الفعليين). كان يقرأ a.vendor = p.vendor
+     (المورّد المقترح عند الإنشاء) وهو فارغٌ غالباً — فتختفي مؤشرات الموردين كلها. مغلق فقط،
+     كبقية «الإنفاق الفعلي». احتياطٌ عند غياب الدالة: actualVendor ثم vendor للطلب المغلق. */
   const byVendor = {};
-  A.forEach(a=>{ if(a.vendor && a.spend>0) byVendor[a.vendor]=(byVendor[a.vendor]||0)+a.spend; });
+  list.forEach(p=>{
+    let parts=null;
+    try{ if(typeof poVendorBreakdown==="function") parts=poVendorBreakdown(p); }catch(e){}
+    if(parts && parts.length && parts.some(x=>x&&(Number(x.cost)||0)>0)){
+      parts.forEach(x=>{ const v=((x&&x.vendor)||"").trim(), c=Number(x&&x.cost)||0; if(v&&c>0) byVendor[v]=(byVendor[v]||0)+c; });
+    } else if(_kpiClosed(p)){
+      const v=((p.actualVendor||p.vendor||"")+"").trim(), c=_kpiActual(p);
+      if(v&&c>0) byVendor[v]=(byVendor[v]||0)+c;
+    }
+  });
   const vendors = Object.entries(byVendor).sort((x,y)=>y[1]-x[1]);
   const totalVendorSpend = vendors.reduce((s,v)=>s+v[1],0);
   const top3Share = totalVendorSpend>0
@@ -196,7 +216,7 @@ function computeKPIs(list){
     const d = new Date(a.created);
     const k = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
     const m = months[k]=months[k]||{est:0,act:0,count:0};
-    m.est+=a.est; m.act+=a.act; m.count++;
+    m.est+=a.est; m.act+=a.actClosed; m.count++;   // v18.9sz: الفعلي = المغلق فقط (كاللوحة)
   });
   const monthKeys = Object.keys(months).sort().slice(-12);
 
@@ -239,7 +259,7 @@ function computeKPIs(list){
     onTimeRate, onTimeN:withDue.length,
     vendors, top3Share,
     totalEst:A.reduce((s,a)=>s+a.est,0),
-    totalAct:A.reduce((s,a)=>s+a.act,0),
+    totalAct:A.reduce((s,a)=>s+a.actClosed,0),   // v18.9sz: المغلق فقط — يطابق «إجمالي المبالغ المغلقة» في اللوحة
     inBOQRate: A.length ? (A.filter(a=>a.inBOQ).length/A.length)*100 : null,
     inContractRate: A.length ? (A.filter(a=>a.inContract).length/A.length)*100 : null,
     ticketRate: A.length ? (A.filter(a=>a.ticketLinked).length/A.length)*100 : null,
