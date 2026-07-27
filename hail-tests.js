@@ -1065,6 +1065,13 @@ function kpiSpendClosedOnly() {
   T("actClosed = تكلفة المغلق فقط", ksrc.includes("const actClosed = _clo ? _kpiActual(p) : 0;"));
   T("الإنفاق الشهري الفعلي = المغلق فقط", ksrc.includes("m.est+=a.est; m.act+=a.actClosed;"));
   T("isClosed من المصدر الموحّد (_clo)", ksrc.includes("isClosed: _clo,"));
+  // مؤشرات الموردين تقرأ المورّد الفعلي (poVendorBreakdown) لا p.vendor المقترح
+  T("★ الإنفاق حسب المورد يقرأ المورّد الفعلي (poVendorBreakdown)",
+    ksrc.includes('if(typeof poVendorBreakdown==="function") parts=poVendorBreakdown(p);'));
+  T("لم يعد يقرأ p.vendor المقترح (a.vendor && a.spend) لمؤشر الموردين",
+    !ksrc.includes("A.forEach(a=>{ if(a.vendor && a.spend>0) byVendor"));
+  T("احتياط المورّد الفعلي: actualVendor ثم vendor للمغلق",
+    ksrc.includes("const v=((p.actualVendor||p.vendor||\"\")+\"\").trim(), c=_kpiActual(p);"));
 }
 
 /* ════════════════════════════════════════════════════════════════════

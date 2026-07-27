@@ -189,9 +189,21 @@ function computeKPIs(list){
   const withDue = closed.filter(a=>a.onTime!=null);
   const onTimeRate = withDue.length ? (withDue.filter(a=>a.onTime).length/withDue.length)*100 : null;
 
-  /* الإنفاق حسب المورد */
+  /* الإنفاق حسب المورد — v18.9sz: المورّد الفعلي من سندات الاستلام عبر المصدر الموحّد
+     poVendorBreakdown (يوزّع الطلب المغلق على مورّديه الفعليين). كان يقرأ a.vendor = p.vendor
+     (المورّد المقترح عند الإنشاء) وهو فارغٌ غالباً — فتختفي مؤشرات الموردين كلها. مغلق فقط،
+     كبقية «الإنفاق الفعلي». احتياطٌ عند غياب الدالة: actualVendor ثم vendor للطلب المغلق. */
   const byVendor = {};
-  A.forEach(a=>{ if(a.vendor && a.spend>0) byVendor[a.vendor]=(byVendor[a.vendor]||0)+a.spend; });
+  list.forEach(p=>{
+    let parts=null;
+    try{ if(typeof poVendorBreakdown==="function") parts=poVendorBreakdown(p); }catch(e){}
+    if(parts && parts.length && parts.some(x=>x&&(Number(x.cost)||0)>0)){
+      parts.forEach(x=>{ const v=((x&&x.vendor)||"").trim(), c=Number(x&&x.cost)||0; if(v&&c>0) byVendor[v]=(byVendor[v]||0)+c; });
+    } else if(_kpiClosed(p)){
+      const v=((p.actualVendor||p.vendor||"")+"").trim(), c=_kpiActual(p);
+      if(v&&c>0) byVendor[v]=(byVendor[v]||0)+c;
+    }
+  });
   const vendors = Object.entries(byVendor).sort((x,y)=>y[1]-x[1]);
   const totalVendorSpend = vendors.reduce((s,v)=>s+v[1],0);
   const top3Share = totalVendorSpend>0
