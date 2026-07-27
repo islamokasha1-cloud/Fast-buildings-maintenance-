@@ -25548,8 +25548,16 @@ async function doUpdatePurchaseStatus(){
   // يمنع حالة Race Condition إذا غيّر مستخدم آخر الحالة بعد فتح هذا المودال
   if(db){
     try{
-      const freshDoc = await db.collection(PURCHASES_COLLECTION()).doc(poId).get();
-      if(freshDoc.exists){
+      // v18.9sz: مهلة قصوى للقراءة الطازجة. كانت await get() بلا مهلة، فإن تجمّد عميل Firestore
+      // (خلل SDK الداخلي ca9/b815) أو تعثّرت الشبكة على الجوال، تعلّق «حفظ التحديث» أبداً بلا
+      // إجراء ولا خطأ — تماماً كالتجمّد المُبلَّغ. الآن: بعد 6 ثوانٍ نمضي بالنسخة المحلية (مرآة
+      // onSnapshot)، وكتابة savePurchase بـ merge:true لا تدهس تعديل مستخدم آخر. حماية التزامن
+      // تبقى أفضل جهد: تُطبَّق حين تستجيب القراءة، وتُتخطّى بأمان حين تتعذّر.
+      const freshDoc = await Promise.race([
+        db.collection(PURCHASES_COLLECTION()).doc(poId).get(),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error("fresh-read-timeout")), 6000))
+      ]);
+      if(freshDoc && freshDoc.exists){
         // v18.9qr: طبّع الحالة الخام قبل المقارنة — كان يقارن حالةً خام من Firestore
         // (قد تكون عربية لطلب قديم مُرحّل) بـ p.status المطبّع دائماً، فيرفض تحديث كل
         // طلب غير مطبّع برسالة «غيّر مستخدم آخر الحالة» في حلقة لا تنتهي.
@@ -25566,7 +25574,7 @@ async function doUpdatePurchaseStatus(){
           return;
         }
       }
-    } catch(e){ console.warn("doUpdatePurchaseStatus: fresh-read error",e); }
+    } catch(e){ console.warn("doUpdatePurchaseStatus: fresh-read error/timeout",e); }
   }
 
   // تحقق الأذونات: غير المدير لا يمكنه تغيير الحالة لما هو خارج صلاحياته
