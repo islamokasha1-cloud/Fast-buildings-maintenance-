@@ -26041,8 +26041,7 @@ function openNotifyWarehouseModal(poId){
     title: "تم الشراء — إشعار المستودع بالاستلام",
     body: `
       <div style="font-size:12px;color:var(--muted);background:var(--surface2);border-radius:8px;padding:8px 12px;margin-bottom:12px">سيُشعَر المستودع لتأكيد الاستلام. يمكنك إرفاق فاتورة المورد الآن (اختياري) فتُحفظ في «مرفقات الطلب» كمرجع — أمّا «ملف الفاتورة» الرسمي فيُسجّله المستودع عند تدقيق الاستلام.</div>
-      <input class="form-input" id="nw-invno" placeholder="رقم الفاتورة (اختياري)" value="${esc(p.invoice||"")}" style="margin-bottom:8px">
-      <input class="form-input" id="nw-vendor" placeholder="المورد الفعلي (اختياري)" value="${esc(p.actualVendor||p.vendor||"")}" style="margin-bottom:10px">
+      <input class="form-input" id="nw-invno" placeholder="رقم الفاتورة (اختياري)" value="${esc(p.invoice||"")}" style="margin-bottom:10px">
       <div style="font-size:11.5px;color:var(--muted);margin-bottom:4px">فاتورة المورد (صورة أو PDF — اختياري):</div>
       <input type="file" id="nw-file" accept="image/*,application/pdf" style="font-size:12px">
     `,
@@ -26054,7 +26053,6 @@ function openNotifyWarehouseModal(poId){
 async function doNotifyWarehouse(poId){
   if(!(isProcurementOfficer()||isAdmin())){ toast("⚠ صلاحية مسؤول المشتريات فقط","warn"); return false; }
   const invNo  = (document.getElementById("nw-invno").value||"").trim();
-  const vendor = (document.getElementById("nw-vendor").value||"").trim();
   const fileEl = document.getElementById("nw-file");
   const file   = fileEl && fileEl.files && fileEl.files[0];
 
@@ -26069,7 +26067,7 @@ async function doNotifyWarehouse(poId){
   const now = new Date().toISOString();
 
   if(invNo)  p.invoice = invNo;
-  if(vendor) p.actualVendor = vendor;
+  // v18.9sz: لا يُدخل المشتريات المورّد — المورّد الفعلي يسجّله المستودع من سندات الاستلام عند التدقيق.
   if(att){
     // v18.9sz: رفع المشتريات للفاتورة يبقى في «مرفقات الطلب» فقط كمرجع — لا يصبح «ملف الفاتورة».
     // «ملف الفاتورة» الرسمي مصدره الوحيد رفع مسؤول المستودع عند تدقيق الاستلام (grnDocs)، لأن
