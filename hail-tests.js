@@ -931,8 +931,8 @@ function extrasCardGating() {
   H("20) بطاقة البنود المُضافة عند الاستلام");
   const i = HTML.indexOf("function renderExtrasCard(");
   const fn = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
-  T("★ لا تظهر إلا للمسؤول (أدمن/مدير مشاريع/مدير تنفيذي)",
-    fn.includes('if(!(isAdmin()||isProjectManager()||isCEO())){ card.style.display="none"'));
+  T("★ لا تظهر إلا للمسؤول (الأدمن وحده)",
+    fn.includes('if(!isAdmin()){ card.style.display="none"'));
   T("★ تختفي بعد البتّ — تُخفى عند غياب المعلّق (افتراضياً)",
     fn.includes('if(!_xCardAll && !pend.length){ card.style.display="none"'));
   T("الافتراضي يعرض المعلّق فقط (لا يرتدّ لعرض المبتوت)",

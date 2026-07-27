@@ -24496,9 +24496,8 @@ function toggleExtrasCardAll(){ _xCardAll = !_xCardAll; renderExtrasCard(); }
 function renderExtrasCard(){
   const card = document.getElementById("po-extras-card");
   if(!card) return;
-  // v18.9sz: بطاقة إشرافية للبتّ في البنود المُضافة عند الاستلام — تظهر فقط لِمن يملك البتّ
-  // («المسؤول»): الأدمن / مدير المشاريع / المدير التنفيذي. غيرهم لا تظهر لهم إطلاقاً.
-  if(!(isAdmin()||isProjectManager()||isCEO())){ card.style.display="none"; card.innerHTML=""; return; }
+  // v18.9sz: بطاقة إشرافية للبنود المُضافة عند الاستلام — تظهر لِلمسؤول (الأدمن/مدير النظام) وحده.
+  if(!isAdmin()){ card.style.display="none"; card.innerHTML=""; return; }
   const all = [];
   (typeof purchases!=="undefined" ? purchases : []).forEach(p=>{
     if(!p || !p.hasExtraItems) return;
