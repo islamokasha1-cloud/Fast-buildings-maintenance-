@@ -1076,8 +1076,14 @@ function kpiSpendClosedOnly() {
     ksrc.includes("first(p.actualVendor)") && ksrc.includes("first(p.supplier)") &&
     ksrc.includes("first(p.vendor)") && ksrc.includes('return v || "غير محدد"'));
   T("★ الفرع الاحتياطي ينسب الإنفاق دون إسقاطٍ باسمٍ خالٍ",
-    ksrc.includes("const v=_kpiVendorOf(p), c=_kpiSpendOf(p);") &&
+    ksrc.includes("const v=_kpiVendorOf(p), c=_kpiActual(p);") &&
     ksrc.includes("if(c>0) byVendor[v]=(byVendor[v]||0)+c;"));
+  // v18.9tc: مخطّط الموردين يحسب المغلقة فقط بالفعلي — يطابق «المبالغ المغلقة» (لا يشمل تقدير المفتوحة)
+  T("★ مخطّط الموردين = المغلقة فقط (اتساق مع أرقام الإنفاق)",
+    ksrc.includes("if(!p || !_kpiClosed(p)) return;"));
+  T("الفرع الاحتياطي يستخدم الفعلي _kpiActual لا التقديري _kpiSpendOf",
+    ksrc.includes("const v=_kpiVendorOf(p), c=_kpiActual(p);") &&
+    !ksrc.includes("const v=_kpiVendorOf(p), c=_kpiSpendOf(p);"));
   T("_kpiSpendOf أفضل-جهداً (فعلي ثم تقديري ثم مجموع البنود)",
     ksrc.includes("function _kpiSpendOf(p)") &&
     ksrc.includes('if(typeof getPOTotal==="function") c=Number(getPOTotal(p))||0;'));
