@@ -960,6 +960,24 @@ function adminEditKeepsStatus() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   22) تدقيق الاستلام: إضافة بند إضافي لا تمحو كميات صفوف الطلب (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function waExtrasPreserveQty() {
+  H("22) إضافة بند إضافي تحفظ كميات الطلب");
+  T("★ توجد التقاط/استعادة قيم صفوف الطلب (_waCaptureOrig/_waRestoreOrig)",
+    HTML.includes("function _waCaptureOrig(") && HTML.includes("function _waRestoreOrig("));
+  T("_waRestoreOrig يحترم خانة المستودع (src='stock' لا يعيد حسابها)",
+    HTML.includes("waUpdateRow(parseInt(k,10),'stock')"));
+  const add = (()=>{ const i=HTML.indexOf("function waAddExtra("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ waAddExtra يلتقط قيم الصفوف قبل فتح نافذة البند الإضافي", add.includes("_waCaptureOrig();"));
+  const rem = (()=>{ const i=HTML.indexOf("function waRemoveExtra("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("waRemoveExtra يلتقط ويستعيد قيم الصفوف", rem.includes("_waCaptureOrig();") && rem.includes("_waRestoreOrig();"));
+  const form = (()=>{ const i=HTML.indexOf("function _waExtraForm("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ نافذة البند الإضافي تستعيد قيم الصفوف بعد الإضافة", form.includes("_waRestoreOrig();"));
+  T("التقاط القيم يبدأ نظيفاً عند فتح التدقيق", HTML.includes("_waOrigVals = null;   // v18.9sz"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
    ════════════════════════════════════════════════════════════════════ */
 function auditRound2() {
@@ -1361,6 +1379,7 @@ function rollupMonthIsolation() {
   closedOrdersCard();
   extrasCardGating();
   adminEditKeepsStatus();
+  waExtrasPreserveQty();
   auditRound2();
   dateBucketing();
   auditRound2Medium();

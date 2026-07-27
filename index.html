@@ -27436,6 +27436,7 @@ function _waXIdx(k){ return _waBaseCount + k; }
 function waAddExtra(){
   if(!canReceivePO()){ toast("⚠ صلاحية غير كافية","warn"); return; }
   if(_waExtras.length >= _WA_X_MAX){ toast(`⚠ حد أقصى ${_WA_X_MAX} بنود إضافية في استلام واحد`,"warn"); return; }
+  _waCaptureOrig();   // v18.9sz: احفظ كميات صفوف الطلب قبل فتح نافذة البند الإضافي — تُستعاد بعد إغلاقها
   // من الكتالوج فقط — ضرورة تقنية لا تشدد: البند بلا itemId لا يدخل رصيداً،
   // وعدّادٌ فوق نص حرّ عدّادٌ فوق لا شيء. والإضافة للكتالوج متاحة من هنا فلا جدار.
   openCatalogPickerFor(
@@ -27499,6 +27500,7 @@ function _waExtraForm(catId){
       });
       waRenderExtras();
       waSyncInvPickers();
+      _waRestoreOrig();   // v18.9sz: أعِد كميات صفوف الطلب التي التُقطت قبل فتح النافذة (تمنع اختفاءها)
       toast("➕ أُضيف «"+(ci.name||"")+"» — لن يُقفل الطلب حتى يُبتّ فيه","warn");
       return true;
     }
@@ -27518,11 +27520,40 @@ function _waSyncExtras(){
   });
 }
 
+// v18.9sz: صفوف الطلب الأصلية تعيش في الـ DOM وحده (بلا حالة، بخلاف الإضافية _waExtras).
+// أبلغ المستخدم أن إضافة «بند إضافي» والخروج من نافذته يمحو الكميات المستلمة/المباشرة المكتوبة
+// في صفوف الطلب فيضطر لإعادة إدخالها. لم أعثر على مسارٍ يهدم wa-items-tbody، فالسبب إعادة رسمٍ
+// عابرة/سلوكُ متصفّح. الحلّ الآمن: نلتقط قيم الصفوف الأصلية قبل فتح نافذة البند الإضافي، ونعيد
+// تطبيقها بعد إغلاقها — والحفظ يقرأ الـ DOM الحيّ فلا يتأثّر بأي شيء هنا.
+let _waOrigVals = null;
+function _waCaptureOrig(){
+  _waOrigVals = {};
+  for(let i=0;i<_waBaseCount;i++){
+    if(!document.querySelector(`.wa-rcv-qty[data-idx="${i}"]`)) continue;
+    const val = cls => (document.querySelector(`.${cls}[data-idx="${i}"]`)||{}).value;
+    _waOrigVals[i] = { rcv:val("wa-rcv-qty"), stock:val("wa-stock-qty"), direct:val("wa-direct-qty"),
+                       price:val("wa-unit-price"), supplier:val("wa-supplier-name") };
+  }
+}
+function _waRestoreOrig(){
+  if(!_waOrigVals) return;
+  Object.keys(_waOrigVals).forEach(k=>{
+    const v = _waOrigVals[k];
+    const set = (cls,val)=>{ const el=document.querySelector(`.${cls}[data-idx="${k}"]`); if(el && val!=null && el.value!==val) el.value=val; };
+    set("wa-rcv-qty",v.rcv); set("wa-stock-qty",v.stock); set("wa-direct-qty",v.direct);
+    set("wa-unit-price",v.price); set("wa-supplier-name",v.supplier);
+    // src='stock' يحترم خانة المستودع كما التُقطت (لا يعيد حسابها) ويحدّث الإجماليات والتحذيرات
+    if(document.querySelector(`.wa-rcv-qty[data-idx="${k}"]`)) waUpdateRow(parseInt(k,10),'stock');
+  });
+}
+
 function waRemoveExtra(uid){
+  _waCaptureOrig();
   _waSyncExtras();
   _waExtras = _waExtras.filter(x=>x.uid!==uid);
   waRenderExtras();
   waSyncInvPickers();
+  _waRestoreOrig();
 }
 
 // نفس أصناف الصفوف العادية (wa-rcv-qty…) ونفس data-idx — فـ waUpdateRow
@@ -27681,6 +27712,7 @@ function openWarehouseAudit(poId){
   // v18.9nz: تُفتح بلا بنود إضافية — الحالة الشائعة. والزر يُخفى عن الطلبات
   // قديمة البنية (بلا p.items) لأن الإلحاق ليس له موضع فيها.
   _waExtras = [];
+  _waOrigVals = null;   // v18.9sz: التقاط قيم صفوف الطلب يبدأ نظيفاً لكل فتح
   waRenderExtras();
   const _xBar = document.getElementById("wa-extra-bar");
   if(_xBar) _xBar.style.display = (p.items && p.items.length > 0) ? "" : "none";
