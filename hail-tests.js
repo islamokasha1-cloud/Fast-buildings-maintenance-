@@ -925,6 +925,22 @@ function closedOrdersCard() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   20) بطاقة «بنود أُضيفت عند الاستلام» — للمسؤول فقط، وتختفي بعد البتّ (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function extrasCardGating() {
+  H("20) بطاقة البنود المُضافة عند الاستلام");
+  const i = HTML.indexOf("function renderExtrasCard(");
+  const fn = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
+  T("★ لا تظهر إلا للمسؤول (أدمن/مدير مشاريع/مدير تنفيذي)",
+    fn.includes('if(!(isAdmin()||isProjectManager()||isCEO())){ card.style.display="none"'));
+  T("★ تختفي بعد البتّ — تُخفى عند غياب المعلّق (افتراضياً)",
+    fn.includes('if(!_xCardAll && !pend.length){ card.style.display="none"'));
+  T("الافتراضي يعرض المعلّق فقط (لا يرتدّ لعرض المبتوت)",
+    fn.includes("const show = _xCardAll ? all : pend;") &&
+    !fn.includes("_xCardAll ? all : (pend.length ? pend : all)"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
    ════════════════════════════════════════════════════════════════════ */
 function auditRound2() {
@@ -1324,6 +1340,7 @@ function rollupMonthIsolation() {
   listenerChurn();
   invoiceFileSource();
   closedOrdersCard();
+  extrasCardGating();
   auditRound2();
   dateBucketing();
   auditRound2Medium();

@@ -24496,6 +24496,9 @@ function toggleExtrasCardAll(){ _xCardAll = !_xCardAll; renderExtrasCard(); }
 function renderExtrasCard(){
   const card = document.getElementById("po-extras-card");
   if(!card) return;
+  // v18.9sz: بطاقة إشرافية للبتّ في البنود المُضافة عند الاستلام — تظهر فقط لِمن يملك البتّ
+  // («المسؤول»): الأدمن / مدير المشاريع / المدير التنفيذي. غيرهم لا تظهر لهم إطلاقاً.
+  if(!(isAdmin()||isProjectManager()||isCEO())){ card.style.display="none"; card.innerHTML=""; return; }
   const all = [];
   (typeof purchases!=="undefined" ? purchases : []).forEach(p=>{
     if(!p || !p.hasExtraItems) return;
@@ -24505,11 +24508,14 @@ function renderExtrasCard(){
 
   const pend = all.filter(x=>x.it._extraStatus==="pending_pm"||x.it._extraStatus==="pending_ceo");
   const rej  = all.filter(x=>x.it._extraStatus==="rejected");
-  const show = _xCardAll ? all : (pend.length ? pend : all);
+  // v18.9sz: بعد البتّ (اعتماد/رفض) تختفي البطاقة — الافتراضي يعرض المعلّق فقط، فإن لم يبقَ
+  // بندٌ معلّقٌ تُخفى تماماً. «أعرض الكل» يبقى متاحاً للسجل ما دام هناك معلّقٌ يُظهِر زرّه.
+  if(!_xCardAll && !pend.length){ card.style.display="none"; card.innerHTML=""; return; }
+  const show = _xCardAll ? all : pend;
 
-  // العدّاد بالشخص — لا يكشف تكرار السلوك إلا هكذا
+  // العدّاد بالشخص — على المعروض فعلياً (المعلّق افتراضياً)
   const byWho = {};
-  all.forEach(x=>{ const w = x.it._extraBy||"—"; byWho[w] = (byWho[w]||0)+1; });
+  show.forEach(x=>{ const w = x.it._extraBy||"—"; byWho[w] = (byWho[w]||0)+1; });
   const whoChips = Object.keys(byWho).sort((a,b)=>byWho[b]-byWho[a])
     .map(w=>`<span style="font-size:10px;background:var(--surface2);border-radius:10px;padding:2px 8px">${esc(w)}: <b>${byWho[w]}</b></span>`).join(" ");
 
@@ -24543,7 +24549,7 @@ function renderExtrasCard(){
     <div class="card" style="border:1.5px solid ${pend.length?"#f59e0b":"var(--border)"}">
       <div class="card-body">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-          <div style="font-weight:900;font-size:14px;color:#b45309">➕ ${all.length} بند أُضيف عند الاستلام</div>
+          <div style="font-weight:900;font-size:14px;color:#b45309">➕ ${show.length} بند أُضيف عند الاستلام</div>
           ${pend.length?`<span style="font-size:11px;background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 9px;font-weight:800">${pend.length} بانتظار البتّ</span>`:""}
           ${rej.length?`<span style="font-size:11px;background:#fee2e2;color:#991b1b;border-radius:10px;padding:2px 9px;font-weight:800">${rej.length} مرفوض</span>`:""}
           <span style="margin-right:auto"></span>
