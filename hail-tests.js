@@ -1081,6 +1081,10 @@ function kpiSpendClosedOnly() {
   // v18.9tc: مخطّط الموردين يحسب المغلقة فقط بالفعلي — يطابق «المبالغ المغلقة» (لا يشمل تقدير المفتوحة)
   T("★ مخطّط الموردين = المغلقة فقط (اتساق مع أرقام الإنفاق)",
     ksrc.includes("if(!p || !_kpiClosed(p)) return;"));
+  // v18.9td: مستمع الطلبات يعيد رسم صفحة المؤشرات إن كانت مفتوحة (تمنع المخطّط الفارغ عند الفتح المبكر)
+  T("★ onSnapshot يعيد رسم مؤشرات الأداء إن كانت صفحتها مفتوحة",
+    HTML.includes('document.getElementById("page-purchase-kpi").classList.contains("active")') &&
+    HTML.includes("window.purchaseKPI && window.purchaseKPI.render) window.purchaseKPI.render();"));
   T("الفرع الاحتياطي يستخدم الفعلي _kpiActual لا التقديري _kpiSpendOf",
     ksrc.includes("const v=_kpiVendorOf(p), c=_kpiActual(p);") &&
     !ksrc.includes("const v=_kpiVendorOf(p), c=_kpiSpendOf(p);"));
