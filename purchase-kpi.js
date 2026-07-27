@@ -226,8 +226,11 @@ function computeKPIs(list){
     let parts=null;
     try{ if(typeof poVendorBreakdown==="function") parts=poVendorBreakdown(p); }catch(e){}
     if(parts && parts.length && parts.some(x=>x&&(Number(x.cost)||0)>0)){
-      /* توزيعٌ فعليٌّ بالسندات — بحصص كل مورّد. الاسم الخالي يُنسب لـ«غير محدد» فلا يسقط. */
-      parts.forEach(x=>{ const v=((x&&x.vendor)||"").trim()||_kpiVendorOf(p), c=Number(x&&x.cost)||0; if(c>0) byVendor[v]=(byVendor[v]||0)+c; });
+      /* توزيعٌ فعليٌّ بالسندات — بحصص كل مورّد. v18.9tf: الاسم الخالي **أو سنتينل**
+         «غير محدد» (poVendorBreakdown يقرأ actualVendor/vendor/grn فقط) يُستردّ من أي
+         حقلٍ آخر عبر _kpiVendorOf (supplier للمحوّل من عرض أسعار، أو بند items[]) — فلا
+         يُبتَر اسمُ مورّدٍ حقيقيٍّ تحت «غير محدد» كما وعد v18.9tb «ينسب لأي حقل مورّد». */
+      parts.forEach(x=>{ let v=((x&&x.vendor)||"").trim(); if(!v||v==="غير محدد") v=_kpiVendorOf(p); const c=Number(x&&x.cost)||0; if(c>0) byVendor[v]=(byVendor[v]||0)+c; });
     } else {
       /* مغلقٌ بلا سندات صالحة — تُنسب تكلفتُه الفعلية لمورّده من أي حقل (لا التقديري). */
       const v=_kpiVendorOf(p), c=_kpiActual(p);
