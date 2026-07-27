@@ -1040,6 +1040,34 @@ function issueOrderManualProject() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   26) مؤشرات المشتريات: «إجمالي الإنفاق (فعلي)» = المغلق فقط (يطابق اللوحة) (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function kpiSpendClosedOnly() {
+  H("26) الإنفاق الفعلي في المؤشرات = المغلق فقط");
+  if (!KPI_PATH) { console.log("  ⏭  purchase-kpi.js غير موجود — تُخطّى"); return; }
+  const ksrc = fs.readFileSync(KPI_PATH, "utf8");
+  const sl = (a, b) => ksrc.slice(ksrc.indexOf(a), ksrc.indexOf(b));
+  let kc, ka;
+  try {
+    kc = new Function("poIsClosed", sl("function _kpiClosed(", "function _kpiActual(") + "\nreturn _kpiClosed;")(
+      p => ["closed", "closed_after_receipt"].includes(p.status));
+    ka = new Function("poActualCost", sl("function _kpiActual(", "/* ══ استخراج") + "\nreturn _kpiActual;")(
+      p => Number(p.actualCost) || 0);
+  } catch (e) { T("تُبنى دوال KPI الموحّدة", false, String(e.message).slice(0, 120)); return; }
+  T("_kpiClosed يشمل closed و closed_after_receipt", kc({ status: "closed" }) === true && kc({ status: "closed_after_receipt" }) === true);
+  T("_kpiClosed يستثني غير المغلق", kc({ status: "proc_executing" }) === false);
+  T("_kpiActual يقرأ التكلفة الفعلية", ka({ actualCost: 500 }) === 500);
+  // fallback بلا poIsClosed
+  const kcF = new Function("poIsClosed", sl("function _kpiClosed(", "function _kpiActual(") + "\nreturn _kpiClosed;")(undefined);
+  T("_kpiClosed fallback بالحالة عند غياب poIsClosed", kcF({ status: "closed_after_receipt" }) === true && kcF({ status: "pending_pm" }) === false);
+
+  T("★ totalAct يجمع المغلق فقط (actClosed)", ksrc.includes("totalAct:A.reduce((s,a)=>s+a.actClosed,0)"));
+  T("actClosed = تكلفة المغلق فقط", ksrc.includes("const actClosed = _clo ? _kpiActual(p) : 0;"));
+  T("الإنفاق الشهري الفعلي = المغلق فقط", ksrc.includes("m.est+=a.est; m.act+=a.actClosed;"));
+  T("isClosed من المصدر الموحّد (_clo)", ksrc.includes("isClosed: _clo,"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    15) إصلاحات جولة التدقيق الثانية — XSS / SLA / فلاتر Excel / نقل المخزون
    ════════════════════════════════════════════════════════════════════ */
 function auditRound2() {
@@ -1445,6 +1473,7 @@ function rollupMonthIsolation() {
   procToFinance();
   issueOrderWarehouseCol();
   issueOrderManualProject();
+  kpiSpendClosedOnly();
   auditRound2();
   dateBucketing();
   auditRound2Medium();
