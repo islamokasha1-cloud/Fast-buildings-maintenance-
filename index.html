@@ -19088,7 +19088,8 @@ async function issueOrderSubmit(){
       itemId, qty,
       itemName:src.itemName||"",
       itemCode:src.itemCode||"",
-      unit:(document.getElementById(rid+"-unit")?.value||src.unit||"").trim()
+      unit:(document.getElementById(rid+"-unit")?.value||src.unit||"").trim(),
+      warehouseName:(src.warehouseName||"").trim()   // v18.9sz: المستودع مصدر الصنف — يظهر في القائمة والسند
     });
   }
 
@@ -19119,7 +19120,7 @@ async function issueOrderSubmit(){
   const orderDoc={
     id:orderRef, orderRef, recipient, projectId, location:loc, notes,
     date:now, issuedBy:performedBy, status:"pending",
-    items: items.map(it=>({itemId:it.itemId, itemName:it.itemName, itemCode:it.itemCode||"", unit:it.unit||"", qty:it.qty})),
+    items: items.map(it=>({itemId:it.itemId, itemName:it.itemName, itemCode:it.itemCode||"", unit:it.unit||"", qty:it.qty, warehouseName:it.warehouseName||""})),
     approvedBy:"", approvedAt:"", rejectedBy:"", rejectedAt:"", rejectReason:"",
     createdAt: new Date().toISOString()
   };
@@ -19322,6 +19323,15 @@ function renderIssueOrders(){
     const totalQty=(o.items||[]).reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
     const _issItemsFull=(o.items||[]).map(i=>esc(i.itemName||"")+" ("+(parseFloat(i.qty)||0)+" "+esc(i.unit||"")+")");
     const itemsBrief=_issItemsFull.slice(0,2).join("، ")+(_issItemsFull.length>2?` <span style="color:var(--muted);font-weight:700">…+${_issItemsFull.length-2}</span>`:"");
+    // v18.9sz: عمود «المستودع» — أسماء المستودعات الفعلية لأصناف الأمر (كان يعرض «صرفه» بالخطأ).
+    // احتياط للأوامر القديمة بلا warehouseName: اشتقاقه من رصيد المخزون الحالي بمعرّف الصنف.
+    const _issWhNames=[...new Set((o.items||[]).map(i=>{
+      const w=(i.warehouseName||"").trim();
+      if(w) return w;
+      const inv=(_inventoryItems||[]).find(x=>x.id===i.itemId);
+      return (inv&&inv.warehouseName)?String(inv.warehouseName).trim():"";
+    }).filter(Boolean))];
+    const _issWhCell=_issWhNames.length ? esc(_issWhNames.join("، ")) : "—";
     return `<tr onclick="openIssueOrderDetail('${esc(o.id)}')" style="cursor:pointer" title="اضغط لعرض تفاصيل الأمر">
       <td style="padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#0369a1">${esc(o.orderRef||"—")}</td>
       <td style="padding:10px 12px">
@@ -19333,7 +19343,7 @@ function renderIssueOrders(){
         <div style="font-size:11px;color:var(--muted);white-space:normal">${itemsBrief}</div>
       </td>
       <td style="text-align:center;padding:10px 8px;font-size:11px;color:var(--muted)">${o.date?fmtDateOnly(o.date):"—"}</td>
-      <td style="text-align:center;padding:10px 8px;font-size:11px">${esc(o.issuedBy||"—")}</td>
+      <td style="text-align:center;padding:10px 8px;font-size:11px">${_issWhCell}</td>
       <td style="text-align:center;padding:10px 8px"><span class="badge ${m.cls}"><span class="badge-dot"></span>${m.t}</span>${st==="approved"&&o.approvedBy?`<div style="font-size:10px;color:var(--muted);margin-top:3px">${esc(o.approvedBy)}</div>`:""}${st==="rejected"&&o.rejectReason?`<div style="font-size:10px;color:var(--danger);margin-top:3px">${esc(o.rejectReason)}</div>`:""}</td>
       <td style="text-align:center;padding:10px 8px" onclick="event.stopPropagation()">
         <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap">
