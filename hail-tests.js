@@ -1070,8 +1070,9 @@ function kpiSpendClosedOnly() {
     ksrc.includes('if(typeof poVendorBreakdown==="function") parts=poVendorBreakdown(p);'));
   T("لم يعد يقرأ p.vendor المقترح (a.vendor && a.spend) لمؤشر الموردين",
     !ksrc.includes("A.forEach(a=>{ if(a.vendor && a.spend>0) byVendor"));
-  T("احتياط المورّد الفعلي: actualVendor ثم vendor للمغلق",
-    ksrc.includes("const v=((p.actualVendor||p.vendor||\"\")+\"\").trim(), c=_kpiActual(p);"));
+  T("احتياط المورّد الفعلي (actualVendor ثم vendor) بالإنفاق الأفضل-جهداً",
+    ksrc.includes("const v=((p.actualVendor||p.vendor||\"\")+\"\").trim();") &&
+    ksrc.includes('if(typeof getPOTotal==="function") c=Number(getPOTotal(p))||0;'));
 }
 
 /* ════════════════════════════════════════════════════════════════════
