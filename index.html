@@ -3093,10 +3093,10 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
         <div class="st-val" id="po-dash-overdue" style="color:var(--danger)">0</div>
         <div class="st-lbl">طلبات متأخرة</div>
       </div>
-      <div class="stat-tile" id="po-dash-approved-box" style="--_c:var(--accent);cursor:pointer" onclick="_poApprovedFilter()" title="اضغط لعرض المعتمدة هذا الشهر فقط — اضغط مجدداً للإلغاء">
+      <div class="stat-tile" id="po-dash-approved-box" style="--_c:var(--accent);cursor:pointer" onclick="_poStageFilter('closed')" title="اضغط لعرض الطلبات المغلقة فقط — اضغط مجدداً للإلغاء">
         <div class="st-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
         <div class="st-val" id="po-dash-approved" style="color:var(--accent)">0</div>
-        <div class="st-lbl">معتمدة هذا الشهر</div>
+        <div class="st-lbl">الطلبات المغلقة</div>
       </div>
       <div class="stat-tile" id="po-dash-amount-box" style="--_c:var(--accent)">
         <div class="st-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01"/><path d="M18 12h.01"/></svg></div>
@@ -5447,16 +5447,8 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
         </div>
         <div class="form-group">
           <label class="form-label">الحالة</label>
-          <select class="form-select" id="pae-status">
-            <optgroup label="سير العمل الجديد">
-              <option value="draft">مسودة</option><option value="in_review">قيد المراجعة</option><option value="approved">معتمد</option>
-              <option value="rejected">مرفوض</option><option>منفذ</option><option value="closed">مغلق</option>
-            </optgroup>
-            <optgroup label="حالات قديمة">
-              <option value="new_request">طلب جديد</option><option value="approving">قيد الموافقة</option><option value="approved_old">تمت الموافقة</option>
-              <option value="ordered">تم الطلب</option><option value="delivered">تم التسليم</option><option value="cancelled">ملغي</option>
-            </optgroup>
-          </select>
+          <!-- v18.9sz: الخيارات تُبنى ديناميكياً من PO_STATUS في openAdminEditPurchase (المصدر الموحّد) -->
+          <select class="form-select" id="pae-status"></select>
         </div>
       </div>
       <div class="form-row">
@@ -24292,8 +24284,9 @@ function renderPurchasesDashboard(){
   // v18.9np: من PO_STAGES — كان اتحاداً مكتوباً يدوياً يكرّر pending_pm/wh_review/pending_proc/pending_ceo
   // ويُسقط ordered/approved/approved_old رغم أنها ليست في PO_FINAL_STATUSES (أي أنها جارية فعلاً)
   const pending = dashData.filter(poStageIsWip).length;
-  // v18.9np: الشرط انتقل إلى poApprovedThisMonth ليقرأه العدّاد ونقرُ البطاقة معاً
-  const approvedThisMonth = dashData.filter(p=>poApprovedThisMonth(p, thisMonth)).length;
+  // v18.9sz: البطاقة صارت «الطلبات المغلقة» — عدد الطلبات المغلقة فعلياً (poIsClosed)، نفس تعريف
+  // «مغلق» في بطاقة «إجمالي المبالغ المغلقة» المجاورة (لا تعريفَين للإغلاق). كانت «معتمدة هذا الشهر».
+  const closedCount = dashData.filter(poIsClosed).length;
   // v18.9mf: المؤشرات المالية تحسب الطلبات المغلقة فقط (استلام كامل + فاتورة مورد مسجلة في تدقيق المستودع)
   // v18.9nx: التصنيف والتكلفة من المصدر الموحّد poIsClosed/poActualCost — نفس ما يحسبه التقرير
   // بالضبط، وبالتكلفة الفعلية بعد التوريد لا المقدّرة.
@@ -24305,7 +24298,7 @@ function renderPurchasesDashboard(){
   const setEl=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
   setEl("po-dash-total", total);
   setEl("po-dash-pending", pending);
-  setEl("po-dash-approved", approvedThisMonth);
+  setEl("po-dash-approved", closedCount);
   setEl("po-dash-overdue", overdueCount);
   // إبراز البطاقة عند تفعيل فلترها
   const ovBox=document.getElementById("po-dash-overdue-box");
@@ -24314,7 +24307,7 @@ function renderPurchasesDashboard(){
   const pdBox=document.getElementById("po-dash-pending-box");
   if(pdBox) pdBox.classList.toggle("tile-active-filter", _pfStatus==="_stage_wip");
   const apBox=document.getElementById("po-dash-approved-box");
-  if(apBox) apBox.classList.toggle("tile-active-filter", !!window._poApprovedMonthOnly);
+  if(apBox) apBox.classList.toggle("tile-active-filter", _pfStatus==="_stage_closed");
   // v18.9np: مخطط المسار — يقرأ dashData نفسها فيحترم فلتر المشروع
   renderPOStageFlow(dashData);
   // v18.9qr: بطاقة ملخّص المفتوحة/المتأخرة — بجانب المسار، من dashData نفسها
@@ -24495,6 +24488,8 @@ function toggleExtrasCardAll(){ _xCardAll = !_xCardAll; renderExtrasCard(); }
 function renderExtrasCard(){
   const card = document.getElementById("po-extras-card");
   if(!card) return;
+  // v18.9sz: بطاقة إشرافية للبنود المُضافة عند الاستلام — تظهر لِلمسؤول (الأدمن/مدير النظام) وحده.
+  if(!isAdmin()){ card.style.display="none"; card.innerHTML=""; return; }
   const all = [];
   (typeof purchases!=="undefined" ? purchases : []).forEach(p=>{
     if(!p || !p.hasExtraItems) return;
@@ -24504,11 +24499,14 @@ function renderExtrasCard(){
 
   const pend = all.filter(x=>x.it._extraStatus==="pending_pm"||x.it._extraStatus==="pending_ceo");
   const rej  = all.filter(x=>x.it._extraStatus==="rejected");
-  const show = _xCardAll ? all : (pend.length ? pend : all);
+  // v18.9sz: بعد البتّ (اعتماد/رفض) تختفي البطاقة — الافتراضي يعرض المعلّق فقط، فإن لم يبقَ
+  // بندٌ معلّقٌ تُخفى تماماً. «أعرض الكل» يبقى متاحاً للسجل ما دام هناك معلّقٌ يُظهِر زرّه.
+  if(!_xCardAll && !pend.length){ card.style.display="none"; card.innerHTML=""; return; }
+  const show = _xCardAll ? all : pend;
 
-  // العدّاد بالشخص — لا يكشف تكرار السلوك إلا هكذا
+  // العدّاد بالشخص — على المعروض فعلياً (المعلّق افتراضياً)
   const byWho = {};
-  all.forEach(x=>{ const w = x.it._extraBy||"—"; byWho[w] = (byWho[w]||0)+1; });
+  show.forEach(x=>{ const w = x.it._extraBy||"—"; byWho[w] = (byWho[w]||0)+1; });
   const whoChips = Object.keys(byWho).sort((a,b)=>byWho[b]-byWho[a])
     .map(w=>`<span style="font-size:10px;background:var(--surface2);border-radius:10px;padding:2px 8px">${esc(w)}: <b>${byWho[w]}</b></span>`).join(" ");
 
@@ -24542,7 +24540,7 @@ function renderExtrasCard(){
     <div class="card" style="border:1.5px solid ${pend.length?"#f59e0b":"var(--border)"}">
       <div class="card-body">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-          <div style="font-weight:900;font-size:14px;color:#b45309">➕ ${all.length} بند أُضيف عند الاستلام</div>
+          <div style="font-weight:900;font-size:14px;color:#b45309">➕ ${show.length} بند أُضيف عند الاستلام</div>
           ${pend.length?`<span style="font-size:11px;background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 9px;font-weight:800">${pend.length} بانتظار البتّ</span>`:""}
           ${rej.length?`<span style="font-size:11px;background:#fee2e2;color:#991b1b;border-radius:10px;padding:2px 9px;font-weight:800">${rej.length} مرفوض</span>`:""}
           <span style="margin-right:auto"></span>
@@ -27438,6 +27436,7 @@ function _waXIdx(k){ return _waBaseCount + k; }
 function waAddExtra(){
   if(!canReceivePO()){ toast("⚠ صلاحية غير كافية","warn"); return; }
   if(_waExtras.length >= _WA_X_MAX){ toast(`⚠ حد أقصى ${_WA_X_MAX} بنود إضافية في استلام واحد`,"warn"); return; }
+  _waCaptureOrig();   // v18.9sz: احفظ كميات صفوف الطلب قبل فتح نافذة البند الإضافي — تُستعاد بعد إغلاقها
   // من الكتالوج فقط — ضرورة تقنية لا تشدد: البند بلا itemId لا يدخل رصيداً،
   // وعدّادٌ فوق نص حرّ عدّادٌ فوق لا شيء. والإضافة للكتالوج متاحة من هنا فلا جدار.
   openCatalogPickerFor(
@@ -27501,6 +27500,7 @@ function _waExtraForm(catId){
       });
       waRenderExtras();
       waSyncInvPickers();
+      _waRestoreOrig();   // v18.9sz: أعِد كميات صفوف الطلب التي التُقطت قبل فتح النافذة (تمنع اختفاءها)
       toast("➕ أُضيف «"+(ci.name||"")+"» — لن يُقفل الطلب حتى يُبتّ فيه","warn");
       return true;
     }
@@ -27520,11 +27520,40 @@ function _waSyncExtras(){
   });
 }
 
+// v18.9sz: صفوف الطلب الأصلية تعيش في الـ DOM وحده (بلا حالة، بخلاف الإضافية _waExtras).
+// أبلغ المستخدم أن إضافة «بند إضافي» والخروج من نافذته يمحو الكميات المستلمة/المباشرة المكتوبة
+// في صفوف الطلب فيضطر لإعادة إدخالها. لم أعثر على مسارٍ يهدم wa-items-tbody، فالسبب إعادة رسمٍ
+// عابرة/سلوكُ متصفّح. الحلّ الآمن: نلتقط قيم الصفوف الأصلية قبل فتح نافذة البند الإضافي، ونعيد
+// تطبيقها بعد إغلاقها — والحفظ يقرأ الـ DOM الحيّ فلا يتأثّر بأي شيء هنا.
+let _waOrigVals = null;
+function _waCaptureOrig(){
+  _waOrigVals = {};
+  for(let i=0;i<_waBaseCount;i++){
+    if(!document.querySelector(`.wa-rcv-qty[data-idx="${i}"]`)) continue;
+    const val = cls => (document.querySelector(`.${cls}[data-idx="${i}"]`)||{}).value;
+    _waOrigVals[i] = { rcv:val("wa-rcv-qty"), stock:val("wa-stock-qty"), direct:val("wa-direct-qty"),
+                       price:val("wa-unit-price"), supplier:val("wa-supplier-name") };
+  }
+}
+function _waRestoreOrig(){
+  if(!_waOrigVals) return;
+  Object.keys(_waOrigVals).forEach(k=>{
+    const v = _waOrigVals[k];
+    const set = (cls,val)=>{ const el=document.querySelector(`.${cls}[data-idx="${k}"]`); if(el && val!=null && el.value!==val) el.value=val; };
+    set("wa-rcv-qty",v.rcv); set("wa-stock-qty",v.stock); set("wa-direct-qty",v.direct);
+    set("wa-unit-price",v.price); set("wa-supplier-name",v.supplier);
+    // src='stock' يحترم خانة المستودع كما التُقطت (لا يعيد حسابها) ويحدّث الإجماليات والتحذيرات
+    if(document.querySelector(`.wa-rcv-qty[data-idx="${k}"]`)) waUpdateRow(parseInt(k,10),'stock');
+  });
+}
+
 function waRemoveExtra(uid){
+  _waCaptureOrig();
   _waSyncExtras();
   _waExtras = _waExtras.filter(x=>x.uid!==uid);
   waRenderExtras();
   waSyncInvPickers();
+  _waRestoreOrig();
 }
 
 // نفس أصناف الصفوف العادية (wa-rcv-qty…) ونفس data-idx — فـ waUpdateRow
@@ -27683,6 +27712,7 @@ function openWarehouseAudit(poId){
   // v18.9nz: تُفتح بلا بنود إضافية — الحالة الشائعة. والزر يُخفى عن الطلبات
   // قديمة البنية (بلا p.items) لأن الإلحاق ليس له موضع فيها.
   _waExtras = [];
+  _waOrigVals = null;   // v18.9sz: التقاط قيم صفوف الطلب يبدأ نظيفاً لكل فتح
   waRenderExtras();
   const _xBar = document.getElementById("wa-extra-bar");
   if(_xBar) _xBar.style.display = (p.items && p.items.length > 0) ? "" : "none";
@@ -28960,7 +28990,18 @@ function openAdminEditPurchase(poId){
 
   document.getElementById("pae-priority").value   = p.priority||"عادي 🟢";
   document.getElementById("pae-supervisor").value = p.supervisor||"";
-  document.getElementById("pae-status").value     = p.status||"new_request";
+  // v18.9sz: املأ قائمة الحالة من المصدر الموحّد PO_STATUS بدل قائمةٍ ثابتةٍ قديمة لا تحوي
+  // حالات المسار الحالي (pending_pm/pm_approved/wh_review...). كانت select.value=p.status يفشل
+  // بصمت لأن الحالة الحديثة ليست خياراً، فتُحفظ حالةٌ فارغة عند الحفظ فيخرج الطلب من مساره.
+  // الآن كل الحالات القياسية خيارات، والحالة الحالية محفوظة كما هي (بلا إعادة تعيين للمسار).
+  const paeStatusSel = document.getElementById("pae-status");
+  if(paeStatusSel){
+    const _paeCur = normalizePOStatus(p.status) || "pending_pm";
+    let _paeOpts = Object.keys(PO_STATUS).map(k=>`<option value="${esc(k)}">${esc(PO_STATUS[k])}</option>`).join("");
+    if(!PO_STATUS[_paeCur]) _paeOpts += `<option value="${esc(_paeCur)}">${esc(_paeCur)}</option>`; // حالة قديمة نادرة — لا تُفقَد
+    paeStatusSel.innerHTML = _paeOpts;
+    paeStatusSel.value = _paeCur;
+  }
   document.getElementById("pae-actual-cost").value= p.actualCost||"";
   document.getElementById("pae-vendor").value     = p.vendor||"";
   document.getElementById("pae-invoice").value    = p.invoice||"";

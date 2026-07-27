@@ -903,16 +903,78 @@ function invoiceFileSource() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   19) بطاقة «معتمدة هذا الشهر» — أيقونة القفل (كأيقونة البلاغات المغلقة) (v18.9sz)
+   19) بطاقة «الطلبات المغلقة» — عددٌ ولونٌ وفلترٌ للطلبات المغلقة (v18.9sz)
+       كانت «معتمدة هذا الشهر»؛ صارت تحسب عدد الطلبات المغلقة (poIsClosed)
+       بأيقونة القفل، ونقرُها يفلتر القائمة على المرحلة المغلقة.
    ════════════════════════════════════════════════════════════════════ */
-function approvedCardIcon() {
-  H("19) أيقونة بطاقة «معتمدة هذا الشهر»");
+function closedOrdersCard() {
+  H("19) بطاقة «الطلبات المغلقة»");
   const i = HTML.indexOf('id="po-dash-approved-box"');
-  const tile = i >= 0 ? HTML.slice(i, HTML.indexOf("</div>", HTML.indexOf('class="st-lbl"', i))) : "";
-  T("★ بطاقة «معتمدة هذا الشهر» تستخدم أيقونة القفل (مغلق)",
-    tile.includes('<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'));
-  T("لم تعد تستخدم أيقونة الدائرة-صح القديمة",
-    !tile.includes('<path d="m9 11 3 3L22 4"/>'));
+  const tile = i >= 0 ? HTML.slice(i, HTML.indexOf("</div>", HTML.indexOf('class="st-lbl"', i)) + 6) : "";
+  T("★ العنوان صار «الطلبات المغلقة» (لا «معتمدة هذا الشهر»)",
+    tile.includes(">الطلبات المغلقة<") && !tile.includes("معتمدة هذا الشهر"));
+  T("تستخدم أيقونة القفل (مغلق)", tile.includes('<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'));
+  T("نقرُ البطاقة يفلتر على المرحلة المغلقة", tile.includes(`onclick="_poStageFilter('closed')"`));
+
+  // العدّاد = الطلبات المغلقة فعلياً (poIsClosed) — نفس تعريف بطاقة المبالغ المغلقة
+  T("★ العدّاد = عدد الطلبات المغلقة (poIsClosed)",
+    HTML.includes("const closedCount = dashData.filter(poIsClosed).length;") &&
+    HTML.includes('setEl("po-dash-approved", closedCount);'));
+  T("إبراز البطاقة عند تفعيل فلتر المغلقة",
+    HTML.includes('apBox.classList.toggle("tile-active-filter", _pfStatus==="_stage_closed")'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   20) بطاقة «بنود أُضيفت عند الاستلام» — للمسؤول فقط، وتختفي بعد البتّ (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function extrasCardGating() {
+  H("20) بطاقة البنود المُضافة عند الاستلام");
+  const i = HTML.indexOf("function renderExtrasCard(");
+  const fn = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
+  T("★ لا تظهر إلا للمسؤول (الأدمن وحده)",
+    fn.includes('if(!isAdmin()){ card.style.display="none"'));
+  T("★ تختفي بعد البتّ — تُخفى عند غياب المعلّق (افتراضياً)",
+    fn.includes('if(!_xCardAll && !pend.length){ card.style.display="none"'));
+  T("الافتراضي يعرض المعلّق فقط (لا يرتدّ لعرض المبتوت)",
+    fn.includes("const show = _xCardAll ? all : pend;") &&
+    !fn.includes("_xCardAll ? all : (pend.length ? pend : all)"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   21) تعديل المسؤول لطلب الشراء لا يُخرجه من مساره — قائمة الحالة من PO_STATUS (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function adminEditKeepsStatus() {
+  H("21) تعديل المسؤول لا يُخرج الطلب من مساره");
+  const i = HTML.indexOf("function openAdminEditPurchase(");
+  const fn = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
+  T("★ قائمة الحالة تُبنى من المصدر الموحّد PO_STATUS",
+    fn.includes("Object.keys(PO_STATUS).map(k=>`<option value=\"${esc(k)}\">${esc(PO_STATUS[k])}</option>`)"));
+  T("★ الحالة الحالية (المطبَّعة) تُضبط ومحفوظة",
+    fn.includes("const _paeCur = normalizePOStatus(p.status) || \"pending_pm\";") &&
+    fn.includes("paeStatusSel.value = _paeCur;"));
+  T("لم تعد تُضبط قيمة الحالة على قائمة قديمة (p.status||new_request)",
+    !fn.includes('document.getElementById("pae-status").value     = p.status||"new_request";'));
+  // قائمة pae-status في الـ HTML فارغة (تُبنى ديناميكياً) — لا خيارات ثابتة قديمة داخلها
+  T("★ قائمة pae-status فارغة في الـ HTML (تُملأ من PO_STATUS)",
+    HTML.includes('<select class="form-select" id="pae-status"></select>'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   22) تدقيق الاستلام: إضافة بند إضافي لا تمحو كميات صفوف الطلب (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function waExtrasPreserveQty() {
+  H("22) إضافة بند إضافي تحفظ كميات الطلب");
+  T("★ توجد التقاط/استعادة قيم صفوف الطلب (_waCaptureOrig/_waRestoreOrig)",
+    HTML.includes("function _waCaptureOrig(") && HTML.includes("function _waRestoreOrig("));
+  T("_waRestoreOrig يحترم خانة المستودع (src='stock' لا يعيد حسابها)",
+    HTML.includes("waUpdateRow(parseInt(k,10),'stock')"));
+  const add = (()=>{ const i=HTML.indexOf("function waAddExtra("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ waAddExtra يلتقط قيم الصفوف قبل فتح نافذة البند الإضافي", add.includes("_waCaptureOrig();"));
+  const rem = (()=>{ const i=HTML.indexOf("function waRemoveExtra("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("waRemoveExtra يلتقط ويستعيد قيم الصفوف", rem.includes("_waCaptureOrig();") && rem.includes("_waRestoreOrig();"));
+  const form = (()=>{ const i=HTML.indexOf("function _waExtraForm("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ نافذة البند الإضافي تستعيد قيم الصفوف بعد الإضافة", form.includes("_waRestoreOrig();"));
+  T("التقاط القيم يبدأ نظيفاً عند فتح التدقيق", HTML.includes("_waOrigVals = null;   // v18.9sz"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1314,7 +1376,10 @@ function rollupMonthIsolation() {
   manualProjectCosts();
   listenerChurn();
   invoiceFileSource();
-  approvedCardIcon();
+  closedOrdersCard();
+  extrasCardGating();
+  adminEditKeepsStatus();
+  waExtrasPreserveQty();
   auditRound2();
   dateBucketing();
   auditRound2Medium();
