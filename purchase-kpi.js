@@ -287,9 +287,19 @@ function injectCSS(){
   document.head.appendChild(st);
 }
 
+// v18.9sz: المشروع اليدوي (المخصّص) يُميَّز بمفتاح "__CUSTOM__:"+الاسم لا بسنتينل "__OTHER__"
+// وحده — فكانت كل المشاريع اليدوية تنطوي في خيارٍ واحد يتعذّر فرزها، وتضيع مؤشّرات كلٍّ منها.
+function _pkpiIsCustom(p){ return !!p && (p.isCustomProject === true || p.projectId === "__OTHER__"); }
 function projectOptions(){
   const seen=new Map();
-  getPurchases().forEach(p=>{ if(p.projectId && !seen.has(p.projectId)) seen.set(p.projectId,p.projectName||p.projectId); });
+  getPurchases().forEach(p=>{
+    if(_pkpiIsCustom(p)){
+      const key="__CUSTOM__:"+(p.projectName||"غير محدد");
+      if(!seen.has(key)) seen.set(key,(p.projectName||"غير محدد")+" (يدوي)");
+    } else if(p.projectId && !seen.has(p.projectId)){
+      seen.set(p.projectId,p.projectName||p.projectId);
+    }
+  });
   return [...seen.entries()];
 }
 
@@ -305,7 +315,14 @@ function currentFilters(){
 function filteredList(){
   const f = currentFilters();
   let list = getPurchases().filter(p=>normStatus(p.status)!=="deleted");
-  if(f.proj) list=list.filter(p=>p.projectId===f.proj);
+  if(f.proj){
+    if(f.proj.indexOf("__CUSTOM__:")===0){
+      const cname=f.proj.slice(11);
+      list=list.filter(p=>_pkpiIsCustom(p) && (p.projectName||"غير محدد")===cname);
+    } else {
+      list=list.filter(p=>!_pkpiIsCustom(p) && p.projectId===f.proj);
+    }
+  }
   if(f.from){ const t=new Date(f.from).getTime(); list=list.filter(p=>{const c=parseTS(p.createdAt);return c&&c>=t;}); }
   if(f.to){ const t=new Date(f.to).getTime()+DAY; list=list.filter(p=>{const c=parseTS(p.createdAt);return c&&c<t;}); }
   return list;
