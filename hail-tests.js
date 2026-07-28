@@ -1044,6 +1044,14 @@ function financialInvariants() {
     }
     T("★ H6: مؤشّر «زيادة تُستردّ» في تفاصيل الطلب", HTML.includes("_poOverpaid(p)>0.01") && HTML.includes("زيادة تُستردّ"));
   }
+
+  // ── v18.9ts — تنظيف منخفض (L7/L9/L10/L11) ──
+  T("L7: تقريب estCost عند إنشاء الطلب (لا تسرّب عائم)",
+    HTML.includes("Math.round(currentPurchaseItems.reduce((s,item)=>s+(item.itemCost||0),0)*100)/100"));
+  T("L9: _waPrevRcv يطابق بالكود قبل الاسم للبند الحرّ",
+    HTML.includes("else if(gi.itemCode && it && it.itemCode) _idOk = (String(gi.itemCode).trim() === String(it.itemCode).trim())"));
+  T("L10: تكلفة بطاقة القائمة بمنزلتين (تطابق التفاصيل)",
+    HTML.includes('display:inline-block">${sum.toLocaleString("en-US",{maximumFractionDigits:2})}</span> ر.س'));
 }
 
 /* ════════════════════════════════════════════════════════════════════

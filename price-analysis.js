@@ -985,12 +985,15 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     }
 
     const c = compute({materials,labor}, wastePct, overheadPct);
+    const _r2c = n => Math.round((Number(n)||0)*100)/100;   // v18.9ts — L11
     const data = {
       code:code, name:name, category:category, unit:unit,
       materials:materials, labor:labor,
       wastePct:wastePct, overheadPct:overheadPct, notes:notes,
-      matCost: +c.matCost.toFixed(2), laborCost: +c.laborCost.toFixed(2),
-      directCost: +c.directCost.toFixed(2), unitPrice: +c.unitPrice.toFixed(2),
+      // v18.9ts — L11: تقريب موثوق (Math.round لا toFixed المتذبذب عند .005)، و
+      // directCost = مجموع الجزأين المقرّبين فلا يتدرّج عن matCost+laborCost بقرش.
+      matCost: _r2c(c.matCost), laborCost: _r2c(c.laborCost),
+      directCost: _r2c(_r2c(c.matCost)+_r2c(c.laborCost)), unitPrice: _r2c(c.unitPrice),
       updatedAt: stamp(), updatedBy: userLabel()
     };
 
