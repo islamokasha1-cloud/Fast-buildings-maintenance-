@@ -889,7 +889,7 @@ function financialInvariants() {
   let M;
   try {
     M = new Function("normalizePOStatus", "getPOTotal",
-      src + "\nreturn { poActualCost, poReceivedQty, _poItemLine, poVendorBreakdown, poIsClosed };")(
+      src + "\nreturn { poActualCost, poReceivedQty, _poItemLine, _poHealItems, poVendorBreakdown, poIsClosed };")(
       s => s, p => (p.items || []).reduce((a, it) => a + (Number(it.itemCost) || 0), 0));
   } catch (e) { T("تُبنى دوال الحساب المالي", false, String(e.message).slice(0, 140)); return; }
   T("تُبنى دوال الحساب المالي", typeof M.poActualCost === "function");
@@ -950,6 +950,27 @@ function financialInvariants() {
     !HTML.includes('actualCost     = _waSumGrn(pCurrent, "invoicedTotal")'));
   T("مسار تعديل المسؤول يحسب على المستلَم للمُدقَّق (paeCalcItem)",
     HTML.includes("(_paeAudited && _paeItems[i] && _paeItems[i].rcvQty!=null)"));
+
+  // ── v18.9tm: تطبيع البنود عند التحميل يشفي كل ما يقرأ it.itemCost مباشرةً ──
+  // (بطاقة القائمة، getPOTotal، تعبئة التكلفة...) فلا يبقى موضعٌ يعرض المخزَّن الخاطئ.
+  if (typeof M._poHealItems === "function") {
+    const po = { auditedBy: "ن", items: [
+      { qty: 10, rcvQty: 5, unitCost: 5, itemCost: 57.5, vat: 7.5 },   // خاطئ (على المطلوب)
+      { qty: 4, rcvQty: 4, unitCost: 21, itemCost: 96.6, vat: 12.6 }    // سليم
+    ] };
+    M._poHealItems(po);
+    T("★ التطبيع يشفي itemCost المخزَّن الخاطئ (57.5→28.75)", po.items[0].itemCost === 28.75);
+    T("التطبيع لا يمسّ البند السليم", po.items[1].itemCost === 96.6);
+    T("★ بعد التطبيع: Σ itemCost المباشر = التكلفة الفعلية",
+      Math.round(po.items.reduce((s, it) => s + it.itemCost, 0) * 100) / 100 === M.poActualCost(po));
+    // الطلب غير المُدقَّق لا يُمسّ (التقدير يبقى)
+    const est = { items: [{ qty: 10, rcvQty: 5, unitCost: 5, itemCost: 57.5, vat: 7.5 }] };
+    M._poHealItems(est);
+    T("التطبيع لا يمسّ الطلب غير المُدقَّق", est.items[0].itemCost === 57.5);
+  }
+  // حارس: مسارا تحميل الطلبات يستدعيان التطبيع
+  T("★ تحميل الطلبات يطبّع البنود (_poHealItems) — المسار الأولي والحيّ",
+    (HTML.match(/return _poHealItems\(_o\);/g) || []).length >= 2);
 }
 
 /* ════════════════════════════════════════════════════════════════════
