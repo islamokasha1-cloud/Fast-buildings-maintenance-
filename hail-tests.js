@@ -277,7 +277,10 @@ function guards() {
     ["إشارة السجل من adjustDelta", "const _qtyShown = _hasAdjD ? Math.abs(_adjD)", true],
     ["زال باب الاستلام الثاني", 'id="pu-receipt-section"', false],
     ["زال الكاتب التراكمي لـ receivedQty", "p.receivedQty = (p.receivedQty||0) + receivedQty", false],
-    ["كاتب واحد لـ receivedQty (مجموع السندات)", 'receivedQty    = _waSumGrn(pCurrent, "totalRcv")', true],
+    ["كاتب واحد لـ receivedQty (من حالة البنود لا جمع السندات)", 'receivedQty  = poReceivedQty(pCurrent)', true],
+    ["زال جمع السندات المتضخّم لـ receivedQty", 'receivedQty    = _waSumGrn(pCurrent, "totalRcv")', false],
+    ["التكلفة الفعلية من حالة البنود لا جمع السندات", 'actualCost   = poActualCost(pCurrent)', true],
+    ["زال جمع السندات المتضخّم لـ actualCost", 'actualCost     = _waSumGrn(pCurrent, "invoicedTotal")', false],
     ["__WAREHOUSE_AUDIT__ له معالج", 'if(newStatus === "__WAREHOUSE_AUDIT__"){', true],
     ["تجاوز الأدمن مُسمّى بصراحة", 'l:"🔒 مغلق — تجاوز يدوي بلا سند استلام"', true],
     ["زال تلفيق رقم سند الاستلام", 'if(!db) return "GRN-"+yr+"-"+String(Date.now()).slice(-6)', false],
@@ -774,6 +777,68 @@ function vendorSummary() {
     HTML.includes("poVendorBreakdown(p).forEach(({vendor,cost})=>{\n      if(!byVendorPDF[vendor])"));
   T("زالت فهرسة الملخّص على مورد الطلب (شاشة)", !HTML.includes("if(!byVendor[v]) byVendor[v]={total:0,actualCost:0};"));
   T("زالت فهرسة الملخّص على مورد الطلب (PDF)", !HTML.includes("if(!byVendorPDF[v]) byVendorPDF[v]={total:0,cost:0};"));
+
+  // ── v18.9tk: التوزيع من البنود للطلب المُدقَّق (يطابق التكلفة الفعلية المشتقّة) ──
+  const rItems = fn({
+    _closed: true, auditedBy: "نظام",
+    grnDocs: [{ vendor: "الوانك", invoicedTotal: 55 }, { vendor: "الوانك", invoicedTotal: 55 }, { vendor: "فهد", invoicedTotal: 432.4 }],
+    items: [
+      { vendor: "الوانك", rcvQty: 3, itemCost: 44.99 },
+      { vendor: "فهد", rcvQty: 7, itemCost: 104.65 },
+      { vendor: "فهد", rcvQty: 3, itemCost: 120.75 }
+    ]
+  });
+  const vAl = rItems.find(x => x.vendor === "الوانك"), vFa = rItems.find(x => x.vendor === "فهد");
+  T("★ التوزيع من البنود لا جمع السندات المتضخّم", rItems.length === 2 && vAl && vFa &&
+    vAl.cost === 44.99 && vFa.cost === Math.round((104.65 + 120.75) * 100) / 100);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   14ب) التكلفة الفعلية والكمية المستلمة = حالة البنود النهائية لا جمع السندات
+        (v18.9tk) — الطلب العالق على بند ناقص يُعاد تدقيقه مراراً، فجمع
+        grnDocs[].invoicedTotal/totalRcv يتضخّم؛ المصدر الصحيح: البنود النهائية.
+   ════════════════════════════════════════════════════════════════════ */
+function actualCostFromItems() {
+  H("14ب) التكلفة الفعلية من حالة البنود (لا جمع السندات)");
+  const a = HTML.indexOf("function _poItemsActual(p){");
+  if (a < 0) { T("_poItemsActual موجودة في index.html", false, "لم تُعثر"); return; }
+  // نستخرج كتلة الدوال الأربع المتتالية حتى نهاية poReceivedQty
+  const end = HTML.indexOf("\nfunction poIsCustomProject(", a);
+  const src = HTML.slice(a, end);
+  let poAC, poRQ;
+  try {
+    const built = new Function("getPOTotal", src + "\nreturn { poActualCost, poReceivedQty };")(
+      p => (p.items || []).reduce((s, it) => s + (Number(it.itemCost) || 0), 0)
+    );
+    poAC = built.poActualCost; poRQ = built.poReceivedQty;
+  } catch (e) { T("تُبنى دوال الاشتقاق", false, String(e.message).slice(0, 140)); return; }
+  T("تُبنى poActualCost/poReceivedQty", typeof poAC === "function" && typeof poRQ === "function");
+  if (typeof poAC !== "function") return;
+
+  // طلب استُلم على عدة سندات لنفس البضاعة (grnDocs متضخّمة) — الحالة النهائية للبنود صحيحة
+  const po = {
+    auditedBy: "نظام", actualCost: 1457.19, receivedQty: 95,
+    grnDocs: [{ invoicedTotal: 487.4 }, { invoicedTotal: 487.4 }, { invoicedTotal: 482.39 }],
+    items: [
+      { rcvQty: 2, itemCost: 10.01 }, { rcvQty: 3, itemCost: 44.99 }, { rcvQty: 7, itemCost: 104.65 },
+      { rcvQty: 10, itemCost: 23 }, { rcvQty: 6, itemCost: 34.5 }, { rcvQty: 1, itemCost: 149.5 },
+      { rcvQty: 3, itemCost: 120.75 }
+    ]
+  };
+  T("★ التكلفة الفعلية = مجموع البنود لا السندات المتضخّمة",
+    poAC(po) === 487.4, "الناتج: " + poAC(po));
+  T("★ الكمية المستلمة = مجموع البنود لا السندات", poRQ(po) === 32, "الناتج: " + poRQ(po));
+
+  // البند غير المستلَم (مغطى من المخزون/لم يصل) لا تكلفة فعلية له
+  const po2 = { auditedBy: "نظام", items: [{ rcvQty: 0, itemCost: 99 }, { rcvQty: 2, itemCost: 20 }] };
+  T("البند غير المستلَم (كمية صفر) لا يدخل التكلفة الفعلية", poAC(po2) === 20);
+
+  // طلب مغلق قديم بلا بنود مستلَمة — يُرجَع للقيمة المخزَّنة (لا صفر)
+  const po3 = { auditedBy: "نظام", actualCost: 800, receivedQty: 5, items: [{ itemCost: 800 }] };
+  T("قديم بلا rcvQty: يُرجَع للمخزَّن", poAC(po3) === 800 && poRQ(po3) === 5);
+
+  // غير مُدقَّق — القيمة المخزَّنة كما هي
+  T("غير مُدقَّق: التكلفة المخزَّنة", poAC({ actualCost: 300 }) === 300);
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1602,6 +1667,7 @@ function rollupMonthIsolation() {
   writeRaceRoot();
   stocktakeTests();
   vendorSummary();
+  actualCostFromItems();
   manualProjectCosts();
   listenerChurn();
   invoiceFileSource();
