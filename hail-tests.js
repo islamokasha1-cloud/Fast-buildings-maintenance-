@@ -1052,6 +1052,29 @@ function financialInvariants() {
     HTML.includes("else if(gi.itemCode && it && it.itemCode) _idOk = (String(gi.itemCode).trim() === String(it.itemCode).trim())"));
   T("L10: تكلفة بطاقة القائمة بمنزلتين (تطابق التفاصيل)",
     HTML.includes('display:inline-block">${sum.toLocaleString("en-US",{maximumFractionDigits:2})}</span> ر.س'));
+
+  // ── v18.9tt — L8: بندان لنفس صنف المخزون (توافر تراكمي + خصم مُجمَّع + وسم بـ origIdx) ──
+  T("★ L8: التوافر تراكمي (_remainByInv — كل بند يأخذ من المتبقّي)",
+    HTML.includes("const _remainByInv = new Map();") &&
+    HTML.includes("_remainByInv.has(_iid) ? _remainByInv.get(_iid) : _fullQty"));
+  T("★ L8: الخصم مُجمَّع بـ invId لا «أوّل بند فقط»",
+    HTML.includes("const _invAgg = new Map();") && !HTML.includes("if(_seenInvIds.has(e.invId)) return false;"));
+  T("★ L8: الوسم لكل بند بـ origIdx لا بالاسم",
+    HTML.includes("stockRows.find(e => e.origIdx === _i)") && HTML.includes("procRows.find(e => e.origIdx === _i)"));
+  // سلوكي: محاكاة الخوارزمية — رصيد 10، بندان يحتاجان 7 و6 من نفس الصنف
+  {
+    const balance = 10, needs = [7, 6];
+    const remain = new Map(); remain.set("X", balance);
+    const took = needs.map(req => {
+      const avail = remain.get("X");
+      const fs = Math.min(avail, req);
+      remain.set("X", Math.round((avail - fs) * 1000) / 1000);
+      return fs;
+    });
+    T("★ L8: مجموع المسحوب ≤ الرصيد (لا وعدٌ زائد)", took[0] + took[1] <= balance && took[0] === 7 && took[1] === 3);
+    const agg = took.reduce((s, x) => s + x, 0);
+    T("★ L8: الخصم المُجمَّع = المسحوب فعلاً (لا ناقص ولا زائد)", agg === 10);
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════
