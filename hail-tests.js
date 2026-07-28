@@ -986,6 +986,17 @@ function financialInvariants() {
   T("★ C1: التكلفة الفعلية = مجموع بنود الجلستين لا آخر جلسة",
     M.poActualCost(poMulti) === 2300, "الناتج: " + M.poActualCost(poMulti));
   T("★ C1: الكمية المستلمة = مجموع الجلستين", M.poReceivedQty(poMulti) === 20);
+
+  // ── v18.9to — H3: اصطلاح ض.ق.م موحّد على «الوحدة» في التدقيق (مطابق _poItemLine والفاتورة) ──
+  T("★ H3: التدقيق يحسب ض.ق.م على الوحدة (total=round((unit+vatUnit)×rcv))",
+    HTML.includes("Math.round((unitPrice+_vatUnit)*rcvQty*100)/100"));
+  T("★ H3: زال اصطلاح net×0.15 من تخزين التدقيق",
+    !HTML.includes("const vat   = Math.round(net*0.15*100)/100"));
+  T("★ H3: net مقرَّب في التدقيق (لا تسرّب عائم — L7)",
+    HTML.includes("const net   = Math.round(rcvQty * unitPrice * 100)/100"));
+  // سلوكي: اصطلاح الوحدة يطابق فاتورة المورد (بخاخ 13.04×3 ⇒ 45.00 لا 44.99)
+  T("★ H3: تكلفة البند = فاتورة المورد (بخاخ 13.04×3 ⇒ 45.00)",
+    M._poItemLine({ rcvQty: 3, unitCost: 13.04, itemCost: 45, vat: 5.88 }, true).total === 45);
 }
 
 /* ════════════════════════════════════════════════════════════════════
