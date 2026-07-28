@@ -24,6 +24,17 @@ const IDX = CANDIDATES.find(p => fs.existsSync(p));
 if (!IDX) { console.error("❌ لم يُعثر على index.html في:\n   " + CANDIDATES.join("\n   ")); process.exit(1); }
 const HTML = fs.readFileSync(IDX, "utf8");
 const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.v2.js"), path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
+// v18.9ti: وحدة المؤشرات صارت مدموجةً داخل index.html بين علامتين — تُقرأ منها مباشرةً.
+// (احتياطياً: إن وُجد ملفٌ خارجي قديم يُقرأ منه.) فلا يعود يُخدَم ملفٌ منفصلٌ قديماً من الكاش.
+const _KPI_A = HTML.indexOf("==PKPI-INLINE-START==");
+const _KPI_B = HTML.indexOf("/* ==PKPI-INLINE-END==");
+let KPI_SRC = null;
+if (_KPI_A >= 0 && _KPI_B > _KPI_A) {
+  const _bodyStart = HTML.indexOf("*/", _KPI_A) + 2;   // بعد تعليق علامة البداية
+  KPI_SRC = HTML.slice(_bodyStart, _KPI_B).split("<\\/script>").join("</script>").trim();
+} else if (KPI_PATH) {
+  KPI_SRC = fs.readFileSync(KPI_PATH, "utf8");
+}
 const SB_PATH  = [path.resolve(path.dirname(IDX), "substitute-budget.js")].find(p => fs.existsSync(p));
 const PA_PATH  = [path.resolve(path.dirname(IDX), "price-analysis.js")].find(p => fs.existsSync(p));
 const LC_PATH  = [path.resolve(path.dirname(IDX), "labor-catalog.js")].find(p => fs.existsSync(p));
@@ -331,9 +342,10 @@ function predelivery() {
    ════════════════════════════════════════════════════════════════════ */
 function kpi() {
   H("7) وحدة مؤشرات الأداء (purchase-kpi.js)");
-  if (!KPI_PATH) { console.log("  ⏭  purchase-kpi.js غير موجود — تُخطّى"); return; }
-  T("الوسم موجود في index.html", /<script src="purchase-kpi\.v2\.js\?v=/.test(HTML));
-  const src = fs.readFileSync(KPI_PATH, "utf8");
+  if (!KPI_SRC) { console.log("  ⏭  كود purchase-kpi غير موجود — تُخطّى"); return; }
+  T("★ وحدة المؤشرات مدموجة داخل index.html (تصل المتصفّح مع المستند الطازج)",
+    HTML.includes("==PKPI-INLINE-START==") && HTML.includes("==PKPI-INLINE-END=="));
+  const src = KPI_SRC;
   const vm = require("vm");
   try { new vm.Script(src); T("صياغة purchase-kpi.js سليمة", true); }
   catch (e) { T("صياغة purchase-kpi.js سليمة", false, String(e.message).slice(0, 120)); }
@@ -817,8 +829,8 @@ function manualProjectCosts() {
     HTML.includes("const totalAmount = dashData.filter(poIsClosed).reduce((s,p)=>s+poActualCost(p),0);"));
 
   // ── مؤشرات الأداء: تميّز كل مشروع يدوي بمفتاحه ──
-  if (KPI_PATH) {
-    const ksrc = fs.readFileSync(KPI_PATH, "utf8");
+  if (KPI_SRC) {
+    const ksrc = KPI_SRC;
     T("KPI: مصدر موحّد لتصنيف اليدوي", ksrc.includes("function _pkpiIsCustom(p){ return !!p && (p.isCustomProject === true || p.projectId === \"__OTHER__\"); }"));
     T("★ KPI: كل مشروع يدوي بمفتاح __CUSTOM__ منفصل", ksrc.includes('const key="__CUSTOM__:"+(p.projectName||"غير محدد");'));
     T("KPI: الفلتر يميّز اليدوي بالاسم", ksrc.includes("list=list.filter(p=>_pkpiIsCustom(p) && (p.projectName||\"غير محدد\")===cname);"));
@@ -1064,8 +1076,8 @@ function issueOrderManualProject() {
    ════════════════════════════════════════════════════════════════════ */
 function kpiSpendClosedOnly() {
   H("26) الإنفاق الفعلي في المؤشرات = المغلق فقط");
-  if (!KPI_PATH) { console.log("  ⏭  purchase-kpi.js غير موجود — تُخطّى"); return; }
-  const ksrc = fs.readFileSync(KPI_PATH, "utf8");
+  if (!KPI_SRC) { console.log("  ⏭  كود purchase-kpi غير موجود — تُخطّى"); return; }
+  const ksrc = KPI_SRC;
   const sl = (a, b) => ksrc.slice(ksrc.indexOf(a), ksrc.indexOf(b));
   let kc, ka;
   try {
