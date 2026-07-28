@@ -742,10 +742,11 @@ function vendorSummary() {
   const src = HTML.slice(a, HTML.indexOf("\nfunction ", a + 10));
   let fn;
   try {
-    // نُبني الدالة الحقيقية مع بدائل تبعيتيها (poIsClosed / poActualCost)
-    fn = new Function("poIsClosed", "poActualCost", src + "\nreturn poVendorBreakdown;")(
+    // نُبني الدالة الحقيقية مع بدائل تبعيتيها (poIsClosed / poActualCost / _poItemLine)
+    fn = new Function("poIsClosed", "poActualCost", "_poItemLine", src + "\nreturn poVendorBreakdown;")(
       p => !!p._closed,
-      p => Number(p.actualCost) || 0
+      p => Number(p.actualCost) || 0,
+      it => ({ net: 0, vat: Number(it && it.vat) || 0, total: Number(it && it.itemCost) || 0 })
     );
   } catch (e) { T("تُبنى poVendorBreakdown وتُنفَّذ", false, String(e.message).slice(0, 120)); return; }
   T("تُبنى poVendorBreakdown وتُنفَّذ", typeof fn === "function");
@@ -800,9 +801,9 @@ function vendorSummary() {
    ════════════════════════════════════════════════════════════════════ */
 function actualCostFromItems() {
   H("14ب) التكلفة الفعلية من حالة البنود (لا جمع السندات)");
-  const a = HTML.indexOf("function _poItemsActual(p){");
-  if (a < 0) { T("_poItemsActual موجودة في index.html", false, "لم تُعثر"); return; }
-  // نستخرج كتلة الدوال الأربع المتتالية حتى نهاية poReceivedQty
+  const a = HTML.indexOf("function _poItemLine(");
+  if (a < 0) { T("_poItemLine موجودة في index.html", false, "لم تُعثر"); return; }
+  // نستخرج كتلة دوال الاشتقاق المتتالية حتى نهاية poReceivedQty
   const end = HTML.indexOf("\nfunction poIsCustomProject(", a);
   const src = HTML.slice(a, end);
   let poAC, poRQ;
@@ -839,6 +840,35 @@ function actualCostFromItems() {
 
   // غير مُدقَّق — القيمة المخزَّنة كما هي
   T("غير مُدقَّق: التكلفة المخزَّنة", poAC({ actualCost: 300 }) === 300);
+
+  // ★ البند المستلَم جزئياً: itemCost مخزَّن على «المطلوب» (10) يُشفى إلى «المستلَم» (5)
+  // مثال PO-202607-0113: مطلوب 10، مستلم 5، سعر 5 ⇒ 57.5 (خطأ) → 28.75 (صحيح).
+  const poPartial = {
+    auditedBy: "نظام", actualCost: 352.3,
+    items: [
+      { qty: 10, rcvQty: 5, unitCost: 5,     itemCost: 57.5, vat: 7.5 },   // مخزَّن على المطلوب
+      { qty: 4,  rcvQty: 4, unitCost: 21,    itemCost: 96.6, vat: 12.6 },
+      { qty: 5,  rcvQty: 5, unitCost: 5.25,  itemCost: 30.2, vat: 3.95 },
+      { qty: 2,  rcvQty: 2, unitCost: 38.46, itemCost: 88.46, vat: 11.54 },
+      { qty: 2,  rcvQty: 2, unitCost: 34.58, itemCost: 79.54, vat: 10.37 }
+    ]
+  };
+  T("★ البند الجزئي: التكلفة على المستلَم لا المطلوب (57.5→28.75)",
+    poAC(poPartial) === 323.55, "الناتج: " + poAC(poPartial));
+
+  // البنود السليمة (مستلم = مطلوب) لا تتغيّر بقرش تقريب
+  const _lineFn = (() => {
+    try {
+      const b = new Function("getPOTotal", HTML.slice(HTML.indexOf("function _poItemLine("), HTML.indexOf("\nfunction poIsCustomProject(", HTML.indexOf("function _poItemLine("))) + "\nreturn _poItemLine;")();
+      return b;
+    } catch (e) { return null; }
+  })();
+  if (_lineFn) {
+    T("البند السليم يبقى كما خُزِّن (لا تذبذب تقريب)",
+      _lineFn({ qty: 5, rcvQty: 5, unitCost: 5.25, itemCost: 30.2, vat: 3.95 }, true).total === 30.2);
+    T("البند الجزئي يُعاد حسابه على المستلَم",
+      _lineFn({ qty: 10, rcvQty: 5, unitCost: 5, itemCost: 57.5, vat: 7.5 }, true).total === 28.75);
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════
