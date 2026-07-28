@@ -1270,6 +1270,46 @@ function invoiceFileSource() {
     HTML.includes("pCurrent.invoices = (pCurrent.grnDocs||[]).map(g=>({ grnRef:g.grnRef, invoiceNo:g.invoiceNo||\"\", vendor:g.vendor||\"\", at:g.createdAt||\"\", photoUrl:g.invoicePhotoUrl||\"\" }))"));
   T("سند الاستلام يحمل فاتورته من نموذج التدقيق (v.photoUrl)",
     HTML.includes("invoicePhotoUrl: v.photoUrl, // v18.9nr"));
+
+  // ── v18.9ua: إعادة استخدام فاتورة المشتريات في التدقيق (بلا إعادة رفع/تكرار) ──
+  // ملاحظة: slice المحلّية هنا توقيعها slice(name) — تقتطع جسم دالة بالاسم.
+  {
+    const owa = slice("openWarehouseAudit");
+    T("★ openWarehouseAudit يجمع فواتير المشتريات (مرفقات proc_invoice) كمرشّحات",
+      owa.includes('a.kind==="proc_invoice" && a.url') && owa.includes("_waProcInvoices.push"));
+    T("openWarehouseAudit يشمل فاتورة الطلب القديمة (invoicePhotoUrl) كمرشّح للطلب بلا سندات",
+      owa.includes('!((p.grnDocs||[]).length) && p.invoicePhotoUrl'));
+    T("openWarehouseAudit يُحسب المرشّحات قبل رسم بطاقات الفاتورة (waRenderInvoices)",
+      owa.indexOf("_waProcInvoices = []") >= 0 &&
+      owa.indexOf("_waProcInvoices = []") < owa.indexOf("waRenderInvoices()"));
+    T("★ openWarehouseAudit يُعبّئ رقم الفاتورة مسبقاً من رقم المشتريات (p.invoice) قابلاً للتعديل",
+      owa.includes("_waN0.value.trim() && p.invoice"));
+
+    // بطاقة الفاتورة تعرض منتقي إعادة الاستخدام حين توجد مرشّحات
+    const card = slice("_waInvCardHtml");
+    T("بطاقة الفاتورة تعرض منتقي «إعادة استخدام فاتورة المشتريات» عند وجود مرشّحات",
+      card.includes("wa-inv-reuse") && card.includes("onWaInvReuseChange") && card.includes("_waProcInvoices.length"));
+
+    // التجميع يقرأ رابط الفاتورة المُعاد استخدامه (نصّ فريد في index.html)
+    T("★ تجميع الفواتير يقرأ reuseUrl من منتقي المشتريات",
+      HTML.includes(".wa-inv-reuse[data-uid=") && HTML.includes("reuseUrl  : (()=>{"));
+
+    // التحقّق يقبل reuseUrl كمصدر للفاتورة بلا رفع ملف (نصّ فريد)
+    T("★ التدقيق يقبل الفاتورة المُعاد استخدامها (reuseUrl) بلا إلزام رفع ملف",
+      HTML.includes("let inh = v.reuseUrl") && HTML.includes("if(!inh && _isFirstGrn && activeInvs.length===1) inh = p.invoicePhotoUrl"));
+
+    // معالج الاختيار: يُلغي رفع ملف جديد ويُعبّئ الرقم من المرشّح
+    const reuseFn = slice("onWaInvReuseChange");
+    T("onWaInvReuseChange يستعمل نفس الملف (لا يرفع) ويعبّئ الرقم إن كان فارغاً",
+      reuseFn.includes("_waProcInvoices[parseInt(sel.value,10)]") && reuseFn.includes("!noInput.value.trim() && c && c.invoiceNo"));
+    T("رفع ملف جديد يُلغي اختيار إعادة الاستخدام (لا مصدران معاً)",
+      slice("onWaInvoiceFileChange").includes('_reuseSel.value=""'));
+  }
+
+  // ── v18.9ua: توحيد كاتب «ملف الفاتورة» — إخفاء الرفع المستقل الذي يكتب invoicePhotoUrl خارج grnDocs ──
+  T("★ صفّ الرفع المستقل (pu-invoice-photo) مُخفى دائماً — التدقيق هو المصدر الوحيد",
+    HTML.includes('if(_invPhotoRow)  _invPhotoRow.style.display  = "none";') &&
+    !HTML.includes('_invPhotoRow.style.display  = atAuditClose ? "" : "none"'));
 }
 
 /* ════════════════════════════════════════════════════════════════════
