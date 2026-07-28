@@ -1014,6 +1014,36 @@ function financialInvariants() {
     HTML.includes("const _did = it._stockDocId || it.itemId;") && HTML.includes("_bump(_did, it.itemName, it.unit)"));
   T("★ H5: عكس سحب المراجعة يعود إلى _fromStockDocId",
     HTML.includes("const _did = it._fromStockDocId || it.itemId;"));
+
+  // ── v18.9tr — H6: مصالحة المالية (المطلوب سداده = الفعلي؛ القديم يُقرأ كـ estCost) ──
+  {
+    const fs = HTML.indexOf("function _poFinanceTotal(");
+    const fe = HTML.indexOf("\nfunction _poFinanceFilterAll", fs);
+    let F = null;
+    if (fs >= 0 && fe > fs) {
+      try {
+        F = new Function("poActualCost", "getPOTotal",
+          HTML.slice(fs, fe) + "\nreturn { _poFinanceTotal, _poPaidSoFar, _poRemaining, _poOverpaid };")(
+          p => p.auditedBy ? (Number(p.actualCost) || 0) : (Number(p.estCost) || 0),
+          p => Number(p.estCost) || 0);
+      } catch (e) { T("تُبنى دوال المالية", false, String(e.message).slice(0, 120)); }
+    }
+    T("تُبنى دوال المالية", !!F);
+    if (F) {
+      // قديم: قُدِّر 10000 وسُدِّد بالكامل (بلا مصفوفة)، ثم الفعلي 9300
+      const po = { auditedBy: "ن", actualCost: 9300, estCost: 10000, payment: { paid: true } };
+      T("★ H6: المطلوب سداده = الفعلي (فاتورة المورد)", F._poFinanceTotal(po) === 9300);
+      T("★ H6: القديم المسدَّد يُقرأ كـ estCost لا الفعلي الحالي", F._poPaidSoFar(po) === 10000);
+      T("★ H6: زيادة تُستردّ = مُسدَّد − فعلي", F._poOverpaid(po) === 700 && F._poRemaining(po) === 0);
+      // على دفعات: المسدَّد = مجموع الدفعات
+      const po2 = { auditedBy: "ن", actualCost: 5000, estCost: 5000, payment: { installments: [{ amount: 2000 }, { amount: 1500 }] } };
+      T("★ H6: المسدَّد = مجموع الدفعات، والمتبقّي فرقها", F._poPaidSoFar(po2) === 3500 && F._poRemaining(po2) === 1500);
+      // نقص: الفعلي أكبر من المسدَّد
+      const po3 = { auditedBy: "ن", actualCost: 11000, estCost: 10000, payment: { paid: true } };
+      T("★ H6: نقص يُستكمل (المتبقّي = فعلي − مُسدَّد)", F._poRemaining(po3) === 1000 && F._poOverpaid(po3) === 0);
+    }
+    T("★ H6: مؤشّر «زيادة تُستردّ» في تفاصيل الطلب", HTML.includes("_poOverpaid(p)>0.01") && HTML.includes("زيادة تُستردّ"));
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════
