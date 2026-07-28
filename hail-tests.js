@@ -390,6 +390,14 @@ function kpi() {
     /const base\s*=\s*\(\)\s*=>\s*\(\{/.test(src));
   T("★ كل مخطّط يستدعي base() لا يتقاسم المرجع (لا يبقى ...base, نصّاً)",
     src.includes("...base()") && !/\.\.\.base,/.test(src));
+  // v18.9tw: على iPad Safari قد يقيس Chart.js عرض الحاوية خطأً وقت الإنشاء (أثناء انتقال
+  // الصفحة/طيّ القائمة) فيثبّت الرسم أضيق من البطاقة منزاحاً لجانبها، وResizeObserver لا
+  // يصحّحه دائماً — فيُجبَر resize() بعد استقرار التخطيط. حارسٌ يمنع حذف الملاءمة:
+  T("★ render يُجبِر ملاءمة المخطّطات بعد الرسم (_fitCharts) — يملأ البطاقة على الآيباد",
+    /drawCharts\(K\);\s*_fitCharts\(\)/.test(src));
+  T("★ _fitCharts يستدعي resize() بعد استقرار التخطيط (إطار + مهلة)",
+    /function _fitCharts\(\)/.test(src) && /\.resize\(\)/.test(src) &&
+    src.includes("requestAnimationFrame") && /setTimeout\(doResize/.test(src));
   // v1.3: pending_finance في STAGE_ORDER بموضعها الصحيح (بين pending_ceo و proc_executing)
   // وإلا ابتلع pending_ceo زمنَ انتظار المالية فتشوّه مخطّط متوسط المراحل.
   T("★ pending_finance ضمن STAGE_ORDER (لا يُبتلَع زمنها)", src.includes('"pending_finance"'));
