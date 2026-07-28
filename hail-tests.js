@@ -398,6 +398,14 @@ function kpi() {
   T("★ _fitCharts يستدعي resize() بعد استقرار التخطيط (إطار + مهلة)",
     /function _fitCharts\(\)/.test(src) && /\.resize\(\)/.test(src) &&
     src.includes("requestAnimationFrame") && /setTimeout\(doResize/.test(src));
+  // v18.9tx: العلّة الحقيقية لـ«المخطّط في جانب البطاقة» — تخطيط المخطّطات لا قياس العرض.
+  // المخطّط الدائري: المفتاح أسفله لا يمينه/يساره (legend:left كان يحجز نصف العرض فتنكمش الحلقة):
+  T("★ مخطّط الحالة الدائري: المفتاح أسفله (position:bottom) لا على جانبه — تملأ الحلقة البطاقة",
+    /position:"bottom"/.test(src) && !/position:"left"/.test(src));
+  // المخطّطات الأفقية (indexAxis:y) تقصّ أسماء الفئات الطويلة عبر hbar() فلا تُحشَر الأعمدة:
+  T("★ المخطّطات الأفقية تستعمل hbar() التي تقصّ الأسماء الطويلة (لا تُحشَر الأعمدة في الجانب)",
+    /const hbar\s*=/.test(src) && /crossAlign="far"/.test(src) &&
+    src.includes("...hbar()") && !/indexAxis:"y",plugins:\{legend:\{display:false\}\}\}\}\);/.test(src));
   // v1.3: pending_finance في STAGE_ORDER بموضعها الصحيح (بين pending_ceo و proc_executing)
   // وإلا ابتلع pending_ceo زمنَ انتظار المالية فتشوّه مخطّط متوسط المراحل.
   T("★ pending_finance ضمن STAGE_ORDER (لا يُبتلَع زمنها)", src.includes('"pending_finance"'));
