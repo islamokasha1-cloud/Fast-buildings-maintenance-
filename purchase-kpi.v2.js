@@ -589,7 +589,7 @@ else init();
    v18.9tg: build = بصمة البناء المخبوزة في مصدر الوحدة (تُطابق APP_VERSION عند كل إصدار).
    الكاشف في index.html (يصل المتصفّح طازجاً دائماً) يقارنها بـ APP_VERSION فيكشف نسخةً
    قديمةً مخزّنةً من هذه الوحدة (كاشٌ يتجاهل ?v= أو نشرٌ لم يرفع الوحدة) بدل «مخطّط فارغ» صامت. */
-const MODULE_BUILD = "v18.9tg";
+const MODULE_BUILD = "v18.9th";
 window.purchaseKPI = {
   render,
   startSync(){ /* لا مزامنة مستقلة — يقرأ purchases الحية مباشرة */ },

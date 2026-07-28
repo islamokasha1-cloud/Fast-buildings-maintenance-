@@ -23,7 +23,7 @@ const CANDIDATES = [
 const IDX = CANDIDATES.find(p => fs.existsSync(p));
 if (!IDX) { console.error("❌ لم يُعثر على index.html في:\n   " + CANDIDATES.join("\n   ")); process.exit(1); }
 const HTML = fs.readFileSync(IDX, "utf8");
-const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
+const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.v2.js"), path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
 const SB_PATH  = [path.resolve(path.dirname(IDX), "substitute-budget.js")].find(p => fs.existsSync(p));
 const PA_PATH  = [path.resolve(path.dirname(IDX), "price-analysis.js")].find(p => fs.existsSync(p));
 const LC_PATH  = [path.resolve(path.dirname(IDX), "labor-catalog.js")].find(p => fs.existsSync(p));
@@ -332,7 +332,7 @@ function predelivery() {
 function kpi() {
   H("7) وحدة مؤشرات الأداء (purchase-kpi.js)");
   if (!KPI_PATH) { console.log("  ⏭  purchase-kpi.js غير موجود — تُخطّى"); return; }
-  T("الوسم موجود في index.html", /<script src="purchase-kpi\.js\?v=/.test(HTML));
+  T("الوسم موجود في index.html", /<script src="purchase-kpi\.v2\.js\?v=/.test(HTML));
   const src = fs.readFileSync(KPI_PATH, "utf8");
   const vm = require("vm");
   try { new vm.Script(src); T("صياغة purchase-kpi.js سليمة", true); }
@@ -352,8 +352,8 @@ function kpi() {
   T("الوحدة تُصدّر build على واجهتها العامة", /window\.purchaseKPI = \{[\s\S]*?build: MODULE_BUILD/.test(src));
   // الكاشف في index.html (المستند الطازج) يقارن build بـ APP_VERSION
   T("★ index.html يحوي كاشف الوحدات القديمة", HTML.includes("hail-stale-banner") && HTML.includes("s.build!==APP_VERSION"));
-  T("الكاشف يفحص purchase-kpi.js عبر window.purchaseKPI",
-    /name:"purchase-kpi\.js", get:function\(\)\{ return window\.purchaseKPI; \}/.test(HTML));
+  T("الكاشف يفحص وحدة المؤشرات عبر window.purchaseKPI",
+    /name:"purchase-kpi\.v2\.js", get:function\(\)\{ return window\.purchaseKPI; \}/.test(HTML));
   T("★ الشفاء الذاتي يُلغي Service Worker ويمسح Cache Storage قبل إعادة التحميل",
     HTML.includes("navigator.serviceWorker.getRegistrations()") && HTML.includes("r.unregister()") &&
     HTML.includes("caches.keys()") && HTML.includes("caches.delete(k)") && HTML.includes("location.reload(true)"));
