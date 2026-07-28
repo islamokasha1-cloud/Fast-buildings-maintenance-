@@ -403,8 +403,9 @@ function kpi() {
   T("★ مخطّط الحالة الدائري: المفتاح أسفله (position:bottom) لا على جانبه — تملأ الحلقة البطاقة",
     /position:"bottom"/.test(src) && !/position:"left"/.test(src));
   // المخطّطات الأفقية (indexAxis:y) تقصّ أسماء الفئات الطويلة عبر hbar() فلا تُحشَر الأعمدة:
-  T("★ المخطّطات الأفقية تستعمل hbar() التي تقصّ الأسماء الطويلة (لا تُحشَر الأعمدة في الجانب)",
+  T("★ المخطّطات الأفقية تستعمل hbar() وتلفّ الأسماء الطويلة على أسطر (تظهر كاملةً، لا تُقصّ ولا تُحشَر)",
     /const hbar\s*=/.test(src) && /crossAlign="far"/.test(src) &&
+    /const _wrap\s*=/.test(src) && /autoSkip=false/.test(src) &&
     src.includes("...hbar()") && !/indexAxis:"y",plugins:\{legend:\{display:false\}\}\}\}\);/.test(src));
   // v18.9ty: الحلّ الحتميّ لانزياح اللوحة — CSS يُجبِر اللوحة على ملء الحاوية (position:absolute
   // + inset + width/height:100%!) فلا تعتمد الملاءمة على قياس Chart.js الذي يفشل على iPad Safari
