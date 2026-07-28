@@ -1004,6 +1004,16 @@ function financialInvariants() {
     HTML.includes("فلن تُحتسب تكلفتها"));
   T("★ H4: يُمنع نقص التوزيع (المستلَم > المستودع + المباشر)",
     HTML.includes("rcv - (stock + direct) > 0.001") && HTML.includes("distShort"));
+
+  // ── v18.9tq — H5: عكس المخزون يخصم من الوثيقة المكتوبة فعلاً لا itemId الخام ──
+  T("★ H5: الاستلام يخزّن معرّف وثيقة المخزون المكتوبة (_stockDocId)",
+    HTML.includes("it._stockDocId = _canonId"));
+  T("★ H5: المراجعة تخزّن معرّف الوثيقة المسحوب منها (_fromStockDocId)",
+    HTML.includes("_fromStockDocId: fromStockRow.invId"));
+  T("★ H5: عكس استلام المستودع يخصم مقابل _stockDocId (وإلا itemId للقديم)",
+    HTML.includes("const _did = it._stockDocId || it.itemId;") && HTML.includes("_bump(_did, it.itemName, it.unit)"));
+  T("★ H5: عكس سحب المراجعة يعود إلى _fromStockDocId",
+    HTML.includes("const _did = it._fromStockDocId || it.itemId;"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
