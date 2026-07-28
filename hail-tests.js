@@ -872,6 +872,87 @@ function actualCostFromItems() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   14د) ثوابت الحساب المالي — درعٌ وقائيّ ضد عودة «الحساب المبعثر»
+        كل الأخطاء الحسابية (0091، 0113) جذرها واحد: الرقم يُحسب في أكثر من
+        مسار بأساسٍ مختلف. هذه الفحوص تثبّت «ثلاثيّة متطابقة» على طلبات-اختبار
+        من حوادث حقيقية: actualCost == Σ تكلفة البنود == Σ توزيع الموردين،
+        وتَحرُس أن مسارات العرض/التجميع تمرّ عبر الدوال المعتمدة وحدها.
+   ════════════════════════════════════════════════════════════════════ */
+function financialInvariants() {
+  H("14د) ثوابت الحساب المالي (درع وقائي)");
+  const s1 = HTML.indexOf("const PO_CLOSED_STATUSES");
+  const e1 = HTML.indexOf("\nfunction poIsCustomProject(", s1);
+  const vbS = HTML.indexOf("function poVendorBreakdown(");
+  const vbE = HTML.indexOf("\nfunction ", vbS + 10);
+  if (s1 < 0 || vbS < 0 || e1 < 0) { T("دوال الحساب موجودة في index.html", false, "لم تُعثر — هل دُمج #103؟"); return; }
+  const src = HTML.slice(s1, e1) + "\n" + HTML.slice(vbS, vbE);
+  let M;
+  try {
+    M = new Function("normalizePOStatus", "getPOTotal",
+      src + "\nreturn { poActualCost, poReceivedQty, _poItemLine, poVendorBreakdown, poIsClosed };")(
+      s => s, p => (p.items || []).reduce((a, it) => a + (Number(it.itemCost) || 0), 0));
+  } catch (e) { T("تُبنى دوال الحساب المالي", false, String(e.message).slice(0, 140)); return; }
+  T("تُبنى دوال الحساب المالي", typeof M.poActualCost === "function");
+  if (typeof M.poActualCost !== "function") return;
+
+  const sumLines = p => Math.round(p.items.filter(it => (Number(it.rcvQty) || 0) > 0)
+    .reduce((s, it) => s + M._poItemLine(it, true).total, 0) * 100) / 100;
+  const sumVendor = p => Math.round(M.poVendorBreakdown(p).reduce((s, x) => s + x.cost, 0) * 100) / 100;
+
+  // ── طلبات-اختبار من حوادث حقيقية (مكتبة انحدار) ──
+  const fixtures = [
+    { name: "استلام جزئي + تعديل مسؤول (نمط 0113)", expectActual: 323.55, expectRcv: 18,
+      po: { status: "closed", auditedBy: "ن", actualCost: 352.3, vendor: "أ",
+        items: [
+          { qty: 10, rcvQty: 5, unitCost: 5,     itemCost: 57.5,  vat: 7.5,  vendor: "أ" }, // مخزَّن على المطلوب
+          { qty: 4,  rcvQty: 4, unitCost: 21,    itemCost: 96.6,  vat: 12.6, vendor: "أ" },
+          { qty: 5,  rcvQty: 5, unitCost: 5.25,  itemCost: 30.2,  vat: 3.95, vendor: "ب" },
+          { qty: 2,  rcvQty: 2, unitCost: 38.46, itemCost: 88.46, vat: 11.54, vendor: "ب" },
+          { qty: 2,  rcvQty: 2, unitCost: 34.58, itemCost: 79.54, vat: 10.37, vendor: "ب" }
+        ] } },
+    { name: "عدة سندات لنفس البضاعة (نمط 0091)", expectActual: 487.4, expectRcv: 32,
+      po: { status: "closed", auditedBy: "ن", actualCost: 1457.19, receivedQty: 95,
+        grnDocs: [{ invoicedTotal: 487.4 }, { invoicedTotal: 487.4 }, { invoicedTotal: 482.39 }],
+        items: [
+          { qty: 2,  rcvQty: 2,  unitCost: 0, itemCost: 10.01,  vat: 1.31,  vendor: "و" }, // unitCost 0 ⇒ يبقى المخزَّن
+          { qty: 3,  rcvQty: 3,  unitCost: 0, itemCost: 44.99,  vat: 5.87,  vendor: "و" },
+          { qty: 7,  rcvQty: 7,  unitCost: 0, itemCost: 104.65, vat: 13.65, vendor: "ف" },
+          { qty: 10, rcvQty: 10, unitCost: 0, itemCost: 23,     vat: 3,     vendor: "ف" },
+          { qty: 6,  rcvQty: 6,  unitCost: 0, itemCost: 34.5,   vat: 4.5,   vendor: "ف" },
+          { qty: 1,  rcvQty: 1,  unitCost: 0, itemCost: 149.5,  vat: 19.5,  vendor: "ف" },
+          { qty: 3,  rcvQty: 3,  unitCost: 0, itemCost: 120.75, vat: 15.75, vendor: "ف" }
+        ] } }
+  ];
+  for (const f of fixtures) {
+    const a = M.poActualCost(f.po);
+    T(`${f.name}: التكلفة الفعلية`, a === f.expectActual, `الناتج ${a} المتوقّع ${f.expectActual}`);
+    T(`${f.name}: الكمية المستلمة`, M.poReceivedQty(f.po) === f.expectRcv, `الناتج ${M.poReceivedQty(f.po)}`);
+    // ★ الثلاثيّة المتطابقة — المصدر الواحد يضمنها
+    T(`★ ${f.name}: التكلفة = Σ البنود = Σ الموردين`,
+      a === sumLines(f.po) && a === sumVendor(f.po),
+      `فعلي ${a} / بنود ${sumLines(f.po)} / موردين ${sumVendor(f.po)}`);
+  }
+
+  // ★ ثابت جوهري: تكلفة البند لا تعتمد الكمية المطلوبة أبداً (مطلوب 100، مستلم 3)
+  T("★ تكلفة البند من المستلَم لا المطلوب دائماً",
+    M._poItemLine({ qty: 100, rcvQty: 3, unitCost: 10, itemCost: 1150, vat: 150 }, true).total === 34.5);
+
+  // ── حارس مصدري: منع عودة «الحساب المبعثر» خارج الدوال المعتمدة ──
+  T("★ عرض تكلفة البند (تفاصيل الطلب) يمرّ عبر _poItemLine",
+    HTML.includes("_poItemLine(item,hasAudit)"));
+  T("★ عرض تكلفة البند (PDF) يمرّ عبر _poItemLine",
+    HTML.includes("_poItemLine(it,hasAudit)"));
+  T("★ تجميع التكلفة الفعلية يمرّ عبر _poItemLine",
+    HTML.includes("s += _poItemLine(it,true).total"));
+  T("★ توزيع الموردين يمرّ عبر _poItemLine",
+    HTML.includes("_poItemLine(it,true).total;   // v18.9tl"));
+  T("لا يُجمع actualCost من السندات مباشرةً (خارج fallback الاشتقاق)",
+    !HTML.includes('actualCost     = _waSumGrn(pCurrent, "invoicedTotal")'));
+  T("مسار تعديل المسؤول يحسب على المستلَم للمُدقَّق (paeCalcItem)",
+    HTML.includes("(_paeAudited && _paeItems[i] && _paeItems[i].rcvQty!=null)"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    16) تكاليف المشاريع المُدخَلة يدوياً — تدخل كل الحسابات والمؤشّرات (v18.9sz)
        مصدرٌ واحدٌ لتصنيف «المشروع اليدوي» (poIsCustomProject) وتسميته
        (poProjectDisplayName)، والتحويل من طلب تسعير يحافظ على الشكل القياسي.
@@ -1698,6 +1779,7 @@ function rollupMonthIsolation() {
   stocktakeTests();
   vendorSummary();
   actualCostFromItems();
+  financialInvariants();
   manualProjectCosts();
   listenerChurn();
   invoiceFileSource();
