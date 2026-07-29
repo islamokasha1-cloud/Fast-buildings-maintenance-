@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fast Buildings — عرض شاشات المعرض</title>
+<style>
+  :root{
+    --navy:#26264d;
+    --navy-2:#39396d;
+    --teal:#3f8c86;
+    --teal-2:#4a8782;
+    --teal-light:#7fc4bd;
+    --paper:#f4f7f6;
+    --white:#ffffff;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    width:100%; height:100%; overflow:hidden;
+    background:var(--navy);
+    font-family:'Segoe UI', Tahoma, 'Arial', sans-serif;
+    color:var(--white);
+  }
+
+  /* ---------- animated background shared by every scene ---------- */
+  .bg{
+    position:fixed; inset:0; z-index:0;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(127,196,189,.18), transparent 45%),
+      radial-gradient(circle at 85% 80%, rgba(127,196,189,.14), transparent 50%),
+      linear-gradient(135deg, var(--navy) 0%, var(--navy-2) 55%, #2c2c58 100%);
+  }
+  .speedlines{position:fixed; inset:0; z-index:1; overflow:hidden; pointer-events:none;}
+  .speedlines span{
+    position:absolute; height:6px; border-radius:6px;
+    background:linear-gradient(90deg, transparent, var(--teal-light), transparent);
+    opacity:.16; animation:drift linear infinite;
+  }
+  @keyframes drift{
+    from{transform:translateX(-30vw);}
+    to{transform:translateX(130vw);}
+  }
+
+  /* ---------- stage / scene mechanics ---------- */
+  .stage{position:fixed; inset:0; z-index:2;}
+  .scene{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:4vw 6vw; text-align:center;
+    opacity:0; transform:scale(1.04);
+    transition:opacity .9s ease, transform 1.1s ease;
+    pointer-events:none;
+  }
+  .scene.active{opacity:1; transform:scale(1); pointer-events:auto;}
+  .scene.leaving{opacity:0; transform:scale(.97);}
+
+  .corner-logo{
+    position:fixed; top:2.4vw; left:2.4vw; z-index:5;
+    display:flex; align-items:center; gap:.8vw;
+    opacity:0; transition:opacity .6s ease;
+  }
+  .corner-logo.show{opacity:.9;}
+  .corner-logo img{height:4.2vw; filter:drop-shadow(0 2px 6px rgba(0,0,0,.35));}
+
+  .eyebrow{
+    font-size:1.35vw; letter-spacing:.35vw; text-transform:uppercase;
+    color:var(--teal-light); font-weight:600; margin-bottom:1.4vw;
+    opacity:0; transform:translateY(18px);
+  }
+  h1.big{
+    font-size:5.6vw; font-weight:800; line-height:1.15; margin-bottom:1.2vw;
+    opacity:0; transform:translateY(28px);
+  }
+  h2.mid{
+    font-size:3.1vw; font-weight:700; line-height:1.25; margin-bottom:1.6vw;
+    opacity:0; transform:translateY(28px);
+  }
+  p.lead{
+    font-size:1.85vw; font-weight:400; color:#d9e3e1; max-width:60vw; line-height:1.6;
+    opacity:0; transform:translateY(24px);
+  }
+  .accent{color:var(--teal-light);}
+
+  .scene.active .eyebrow,
+  .scene.active h1.big,
+  .scene.active h2.mid,
+  .scene.active p.lead{
+    animation:riseIn .8s ease forwards;
+  }
+  .scene.active .eyebrow{animation-delay:.1s;}
+  .scene.active h1.big{animation-delay:.25s;}
+  .scene.active h2.mid{animation-delay:.25s;}
+  .scene.active p.lead{animation-delay:.5s;}
+  @keyframes riseIn{to{opacity:1; transform:translateY(0);}}
+
+  /* ---------- scene 1 : hero ---------- */
+  #s1 .logo-wrap{position:relative; margin-bottom:2vw;}
+  #s1 img.hero-logo{
+    height:16vw; filter:drop-shadow(0 10px 30px rgba(0,0,0,.4));
+    opacity:0; transform:scale(.7);
+  }
+  .scene.active#s1 img.hero-logo{animation:popIn 1s cubic-bezier(.2,.8,.2,1) forwards;}
+  @keyframes popIn{to{opacity:1; transform:scale(1);}}
+  #s1 .since{
+    margin-top:1.6vw; font-size:1.4vw; letter-spacing:.25vw; color:var(--teal-light);
+    opacity:0; animation:none;
+  }
+  .scene.active#s1 .since{animation:riseIn .8s ease forwards .75s;}
+
+  /* ---------- scene 2 : problem -> solution ---------- */
+  .pain-row{display:flex; gap:2.4vw; margin:2vw 0 3vw; flex-wrap:wrap; justify-content:center;}
+  .pain{
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12);
+    border-radius:1vw; padding:1.6vw 2vw; font-size:1.5vw; min-width:16vw;
+    opacity:0; transform:translateY(20px) scale(.95);
+  }
+  .scene.active .pain{animation:riseIn .6s ease forwards;}
+  .scene.active .pain:nth-child(1){animation-delay:.3s;}
+  .scene.active .pain:nth-child(2){animation-delay:.55s;}
+  .scene.active .pain:nth-child(3){animation-delay:.8s;}
+  .scene.active .pain:nth-child(4){animation-delay:1.05s;}
+  .pain .x{color:#ff8a80; font-weight:800; margin-left:.6vw;}
+  .solution-line{
+    font-size:2.6vw; font-weight:800; opacity:0; transform:translateY(20px);
+  }
+  .scene.active .solution-line{animation:riseIn .7s ease forwards 1.4s;}
+
+  /* ---------- scene 3 : modules grid ---------- */
+  .grid{
+    display:grid; grid-template-columns:repeat(3,1fr); gap:1.6vw 2vw;
+    margin-top:1.5vw; width:min(78vw, 1200px);
+  }
+  .tile{
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.14);
+    border-radius:1vw; padding:1.5vw 1.2vw; font-size:1.35vw; font-weight:600;
+    display:flex; flex-direction:column; align-items:center; gap:.6vw;
+    opacity:0; transform:translateY(24px) scale(.92);
+  }
+  .tile .ic{font-size:2.6vw;}
+  .scene.active .tile{animation:riseIn .55s ease forwards;}
+  .scene.active .tile:nth-child(1){animation-delay:.2s;}
+  .scene.active .tile:nth-child(2){animation-delay:.35s;}
+  .scene.active .tile:nth-child(3){animation-delay:.5s;}
+  .scene.active .tile:nth-child(4){animation-delay:.65s;}
+  .scene.active .tile:nth-child(5){animation-delay:.8s;}
+  .scene.active .tile:nth-child(6){animation-delay:.95s;}
+  .scene.active .tile:nth-child(7){animation-delay:1.1s;}
+  .scene.active .tile:nth-child(8){animation-delay:1.25s;}
+  .scene.active .tile:nth-child(9){animation-delay:1.4s;}
+
+  /* ---------- scene 4 : live numbers ---------- */
+  .stat-row{display:flex; gap:3.2vw; margin-top:1vw; flex-wrap:wrap; justify-content:center;}
+  .stat{display:flex; flex-direction:column; align-items:center;}
+  .stat .num{font-size:5vw; font-weight:800; color:var(--teal-light);}
+  .stat .lbl{font-size:1.25vw; color:#d9e3e1; margin-top:.4vw;}
+  .bars{display:flex; align-items:flex-end; gap:1vw; height:9vw; margin-top:3vw;}
+  .bar{width:2.2vw; background:linear-gradient(180deg, var(--teal-light), var(--teal)); border-radius:.4vw .4vw 0 0; height:0;}
+  .scene.active .bar{transition:height 1.4s cubic-bezier(.2,.8,.2,1);}
+
+  /* ---------- scene 5 : approval pipeline ---------- */
+  .pipeline{display:flex; align-items:center; gap:1vw; margin-top:2vw; width:min(82vw,1300px); justify-content:center;}
+  .node{
+    background:rgba(255,255,255,.06); border:2px solid rgba(255,255,255,.2);
+    border-radius:1vw; padding:1.3vw 1vw; font-size:1.15vw; font-weight:600; flex:1;
+    transition:background .5s ease, border-color .5s ease, transform .5s ease;
+  }
+  .node .n-ic{font-size:2vw; display:block; margin-bottom:.5vw; opacity:.55; transition:opacity .5s ease;}
+  .node.lit{background:rgba(127,196,189,.22); border-color:var(--teal-light); transform:translateY(-.6vw);}
+  .node.lit .n-ic{opacity:1;}
+  .arrow{font-size:1.6vw; color:rgba(255,255,255,.35); transition:color .4s ease;}
+  .arrow.lit{color:var(--teal-light);}
+
+  /* ---------- scene 6 : whatsapp instant notify ---------- */
+  .phone{
+    width:16vw; height:32vw; border:.5vw solid #111; border-radius:2vw;
+    background:#0b141a; position:relative; overflow:hidden; margin-top:1vw;
+    box-shadow:0 20px 50px rgba(0,0,0,.4);
+  }
+  .phone .bar-top{height:2.4vw; background:#1f2c34;}
+  .bubble{
+    position:absolute; bottom:2vw; right:1vw; left:1vw;
+    background:#005c4b; color:#fff; border-radius:1vw; padding:1vw 1.1vw;
+    font-size:1.05vw; text-align:right; line-height:1.5;
+    opacity:0; transform:translateY(30px) scale(.9);
+  }
+  .scene.active .bubble{animation:bubbleIn .6s cubic-bezier(.2,.8,.2,1) forwards 1s;}
+  @keyframes bubbleIn{to{opacity:1; transform:translateY(0) scale(1);}}
+  .wa-caption{font-size:1.7vw; font-weight:700; margin-top:2vw; opacity:0; transform:translateY(20px);}
+  .scene.active .wa-caption{animation:riseIn .7s ease forwards 1.7s;}
+
+  /* ---------- scene 7 : closing ---------- */
+  #s7 img.hero-logo-sm{height:8vw; margin-bottom:1.6vw; opacity:0; transform:scale(.85);}
+  .scene.active#s7 img.hero-logo-sm{animation:popIn .8s ease forwards .1s;}
+  .cta{
+    margin-top:2vw; font-size:1.9vw; font-weight:700;
+    background:var(--teal); padding:1vw 2.6vw; border-radius:3vw;
+    opacity:0; transform:translateY(20px);
+  }
+  .scene.active .cta{animation:riseIn .7s ease forwards 1.1s;}
+
+  /* progress dots */
+  .dots{position:fixed; bottom:2vw; left:50%; transform:translateX(-50%); z-index:6; display:flex; gap:.6vw;}
+  .dot{width:.6vw; height:.6vw; border-radius:50%; background:rgba(255,255,255,.25); transition:background .4s ease;}
+  .dot.on{background:var(--teal-light);}
+</style>
+</head>
+<body>
+
+  <div class="bg"></div>
+  <div class="speedlines" id="speedlines"></div>
+  <div class="corner-logo" id="cornerLogo"><img src="../logo.png" alt="Fast Buildings"></div>
+
+  <div class="stage">
+
+    <!-- 1 : HERO -->
+    <section class="scene" id="s1">
+      <div class="logo-wrap">
+        <img class="hero-logo" src="../logo.png" alt="Fast Buildings">
+      </div>
+      <h1 class="big">Fast Buildings <span class="accent">|</span> المباني السريعة</h1>
+      <p class="lead">منصّة ذكية متكاملة لإدارة المرافق والصيانة والمشتريات والمستودعات — في نظام واحد</p>
+      <div class="since">SINCE 1983 — منذ عام ١٩٨٣</div>
+    </section>
+
+    <!-- 2 : PROBLEM -> SOLUTION -->
+    <section class="scene" id="s2">
+      <div class="eyebrow">واقع إدارة المرافق تقليدياً</div>
+      <div class="pain-row">
+        <div class="pain"><span class="x">✕</span> بلاغات صيانة تضيع بين الاتصالات</div>
+        <div class="pain"><span class="x">✕</span> جداول صيانة وقائية على ورق</div>
+        <div class="pain"><span class="x">✕</span> مخزون بلا رقابة حقيقية</div>
+        <div class="pain"><span class="x">✕</span> موافقات شراء بلا تتبّع</div>
+      </div>
+      <div class="solution-line">الحل: <span class="accent">كل شيء في منصّة واحدة، لحظة بلحظة</span></div>
+    </section>
+
+    <!-- 3 : MODULES GRID -->
+    <section class="scene" id="s3">
+      <div class="eyebrow">منظومة متكاملة</div>
+      <h2 class="mid">كل ما تحتاجه إدارة المرافق</h2>
+      <div class="grid">
+        <div class="tile"><span class="ic">📋</span> البلاغات والصيانة</div>
+        <div class="tile"><span class="ic">🗓️</span> الصيانة الوقائية PPM</div>
+        <div class="tile"><span class="ic">🔧</span> سجل الأصول</div>
+        <div class="tile"><span class="ic">🛒</span> المشتريات وسلسلة الاعتماد</div>
+        <div class="tile"><span class="ic">📦</span> المخزون والمستودعات</div>
+        <div class="tile"><span class="ic">🧮</span> تحليل الأسعار</div>
+        <div class="tile"><span class="ic">📊</span> مؤشرات الأداء KPI</div>
+        <div class="tile"><span class="ic">📺</span> لوحة عرض تنفيذية مباشرة</div>
+        <div class="tile"><span class="ic">💬</span> إشعارات واتساب فورية</div>
+      </div>
+    </section>
+
+    <!-- 4 : LIVE NUMBERS -->
+    <section class="scene" id="s4">
+      <div class="eyebrow">أداء مُثبَت</div>
+      <h2 class="mid">أرقام تتحدّث بدل الوعود</h2>
+      <div class="stat-row">
+        <div class="stat"><span class="num" data-target="42" data-suffix="+">0</span><span class="lbl">عاماً من الخبرة</span></div>
+        <div class="stat"><span class="num" data-target="449" data-suffix="/449">0</span><span class="lbl">فحص آلي ناجح لدقّة الأرقام المالية</span></div>
+        <div class="stat"><span class="num" data-target="5" data-suffix=" مراحل">0</span><span class="lbl">اعتماد شفّاف لكل طلب شراء</span></div>
+      </div>
+      <div class="bars">
+        <div class="bar" data-h="55"></div>
+        <div class="bar" data-h="72"></div>
+        <div class="bar" data-h="60"></div>
+        <div class="bar" data-h="88"></div>
+        <div class="bar" data-h="100"></div>
+      </div>
+    </section>
+
+    <!-- 5 : APPROVAL PIPELINE -->
+    <section class="scene" id="s5">
+      <div class="eyebrow">شفافية كاملة</div>
+      <h2 class="mid">من طلب الشراء حتى السداد</h2>
+      <div class="pipeline">
+        <div class="node" data-step="0"><span class="n-ic">📝</span>المكتب الفني</div>
+        <div class="arrow" data-step="a1">←</div>
+        <div class="node" data-step="1"><span class="n-ic">👷</span>مدير المشروع</div>
+        <div class="arrow" data-step="a2">←</div>
+        <div class="node" data-step="2"><span class="n-ic">🏗️</span>مدير المشاريع</div>
+        <div class="arrow" data-step="a3">←</div>
+        <div class="node" data-step="3"><span class="n-ic">💰</span>المالية</div>
+        <div class="arrow" data-step="a4">←</div>
+        <div class="node" data-step="4"><span class="n-ic">✅</span>المدير التنفيذي</div>
+      </div>
+    </section>
+
+    <!-- 6 : WHATSAPP -->
+    <section class="scene" id="s6">
+      <div class="eyebrow">استجابة فورية</div>
+      <div class="phone">
+        <div class="bar-top"></div>
+        <div class="bubble">🔧 مرحباً أحمد، تم إسناد بلاغ صيانة إليك.<br>المبنى: البرج الرئيسي — الأولوية: عاجلة</div>
+      </div>
+      <div class="wa-caption">الفني يستلم البلاغ على واتساب <span class="accent">لحظة إسناده</span></div>
+    </section>
+
+    <!-- 7 : CLOSING -->
+    <section class="scene" id="s7">
+      <img class="hero-logo-sm" src="../logo.png" alt="Fast Buildings">
+      <h2 class="mid">نبني الثقة منذ <span class="accent">١٩٨٣</span></h2>
+      <p class="lead">تفضّلوا بزيارة جناحنا لمشاهدة المنصّة مباشرة</p>
+      <div class="cta">تعرّف أكثر على منصّة Fast Buildings</div>
+    </section>
+
+  </div>
+
+  <div class="dots" id="dots"></div>
+
+<script>
+(function(){
+  const scenes = Array.from(document.querySelectorAll('.scene'));
+  const dotsWrap = document.getElementById('dots');
+  scenes.forEach((_,i)=>{
+    const d = document.createElement('div');
+    d.className = 'dot' + (i===0 ? ' on' : '');
+    dotsWrap.appendChild(d);
+  });
+  const dots = Array.from(dotsWrap.children);
+  const cornerLogo = document.getElementById('cornerLogo');
+
+  const DURATION = 8000; // ms per scene
+  let current = 0;
+
+  function animateNumbers(scene){
+    scene.querySelectorAll('.num').forEach(el=>{
+      const target = parseInt(el.getAttribute('data-target'),10);
+      const suffix = el.getAttribute('data-suffix') || '';
+      const start = performance.now();
+      const dur = 1400;
+      function step(now){
+        const p = Math.min(1, (now-start)/dur);
+        const val = Math.round(target * (1 - Math.pow(1-p,3)));
+        el.textContent = val + suffix;
+        if(p<1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    });
+    scene.querySelectorAll('.bar').forEach((b,i)=>{
+      b.style.height = '0';
+      setTimeout(()=>{ b.style.height = b.getAttribute('data-h') + '%'; }, 150 + i*120);
+    });
+  }
+
+  function animatePipeline(scene){
+    const nodes = Array.from(scene.querySelectorAll('.node'));
+    const arrows = Array.from(scene.querySelectorAll('.arrow'));
+    nodes.forEach(n=>n.classList.remove('lit'));
+    arrows.forEach(a=>a.classList.remove('lit'));
+    nodes.forEach((n,i)=>{
+      setTimeout(()=>{
+        n.classList.add('lit');
+        if(arrows[i]) arrows[i].classList.add('lit');
+      }, 400 + i*700);
+    });
+  }
+
+  function showScene(index){
+    scenes.forEach((s,i)=>{
+      if(i===index){
+        s.classList.add('active');
+        s.classList.remove('leaving');
+      } else if(i===current && index!==current){
+        s.classList.add('leaving');
+        s.classList.remove('active');
+      } else {
+        s.classList.remove('active','leaving');
+      }
+    });
+    dots.forEach((d,i)=> d.classList.toggle('on', i===index));
+    cornerLogo.classList.toggle('show', index!==0);
+
+    const active = scenes[index];
+    if(active.id === 's4') animateNumbers(active);
+    if(active.id === 's5') animatePipeline(active);
+  }
+
+  function next(){
+    current = (current+1) % scenes.length;
+    showScene(current);
+  }
+
+  function buildSpeedlines(){
+    const wrap = document.getElementById('speedlines');
+    for(let i=0;i<10;i++){
+      const s = document.createElement('span');
+      const top = Math.random()*100;
+      const width = 10 + Math.random()*22;
+      const dur = 9 + Math.random()*10;
+      const delay = Math.random()*10;
+      s.style.top = top+'vh';
+      s.style.width = width+'vw';
+      s.style.animationDuration = dur+'s';
+      s.style.animationDelay = '-'+delay+'s';
+      wrap.appendChild(s);
+    }
+  }
+
+  buildSpeedlines();
+  showScene(0);
+  setInterval(next, DURATION);
+
+  // manual override for rehearsal/testing: arrow keys, click, or tap
+  document.addEventListener('keydown', e=>{
+    if(e.key==='ArrowLeft'){ current = (current-1+scenes.length)%scenes.length; showScene(current); }
+    if(e.key==='ArrowRight'){ next(); }
+  });
+})();
+</script>
+
+</body>
+</html>
