@@ -1234,6 +1234,37 @@ function listenerChurn() {
     T("doUpdatePurchaseStatus يمضي بالنسخة المحلية عند تعذّر القراءة (catch يحرس)",
       upd.includes('catch(e){ console.warn("doUpdatePurchaseStatus: fresh-read error/timeout"'));
   }
+
+  // ── v18.9ub: إتمام §17 لمستمعَي إشعارات سطح المكتب (HailNotify) ──
+  {
+    const hn = slice("startHailNotifications");
+    // مستمع طلبات الشراء (global_purchases — عام): يُركَّب مرة واحدة، لا يُفكّ ويُعاد التركيب مع كل استدعاء
+    T("★ startHailNotifications: مستمع طلبات الشراء (عام) بحارس idempotent (!_hnPOUnsub)",
+      hn.includes("if(!_hnPOUnsub){") && hn.includes("_hnPOUnsub = db.collection(PURCHASES_COLLECTION())"));
+    T("★ لم يعد يفكّ مستمع طلبات الشراء العام مع كل استدعاء",
+      !hn.includes("if(_hnPOUnsub){ _hnPOUnsub(); _hnPOUnsub=null; }"));
+    // مستمع البلاغات (مرتبط بالمشروع): يُعاد تركيبه فقط عند تغيّر المشروع فعلاً
+    T("★ مستمع البلاغات يُعاد تركيبه فقط عند تغيّر المشروع (_hnTicketsProjKey)",
+      hn.includes("_hnTicketsProjKey === _hnProjKey") && hn.includes("_hnTicketsProjKey = _hnProjKey;"));
+  }
+  // كلا المستمعَين يُفكّان عند الخروج (ليُعاد تركيبهما نظيفَين للجلسة التالية)
+  T("★ logout يفكّ مستمعَي HailNotify (idempotent)",
+    slice("logout").includes("_hnTicketsUnsub(); _hnTicketsUnsub=null; _hnTicketsProjKey=null;") &&
+    slice("logout").includes("_hnPOUnsub(); _hnPOUnsub=null;"));
+  T("logoutToLogin يفكّ مستمعَي HailNotify أيضاً",
+    slice("logoutToLogin").includes("_hnTicketsUnsub(); _hnTicketsUnsub=null; _hnTicketsProjKey=null;") &&
+    slice("logoutToLogin").includes("_hnPOUnsub(); _hnPOUnsub=null;"));
+
+  // ── v18.9ub: تحديث وقائي للجلسات الطويلة على الأجهزة الدائمة التشغيل ──
+  // يعالج «الجهاز المحدّد» جذرياً: يُصفّر عدّاد targetId بإعادة تحميلٍ صامتٍ عند طول العمر + غياب المستخدم.
+  T("★ index.html يحوي التحديث الوقائي (visibilitychange + عمر الجلسة)",
+    HTML.includes("_installPreventiveReload") && HTML.includes('addEventListener("visibilitychange"') &&
+    HTML.includes("MAX_UPTIME_MS") && HTML.includes("window._bootT0"));
+  T("★ التحديث الوقائي يُطلَق فقط والتبويب مخفيّ (لا يقطع عملاً ظاهراً)",
+    HTML.includes("if(!document.hidden){ _armed = false; return; }") &&
+    HTML.includes("if(document.hidden){ try{ location.reload();"));
+  T("التحديث الوقائي محروسٌ بوجود Firestore وبعدم إطلاقٍ مزدوج",
+    HTML.includes('if(typeof db==="undefined" || !db) return;') && HTML.includes("if(_armed) return;"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
