@@ -1310,6 +1310,10 @@ function invoiceFileSource() {
       owa.includes('a.kind==="proc_invoice"') && owa.includes('a.kind==="attachment" || !a.kind') && owa.includes("_waProcInvoices.push"));
     T("openWarehouseAudit يشمل فاتورة الطلب القديمة (invoicePhotoUrl) كمرشّح للطلب بلا سندات",
       owa.includes('!((p.grnDocs||[]).length) && p.invoicePhotoUrl'));
+    T("★ openWarehouseAudit يشمل فواتير السندات السابقة (grnDocs) للاستلام على مراحل",
+      owa.includes('(Array.isArray(p.grnDocs)?p.grnDocs:[]).forEach') &&
+      owa.includes('g.invoicePhotoUrl') && owa.includes('فاتورة سند سابق') &&
+      owa.includes('invoiceNo:g.invoiceNo'));
     T("openWarehouseAudit يُحسب المرشّحات قبل رسم بطاقات الفاتورة (waRenderInvoices)",
       owa.indexOf("_waProcInvoices = []") >= 0 &&
       owa.indexOf("_waProcInvoices = []") < owa.indexOf("waRenderInvoices()"));
