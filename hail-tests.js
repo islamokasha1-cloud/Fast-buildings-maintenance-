@@ -1306,8 +1306,8 @@ function invoiceFileSource() {
   // ملاحظة: slice المحلّية هنا توقيعها slice(name) — تقتطع جسم دالة بالاسم.
   {
     const owa = slice("openWarehouseAudit");
-    T("★ openWarehouseAudit يجمع فواتير المشتريات (مرفقات proc_invoice) كمرشّحات",
-      owa.includes('a.kind==="proc_invoice" && a.url') && owa.includes("_waProcInvoices.push"));
+    T("★ openWarehouseAudit يجمع فاتورة المشتريات وأيّ مرفق عام كمرشّحات (مهما كان مسار الرفع)",
+      owa.includes('a.kind==="proc_invoice"') && owa.includes('a.kind==="attachment" || !a.kind') && owa.includes("_waProcInvoices.push"));
     T("openWarehouseAudit يشمل فاتورة الطلب القديمة (invoicePhotoUrl) كمرشّح للطلب بلا سندات",
       owa.includes('!((p.grnDocs||[]).length) && p.invoicePhotoUrl'));
     T("openWarehouseAudit يُحسب المرشّحات قبل رسم بطاقات الفاتورة (waRenderInvoices)",
