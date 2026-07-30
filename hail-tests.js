@@ -23,7 +23,18 @@ const CANDIDATES = [
 const IDX = CANDIDATES.find(p => fs.existsSync(p));
 if (!IDX) { console.error("❌ لم يُعثر على index.html في:\n   " + CANDIDATES.join("\n   ")); process.exit(1); }
 const HTML = fs.readFileSync(IDX, "utf8");
-const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
+const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.v2.js"), path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
+// v18.9ti: وحدة المؤشرات صارت مدموجةً داخل index.html بين علامتين — تُقرأ منها مباشرةً.
+// (احتياطياً: إن وُجد ملفٌ خارجي قديم يُقرأ منه.) فلا يعود يُخدَم ملفٌ منفصلٌ قديماً من الكاش.
+const _KPI_A = HTML.indexOf("==PKPI-INLINE-START==");
+const _KPI_B = HTML.indexOf("/* ==PKPI-INLINE-END==");
+let KPI_SRC = null;
+if (_KPI_A >= 0 && _KPI_B > _KPI_A) {
+  const _bodyStart = HTML.indexOf("*/", _KPI_A) + 2;   // بعد تعليق علامة البداية
+  KPI_SRC = HTML.slice(_bodyStart, _KPI_B).split("<\\/script>").join("</script>").trim();
+} else if (KPI_PATH) {
+  KPI_SRC = fs.readFileSync(KPI_PATH, "utf8");
+}
 const SB_PATH  = [path.resolve(path.dirname(IDX), "substitute-budget.js")].find(p => fs.existsSync(p));
 const PA_PATH  = [path.resolve(path.dirname(IDX), "price-analysis.js")].find(p => fs.existsSync(p));
 const LC_PATH  = [path.resolve(path.dirname(IDX), "labor-catalog.js")].find(p => fs.existsSync(p));
@@ -266,7 +277,10 @@ function guards() {
     ["إشارة السجل من adjustDelta", "const _qtyShown = _hasAdjD ? Math.abs(_adjD)", true],
     ["زال باب الاستلام الثاني", 'id="pu-receipt-section"', false],
     ["زال الكاتب التراكمي لـ receivedQty", "p.receivedQty = (p.receivedQty||0) + receivedQty", false],
-    ["كاتب واحد لـ receivedQty (مجموع السندات)", 'receivedQty    = _waSumGrn(pCurrent, "totalRcv")', true],
+    ["كاتب واحد لـ receivedQty (من حالة البنود لا جمع السندات)", 'receivedQty  = poReceivedQty(pCurrent)', true],
+    ["زال جمع السندات المتضخّم لـ receivedQty", 'receivedQty    = _waSumGrn(pCurrent, "totalRcv")', false],
+    ["التكلفة الفعلية من حالة البنود لا جمع السندات", 'actualCost   = poActualCost(pCurrent)', true],
+    ["زال جمع السندات المتضخّم لـ actualCost", 'actualCost     = _waSumGrn(pCurrent, "invoicedTotal")', false],
     ["__WAREHOUSE_AUDIT__ له معالج", 'if(newStatus === "__WAREHOUSE_AUDIT__"){', true],
     ["تجاوز الأدمن مُسمّى بصراحة", 'l:"🔒 مغلق — تجاوز يدوي بلا سند استلام"', true],
     ["زال تلفيق رقم سند الاستلام", 'if(!db) return "GRN-"+yr+"-"+String(Date.now()).slice(-6)', false],
@@ -331,9 +345,10 @@ function predelivery() {
    ════════════════════════════════════════════════════════════════════ */
 function kpi() {
   H("7) وحدة مؤشرات الأداء (purchase-kpi.js)");
-  if (!KPI_PATH) { console.log("  ⏭  purchase-kpi.js غير موجود — تُخطّى"); return; }
-  T("الوسم موجود في index.html", /<script src="purchase-kpi\.js\?v=/.test(HTML));
-  const src = fs.readFileSync(KPI_PATH, "utf8");
+  if (!KPI_SRC) { console.log("  ⏭  كود purchase-kpi غير موجود — تُخطّى"); return; }
+  T("★ وحدة المؤشرات مدموجة داخل index.html (تصل المتصفّح مع المستند الطازج)",
+    HTML.includes("==PKPI-INLINE-START==") && HTML.includes("==PKPI-INLINE-END=="));
+  const src = KPI_SRC;
   const vm = require("vm");
   try { new vm.Script(src); T("صياغة purchase-kpi.js سليمة", true); }
   catch (e) { T("صياغة purchase-kpi.js سليمة", false, String(e.message).slice(0, 120)); }
@@ -342,6 +357,63 @@ function kpi() {
   T("يلفّ showPage", src.includes("function hookShowPage()") && src.includes("window.showPage = function(id)"));
   T("نقاط ارتساؤه موجودة في index.html",
     HTML.includes('id="grp-po"') && HTML.includes('data-page="purchase-reports"') && HTML.includes("function showPage(id){"));
+  // v18.9tv: كل مخطّط يجب أن يستدعي base() لا يمرّر مرجع الدالة base — تمريرها بلا أقواس
+  // يجعل Chart.js يتجاهل الخيارات ويعود لـ maintainAspectRatio:true (نسبة 2:1) فلا يملأ
+  // الرسم البطاقة (كان مخطّط الإنفاق الشهري منكمشاً بفراغٍ كبير على الآيباد).
+  T("★ مخطّطات المؤشرات تستدعي base() لا تمرّر الدالة base (وإلا لا يملأ الرسم البطاقة)",
+    !/options:\s*base(?!\()/.test(src), (src.match(/options:\s*base(?!\()[^\n]*/) || [""])[0].slice(0, 60));
+
+  // ══ v18.9tg: بصمة build في الوحدة + كاشف الوحدات القديمة في index.html ══
+  // الجذر الذي يعالجه: index.html يصل طازجاً بينما purchase-kpi.js قد يُخدَم قديماً
+  // (كاش يتجاهل ?v= أو نشر لم يرفع الوحدة) — فيبقى «مخطّط الموردين» فارغاً بلا سبب ظاهر.
+  T("★ purchase-kpi.js يخبز بصمة build في مصدره", /const MODULE_BUILD = "(v[\d.a-z]+)"/.test(src));
+  const mb = (src.match(/const MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
+  T("★ بصمة build تطابق APP_VERSION (تُبطل عند نسيان رفعها)", mb === VER, `build=${mb}  APP_VERSION=${VER}`);
+  T("الوحدة تُصدّر build على واجهتها العامة", /window\.purchaseKPI = \{[\s\S]*?build: MODULE_BUILD/.test(src));
+  // الكاشف في index.html (المستند الطازج) يقارن build بـ APP_VERSION
+  T("★ index.html يحوي كاشف الوحدات القديمة", HTML.includes("hail-stale-banner") && HTML.includes("s.build!==APP_VERSION"));
+  T("الكاشف يفحص وحدة المؤشرات عبر window.purchaseKPI",
+    /name:"purchase-kpi\.v2\.js", get:function\(\)\{ return window\.purchaseKPI; \}/.test(HTML));
+  T("★ الشفاء الذاتي يُلغي Service Worker ويمسح Cache Storage قبل إعادة التحميل",
+    HTML.includes("navigator.serviceWorker.getRegistrations()") && HTML.includes("r.unregister()") &&
+    HTML.includes("caches.keys()") && HTML.includes("caches.delete(k)") && HTML.includes("location.reload(true)"));
+  T("★ حارس sessionStorage يمنع حلقة إعادة التحميل (مرّة لكل إصدار)",
+    HTML.includes('KEY="hailStaleReload:"+APP_VERSION') && HTML.includes('sessionStorage.setItem(KEY,"1")') &&
+    HTML.includes("canGuard && !already"));
+  T("عند تعذّر sessionStorage لا إعادة تحميل تلقائية (شريط فقط — لا حلقة)",
+    HTML.includes("canGuard=false") && HTML.includes("if(document.body) banner()"));
+
+  // v18.9tj: base دالةٌ تُنشئ options طازجاً لكل مخطّط — وإلا تقاسمت المخطّطات مرجع
+  // scales واحداً تلوّثه Chart.js (type:category/linear)، فيرث مخطّط الموردين (indexAxis:y)
+  // مقاييسَ عموديةً فيُرسَم فارغاً رأسياً رغم بياناته. حارسٌ يمنع عودة الكائن المشترك:
+  T("★ base في drawCharts دالةٌ تُنتج كائناً طازجاً لكل مخطّط (لا تلوّث scales)",
+    /const base\s*=\s*\(\)\s*=>\s*\(\{/.test(src));
+  T("★ كل مخطّط يستدعي base() لا يتقاسم المرجع (لا يبقى ...base, نصّاً)",
+    src.includes("...base()") && !/\.\.\.base,/.test(src));
+  // v18.9tw: على iPad Safari قد يقيس Chart.js عرض الحاوية خطأً وقت الإنشاء (أثناء انتقال
+  // الصفحة/طيّ القائمة) فيثبّت الرسم أضيق من البطاقة منزاحاً لجانبها، وResizeObserver لا
+  // يصحّحه دائماً — فيُجبَر resize() بعد استقرار التخطيط. حارسٌ يمنع حذف الملاءمة:
+  T("★ render يُجبِر ملاءمة المخطّطات بعد الرسم (_fitCharts) — يملأ البطاقة على الآيباد",
+    /drawCharts\(K\);\s*_fitCharts\(\)/.test(src));
+  T("★ _fitCharts يستدعي resize() بعد استقرار التخطيط (إطار + مهلة)",
+    /function _fitCharts\(\)/.test(src) && /\.resize\(\)/.test(src) &&
+    src.includes("requestAnimationFrame") && /setTimeout\(doResize/.test(src));
+  // v18.9tx: العلّة الحقيقية لـ«المخطّط في جانب البطاقة» — تخطيط المخطّطات لا قياس العرض.
+  // المخطّط الدائري: المفتاح أسفله لا يمينه/يساره (legend:left كان يحجز نصف العرض فتنكمش الحلقة):
+  T("★ مخطّط الحالة الدائري: المفتاح أسفله (position:bottom) لا على جانبه — تملأ الحلقة البطاقة",
+    /position:"bottom"/.test(src) && !/position:"left"/.test(src));
+  // المخطّطات الأفقية (indexAxis:y) تقصّ أسماء الفئات الطويلة عبر hbar() فلا تُحشَر الأعمدة:
+  T("★ المخطّطات الأفقية تستعمل hbar() وتلفّ الأسماء الطويلة على أسطر (تظهر كاملةً، لا تُقصّ ولا تُحشَر)",
+    /const hbar\s*=/.test(src) && /crossAlign="far"/.test(src) &&
+    /const _wrap\s*=/.test(src) && /autoSkip=false/.test(src) &&
+    src.includes("...hbar()") && !/indexAxis:"y",plugins:\{legend:\{display:false\}\}\}\}\);/.test(src));
+  // v18.9ty: الحلّ الحتميّ لانزياح اللوحة — CSS يُجبِر اللوحة على ملء الحاوية (position:absolute
+  // + inset + width/height:100%!) فلا تعتمد الملاءمة على قياس Chart.js الذي يفشل على iPad Safari
+  // (canvas أضيق يُحاذى يميناً في RTL فيبقى فراغٌ يساراً). حارسٌ على قاعدة CSS في index.html:
+  T("★ CSS يُجبِر لوحة المخطّط على ملء الحاوية (لا تنكمش/تنزاح لجانب البطاقة على الآيباد)",
+    /\.pkpi-chart-card \.cwrap canvas\{position:absolute!important/.test(HTML) &&
+    /\.pkpi-chart-card \.cwrap canvas\{[^}]*width:100%!important/.test(HTML) &&
+    /\.pkpi-chart-card \.cwrap\{position:relative;height:280px;width:100%\}/.test(HTML));
   // v1.3: pending_finance في STAGE_ORDER بموضعها الصحيح (بين pending_ceo و proc_executing)
   // وإلا ابتلع pending_ceo زمنَ انتظار المالية فتشوّه مخطّط متوسط المراحل.
   T("★ pending_finance ضمن STAGE_ORDER (لا يُبتلَع زمنها)", src.includes('"pending_finance"'));
@@ -699,10 +771,11 @@ function vendorSummary() {
   const src = HTML.slice(a, HTML.indexOf("\nfunction ", a + 10));
   let fn;
   try {
-    // نُبني الدالة الحقيقية مع بدائل تبعيتيها (poIsClosed / poActualCost)
-    fn = new Function("poIsClosed", "poActualCost", src + "\nreturn poVendorBreakdown;")(
+    // نُبني الدالة الحقيقية مع بدائل تبعيتيها (poIsClosed / poActualCost / _poItemLine)
+    fn = new Function("poIsClosed", "poActualCost", "_poItemLine", src + "\nreturn poVendorBreakdown;")(
       p => !!p._closed,
-      p => Number(p.actualCost) || 0
+      p => Number(p.actualCost) || 0,
+      it => ({ net: 0, vat: Number(it && it.vat) || 0, total: Number(it && it.itemCost) || 0 })
     );
   } catch (e) { T("تُبنى poVendorBreakdown وتُنفَّذ", false, String(e.message).slice(0, 120)); return; }
   T("تُبنى poVendorBreakdown وتُنفَّذ", typeof fn === "function");
@@ -734,6 +807,811 @@ function vendorSummary() {
     HTML.includes("poVendorBreakdown(p).forEach(({vendor,cost})=>{\n      if(!byVendorPDF[vendor])"));
   T("زالت فهرسة الملخّص على مورد الطلب (شاشة)", !HTML.includes("if(!byVendor[v]) byVendor[v]={total:0,actualCost:0};"));
   T("زالت فهرسة الملخّص على مورد الطلب (PDF)", !HTML.includes("if(!byVendorPDF[v]) byVendorPDF[v]={total:0,cost:0};"));
+
+  // ── v18.9tk: التوزيع من البنود للطلب المُدقَّق (يطابق التكلفة الفعلية المشتقّة) ──
+  const rItems = fn({
+    _closed: true, auditedBy: "نظام",
+    grnDocs: [{ vendor: "الوانك", invoicedTotal: 55 }, { vendor: "الوانك", invoicedTotal: 55 }, { vendor: "فهد", invoicedTotal: 432.4 }],
+    items: [
+      { vendor: "الوانك", rcvQty: 3, itemCost: 44.99 },
+      { vendor: "فهد", rcvQty: 7, itemCost: 104.65 },
+      { vendor: "فهد", rcvQty: 3, itemCost: 120.75 }
+    ]
+  });
+  const vAl = rItems.find(x => x.vendor === "الوانك"), vFa = rItems.find(x => x.vendor === "فهد");
+  T("★ التوزيع من البنود لا جمع السندات المتضخّم", rItems.length === 2 && vAl && vFa &&
+    vAl.cost === 44.99 && vFa.cost === Math.round((104.65 + 120.75) * 100) / 100);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   14ب) التكلفة الفعلية والكمية المستلمة = حالة البنود النهائية لا جمع السندات
+        (v18.9tk) — الطلب العالق على بند ناقص يُعاد تدقيقه مراراً، فجمع
+        grnDocs[].invoicedTotal/totalRcv يتضخّم؛ المصدر الصحيح: البنود النهائية.
+   ════════════════════════════════════════════════════════════════════ */
+function actualCostFromItems() {
+  H("14ب) التكلفة الفعلية من حالة البنود (لا جمع السندات)");
+  const a = HTML.indexOf("function _poItemLine(");
+  if (a < 0) { T("_poItemLine موجودة في index.html", false, "لم تُعثر"); return; }
+  // نستخرج كتلة دوال الاشتقاق المتتالية حتى نهاية poReceivedQty
+  const end = HTML.indexOf("\nfunction poIsCustomProject(", a);
+  const src = HTML.slice(a, end);
+  let poAC, poRQ;
+  try {
+    const built = new Function("getPOTotal", src + "\nreturn { poActualCost, poReceivedQty };")(
+      p => (p.items || []).reduce((s, it) => s + (Number(it.itemCost) || 0), 0)
+    );
+    poAC = built.poActualCost; poRQ = built.poReceivedQty;
+  } catch (e) { T("تُبنى دوال الاشتقاق", false, String(e.message).slice(0, 140)); return; }
+  T("تُبنى poActualCost/poReceivedQty", typeof poAC === "function" && typeof poRQ === "function");
+  if (typeof poAC !== "function") return;
+
+  // طلب استُلم على عدة سندات لنفس البضاعة (grnDocs متضخّمة) — الحالة النهائية للبنود صحيحة
+  const po = {
+    auditedBy: "نظام", actualCost: 1457.19, receivedQty: 95,
+    grnDocs: [{ invoicedTotal: 487.4 }, { invoicedTotal: 487.4 }, { invoicedTotal: 482.39 }],
+    items: [
+      { rcvQty: 2, itemCost: 10.01 }, { rcvQty: 3, itemCost: 44.99 }, { rcvQty: 7, itemCost: 104.65 },
+      { rcvQty: 10, itemCost: 23 }, { rcvQty: 6, itemCost: 34.5 }, { rcvQty: 1, itemCost: 149.5 },
+      { rcvQty: 3, itemCost: 120.75 }
+    ]
+  };
+  T("★ التكلفة الفعلية = مجموع البنود لا السندات المتضخّمة",
+    poAC(po) === 487.4, "الناتج: " + poAC(po));
+  T("★ الكمية المستلمة = مجموع البنود لا السندات", poRQ(po) === 32, "الناتج: " + poRQ(po));
+
+  // البند غير المستلَم (مغطى من المخزون/لم يصل) لا تكلفة فعلية له
+  const po2 = { auditedBy: "نظام", items: [{ rcvQty: 0, itemCost: 99 }, { rcvQty: 2, itemCost: 20 }] };
+  T("البند غير المستلَم (كمية صفر) لا يدخل التكلفة الفعلية", poAC(po2) === 20);
+
+  // طلب مغلق قديم بلا بنود مستلَمة — يُرجَع للقيمة المخزَّنة (لا صفر)
+  const po3 = { auditedBy: "نظام", actualCost: 800, receivedQty: 5, items: [{ itemCost: 800 }] };
+  T("قديم بلا rcvQty: يُرجَع للمخزَّن", poAC(po3) === 800 && poRQ(po3) === 5);
+
+  // غير مُدقَّق — القيمة المخزَّنة كما هي
+  T("غير مُدقَّق: التكلفة المخزَّنة", poAC({ actualCost: 300 }) === 300);
+
+  // ★ البند المستلَم جزئياً: itemCost مخزَّن على «المطلوب» (10) يُشفى إلى «المستلَم» (5)
+  // مثال PO-202607-0113: مطلوب 10، مستلم 5، سعر 5 ⇒ 57.5 (خطأ) → 28.75 (صحيح).
+  const poPartial = {
+    auditedBy: "نظام", actualCost: 352.3,
+    items: [
+      { qty: 10, rcvQty: 5, unitCost: 5,     itemCost: 57.5, vat: 7.5 },   // مخزَّن على المطلوب
+      { qty: 4,  rcvQty: 4, unitCost: 21,    itemCost: 96.6, vat: 12.6 },
+      { qty: 5,  rcvQty: 5, unitCost: 5.25,  itemCost: 30.2, vat: 3.95 },
+      { qty: 2,  rcvQty: 2, unitCost: 38.46, itemCost: 88.46, vat: 11.54 },
+      { qty: 2,  rcvQty: 2, unitCost: 34.58, itemCost: 79.54, vat: 10.37 }
+    ]
+  };
+  T("★ البند الجزئي: التكلفة على المستلَم لا المطلوب (57.5→28.75)",
+    poAC(poPartial) === 323.55, "الناتج: " + poAC(poPartial));
+
+  // البنود السليمة (مستلم = مطلوب) لا تتغيّر بقرش تقريب
+  const _lineFn = (() => {
+    try {
+      const b = new Function("getPOTotal", HTML.slice(HTML.indexOf("function _poItemLine("), HTML.indexOf("\nfunction poIsCustomProject(", HTML.indexOf("function _poItemLine("))) + "\nreturn _poItemLine;")();
+      return b;
+    } catch (e) { return null; }
+  })();
+  if (_lineFn) {
+    T("البند السليم يبقى كما خُزِّن (لا تذبذب تقريب)",
+      _lineFn({ qty: 5, rcvQty: 5, unitCost: 5.25, itemCost: 30.2, vat: 3.95 }, true).total === 30.2);
+    T("البند الجزئي يُعاد حسابه على المستلَم",
+      _lineFn({ qty: 10, rcvQty: 5, unitCost: 5, itemCost: 57.5, vat: 7.5 }, true).total === 28.75);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   14د) ثوابت الحساب المالي — درعٌ وقائيّ ضد عودة «الحساب المبعثر»
+        كل الأخطاء الحسابية (0091، 0113) جذرها واحد: الرقم يُحسب في أكثر من
+        مسار بأساسٍ مختلف. هذه الفحوص تثبّت «ثلاثيّة متطابقة» على طلبات-اختبار
+        من حوادث حقيقية: actualCost == Σ تكلفة البنود == Σ توزيع الموردين،
+        وتَحرُس أن مسارات العرض/التجميع تمرّ عبر الدوال المعتمدة وحدها.
+   ════════════════════════════════════════════════════════════════════ */
+function financialInvariants() {
+  H("14د) ثوابت الحساب المالي (درع وقائي)");
+  const s1 = HTML.indexOf("const PO_CLOSED_STATUSES");
+  const e1 = HTML.indexOf("\nfunction poIsCustomProject(", s1);
+  const vbS = HTML.indexOf("function poVendorBreakdown(");
+  const vbE = HTML.indexOf("\nfunction ", vbS + 10);
+  if (s1 < 0 || vbS < 0 || e1 < 0) { T("دوال الحساب موجودة في index.html", false, "لم تُعثر — هل دُمج #103؟"); return; }
+  const src = HTML.slice(s1, e1) + "\n" + HTML.slice(vbS, vbE);
+  let M;
+  try {
+    M = new Function("normalizePOStatus", "getPOTotal",
+      src + "\nreturn { poActualCost, poReceivedQty, _poItemLine, _poHealItems, poVendorBreakdown, poIsClosed };")(
+      s => s, p => (p.items || []).reduce((a, it) => a + (Number(it.itemCost) || 0), 0));
+  } catch (e) { T("تُبنى دوال الحساب المالي", false, String(e.message).slice(0, 140)); return; }
+  T("تُبنى دوال الحساب المالي", typeof M.poActualCost === "function");
+  if (typeof M.poActualCost !== "function") return;
+
+  const sumLines = p => Math.round(p.items.filter(it => (Number(it.rcvQty) || 0) > 0)
+    .reduce((s, it) => s + M._poItemLine(it, true).total, 0) * 100) / 100;
+  const sumVendor = p => Math.round(M.poVendorBreakdown(p).reduce((s, x) => s + x.cost, 0) * 100) / 100;
+
+  // ── طلبات-اختبار من حوادث حقيقية (مكتبة انحدار) ──
+  const fixtures = [
+    { name: "استلام جزئي + تعديل مسؤول (نمط 0113)", expectActual: 323.55, expectRcv: 18,
+      po: { status: "closed", auditedBy: "ن", actualCost: 352.3, vendor: "أ",
+        items: [
+          { qty: 10, rcvQty: 5, unitCost: 5,     itemCost: 57.5,  vat: 7.5,  vendor: "أ" }, // مخزَّن على المطلوب
+          { qty: 4,  rcvQty: 4, unitCost: 21,    itemCost: 96.6,  vat: 12.6, vendor: "أ" },
+          { qty: 5,  rcvQty: 5, unitCost: 5.25,  itemCost: 30.2,  vat: 3.95, vendor: "ب" },
+          { qty: 2,  rcvQty: 2, unitCost: 38.46, itemCost: 88.46, vat: 11.54, vendor: "ب" },
+          { qty: 2,  rcvQty: 2, unitCost: 34.58, itemCost: 79.54, vat: 10.37, vendor: "ب" }
+        ] } },
+    { name: "عدة سندات لنفس البضاعة (نمط 0091)", expectActual: 487.4, expectRcv: 32,
+      po: { status: "closed", auditedBy: "ن", actualCost: 1457.19, receivedQty: 95,
+        grnDocs: [{ invoicedTotal: 487.4 }, { invoicedTotal: 487.4 }, { invoicedTotal: 482.39 }],
+        items: [
+          { qty: 2,  rcvQty: 2,  unitCost: 0, itemCost: 10.01,  vat: 1.31,  vendor: "و" }, // unitCost 0 ⇒ يبقى المخزَّن
+          { qty: 3,  rcvQty: 3,  unitCost: 0, itemCost: 44.99,  vat: 5.87,  vendor: "و" },
+          { qty: 7,  rcvQty: 7,  unitCost: 0, itemCost: 104.65, vat: 13.65, vendor: "ف" },
+          { qty: 10, rcvQty: 10, unitCost: 0, itemCost: 23,     vat: 3,     vendor: "ف" },
+          { qty: 6,  rcvQty: 6,  unitCost: 0, itemCost: 34.5,   vat: 4.5,   vendor: "ف" },
+          { qty: 1,  rcvQty: 1,  unitCost: 0, itemCost: 149.5,  vat: 19.5,  vendor: "ف" },
+          { qty: 3,  rcvQty: 3,  unitCost: 0, itemCost: 120.75, vat: 15.75, vendor: "ف" }
+        ] } }
+  ];
+  for (const f of fixtures) {
+    const a = M.poActualCost(f.po);
+    T(`${f.name}: التكلفة الفعلية`, a === f.expectActual, `الناتج ${a} المتوقّع ${f.expectActual}`);
+    T(`${f.name}: الكمية المستلمة`, M.poReceivedQty(f.po) === f.expectRcv, `الناتج ${M.poReceivedQty(f.po)}`);
+    // ★ الثلاثيّة المتطابقة — المصدر الواحد يضمنها
+    T(`★ ${f.name}: التكلفة = Σ البنود = Σ الموردين`,
+      a === sumLines(f.po) && a === sumVendor(f.po),
+      `فعلي ${a} / بنود ${sumLines(f.po)} / موردين ${sumVendor(f.po)}`);
+  }
+
+  // ★ ثابت جوهري: تكلفة البند لا تعتمد الكمية المطلوبة أبداً (مطلوب 100، مستلم 3)
+  T("★ تكلفة البند من المستلَم لا المطلوب دائماً",
+    M._poItemLine({ qty: 100, rcvQty: 3, unitCost: 10, itemCost: 1150, vat: 150 }, true).total === 34.5);
+
+  // ── حارس مصدري: منع عودة «الحساب المبعثر» خارج الدوال المعتمدة ──
+  T("★ عرض تكلفة البند (تفاصيل الطلب) يمرّ عبر _poItemLine",
+    HTML.includes("_poItemLine(item,hasAudit)"));
+  T("★ عرض تكلفة البند (PDF) يمرّ عبر _poItemLine",
+    HTML.includes("_poItemLine(it,hasAudit)"));
+  T("★ تجميع التكلفة الفعلية يمرّ عبر _poItemLine",
+    HTML.includes("s += _poItemLine(it,true).total"));
+  T("★ توزيع الموردين يمرّ عبر _poItemLine",
+    HTML.includes("_poItemLine(it,true).total;   // v18.9tl"));
+  T("لا يُجمع actualCost من السندات مباشرةً (خارج fallback الاشتقاق)",
+    !HTML.includes('actualCost     = _waSumGrn(pCurrent, "invoicedTotal")'));
+  T("مسار تعديل المسؤول يحسب على المستلَم للمُدقَّق (paeCalcItem)",
+    HTML.includes("(_paeAudited && _paeItems[i] && _paeItems[i].rcvQty!=null)"));
+
+  // ── v18.9tm: تطبيع البنود عند التحميل يشفي كل ما يقرأ it.itemCost مباشرةً ──
+  // (بطاقة القائمة، getPOTotal، تعبئة التكلفة...) فلا يبقى موضعٌ يعرض المخزَّن الخاطئ.
+  if (typeof M._poHealItems === "function") {
+    const po = { auditedBy: "ن", items: [
+      { qty: 10, rcvQty: 5, unitCost: 5, itemCost: 57.5, vat: 7.5 },   // خاطئ (على المطلوب)
+      { qty: 4, rcvQty: 4, unitCost: 21, itemCost: 96.6, vat: 12.6 }    // سليم
+    ] };
+    M._poHealItems(po);
+    T("★ التطبيع يشفي itemCost المخزَّن الخاطئ (57.5→28.75)", po.items[0].itemCost === 28.75);
+    T("التطبيع لا يمسّ البند السليم", po.items[1].itemCost === 96.6);
+    T("★ بعد التطبيع: Σ itemCost المباشر = التكلفة الفعلية",
+      Math.round(po.items.reduce((s, it) => s + it.itemCost, 0) * 100) / 100 === M.poActualCost(po));
+    // الطلب غير المُدقَّق لا يُمسّ (التقدير يبقى)
+    const est = { items: [{ qty: 10, rcvQty: 5, unitCost: 5, itemCost: 57.5, vat: 7.5 }] };
+    M._poHealItems(est);
+    T("التطبيع لا يمسّ الطلب غير المُدقَّق", est.items[0].itemCost === 57.5);
+  }
+  // حارس: مسارا تحميل الطلبات يستدعيان التطبيع
+  T("★ تحميل الطلبات يطبّع البنود (_poHealItems) — المسار الأولي والحيّ",
+    (HTML.match(/return _poHealItems\(_o\);/g) || []).length >= 2);
+
+  // ── v18.9tn — C1: الاستلام على دفعات لبنود مختلفة ──
+  // حارس مصدري: التدقيق لا يدهس بند جلسةٍ سابقة بأصفار الجلسة الحالية.
+  T("★ C1: التدقيق يحفظ بند الجلسة السابقة (لا يدهسه بصفر الجلسة الحالية)",
+    HTML.includes("(Number(a.rcvQty)||0) <= 0 && (Number(it.rcvQty)||0) > 0) return it"));
+  // سلوكي: طلبٌ استُلم على جلستين (A ثم B) — بعد الحارس p.items يحمل الاثنين،
+  // فالتكلفة/الكمية = مجموعهما لا آخر جلسة وحدها.
+  const poMulti = { status: "closed", auditedBy: "ن", actualCost: 1150, receivedQty: 5,
+    items: [
+      { qty: 10, rcvQty: 10, unitCost: 100, itemCost: 1150, vat: 150 },  // استُلم جلسة 1 (محفوظ بالحارس)
+      { qty: 10, rcvQty: 10, unitCost: 100, itemCost: 1150, vat: 150 }   // استُلم جلسة 2
+    ] };
+  T("★ C1: التكلفة الفعلية = مجموع بنود الجلستين لا آخر جلسة",
+    M.poActualCost(poMulti) === 2300, "الناتج: " + M.poActualCost(poMulti));
+  T("★ C1: الكمية المستلمة = مجموع الجلستين", M.poReceivedQty(poMulti) === 20);
+
+  // ── v18.9to — H3: اصطلاح ض.ق.م موحّد على «الوحدة» في التدقيق (مطابق _poItemLine والفاتورة) ──
+  T("★ H3: التدقيق يحسب ض.ق.م على الوحدة (total=round((unit+vatUnit)×rcv))",
+    HTML.includes("Math.round((unitPrice+_vatUnit)*rcvQty*100)/100"));
+  T("★ H3: زال اصطلاح net×0.15 من تخزين التدقيق",
+    !HTML.includes("const vat   = Math.round(net*0.15*100)/100"));
+  T("★ H3: net مقرَّب في التدقيق (لا تسرّب عائم — L7)",
+    HTML.includes("const net   = Math.round(rcvQty * unitPrice * 100)/100"));
+  // سلوكي: اصطلاح الوحدة يطابق فاتورة المورد (بخاخ 13.04×3 ⇒ 45.00 لا 44.99)
+  T("★ H3: تكلفة البند = فاتورة المورد (بخاخ 13.04×3 ⇒ 45.00)",
+    M._poItemLine({ rcvQty: 3, unitCost: 13.04, itemCost: 45, vat: 5.88 }, true).total === 45);
+
+  // ── v18.9tp — H2 + H4: حارسا تدقيق الاستلام ──
+  T("★ H2: يُمنع الإغلاق ببندٍ مستلَم بسعر وحدة صفر (lumpSum لا يختفي)",
+    HTML.includes('_waVal("wa-rcv-qty",i) > 0 && _waVal("wa-unit-price",i) <= 0') &&
+    HTML.includes("فلن تُحتسب تكلفتها"));
+  T("★ H4: يُمنع نقص التوزيع (المستلَم > المستودع + المباشر)",
+    HTML.includes("rcv - (stock + direct) > 0.001") && HTML.includes("distShort"));
+
+  // ── v18.9tq — H5: عكس المخزون يخصم من الوثيقة المكتوبة فعلاً لا itemId الخام ──
+  T("★ H5: الاستلام يخزّن معرّف وثيقة المخزون المكتوبة (_stockDocId)",
+    HTML.includes("it._stockDocId = _canonId"));
+  T("★ H5: المراجعة تخزّن معرّف الوثيقة المسحوب منها (_fromStockDocId)",
+    HTML.includes("_fromStockDocId: fromStockRow.invId"));
+  T("★ H5: عكس استلام المستودع يخصم مقابل _stockDocId (وإلا itemId للقديم)",
+    HTML.includes("const _did = it._stockDocId || it.itemId;") && HTML.includes("_bump(_did, it.itemName, it.unit)"));
+  T("★ H5: عكس سحب المراجعة يعود إلى _fromStockDocId",
+    HTML.includes("const _did = it._fromStockDocId || it.itemId;"));
+
+  // ── v18.9tr — H6: مصالحة المالية (المطلوب سداده = الفعلي؛ القديم يُقرأ كـ estCost) ──
+  {
+    const fs = HTML.indexOf("function _poFinanceTotal(");
+    const fe = HTML.indexOf("\nfunction _poFinanceFilterAll", fs);
+    let F = null;
+    if (fs >= 0 && fe > fs) {
+      try {
+        F = new Function("poActualCost", "getPOTotal",
+          HTML.slice(fs, fe) + "\nreturn { _poFinanceTotal, _poPaidSoFar, _poRemaining, _poOverpaid };")(
+          p => p.auditedBy ? (Number(p.actualCost) || 0) : (Number(p.estCost) || 0),
+          p => Number(p.estCost) || 0);
+      } catch (e) { T("تُبنى دوال المالية", false, String(e.message).slice(0, 120)); }
+    }
+    T("تُبنى دوال المالية", !!F);
+    if (F) {
+      // قديم: قُدِّر 10000 وسُدِّد بالكامل (بلا مصفوفة)، ثم الفعلي 9300
+      const po = { auditedBy: "ن", actualCost: 9300, estCost: 10000, payment: { paid: true } };
+      T("★ H6: المطلوب سداده = الفعلي (فاتورة المورد)", F._poFinanceTotal(po) === 9300);
+      T("★ H6: القديم المسدَّد يُقرأ كـ estCost لا الفعلي الحالي", F._poPaidSoFar(po) === 10000);
+      T("★ H6: زيادة تُستردّ = مُسدَّد − فعلي", F._poOverpaid(po) === 700 && F._poRemaining(po) === 0);
+      // على دفعات: المسدَّد = مجموع الدفعات
+      const po2 = { auditedBy: "ن", actualCost: 5000, estCost: 5000, payment: { installments: [{ amount: 2000 }, { amount: 1500 }] } };
+      T("★ H6: المسدَّد = مجموع الدفعات، والمتبقّي فرقها", F._poPaidSoFar(po2) === 3500 && F._poRemaining(po2) === 1500);
+      // نقص: الفعلي أكبر من المسدَّد
+      const po3 = { auditedBy: "ن", actualCost: 11000, estCost: 10000, payment: { paid: true } };
+      T("★ H6: نقص يُستكمل (المتبقّي = فعلي − مُسدَّد)", F._poRemaining(po3) === 1000 && F._poOverpaid(po3) === 0);
+    }
+    T("★ H6: مؤشّر «زيادة تُستردّ» في تفاصيل الطلب", HTML.includes("_poOverpaid(p)>0.01") && HTML.includes("زيادة تُستردّ"));
+  }
+
+  // ── v18.9ts — تنظيف منخفض (L7/L9/L10/L11) ──
+  T("L7: تقريب estCost عند إنشاء الطلب (لا تسرّب عائم)",
+    HTML.includes("Math.round(currentPurchaseItems.reduce((s,item)=>s+(item.itemCost||0),0)*100)/100"));
+  T("L9: _waPrevRcv يطابق بالكود قبل الاسم للبند الحرّ",
+    HTML.includes("else if(gi.itemCode && it && it.itemCode) _idOk = (String(gi.itemCode).trim() === String(it.itemCode).trim())"));
+  T("L10: تكلفة بطاقة القائمة بمنزلتين (تطابق التفاصيل)",
+    HTML.includes('display:inline-block">${sum.toLocaleString("en-US",{maximumFractionDigits:2})}</span> ر.س'));
+
+  // ── v18.9tt — L8: بندان لنفس صنف المخزون (توافر تراكمي + خصم مُجمَّع + وسم بـ origIdx) ──
+  T("★ L8: التوافر تراكمي (_remainByInv — كل بند يأخذ من المتبقّي)",
+    HTML.includes("const _remainByInv = new Map();") &&
+    HTML.includes("_remainByInv.has(_iid) ? _remainByInv.get(_iid) : _fullQty"));
+  T("★ L8: الخصم مُجمَّع بـ invId لا «أوّل بند فقط»",
+    HTML.includes("const _invAgg = new Map();") && !HTML.includes("if(_seenInvIds.has(e.invId)) return false;"));
+  T("★ L8: الوسم لكل بند بـ origIdx لا بالاسم",
+    HTML.includes("stockRows.find(e => e.origIdx === _i)") && HTML.includes("procRows.find(e => e.origIdx === _i)"));
+  // سلوكي: محاكاة الخوارزمية — رصيد 10، بندان يحتاجان 7 و6 من نفس الصنف
+  {
+    const balance = 10, needs = [7, 6];
+    const remain = new Map(); remain.set("X", balance);
+    const took = needs.map(req => {
+      const avail = remain.get("X");
+      const fs = Math.min(avail, req);
+      remain.set("X", Math.round((avail - fs) * 1000) / 1000);
+      return fs;
+    });
+    T("★ L8: مجموع المسحوب ≤ الرصيد (لا وعدٌ زائد)", took[0] + took[1] <= balance && took[0] === 7 && took[1] === 3);
+    const agg = took.reduce((s, x) => s + x, 0);
+    T("★ L8: الخصم المُجمَّع = المسحوب فعلاً (لا ناقص ولا زائد)", agg === 10);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   16) تكاليف المشاريع المُدخَلة يدوياً — تدخل كل الحسابات والمؤشّرات (v18.9sz)
+       مصدرٌ واحدٌ لتصنيف «المشروع اليدوي» (poIsCustomProject) وتسميته
+       (poProjectDisplayName)، والتحويل من طلب تسعير يحافظ على الشكل القياسي.
+   ════════════════════════════════════════════════════════════════════ */
+function manualProjectCosts() {
+  H("16) تكاليف المشاريع اليدوية في كل الحسابات");
+
+  // ── poIsCustomProject: العلَم أو __OTHER__ (لا __OTHER__ وحده) ──
+  const a = HTML.indexOf("function poIsCustomProject(p){");
+  if (a < 0) { T("poIsCustomProject موجودة في index.html", false, "لم تُعثر"); return; }
+  const srcA = HTML.slice(a, HTML.indexOf("\nfunction ", a + 10));
+  let isCustom;
+  try { isCustom = new Function(srcA + "\nreturn poIsCustomProject;")(); }
+  catch (e) { T("تُبنى poIsCustomProject", false, String(e.message).slice(0, 120)); return; }
+  T("تُبنى poIsCustomProject", typeof isCustom === "function");
+  T("يدوي بالعلَم isCustomProject", isCustom({ isCustomProject: true, projectId: "" }) === true);
+  T("يدوي بسنتينل __OTHER__", isCustom({ projectId: "__OTHER__" }) === true);
+  T("★ يدوي بالعلَم رغم غياب __OTHER__ (المحوَّل من تسعير)", isCustom({ isCustomProject: true, projectId: "hail" }) === true);
+  T("رسمي (معرّف حقيقي) ليس يدوياً", isCustom({ projectId: "hail" }) === false);
+  T("projectId فارغ بلا علَم ليس يدوياً (لا يُخلط بـ hail الافتراضي)", isCustom({ projectId: "" }) === false);
+
+  // ── poProjectDisplayName: يدوي بالاسم، رسمي بالمعرّف ──
+  const b = HTML.indexOf("function poProjectDisplayName(p){");
+  if (b < 0) { T("poProjectDisplayName موجودة", false); }
+  else {
+    const srcB = HTML.slice(b, HTML.indexOf("\nfunction ", b + 10));
+    let dispName;
+    try { dispName = new Function("poIsCustomProject", "_getProjName", srcB + "\nreturn poProjectDisplayName;")(isCustom, id => id === "hail" ? "مشروع هايل" : ""); }
+    catch (e) { T("تُبنى poProjectDisplayName", false, String(e.message).slice(0, 120)); }
+    if (typeof dispName === "function") {
+      T("اسم اليدوي من projectName", dispName({ isCustomProject: true, projectName: "فيلا العميل" }) === "فيلا العميل");
+      T("★ اليدوي لا يُنسَب لمشروع هايل الافتراضي", dispName({ projectId: "__OTHER__", projectName: "استراحة" }) === "استراحة");
+      T("اسم الرسمي من المعرّف", dispName({ projectId: "hail" }) === "مشروع هايل");
+    }
+  }
+
+  // ── التحويل من طلب تسعير يطبّق الشكل القياسي للمشروع اليدوي ──
+  T("طلب التسعير يحمل علَم isCustomProject", HTML.includes('isCustomProject: projVal==="__OTHER__"'));
+  T("كشف اليدوي عند التحويل (العلَم أو غياب projectId مع اسم)",
+    HTML.includes("const _rfIsCustom = !!(rf.isCustomProject || (!rf.projectId && (rf.projectName||\"\").trim()));"));
+  T("★ التحويل يطبّق projectId:__OTHER__ لليدوي", HTML.includes('projectId: _rfIsCustom ? "__OTHER__" : (rf.projectId||"")'));
+  T("التحويل يحفظ isCustomProject وprojectName", HTML.includes("isCustomProject: _rfIsCustom,") && HTML.includes("projectName: rf.projectName || projName,"));
+
+  // ── كل شاشات التقرير/التصدير تقرأ المصدر الموحّد (لا __OTHER__ وحده) ──
+  T("ملخّص المشروع (شاشة) يستخدم poProjectDisplayName",
+    HTML.includes("const pname=poProjectDisplayName(p);   // v18.9sz: المصدر الموحّد (يدوي بالاسم، رسمي بالمعرّف)"));
+  T("ملخّص المشروع (PDF) يستخدم poProjectDisplayName",
+    HTML.includes("const pname=poProjectDisplayName(p);   // v18.9sz: المصدر الموحّد"));
+  T("صفوف تفاصيل التقرير (شاشة+PDF) تستخدم poProjectDisplayName",
+    HTML.includes("const pProjName=poProjectDisplayName(p)") && HTML.includes("const pProjName2=poProjectDisplayName(p)"));
+  T("★ فلتر التقرير يصنّف اليدوي بالمصدر الموحّد",
+    HTML.includes("if(!poIsCustomProject(p)||( p.projectName||\"غير محدد\")!==cname) return false;"));
+  T("قائمة مشاريع التقرير تميّز كل يدوي (لا تُنطوى في __OTHER__)",
+    HTML.includes("if(poIsCustomProject(p)){   // v18.9sz: المصدر الموحّد — العلَم أو __OTHER__ (كان __OTHER__ وحده)"));
+
+  // ── لوحة المعلومات: «إجمالي المبالغ المغلقة» يجمع كل المغلق بلا بوّابة مشروع ──
+  T("إجمالي المبالغ المغلقة يجمع كل الطلبات المغلقة (يشمل اليدوية)",
+    HTML.includes("const totalAmount = dashData.filter(poIsClosed).reduce((s,p)=>s+poActualCost(p),0);"));
+
+  // ── مؤشرات الأداء: تميّز كل مشروع يدوي بمفتاحه ──
+  if (KPI_SRC) {
+    const ksrc = KPI_SRC;
+    T("KPI: مصدر موحّد لتصنيف اليدوي", ksrc.includes("function _pkpiIsCustom(p){ return !!p && (p.isCustomProject === true || p.projectId === \"__OTHER__\"); }"));
+    T("★ KPI: كل مشروع يدوي بمفتاح __CUSTOM__ منفصل", ksrc.includes('const key="__CUSTOM__:"+(p.projectName||"غير محدد");'));
+    T("KPI: الفلتر يميّز اليدوي بالاسم", ksrc.includes("list=list.filter(p=>_pkpiIsCustom(p) && (p.projectName||\"غير محدد\")===cname);"));
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   17) تقليل احتكاك مستمعي Firestore — المجموعات العامة تُركَّب مرة وتبقى حيّة (v18.9sz)
+       يخفّف خلل SDK الداخلي (INTERNAL ASSERTION ca9/b815) بمنع تركيب/فكّ متكرّر
+       لمستمعي global_* عند تبديل المشروع/الوضع أو زرّ التحديث.
+   ════════════════════════════════════════════════════════════════════ */
+function listenerChurn() {
+  H("17) تقليل احتكاك مستمعي Firestore (ca9/b815)");
+  const slice = (name) => {
+    const i = HTML.indexOf("function " + name + "(");
+    if (i < 0) return "";
+    return HTML.slice(i, HTML.indexOf("\nfunction ", i + 10));
+  };
+
+  // ── حراس idempotent على دوال المزامنة العامة (لا تُعيد التركيب إن كان المستمع حيّاً) ──
+  T("startPurchaseSync يخرج مبكّراً إن كان _poUnsub حيّاً", slice("startPurchaseSync").includes("if(_poUnsub) return;"));
+  T("loadRFQs يخرج مبكّراً إن كان _rfqUnsub حيّاً", slice("loadRFQs").includes("if(_rfqUnsub) return;"));
+  T("startIssueOrdersSync يخرج مبكّراً إن كان حيّاً", slice("startIssueOrdersSync").includes("if(_issueOrdersUnsub) return;"));
+  T("loadCatalogTypes يخرج مبكّراً إن كان حيّاً", slice("loadCatalogTypes").includes("if(_catTypesUnsub) return;"));
+  T("loadItemCatalog حارس idempotent (يحترم onDone)", slice("loadItemCatalog").includes("if(_catalogUnsub){ if(onDone) onDone(); return; }"));
+  {
+    const inv = slice("startInventorySync");
+    T("startInventorySync: المخزون/السجل/المستودعات كلها بحارس !_x", inv.includes("if(!_invUnsub) _invUnsub =") && inv.includes("if(!_invLogUnsub) _invLogUnsub =") && inv.includes("if(!_whUnsub) _whUnsub ="));
+    T("★ startInventorySync لم يعد يفكّ ثم يُعيد التركيب", !inv.includes("if(_invUnsub) _invUnsub();"));
+  }
+  {
+    const cus = slice("startCustodySync");
+    T("startCustodySync بحارس !_x للعهد والنسخ الموقّعة", cus.includes("if(!_custodyUnsub) _custodyUnsub =") && cus.includes("if(!_custodySignedUnsub) _custodySignedUnsub ="));
+  }
+
+  // ── تبديل المشروع لا يفكّ المستمعين العامّين ولا يصفّر بياناتهم ──
+  {
+    const sw = slice("switchProject");
+    T("★ switchProject لا يفكّ مستمع المشتريات (عام)", !sw.includes("_poUnsub"));
+    T("★ switchProject لا يفكّ مستمع المخزون (عام)", !sw.includes("_invUnsub"));
+    T("switchProject لا يفكّ الكتالوج/التسعير/العهد/أوامر الصرف", !sw.includes("_catalogUnsub") && !sw.includes("_rfqUnsub") && !sw.includes("_custodyUnsub") && !sw.includes("_issueOrdersUnsub"));
+    T("switchProject لا يصفّر بيانات المشتريات/المخزون العامة", !sw.includes("purchases = []") && !sw.includes("_inventoryItems = []"));
+    T("switchProject ما زال يفكّ المستمعين المرتبطين بالمشروع", sw.includes("_ticketsUnsub(); _ticketsUnsub=null;") && sw.includes("_assetsUnsub(); _assetsUnsub=null;") && sw.includes("_ppmUnsub(); _ppmUnsub=null;"));
+    T("switchProject ما زال يصفّر بيانات المشروع", sw.includes("tickets = []; assets = []; ppmPlans = [];"));
+  }
+
+  // ── الخروج من الوضع المركزي لا يفكّ المستمعين العامّين ──
+  {
+    const ex = slice("exitGlobalPurchases");
+    T("★ exitGlobalPurchases لا يفكّ المستمعين العامّين", !ex.includes("_poUnsub") && !ex.includes("_invUnsub") && !ex.includes("_rfqUnsub"));
+    T("exitGlobalPurchases ما زال يفكّ مستمع الإشعارات المرتبط بالمشروع", ex.includes("_notifUnsub(); _notifUnsub=null;"));
+  }
+
+  // ── تسجيل الخروج يفكّ كل شيء (ليُعاد التركيب عند الدخول التالي) ──
+  T("★ logout يفكّ المستمعين العامّين (إعادة تركيب عند الدخول)", slice("logout").includes("_poUnsub(); _poUnsub=null;"));
+  T("logoutToLogin يفكّ المستمعين العامّين أيضاً", slice("logoutToLogin").includes("_poUnsub(); _poUnsub=null;"));
+
+  // ── «حفظ التحديث» لا يتجمّد إن تجمّد عميل Firestore أو تعثّرت الشبكة (مهلة على القراءة الطازجة) ──
+  {
+    const upd = slice("doUpdatePurchaseStatus");
+    T("★ doUpdatePurchaseStatus يحدّ القراءة الطازجة بمهلة (يمنع تجمّد النافذة)",
+      upd.includes("Promise.race([") && upd.includes('new Error("fresh-read-timeout")'));
+    T("doUpdatePurchaseStatus يمضي بالنسخة المحلية عند تعذّر القراءة (catch يحرس)",
+      upd.includes('catch(e){ console.warn("doUpdatePurchaseStatus: fresh-read error/timeout"'));
+  }
+
+  // ── v18.9ub: إتمام §17 لمستمعَي إشعارات سطح المكتب (HailNotify) ──
+  {
+    const hn = slice("startHailNotifications");
+    // مستمع طلبات الشراء (global_purchases — عام): يُركَّب مرة واحدة، لا يُفكّ ويُعاد التركيب مع كل استدعاء
+    T("★ startHailNotifications: مستمع طلبات الشراء (عام) بحارس idempotent (!_hnPOUnsub)",
+      hn.includes("if(!_hnPOUnsub){") && hn.includes("_hnPOUnsub = db.collection(PURCHASES_COLLECTION())"));
+    T("★ لم يعد يفكّ مستمع طلبات الشراء العام مع كل استدعاء",
+      !hn.includes("if(_hnPOUnsub){ _hnPOUnsub(); _hnPOUnsub=null; }"));
+    // مستمع البلاغات (مرتبط بالمشروع): يُعاد تركيبه فقط عند تغيّر المشروع فعلاً
+    T("★ مستمع البلاغات يُعاد تركيبه فقط عند تغيّر المشروع (_hnTicketsProjKey)",
+      hn.includes("_hnTicketsProjKey === _hnProjKey") && hn.includes("_hnTicketsProjKey = _hnProjKey;"));
+  }
+  // كلا المستمعَين يُفكّان عند الخروج (ليُعاد تركيبهما نظيفَين للجلسة التالية)
+  T("★ logout يفكّ مستمعَي HailNotify (idempotent)",
+    slice("logout").includes("_hnTicketsUnsub(); _hnTicketsUnsub=null; _hnTicketsProjKey=null;") &&
+    slice("logout").includes("_hnPOUnsub(); _hnPOUnsub=null;"));
+  T("logoutToLogin يفكّ مستمعَي HailNotify أيضاً",
+    slice("logoutToLogin").includes("_hnTicketsUnsub(); _hnTicketsUnsub=null; _hnTicketsProjKey=null;") &&
+    slice("logoutToLogin").includes("_hnPOUnsub(); _hnPOUnsub=null;"));
+
+  // ── v18.9ub: تحديث وقائي للجلسات الطويلة على الأجهزة الدائمة التشغيل ──
+  // يعالج «الجهاز المحدّد» جذرياً: يُصفّر عدّاد targetId بإعادة تحميلٍ صامتٍ عند طول العمر + غياب المستخدم.
+  T("★ index.html يحوي التحديث الوقائي (visibilitychange + عمر الجلسة)",
+    HTML.includes("_installPreventiveReload") && HTML.includes('addEventListener("visibilitychange"') &&
+    HTML.includes("MAX_UPTIME_MS") && HTML.includes("window._bootT0"));
+  T("★ التحديث الوقائي يُطلَق فقط والتبويب مخفيّ (لا يقطع عملاً ظاهراً)",
+    HTML.includes("if(!document.hidden){ _armed = false; return; }") &&
+    HTML.includes("if(document.hidden){ try{ location.reload();"));
+  T("التحديث الوقائي محروسٌ بوجود Firestore وبعدم إطلاقٍ مزدوج",
+    HTML.includes('if(typeof db==="undefined" || !db) return;') && HTML.includes("if(_armed) return;"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   18) ملف الفاتورة — مصدره المستودع فقط، وبلا اسم مورد مقترح (v18.9sz)
+       رفع المشتريات للفاتورة يبقى في «المرفقات» فقط؛ «ملف الفاتورة» يسجّله
+       المستودع عند التدقيق. ولا يُكتب اسم المورد بجانب الفاتورة (قد يختلف المورّد الفعلي).
+   ════════════════════════════════════════════════════════════════════ */
+function invoiceFileSource() {
+  H("18) ملف الفاتورة — مصدره المستودع فقط");
+  const slice = (name) => {
+    const i = HTML.indexOf("function " + name + "(");
+    if (i < 0) return "";
+    return HTML.slice(i, HTML.indexOf("\nfunction ", i + 10));
+  };
+
+  // ── لا اسم مورد بجانب ملف الفاتورة في بطاقة تفاصيل الطلب ──
+  T("★ بطاقة «ملف الفاتورة» لا تعرض اسم المورد (قد يكون المورّد الفعلي مختلفاً)",
+    !HTML.includes('${_ic("store","ic-sm ic-muted")} ${esc(v.vendor)}'));
+  T("بطاقة «ملف الفاتورة» ما زالت تعرض رقم الفاتورة والسند",
+    HTML.includes("رقم الفاتورة: <b style=\"font-family:'JetBrains Mono',monospace\">${esc(v.invoiceNo)}</b>") && HTML.includes("السند: <b"));
+
+  // ── رفع المشتريات للفاتورة → المرفقات فقط، لا «ملف الفاتورة» ──
+  {
+    const dnw = slice("doNotifyWarehouse");
+    T("★ doNotifyWarehouse لا يكتب p.invoicePhotoUrl (لا يصبح «ملف الفاتورة»)", !dnw.includes("p.invoicePhotoUrl = att.url"));
+    T("doNotifyWarehouse يحفظ الفاتورة في المرفقات", dnw.includes("p.attachments.push(att)"));
+    T("doNotifyWarehouse يوسم مرفق المشتريات بوضوح", dnw.includes('att.label = "فاتورة المورد — مرفوعة من المشتريات (مرجع)"'));
+    T("★ doNotifyWarehouse لا يُدخل المورّد (يسجّله المستودع)", !dnw.includes("p.actualVendor = vendor"));
+    T("نافذة إشعار المستودع أزالت حقل «المورد الفعلي»", !HTML.includes('id="nw-vendor"'));
+  }
+
+  // ── «ملف الفاتورة» الرسمي ما زال يُشتق من سندات المستودع (grnDocs) ──
+  T("p.invoices تُشتق من grnDocs (رفع المستودع)",
+    HTML.includes("pCurrent.invoices = (pCurrent.grnDocs||[]).map(g=>({ grnRef:g.grnRef, invoiceNo:g.invoiceNo||\"\", vendor:g.vendor||\"\", at:g.createdAt||\"\", photoUrl:g.invoicePhotoUrl||\"\" }))"));
+  T("سند الاستلام يحمل فاتورته من نموذج التدقيق (v.photoUrl)",
+    HTML.includes("invoicePhotoUrl: v.photoUrl, // v18.9nr"));
+
+  // ── v18.9ua: إعادة استخدام فاتورة المشتريات في التدقيق (بلا إعادة رفع/تكرار) ──
+  // ملاحظة: slice المحلّية هنا توقيعها slice(name) — تقتطع جسم دالة بالاسم.
+  {
+    const owa = slice("openWarehouseAudit");
+    T("★ openWarehouseAudit يجمع فاتورة المشتريات وأيّ مرفق عام كمرشّحات (مهما كان مسار الرفع)",
+      owa.includes('a.kind==="proc_invoice"') && owa.includes('a.kind==="attachment" || !a.kind') && owa.includes("_waProcInvoices.push"));
+    T("openWarehouseAudit يشمل فاتورة الطلب القديمة (invoicePhotoUrl) كمرشّح للطلب بلا سندات",
+      owa.includes('!((p.grnDocs||[]).length) && p.invoicePhotoUrl'));
+    T("★ openWarehouseAudit يشمل فواتير السندات السابقة (grnDocs) للاستلام على مراحل",
+      owa.includes('(Array.isArray(p.grnDocs)?p.grnDocs:[]).forEach') &&
+      owa.includes('g.invoicePhotoUrl') && owa.includes('فاتورة سند سابق') &&
+      owa.includes('invoiceNo:g.invoiceNo'));
+    T("★ الاستلام على مراحل: فاتورة السند السابق الوحيدة تُختار تلقائياً (مرفوعة ومختارة)",
+      owa.includes("_uniqPrev.length === 1") && owa.includes("onWaInvReuseChange(_sel)") &&
+      owa.includes("مرفوعة بالفعل ومختارة") && owa.includes("x.c.fromGrn"));
+    T("openWarehouseAudit يُحسب المرشّحات قبل رسم بطاقات الفاتورة (waRenderInvoices)",
+      owa.indexOf("_waProcInvoices = []") >= 0 &&
+      owa.indexOf("_waProcInvoices = []") < owa.indexOf("waRenderInvoices()"));
+    T("★ openWarehouseAudit يُعبّئ رقم الفاتورة مسبقاً من رقم المشتريات (p.invoice) قابلاً للتعديل",
+      owa.includes("_waN0.value.trim() && p.invoice"));
+
+    // بطاقة الفاتورة تعرض منتقي إعادة الاستخدام حين توجد مرشّحات
+    const card = slice("_waInvCardHtml");
+    T("بطاقة الفاتورة تعرض منتقي «إعادة استخدام فاتورة المشتريات» عند وجود مرشّحات",
+      card.includes("wa-inv-reuse") && card.includes("onWaInvReuseChange") && card.includes("_waProcInvoices.length"));
+
+    // التجميع يقرأ رابط الفاتورة المُعاد استخدامه (نصّ فريد في index.html)
+    T("★ تجميع الفواتير يقرأ reuseUrl من منتقي المشتريات",
+      HTML.includes(".wa-inv-reuse[data-uid=") && HTML.includes("reuseUrl  : (()=>{"));
+
+    // التحقّق يقبل reuseUrl كمصدر للفاتورة بلا رفع ملف (نصّ فريد)
+    T("★ التدقيق يقبل الفاتورة المُعاد استخدامها (reuseUrl) بلا إلزام رفع ملف",
+      HTML.includes("let inh = v.reuseUrl") && HTML.includes("if(!inh && _isFirstGrn && activeInvs.length===1) inh = p.invoicePhotoUrl"));
+
+    // معالج الاختيار: يُلغي رفع ملف جديد ويُعبّئ الرقم من المرشّح
+    const reuseFn = slice("onWaInvReuseChange");
+    T("onWaInvReuseChange يستعمل نفس الملف (لا يرفع) ويعبّئ الرقم إن كان فارغاً",
+      reuseFn.includes("_waProcInvoices[parseInt(sel.value,10)]") && reuseFn.includes("!noInput.value.trim() && c && c.invoiceNo"));
+    T("رفع ملف جديد يُلغي اختيار إعادة الاستخدام (لا مصدران معاً)",
+      slice("onWaInvoiceFileChange").includes('_reuseSel.value=""'));
+  }
+
+  // ── v18.9ua: توحيد كاتب «ملف الفاتورة» — إخفاء الرفع المستقل الذي يكتب invoicePhotoUrl خارج grnDocs ──
+  T("★ صفّ الرفع المستقل (pu-invoice-photo) مُخفى دائماً — التدقيق هو المصدر الوحيد",
+    HTML.includes('if(_invPhotoRow)  _invPhotoRow.style.display  = "none";') &&
+    !HTML.includes('_invPhotoRow.style.display  = atAuditClose ? "" : "none"'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   19) بطاقة «الطلبات المغلقة» — عددٌ ولونٌ وفلترٌ للطلبات المغلقة (v18.9sz)
+       كانت «معتمدة هذا الشهر»؛ صارت تحسب عدد الطلبات المغلقة (poIsClosed)
+       بأيقونة القفل، ونقرُها يفلتر القائمة على المرحلة المغلقة.
+   ════════════════════════════════════════════════════════════════════ */
+function closedOrdersCard() {
+  H("19) بطاقة «الطلبات المغلقة»");
+  const i = HTML.indexOf('id="po-dash-approved-box"');
+  const tile = i >= 0 ? HTML.slice(i, HTML.indexOf("</div>", HTML.indexOf('class="st-lbl"', i)) + 6) : "";
+  T("★ العنوان صار «الطلبات المغلقة» (لا «معتمدة هذا الشهر»)",
+    tile.includes(">الطلبات المغلقة<") && !tile.includes("معتمدة هذا الشهر"));
+  T("تستخدم أيقونة القفل (مغلق)", tile.includes('<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'));
+  T("نقرُ البطاقة يفلتر على المرحلة المغلقة", tile.includes(`onclick="_poStageFilter('closed')"`));
+
+  // العدّاد = الطلبات المغلقة فعلياً (poIsClosed) — نفس تعريف بطاقة المبالغ المغلقة
+  T("★ العدّاد = عدد الطلبات المغلقة (poIsClosed)",
+    HTML.includes("const closedCount = dashData.filter(poIsClosed).length;") &&
+    HTML.includes('setEl("po-dash-approved", closedCount);'));
+  T("إبراز البطاقة عند تفعيل فلتر المغلقة",
+    HTML.includes('apBox.classList.toggle("tile-active-filter", _pfStatus==="_stage_closed")'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   20) بطاقة «بنود أُضيفت عند الاستلام» — للمسؤول فقط، وتختفي بعد البتّ (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function extrasCardGating() {
+  H("20) بطاقة البنود المُضافة عند الاستلام");
+  const i = HTML.indexOf("function renderExtrasCard(");
+  const fn = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
+  T("★ لا تظهر إلا للمسؤول (الأدمن وحده)",
+    fn.includes('if(!isAdmin()){ card.style.display="none"'));
+  T("★ تختفي بعد البتّ — تُخفى عند غياب المعلّق (افتراضياً)",
+    fn.includes('if(!_xCardAll && !pend.length){ card.style.display="none"'));
+  T("الافتراضي يعرض المعلّق فقط (لا يرتدّ لعرض المبتوت)",
+    fn.includes("const show = _xCardAll ? all : pend;") &&
+    !fn.includes("_xCardAll ? all : (pend.length ? pend : all)"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   21) تعديل المسؤول لطلب الشراء لا يُخرجه من مساره — قائمة الحالة من PO_STATUS (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function adminEditKeepsStatus() {
+  H("21) تعديل المسؤول لا يُخرج الطلب من مساره");
+  const i = HTML.indexOf("function openAdminEditPurchase(");
+  const fn = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
+  T("★ قائمة الحالة تُبنى من المصدر الموحّد PO_STATUS",
+    fn.includes("Object.keys(PO_STATUS).map(k=>`<option value=\"${esc(k)}\">${esc(PO_STATUS[k])}</option>`)"));
+  T("★ الحالة الحالية (المطبَّعة) تُضبط ومحفوظة",
+    fn.includes("const _paeCur = normalizePOStatus(p.status) || \"pending_pm\";") &&
+    fn.includes("paeStatusSel.value = _paeCur;"));
+  T("لم تعد تُضبط قيمة الحالة على قائمة قديمة (p.status||new_request)",
+    !fn.includes('document.getElementById("pae-status").value     = p.status||"new_request";'));
+  // قائمة pae-status في الـ HTML فارغة (تُبنى ديناميكياً) — لا خيارات ثابتة قديمة داخلها
+  T("★ قائمة pae-status فارغة في الـ HTML (تُملأ من PO_STATUS)",
+    HTML.includes('<select class="form-select" id="pae-status"></select>'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   22) تدقيق الاستلام: إضافة بند إضافي لا تمحو كميات صفوف الطلب (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function waExtrasPreserveQty() {
+  H("22) إضافة بند إضافي تحفظ كميات الطلب");
+  T("★ توجد التقاط/استعادة قيم صفوف الطلب (_waCaptureOrig/_waRestoreOrig)",
+    HTML.includes("function _waCaptureOrig(") && HTML.includes("function _waRestoreOrig("));
+  T("_waRestoreOrig يحترم خانة المستودع (src='stock' لا يعيد حسابها)",
+    HTML.includes("waUpdateRow(parseInt(k,10),'stock')"));
+  const add = (()=>{ const i=HTML.indexOf("function waAddExtra("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ waAddExtra يلتقط قيم الصفوف قبل فتح نافذة البند الإضافي", add.includes("_waCaptureOrig();"));
+  const rem = (()=>{ const i=HTML.indexOf("function waRemoveExtra("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("waRemoveExtra يلتقط ويستعيد قيم الصفوف", rem.includes("_waCaptureOrig();") && rem.includes("_waRestoreOrig();"));
+  const form = (()=>{ const i=HTML.indexOf("function _waExtraForm("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ نافذة البند الإضافي تستعيد قيم الصفوف بعد الإضافة", form.includes("_waRestoreOrig();"));
+  T("التقاط القيم يبدأ نظيفاً عند فتح التدقيق", HTML.includes("_waOrigVals = null;   // v18.9sz"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   23) مسؤول المشتريات يحيل الطلب «قيد التنفيذ» للمالية للسداد (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function procToFinance() {
+  H("23) الإحالة للمالية من «قيد تنفيذ المشتريات»");
+  const i = HTML.indexOf("function getAvailableStatuses(");
+  const src = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
+  let fn;
+  try {
+    fn = new Function("currentUser", "getPOTotal", "PO_CEO_THRESHOLD", src + "\nreturn getAvailableStatuses;")(
+      { role: "procurement_officer" }, () => 1000, 50000);
+  } catch (e) { T("تُبنى getAvailableStatuses", false, String(e.message).slice(0, 120)); return; }
+  T("تُبنى getAvailableStatuses", typeof fn === "function");
+  if (typeof fn !== "function") return;
+
+  const opts = fn("proc_executing", {}).map(o => o.v);
+  T("★ مسؤول المشتريات في «قيد التنفيذ» يملك «إحالة للمالية للسداد»", opts.includes("__SEND_TO_FINANCE__"));
+  T("ما زال يملك «تم الشراء — إشعار المستودع»", opts.includes("wh_receiving"));
+  // لا يُمنح لدورٍ لا يملكه (المستودع مثلاً) في هذه المرحلة
+  const whFn = new Function("currentUser", "getPOTotal", "PO_CEO_THRESHOLD", src + "\nreturn getAvailableStatuses;")(
+    { role: "warehouse_manager" }, () => 1000, 50000);
+  T("لا يظهر الخيار لمسؤول المستودع في «قيد التنفيذ»", !whFn("proc_executing", {}).map(o => o.v).includes("__SEND_TO_FINANCE__"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   24) أوامر الصرف: عمود «المستودع» يعرض المستودع لا اسم من صرف (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function issueOrderWarehouseCol() {
+  H("24) عمود المستودع في أوامر الصرف");
+  const sub = (()=>{ const i=HTML.indexOf("async function issueOrderSubmit("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ يُلتقط اسم المستودع من الصنف عند الصرف", sub.includes('warehouseName:(src.warehouseName||"").trim()'));
+  T("اسم المستودع يُحفظ في وثيقة الأمر", sub.includes('warehouseName:it.warehouseName||""'));
+  const ren = (()=>{ const i=HTML.indexOf("function renderIssueOrders("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ عمود «المستودع» يعرض مستودعات أصناف الأمر", ren.includes("const _issWhNames=[...new Set((o.items||[]).map(i=>{") && ren.includes("${_issWhCell}"));
+  T("لم يعد يعرض «من صرف» (issuedBy) في عمود المستودع", !ren.includes('<td style="text-align:center;padding:10px 8px;font-size:11px">${esc(o.issuedBy||"—")}</td>'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   25) أمر الصرف: قائمة المشروع تشمل المشاريع اليدوية المحفوظة (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function issueOrderManualProject() {
+  H("25) مشروع أمر الصرف يشمل اليدوية");
+  const i = HTML.indexOf("function _issProjectOptionsHTML(");
+  const src = i >= 0 ? HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)) : "";
+  let fn;
+  try {
+    fn = new Function("window", "_manualProjectNamesAll", "esc", src + "\nreturn _issProjectOptionsHTML;")(
+      { _projectsList: [{ id: "hail", name: "مشروع رسمي" }] },
+      () => ["مشروع يدوي", "مشروع رسمي"], x => x);
+  } catch (e) { T("تُبنى _issProjectOptionsHTML", false, String(e.message).slice(0, 120)); return; }
+  T("تُبنى _issProjectOptionsHTML", typeof fn === "function");
+  if (typeof fn !== "function") return;
+  const html = fn();
+  T("تحوي المشروع الرسمي", html.includes('<option value="مشروع رسمي">مشروع رسمي</option>'));
+  T("★ تحوي المشروع اليدوي المحفوظ", html.includes('<option value="مشروع يدوي">مشروع يدوي (يدوي)</option>'));
+  T("لا تُكرّر اسماً رسمياً كيدوي", !html.includes('مشروع رسمي (يدوي)'));
+  T("تُبقي خيار الإدخال اليدوي", html.includes('<option value="__OTHER__">إدخال يدوي...</option>'));
+  const init = (()=>{ const j=HTML.indexOf("function initIssueOrderPage("); return j<0?"":HTML.slice(j, HTML.indexOf("\nfunction ", j+10)); })();
+  T("initIssueOrderPage يبني القائمة من المصدر الموحّد ويعيد بناءها بعد تحميل meta",
+    init.includes("_issProjectOptionsHTML()") && init.includes("_loadManualProjectNames().then(_fill)"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   26) مؤشرات المشتريات: «إجمالي الإنفاق (فعلي)» = المغلق فقط (يطابق اللوحة) (v18.9sz)
+   ════════════════════════════════════════════════════════════════════ */
+function kpiSpendClosedOnly() {
+  H("26) الإنفاق الفعلي في المؤشرات = المغلق فقط");
+  if (!KPI_SRC) { console.log("  ⏭  كود purchase-kpi غير موجود — تُخطّى"); return; }
+  const ksrc = KPI_SRC;
+  const sl = (a, b) => ksrc.slice(ksrc.indexOf(a), ksrc.indexOf(b));
+  let kc, ka;
+  try {
+    kc = new Function("poIsClosed", sl("function _kpiClosed(", "function _kpiActual(") + "\nreturn _kpiClosed;")(
+      p => ["closed", "closed_after_receipt"].includes(p.status));
+    ka = new Function("poActualCost", sl("function _kpiActual(", "/* ══ استخراج") + "\nreturn _kpiActual;")(
+      p => Number(p.actualCost) || 0);
+  } catch (e) { T("تُبنى دوال KPI الموحّدة", false, String(e.message).slice(0, 120)); return; }
+  T("_kpiClosed يشمل closed و closed_after_receipt", kc({ status: "closed" }) === true && kc({ status: "closed_after_receipt" }) === true);
+  T("_kpiClosed يستثني غير المغلق", kc({ status: "proc_executing" }) === false);
+  T("_kpiActual يقرأ التكلفة الفعلية", ka({ actualCost: 500 }) === 500);
+  // fallback بلا poIsClosed
+  const kcF = new Function("poIsClosed", sl("function _kpiClosed(", "function _kpiActual(") + "\nreturn _kpiClosed;")(undefined);
+  T("_kpiClosed fallback بالحالة عند غياب poIsClosed", kcF({ status: "closed_after_receipt" }) === true && kcF({ status: "pending_pm" }) === false);
+
+  T("★ totalAct يجمع المغلق فقط (actClosed)", ksrc.includes("totalAct:A.reduce((s,a)=>s+a.actClosed,0)"));
+  T("actClosed = تكلفة المغلق فقط", ksrc.includes("const actClosed = _clo ? _kpiActual(p) : 0;"));
+  T("الإنفاق الشهري الفعلي = المغلق فقط", ksrc.includes("m.est+=a.est; m.act+=a.actClosed;"));
+  T("isClosed من المصدر الموحّد (_clo)", ksrc.includes("isClosed: _clo,"));
+  // مؤشرات الموردين تقرأ المورّد الفعلي (poVendorBreakdown) لا p.vendor المقترح
+  T("★ الإنفاق حسب المورد يقرأ المورّد الفعلي (poVendorBreakdown)",
+    ksrc.includes('if(typeof poVendorBreakdown==="function") parts=poVendorBreakdown(p);'));
+  T("لم يعد يقرأ p.vendor المقترح (a.vendor && a.spend) لمؤشر الموردين",
+    !ksrc.includes("A.forEach(a=>{ if(a.vendor && a.spend>0) byVendor"));
+  // v18.9tb: المورّد يُقرأ من أي حقل ولا يُسقَط إنفاقٌ باسمٍ خالٍ (كان `if(v&&c>0)` يُهمله)
+  T("★ _kpiVendorOf يقرأ كل حقول المورّد (actualVendor/vendors/supplier/vendor/grn/بند)",
+    ksrc.includes("function _kpiVendorOf(p)") &&
+    ksrc.includes("first(p.actualVendor)") && ksrc.includes("first(p.supplier)") &&
+    ksrc.includes("first(p.vendor)") && ksrc.includes('return v || "غير محدد"'));
+  T("★ الفرع الاحتياطي ينسب الإنفاق دون إسقاطٍ باسمٍ خالٍ",
+    ksrc.includes("const v=_kpiVendorOf(p), c=_kpiActual(p);") &&
+    ksrc.includes("if(c>0) byVendor[v]=(byVendor[v]||0)+c;"));
+  // v18.9tc: مخطّط الموردين يحسب المغلقة فقط بالفعلي — يطابق «المبالغ المغلقة» (لا يشمل تقدير المفتوحة)
+  T("★ مخطّط الموردين = المغلقة فقط (اتساق مع أرقام الإنفاق)",
+    ksrc.includes("if(!p || !_kpiClosed(p)) return;"));
+  // v18.9td: مستمع الطلبات يعيد رسم صفحة المؤشرات إن كانت مفتوحة (تمنع المخطّط الفارغ عند الفتح المبكر)
+  T("★ onSnapshot يعيد رسم مؤشرات الأداء إن كانت صفحتها مفتوحة",
+    HTML.includes('document.getElementById("page-purchase-kpi").classList.contains("active")') &&
+    HTML.includes("window.purchaseKPI && window.purchaseKPI.render) window.purchaseKPI.render();"));
+  // v18.9te: كتم رفض App Check/reCAPTCHA العابر فقط (لا يبتلع أي خطأ آخر)
+  T("★ يُكتم رفض reCAPTCHA/App Check العابر حصراً عبر unhandledrejection",
+    HTML.includes('window.addEventListener("unhandledrejection"') &&
+    HTML.includes("/recaptcha|appcheck|app-?check/i.test(m)") &&
+    HTML.includes("ev.preventDefault();"));
+  T("الفرع الاحتياطي يستخدم الفعلي _kpiActual لا التقديري _kpiSpendOf",
+    ksrc.includes("const v=_kpiVendorOf(p), c=_kpiActual(p);") &&
+    !ksrc.includes("const v=_kpiVendorOf(p), c=_kpiSpendOf(p);"));
+  T("_kpiSpendOf أفضل-جهداً (فعلي ثم تقديري ثم مجموع البنود)",
+    ksrc.includes("function _kpiSpendOf(p)") &&
+    ksrc.includes('if(typeof getPOTotal==="function") c=Number(getPOTotal(p))||0;'));
+  // اختبار سلوكي: مغلق بلا مورّد وبتكلفة يُنسب لـ«غير محدد» لا يُسقَط
+  {
+    let _vend, _spend;
+    try {
+      _vend = new Function("getPOTotal", sl("function _kpiVendorOf(", "/* v18.9tb: إنفاقٌ أفضل") + "\nreturn _kpiVendorOf;")(undefined);
+      _spend = new Function("getPOTotal", sl("function _kpiSpendOf(", "\n/* ══") + "\nreturn _kpiSpendOf;")(undefined);
+    } catch (e) { T("تُبنى _kpiVendorOf/_kpiSpendOf", false, String(e.message).slice(0, 120)); }
+    if (typeof _vend === "function") {
+      T("_kpiVendorOf: supplier عند غياب actualVendor/vendor", _vend({ supplier: "مورّد عرض" }) === "مورّد عرض");
+      T("_kpiVendorOf: vendors[] أولاً", _vend({ vendors: [{ vendor: "أ" }], vendor: "ب" }) === "أ");
+      T("_kpiVendorOf: بند عند غياب الحقول العليا", _vend({ items: [{ vendor: "بند-مورّد" }] }) === "بند-مورّد");
+      T("_kpiVendorOf: «غير محدد» عند غياب الكل", _vend({ actualCost: 500 }) === "غير محدد");
+    }
+    if (typeof _spend === "function") {
+      T("_kpiSpendOf: actualCost أولاً", _spend({ actualCost: 700 }) === 700);
+      T("_kpiSpendOf: مجموع البنود احتياطاً", _spend({ items: [{ qty: 2, price: 50 }, { total: 100 }] }) === 200);
+    }
+  }
+
+  // v18.9tf: فرع poVendorBreakdown كان يقبل سنتينل «غير محدد» كاسمٍ نهائي، فلا يستدعي
+  // _kpiVendorOf — فيُدفن مورّد supplier/items تحت «غير محدد» رغم وعد tb. الحارس المصدري:
+  T("★ فرع السندات يستردّ الاسم عند سنتينل «غير محدد» لا عند الفراغ فقط (tf)",
+    ksrc.includes('if(!v||v==="غير محدد") v=_kpiVendorOf(p);'));
+
+  // ── تأكيد سلوكي شامل: computeKPIs الحقيقي يملأ K.vendors بالأسماء الصحيحة ──
+  {
+    let computeKPIs;
+    try {
+      const block = ksrc.slice(ksrc.indexOf("const DAY = 86400000;"), ksrc.indexOf("/* ══════════════════ الواجهة"));
+      const _poVB = p => { // نسخة index.html: يقرأ actualVendor/vendor/grn فقط (لا supplier/items)
+        if (!p) return [{ vendor: "غير محدد", cost: 0 }];
+        const closed = p.status === "closed" || p.status === "closed_after_receipt";
+        const grn = (closed && Array.isArray(p.grnDocs)) ? p.grnDocs.filter(g => g && ((g.vendor || "").trim() || g.invoicedTotal != null)) : [];
+        if (grn.length) { const m = {}; grn.forEach(g => { const v = (g.vendor || "").trim() || (p.actualVendor || "").trim() || p.vendor || "غير محدد"; m[v] = (m[v] || 0) + (parseFloat(g.invoicedTotal) || 0); }); return Object.keys(m).map(v => ({ vendor: v, cost: m[v] })); }
+        const v = (p.actualVendor || "").trim() || p.vendor || "غير محدد";
+        return [{ vendor: v, cost: closed ? (Number(p.actualCost) || 0) : 0 }];
+      };
+      computeKPIs = new Function(
+        "poIsClosed", "poActualCost", "getPOTotal", "poVendorBreakdown",
+        "STAGE_ORDER", "REJECT_CODES", "TERMINAL_CODES", "parseTS", "normStatus",
+        block + "\nreturn computeKPIs;")(
+          p => p.status === "closed" || p.status === "closed_after_receipt",
+          p => Number(p.actualCost) || 0, p => Number(p.estCost) || 0, _poVB,
+          ["pending_pm", "pm_approved", "wh_review", "wh_reviewed", "pending_proc", "pending_ceo", "pending_finance", "proc_executing", "wh_receiving", "wh_auditing", "pending_extra", "closed"],
+          ["pm_rejected", "wh_rejected", "ceo_rejected", "rejected"],
+          ["closed", "rejected", "cancelled", "deleted", "pm_rejected", "wh_rejected", "ceo_rejected"],
+          v => v ? new Date(v).getTime() || null : null, s => s);
+    } catch (e) { T("يُبنى computeKPIs للتأكيد السلوكي", false, String(e.message).slice(0, 140)); }
+    if (typeof computeKPIs === "function") {
+      const D = "2026-07-10T09:00:00Z";
+      const K = computeKPIs([
+        { id: "a", status: "closed", actualCost: 2500, estCost: 2600, createdAt: D, vendor: "قديم", grnDocs: [{ vendor: "مصقول", invoicedTotal: 2500 }] },
+        { id: "b", status: "closed_after_receipt", actualCost: 1800, estCost: 1700, createdAt: D, actualVendor: "انوار" },
+        { id: "c", status: "closed", actualCost: 900, estCost: 1000, createdAt: D, supplier: "سنابل" },      // supplier فقط
+        { id: "d", status: "closed", actualCost: 1000, estCost: 1100, createdAt: D, items: [{ vendor: "الاجتهاد", qty: 5, price: 200 }] }, // بند فقط
+        { id: "e", status: "closed", actualCost: 500, estCost: 500, createdAt: D },                          // بلا اسم
+        { id: "f", status: "pending_ceo", estCost: 40000, createdAt: D, vendor: "مفتوح" },                   // مفتوح — يُستبعد
+      ]);
+      const spend = v => { const e = K.vendors.find(x => x[0] === v); return e ? e[1] : 0; };
+      T("★ مخطّط الموردين غير فارغ (يظهر) بعد المعالجة", K.vendors.length > 0, "length=" + K.vendors.length);
+      T("★ مجموع المخطّط = 6,700 (يطابق «المبالغ المغلقة»)", K.vendors.reduce((s, v) => s + v[1], 0) === 6700);
+      T("★ مورّد supplier (المحوّل من عرض) يظهر باسمه لا «غير محدد» (tf)", spend("سنابل") === 900);
+      T("★ مورّد البند items[] يظهر باسمه لا «غير محدد» (tf)", spend("الاجتهاد") === 1000);
+      T("مغلق بلا اسم يُنسب لـ«غير محدد» بقيمته (لا يسقط)", spend("غير محدد") === 500);
+      T("مورّد السند بقيمته الفعلية", spend("مصقول") === 2500);
+      T("المفتوح (40,000 تقديري) مُستبعَد من المخطّط", !K.vendors.some(v => v[0] === "مفتوح"));
+    }
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1132,6 +2010,19 @@ function rollupMonthIsolation() {
   writeRaceRoot();
   stocktakeTests();
   vendorSummary();
+  actualCostFromItems();
+  financialInvariants();
+  manualProjectCosts();
+  listenerChurn();
+  invoiceFileSource();
+  closedOrdersCard();
+  extrasCardGating();
+  adminEditKeepsStatus();
+  waExtrasPreserveQty();
+  procToFinance();
+  issueOrderWarehouseCol();
+  issueOrderManualProject();
+  kpiSpendClosedOnly();
   auditRound2();
   dateBucketing();
   auditRound2Medium();

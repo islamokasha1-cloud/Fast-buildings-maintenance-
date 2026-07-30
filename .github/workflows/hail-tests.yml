@@ -5,7 +5,6 @@ on:
     paths:
       # كل ملفٍ يفحصه hail-tests — أي إغفال يعني أن push مباشراً له لا يُشغّل CI.
       - 'index.html'
-      - 'purchase-kpi.js'
       - 'labor-catalog.js'
       - 'price-analysis.js'
       - 'stocktake.js'
