@@ -22,9 +22,30 @@ const ROW_H = 52;
 const ROW_GAP = 10;
 const PAD_TOP = 18;
 const CURSOR = 15;
-const INTERVAL = 26;
+const INTERVAL = 17;
+const SHIMMER_PERIOD = 55;
 
 const topOf = (i: number) => PAD_TOP + i * (ROW_H + ROW_GAP) + ROW_H / 2 - CURSOR / 2;
+
+const SkeletonLine: React.FC<{ width: string; phase: number }> = ({ width, phase }) => {
+  const frame = useCurrentFrame();
+  const loop = (frame + phase) % SHIMMER_PERIOD;
+  const x = interpolate(loop, [0, SHIMMER_PERIOD], [-60, 160]);
+  return (
+    <div style={{ height: 16, width, background: colors.surface2, borderRadius: 6, overflow: "hidden", position: "relative" }}>
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          width: "40%",
+          left: `${x}%`,
+          background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent)",
+        }}
+      />
+    </div>
+  );
+};
 
 export const Scene3ProductMockup: React.FC = () => {
   const frame = useCurrentFrame();
@@ -119,9 +140,9 @@ export const Scene3ProductMockup: React.FC = () => {
                 ))}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
-                <div style={{ height: 16, width: "100%", background: colors.surface2, borderRadius: 6 }} />
-                <div style={{ height: 16, width: "82%", background: colors.surface2, borderRadius: 6 }} />
-                <div style={{ height: 16, width: "60%", background: colors.surface2, borderRadius: 6 }} />
+                <SkeletonLine width="100%" phase={0} />
+                <SkeletonLine width="82%" phase={12} />
+                <SkeletonLine width="60%" phase={24} />
               </div>
             </div>
           </div>

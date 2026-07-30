@@ -1,7 +1,8 @@
 import React from "react";
-import { AbsoluteFill } from "remotion";
+import { AbsoluteFill, useCurrentFrame } from "remotion";
 import { colors, shadow, FONT_UI } from "../tokens";
 import { Reveal } from "../Reveal";
+import { pulse } from "../pulse";
 import { IconPhone, IconCalendar, IconBox, IconCircleX, IconCheck } from "../icons";
 
 const painItems = [
@@ -12,6 +13,9 @@ const painItems = [
 ];
 
 export const Scene2Ledger: React.FC = () => {
+  const frame = useCurrentFrame();
+  const checkPulse = pulse(frame, 45, 0.08);
+
   return (
     <AbsoluteFill style={{ background: colors.bg, alignItems: "center", justifyContent: "center", fontFamily: FONT_UI, direction: "rtl", padding: 100 }}>
       <Reveal delay={2} style={{ marginBottom: 26 }}>
@@ -49,7 +53,7 @@ export const Scene2Ledger: React.FC = () => {
           <Reveal delay={100} y={12}>
             <div style={{ marginTop: 24, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12, fontSize: 21, color: colors.accent, fontWeight: 700 }}>
               <span>متزامن الآن</span>
-              <span style={{ width: 34, height: 34, borderRadius: "50%", background: "#eafbf3", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ width: 34, height: 34, borderRadius: "50%", background: "#eafbf3", display: "flex", alignItems: "center", justifyContent: "center", scale: checkPulse }}>
                 <IconCheck width={18} height={18} />
               </span>
             </div>

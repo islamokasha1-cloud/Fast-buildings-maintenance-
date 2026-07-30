@@ -2,6 +2,7 @@ import React from "react";
 import { AbsoluteFill, Easing, interpolate, useCurrentFrame } from "remotion";
 import { colors, FONT_UI } from "../tokens";
 import { Reveal } from "../Reveal";
+import { pulse } from "../pulse";
 
 const STEPS = ["المكتب الفني", "مدير المشروع", "مدير المشاريع", "المالية", "المدير التنفيذي"];
 const START = 20;
@@ -34,9 +35,11 @@ export const Scene5Stepper: React.FC = () => {
           {STEPS.map((label, i) => {
             const litAt = START + i * STEP_GAP;
             const lit = frame >= litAt;
-            const knobScale = interpolate(frame, [litAt, litAt + 10], [1, 1.15], {
+            const settleAt = litAt + 8;
+            const pop = interpolate(frame, [litAt, settleAt], [1, 1.2], {
               extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.bezier(0.16, 1, 0.3, 1),
             });
+            const knobScale = frame > settleAt ? pulse(frame + i * 15, 65, 0.05) : pop;
             return (
               <div key={label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "0 8px" }}>
                 <div

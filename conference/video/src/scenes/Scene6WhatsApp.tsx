@@ -1,9 +1,13 @@
 import React from "react";
-import { AbsoluteFill } from "remotion";
+import { AbsoluteFill, useCurrentFrame } from "remotion";
 import { colors, shadowLg, FONT_UI } from "../tokens";
 import { Reveal } from "../Reveal";
+import { pulseOpacity } from "../pulse";
 
 export const Scene6WhatsApp: React.FC = () => {
+  const frame = useCurrentFrame();
+  const dotOpacity = pulseOpacity(frame, 40, 0.45, 1);
+
   return (
     <AbsoluteFill style={{ background: colors.bg, alignItems: "center", justifyContent: "center", fontFamily: FONT_UI, direction: "rtl", padding: 100 }}>
       <Reveal delay={2} style={{ marginBottom: 30 }}>
@@ -16,7 +20,7 @@ export const Scene6WhatsApp: React.FC = () => {
           <div style={{ height: 62, background: "#1a2b31", display: "flex", alignItems: "center", gap: 12, padding: "0 20px" }}>
             <span style={{ width: 36, height: 36, borderRadius: "50%", background: colors.primary, color: "#fff", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800 }}>FB</span>
             <span style={{ fontSize: 19, color: "#e9f2f1", fontWeight: 700 }}>الدعم الفني</span>
-            <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#4fd67a", marginRight: "auto" }} />
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#4fd67a", marginRight: "auto", opacity: dotOpacity }} />
           </div>
 
           <Reveal delay={24} y={30} style={{ position: "absolute", bottom: 44, right: 24, left: 24 }}>

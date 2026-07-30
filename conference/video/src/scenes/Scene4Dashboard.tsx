@@ -3,6 +3,7 @@ import { AbsoluteFill, Easing, interpolate, useCurrentFrame } from "remotion";
 import { colors, shadow, FONT_UI, FONT_MONO } from "../tokens";
 import { Reveal } from "../Reveal";
 import { IconShield, IconBars, IconCheck } from "../icons";
+import { pulse } from "../pulse";
 
 const STATS = [
   { icon: IconShield, target: 42, suffix: "+", label: "عاماً من الخبرة — منذ ١٩٨٣", accent: colors.primary, tint: "#eaf0fb" },
@@ -21,12 +22,14 @@ const useCount = (target: number, delay: number) => {
   return Math.round(target * p);
 };
 
-const StatCard: React.FC<(typeof STATS)[number] & { delay: number }> = (s) => {
+const StatCard: React.FC<(typeof STATS)[number] & { delay: number; phase: number }> = (s) => {
   const value = useCount(s.target, s.delay + 14);
+  const frame = useCurrentFrame();
+  const iconScale = pulse(frame + s.phase, 70, 0.07);
   return (
     <Reveal delay={s.delay} style={{ flex: 1 }}>
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderTop: `4px solid ${s.accent}`, borderRadius: 18, boxShadow: shadow, padding: "26px 22px", textAlign: "right" }}>
-        <div style={{ width: 50, height: 50, borderRadius: 12, background: s.tint, color: s.accent, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+        <div style={{ width: 50, height: 50, borderRadius: 12, background: s.tint, color: s.accent, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16, scale: iconScale }}>
           <s.icon width={24} height={24} />
         </div>
         <div style={{ fontFamily: FONT_MONO, fontSize: 44, fontWeight: 700, color: s.accent }}>{value}{s.suffix}</div>
@@ -50,7 +53,7 @@ export const Scene4Dashboard: React.FC = () => {
 
       <div style={{ display: "flex", gap: 28, width: 1500 }}>
         {STATS.map((s, i) => (
-          <StatCard key={s.label} {...s} delay={16 + i * 8} />
+          <StatCard key={s.label} {...s} delay={16 + i * 8} phase={i * 20} />
         ))}
       </div>
 
