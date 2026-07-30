@@ -8,7 +8,8 @@
 import { Config } from "@remotion/cli/config";
 import { enableTailwind } from '@remotion/tailwind-v4';
 
-Config.setVideoImageFormat("jpeg");
+Config.setVideoImageFormat("png");
+Config.setCrf(14);
 Config.setOverwriteOutput(true);
 Config.overrideWebpackConfig(enableTailwind);
 Config.setBrowserExecutable(
