@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vc";
+const MODULE_BUILD = "v18.9vd";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -1934,6 +1934,25 @@ function injectSidebarButton(){
   else nav.insertBefore(btn, nav.firstChild);
 }
 
+/* ══ إخفاء مجموعات القائمة الجانبية غير المتعلّقة بعقد النظافة ══
+   في مشروع النظافة لا معنى لإدارة الأصول ولا المخزون ولا كتالوج البنود والأسعار ولا
+   طلبات التسعير — تُخفى مجموعاتُها (الترويسة + الجسم) من القائمة الجانبية. **إخفاءُ عرضٍ
+   فقط**: لا حذفَ بياناتٍ ولا لمسَ منطق؛ والمجموعات تعود كاملةً في مشاريع الصيانة/المشتريات
+   (نستعيد فقط ما أخفيناه نحن — عبر وسمِ coHidden — فلا نمسّ مجموعةً مخفيّةً أصلاً كالعُهد).
+   يُعاد التطبيق مع كل تبديلِ مشروعٍ لأن النواة تُعيد بناء القائمة (نفس سبب إعادة حقن الزرّ). */
+const CLEANING_HIDDEN_GROUPS = ["assets","inventory","catalog","rfq"];
+function applyNavGroupVisibility(){
+  const hide=isCleaningProject();
+  CLEANING_HIDDEN_GROUPS.forEach(g=>{
+    ["hdr-grp-"+g, "grp-"+g].forEach(id=>{
+      const el=document.getElementById(id);
+      if(!el) return;
+      if(hide){ el.dataset.coHidden="1"; el.style.setProperty("display","none","important"); }
+      else if(el.dataset.coHidden){ el.style.removeProperty("display"); delete el.dataset.coHidden; }
+    });
+  });
+}
+
 /* ══ حقن نوع «إدارة نظافة» في نافذتَي إنشاء/تعديل المشروع دون تعديل index.html ══
    index.html ملفٌ ضخم (٢.٤ ميغابايت)، فنبقيه بلا إضافاتٍ وظيفية: نلفّ دالتَي فتح
    النافذتين (نفس نمط لفّ showPage الذي تستعمله وحدات المنصة) ونُلحق الخيار بالقائمة
@@ -2027,8 +2046,10 @@ function _watchProject(){
       // ارفع لوحات النظافة فوراً عند مغادرة مشروع النظافة — قبل معرفة نوع الجديد
       unmountExec(); unmountDaily(); unmountKPI();
       _monthLog=null; _monthLogFor="";
+      applyNavGroupVisibility();   // خروجاً: أعِد المجموعات فوراً قبل معرفة نوع الجديد
       ensureTypeKnown(()=>{
         injectSidebarButton();
+        applyNavGroupVisibility();  // دخولاً: أخفِها إن كان الجديدُ نظافةً
         if(_onPage()) render();
         // أعِد تركيب الصفحة المعروضة حسب نوع المشروع الجديد
         const dash=document.getElementById("page-dashboard");
@@ -2224,12 +2245,13 @@ function init(){
   hookProjectModals();
   hookRepopulate();
   hookPhotoReport();
-  ensureTypeKnown(()=>{ injectSidebarButton(); _prefetch(); });
+  ensureTypeKnown(()=>{ injectSidebarButton(); applyNavGroupVisibility(); _prefetch(); });
   injectSidebarButton();
+  applyNavGroupVisibility();
   _prefetch();
   _watchProject();
   // القائمة الجانبية يُعاد بناؤها بعد الدخول/تبديل المشروع — أعِد الحقن عند التغيير
-  const obs=new MutationObserver(()=>{ injectSidebarButton(); hookShowPage(); hookProjectModals(); hookRepopulate(); hookPhotoReport(); injectPhotoSourceFilter(); });
+  const obs=new MutationObserver(()=>{ injectSidebarButton(); applyNavGroupVisibility(); hookShowPage(); hookProjectModals(); hookRepopulate(); hookPhotoReport(); injectPhotoSourceFilter(); });
   obs.observe(document.body,{childList:true,subtree:true});
 }
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", init);

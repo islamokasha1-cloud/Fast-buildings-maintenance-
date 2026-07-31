@@ -2466,6 +2466,27 @@ function cleaningOpsTests() {
     T("خريطةٌ فارغةٌ ⟵ كلُّ المباني بلا مشرف", CO._unassignedBuildings(allB, {}, null).length === 5);
   }
 
+  // ══ ★ v18.9vd: إخفاءُ مجموعات القائمة غير المتعلّقة بعقد النظافة ══
+  // في مشروع النظافة لا معنى لإدارة الأصول/المخزون/كتالوج البنود والأسعار/طلبات التسعير.
+  // تُخفى مجموعاتُها (عرضاً فقط، بلا حذفِ بياناتٍ ولا لمسِ منطق) وتعود في الصيانة/المشتريات.
+  T("★ الأربعُ المستهدَفة فقط لا غير (أصول/مخزون/كتالوج/تسعير)",
+    /const CLEANING_HIDDEN_GROUPS = \["assets","inventory","catalog","rfq"\]/.test(src));
+  T("★ الإخفاء مبنيٌّ على isCleaningProject ويطال الترويسةَ والجسمَ معاً",
+    /function applyNavGroupVisibility\(\)\{\s*const hide=isCleaningProject\(\)/.test(src) &&
+    /\["hdr-grp-"\+g, "grp-"\+g\]/.test(src));
+  T("★ إخفاءُ عرضٍ فقط، ويُستعاد ما أخفيناه وحده (وسم coHidden لا يمسّ العُهدَ المخفيّة أصلاً)",
+    /el\.dataset\.coHidden="1"; el\.style\.setProperty\("display","none","important"\)/.test(src) &&
+    /else if\(el\.dataset\.coHidden\)\{ el\.style\.removeProperty\("display"\); delete el\.dataset\.coHidden;/.test(src));
+  T("★ يُعاد التطبيق عند التركيب وإعادة بناء القائمة وتبديل المشروع",
+    (src.match(/applyNavGroupVisibility\(\)/g) || []).length >= 5);
+  // حارسُ الأهداف: معرّفاتُ المجموعات في index.html يجب أن تبقى مطابقةً للمُخفية
+  T("★ معرّفاتُ المجموعات الأربع ما زالت في index.html (أهدافُ الإخفاء غيرُ مكسورة)",
+    ['grp-assets', 'grp-inventory', 'grp-catalog', 'grp-rfq']
+      .every(g => HTML.includes('id="' + g + '"') && HTML.includes('id="hdr-' + g + '"')));
+  // لا نُخفي ما لم يُطلَب: طلبات الشراء وإدارة المشاريع تبقى في مشاريع النظافة
+  T("طلباتُ الشراء وإدارةُ المشاريع لا تُخفى (خارج القائمة المستهدَفة)",
+    !/CLEANING_HIDDEN_GROUPS[^\n]*"po"/.test(src) && !/CLEANING_HIDDEN_GROUPS[^\n]*"projects"/.test(src));
+
   // ══ ★ عموميّة المشاريع: أيُّ مشروع نظافةٍ جديدٍ يعمل بنفس المنطق ══
   T("★ لا معرّفَ مشروعٍ مثبَّتٌ في الوحدة إطلاقاً",
     !/["'`](hail|bathroom001)["'`]/.test(src) && !/hail_/.test(src));
