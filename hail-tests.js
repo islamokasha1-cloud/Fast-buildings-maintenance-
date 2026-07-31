@@ -1460,6 +1460,31 @@ function procToFinance() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   23-ب) دمج مشروع يدوي في مشروع رسمي — إعادة ربط طلبات الشراء (v18.9vj)
+   ════════════════════════════════════════════════════════════════════ */
+function mergeManualProject() {
+  H("23-ب) دمج مشروع يدوي في مشروع رسمي");
+  // الأداة والزر والنافذة موجودة
+  T("★ زر «دمج مشروع يدوي» في ترويسة المشتريات (للمسؤول)",
+    HTML.includes('id="po-merge-proj-btn"') && HTML.includes('onclick="openMergeProjectModal()"'));
+  T("نافذة الدمج موجودة بحقولها (المصدر/الهدف/السبب)",
+    HTML.includes('id="modal-po-merge-project"') && HTML.includes('id="mp-manual"') &&
+    HTML.includes('id="mp-target"') && HTML.includes('id="mp-reason"'));
+  // اختيار الطلبات المطابقة = يدوية بنفس الاسم (المصدر الموحّد لتصنيف اليدوي)
+  const mpm = (()=>{ const i=HTML.indexOf("function _mpManualPOs("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ _mpManualPOs يطابق الطلبات اليدوية بنفس الاسم",
+    mpm.includes('(p.isCustomProject || p.projectId==="__OTHER__")') && mpm.includes('String(p.projectName||"").trim()===nm'));
+  // منطق الدمج: يكتب معرّفاً رسمياً ويُلغي علَم اليدوي
+  const dm = (()=>{ const i=HTML.indexOf("async function doMergeProject("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ الدمج يكتب projectId الرسمي ويُلغي isCustomProject",
+    dm.includes("p.projectId=target.id") && dm.includes("p.isCustomProject=false"));
+  T("الدمج يستعمل دفعة Firestore ويسجّل قيداً زمنياً لكل طلب",
+    dm.includes("db.batch()") && dm.includes("p.timeline.push(") && dm.includes("b.commit()"));
+  T("الدمج محميّ بصلاحية المسؤول وسبب إلزامي وتأكيد",
+    dm.includes('currentUser.role!=="admin"') && dm.includes("if(!reason)") && dm.includes("showConfirm(") && dm.includes("logAudit("));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    24) أوامر الصرف: عمود «المستودع» يعرض المستودع لا اسم من صرف (v18.9sz)
    ════════════════════════════════════════════════════════════════════ */
 function issueOrderWarehouseCol() {
@@ -2782,6 +2807,7 @@ function cleaningOpsTests() {
   adminEditKeepsStatus();
   waExtrasPreserveQty();
   procToFinance();
+  mergeManualProject();
   issueOrderWarehouseCol();
   issueOrderManualProject();
   kpiSpendClosedOnly();
