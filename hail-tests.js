@@ -2798,6 +2798,69 @@ function cleaningOpsTests() {
     /JetBrains Mono/.test(cssBlock) && /tabular-nums/.test(cssBlock));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   27) إصلاحات المراجعة الشاملة (v18.9vl) — حرّاس مصدرية:
+       • #3 (حرج): الاستلام الجزئي لنفس البند عبر جلستين — التدقيق يخزّن الكمية
+         والتكلفة التراكميّتين (cumRcv) لا كمية الجلسة وحدها.
+       • #2 (H1): تقرير الطلبات يهرّب p.id/itemName/supervisor (XSS مخزّن).
+       • #5a: مراجعة المخزون الفاشلة تُطلق الحارس الدائم (بلا خصم مزدوج).
+       • #5b: كاشف التقادم يحرس cleaning-operations.js وبصمتها تطابق APP_VERSION.
+   ════════════════════════════════════════════════════════════════════ */
+function comprehensiveReviewV18_9vl() {
+  H("27) إصلاحات المراجعة الشاملة (v18.9vl)");
+
+  // ── #3: التدقيق يعيد بناء البند على cumRcv التراكمي ──
+  T("★ #3: rcvQty في بناء بنود التدقيق تراكميّ (cumRcv) لا كمية الجلسة",
+    HTML.includes("rcvQty    : _cumQ,") &&
+    /_cumQ\s*=\s*Number\(a\.cumRcv\)/.test(HTML));
+  T("★ #3: التكلفة (itemCost/lineTotal/vat) تُعاد على cumRcv باصطلاح الوحدة",
+    HTML.includes("const _cTot  = Math.round((_cUnit+_cVatU)*_cumQ*100)/100;") &&
+    HTML.includes("itemCost  : _cTot,") && HTML.includes("lineTotal : _cNet,") &&
+    HTML.includes("vat       : _cVat,"));
+  T("★ #3: لم يعُد يُخزَّن rcvQty:a.rcvQty الجلسيّ في بناء البنود (منع التراجع)",
+    !HTML.includes("rcvQty    : a.rcvQty,"));
+  // سلوكي: بندٌ استُلم 5 ثم 5 (cumRcv=10) بسعر 100 ⇒ التكلفة على 10 لا 5.
+  {
+    const _u = 100, _cum = 10;
+    const _vatU = Math.round(_u * 0.15 * 100) / 100;
+    const _net = Math.round(_u * _cum * 100) / 100;
+    const _tot = Math.round((_u + _vatU) * _cum * 100) / 100;
+    T("★ #3: تكلفة البند المُقسَّم = على التراكمي (10×115 = 1150)",
+      _tot === 1150 && _net === 1000, `total=${_tot} net=${_net}`);
+  }
+
+  // ── #2 (H1): تهريب حقول تقرير الطلبات ──
+  T("★ #2: تقرير الطلبات يهرّب رقم الطلب (esc(p.id))",
+    HTML.includes('border-radius:4px">${esc(p.id)}</span></td>'));
+  T("★ #2: تقرير الطلبات يهرّب اسم المادة (esc(p.itemName))",
+    HTML.includes(':`${esc(p.itemName)}`}</td>'));
+  T("★ #2: تقرير الطلبات يهرّب طالب المواد (esc(p.supervisor))",
+    HTML.includes('${esc(p.supervisor||"—")}</td>'));
+
+  // ── #5a: تراجُع الحارس الدائم عند فشل مراجعة المخزون ──
+  T("★ #5a: catch مراجعة المخزون يُطلق الحارس فقط إن لم يُطبَّق الخصم",
+    HTML.includes("if(!_stockApplied) _reviewedPOIds.delete(poId);"));
+  T("★ #5a: علم _stockApplied يُرفع بعد نجاح الخصم فعلاً",
+    HTML.includes("_stockApplied = true;"));
+  T("★ #5a: مسارات الخروج قبل الكتابة تُطلق الحارس (لا حبس بلا مراجعة)",
+    (HTML.match(/_reviewedPOIds\.delete\(poId\)/g) || []).length >= 4);
+
+  // ── #5b: كاشف التقادم يحرس cleaning-operations.js وبصمتها في اللقب ──
+  T("★ #5b: REG يسجّل cleaning-operations عبر window.cleaningOps",
+    /name:"cleaning-operations\.js",\s*get:function\(\)\{ return window\.cleaningOps; \}/.test(HTML));
+  const _coSrc = fs.existsSync(path.resolve(path.dirname(IDX), "cleaning-operations.js"))
+    ? fs.readFileSync(path.resolve(path.dirname(IDX), "cleaning-operations.js"), "utf8") : "";
+  const _coBuild = (_coSrc.match(/const MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
+  T("★ #5b: بصمة cleaning-operations.js تطابق APP_VERSION (تمنع الانحراف الصامت)",
+    _coBuild === VER, `MODULE_BUILD=${_coBuild}  APP_VERSION=${VER}`);
+  T("★ #5c: مُرشّح مسارات CI يشمل الوحدتين الكبيرتين",
+    (() => {
+      const wf = fs.existsSync(path.resolve(path.dirname(IDX), ".github/workflows/hail-tests.yml"))
+        ? fs.readFileSync(path.resolve(path.dirname(IDX), ".github/workflows/hail-tests.yml"), "utf8") : "";
+      return wf.includes("'cleaning-operations.js'") && wf.includes("'project-management.js'");
+    })());
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -2830,6 +2893,7 @@ function cleaningOpsTests() {
   auditRound2Medium();
   fuzz();
   rollupMonthIsolation();
+  comprehensiveReviewV18_9vl();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }

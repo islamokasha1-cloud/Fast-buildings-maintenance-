@@ -9,6 +9,8 @@ on:
       - 'price-analysis.js'
       - 'stocktake.js'
       - 'substitute-budget.js'
+      - 'project-management.js'
+      - 'cleaning-operations.js'
       - 'HailNotify.js'
       - 'hail-tests.js'
       - '.github/workflows/hail-tests.yml'
