@@ -1,18 +1,31 @@
 // هوية شركة المباني السريعة للمقاولات
-// مستخرجة من ألوان النظام الأساسي (index.html)
+// مطابقة لتوكنات تصميم المنصة (متغيّرات CSS في index.html — الوضع الفاتح)
 export const theme = {
-  navy: "#1b3a6b",
-  navyDeep: "#122a4f",
-  navyDark: "#0d1f3c",
-  green: "#0a7c59",
-  greenDeep: "#166534",
-  amber: "#b45309",
-  gold: "#d4a017",
-  slate: "#64748b",
-  ink: "#0f172a",
-  paper: "#f8fafc",
+  // خلفيات المنصة
+  bg: "#eef2f7", // خلفية الصفحة الرمادية
+  surface2: "#f4f7fb", // سطح ثانوي
+  surface: "#ffffff", // الكروت البيضاء
+  border: "#dde3ed", // حدود الكروت
+
+  // الألوان الأساسية
+  primary: "#1b3a6b", // الأزرق الكحلي
+  primaryL: "#254f92",
+  primaryD: "#14305c",
+  accent: "#0a7c59", // الأخضر
+  accentL: "#0f9d72",
+  warn: "#a06010", // الكهرماني
+  danger: "#b92c2c",
+
+  // النص
+  ink: "#1a202c",
+  muted: "#64748b",
   white: "#ffffff",
-  cloud: "#e2e8f0",
+
+  // تدرّج بانر الـ hero (من page-hero في المنصة)
+  heroGradient: "linear-gradient(135deg,#14305c 0%,#1b3a6b 55%,#254f92 100%)",
+  // ظل الكروت (var(--shadow))
+  cardShadow: "0 1px 4px rgba(0,0,0,0.07)",
+  cardShadowLg: "0 8px 24px rgba(20,48,92,0.10)",
 };
 
 export const fps = 30;

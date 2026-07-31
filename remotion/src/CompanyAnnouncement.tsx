@@ -1,18 +1,38 @@
 import React from "react";
 import {
   AbsoluteFill,
-  Img,
   Sequence,
   interpolate,
   spring,
-  staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
 import { theme } from "./theme";
 import { headingFont, bodyFont } from "./fonts";
-import { AccentBar, BlueprintBackground, RevealText } from "./components";
+import {
+  Card,
+  HeroBanner,
+  IconChip,
+  KpiBar,
+  LogoChip,
+  PlatformCanvas,
+  RevealText,
+} from "./components";
 import { FontLoader } from "./FontLoader";
+import {
+  IconArrow,
+  IconBuildings,
+  IconCart,
+  IconCheckCircle,
+  IconClock,
+  IconFacility,
+  IconGlobe,
+  IconPhone,
+  IconProjects,
+  IconShieldCheck,
+  IconTarget,
+  IconWrench,
+} from "./Icons";
 
 export type AnnouncementProps = {
   companyName: string;
@@ -26,60 +46,36 @@ const Stage: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     style={{
       direction: "rtl",
       fontFamily: bodyFont,
-      color: theme.white,
+      color: theme.ink,
       alignItems: "center",
       justifyContent: "center",
-      padding: 80,
+      padding: "70px 90px",
     }}
   >
     {children}
   </AbsoluteFill>
 );
 
-// المشهد 1 — ظهور الشعار واسم الشركة
-const SceneIntro: React.FC<{ companyName: string }> = ({ companyName }) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const logoSpring = spring({ frame, fps, config: { damping: 12, mass: 0.9 } });
-  const logoScale = interpolate(logoSpring, [0, 1], [0.3, 1]);
-  const ring = interpolate(frame, [0, 40], [0, 1], { extrapolateRight: "clamp" });
+const SectionTitle: React.FC<{ label: string; delay?: number }> = ({ label, delay = 0 }) => (
+  <RevealText delay={delay}>
+    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      <div style={{ width: 8, height: 34, borderRadius: 4, background: theme.primary }} />
+      <div style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 52, color: theme.primary }}>{label}</div>
+    </div>
+  </RevealText>
+);
+
+// المشهد 1 — الافتتاح: بانر المنصة يظهر كأن التطبيق يُفتح
+const SceneIntro: React.FC<{ companyName: string; tagline: string }> = ({ companyName, tagline }) => {
   return (
     <Stage>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 34 }}>
-        <div style={{ position: "relative", width: 260, height: 260, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              borderRadius: "50%",
-              border: `3px solid ${theme.gold}`,
-              opacity: 0.5 * ring,
-              transform: `scale(${1 + (1 - ring) * 0.4})`,
-            }}
-          />
-          <div
-            style={{
-              width: 220,
-              height: 220,
-              borderRadius: "50%",
-              background: theme.white,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              transform: `scale(${logoScale})`,
-              boxShadow: `0 30px 80px rgba(0,0,0,0.45)`,
-            }}
-          >
-            <Img src={staticFile("logo.png")} style={{ width: 150, height: "auto" }} />
-          </div>
-        </div>
-        <RevealText delay={22}>
-          <div style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 82, textAlign: "center", lineHeight: 1.2 }}>
-            {companyName}
-          </div>
-        </RevealText>
-        <RevealText delay={34}>
-          <AccentBar width={340} delay={34} />
+      <div style={{ width: "100%", maxWidth: 1320, display: "flex", flexDirection: "column", gap: 26 }}>
+        <HeroBanner title={companyName} subtitle="نظام إدارة المرافق والمشتريات" delay={2} />
+        <RevealText delay={18}>
+          <Card padding={30} style={{ display: "flex", alignItems: "center", gap: 20 }}>
+            <div style={{ width: 8, height: 46, borderRadius: 4, background: theme.accent }} />
+            <div style={{ fontSize: 34, fontWeight: 700, color: theme.ink, lineHeight: 1.5 }}>{tagline}</div>
+          </Card>
         </RevealText>
       </div>
     </Stage>
@@ -87,70 +83,77 @@ const SceneIntro: React.FC<{ companyName: string }> = ({ companyName }) => {
 };
 
 // المشهد 2 — من نحن
-const SceneAbout: React.FC<{ tagline: string }> = ({ tagline }) => {
+const SceneAbout: React.FC = () => {
+  const points = [
+    { Icon: IconFacility, color: theme.primary, text: "تشغيل وصيانة المباني الحكومية" },
+    { Icon: IconShieldCheck, color: theme.accent, text: "أعلى معايير الجودة والالتزام" },
+    { Icon: IconProjects, color: theme.warn, text: "إدارة وتقارير رقمية دقيقة" },
+  ];
   return (
     <Stage>
-      <div style={{ maxWidth: 1300, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 30 }}>
-        <RevealText delay={2}>
-          <div style={{ fontFamily: headingFont, fontWeight: 800, fontSize: 40, color: theme.gold, letterSpacing: 2 }}>
-            من نحن
-          </div>
-        </RevealText>
+      <div style={{ width: "100%", maxWidth: 1360, display: "flex", flexDirection: "column", gap: 30 }}>
+        <SectionTitle label="من نحن" delay={2} />
         <RevealText delay={10}>
-          <div style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 66, lineHeight: 1.35 }}>
-            {tagline}
-          </div>
+          <Card accent={theme.primary} padding={40}>
+            <div style={{ fontSize: 36, lineHeight: 1.75, color: theme.ink, fontWeight: 600 }}>
+              شركة مقاولات متخصصة في تشغيل وصيانة المباني والمرافق الحكومية،
+              نقدّم حلولاً متكاملة تجمع بين الخبرة الميدانية والإدارة الرقمية،
+              بأعلى معايير الجودة والالتزام بالمواعيد.
+            </div>
+          </Card>
         </RevealText>
-        <RevealText delay={20}>
-          <div style={{ fontSize: 36, color: theme.cloud, lineHeight: 1.7, maxWidth: 1100 }}>
-            شركة مقاولات متخصصة في تشغيل وصيانة المباني والمرافق الحكومية،
-            نقدّم حلولاً متكاملة بأعلى معايير الجودة والالتزام.
-          </div>
-        </RevealText>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 22 }}>
+          {points.map((p, i) => (
+            <RevealText key={p.text} delay={20 + i * 6}>
+              <Card padding={26} style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <IconChip color={p.color} size={64}>
+                  <p.Icon size={34} color={p.color} />
+                </IconChip>
+                <div style={{ fontSize: 26, fontWeight: 700, color: theme.ink, lineHeight: 1.4 }}>{p.text}</div>
+              </Card>
+            </RevealText>
+          ))}
+        </div>
       </div>
     </Stage>
   );
 };
 
-const services: { icon: string; title: string; desc: string }[] = [
-  { icon: "🏗️", title: "تشغيل وصيانة المرافق", desc: "صيانة وقائية وعلاجية شاملة" },
-  { icon: "🔧", title: "الصيانة الفنية", desc: "كهرباء • سباكة • تكييف" },
-  { icon: "📦", title: "إدارة المشتريات", desc: "دورة شراء ذكية ومنظمة" },
-  { icon: "📊", title: "إدارة المشاريع", desc: "متابعة دقيقة وتقارير لحظية" },
-  { icon: "🏢", title: "خدمات المباني", desc: "نظافة وتشغيل وأمن" },
-  { icon: "✅", title: "الالتزام بالجودة", desc: "معايير عالية ومواعيد مضمونة" },
+const services = [
+  { Icon: IconFacility, color: "#1b3a6b", title: "تشغيل وصيانة المرافق", desc: "صيانة وقائية وعلاجية شاملة" },
+  { Icon: IconWrench, color: "#0a7c59", title: "الصيانة الفنية", desc: "كهرباء • سباكة • تكييف" },
+  { Icon: IconCart, color: "#a06010", title: "إدارة المشتريات", desc: "دورة شراء ذكية ومنظمة" },
+  { Icon: IconProjects, color: "#1b3a6b", title: "إدارة المشاريع", desc: "متابعة دقيقة وتقارير لحظية" },
+  { Icon: IconBuildings, color: "#0a7c59", title: "خدمات المباني", desc: "نظافة وتشغيل وأمن" },
+  { Icon: IconShieldCheck, color: "#a06010", title: "الالتزام بالجودة", desc: "معايير عالية ومواعيد مضمونة" },
 ];
 
-const ServiceCard: React.FC<{ index: number; icon: string; title: string; desc: string }> = ({
+const ServiceCard: React.FC<{ index: number } & (typeof services)[number]> = ({
   index,
-  icon,
+  Icon,
+  color,
   title,
   desc,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const delay = 8 + index * 7;
+  const delay = 12 + index * 6;
   const s = spring({ frame: frame - delay, fps, config: { damping: 200 } });
-  const y = interpolate(s, [0, 1], [50, 0]);
+  const y = interpolate(s, [0, 1], [42, 0]);
   return (
-    <div
-      style={{
-        opacity: s,
-        transform: `translateY(${y}px)`,
-        background: "rgba(255,255,255,0.06)",
-        border: "1px solid rgba(255,255,255,0.14)",
-        borderRadius: 24,
-        padding: "34px 30px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-        backdropFilter: "blur(4px)",
-        boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
-      }}
-    >
-      <div style={{ fontSize: 60 }}>{icon}</div>
-      <div style={{ fontFamily: headingFont, fontWeight: 800, fontSize: 38 }}>{title}</div>
-      <div style={{ fontSize: 27, color: theme.cloud }}>{desc}</div>
+    <div style={{ opacity: s, transform: `translateY(${y}px)` }}>
+      <Card accent={color} padding={30} style={{ height: "100%" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <IconChip color={color} size={76}>
+              <Icon size={42} color={color} />
+            </IconChip>
+            <IconArrow size={26} color={theme.muted} />
+          </div>
+          <div style={{ fontFamily: headingFont, fontWeight: 800, fontSize: 34, color: theme.primary }}>{title}</div>
+          <div style={{ fontSize: 25, color: theme.muted, fontWeight: 600 }}>{desc}</div>
+        </div>
+      </Card>
     </div>
   );
 };
@@ -159,22 +162,9 @@ const ServiceCard: React.FC<{ index: number; icon: string; title: string; desc: 
 const SceneServices: React.FC = () => {
   return (
     <Stage>
-      <div style={{ width: "100%", maxWidth: 1560, display: "flex", flexDirection: "column", gap: 44 }}>
-        <div style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
-          <RevealText delay={0}>
-            <div style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 62 }}>خدماتنا</div>
-          </RevealText>
-          <RevealText delay={4}>
-            <AccentBar width={220} delay={4} />
-          </RevealText>
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 30,
-          }}
-        >
+      <div style={{ width: "100%", maxWidth: 1560, display: "flex", flexDirection: "column", gap: 34 }}>
+        <SectionTitle label="خدماتنا" delay={0} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 26 }}>
           {services.map((sv, i) => (
             <ServiceCard key={sv.title} index={i} {...sv} />
           ))}
@@ -184,99 +174,109 @@ const SceneServices: React.FC = () => {
   );
 };
 
-const AnimatedNumber: React.FC<{ to: number; suffix?: string; delay: number }> = ({
+const AnimatedNumber: React.FC<{ to: number; suffix?: string; color: string; delay: number }> = ({
   to,
   suffix = "",
+  color,
   delay,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const s = spring({ frame: frame - delay, fps, config: { damping: 200 } });
-  const value = Math.round(interpolate(s, [0, 1], [0, to]));
+  const s = spring({ frame: frame - delay, fps, config: { damping: 60, stiffness: 90 } });
+  const value = Math.round(interpolate(s, [0, 1], [0, to], { extrapolateRight: "clamp" }));
   return (
-    <span style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 96, color: theme.gold }}>
+    <span
+      style={{
+        fontFamily: headingFont,
+        fontWeight: 900,
+        fontSize: 88,
+        color,
+        lineHeight: 1,
+        fontVariantNumeric: "tabular-nums",
+      }}
+    >
       {value.toLocaleString("ar-EG")}
       {suffix}
     </span>
   );
 };
 
-// المشهد 4 — الأرقام والقيمة
+// المشهد 4 — الأرقام (بأسلوب بطاقات KPI في المنصة)
 const SceneStats: React.FC = () => {
   const stats = [
-    { to: 100, suffix: "٪", label: "التزام بالمواعيد" },
-    { to: 24, suffix: "/٧", label: "دعم وصيانة" },
-    { to: 360, suffix: "°", label: "حلول متكاملة" },
+    { Icon: IconCheckCircle, color: theme.accent, to: 100, suffix: "٪", label: "التزام بالمواعيد", bar: 100 },
+    { Icon: IconClock, color: theme.primary, to: 24, suffix: "/٧", label: "دعم وصيانة مستمر", bar: 92 },
+    { Icon: IconTarget, color: theme.warn, to: 360, suffix: "°", label: "حلول متكاملة", bar: 100 },
   ];
   return (
     <Stage>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 60, width: "100%" }}>
-        <RevealText delay={0}>
-          <div style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 60, textAlign: "center" }}>
-            لماذا المباني السريعة؟
-          </div>
-        </RevealText>
-        <div style={{ display: "flex", gap: 90, justifyContent: "center", flexWrap: "wrap" }}>
-          {stats.map((st, i) => (
-            <div key={st.label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-              <AnimatedNumber to={st.to} suffix={st.suffix} delay={10 + i * 8} />
-              <RevealText delay={14 + i * 8}>
-                <div style={{ fontSize: 34, color: theme.cloud }}>{st.label}</div>
+      <div style={{ width: "100%", maxWidth: 1500, display: "flex", flexDirection: "column", gap: 34 }}>
+        <SectionTitle label="لماذا المباني السريعة؟" delay={0} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 26 }}>
+          {stats.map((st, i) => {
+            const delay = 12 + i * 8;
+            return (
+              <RevealText key={st.label} delay={delay}>
+                <Card accent={st.color} padding={34}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <IconChip color={st.color} size={64}>
+                        <st.Icon size={36} color={st.color} />
+                      </IconChip>
+                    </div>
+                    <AnimatedNumber to={st.to} suffix={st.suffix} color={st.color} delay={delay + 2} />
+                    <div style={{ fontSize: 28, color: theme.ink, fontWeight: 700 }}>{st.label}</div>
+                    <KpiBar to={st.bar} color={st.color} delay={delay + 4} />
+                  </div>
+                </Card>
               </RevealText>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </Stage>
   );
 };
 
-// المشهد 5 — الختام والدعوة للتواصل
+// المشهد 5 — الختام والتواصل
 const SceneOutro: React.FC<{ companyName: string; phone: string; website: string }> = ({
   companyName,
   phone,
   website,
 }) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const logoSpring = spring({ frame, fps, config: { damping: 14 } });
-  const scale = interpolate(logoSpring, [0, 1], [0.6, 1]);
   return (
     <Stage>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 30 }}>
-        <div
-          style={{
-            width: 180,
-            height: 180,
-            borderRadius: "50%",
-            background: theme.white,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transform: `scale(${scale})`,
-            boxShadow: `0 24px 60px rgba(0,0,0,0.45)`,
-          }}
-        >
-          <Img src={staticFile("logo.png")} style={{ width: 118, height: "auto" }} />
-        </div>
-        <RevealText delay={12}>
-          <div style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 70, textAlign: "center" }}>
+      <div style={{ width: "100%", maxWidth: 1200, display: "flex", flexDirection: "column", alignItems: "center", gap: 30 }}>
+        <RevealText delay={2} style={{ display: "flex", justifyContent: "center" }}>
+          <LogoChip size={130} />
+        </RevealText>
+        <RevealText delay={10}>
+          <div style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 60, color: theme.primary, textAlign: "center" }}>
             {companyName}
           </div>
         </RevealText>
-        <RevealText delay={20}>
-          <AccentBar width={300} delay={20} />
-        </RevealText>
-        <RevealText delay={26}>
-          <div style={{ fontSize: 40, color: theme.gold, fontWeight: 700 }}>
-            نبني الثقة… ونصون التميّز
+        <RevealText delay={16}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 60, height: 4, borderRadius: 4, background: theme.accent }} />
+            <div style={{ fontSize: 34, color: theme.accent, fontWeight: 800 }}>نبني الثقة… ونصون التميّز</div>
+            <div style={{ width: 60, height: 4, borderRadius: 4, background: theme.accent }} />
           </div>
         </RevealText>
         {(phone || website) && (
-          <RevealText delay={34}>
-            <div style={{ display: "flex", gap: 40, fontSize: 32, color: theme.cloud, marginTop: 8 }}>
-              {phone ? <span>📞 {phone}</span> : null}
-              {website ? <span>🌐 {website}</span> : null}
+          <RevealText delay={24}>
+            <div style={{ display: "flex", gap: 18, marginTop: 6 }}>
+              {phone ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 14, padding: "14px 22px", boxShadow: theme.cardShadow }}>
+                  <IconPhone size={28} color={theme.primary} />
+                  <span style={{ fontSize: 28, fontWeight: 700, color: theme.ink }}>{phone}</span>
+                </div>
+              ) : null}
+              {website ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 14, padding: "14px 22px", boxShadow: theme.cardShadow }}>
+                  <IconGlobe size={28} color={theme.primary} />
+                  <span style={{ fontSize: 28, fontWeight: 700, color: theme.ink }}>{website}</span>
+                </div>
+              ) : null}
             </div>
           </RevealText>
         )}
@@ -285,7 +285,6 @@ const SceneOutro: React.FC<{ companyName: string; phone: string; website: string
   );
 };
 
-// انتقال بالتلاشي بين المشاهد
 const Fade: React.FC<{ children: React.ReactNode; durationInFrames: number }> = ({
   children,
   durationInFrames,
@@ -308,17 +307,17 @@ export const CompanyAnnouncement: React.FC<AnnouncementProps> = ({
   website,
 }) => {
   return (
-    <AbsoluteFill style={{ backgroundColor: theme.navyDark }}>
+    <AbsoluteFill style={{ backgroundColor: theme.bg }}>
       <FontLoader />
-      <BlueprintBackground />
+      <PlatformCanvas />
       <Sequence durationInFrames={120}>
         <Fade durationInFrames={120}>
-          <SceneIntro companyName={companyName} />
+          <SceneIntro companyName={companyName} tagline={tagline} />
         </Fade>
       </Sequence>
       <Sequence from={120} durationInFrames={150}>
         <Fade durationInFrames={150}>
-          <SceneAbout tagline={tagline} />
+          <SceneAbout />
         </Fade>
       </Sequence>
       <Sequence from={270} durationInFrames={240}>
