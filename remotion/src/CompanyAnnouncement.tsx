@@ -43,6 +43,8 @@ import {
 import { clients } from "./clients";
 import { certifications, classification } from "./certifications";
 import { experienceYears } from "./company";
+import { regions } from "./regions";
+import { SaudiMap } from "./SaudiMap";
 
 export type AnnouncementProps = {
   companyName: string;
@@ -331,7 +333,53 @@ const AnimatedNumber: React.FC<{ to: number; suffix?: string; color: string; del
   );
 };
 
-// المشهد 5 — المنصة الرقمية (لقطات حقيقية من نظام الشركة)
+// المشهد 5 — نطاق الأعمال الجغرافي
+const SceneReach: React.FC = () => {
+  const hq = regions.find((r) => r.hq);
+  return (
+    <Stage>
+      <div style={{ width: "100%", maxWidth: 1580, display: "flex", alignItems: "center", gap: 60 }}>
+        <div style={{ width: 520, display: "flex", flexDirection: "column", gap: 24 }}>
+          <SectionTitle label="نطاق أعمالنا" delay={0} />
+          <RevealText delay={8}>
+            <div style={{ fontSize: 30, color: theme.ink, fontWeight: 600, lineHeight: 1.65 }}>
+              ننطلق من {hq ? hq.name : "مقرنا"} لخدمة المرافق الحكومية
+              والخاصة، بفرق ميدانية جاهزة وإدارة مركزية تتابع كل موقع.
+            </div>
+          </RevealText>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 4 }}>
+            {regions.map((r, i) => (
+              <RevealText key={r.name} delay={50 + i * 8}>
+                <Card padding={20} style={{ display: "flex", alignItems: "center", gap: 15 }}>
+                  <div
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: "50%",
+                      background: r.hq ? theme.accent : theme.primary,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ fontFamily: headingFont, fontWeight: 800, fontSize: 30, color: theme.primary }}>
+                    {r.name}
+                  </div>
+                  {r.note ? (
+                    <div style={{ fontSize: 23, color: theme.muted, fontWeight: 600 }}>{r.note}</div>
+                  ) : null}
+                </Card>
+              </RevealText>
+            ))}
+          </div>
+        </div>
+        <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center" }}>
+          <SaudiMap width={860} />
+        </div>
+      </div>
+    </Stage>
+  );
+};
+
+// المشهد 6 — المنصة الرقمية (لقطات حقيقية من نظام الشركة)
 const ScenePlatform: React.FC = () => {
   const features = [
     { Icon: IconProjects, text: "متابعة العقود والمشاريع لحظياً" },
@@ -645,22 +693,27 @@ export const CompanyAnnouncement: React.FC<AnnouncementProps> = ({
           <SceneClients />
         </Fade>
       </Sequence>
-      <Sequence from={720} durationInFrames={180}>
+      <Sequence from={720} durationInFrames={150}>
+        <Fade durationInFrames={150}>
+          <SceneReach />
+        </Fade>
+      </Sequence>
+      <Sequence from={870} durationInFrames={180}>
         <Fade durationInFrames={180}>
           <ScenePlatform />
         </Fade>
       </Sequence>
-      <Sequence from={900} durationInFrames={180}>
+      <Sequence from={1050} durationInFrames={180}>
         <Fade durationInFrames={180}>
           <SceneCertifications />
         </Fade>
       </Sequence>
-      <Sequence from={1080} durationInFrames={150}>
+      <Sequence from={1230} durationInFrames={150}>
         <Fade durationInFrames={150}>
           <SceneStats />
         </Fade>
       </Sequence>
-      <Sequence from={1230} durationInFrames={240}>
+      <Sequence from={1380} durationInFrames={240}>
         <Fade durationInFrames={240}>
           <SceneOutro companyName={companyName} phone={phone} website={website} />
         </Fade>

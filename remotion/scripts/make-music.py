@@ -17,7 +17,7 @@ import wave
 import numpy as np
 
 SR = 44100
-DURATION = 49.0  # يجب أن تساوي مدة الفيديو في src/Root.tsx
+DURATION = 54.0  # يجب أن تساوي مدة الفيديو في src/Root.tsx
 BPM = 84.0
 BEAT = 60.0 / BPM
 BAR = 4 * BEAT
