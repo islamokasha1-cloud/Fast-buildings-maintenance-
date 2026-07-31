@@ -21,6 +21,7 @@ import {
   LogoChip,
   PlatformCanvas,
   RevealText,
+  ScreenFrame,
 } from "./components";
 import { FontLoader } from "./FontLoader";
 import {
@@ -330,7 +331,58 @@ const AnimatedNumber: React.FC<{ to: number; suffix?: string; color: string; del
   );
 };
 
-// المشهد 5 — الشهادات والاعتمادات
+// المشهد 5 — المنصة الرقمية (لقطات حقيقية من نظام الشركة)
+const ScenePlatform: React.FC = () => {
+  const features = [
+    { Icon: IconProjects, text: "متابعة العقود والمشاريع لحظياً" },
+    { Icon: IconFacility, text: "خريطة تشغيلية لكل مبنى" },
+    { Icon: IconCart, text: "دورة مشتريات موثّقة بالكامل" },
+    { Icon: IconCheckCircle, text: "مؤشرات أداء بأهداف محددة" },
+  ];
+  return (
+    <Stage>
+      <div style={{ width: "100%", maxWidth: 1620, display: "flex", alignItems: "center", gap: 54 }}>
+        {/* النص على اليمين لأن التخطيط RTL */}
+        <div style={{ width: 520, display: "flex", flexDirection: "column", gap: 22 }}>
+          <SectionTitle label="منصتنا الرقمية" delay={0} />
+          <RevealText delay={8}>
+            <div style={{ fontSize: 29, color: theme.ink, fontWeight: 600, lineHeight: 1.65 }}>
+              لا نكتفي بتنفيذ الصيانة — ندير أعمالنا عبر نظام رقمي خاص
+              يمنح عملاءنا شفافية كاملة على كل بلاغ وكل ريال.
+            </div>
+          </RevealText>
+          <div style={{ display: "flex", flexDirection: "column", gap: 13, marginTop: 4 }}>
+            {features.map((f, i) => (
+              <RevealText key={f.text} delay={16 + i * 5}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <IconChip color={theme.accent} size={50}>
+                    <f.Icon size={28} color={theme.accent} />
+                  </IconChip>
+                  <div style={{ fontSize: 25, fontWeight: 700, color: theme.ink }}>{f.text}</div>
+                </div>
+              </RevealText>
+            ))}
+          </div>
+        </div>
+
+        {/* اللقطات على اليسار، متراكبة لإيحاء العمق */}
+        <div style={{ flex: 1, position: "relative", height: 660 }}>
+          <RevealText delay={6} style={{ position: "absolute", top: 0, right: 0 }}>
+            <ScreenFrame src="platform/dashboard.png" width={760} />
+          </RevealText>
+          <RevealText delay={14} style={{ position: "absolute", top: 196, left: 24 }}>
+            <ScreenFrame src="platform/buildings.png" width={620} />
+          </RevealText>
+          <RevealText delay={22} style={{ position: "absolute", top: 392, right: 96 }}>
+            <ScreenFrame src="platform/kpi.png" width={520} />
+          </RevealText>
+        </div>
+      </div>
+    </Stage>
+  );
+};
+
+// المشهد 6 — الشهادات والاعتمادات
 const SceneCertifications: React.FC = () => {
   return (
     <Stage>
@@ -595,15 +647,20 @@ export const CompanyAnnouncement: React.FC<AnnouncementProps> = ({
       </Sequence>
       <Sequence from={720} durationInFrames={180}>
         <Fade durationInFrames={180}>
+          <ScenePlatform />
+        </Fade>
+      </Sequence>
+      <Sequence from={900} durationInFrames={180}>
+        <Fade durationInFrames={180}>
           <SceneCertifications />
         </Fade>
       </Sequence>
-      <Sequence from={900} durationInFrames={150}>
+      <Sequence from={1080} durationInFrames={150}>
         <Fade durationInFrames={150}>
           <SceneStats />
         </Fade>
       </Sequence>
-      <Sequence from={1050} durationInFrames={240}>
+      <Sequence from={1230} durationInFrames={240}>
         <Fade durationInFrames={240}>
           <SceneOutro companyName={companyName} phone={phone} website={website} />
         </Fade>

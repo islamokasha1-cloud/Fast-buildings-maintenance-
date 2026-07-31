@@ -173,6 +173,43 @@ export const BrandMark: React.FC<{ height?: number }> = ({ height = 104 }) => {
   );
 };
 
+// إطار نافذة متصفّح يحيط بلقطة من النظام
+export const ScreenFrame: React.FC<{
+  src: string;
+  width: number;
+  style?: React.CSSProperties;
+}> = ({ src, width, style }) => (
+  <div
+    style={{
+      width,
+      borderRadius: 14,
+      overflow: "hidden",
+      background: theme.surface,
+      border: `1px solid ${theme.border}`,
+      boxShadow: "0 26px 60px rgba(20,48,92,0.22)",
+      ...style,
+    }}
+  >
+    {/* شريط علوي يوحي بنافذة تطبيق */}
+    <div
+      style={{
+        height: 26,
+        background: theme.surface2,
+        borderBottom: `1px solid ${theme.border}`,
+        display: "flex",
+        alignItems: "center",
+        gap: 7,
+        paddingInlineStart: 12,
+      }}
+    >
+      {["#e5787a", "#e8b765", "#6fbf8b"].map((c) => (
+        <div key={c} style={{ width: 9, height: 9, borderRadius: "50%", background: c }} />
+      ))}
+    </div>
+    <Img src={staticFile(src)} style={{ width: "100%", display: "block" }} />
+  </div>
+);
+
 // ظهور نصي متحرك للأعلى مع تلاشي
 export const RevealText: React.FC<{
   children: React.ReactNode;

@@ -2,8 +2,9 @@
 """
 يولّد موسيقى الخلفية الأصلية لإعلان الشركة.
 
-مقطوعة مؤسسية هادئة (37 ثانية) مؤلَّفة برمجياً — لا تخضع لأي ترخيص
-خارجي. لتغيير المزاج عدّل PROGRESSION أو BPM ثم أعد التشغيل:
+مقطوعة مؤسسية هادئة مؤلَّفة برمجياً — لا تخضع لأي ترخيص خارجي.
+اضبط DURATION على مدة الفيديو، ولتغيير المزاج عدّل PROGRESSION أو BPM
+ثم أعد التشغيل:
 
     python3 scripts/make-music.py
 
@@ -16,7 +17,7 @@ import wave
 import numpy as np
 
 SR = 44100
-DURATION = 43.0  # يجب أن تساوي مدة الفيديو في src/Root.tsx
+DURATION = 49.0  # يجب أن تساوي مدة الفيديو في src/Root.tsx
 BPM = 84.0
 BEAT = 60.0 / BPM
 BAR = 4 * BEAT
@@ -152,8 +153,8 @@ for b in range(bars):
                 f = freqs[idx % len(freqs)] * 2
                 add(None, start + off, pluck(f, 0.10), pan=0.35 if j % 2 else -0.35)
 
-    # إيقاع خفيف في منتصف الإعلان فقط
-    if 9.0 <= start < 30.0:
+    # إيقاع خفيف في المتن، ينسحب قبل الخاتمة ليهدأ الإيقاع
+    if 9.0 <= start < DURATION - 9.0:
         for beat_i in range(4):
             bt = start + beat_i * BEAT
             if bt >= DURATION - 4.0:
