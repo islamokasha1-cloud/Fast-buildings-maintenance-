@@ -2027,7 +2027,11 @@ function cleaningOpsTests() {
   const sandbox = {
     window: {}, document: docStub, console,
     setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
-    MutationObserver: function () { this.observe = () => {}; }
+    MutationObserver: function () { this.observe = () => {}; },
+    // نحاكي شكل _svgIcon الحقيقي في النواة: <svg> **بلا** width/height — وهو منشأ
+    // «الأيقونة العملاقة». وشكلاً بلا سماتٍ إطلاقاً للتحقّق من إحكام البديل.
+    _svgIcon: (n) => n === "__bare__" ? "<svg></svg>"
+                   : (n ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M1 1"/></svg>' : "")
   };
   vm.createContext(sandbox);
   try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل cleaningOps", false, String(e.message).slice(0, 120)); return; }
@@ -2386,6 +2390,27 @@ function cleaningOpsTests() {
     T("نصٌّ قبل JSON وبعده لا يمنع الاستخراج", pick('إليك الجدول:\n{"tasks":[{"name":"ج"}]}\nبالتوفيق').length === 1);
     T("ردٌّ بلا JSON يُرجع صفراً (لا تلفيق)", pick("عذراً لا أستطيع").length === 0);
   }
+
+  // ══ ★ صنفُ «الأيقونة العملاقة» — معالجةٌ عند المنبع بعد تكرّره ثلاث مرّات ══
+  // _svgIcon في النواة يُرجع <svg> بلا width/height، وSVG بلا أبعادٍ داخل حاوية flex
+  // يتمدّد ليملأها. رُقِّع موضعياً مرّتين (شريط التنبيه، أرشيف البلاغات) ثم تكرّر ثالثةً
+  // في بنود قائمة الفحص — فصار العلاج في _svg نفسها لا في كل حاوية.
+  T("★ كلُّ أيقونةٍ تخرج من الوحدة بأبعادٍ صريحة (علاجٌ عند المنبع)",
+    /function _svg\(name, size\)\{/.test(src) &&
+    /raw\.replace\(\/\^<svg\\b\/, '<svg width="'\+n\+'" height="'\+n\+'"'\)/.test(src));
+  T("النواة فعلاً تُرجع SVG بلا أبعاد (وإلا فالعلاج بلا سبب)",
+    /return p\?\('<svg viewBox="0 0 24 24"/.test(HTML));
+  if (CO && typeof CO._svg === "function") {
+    const out = CO._svg("checkCircle");
+    T("★ الأبعاد الافتراضية 16px", /width="16" height="16"/.test(out), out.slice(0, 60));
+    T("حجمٌ مخصّصٌ عند الحاجة", /width="34" height="34"/.test(CO._svg("checkCircle", 34)));
+    T("أيقونةٌ مفقودةٌ تُرجع فراغاً لا وسماً مكسوراً", CO._svg("") === "");
+    // ★ الشكل بلا سماتٍ (<svg>) كان يفلت من البديل النصّي — التعبير النمطي يلتقطه
+    T("★ حتى <svg> بلا سماتٍ يُوسَم بأبعاده", /width="16" height="16"/.test(CO._svg("__bare__")),
+      CO._svg("__bare__"));
+  }
+  T("بنودُ قائمة الفحص لها قاعدةُ حجمٍ صريحة أيضاً",
+    /\.co-ck svg\{width:16px;height:16px;flex:none/.test(src));
 
   // ── أيقونات SVG داخل حاويات لا تضبط أبعادها (تتمدّد لملء الشاشة) ──
   T("★ أيقونة شريط التنبيه مغلَّفةٌ بمحدِّدٍ يضبط أبعادها",

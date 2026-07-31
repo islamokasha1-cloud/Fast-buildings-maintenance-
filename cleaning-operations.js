@@ -71,7 +71,21 @@ function _user(){ try{ return currentUser||null; }catch(e){ return null; } }
 function _role(){ const u=_user(); return u&&u.role ? u.role : ""; }
 function _userName(){ const u=_user(); return (u&&u.name)||(u&&u.email)||""; }
 function _icon(name){ try{ return (typeof _ic==="function") ? _ic(name) : ""; }catch(e){ return ""; } }
-function _svg(name){ try{ return (typeof _svgIcon==="function") ? _svgIcon(name) : ""; }catch(e){ return ""; } }
+/* ★ كلُّ أيقونةٍ تخرج من هذه الوحدة بأبعادٍ صريحة.
+   السبب: _svgIcon في النواة يُرجع <svg> بلا width/height، وSVG بلا أبعاد داخل حاوية
+   flex **يتمدّد ليملأها** — وهو ما أنتج أيقوناتٍ بحجم الشاشة ثلاث مرّات (شريط التنبيه،
+   أرشيف البلاغات، بنود قائمة الفحص). المعالجة هنا عند المنبع لا في كل حاوية: الـCSS
+   يتغلّب على السمات، فكلُّ حاويةٍ لها قاعدةُ حجمٍ (من المنصة أو منّا) تبقى كما هي
+   تماماً، وما لا قاعدةَ له يحصل على حجمٍ معقولٍ بدل التمدّد. */
+function _svg(name, size){
+  try{
+    const raw=(typeof _svgIcon==="function") ? _svgIcon(name) : "";
+    if(!raw) return "";
+    const n=size||16;
+    // \b فيلتقط <svg> و<svg ...> معاً — لا يفلت شكلٌ بلا أبعاد
+    return raw.replace(/^<svg\b/, '<svg width="'+n+'" height="'+n+'"');
+  }catch(e){ return ""; }
+}
 function _isDev(){ try{ return (typeof IS_DEV!=="undefined") && !!IS_DEV; }catch(e){ return false; } }
 function _proj(){ try{ return (typeof CURRENT_PROJECT!=="undefined") ? CURRENT_PROJECT : null; }catch(e){ return null; } }
 function _projId(){ const p=_proj(); return p ? p.id : ""; }
@@ -1801,6 +1815,7 @@ function injectCSS(){
 .co-ck:hover{border-color:var(--primary)}
 .co-ck:has(input:checked){background:var(--sla-ok-bg);border-color:var(--sla-ok-bd);color:var(--sla-ok)}
 .co-ck input{width:17px;height:17px;cursor:pointer;flex:none;accent-color:var(--sla-ok)}
+.co-ck svg{width:16px;height:16px;flex:none;stroke-width:2}
 .co-hint{font-size:11.5px;color:var(--muted);margin-top:11px;line-height:1.9}
 .co-photos{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px}
 .co-photo{position:relative;width:96px;height:96px;border-radius:11px;overflow:hidden;border:1px solid var(--border);background:var(--surface2);flex:none}
@@ -1880,6 +1895,7 @@ window.cleaningOps = {
   _coverageByBuilding: coverageByBuilding, _supOfBuilding: supOfBuilding,
   _logAsTicket: _logAsTicket, _taskSupervisor: taskSupervisor,
   _salvageObjects: _salvageObjects,
+  _svg: _svg,
   _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,
   _addDays: _addDays, _today: _today,
