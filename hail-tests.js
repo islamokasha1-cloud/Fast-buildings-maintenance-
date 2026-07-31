@@ -2252,7 +2252,24 @@ function cleaningOpsTests() {
   T("★ تنفيذات النظافة لا تُكتب بلاغاتٍ (لا تُغرق القائمة ولا تشوّه مؤشّرات الصيانة)",
     !/collection\(\s*COLLECTION\(\)\s*\)/.test(src) && !/_tickets["'`]\)\.doc\(/.test(src));
   T("لفُّ generatePhotoReport مقصورٌ على مشاريع النظافة",
-    /window\.generatePhotoReport\s*=\s*function/.test(src) && /if\(!isCleaningProject\(\)\) return r;/.test(src));
+    /window\.generatePhotoReport\s*=\s*function/.test(src) &&
+    /if\(!isCleaningProject\(\)\) return orig\.apply\(this, arguments\);/.test(src));
+
+  // فلتر «مصدر التقرير» — يُحقَن لمشاريع النظافة وحدها
+  T("★ فلتر مصدر التقرير يُحقَن في فلاتر النواة (بلا تعديل index.html)",
+    /#page-photo-report \.report-filters/.test(src) && /co-pr-source/.test(src));
+  T("الفلتر يُزال فوراً لمشروعٍ غير نظافة",
+    /if\(!wrap \|\| !isCleaningProject\(\)\)\{[\s\S]{0,120}existing\.parentElement\.remove\(\);/.test(src));
+  T("خيارات المصدر الثلاثة موجودة",
+    /value=""[^>]*>الكل/.test(src) && /value="cleaning"/.test(src) && /value="tickets"/.test(src));
+  T("★ «البلاغات فقط» يُرجع السلوك الأصلي بلا أي إدراج",
+    /if\(src==="tickets"\) return orig\.apply\(this, arguments\);/.test(src));
+  T("★ «النظافة فقط» يستبدل القائمة ولا يضمّها للبلاغات",
+    /if\(src==="cleaning"\)\{[\s\S]{0,200}photoReportTickets = extra;/.test(src));
+  T("«النظافة فقط» بلا نتائج يعطي رسالةً صريحة لا قائمةَ بلاغاتٍ مضلِّلة",
+    /لا توجد أعمال نظافة مصوّرة مطابقة للتصفية/.test(src));
+  T("الحاوية المستهدَفة موجودةٌ فعلاً في index.html (وإلا فالحقن ميت)",
+    /class="report-filters"/.test(HTML) && /id="page-photo-report"/.test(HTML));
   T("لا يُدرَج في التقرير إلا ما له صورة", /filter\(r=>Array\.isArray\(r\.photos\)&&r\.photos\.length\)/.test(src));
   if (CO && typeof CO._logAsTicket === "function") {
     const tk = CO._logAsTicket({ id: "x", at: "2026-07-31T08:00:00Z", building: "مبنى أ", floor: "الدور 1",

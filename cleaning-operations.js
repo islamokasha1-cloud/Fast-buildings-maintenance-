@@ -1281,20 +1281,60 @@ function _logAsTicket(r){
     _cleaning: true
   };
 }
+/* فلتر «مصدر التقرير» — يُحقَن في فلاتر التقرير المصوّر لمشاريع النظافة وحدها.
+   الكل | النظافة فقط | البلاغات فقط. */
+const PR_SRC_ID="co-pr-source";
+function injectPhotoSourceFilter(){
+  const wrap=document.querySelector("#page-photo-report .report-filters");
+  const existing=document.getElementById(PR_SRC_ID);
+  if(!wrap || !isCleaningProject()){
+    if(existing && existing.parentElement) existing.parentElement.remove();
+    return;
+  }
+  if(existing) return;
+  const g=document.createElement("div");
+  g.className="form-group"; g.style.marginBottom="0";
+  g.innerHTML='<label class="form-label">مصدر التقرير</label>'+
+    '<select class="form-select" id="'+PR_SRC_ID+'">'+
+      '<option value="">الكل (نظافة + بلاغات)</option>'+
+      '<option value="cleaning">أعمال النظافة فقط</option>'+
+      '<option value="tickets">البلاغات فقط</option>'+
+    '</select>';
+  wrap.insertBefore(g, wrap.firstChild);
+  const sel=g.querySelector("select");
+  if(sel) sel.onchange=()=>{ try{ generatePhotoReport(); }catch(e){} };
+}
+function _prSource(){ const el=document.getElementById(PR_SRC_ID); return el?el.value:""; }
+
 function hookPhotoReport(){
   if(window._coPhotoHooked || typeof window.generatePhotoReport!=="function") return;
   const orig=window.generatePhotoReport;
   window.generatePhotoReport=function(){
+    if(!isCleaningProject()) return orig.apply(this, arguments);
+    const src=_prSource();
+    // «البلاغات فقط» ⟵ السلوك الأصلي بلا أي إدراج
+    if(src==="tickets") return orig.apply(this, arguments);
     const r=orig.apply(this, arguments);
-    if(!isCleaningProject()) return r;
     const g=id=>{ const el=document.getElementById(id); return el?el.value:""; };
     const from=g("pr-from"), to=g("pr-to"), rb=g("pr-building"), rt=g("pr-type"), rs=g("pr-supervisor");
     loadPhotoLog(from, to).then(recs=>{
       const extra=recs
         .filter(x=>(!rb||x.building===rb) && (!rt||x.workType===rt) && (!rs||(x.supervisor||"")===rs))
         .map(_logAsTicket);
-      if(!extra.length) return;
       try{
+        if(src==="cleaning"){
+          // النظافة وحدها — نستبدل القائمة ولا نضمّها للبلاغات
+          photoReportTickets = extra;
+          const out=document.getElementById("photo-report-output");
+          if(!extra.length){
+            if(out) out.innerHTML='<div class="card" style="text-align:center;color:var(--muted);padding:40px">لا توجد أعمال نظافة مصوّرة مطابقة للتصفية في هذه الفترة</div>';
+            const pb=document.getElementById("print-photo-btn"); if(pb) pb.style.display="none";
+            return;
+          }
+          if(typeof renderPhotoReportOutput==="function") renderPhotoReportOutput(photoReportTickets);
+          return;
+        }
+        if(!extra.length) return;
         photoReportTickets = (Array.isArray(photoReportTickets)?photoReportTickets:[]).concat(extra);
         if(typeof renderPhotoReportOutput==="function") renderPhotoReportOutput(photoReportTickets);
       }catch(e){ console.warn("cleaningOps/photoReport",e); }
@@ -1499,6 +1539,7 @@ function hookShowPage(){
     if(id==="dashboard"){ try{ mountExec(); }catch(e){ console.warn("cleaningOps/mountExec",e); } }
     // المتابعة اليومية: نسخةُ النظافة بدل نسخة البلاغات (إخفاءٌ لا حذف)
     if(id==="daily"){ try{ mountDaily(); }catch(e){ console.warn("cleaningOps/mountDaily",e); } }
+    if(id==="photo-report"){ try{ injectPhotoSourceFilter(); }catch(e){ console.warn("cleaningOps/prFilter",e); } }
     // تعريب مصطلحات صفحات أوامر العمل + ضمانُ وجود أنواع عمل النظافة
     if(id==="new"||id==="tickets"||id==="tickets-archive"){
       try{ seedWorkTypes(); }catch(e){}
@@ -1539,6 +1580,7 @@ function _watchProject(){
         if(dash && dash.classList.contains("active")) mountExec();
         const dly=document.getElementById("page-daily");
         if(dly && dly.classList.contains("active")) mountDaily();
+        injectPhotoSourceFilter();
         seedWorkTypes();
       });
     }
@@ -1661,7 +1703,7 @@ function init(){
   injectSidebarButton();
   _watchProject();
   // القائمة الجانبية يُعاد بناؤها بعد الدخول/تبديل المشروع — أعِد الحقن عند التغيير
-  const obs=new MutationObserver(()=>{ injectSidebarButton(); hookShowPage(); hookProjectModals(); hookRepopulate(); hookPhotoReport(); });
+  const obs=new MutationObserver(()=>{ injectSidebarButton(); hookShowPage(); hookProjectModals(); hookRepopulate(); hookPhotoReport(); injectPhotoSourceFilter(); });
   obs.observe(document.body,{childList:true,subtree:true});
 }
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", init);
@@ -1674,7 +1716,7 @@ window.cleaningOps = {
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   saveSupMap,
   mountExec, unmountExec, refreshExec, goOps,
-  mountDaily, unmountDaily, refreshDaily, seedWorkTypes, relabelPage,
+  mountDaily, unmountDaily, refreshDaily, seedWorkTypes, relabelPage, injectPhotoSourceFilter,
   startSync(){ /* لا مزامنة مستقلة — القراءة بـ .get() عند العرض (انضباط المستمعين) */ },
   version: VERSION,
   build: MODULE_BUILD,
