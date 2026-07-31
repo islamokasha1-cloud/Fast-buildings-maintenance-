@@ -2245,12 +2245,23 @@ function cleaningOpsTests() {
   T("★ حارسُ عدم إعادة الدخول على render", /if\(_rendering\) return;/.test(src) && /_rendering=true;/.test(src));
   T("★ render لا تسقط بخطأ يترك الحارس مرفوعاً (finally)",
     /finally\{ _rendering=false; \}/.test(src));
-  T("★ نداءٌ معلّقٌ واحدٌ فقط بعد التحميل (لا تكديس)",
-    /function _afterLoad\(flagGet, flagSet, cb\)\{[\s\S]{0,120}if\(flagGet\(\)\) return;/.test(src));
-  T("العَلَم يُخفَض عند النجاح وعند الفشل معاً (لا يعلق معلّقاً للأبد)",
-    /\.then\(\(\)=>\{ flagSet\(false\); cb\(\); \}\)\.catch\(\(\)=>\{ flagSet\(false\); \}\);/.test(src));
-  T("★ المُركِّبات الثلاثة كلُّها تمرّ بالحارس (لا مسارَ تحميلٍ عارٍ)",
-    (src.match(/_afterLoad\(/g) || []).length >= 4 && !/loadTasks\(\)\.then\(\(\)=>\{ if\(_onPage\(\)\) render\(\); \}\);/.test(src));
+  // ★ لا أعلامَ معلّقة: عَلَمٌ يعلق مرفوعاً يترك الشاشة على «جارٍ التحميل» للأبد
+  // (وهو ما حدث فعلاً في اللوحة التنفيذية). الارتباطُ بالوعد المشترك لا يعلق أبداً.
+  T("★ لا أعلامَ تحميلٍ معلّقة إطلاقاً",
+    !/_pendingRender|_pendingExec|_pendingDaily/.test(src));
+  T("★ الارتباط بالوعد المشترك مباشرةً", /function _afterLoad\(\)\{ loadTasks\(\)\.then\(_refreshMounted\)/.test(src));
+  T("★ اكتمالُ التحميل يُحدِّث كلَّ سطحٍ مركَّب لا الطالبَ وحده",
+    /function _refreshMounted\(\)\{[\s\S]{0,400}EXEC_ID[\s\S]{0,200}DAILY_ID/.test(src));
+  T("★ فشلُ بناء HTML يُظهر رسالةً بدل تركِ الشاشة على «جارٍ التحميل»",
+    /function _safeHTML\(el, build\)/.test(src) && /تعذّر عرض البيانات/.test(src));
+  T("المُركِّبات كلُّها تمرّ بالنداء الموحّد", (src.match(/_afterLoad\(\);/g) || []).length >= 3);
+
+  // سرعةُ أول عرض
+  T("★ قراءتا المهامّ والخريطة بالتوازي لا بالتتابع",
+    /await Promise\.all\(\[\s*database\.collection\(col\)\.limit\(500\)\.get\(\),\s*loadCfg\(force\)\s*\]\)/.test(src));
+  T("★ استباقُ التحميل عند معرفة أن المشروع نظافة (لا عند أول ضغطة)",
+    /function _prefetch\(\)\{[\s\S]{0,200}if\(!isCleaningProject\(\)\) return;/.test(src) &&
+    (src.match(/_prefetch\(\)/g) || []).length >= 3);
 
   // ══ ربط المشرف بمبانيه + صور التنفيذ + التقرير المصوّر ══
   T("خريطة المشرف↔المباني في مستندٍ خاصٍّ بالوحدة (لا تغيّر شكل إعدادات النواة)",

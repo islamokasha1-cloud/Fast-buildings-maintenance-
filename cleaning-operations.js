@@ -215,9 +215,12 @@ function loadTasks(force){
   _loading=true;
   _loadPromise = (async()=>{
     try{
-      const snap = await database.collection(col).limit(500).get();
+      // بالتوازي لا بالتتابع — كانتا رحلتين متعاقبتين تضاعفان زمن أول عرض
+      const [snap] = await Promise.all([
+        database.collection(col).limit(500).get(),
+        loadCfg(force)
+      ]);
       _tasks = snap.docs.map(d=>Object.assign({id:d.id}, d.data()||{}));
-      await loadCfg(force);   // خريطة المشرف↔المباني — تحكم ما يراه كلُّ مستخدم
     }catch(e){
       console.warn("cleaningOps/loadTasks",e);
       _toast("⚠ تعذّر تحميل جدول النظافة","warn");
@@ -360,12 +363,28 @@ async function executeTask(task, checkedItems, note){
        مسارٍ لم نتوقّعه، تحصل على رسمةٍ إضافيةٍ واحدة لا حلقةً لا نهائية.
    يقتل هذا الصنفَ كلَّه لا مساراً بعينه. */
 let _rendering=false;
-let _pendingRender=false, _pendingExec=false, _pendingDaily=false;
-function _afterLoad(flagGet, flagSet, cb){
-  if(flagGet()) return;              // نداءٌ معلّقٌ بالفعل — لا تُكدّس
-  flagSet(true);
-  loadTasks().then(()=>{ flagSet(false); cb(); }).catch(()=>{ flagSet(false); });
+/* لا أعلامَ معلّقة: عَلَمٌ يعلق مرفوعاً يترك الشاشة على «جارٍ التحميل» للأبد. بدلها
+   نرتبط بالوعد المشترك نفسه — loadTasks تُوحّد النداء الشبكي أصلاً، وإلحاقُ then
+   متعددةٍ بوعدٍ واحد آمنٌ (كلٌّ يُنفَّذ مرّة). وعند اكتمال أيّ تحميل نُحدِّث **كل**
+   السطوح المركَّبة لا السطحَ الطالبَ وحده، فلا يبقى سطحٌ عالقاً لأن نداءه لم يُسجَّل. */
+function _safeHTML(el, build){
+  if(!el) return;
+  try{ el.innerHTML = build(); }
+  catch(e){
+    console.warn("cleaningOps/build",e);
+    el.innerHTML = `<div class="card"><div class="co-empty">
+      <div class="co-empty-t">تعذّر عرض البيانات</div>
+      <div class="co-empty-s">افتح Console لتفاصيل الخطأ، أو اضغط «تحديث».</div></div></div>`;
+  }
 }
+function _refreshMounted(){
+  if(_onPage()) render();
+  const eb=document.getElementById(EXEC_ID);
+  if(eb && isCleaningProject()) _safeHTML(eb, execHTML);
+  const db2=document.getElementById(DAILY_ID);
+  if(db2 && isCleaningProject()) _safeHTML(db2, dailyHTML);
+}
+function _afterLoad(){ loadTasks().then(_refreshMounted).catch(e=>console.warn("cleaningOps/afterLoad",e)); }
 function render(){
   if(_rendering) return;             // لا تعاود الدخول
   _rendering=true;
@@ -388,7 +407,7 @@ function _render(){
   if(!_loaded || _loadedFor!==_projId()){
     el.innerHTML = heroHTML() + `<div class="card"><div class="co-empty">
       <div class="co-empty-t">جارٍ تحميل جدول النظافة…</div></div></div>`;
-    _afterLoad(()=>_pendingRender, v=>_pendingRender=v, ()=>{ if(_onPage()) render(); });
+    _afterLoad();
     return;
   }
   if(_editing) { renderEditor(el); return; }
@@ -1173,10 +1192,7 @@ function mountExec(){
   host.classList.add("co-exec-mode");
   if(!_loaded || _loadedFor!==_projId()){
     box.innerHTML = `<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ تحميل بيانات التشغيل…</div></div></div>`;
-    _afterLoad(()=>_pendingExec, v=>_pendingExec=v, ()=>{
-      const b=document.getElementById(EXEC_ID);
-      if(b && isCleaningProject()){ try{ b.innerHTML=execHTML(); }catch(e){ console.warn("cleaningOps/execHTML",e); } }
-    });
+    _afterLoad();
     return;
   }
   box.innerHTML=execHTML();
@@ -1476,10 +1492,7 @@ function mountDaily(){
   host.classList.add("co-daily-mode");
   if(!_loaded || _loadedFor!==_projId()){
     box.innerHTML=`<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ تحميل مهامّ اليوم…</div></div></div>`;
-    _afterLoad(()=>_pendingDaily, v=>_pendingDaily=v, ()=>{
-      const b=document.getElementById(DAILY_ID);
-      if(b && isCleaningProject()){ try{ b.innerHTML=dailyHTML(); }catch(e){ console.warn("cleaningOps/dailyHTML",e); } }
-    });
+    _afterLoad();
     return;
   }
   box.innerHTML=dailyHTML();
@@ -1491,6 +1504,15 @@ function unmountDaily(){
   if(box) box.remove();
 }
 async function refreshDaily(){ await loadTasks(true); mountDaily(); _toast("✅ حُدِّثت المتابعة","success"); }
+
+/* استباقُ التحميل: نبدأ جلب المهامّ فور معرفة أن المشروع نظافة، لا عند أول ضغطة —
+   فتكون البيانات جاهزةً غالباً قبل أن يفتح المستخدم أيّ شاشة، ويختفي انتظارُ أول عرض.
+   آمنٌ لأن loadTasks تُوحّد النداء الشبكي، والاكتمالُ يُحدِّث كل سطحٍ مركَّب. */
+function _prefetch(){
+  if(!isCleaningProject()) return;
+  if(_loaded && _loadedFor===_projId()) return;
+  _afterLoad();
+}
 
 /* ════════════════════════════════════════════════════════════
    التركيب الذاتي: صفحة + زرّ قائمة جانبية + لفّ showPage
@@ -1622,6 +1644,7 @@ function _watchProject(){
         if(dly && dly.classList.contains("active")) mountDaily();
         injectPhotoSourceFilter();
         seedWorkTypes();
+        _prefetch();
       });
     }
   }, 1500);
@@ -1739,8 +1762,9 @@ function init(){
   hookProjectModals();
   hookRepopulate();
   hookPhotoReport();
-  ensureTypeKnown(()=>injectSidebarButton());
+  ensureTypeKnown(()=>{ injectSidebarButton(); _prefetch(); });
   injectSidebarButton();
+  _prefetch();
   _watchProject();
   // القائمة الجانبية يُعاد بناؤها بعد الدخول/تبديل المشروع — أعِد الحقن عند التغيير
   const obs=new MutationObserver(()=>{ injectSidebarButton(); hookShowPage(); hookProjectModals(); hookRepopulate(); hookPhotoReport(); injectPhotoSourceFilter(); });
