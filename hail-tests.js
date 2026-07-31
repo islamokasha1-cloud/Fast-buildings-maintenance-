@@ -2139,6 +2139,41 @@ function cleaningOpsTests() {
   T("★ الوحدة تختار «نظافة» عند التعديل (النواة لا تعرف الخيار فلا تختاره)",
     /_addTypeOption\("ep-type"\s*,\s*"ep-type-hint"\s*,\s*isC\)/.test(src));
 
+  // ══ اللوحة التنفيذية لعقود النظافة ══
+  // ★ الضمانة الحاكمة: لا مساس بمشاريع الصيانة — نُخفي لوحة الصيانة ولا نحذفها،
+  // لأن النواة تحذّر صراحةً أن إتلاف محتوى #page-dashboard يكسر renderDashboard().
+  T("★ لوحة الصيانة تُخفى ولا تُحذف (renderDashboard يبقى سليماً)",
+    /#page-dashboard\.co-exec-mode > \*:not\(#\$\{EXEC_ID\}\)\{display:none!important\}/.test(src));
+  T("★ لا يُتلَف محتوى #page-dashboard إطلاقاً",
+    !/page-dashboard"\)\.innerHTML\s*=/.test(src) && !/host\.innerHTML\s*=/.test(src));
+  T("اللوحة تُحقن كعنصرٍ أوّلٍ مستقل (insertBefore) لا باستبدال",
+    /insertBefore\(box,\s*host\.firstChild\)/.test(src));
+  T("★ الإخفاء يُرفَع فوراً لمشروعٍ غير نظافة",
+    /if\(!isCleaningProject\(\)\)\{\s*unmountExec\(\);\s*return;\s*\}/.test(src) &&
+    /host\.classList\.remove\("co-exec-mode"\)/.test(src));
+  T("تبديل المشروع يرفع اللوحة قبل معرفة نوع الجديد", /unmountExec\(\);\s*\n\s*ensureTypeKnown/.test(src));
+
+  // ── التغطية حسب المنطقة: الأضعف أولاً (هذا ما يحتاجه التنفيذيّ) ──
+  if (CO._coverageByBuilding) {
+    const nowI = new Date().toISOString();
+    const mkb = (b, o) => Object.assign({ id: "t" + b, freq: "يومي", nextDueDate: today, lastExecuted: "", disabled: false, building: b }, o);
+    const cov = CO._coverageByBuilding([
+      mkb("أ", { lastExecuted: nowI, nextDueDate: day(1) }),          // أ: 1/1 = 100%
+      mkb("ب", { lastExecuted: nowI, nextDueDate: day(1) }),          // ب: 1/2 = 50%
+      mkb("ب", { nextDueDate: today }),
+      mkb("ج", { nextDueDate: day(-3) })                              // ج: 0/1 = 0% ومتأخّرة
+    ]);
+    T("التغطية تُحسب لكل مبنى", cov.length === 3, JSON.stringify(cov.map(c => c.name + ":" + c.pct)));
+    T("★ الترتيب: الأضعف تغطيةً أولاً", cov[0].pct <= cov[1].pct && cov[1].pct <= cov[2].pct,
+      cov.map(c => c.name + "=" + c.pct + "%").join("، "));
+    const g = cov.find(c => c.name === "ج");
+    T("المبنى بلا تنفيذ = 0% ويُحصى تأخّره", g && g.pct === 0 && g.overdue === 1);
+    const bb = cov.find(c => c.name === "ب");
+    T("مبنى نصف منجز = 50%", bb && bb.pct === 50);
+    T("المهام غير المجدولة اليوم لا تدخل التغطية",
+      CO._coverageByBuilding([mkb("د", { nextDueDate: day(6) })]).length === 0);
+  }
+
   // ── الجودة: لا ألوانٍ مصمتة خارج توكنز المنصة (تكسر الثيم الداكن) ──
   const cssBlock = (src.match(/st\.textContent\s*=\s*`([\s\S]*?)`;/) || [])[1] || "";
   const hardHex = [...cssBlock.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(m => m[0]);

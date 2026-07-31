@@ -103,6 +103,7 @@ function canExecute(){ const r=_role(); return canEdit()||r==="supervisor"||r===
    الموازنة (meta/{id}_budget عبر بطاقة المشروع). نقرأ الأول بلا تكلفة، فإن لم يكن نظافةً
    نتحقّق من الثاني مرّةً واحدة لكل مشروع (مستندٌ صغير) — فلا يختلف التصنيف بين الشاشتين. */
 let _typeCache = {};   // projId → "cleaning" | "other"
+let _finCache  = {};   // projId → بيانات عقد النظافة المالية (monthlyValue/monthlySalaries/adminExpenses)
 let _typeChecking = {};
 function isCleaningProject(){
   const p=_proj(); if(!p) return false;
@@ -118,7 +119,8 @@ function ensureTypeKnown(cb){
   _typeChecking[p.id]=true;
   database.doc("meta/"+_safeKey(p.id)+"_budget").get()
     .then(snap=>{ const d=(snap&&snap.exists)?(snap.data()||{}):{};
-      _typeCache[p.id] = (d.type==="cleaning") ? "cleaning" : "other"; })
+      _typeCache[p.id] = (d.type==="cleaning") ? "cleaning" : "other";
+      _finCache[p.id] = (d.cleaning&&typeof d.cleaning==="object") ? d.cleaning : {}; })
     .catch(()=>{ _typeCache[p.id]="other"; })
     .then(()=>{ _typeChecking[p.id]=false; if(cb) cb(); });
 }
@@ -678,6 +680,258 @@ async function confirmExec(){
 }
 
 /* ════════════════════════════════════════════════════════════
+   اللوحة التنفيذية لعقود النظافة
+   ────────────────────────────────────────────────────────────
+   لوحةُ الصيانة تقيس ما لا وجود له في عقد نظافة: بلاغاتٌ وSLA ومؤشّراتُ صيانةٍ سبعة
+   تظهر «0% — دون الهدف» بالأحمر لمجرّد غياب أعمال الصيانة، وسلّمُ استجابةٍ يتحدّث عن
+   «انقطاع كهرباء / مصعد». فهي لا تنقص معلومةً فحسب، بل **تُضلّل**.
+
+   البديل يقيس ما يحكم عقد النظافة فعلاً: التغطيةُ اليوم، والمناطقُ المتخلّفة،
+   والمهامُّ المتأخّرة، والربحيةُ الشهرية، ومدةُ العقد.
+
+   ── لا مساس بمشاريع الصيانة ──
+   لا نحذف لوحة الصيانة ولا نمسّ renderDashboard() (النواة تحذّر صراحةً من إتلاف
+   محتوى #page-dashboard لأنها تعتمد getElementById). نحقن لوحتنا كأول عنصر ونُخفي
+   بقية الأبناء بصنفٍ واحد على الحاوية — فتبقى عناصر النواة موجودةً تعمل بلا خطأ،
+   ويُرفَع الإخفاء فوراً عند الانتقال لمشروعٍ غير نظافة.
+   ════════════════════════════════════════════════════════════ */
+const EXEC_ID = "co-exec";
+const CLEAN_ITEM_TYPE = "مواد نظافة";   // بند المشتريات الذي يغذّي المستهلكات
+
+function _purchases(){ try{ return Array.isArray(purchases)?purchases:[]; }catch(e){ return []; } }
+function _poClosed(p){ try{ return poIsClosed(p); }catch(e){ return false; } }
+function _poActual(p){ try{ return poActualCost(p)||0; }catch(e){ return Number(p&&p.actualCost)||0; } }
+function _money(n){ return (Number(n)||0).toLocaleString('en-US',{maximumFractionDigits:0}); }
+function _ymL(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+
+/* مستهلكات النظافة من المشتريات — نفس منطق إدارة المشاريع: الطلب المغلق تُوزَّع تكلفته
+   الفعلية على بنوده بنسبة أوزانها، فنأخذ حصّة بنود «مواد نظافة» وحدها. */
+function cleaningSpend(){
+  const id=_projId(); if(!id) return { total:0, month:0 };
+  const thisMonth=_ymL(new Date());
+  let total=0, month=0;
+  _purchases().forEach(p=>{
+    if(!p || p.status==="deleted" || p.projectId!==id) return;
+    if(!_poClosed(p)) return;
+    const items=Array.isArray(p.items)?p.items.filter(Boolean):[];
+    if(!items.length) return;
+    let tot=0, clean=0;
+    items.forEach(it=>{ const c=Number(it.itemCost)||0; tot+=c;
+      if(String(it.itemType||"").trim()===CLEAN_ITEM_TYPE) clean+=c; });
+    if(tot<=0 || clean<=0) return;
+    const share=_poActual(p)*(clean/tot);
+    total+=share;
+    try{ if(p.createdAt && _ymL(new Date(p.createdAt))===thisMonth) month+=share; }catch(e){}
+  });
+  return { total, month };
+}
+
+/* مؤشر مدة العقد — من سجلّ المشروع (نفس حقول بطاقة العقد في النواة) */
+function contractProgress(){
+  const p=_proj(); if(!p || !p.contractStart) return null;
+  const months=parseInt(p.contractMonths)||0; if(months<=0) return null;
+  const start=_pDate(String(p.contractStart).slice(0,10));
+  const end=new Date(start); end.setMonth(end.getMonth()+months);
+  const now=new Date();
+  const totalD=Math.max(1,(end-start)/86400000);
+  const goneD =Math.min(totalD,Math.max(0,(now-start)/86400000));
+  const pct=Math.round((goneD/totalD)*100);
+  const monthsGone=+(goneD/30.44).toFixed(1), monthsLeft=+Math.max(0,(totalD-goneD)/30.44).toFixed(1);
+  return { months, pct, monthsGone, monthsLeft, start, end };
+}
+
+/* التغطية لكل مبنى — أيّ المناطق متخلّفة اليوم */
+function coverageByBuilding(list){
+  const m={};
+  (Array.isArray(list)?list:_tasks).filter(t=>!isDisabled(t)).forEach(t=>{
+    if(!(isDue(t)||doneToday(t))) return;
+    const b=t.building||"بلا مبنى";
+    if(!m[b]) m[b]={ name:b, done:0, due:0, overdue:0 };
+    if(doneToday(t)) m[b].done++; else { m[b].due++; if(isOverdue(t)) m[b].overdue++; }
+  });
+  return Object.values(m).map(x=>{
+    const sched=x.done+x.due;
+    return Object.assign(x,{ sched, pct: sched>0?Math.round(x.done/sched*100):0 });
+  }).sort((a,b)=>a.pct-b.pct);   // الأضعف أولاً — هذا ما يحتاجه التنفيذيّ
+}
+
+function execHTML(){
+  const s=boardStats();
+  const fin=_finCache[_projId()]||{};
+  const spend=cleaningSpend();
+  const cp=contractProgress();
+  const cov=coverageByBuilding();
+
+  // الحكم العام — على التغطية لا على البلاغات
+  let vKey, vTxt, vSub;
+  if(s.scheduled===0){ vKey="ok";   vTxt="لا مهامّ اليوم"; vSub="لا مهامّ مجدولةً لهذا اليوم"; }
+  else if(s.overdue>0){ vKey="crit"; vTxt="متأخّرات"; vSub=s.overdue+" مهمة تجاوزت استحقاقها"; }
+  else if(s.due>0){     vKey="warn"; vTxt="قيد التنفيذ"; vSub=s.due+" مهمة متبقّية اليوم"; }
+  else {                vKey="ok";   vTxt="مكتمل"; vSub="نُفِّذت كل مهامّ اليوم"; }
+  const vC="var(--sla-"+vKey+")", vBg="var(--sla-"+vKey+"-bg)";
+
+  const pendingOnTime=Math.max(0,s.due-s.overdue);
+  const seg=(n,cls)=> n>0?`<span class="${cls}" style="flex:${n}"></span>`:"";
+
+  const tile=(icon,val,lbl,c)=>`
+    <div class="stat-tile" style="--_c:${c}">
+      <div class="st-ico">${_svg(icon)}</div>
+      <div class="st-val" style="color:${c}">${val}</div>
+      <div class="st-lbl">${lbl}</div>
+    </div>`;
+
+  // الربحية الشهرية
+  const mv=Number(fin.monthlyValue)||0, sal=Number(fin.monthlySalaries)||0, adm=Number(fin.adminExpenses)||0;
+  const net=mv-sal-adm-spend.month;
+  const margin=mv>0?Math.round(net/mv*100):0;
+  const netC=net<0?"var(--sla-crit)":(margin<15?"var(--sla-warn)":"var(--sla-ok)");
+  const finBlock = mv>0 ? `
+    <div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('banknote')} ربحية الشهر</div>
+        <span class="co-sec-c">هامش <b>${margin}%</b></span></div>
+      <div class="co-fin">
+        <div class="co-fin-i"><span class="k">العقد الشهري</span><span class="v">${_money(mv)}</span></div>
+        <div class="co-fin-i"><span class="k">رواتب الطاقم</span><span class="v neg">−${_money(sal)}</span></div>
+        ${adm>0?`<div class="co-fin-i"><span class="k">مصاريف إدارية</span><span class="v neg">−${_money(adm)}</span></div>`:""}
+        <div class="co-fin-i"><span class="k">مستهلكات الشهر</span><span class="v neg">−${_money(spend.month)}</span></div>
+        <div class="co-fin-i tot"><span class="k">صافي الشهر</span><span class="v" style="color:${netC}">${_money(net)}</span></div>
+      </div>
+      <div class="co-hint" style="margin-top:9px">المستهلكات تُسحب من المشتريات (بند «${CLEAN_ITEM_TYPE}») — تراكمي العقد ${_money(spend.total)} ريال.</div>
+    </div>` : `
+    <div class="card"><div class="co-sec"><div class="co-sec-t">${_svg('banknote')} ربحية الشهر</div></div>
+      <div class="co-hint" style="margin-top:0">أدخل قيمة العقد الشهرية ورواتب الطاقم من: إدارة المشاريع › بطاقة المشروع › تعديل بيانات العقد.</div></div>`;
+
+  // مدة العقد
+  const cpBlock = cp ? `
+    <div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('calendarClock')} مدة العقد</div>
+        <span class="co-sec-c"><b>${cp.pct}%</b> منقضية</span></div>
+      <div class="co-tiles" style="margin-bottom:11px">
+        ${tile('calendar', cp.months,     "مدة العقد (شهر)",    "var(--primary)")}
+        ${tile('hourglass',cp.monthsGone, "المنقضية (شهر)",     "var(--sla-warn)")}
+        ${tile('calendar', cp.monthsLeft, "المتبقّية (شهر)",     "var(--sla-ok)")}
+      </div>
+      <div class="hbar">
+        <span class="s-ok" style="flex:${Math.max(cp.pct,0.01)}"></span>
+        <span style="flex:${Math.max(100-cp.pct,0.01)};background:var(--surface2)"></span>
+      </div>
+    </div>` : "";
+
+  // التغطية حسب المبنى
+  const covBlock = cov.length ? `
+    <div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('building2')} التغطية حسب المنطقة</div>
+        <span class="co-sec-c">الأضعف أولاً</span></div>
+      ${cov.map(b=>{
+        const c=b.pct>=100?"var(--sla-ok)":(b.pct>=60?"var(--sla-warn)":"var(--sla-crit)");
+        return `<div class="co-cov">
+          <div class="co-cov-h"><span class="n">${_esc(b.name)}</span>
+            <span class="p" style="color:${c}">${b.pct}% <small>(${b.done}/${b.sched})</small></span></div>
+          <div class="hbar"><span style="flex:${Math.max(b.pct,0.01)};background:${c}"></span><span style="flex:${Math.max(100-b.pct,0.01)};background:var(--surface2)"></span></div>
+        </div>`;
+      }).join("")}
+    </div>` : "";
+
+  // المهام المتأخّرة — أقدم أولاً
+  const late=_tasks.filter(t=>isOverdue(t)).sort((a,b)=>overdueDays(b)-overdueDays(a)).slice(0,8);
+  const lateBlock = `
+    <div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('alertTriangle')} المهامّ المتأخّرة</div>
+        <span class="co-sec-c">${late.length?late.length+" مهمة":"لا متأخّرات"}</span></div>
+      ${late.length ? late.map(t=>`
+        <div class="ppm-card due-today">
+          <div class="co-card-row">
+            <div class="ppm-chip">${_svg(iconOf(t.workType))}</div>
+            <div class="co-card-main">
+              <div class="co-card-t">${_esc(t.name||"")}</div>
+              <div class="ppm-meta-row"><span class="mi">${_svg('pin')}</span> ${_esc(t.building||"—")}${t.floor?" / "+_esc(t.floor):""}</div>
+            </div>
+            <div class="co-card-act"><span class="ppm-due-badge overdue">متأخّرة ${overdueDays(t)} يوم</span></div>
+          </div>
+        </div>`).join("")
+       : `<div class="co-empty" style="padding:22px">${_svg('checkCircle')}
+          <div class="co-empty-t">لا مهامّ متأخّرة</div></div>`}
+    </div>`;
+
+  return `
+    <div class="page-hero">
+      <div class="page-hero-titles">
+        <div class="page-hero-title"><span class="ph-ico">${_svg('sparkles')}</span> اللوحة التنفيذية — عقد نظافة</div>
+        <div class="page-hero-sub">${_esc((_proj()||{}).name||"")}</div>
+      </div>
+      <div class="page-hero-actions">
+        <button class="btn btn-sm" onclick="cleaningOps.goOps()">${_svg('clipboardList')} تشغيل النظافة</button>
+        <button class="btn btn-sm" onclick="cleaningOps.refreshExec()">${_svg('rotateCcw')} تحديث</button>
+      </div>
+    </div>
+
+    <div class="ops-strip" style="--verdict:${vC};--verdict-bg:${vBg};margin-bottom:14px">
+      <div class="ops-verdict">
+        <div class="eb">حالة التشغيل الآن</div>
+        <div class="big"><span class="dot"></span>${vTxt}</div>
+        <div class="sub">${vSub}</div>
+      </div>
+      <div class="ops-health">
+        <div class="hl"><span class="t">تغطية اليوم</span>
+          <span class="c"><b>${s.done}</b> من ${s.scheduled} مجدولة</span></div>
+        ${s.scheduled>0
+          ? `<div class="hbar">${seg(s.done,'s-ok')}${seg(pendingOnTime,'s-warn')}${seg(s.overdue,'s-crit')}</div>
+             <div class="hleg">
+               <div class="it"><i style="background:var(--sla-ok)"></i>نُفِّذ <span class="n">${s.done}</span></div>
+               ${pendingOnTime>0?`<div class="it"><i style="background:var(--sla-warn)"></i>متبقٍّ <span class="n">${pendingOnTime}</span></div>`:""}
+               ${s.overdue>0?`<div class="it"><i style="background:var(--sla-crit)"></i>متأخّر <span class="n">${s.overdue}</span></div>`:""}
+             </div>`
+          : `<div class="hbar"><span style="flex:1;background:var(--surface2)"></span></div>`}
+      </div>
+      <div class="ops-live">
+        <div class="lbl">نسبة التغطية</div>
+        <div class="big" style="color:${vC}">${s.coverage}%</div>
+        <div class="u"><span class="live"></span>${_tasks.filter(t=>!isDisabled(t)).length} مهمة نشطة</div>
+      </div>
+    </div>
+
+    <div class="co-tiles">
+      ${tile('calendar',    s.scheduled, "مجدول اليوم",  "var(--primary)")}
+      ${tile('checkCircle', s.done,      "نُفِّذ اليوم",   "var(--sla-ok)")}
+      ${tile('hourglass',   s.due,       "متبقٍّ اليوم",  s.due>0?"var(--sla-warn)":"var(--sla-ok)")}
+      ${tile('alertTriangle', s.overdue, "متأخّر",       s.overdue>0?"var(--sla-crit)":"var(--sla-ok)")}
+    </div>
+
+    ${finBlock}
+    ${covBlock}
+    ${lateBlock}
+    ${cpBlock}`;
+}
+
+/* تركيب/رفع اللوحة — بلا مساسٍ بمحتوى النواة */
+function mountExec(){
+  const host=document.getElementById("page-dashboard");
+  if(!host) return;
+  if(!isCleaningProject()){ unmountExec(); return; }
+  let box=document.getElementById(EXEC_ID);
+  if(!box){
+    box=document.createElement("div");
+    box.id=EXEC_ID;
+    host.insertBefore(box, host.firstChild);
+  }
+  host.classList.add("co-exec-mode");
+  if(!_loaded || _loadedFor!==_projId()){
+    box.innerHTML = `<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ تحميل بيانات التشغيل…</div></div></div>`;
+    loadTasks().then(()=>{ const b=document.getElementById(EXEC_ID); if(b && isCleaningProject()) b.innerHTML=execHTML(); });
+    return;
+  }
+  box.innerHTML=execHTML();
+}
+function unmountExec(){
+  const host=document.getElementById("page-dashboard");
+  if(host) host.classList.remove("co-exec-mode");
+  const box=document.getElementById(EXEC_ID);
+  if(box) box.remove();
+}
+async function refreshExec(){ await loadTasks(true); mountExec(); _toast("✅ حُدِّثت اللوحة","success"); }
+function goOps(){ try{ showPage(PAGE_ID); }catch(e){} }
+
+/* ════════════════════════════════════════════════════════════
    التركيب الذاتي: صفحة + زرّ قائمة جانبية + لفّ showPage
    ════════════════════════════════════════════════════════════ */
 function ensurePage(){
@@ -759,6 +1013,9 @@ function hookShowPage(){
       return orig.apply(this, ["dashboard"]);
     }
     orig.apply(this, arguments);
+    // اللوحة التنفيذية: لعقود النظافة نعرض لوحتنا ونُخفي لوحة الصيانة (بلا حذف)،
+    // ولغيرها نرفع الإخفاء فوراً — فمشاريع الصيانة لا تتأثّر إطلاقاً.
+    if(id==="dashboard"){ try{ mountExec(); }catch(e){ console.warn("cleaningOps/mountExec",e); } }
     if(id===PAGE_ID){
       const pg=document.getElementById("page-"+PAGE_ID);
       if(!pg) return;
@@ -781,7 +1038,15 @@ function _watchProject(){
       last=cur;
       _tasks=[]; _loaded=false; _loadedFor="";
       _editing=null; _execFor=null; _execState=[]; _genForm=false; _view="board";
-      ensureTypeKnown(()=>{ injectSidebarButton(); if(_onPage()) render(); });
+      // ارفع لوحة النظافة فوراً عند مغادرة مشروع النظافة — قبل معرفة نوع الجديد
+      unmountExec();
+      ensureTypeKnown(()=>{
+        injectSidebarButton();
+        if(_onPage()) render();
+        // لو الصفحة المعروضة هي اللوحة التنفيذية فأعِد تركيبها حسب نوع المشروع الجديد
+        const dash=document.getElementById("page-dashboard");
+        if(dash && dash.classList.contains("active")) mountExec();
+      });
     }
   }, 1500);
 }
@@ -797,6 +1062,25 @@ function injectCSS(){
   // الحالةُ الفارغة، والجدول.
   st.textContent = `
 #page-${PAGE_ID}{direction:rtl}
+/* اللوحة التنفيذية لعقود النظافة: تُخفى أقسام لوحة الصيانة ولا تُحذف — فتبقى عناصر
+   النواة موجودةً يجدها renderDashboard() بلا خطأ، ويُرفَع الإخفاء بإزالة الصنف. */
+#page-dashboard.co-exec-mode > *:not(#${EXEC_ID}){display:none!important}
+#${EXEC_ID}{direction:rtl}
+.co-fin{display:flex;flex-direction:column;gap:1px}
+.co-fin-i{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px dashed var(--border)}
+.co-fin-i:last-child{border-bottom:none}
+.co-fin-i .k{font-size:12.5px;color:var(--muted);font-weight:700}
+.co-fin-i .v{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:var(--text)}
+.co-fin-i .v.neg{color:var(--muted)}
+.co-fin-i.tot{border-top:1px solid var(--border);margin-top:3px;padding-top:11px}
+.co-fin-i.tot .k{color:var(--text);font-weight:800}
+.co-fin-i.tot .v{font-size:19px;font-weight:800}
+.co-cov{margin-bottom:11px}
+.co-cov:last-child{margin-bottom:0}
+.co-cov-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:5px}
+.co-cov-h .n{font-size:12.5px;font-weight:700;color:var(--text)}
+.co-cov-h .p{font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:800}
+.co-cov-h .p small{font-family:'Cairo',sans-serif;font-weight:700;color:var(--muted);font-size:10.5px}
 #page-${PAGE_ID} .page-hero-actions .btn.co-seg-on{background:rgba(255,255,255,.34);border-color:rgba(255,255,255,.55);font-weight:800}
 .co-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
 .co-sec{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:11px}
@@ -861,11 +1145,13 @@ window.cleaningOps = {
   render, setView, refresh, toggleGen, doGen,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec,
+  mountExec, unmountExec, refreshExec, goOps,
   startSync(){ /* لا مزامنة مستقلة — القراءة بـ .get() عند العرض (انضباط المستمعين) */ },
   version: VERSION,
   build: MODULE_BUILD,
   // مكشوفة لفحوص hail-tests (دوال نقية)
   _boardStats: boardStats,
+  _coverageByBuilding: coverageByBuilding,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,
   _addDays: _addDays, _today: _today,
   _FREQ_DAYS: FREQ_DAYS,
