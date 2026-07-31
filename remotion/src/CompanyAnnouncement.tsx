@@ -180,6 +180,8 @@ const SceneServices: React.FC = () => {
 
 // المشهد 4 — عملاؤنا (لوجو + اسم العميل)
 // التخطيط يتكيّف مع عدد العملاء: بطاقة كبيرة للواحد أو الاثنين، وشبكة لما زاد.
+const GAP = 26;
+
 const SceneClients: React.FC = () => {
   const count = clients.length;
   const columns = count <= 2 ? count : count <= 6 ? 3 : 4;
@@ -196,9 +198,9 @@ const SceneClients: React.FC = () => {
         </RevealText>
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${columns}, 1fr)`,
-            gap: 26,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: GAP,
             justifyContent: "center",
             maxWidth: featured ? 760 * count : "100%",
             marginInline: featured ? "auto" : undefined,
@@ -206,12 +208,16 @@ const SceneClients: React.FC = () => {
           }}
         >
           {clients.map((c, i) => (
-            <RevealText key={c.name} delay={14 + i * 7}>
+            <RevealText
+              key={c.name}
+              delay={14 + i * 7}
+              style={{ width: `calc((100% - ${(columns - 1) * GAP}px) / ${columns})` }}
+            >
               <Card accent={theme.primary} padding={featured ? 44 : 30} style={{ height: "100%" }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
                   <div
                     style={{
-                      height: featured ? 150 : 110,
+                      height: featured ? 170 : 132,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -220,7 +226,7 @@ const SceneClients: React.FC = () => {
                     {c.logo ? (
                       <Img
                         src={staticFile(c.logo)}
-                        style={{ maxHeight: "100%", maxWidth: featured ? 300 : 210, objectFit: "contain" }}
+                        style={{ maxHeight: "100%", maxWidth: featured ? 320 : 250, objectFit: "contain" }}
                       />
                     ) : (
                       <IconChip color={theme.primary} size={featured ? 130 : 96}>

@@ -17,9 +17,9 @@ export type Client = {
 };
 
 export const clients: Client[] = [
-  {
-    name: "أمانة منطقة حائل",
-    sector: "جهة حكومية",
-    // logo: "clients/hail-municipality.png",
-  },
+  { name: "أمانة منطقة حائل", sector: "جهة حكومية", logo: "clients/hail-municipality.png" },
+  { name: "جامعة الملك سعود", sector: "قطاع تعليمي", logo: "clients/ksu.png" },
+  { name: "المؤسسة العامة للحبوب", sector: "جهة حكومية", logo: "clients/sago.png" },
+  { name: "مصرف الراجحي", sector: "قطاع مصرفي", logo: "clients/alrajhi.png" },
+  { name: "امنكو", sector: "قطاع خاص", logo: "clients/amnco.png" },
 ];
