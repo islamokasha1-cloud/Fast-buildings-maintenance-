@@ -288,10 +288,23 @@ function dueStatus(t){
 // تنفيذ المهمة: يُسجَّل في سجلّ التنفيذ (للتغطية والتاريخ) ثم يُقدَّم الاستحقاق التالي
 // بمقدار تكرارها من **اليوم** (لا من الاستحقاق السابق) — فالمهمة المتأخّرة لا تتراكم
 // استحقاقاتها الفائتة بلا معنى في عملٍ يوميٍّ متكرّر.
+/* سجلّ تنفيذ مهمةٍ بعينها — مساواةٌ على حقلٍ واحد فلا تحتاج فهرساً مركّباً،
+   والترتيب في الذاكرة تفادياً لاشتراط orderBy فهرساً. */
+async function loadTaskLog(taskId){
+  const database=_db(), col=logCol();
+  if(!database || !col) return [];
+  try{
+    const snap=await database.collection(col).where("taskId","==",taskId).limit(60).get();
+    return snap.docs.map(d=>d.data()||{}).sort((a,b)=>String(b.at||"").localeCompare(String(a.at||"")));
+  }catch(e){ console.warn("cleaningOps/loadTaskLog",e); return []; }
+}
+
 /* ════════════ صور التنفيذ ════════════
    نعيد استخدام آلية النواة: compressImage للضغط ثم رفعٌ إلى Firebase Storage.
    تُخزَّن الروابط في سجلّ التنفيذ، ومنه تظهر في التقرير المصوّر. */
 let _execPhotos = [];        // [{url, uploading, error, localPreview}]
+let _detailFor = null;       // المهمة المعروضة تفاصيلها (null = لا شاشة تفاصيل)
+let _detailLog = null;       // سجلّ تنفيذها (null = لم يُحمَّل بعد)
 function _storage(){ try{ return (typeof storage!=="undefined" && storage) ? storage : null; }catch(e){ return null; } }
 /* مصدرا الصورة: الكاميرا مباشرةً (سريعٌ في الميدان) أو معرضُ الجوال (صورةٌ التُقطت
    سابقاً). كان capture="environment" مفروضاً دائماً فيفتح الكاميرا ويمنع الاختيار من
@@ -422,8 +435,9 @@ function _render(){
     _afterLoad();
     return;
   }
-  if(_editing) { renderEditor(el); return; }
-  if(_execFor) { renderExec(el); return; }
+  if(_editing)   { renderEditor(el); return; }
+  if(_execFor)   { renderExec(el);   return; }
+  if(_detailFor) { renderDetail(el); return; }
   el.innerHTML = heroHTML() + (_genForm ? genFormHTML() : "") +
                  (_view==="sup" ? supMapHTML() : _view==="board" ? boardHTML() : allTasksHTML());
 }
@@ -502,19 +516,19 @@ function boardHTML(){
   const todays=active.filter(t=>isDue(t)||doneToday(t));
   const byB={};
   todays.forEach(t=>{ const b=t.building||"بلا مبنى"; (byB[b]=byB[b]||[]).push(t); });
-  const groups=Object.keys(byB).sort().map(b=>{
+  const groups=`<div class="co-groups">`+Object.keys(byB).sort().map(b=>{
     const list=byB[b].slice().sort((x,y)=>dueStatus(x).sort-dueStatus(y).sort);
     const d=list.filter(doneToday).length;
     const all=d===list.length;
     return `
-      <div class="card">
+      <div class="card co-group">
         <div class="co-sec">
           <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
           <span class="ppm-due-badge ${all?'ok':'today'}">${d}/${list.length} منجزة</span>
         </div>
         ${list.map(taskCardHTML).join("")}
       </div>`;
-  }).join("");
+  }).join("")+`</div>`;
 
   return `
     <div class="co-tiles">
@@ -535,13 +549,30 @@ function boardHTML(){
       <div class="co-empty-s">كل المهام ضمن مواعيدها.</div></div></div>`}`;
 }
 
+/* تجميعُ المهامّ حسب المبنى في شبكةٍ متجاورة — يستفيد من عرض الشاشة بدل صفٍّ لكل مهمة */
+function _byBuildingGrid(tasks){
+  const byB={};
+  tasks.forEach(t=>{ const b=t.building||"بلا مبنى"; (byB[b]=byB[b]||[]).push(t); });
+  return `<div class="co-groups">`+Object.keys(byB).sort().map(b=>{
+    const list=byB[b].slice().sort((x,y)=>dueStatus(x).sort-dueStatus(y).sort);
+    const d=list.filter(doneToday).length, all=d===list.length;
+    return `<div class="card co-group">
+      <div class="co-sec">
+        <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
+        <span class="ppm-due-badge ${all?'ok':'today'}">${d}/${list.length}</span>
+      </div>
+      ${list.map(taskCardHTML).join("")}
+    </div>`;
+  }).join("")+`</div>`;
+}
+
 /* بطاقة المهمة — نفس .ppm-card (شريط الحالة 4px، مربّع الأيقونة، الشارات وأسطر البيانات) */
 function taskCardHTML(t){
   const st=dueStatus(t);
   const list=Array.isArray(t.checklist)?t.checklist:[];
   const done=doneToday(t);
   return `
-    <div class="ppm-card ${st.card}">
+    <div class="ppm-card ${st.card} co-clickable" onclick="cleaningOps.openDetail('${_esc(t.id)}')" title="اضغط لعرض التفاصيل وسجلّ التنفيذ">
       <div class="co-card-row">
         <div class="ppm-chip">${_svg(iconOf(t.workType))}</div>
         <div class="co-card-main">
@@ -560,8 +591,8 @@ function taskCardHTML(t){
           </div>
         </div>
         <div class="co-card-act">
-          ${done ? "" : (canExecute()?`<button class="btn btn-primary btn-sm" onclick="cleaningOps.exec('${_esc(t.id)}')">${_svg('checkCircle')} تنفيذ</button>`:"")}
-          ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')}</button>`:""}
+          ${done ? "" : (canExecute()?`<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();cleaningOps.exec('${_esc(t.id)}')">${_svg('checkCircle')} تنفيذ</button>`:"")}
+          ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')}</button>`:""}
         </div>
       </div>
     </div>`;
@@ -598,6 +629,77 @@ function allTasksHTML(){
       <tbody>${rows}</tbody></table></div>
   </div>`;
 }
+
+/* ── تفاصيل المهمة: بياناتها وقائمة فحصها وسجلّ تنفيذها بالصور ──
+   الضغط على أيّ بطاقة يفتحها — وهي السبيل الوحيد لمراجعة مهمةٍ أُغلقت (نُفِّذت)،
+   فأزرارُ التنفيذ تختفي عنها بعد الإنجاز. */
+function renderDetail(el){
+  const t=_detailFor;
+  const list=Array.isArray(t.checklist)?t.checklist:[];
+  const st=dueStatus(t);
+  const sup=taskSupervisor(t);
+  const info=(k,v)=> v?`<div class="co-fin-i"><span class="k">${k}</span><span class="v" style="font-family:'Cairo',sans-serif;font-size:12.5px">${_esc(v)}</span></div>`:"";
+  const logHTML = _detailLog===null
+    ? `<div class="co-empty" style="padding:22px"><div class="co-empty-t">جارٍ تحميل سجلّ التنفيذ…</div></div>`
+    : (!_detailLog.length
+        ? `<div class="co-empty" style="padding:22px">${_svg('clipboardList')}
+             <div class="co-empty-t">لم تُنفَّذ بعد</div>
+             <div class="co-empty-s">سيظهر هنا كلُّ تنفيذٍ بتاريخه ومنفِّذه وصوره.</div></div>`
+        : _detailLog.map(r=>`
+            <div class="co-logrow">
+              <div class="co-logrow-h">
+                <span class="d">${_svg('calendar')} ${_esc(String(r.date||"").slice(0,10))}</span>
+                <span class="b">${_svg('user')} ${_esc(r.by||"—")}</span>
+                <span class="ppm-due-badge ${(r.doneItems||0)>=(r.totalItems||0)?'ok':'today'}">${r.doneItems||0}/${r.totalItems||0} بند</span>
+              </div>
+              ${r.note?`<div class="co-lognote">${_svg('fileText')} ${_esc(r.note)}</div>`:""}
+              ${(r.photos&&r.photos.length)?`<div class="co-logphotos">
+                ${r.photos.map(u=>`<a href="${_esc(u)}" target="_blank" rel="noopener"><img src="${_esc(u)}" alt="صورة تنفيذ" loading="lazy"></a>`).join("")}
+              </div>`:`<div class="co-hint" style="margin:6px 0 0">بلا صور</div>`}
+            </div>`).join(""));
+
+  el.innerHTML = subHeroHTML(_esc(t.name||"مهمة"),
+      _esc(t.building||"")+(t.floor?" / "+_esc(t.floor):"")+" • "+_esc(t.workType||"")+" • "+_esc(t.freq||""),
+      "closeDetail") + `
+    <div class="card co-pane">
+      <div class="co-sec"><div class="co-sec-t">${_svg('clipboardList')} بيانات المهمة</div>
+        <span class="ppm-due-badge ${st.badge}">${st.lbl}</span></div>
+      <div class="co-fin">
+        ${info("المنطقة", (t.building||"—")+(t.floor?" / "+t.floor:""))}
+        ${info("نوع العمل", t.workType)}
+        ${info("التكرار", t.freq)}
+        ${info("المشرف المسؤول", sup||"غير مُسنَد")}
+        ${info("العامل المنفِّذ", t.assignee)}
+        ${info("الاستحقاق التالي", String(t.nextDueDate||"").slice(0,10))}
+        ${info("آخر تنفيذ", t.lastExecuted?String(t.lastExecuted).slice(0,10)+(t.lastExecutedBy?" — "+t.lastExecutedBy:""):"لم تُنفَّذ بعد")}
+        ${info("وصف", t.desc)}
+      </div>
+      <div class="co-actions" style="margin-top:12px">
+        ${(!doneToday(t)&&canExecute())?`<button class="btn btn-primary btn-sm" onclick="cleaningOps.exec('${_esc(t.id)}')">${_svg('checkCircle')} تنفيذ الآن</button>`:""}
+        ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')} تعديل</button>`:""}
+      </div>
+    </div>
+    ${list.length?`<div class="card co-pane">
+      <div class="co-sec"><div class="co-sec-t">${_svg('clipboardCheck')} قائمة الفحص</div>
+        <span class="co-sec-c">${list.length} بند</span></div>
+      <div class="co-ck-list">${list.map(i=>`<div class="co-ck" style="cursor:default">${_svg('checkCircle')}<span>${_esc(i)}</span></div>`).join("")}</div>
+    </div>`:""}
+    <div class="card co-pane">
+      <div class="co-sec"><div class="co-sec-t">${_svg('activity')} سجلّ التنفيذ</div>
+        <span class="co-sec-c">${_detailLog===null?"…":_detailLog.length+" تنفيذ"}</span></div>
+      ${logHTML}
+    </div>`;
+}
+function openDetail(id){
+  const t=_tasks.find(x=>x.id===id); if(!t) return;
+  _detailFor=t; _detailLog=null; _editing=null; _execFor=null;
+  render();
+  loadTaskLog(id).then(rows=>{
+    if(!_detailFor || _detailFor.id!==id) return;   // غادر المستخدم قبل الوصول
+    _detailLog=rows; render();
+  });
+}
+function closeDetail(){ _detailFor=null; _detailLog=null; render(); }
 
 /* ── ربط المشرفين بالمباني (للأدمن/مدير المشروع) ── */
 function supMapHTML(){
@@ -896,7 +998,7 @@ async function doGen(){
 }
 
 /* ════════════ معالِجات الواجهة ════════════ */
-function setView(v){ _view=v; _genForm=false; render(); }
+function setView(v){ _view=v; _genForm=false; _detailFor=null; _detailLog=null; render(); }
 function toggleGen(){ _genForm=!_genForm; _genErr=""; render(); }
 async function refresh(){ await loadTasks(true); render(); _toast("✅ حُدِّث الجدول","success"); }
 
@@ -954,6 +1056,7 @@ function exec(id){
 }
 function toggleItem(i,on){ _execState[i]=!!on; render(); }
 function cancelExec(){ _execFor=null; _execState=[]; _execPhotos=[]; render(); }
+function _clearDetail(){ _detailFor=null; _detailLog=null; }
 async function confirmExec(){
   if(!_execFor) return;
   const note=((document.getElementById("co-exec-note")||{}).value||"").trim();
@@ -1489,14 +1592,10 @@ function dailyHTML(){
         </div>`;
       }).join("")}
     </div>`:""}
-    <div class="card">
-      <div class="co-sec"><div class="co-sec-t">${_svg('clipboardCheck')} مهامّ اليوم</div>
-        <span class="co-sec-c">${todays.length} مهمة</span></div>
-      ${todays.length ? todays.map(taskCardHTML).join("")
-        : `<div class="co-empty" style="padding:26px">${_svg('checkCircle')}
-           <div class="co-empty-t">لا مهامّ مستحقّة اليوم</div>
-           <div class="co-empty-s">كل المهامّ ضمن مواعيدها.</div></div>`}
-    </div>`;
+    ${todays.length ? _byBuildingGrid(todays)
+      : `<div class="card"><div class="co-empty" style="padding:26px">${_svg('checkCircle')}
+         <div class="co-empty-t">لا مهامّ مستحقّة اليوم</div>
+         <div class="co-empty-s">كل المهامّ ضمن مواعيدها.</div></div></div>`}`;
 }
 function mountDaily(){
   const host=document.getElementById("page-daily");
@@ -1702,6 +1801,32 @@ function injectCSS(){
 .co-cov-h .p small{font-family:'Cairo',sans-serif;font-weight:700;color:var(--muted);font-size:10.5px}
 #page-${PAGE_ID} .page-hero-actions .btn.co-seg-on{background:rgba(255,255,255,.34);border-color:rgba(255,255,255,.55);font-weight:800}
 .co-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+/* المباني جنباً إلى جنب: عمودٌ لكل مبنى بدل صفٍّ لكل مهمة — يستفيد من عرض الشاشة.
+   align-items:start فلا يتمدّد المبنى القليلُ مهامُّه ليطابق أطولَ جاره. */
+.co-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;align-items:start}
+.co-groups .co-group{margin-bottom:0}
+/* بطاقاتٌ مصغَّرة داخل صفحات النظافة وحدها — لا تمسّ .ppm-card في صفحة الوقائية */
+#page-${PAGE_ID} .ppm-card,#${EXEC_ID} .ppm-card,#${DAILY_ID} .ppm-card{padding:9px 11px;margin-bottom:7px;border-radius:11px}
+#page-${PAGE_ID} .ppm-chip,#${EXEC_ID} .ppm-chip,#${DAILY_ID} .ppm-chip{width:30px;height:30px;border-radius:9px}
+#page-${PAGE_ID} .ppm-chip svg,#${EXEC_ID} .ppm-chip svg,#${DAILY_ID} .ppm-chip svg{width:16px;height:16px}
+#page-${PAGE_ID} .ppm-meta-row,#${EXEC_ID} .ppm-meta-row,#${DAILY_ID} .ppm-meta-row{font-size:10.5px;gap:4px;flex-wrap:wrap}
+#page-${PAGE_ID} .ppm-meta-row .mi svg,#${EXEC_ID} .ppm-meta-row .mi svg,#${DAILY_ID} .ppm-meta-row .mi svg{width:11px;height:11px}
+#page-${PAGE_ID} .ppm-pill,#${EXEC_ID} .ppm-pill,#${DAILY_ID} .ppm-pill,
+#page-${PAGE_ID} .ppm-due-badge,#${EXEC_ID} .ppm-due-badge,#${DAILY_ID} .ppm-due-badge{font-size:9.5px;padding:2px 7px}
+.co-clickable{cursor:pointer;transition:border-color .15s}
+.co-clickable:hover{border-color:var(--primary)}
+.co-clickable:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+/* سجلّ التنفيذ في شاشة التفاصيل */
+.co-logrow{border:1px solid var(--border);border-radius:11px;padding:10px 12px;margin-bottom:9px;background:var(--surface2)}
+.co-logrow:last-child{margin-bottom:0}
+.co-logrow-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11.5px;font-weight:700;color:var(--text)}
+.co-logrow-h .d,.co-logrow-h .b{display:inline-flex;align-items:center;gap:5px;color:var(--muted)}
+.co-logrow-h svg{width:12px;height:12px;stroke-width:2}
+.co-logrow-h .ppm-due-badge{margin-inline-start:auto}
+.co-lognote{font-size:11.5px;color:var(--text);margin-top:7px;display:flex;align-items:flex-start;gap:6px;line-height:1.7}
+.co-lognote svg{width:12px;height:12px;stroke-width:2;flex:none;margin-top:3px;color:var(--muted)}
+.co-logphotos{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
+.co-logphotos img{width:76px;height:76px;object-fit:cover;border-radius:9px;border:1px solid var(--border);display:block}
 .co-sec{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:11px}
 .co-sec-t{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary)}
 .co-sec-t svg{width:16px;height:16px;stroke-width:2;flex-shrink:0}
@@ -1709,8 +1834,8 @@ function injectCSS(){
 .co-sec-c b{font-family:'JetBrains Mono',monospace;color:var(--text)}
 .co-card-row{display:flex;align-items:flex-start;gap:11px;flex-wrap:wrap}
 .co-card-main{flex:1;min-width:0}
-.co-card-t{font-size:13.5px;font-weight:800;color:var(--text);line-height:1.35}
-.co-pills{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:7px}
+.co-card-t{font-size:12.5px;font-weight:800;color:var(--text);line-height:1.35}
+.co-pills{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:5px}
 .co-pills .co-by{background:var(--sla-ok-bg);color:var(--sla-ok);border:1px solid var(--sla-ok-bd)}
 .co-pills .co-by svg{width:11px;height:11px;stroke-width:2.2}
 .co-card-act{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-inline-start:auto}
@@ -1793,6 +1918,7 @@ window.cleaningOps = {
   render, setView, refresh, toggleGen, doGen,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
+  openDetail, closeDetail,
   saveSupMap,
   mountExec, unmountExec, refreshExec, goOps,
   mountDaily, unmountDaily, refreshDaily, seedWorkTypes, relabelPage, injectPhotoSourceFilter,
