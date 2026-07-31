@@ -1482,6 +1482,20 @@ function mergeManualProject() {
     dm.includes("db.batch()") && dm.includes("p.timeline.push(") && dm.includes("b.commit()"));
   T("الدمج محميّ بصلاحية المسؤول وسبب إلزامي وتأكيد",
     dm.includes('currentUser.role!=="admin"') && dm.includes("if(!reason)") && dm.includes("showConfirm(") && dm.includes("logAudit("));
+  // v18.9vk: إتمام الدمج — حذف الاسم اليدوي المتبقّي من meta/manual_projects
+  T("★ الدمج يحذف الاسم اليدوي من القائمة المحفوظة بعد نقل كل الطلبات",
+    dm.includes("if(_mpManualPOs(nm).length===0){ await _mpRemoveMetaName(nm); }"));
+  const rm = (()=>{ const i=HTML.indexOf("async function _mpRemoveMetaName("); return i<0?"":HTML.slice(i, HTML.indexOf("\nasync function ", i+10)); })();
+  T("★ _mpRemoveMetaName يزيل الاسم من meta/manual_projects (arrayRemove) ومن الذاكرة",
+    rm.includes('db.collection("meta").doc("manual_projects")') && rm.includes("FieldValue.arrayRemove(nm)") &&
+    rm.includes("_manualProjectNames = _manualProjectNames.filter"));
+  const dl = (()=>{ const i=HTML.indexOf("async function doDeleteManualName("); return i<0?"":HTML.slice(i, HTML.indexOf("\nfunction ", i+10)); })();
+  T("★ زر «حذف الاسم اليدوي» موجود ويستدعي doDeleteManualName",
+    HTML.includes('id="mp-del-btn"') && HTML.includes('onclick="doDeleteManualName()"'));
+  T("★ الحذف يرفض إن بقيت طلبات مرتبطة (يدعو للدمج أولاً)",
+    dl.includes("const remaining=_mpManualPOs(nm).length;") && dl.includes("if(remaining>0)"));
+  T("الحذف محميّ بصلاحية المسؤول وتأكيد ويحذف من القائمة المحفوظة",
+    dl.includes('currentUser.role!=="admin"') && dl.includes("showConfirm(") && dl.includes("await _mpRemoveMetaName(nm);"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
