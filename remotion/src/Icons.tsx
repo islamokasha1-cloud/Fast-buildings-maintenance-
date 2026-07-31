@@ -111,6 +111,23 @@ export const IconGlobe: React.FC<IconProps> = ({ size = 24, color = "#1b3a6b", s
   </svg>
 );
 
+// قطاع المعادن — سندان
+export const IconAnvil: React.FC<IconProps> = ({ size = 24, color = "#1b3a6b", strokeWidth = 1.75 }) => (
+  <svg {...base(size)}>
+    <path
+      d="M3 9h12l3-1.6V12h-4.4v3.4H16L17.6 19H6.4L8 15.4h2.4V12H3Z"
+      {...stroke(color, strokeWidth)}
+    />
+  </svg>
+);
+
+// علامة صح صغيرة لقوائم الخدمات
+export const IconTick: React.FC<IconProps> = ({ size = 24, color = "#0a7c59", strokeWidth = 2.4 }) => (
+  <svg {...base(size)}>
+    <path d="M5 12.5l4.5 4.5L19 7" {...stroke(color, strokeWidth)} />
+  </svg>
+);
+
 // شهادة أو اعتماد — وسام
 export const IconAward: React.FC<IconProps> = ({ size = 24, color = "#1b3a6b", strokeWidth = 1.75 }) => (
   <svg {...base(size)}>

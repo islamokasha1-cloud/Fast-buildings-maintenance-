@@ -26,6 +26,7 @@ import {
 import { FontLoader } from "./FontLoader";
 import {
   IconArrow,
+  IconAnvil,
   IconAward,
   IconBuildings,
   IconCart,
@@ -38,9 +39,11 @@ import {
   IconProjects,
   IconShieldCheck,
   IconTarget,
+  IconTick,
   IconWrench,
 } from "./Icons";
 import { clients } from "./clients";
+import { divisions } from "./divisions";
 import { certifications, classification } from "./certifications";
 import { experienceYears } from "./company";
 import { regions } from "./regions";
@@ -99,9 +102,9 @@ const SceneIntro: React.FC<{ companyName: string; tagline: string }> = ({ compan
 // المشهد 2 — من نحن
 const SceneAbout: React.FC = () => {
   const points = [
-    { Icon: IconFacility, color: theme.primary, text: "تشغيل وصيانة المباني الحكومية" },
-    { Icon: IconShieldCheck, color: theme.accent, text: "أعلى معايير الجودة والالتزام" },
-    { Icon: IconProjects, color: theme.warn, text: "إدارة وتقارير رقمية دقيقة" },
+    { Icon: IconBuildings, color: theme.primary, text: "الدرجة الأولى في التشييد والبناء" },
+    { Icon: IconFacility, color: theme.accent, text: "الدرجة الأولى في التشغيل والصيانة" },
+    { Icon: IconAnvil, color: theme.warn, text: "ورش تصنيع معادن مستقلة" },
   ];
   return (
     <Stage>
@@ -110,9 +113,9 @@ const SceneAbout: React.FC = () => {
         <RevealText delay={10}>
           <Card accent={theme.primary} padding={40}>
             <div style={{ fontSize: 36, lineHeight: 1.75, color: theme.ink, fontWeight: 600 }}>
-              شركة مقاولات متخصصة في تشغيل وصيانة المباني والمرافق الحكومية،
-              نقدّم حلولاً متكاملة تجمع بين الخبرة الميدانية والإدارة الرقمية،
-              بأعلى معايير الجودة والالتزام بالمواعيد.
+              شركة سعودية تعمل منذ عام ١٩٨٣ في ثلاثة قطاعات متكاملة:
+              المقاولات، وإدارة المرافق، وتصنيع المعادن — نجمع بين الخبرة
+              الميدانية والإدارة الرقمية بأعلى معايير الجودة والالتزام.
             </div>
           </Card>
         </RevealText>
@@ -133,55 +136,63 @@ const SceneAbout: React.FC = () => {
   );
 };
 
-const services = [
-  { Icon: IconFacility, color: "#1b3a6b", title: "تشغيل وصيانة المرافق", desc: "صيانة وقائية وعلاجية شاملة" },
-  { Icon: IconWrench, color: "#0a7c59", title: "الصيانة الفنية", desc: "كهرباء • سباكة • تكييف" },
-  { Icon: IconCart, color: "#a06010", title: "إدارة المشتريات", desc: "دورة شراء ذكية ومنظمة" },
-  { Icon: IconProjects, color: "#1b3a6b", title: "إدارة المشاريع", desc: "متابعة دقيقة وتقارير لحظية" },
-  { Icon: IconBuildings, color: "#0a7c59", title: "خدمات المباني", desc: "نظافة وتشغيل وأمن" },
-  { Icon: IconShieldCheck, color: "#a06010", title: "الالتزام بالجودة", desc: "معايير عالية ومواعيد مضمونة" },
-];
+const DIVISION_STYLE = {
+  contracting: { color: "#1b3a6b", Icon: IconBuildings },
+  facilities: { color: "#0a7c59", Icon: IconFacility },
+  metals: { color: "#a06010", Icon: IconAnvil },
+} as const;
 
-const ServiceCard: React.FC<{ index: number } & (typeof services)[number]> = ({
-  index,
-  Icon,
-  color,
-  title,
-  desc,
-}) => {
+// المشهد 3 — قطاعات الأعمال الثلاثة
+const SceneDivisions: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const delay = 12 + index * 6;
-  const s = spring({ frame: frame - delay, fps, config: { damping: 200 } });
-  const y = interpolate(s, [0, 1], [42, 0]);
-  return (
-    <div style={{ opacity: s, transform: `translateY(${y}px)` }}>
-      <Card accent={color} padding={30} style={{ height: "100%" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <IconChip color={color} size={76}>
-              <Icon size={42} color={color} />
-            </IconChip>
-            <IconArrow size={26} color={theme.muted} />
-          </div>
-          <div style={{ fontFamily: headingFont, fontWeight: 800, fontSize: 34, color: theme.primary }}>{title}</div>
-          <div style={{ fontSize: 25, color: theme.muted, fontWeight: 600 }}>{desc}</div>
-        </div>
-      </Card>
-    </div>
-  );
-};
 
-// المشهد 3 — الخدمات
-const SceneServices: React.FC = () => {
   return (
     <Stage>
-      <div style={{ width: "100%", maxWidth: 1560, display: "flex", flexDirection: "column", gap: 34 }}>
-        <SectionTitle label="خدماتنا" delay={0} />
+      <div style={{ width: "100%", maxWidth: 1580, display: "flex", flexDirection: "column", gap: 30 }}>
+        <SectionTitle label="قطاعات أعمالنا" delay={0} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 26 }}>
-          {services.map((sv, i) => (
-            <ServiceCard key={sv.title} index={i} {...sv} />
-          ))}
+          {divisions.map((d, i) => {
+            const st = DIVISION_STYLE[d.key];
+            const delay = 10 + i * 8;
+            const sp = spring({ frame: frame - delay, fps, config: { damping: 200 } });
+            const y = interpolate(sp, [0, 1], [44, 0]);
+            return (
+              <div key={d.key} style={{ opacity: sp, transform: `translateY(${y}px)` }}>
+                <Card accent={st.color} padding={30} style={{ height: "100%" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                      <IconChip color={st.color} size={72}>
+                        <st.Icon size={40} color={st.color} />
+                      </IconChip>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                        <div style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 40, color: st.color }}>
+                          {d.name}
+                        </div>
+                        <div style={{ fontSize: 21, color: theme.muted, fontWeight: 700 }}>{d.tagline}</div>
+                      </div>
+                    </div>
+                    <div style={{ height: 1, background: theme.border }} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {d.services.map((sv, j) => {
+                        const sd = delay + 8 + j * 4;
+                        const o = spring({ frame: frame - sd, fps, config: { damping: 200 } });
+                        return (
+                          <div
+                            key={sv}
+                            style={{ display: "flex", alignItems: "center", gap: 11, opacity: o }}
+                          >
+                            <IconTick size={22} color={st.color} />
+                            <div style={{ fontSize: 25, fontWeight: 700, color: theme.ink }}>{sv}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            );
+          })}
         </div>
       </div>
     </Stage>
@@ -685,7 +696,7 @@ export const CompanyAnnouncement: React.FC<AnnouncementProps> = ({
       </Sequence>
       <Sequence from={270} durationInFrames={240}>
         <Fade durationInFrames={240}>
-          <SceneServices />
+          <SceneDivisions />
         </Fade>
       </Sequence>
       <Sequence from={510} durationInFrames={210}>
