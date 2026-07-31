@@ -1019,6 +1019,8 @@ async function seedWorkTypes(){
   try{
     await database.doc(path).set({ workTypes: CLEANING_WT_SEED }, { merge:true });
     try{ if(typeof _applyWT==="function") _applyWT(CLEANING_WT_SEED); }catch(e){}
+    // بلا هذه، تبقى القوائم المنسدلة على حالتها القديمة حتى يُعيد شيءٌ آخر بناءها
+    try{ if(typeof repopulateAllSelects==="function") repopulateAllSelects(); }catch(e){}
     _audit("بذر أنواع عمل النظافة", _projId()+" — "+Object.keys(CLEANING_WT_SEED).length+" نوع");
     _toast("✅ أُضيفت أنواع عمل النظافة لهذا المشروع (تُعدَّل من لوحة الإدارة)","success");
   }catch(e){ console.warn("cleaningOps/seedWorkTypes",e); _seededFor[id]=false; }
@@ -1068,6 +1070,24 @@ function relabelPage(pageId){
       if(el.placeholder){ const p=_relabelText(el.placeholder); if(p!==el.placeholder) el.placeholder=p; }
     });
   }catch(e){ console.warn("cleaningOps/relabel",e); }
+}
+
+/* ══ لفّ repopulateAllSelects — التعريب يصمد أمام وصول الإعدادات المتأخّر ══
+   الإعدادات (المباني/المشرفون/أنواع العمل) تصل من Firestore **بعد** رسم الصفحة، وعندها
+   تستدعي النواة repopulateAllSelects فتعيد بناء كل الخيارات — فيُمحى تعريبنا السابق
+   وتظهر مسمّياتُ الصيانة من جديد. نلفّها فنعيد التعريب بعد كل إعادة بناء، فيبقى
+   صحيحاً مهما تأخّرت الإعدادات أو تكرّر البناء. (لغير مشاريع النظافة لا شيء يحدث.) */
+const RELABEL_PAGES = ["page-new","page-tickets","page-tickets-archive"];
+function relabelAllPages(){ RELABEL_PAGES.forEach(p=>{ try{ relabelPage(p); }catch(e){} }); }
+function hookRepopulate(){
+  if(window._coRepopHooked || typeof window.repopulateAllSelects!=="function") return;
+  const orig=window.repopulateAllSelects;
+  window.repopulateAllSelects=function(){
+    const r=orig.apply(this, arguments);
+    if(isCleaningProject()) relabelAllPages();
+    return r;
+  };
+  window._coRepopHooked=true;
 }
 
 /* ── متابعة يومية خاصة بالنظافة ──
@@ -1382,11 +1402,12 @@ function init(){
   ensurePage();
   hookShowPage();
   hookProjectModals();
+  hookRepopulate();
   ensureTypeKnown(()=>injectSidebarButton());
   injectSidebarButton();
   _watchProject();
   // القائمة الجانبية يُعاد بناؤها بعد الدخول/تبديل المشروع — أعِد الحقن عند التغيير
-  const obs=new MutationObserver(()=>{ injectSidebarButton(); hookShowPage(); hookProjectModals(); });
+  const obs=new MutationObserver(()=>{ injectSidebarButton(); hookShowPage(); hookProjectModals(); hookRepopulate(); });
   obs.observe(document.body,{childList:true,subtree:true});
 }
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", init);

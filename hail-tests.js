@@ -2203,6 +2203,19 @@ function cleaningOpsTests() {
   T("التعريب مقصورٌ على العناوين والتسميات (لا محتوى ديناميكي)",
     /RELABEL_SEL\s*=\s*"\.page-hero-title/.test(src) && !/document\.body\.innerHTML/.test(src));
 
+  // ★ الإعدادات تصل من Firestore بعد رسم الصفحة، وعندها تعيد النواة بناء كل الخيارات
+  // (repopulateAllSelects) فتمحو التعريب. لفُّها يعيده بعد كل بناء — وإلا عادت مسمّياتُ
+  // الصيانة كلّما تأخّر وصول الإعدادات.
+  T("★ التعريب يُعاد بعد كل إعادة بناءٍ للقوائم (وصولُ الإعدادات المتأخّر)",
+    /window\.repopulateAllSelects\s*=\s*function/.test(src) &&
+    /if\(isCleaningProject\(\)\) relabelAllPages\(\)/.test(src));
+  T("لفّ repopulateAllSelects مرّةً واحدة (حارس idempotent)",
+    /window\._coRepopHooked/.test(src) && /hookRepopulate\(\)/.test(src));
+  T("★ البذر يُحدِّث القوائم فوراً (وإلا بقيت فارغةً حتى بناءٍ لاحق)",
+    /repopulateAllSelects\(\);\s*\}catch\(e\)\{\}\s*\n\s*_audit\("بذر أنواع عمل النظافة"/.test(src));
+  T("النواة تعيد بناء قوائم المباني من BUILDINGS (فالتأخّر منها لا من الوحدة)",
+    /function repopulateAllSelects\(\)/.test(HTML) && /BUILDINGS\.map\(b=>`<option>/.test(HTML));
+
   // إصلاح أيقونة الأرشيف العملاقة (خلل نواة يصيب الصيانة أيضاً)
   T("★ إصلاح أيقونة الأرشيف العملاقة (font-size لا يحجّم SVG)",
     /#archive-content div\[style\*="font-size:28px"\] > svg\{width:28px;height:28px\}/.test(src));
