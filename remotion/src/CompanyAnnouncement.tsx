@@ -180,16 +180,34 @@ const SceneServices: React.FC = () => {
 
 // المشهد 4 — عملاؤنا (لوجو + اسم العميل)
 // التخطيط يتكيّف مع عدد العملاء: بطاقة كبيرة للواحد أو الاثنين، وشبكة لما زاد.
-const GAP = 26;
-
 const SceneClients: React.FC = () => {
   const count = clients.length;
   const columns = count <= 2 ? count : count <= 6 ? 3 : 4;
   const featured = count <= 2;
+  // وضع مكثّف عند كثرة العملاء حتى تتسع الشبكة دون ازدحام
+  const dense = count >= 7;
+
+  const GAP = dense ? 18 : 26;
+  const sz = {
+    logoH: featured ? 170 : dense ? 92 : 132,
+    logoW: featured ? 320 : dense ? 180 : 250,
+    pad: featured ? 44 : dense ? 20 : 30,
+    name: featured ? 42 : dense ? 21 : 30,
+    sector: featured ? 26 : dense ? 16 : 22,
+    stack: featured ? 20 : dense ? 12 : 20,
+  };
 
   return (
     <Stage>
-      <div style={{ width: "100%", maxWidth: 1500, display: "flex", flexDirection: "column", gap: 34 }}>
+      <div
+        style={{
+          width: "100%",
+          maxWidth: dense ? 1660 : 1500,
+          display: "flex",
+          flexDirection: "column",
+          gap: dense ? 24 : 34,
+        }}
+      >
         <SectionTitle label="عملاؤنا" delay={0} />
         <RevealText delay={6}>
           <div style={{ fontSize: 30, color: theme.muted, fontWeight: 600, marginTop: -12 }}>
@@ -210,14 +228,22 @@ const SceneClients: React.FC = () => {
           {clients.map((c, i) => (
             <RevealText
               key={c.name}
-              delay={14 + i * 7}
+              delay={14 + i * (dense ? 4 : 7)}
               style={{ width: `calc((100% - ${(columns - 1) * GAP}px) / ${columns})` }}
             >
-              <Card accent={theme.primary} padding={featured ? 44 : 30} style={{ height: "100%" }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+              <Card accent={theme.primary} padding={sz.pad} style={{ height: "100%" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: sz.stack,
+                    height: "100%",
+                  }}
+                >
                   <div
                     style={{
-                      height: featured ? 170 : 132,
+                      height: sz.logoH,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -226,20 +252,28 @@ const SceneClients: React.FC = () => {
                     {c.logo ? (
                       <Img
                         src={staticFile(c.logo)}
-                        style={{ maxHeight: "100%", maxWidth: featured ? 320 : 250, objectFit: "contain" }}
+                        style={{ maxHeight: "100%", maxWidth: sz.logoW, objectFit: "contain" }}
                       />
                     ) : (
-                      <IconChip color={theme.primary} size={featured ? 130 : 96}>
-                        <IconGov size={featured ? 74 : 54} color={theme.primary} />
+                      <IconChip color={theme.primary} size={featured ? 130 : dense ? 74 : 96}>
+                        <IconGov size={featured ? 74 : dense ? 42 : 54} color={theme.primary} />
                       </IconChip>
                     )}
                   </div>
-                  <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div
+                    style={{
+                      textAlign: "center",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: dense ? 5 : 8,
+                      marginTop: "auto",
+                    }}
+                  >
                     <div
                       style={{
                         fontFamily: headingFont,
                         fontWeight: 800,
-                        fontSize: featured ? 42 : 30,
+                        fontSize: sz.name,
                         color: theme.primary,
                         lineHeight: 1.3,
                       }}
@@ -247,7 +281,7 @@ const SceneClients: React.FC = () => {
                       {c.name}
                     </div>
                     {c.sector ? (
-                      <div style={{ fontSize: featured ? 26 : 22, color: theme.muted, fontWeight: 600 }}>
+                      <div style={{ fontSize: sz.sector, color: theme.muted, fontWeight: 600 }}>
                         {c.sector}
                       </div>
                     ) : null}
@@ -413,17 +447,17 @@ export const CompanyAnnouncement: React.FC<AnnouncementProps> = ({
           <SceneServices />
         </Fade>
       </Sequence>
-      <Sequence from={510} durationInFrames={150}>
-        <Fade durationInFrames={150}>
+      <Sequence from={510} durationInFrames={210}>
+        <Fade durationInFrames={210}>
           <SceneClients />
         </Fade>
       </Sequence>
-      <Sequence from={660} durationInFrames={150}>
+      <Sequence from={720} durationInFrames={150}>
         <Fade durationInFrames={150}>
           <SceneStats />
         </Fade>
       </Sequence>
-      <Sequence from={810} durationInFrames={240}>
+      <Sequence from={870} durationInFrames={240}>
         <Fade durationInFrames={240}>
           <SceneOutro companyName={companyName} phone={phone} website={website} />
         </Fade>

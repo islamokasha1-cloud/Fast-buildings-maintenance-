@@ -22,4 +22,18 @@ export const clients: Client[] = [
   { name: "المؤسسة العامة للحبوب", sector: "جهة حكومية", logo: "clients/sago.png" },
   { name: "مصرف الراجحي", sector: "قطاع مصرفي", logo: "clients/alrajhi.png" },
   { name: "امنكو", sector: "قطاع خاص", logo: "clients/amnco.png" },
+  { name: "وزارة التعليم", sector: "جهة حكومية", logo: "clients/ministry-education.png" },
+  { name: "وزارة الإعلام", sector: "جهة حكومية", logo: "clients/ministry-media.png" },
+  {
+    name: "وزارة الشؤون الإسلامية والدعوة والإرشاد",
+    sector: "جهة حكومية",
+    logo: "clients/ministry-islamic-affairs.png",
+  },
+  { name: "وكالة الأنباء السعودية", sector: "جهة حكومية", logo: "clients/spa.png" },
+  { name: "السعودية للطاقة", sector: "قطاع الطاقة", logo: "clients/saudi-energy.png" },
+  {
+    name: "المعهد الملكي للفنون التقليدية",
+    sector: "قطاع ثقافي",
+    logo: "clients/royal-institute-traditional-arts.png",
+  },
 ];
