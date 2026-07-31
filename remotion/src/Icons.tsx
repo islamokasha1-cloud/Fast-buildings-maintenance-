@@ -111,6 +111,15 @@ export const IconGlobe: React.FC<IconProps> = ({ size = 24, color = "#1b3a6b", s
   </svg>
 );
 
+// شهادة أو اعتماد — وسام
+export const IconAward: React.FC<IconProps> = ({ size = 24, color = "#1b3a6b", strokeWidth = 1.75 }) => (
+  <svg {...base(size)}>
+    <circle cx="12" cy="9" r="6" {...stroke(color, strokeWidth)} />
+    <path d="M9.4 9.2l1.8 1.8 3.4-3.5" {...stroke(color, strokeWidth)} />
+    <path d="M8.4 14.4L7 21.5l5-2.4 5 2.4-1.4-7.1" {...stroke(color, strokeWidth)} />
+  </svg>
+);
+
 // جهة حكومية — مبنى بأعمدة (يُستخدم كبديل عند غياب لوجو العميل)
 export const IconGov: React.FC<IconProps> = ({ size = 24, color = "#1b3a6b", strokeWidth = 1.75 }) => (
   <svg {...base(size)}>

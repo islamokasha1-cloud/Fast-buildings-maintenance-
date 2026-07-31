@@ -25,6 +25,7 @@ import {
 import { FontLoader } from "./FontLoader";
 import {
   IconArrow,
+  IconAward,
   IconBuildings,
   IconCart,
   IconCheckCircle,
@@ -39,6 +40,7 @@ import {
   IconWrench,
 } from "./Icons";
 import { clients } from "./clients";
+import { certifications, classification } from "./certifications";
 import { experienceYears } from "./company";
 
 export type AnnouncementProps = {
@@ -328,7 +330,90 @@ const AnimatedNumber: React.FC<{ to: number; suffix?: string; color: string; del
   );
 };
 
-// المشهد 4 — الأرقام (بأسلوب بطاقات KPI في المنصة)
+// المشهد 5 — الشهادات والاعتمادات
+const SceneCertifications: React.FC = () => {
+  return (
+    <Stage>
+      <div style={{ width: "100%", maxWidth: 1560, display: "flex", flexDirection: "column", gap: 26 }}>
+        <SectionTitle label="شهاداتنا واعتماداتنا" delay={0} />
+
+        {/* التصنيف الرسمي — الاعتماد الأقوى، لذا يأخذ بطاقة مستقلة */}
+        <RevealText delay={8}>
+          <Card accent={theme.accent} padding={32}>
+            <div style={{ display: "flex", alignItems: "center", gap: 30 }}>
+              <IconChip color={theme.accent} size={92}>
+                <IconAward size={52} color={theme.accent} />
+              </IconChip>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ fontFamily: headingFont, fontWeight: 800, fontSize: 36, color: theme.primary }}>
+                  {classification.name}
+                </div>
+                <div style={{ fontSize: 24, color: theme.muted, fontWeight: 600 }}>
+                  {classification.issuer}
+                </div>
+                <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
+                  {classification.fields.map((f) => (
+                    <div
+                      key={f}
+                      style={{
+                        background: theme.surface2,
+                        border: `1px solid ${theme.border}`,
+                        borderRadius: 999,
+                        padding: "9px 20px",
+                        fontSize: 23,
+                        fontWeight: 700,
+                        color: theme.ink,
+                      }}
+                    >
+                      {f}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ textAlign: "center", paddingInline: 14 }}>
+                <div style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 54, color: theme.accent, lineHeight: 1.1 }}>
+                  {classification.grade}
+                </div>
+              </div>
+            </div>
+          </Card>
+        </RevealText>
+
+        {/* المواصفات الدولية */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 22 }}>
+          {certifications.map((c, i) => (
+            <RevealText key={c.code} delay={20 + i * 6}>
+              <Card accent={theme.primary} padding={26} style={{ height: "100%" }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+                  <IconChip color={theme.primary} size={68}>
+                    <IconAward size={38} color={theme.primary} />
+                  </IconChip>
+                  <div
+                    style={{
+                      fontFamily: headingFont,
+                      fontWeight: 900,
+                      fontSize: 34,
+                      color: theme.primary,
+                      direction: "ltr",
+                      unicodeBidi: "isolate",
+                    }}
+                  >
+                    {c.code}
+                  </div>
+                  <div style={{ fontSize: 24, color: theme.muted, fontWeight: 700, textAlign: "center" }}>
+                    {c.title}
+                  </div>
+                </div>
+              </Card>
+            </RevealText>
+          ))}
+        </div>
+      </div>
+    </Stage>
+  );
+};
+
+// المشهد 6 — الأرقام (بأسلوب بطاقات KPI في المنصة)
 // كل رقم مشتقّ من بيانات حقيقية: قائمة العملاء وسنة التأسيس.
 const SceneStats: React.FC = () => {
   const sectorCount = new Set(
@@ -508,12 +593,17 @@ export const CompanyAnnouncement: React.FC<AnnouncementProps> = ({
           <SceneClients />
         </Fade>
       </Sequence>
-      <Sequence from={720} durationInFrames={150}>
+      <Sequence from={720} durationInFrames={180}>
+        <Fade durationInFrames={180}>
+          <SceneCertifications />
+        </Fade>
+      </Sequence>
+      <Sequence from={900} durationInFrames={150}>
         <Fade durationInFrames={150}>
           <SceneStats />
         </Fade>
       </Sequence>
-      <Sequence from={870} durationInFrames={240}>
+      <Sequence from={1050} durationInFrames={240}>
         <Fade durationInFrames={240}>
           <SceneOutro companyName={companyName} phone={phone} website={website} />
         </Fade>
