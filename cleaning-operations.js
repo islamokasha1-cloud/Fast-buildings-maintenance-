@@ -1260,6 +1260,114 @@ function execHTML(){
     ${cpBlock}`;
 }
 
+/* ════════════ مؤشرات الأداء لعقود النظافة ════════════
+   مؤشّراتُ الصيانة السبعة (طلبات تصحيحية · زمن الإغلاق · الالتزام بـSLA · جودة الالتزام
+   الفني · الصيانة الوقائية · البلاغات المتأخّرة) تقيس ما لا وجود له في عقد نظافة،
+   فتعرض 0% أو 100% بلا معنى. البديل يقيس **الالتزام بالجدول وجودة التوثيق**.
+   كلُّها مشتقّةٌ من بياناتٍ حقيقية: المهامّ وسجلّ التنفيذ الشهري. */
+const KPI_ID="co-kpi";
+let _monthLog=null, _monthLogFor="";
+async function loadMonthLog(force){
+  const database=_db(), col=logCol();
+  const key=_projId()+"|"+_ymL(new Date());
+  if(!database || !col){ _monthLog=[]; return _monthLog; }
+  if(_monthLogFor===key && !force && _monthLog) return _monthLog;
+  try{
+    const from=_ymL(new Date())+"-01";
+    const snap=await database.collection(col).where("date",">=",from).limit(1000).get();
+    _monthLog=snap.docs.map(d=>d.data()||{});
+    _monthLogFor=key;
+  }catch(e){ console.warn("cleaningOps/loadMonthLog",e); _monthLog=[]; }
+  return _monthLog;
+}
+function _ymL(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+
+function cleaningKPIs(){
+  const s=boardStats();
+  const active=visibleTasks().filter(t=>!isDisabled(t));
+  const log=_monthLog||[];
+  const cov=coverageByBuilding();
+  // ١) تغطية اليوم  ٢) المناطق المكتملة  ٣) نسبة التأخّر  ٤) توثيق بالصور
+  // ٥) اكتمال بنود الفحص  ٦) عدد التنفيذات هذا الشهر
+  const zonesDone=cov.filter(b=>b.pct>=100).length;
+  const overduePct = active.length ? Math.round(s.overdue/active.length*100) : 0;
+  const withPhotos = log.filter(r=>Array.isArray(r.photos)&&r.photos.length).length;
+  const photoPct   = log.length ? Math.round(withPhotos/log.length*100) : 0;
+  let di=0, ti=0; log.forEach(r=>{ di+=Number(r.doneItems)||0; ti+=Number(r.totalItems)||0; });
+  const itemsPct = ti>0 ? Math.round(di/ti*100) : 0;
+  return [
+    { id:"CLN-01", name:"تغطية اليوم",          val:s.coverage, target:95, dir:"up",
+      sub:s.done+" من "+s.scheduled+" مجدولة" },
+    { id:"CLN-02", name:"المناطق المكتملة اليوم", val: cov.length?Math.round(zonesDone/cov.length*100):0, target:90, dir:"up",
+      sub:zonesDone+" من "+cov.length+" منطقة" },
+    { id:"CLN-03", name:"نسبة المهامّ المتأخّرة", val:overduePct, target:5, dir:"down",
+      sub:s.overdue+" من "+active.length+" مهمة نشطة" },
+    { id:"CLN-04", name:"توثيق التنفيذ بالصور",   val:photoPct, target:80, dir:"up",
+      sub:withPhotos+" من "+log.length+" تنفيذ هذا الشهر" },
+    { id:"CLN-05", name:"اكتمال بنود الفحص",      val:itemsPct, target:95, dir:"up",
+      sub:di+" من "+ti+" بند هذا الشهر" },
+    { id:"CLN-06", name:"تنفيذات الشهر",          val:log.length, target:null, dir:"up",
+      sub:"إجمالي ما نُفِّذ منذ بداية الشهر", raw:true }
+  ];
+}
+function kpiHTML(){
+  const list=cleaningKPIs();
+  const card=k=>{
+    const ok = k.target==null ? true : (k.dir==="up" ? k.val>=k.target : k.val<=k.target);
+    const c  = k.target==null ? "var(--primary)" : (ok?"var(--sla-ok)":(k.dir==="up"?(k.val>=k.target*0.7?"var(--sla-warn)":"var(--sla-crit)"):"var(--sla-crit)"));
+    const pct= k.raw ? 100 : Math.max(0,Math.min(100,k.val));
+    return `<div class="card co-kpi" style="--_c:${c}">
+      <div class="co-kpi-h"><span class="n">${_esc(k.name)}</span><span class="id">${k.id}</span></div>
+      <div class="co-kpi-v" style="color:${c}">${k.val}${k.raw?"":"%"}</div>
+      <div class="hbar"><span style="flex:${Math.max(pct,0.01)};background:${c}"></span><span style="flex:${Math.max(100-pct,0.01)};background:var(--surface2)"></span></div>
+      <div class="co-kpi-f">
+        <span>${_esc(k.sub)}</span>
+        ${k.target!=null?`<span class="t">${_svg('target')} الهدف: ${k.dir==="up"?"≥":"≤"}${k.target}%</span>`:""}
+      </div>
+    </div>`;
+  };
+  return `
+    <div class="page-hero">
+      <div class="page-hero-titles">
+        <div class="page-hero-title"><span class="ph-ico">${_svg('sparkles')}</span> مؤشرات أداء النظافة</div>
+        <div class="page-hero-sub">الالتزام بالجدول وجودة التوثيق — لا مؤشّرات الصيانة</div>
+      </div>
+      <div class="page-hero-actions">
+        <button class="btn btn-sm" onclick="cleaningOps.goOps()">${_svg('clipboardList')} تشغيل النظافة</button>
+        <button class="btn btn-sm" onclick="cleaningOps.refreshKPI()">${_svg('rotateCcw')} تحديث</button>
+      </div>
+    </div>
+    <div class="co-kpis">${list.map(card).join("")}</div>
+    <div class="co-hint" style="margin-top:4px">
+      المؤشّرات محسوبةٌ من جدول المهامّ وسجلّ التنفيذ لهذا الشهر. «تغطية اليوم» و«المناطق»
+      لحظيّتان، والباقي تراكميٌّ منذ بداية الشهر.
+    </div>`;
+}
+function mountKPI(){
+  const host=document.getElementById("page-kpi");
+  if(!host) return;
+  if(!isCleaningProject()){ unmountKPI(); return; }
+  let box=document.getElementById(KPI_ID);
+  if(!box){ box=document.createElement("div"); box.id=KPI_ID; host.insertBefore(box, host.firstChild); }
+  host.classList.add("co-kpi-mode");
+  if(!_loaded || _loadedFor!==_projId() || _monthLog===null){
+    box.innerHTML=`<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ حساب المؤشّرات…</div></div></div>`;
+    Promise.all([loadTasks(), loadMonthLog()]).then(()=>{
+      const b=document.getElementById(KPI_ID);
+      if(b && isCleaningProject()) _safeHTML(b, kpiHTML);
+    }).catch(e=>console.warn("cleaningOps/mountKPI",e));
+    return;
+  }
+  _safeHTML(box, kpiHTML);
+}
+function unmountKPI(){
+  const host=document.getElementById("page-kpi");
+  if(host) host.classList.remove("co-kpi-mode");
+  const box=document.getElementById(KPI_ID);
+  if(box) box.remove();
+}
+async function refreshKPI(){ await Promise.all([loadTasks(true), loadMonthLog(true)]); mountKPI(); _toast("✅ حُدِّثت المؤشّرات","success"); }
+
 /* تركيب/رفع اللوحة — بلا مساسٍ بمحتوى النواة */
 function mountExec(){
   const host=document.getElementById("page-dashboard");
@@ -1348,6 +1456,11 @@ const RELABEL = [
   ["ابدأ بتسجيل أول بلاغ صيانة",          "ابدأ بتسجيل أول ملاحظة نظافة"],
   ["ابحث برقم البلاغ أو المبنى أو الفني أو المشرف...", "ابحث برقم الملاحظة أو المنطقة أو العامل أو المشرف..."],
   ["كل أنواع الصيانة",                    "كل المصادر"],
+  // خيارا نوع الصيانة يبقيان بقيمتيهما المخزَّنتين (تصحيحية/وقائية) — نغيّر المعروض
+  // فقط: في النظافة «تصحيحية» ملاحظةٌ تستدعي معالجة، و«وقائية» جولةٌ دوريةٌ مجدولة.
+  ["صيانة تصحيحية",                       "ملاحظة / شكوى"],
+  ["صيانة وقائية",                        "جولة دورية مجدولة"],
+  ["ابدأ بتسجيل أول بلاغ صيانة",           "ابدأ بتسجيل أول ملاحظة نظافة"],
   ["تسجيل بلاغ جديد",                     "تسجيل ملاحظة نظافة"],
   ["لا توجد بلاغات مؤرشفة",               "لا توجد ملاحظات مؤرشفة"],
   ["لا توجد بلاغات بعد",                  "لا توجد ملاحظات بعد"],
@@ -1363,7 +1476,8 @@ const RELABEL = [
 ];
 // نقصر التبديل على عناصر العناوين والتسميات والحقول — لا على محتوى الجداول الديناميكي،
 // فلا نمسّ بيانات المستخدم ولا أرقام البلاغات.
-const RELABEL_SEL = ".page-hero-title,.page-hero-sub,.form-label,label,option,.empty-title,.empty-sub,h2,h3,button";
+const RELABEL_SEL = ".page-hero-title,.page-hero-sub,.form-label,label,option,"+
+  ".empty-title,.empty-sub,.te-title,.te-sub,h2,h3,button";
 function _relabelText(s){
   let out=String(s);
   for(const [a,b] of RELABEL){ if(out.indexOf(a)!==-1) out=out.split(a).join(b); }
@@ -1704,6 +1818,7 @@ function hookShowPage(){
     // المتابعة اليومية: نسخةُ النظافة بدل نسخة البلاغات (إخفاءٌ لا حذف)
     if(id==="daily"){ try{ mountDaily(); }catch(e){ console.warn("cleaningOps/mountDaily",e); } }
     if(id==="photo-report"){ try{ injectPhotoSourceFilter(); }catch(e){ console.warn("cleaningOps/prFilter",e); } }
+    if(id==="kpi"){ try{ mountKPI(); }catch(e){ console.warn("cleaningOps/mountKPI",e); } }
     // تعريب مصطلحات صفحات أوامر العمل + ضمانُ وجود أنواع عمل النظافة
     if(id==="new"||id==="tickets"||id==="tickets-archive"){
       try{ seedWorkTypes(); }catch(e){}
@@ -1739,7 +1854,8 @@ function _watchProject(){
       _detailFor=null; _detailLog=null;            // تفاصيلُ مهمةِ السابق لا تبقى معروضة
       _genForm=false; _genErr=""; _view="board";
       // ارفع لوحات النظافة فوراً عند مغادرة مشروع النظافة — قبل معرفة نوع الجديد
-      unmountExec(); unmountDaily();
+      unmountExec(); unmountDaily(); unmountKPI();
+      _monthLog=null; _monthLogFor="";
       ensureTypeKnown(()=>{
         injectSidebarButton();
         if(_onPage()) render();
@@ -1748,6 +1864,8 @@ function _watchProject(){
         if(dash && dash.classList.contains("active")) mountExec();
         const dly=document.getElementById("page-daily");
         if(dly && dly.classList.contains("active")) mountDaily();
+        const kp=document.getElementById("page-kpi");
+        if(kp && kp.classList.contains("active")) mountKPI();
         injectPhotoSourceFilter();
         seedWorkTypes();
         _prefetch();
@@ -1771,6 +1889,17 @@ function injectCSS(){
    النواة موجودةً يجدها renderDashboard() بلا خطأ، ويُرفَع الإخفاء بإزالة الصنف. */
 #page-dashboard.co-exec-mode > *:not(#${EXEC_ID}){display:none!important}
 #page-daily.co-daily-mode > *:not(#${DAILY_ID}){display:none!important}
+#page-kpi.co-kpi-mode > *:not(#${KPI_ID}){display:none!important}
+#${KPI_ID}{direction:rtl}
+.co-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.co-kpi{margin-bottom:0;position:relative;overflow:hidden;padding-top:16px}
+.co-kpi::before{content:"";position:absolute;inset-block-start:0;inset-inline:0;height:4px;background:var(--_c,var(--primary))}
+.co-kpi-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
+.co-kpi-h .n{font-size:12.5px;font-weight:800;color:var(--text)}
+.co-kpi-h .id{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--muted);font-weight:700}
+.co-kpi-v{font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:900;line-height:1;margin-bottom:9px}
+.co-kpi-f{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:7px;font-size:10.5px;color:var(--muted);font-weight:700}
+.co-kpi-f .t{display:inline-flex;align-items:center;gap:4px}
 #${EXEC_ID},#${DAILY_ID}{direction:rtl}
 /* إصلاحُ خللٍ في النواة (يصيب مشاريع الصيانة أيضاً): الحالةُ الفارغة في أرشيف البلاغات
    تضع أيقونةً بلا أبعاد داخل حاويةٍ تضبط font-size فقط — وfont-size لا يحجّم SVG، فيتمدّد
@@ -1928,13 +2057,13 @@ window.cleaningOps = {
   openDetail, closeDetail,
   saveSupMap,
   mountExec, unmountExec, refreshExec, goOps,
-  mountDaily, unmountDaily, refreshDaily, seedWorkTypes, relabelPage, injectPhotoSourceFilter,
+  mountDaily, unmountDaily, refreshDaily, mountKPI, unmountKPI, refreshKPI, seedWorkTypes, relabelPage, injectPhotoSourceFilter,
   startSync(){ /* لا مزامنة مستقلة — القراءة بـ .get() عند العرض (انضباط المستمعين) */ },
   version: VERSION,
   build: MODULE_BUILD,
   // مكشوفة لفحوص hail-tests (دوال نقية)
   _boardStats: boardStats,
-  _coverageByBuilding: coverageByBuilding, _supOfBuilding: supOfBuilding,
+  _coverageByBuilding: coverageByBuilding, _cleaningKPIs: cleaningKPIs, _supOfBuilding: supOfBuilding,
   _logAsTicket: _logAsTicket, _taskSupervisor: taskSupervisor,
   _salvageObjects: _salvageObjects,
   _svg: _svg,
