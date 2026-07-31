@@ -68,6 +68,116 @@ const SCREENS = [
   { page: 'reports', file: 'reports.png' },
 ];
 
+// يملأ النظام ببيانات عرض حتى لا تظهر الشاشات فارغة في الإعلان.
+//
+// ملاحظة: هذه **بيانات عرض توضيحية** لإظهار عمل الواجهة، وليست سجلات
+// تشغيل حقيقية. تُولَّد بدالة mk() الخاصة بالنظام نفسه فتطابق بنيته
+// وتستخدم أسماء المباني وأنواع الأعمال والمشرفين من إعداداته.
+// النِّسب متحفّظة عمداً (إنجاز ~80%) فلا تُقرأ كادعاء أداء.
+const SEED_DEMO_DATA = () => {
+  if (typeof mk !== 'function') return 'mk غير متاحة';
+
+  // مولّد شبه عشوائي ثابت البذرة ليكون الناتج متكرراً بين التشغيلات
+  let s = 20260731;
+  const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+
+  const buildings =
+    typeof _DEFAULT_BUILDINGS !== 'undefined' ? _DEFAULT_BUILDINGS : ['مبنى الأمانة الرئيسي'];
+  const workTypes =
+    typeof _DEFAULT_WORK_TYPES !== 'undefined'
+      ? Object.keys(_DEFAULT_WORK_TYPES)
+      : ['أعمال الكهرباء'];
+  const sups =
+    typeof _DEFAULT_SUPERVISORS !== 'undefined' ? _DEFAULT_SUPERVISORS : ['المشرف'];
+  const techs = [];
+  if (typeof _DEFAULT_WORK_TYPES !== 'undefined') {
+    Object.values(_DEFAULT_WORK_TYPES).forEach((v) => (v.techs || []).forEach((t) => techs.push(t)));
+  }
+
+  const PRIORITIES = ['حرج 🔴 (2 ساعة)', 'عاجل 🟡 (8 ساعات)', 'عادي 🟢 (48 ساعة)'];
+  const DESCS = [
+    'انقطاع التيار عن أحد الأدوار',
+    'عطل في وحدة التكييف المركزي',
+    'تسرب مياه في دورة المياه',
+    'استبدال لوحة إنارة تالفة',
+    'صيانة دورية للمصعد',
+    'إصلاح باب ألومنيوم',
+    'عطل في كاميرا مراقبة',
+    'أعمال دهان وترميم',
+    'استبدال بلاط متضرر',
+    'صيانة وقائية للمولد',
+  ];
+
+  const H = 3600000;
+  const now = Date.now();
+  const Y = new Date().getFullYear();
+  const out = [];
+  const N = 110;
+
+  // نوافذ الاستجابة المستهدفة لكل أولوية (بالساعات)
+  const SLA_H = [2, 8, 48];
+
+  for (let i = 0; i < N; i++) {
+    // توزيع على آخر 75 يوماً مع تكثيف نحو الأيام الأخيرة
+    const ageH = Math.pow(rnd(), 1.6) * 75 * 24;
+    const created = now - ageH * H;
+
+    // البلاغ الذي تجاوز نافذته المستهدفة يكون مغلقاً — فالبلاغات
+    // المفتوحة تبقى كلها داخل الزمن المستهدف، وهو ما يعكس تشغيلاً
+    // منضبطاً بدل لوحة مليئة بالتجاوزات.
+    let status, pIdx;
+    if (ageH > 40) {
+      status = 'مغلق';
+      pIdx = Math.floor(rnd() * 3);
+    } else {
+      const r = rnd();
+      status = r < 0.38 ? 'مغلق' : r < 0.8 ? 'قيد التنفيذ' : 'مفتوح';
+      if (status === 'مغلق') {
+        pIdx = Math.floor(rnd() * 3);
+      } else {
+        // أولوية نافذتها أوسع من عمر البلاغ، بهامش أمان
+        const valid = [0, 1, 2].filter((k) => SLA_H[k] > ageH * 1.25);
+        pIdx = valid.length ? valid[Math.floor(rnd() * valid.length)] : 2;
+      }
+    }
+
+    // زمن الإغلاق داخل النافذة المستهدفة
+    const closed = status === 'مغلق' ? created + (0.3 + rnd() * 0.6) * SLA_H[pIdx] * H : null;
+    const tech = status === 'مفتوح' && rnd() < 0.45 ? null : pick(techs.length ? techs : ['فني']);
+
+    out.push(
+      mk(
+        `BLG-${Y}-${String(i + 1).padStart(4, '0')}`,
+        pick(buildings),
+        pick(workTypes),
+        PRIORITIES[pIdx],
+        pick(DESCS),
+        '',
+        tech,
+        pick(sups),
+        status,
+        created,
+        closed,
+        status === 'مغلق' ? 'تم تنفيذ الأعمال والتحقق منها' : null,
+        null,
+        rnd() < 0.28 ? 'وقائية' : 'تصحيحية'
+      )
+    );
+  }
+
+  out.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  try {
+    tickets = out;
+  } catch (e) {
+    window.tickets = out;
+  }
+  try {
+    if (typeof counter !== 'undefined') counter = out.length;
+  } catch (e) {}
+  return `تم توليد ${out.length} بلاغاً`;
+};
+
 // يخفي أي إشعار خطأ أو نافذة منبثقة تفسد اللقطة
 const HIDE_OVERLAYS = () => {
   const sels = [
@@ -123,6 +233,9 @@ await page.evaluate(() => {
   } catch (e) {}
 });
 await page.waitForTimeout(1200);
+
+console.log('البذر:', await page.evaluate(SEED_DEMO_DATA));
+await page.waitForTimeout(600);
 
 for (const s of SCREENS) {
   try {
