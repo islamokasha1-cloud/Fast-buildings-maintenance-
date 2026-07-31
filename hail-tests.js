@@ -2245,12 +2245,23 @@ function cleaningOpsTests() {
   T("★ حارسُ عدم إعادة الدخول على render", /if\(_rendering\) return;/.test(src) && /_rendering=true;/.test(src));
   T("★ render لا تسقط بخطأ يترك الحارس مرفوعاً (finally)",
     /finally\{ _rendering=false; \}/.test(src));
-  T("★ نداءٌ معلّقٌ واحدٌ فقط بعد التحميل (لا تكديس)",
-    /function _afterLoad\(flagGet, flagSet, cb\)\{[\s\S]{0,120}if\(flagGet\(\)\) return;/.test(src));
-  T("العَلَم يُخفَض عند النجاح وعند الفشل معاً (لا يعلق معلّقاً للأبد)",
-    /\.then\(\(\)=>\{ flagSet\(false\); cb\(\); \}\)\.catch\(\(\)=>\{ flagSet\(false\); \}\);/.test(src));
-  T("★ المُركِّبات الثلاثة كلُّها تمرّ بالحارس (لا مسارَ تحميلٍ عارٍ)",
-    (src.match(/_afterLoad\(/g) || []).length >= 4 && !/loadTasks\(\)\.then\(\(\)=>\{ if\(_onPage\(\)\) render\(\); \}\);/.test(src));
+  // ★ لا أعلامَ معلّقة: عَلَمٌ يعلق مرفوعاً يترك الشاشة على «جارٍ التحميل» للأبد
+  // (وهو ما حدث فعلاً في اللوحة التنفيذية). الارتباطُ بالوعد المشترك لا يعلق أبداً.
+  T("★ لا أعلامَ تحميلٍ معلّقة إطلاقاً",
+    !/_pendingRender|_pendingExec|_pendingDaily/.test(src));
+  T("★ الارتباط بالوعد المشترك مباشرةً", /function _afterLoad\(\)\{ loadTasks\(\)\.then\(_refreshMounted\)/.test(src));
+  T("★ اكتمالُ التحميل يُحدِّث كلَّ سطحٍ مركَّب لا الطالبَ وحده",
+    /function _refreshMounted\(\)\{[\s\S]{0,400}EXEC_ID[\s\S]{0,200}DAILY_ID/.test(src));
+  T("★ فشلُ بناء HTML يُظهر رسالةً بدل تركِ الشاشة على «جارٍ التحميل»",
+    /function _safeHTML\(el, build\)/.test(src) && /تعذّر عرض البيانات/.test(src));
+  T("المُركِّبات كلُّها تمرّ بالنداء الموحّد", (src.match(/_afterLoad\(\);/g) || []).length >= 3);
+
+  // سرعةُ أول عرض
+  T("★ قراءتا المهامّ والخريطة بالتوازي لا بالتتابع",
+    /await Promise\.all\(\[\s*database\.collection\(col\)\.limit\(500\)\.get\(\),\s*loadCfg\(force\)\s*\]\)/.test(src));
+  T("★ استباقُ التحميل عند معرفة أن المشروع نظافة (لا عند أول ضغطة)",
+    /function _prefetch\(\)\{[\s\S]{0,200}if\(!isCleaningProject\(\)\) return;/.test(src) &&
+    (src.match(/_prefetch\(\)/g) || []).length >= 3);
 
   // ══ ربط المشرف بمبانيه + صور التنفيذ + التقرير المصوّر ══
   T("خريطة المشرف↔المباني في مستندٍ خاصٍّ بالوحدة (لا تغيّر شكل إعدادات النواة)",
@@ -2276,7 +2287,14 @@ function cleaningOpsTests() {
     /compressImage\(file\)/.test(src) && /st\.ref\("cleaning\/"/.test(src));
   T("مهلةُ رفعٍ تمنع التعليق إلى الأبد", /45000/.test(src) && /timedOut/.test(src));
   T("روابط الصور تُحفَظ في سجلّ التنفيذ", /photos: \(_execPhotos\|\|\[\]\)\.map\(p=>p\.url\)\.filter\(Boolean\)/.test(src));
-  T("حدٌّ أقصى للصور لكل مهمة", /_execPhotos\.length>=4/.test(src));
+  T("حدٌّ أقصى للصور لكل مهمة", /const room=4-_execPhotos\.length;/.test(src));
+  // ★ capture المفروض دائماً كان يفتح الكاميرا ويمنع الاختيار من معرض الجوال
+  T("★ capture يُضبَط للكاميرا فقط لا دائماً (وإلا امتنع المعرض)",
+    /if\(fromCamera\) inp\.setAttribute\("capture","environment"\);/.test(src) &&
+    !/inp\.capture="environment";/.test(src));
+  T("زرّان: التقاطٌ بالكاميرا ومن المعرض", /pickPhoto\(true\)/.test(src) && /pickPhoto\(false\)/.test(src));
+  T("اختيارٌ متعدّدٌ من المعرض ضمن المتبقّي من الحدّ",
+    /else inp\.multiple=true;/.test(src) && /slice\.call\(inp\.files\|\|\[\],0,room\)/.test(src));
 
   // التقرير المصوّر — إدراجٌ للعرض فقط بلا تلويث مجموعة البلاغات
   T("★ تنفيذات النظافة لا تُكتب بلاغاتٍ (لا تُغرق القائمة ولا تشوّه مؤشّرات الصيانة)",
