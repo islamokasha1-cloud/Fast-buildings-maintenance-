@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vd";
+const MODULE_BUILD = "v18.9ve";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -104,6 +104,28 @@ function _addDays(ymd, n){ const d=_pDate(ymd); d.setDate(d.getDate()+n); return
 function _dayDiff(a,b){ const x=_pDate(a), y=_pDate(b); x.setHours(12,0,0,0); y.setHours(12,0,0,0);
   return Math.round((x-y)/86400000); }
 function _uid(){ return "clt_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+/* ════════════ العطلة الأسبوعية — الجمعة والسبت (مشاريع النظافة فقط) ════════════
+   قاعدةٌ ثابتة: لا عملَ دوريٌّ متوقَّع يومَي الجمعة/السبت في عقود النظافة. مُقيَّدةٌ بـ
+   isCleaningProject فلا أثرَ على الصيانة/المشتريات. (getDay: 5=الجمعة، 6=السبت.)
+   ثلاثةُ آثار: (١) ترحيلُ أيِّ استحقاقٍ يقع في العطلة لأوّل يوم عمل، (٢) لوحةُ اليوم في
+   العطلة تُظهر «إجازة» بلا مهامّ ولا ضغطِ تغطية، (٣) التأخّر يُحسب **بأيام العمل فقط**. */
+// حسابُ العطلة نقيٌّ (يُختبَر بتواريخ صريحة)؛ الوحدةُ لا تعمل إلا في مشاريع النظافة أصلاً.
+function _isWeekend(ymd){ const d=_pDate(ymd).getDay(); return d===5||d===6; }   // 5=الجمعة، 6=السبت
+// «اليوم إجازة؟» يبقى مبنيّاً على نوع المشروع فلا يجعل isDue/dueStatus مرتبطةً بيوم الأسبوع خارج النظافة
+function _isTodayHoliday(){ return isCleaningProject() && _isWeekend(_today()); }
+// أوّل يوم عملٍ من التاريخ (يتخطّى الجمعة/السبت)
+function _nextWorkingDay(ymd){ let y=ymd, g=0; while(_isWeekend(y) && g++<8) y=_addDays(y,1); return y; }
+// تقديمُ الاستحقاق: (اليوم + مدةُ التكرار) ثم ترحيلٌ لأوّل يوم عمل
+function _advanceDue(fromYmd, days){ return _nextWorkingDay(_addDays(fromYmd, days)); }
+// أيامُ العمل المنقضية منذ الاستحقاق حتى اليوم (تتجاهل الجمعة/السبت) — لعدّ التأخّر التعاقدي
+function _overdueWorkingDays(ymd, todayYmd){
+  const today=todayYmd||_today();
+  if(_dayDiff(ymd, today)>=0) return 0;                 // ليست متأخّرة
+  let y=ymd, n=0, g=0;
+  while(_dayDiff(y, today)<0 && g++<800){ y=_addDays(y,1); if(!_isWeekend(y)) n++; }
+  return n;
+}
 
 /* ════════════ الصلاحيات ════════════ */
 // العرض: أي دورٍ معروف. التحرير (إنشاء/تعديل/حذف المهام): الأدمن ومدير المشروع.
@@ -279,10 +301,11 @@ async function deleteTask(taskId){
 /* ════════════ منطق الاستحقاق والتغطية ════════════ */
 function isDisabled(t){ return !!t.disabled; }
 function doneToday(t){ return !!t.lastExecuted && String(t.lastExecuted).slice(0,10)===_today(); }
-// مستحقّة الآن = تاريخ استحقاقها اليوم أو قبله، ولم تُنفَّذ اليوم
-function isDue(t){ if(isDisabled(t)||doneToday(t)) return false; return _dayDiff(String(t.nextDueDate||"").slice(0,10), _today())<=0; }
-function isOverdue(t){ if(isDisabled(t)||doneToday(t)) return false; return _dayDiff(String(t.nextDueDate||"").slice(0,10), _today())<0; }
-function overdueDays(t){ return Math.abs(_dayDiff(String(t.nextDueDate||"").slice(0,10), _today())); }
+// مستحقّة الآن = تاريخ استحقاقها اليوم أو قبله، ولم تُنفَّذ اليوم — ولا شيءَ مستحقٌّ في الإجازة
+function isDue(t){ if(isDisabled(t)||doneToday(t)||_isTodayHoliday()) return false; return _dayDiff(String(t.nextDueDate||"").slice(0,10), _today())<=0; }
+function isOverdue(t){ if(isDisabled(t)||doneToday(t)||_isTodayHoliday()) return false; return _dayDiff(String(t.nextDueDate||"").slice(0,10), _today())<0; }
+// التأخّر بأيام العمل (يتجاهل الجمعة/السبت) — فعطلةٌ بين الاستحقاق واليوم لا تُضخّم الرقم
+function overdueDays(t){ return _overdueWorkingDays(String(t.nextDueDate||"").slice(0,10)); }
 
 // إحصاءات لوحة اليوم — التغطية = ما نُفِّذ اليوم ÷ ما كان مجدولاً لليوم (منفَّذ + مستحقّ).
 // تقبل قائمةً صريحة (للفحوص) وإلا تعمل على مهام المشروع المحمَّلة.
@@ -293,15 +316,17 @@ function boardStats(list){
   const over  = active.filter(isOverdue);
   const scheduled = done.length + due.length;
   const coverage  = scheduled>0 ? Math.round((done.length/scheduled)*100) : 0;
-  return { total:active.length, done:done.length, due:due.length, overdue:over.length, scheduled, coverage };
+  return { total:active.length, done:done.length, due:due.length, overdue:over.length, scheduled, coverage, holiday:_isTodayHoliday() };
 }
 
 // حالة المهمة بمفردات المنصة: card = صنف .ppm-card (لون شريط الحالة)، badge = صنف .ppm-due-badge
 function dueStatus(t){
   if(isDisabled(t)) return { lbl:"موقوفة", color:"var(--muted)", card:"", badge:"soon", sort:9 };
   if(doneToday(t))  return { lbl:"نُفِّذت اليوم", color:"var(--sla-ok)", card:"completed", badge:"ok", sort:3 };
+  // في الإجازة (الجمعة/السبت) لا ضغطَ: المهمّةُ المستحقّة/المتأخّرة تظهر بحالةٍ محايدة وتعود يوم العمل
+  if(_isTodayHoliday()) return { lbl:"إجازة اليوم", color:"var(--muted)", card:"", badge:"soon", sort:5 };
   const diff=_dayDiff(String(t.nextDueDate||"").slice(0,10), _today());
-  if(diff<0)  return { lbl:"متأخّرة "+Math.abs(diff)+" يوم", color:"var(--sla-crit)", card:"due-today", badge:"overdue", sort:0 };
+  if(diff<0)  return { lbl:"متأخّرة "+_overdueWorkingDays(String(t.nextDueDate||"").slice(0,10))+" يوم", color:"var(--sla-crit)", card:"due-today", badge:"overdue", sort:0 };
   if(diff===0)return { lbl:"مستحقّة اليوم", color:"var(--sla-warn)", card:"due-soon", badge:"today", sort:1 };
   return { lbl:"بعد "+diff+" يوم", color:"var(--muted)", card:"", badge:"soon", sort:2 };
 }
@@ -394,7 +419,7 @@ async function executeTask(task, checkedItems, note){
       note: String(note||"").slice(0,500)
     };
     await database.collection(logCol()).doc(rec.id).set(rec);
-    const patch = { id:task.id, lastExecuted: now, lastExecutedBy: _userName(), nextDueDate: _addDays(_today(), days) };
+    const patch = { id:task.id, lastExecuted: now, lastExecutedBy: _userName(), nextDueDate: _advanceDue(_today(), days) };
     await saveTask(patch);
     _audit("تنفيذ مهمة نظافة", (task.name||"")+" — "+(task.building||"")+" ("+doneCount+"/"+list.length+" بند)");
     return true;
@@ -557,8 +582,11 @@ function boardHTML(){
       ${tile('calendar',    s.scheduled, "مجدول اليوم",  "var(--primary)")}
       ${tile('checkCircle', s.done,      "نُفِّذ اليوم",   "var(--sla-ok)")}
       ${tile('hourglass',   s.due,       "متبقٍّ اليوم",  s.due>0?"var(--sla-warn)":"var(--sla-ok)")}
-      ${tile('target',      s.coverage+"%", "نسبة التغطية", s.coverage>=95?"var(--sla-ok)":(s.coverage>=70?"var(--sla-warn)":"var(--sla-crit)"))}
+      ${tile('target',      s.holiday?"إجازة":s.coverage+"%", "نسبة التغطية", s.holiday?"var(--muted)":(s.coverage>=95?"var(--sla-ok)":(s.coverage>=70?"var(--sla-warn)":"var(--sla-crit)")))}
     </div>
+    ${s.holiday?`<div class="ppm-overdue-banner" style="background:var(--surface2);color:var(--muted);border-color:var(--border)">
+      <span class="co-bnr-ic">${_svg('calendar')}</span>
+      <span>اليوم إجازة (${["الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"][_pDate(_today()).getDay()]}) — الجمعة والسبت عطلةٌ في مشاريع النظافة، وتعود المهامّ يوم الأحد.</span></div>`:""}
     <div class="card"><div class="co-sec">
       <div class="co-sec-t">${_svg('activity')} تغطية اليوم</div>
       <span class="co-sec-c">${s.done} من ${s.scheduled} مجدولة • ${s.total} مهمة نشطة</span>
@@ -999,7 +1027,7 @@ async function doGen(){
           freq: FREQ_KEYS.indexOf(x.freq)!==-1 ? x.freq : "يومي",
           assignee:"", desc:"",
           checklist: Array.isArray(x.checklist) ? x.checklist.slice(0,15).map(s=>String(s).trim().slice(0,120)).filter(Boolean) : [],
-          nextDueDate: _today(), lastExecuted:"", lastExecutedBy:"",
+          nextDueDate: _nextWorkingDay(_today()), lastExecuted:"", lastExecutedBy:"",
           disabled:false, createdAt:new Date().toISOString(), createdBy:_userName(), generatedByAI:true
         }));
       } else lastErr="تعذّر قراءة رد الذكاء الاصطناعي";
@@ -1025,7 +1053,7 @@ async function refresh(){ await loadTasks(true); render(); _toast("✅ حُدِ�
 
 function addTask(){
   _editing = { id:_uid(), name:"", building:"", floor:"", workType:WT_KEYS[0], freq:"يومي",
-    assignee:"", supervisor:"", desc:"", checklist:[], nextDueDate:_today(), lastExecuted:"", lastExecutedBy:"",
+    assignee:"", supervisor:"", desc:"", checklist:[], nextDueDate:_nextWorkingDay(_today()), lastExecuted:"", lastExecutedBy:"",
     disabled:false, createdAt:new Date().toISOString(), createdBy:_userName() };
   render();
 }
@@ -1044,7 +1072,7 @@ function _syncEditor(){
   _editing.assignee = g("co-assignee").trim();
   _editing.supervisor = g("co-sup");
   _editing.desc     = g("co-desc").trim();
-  _editing.nextDueDate = g("co-due") || _today();
+  _editing.nextDueDate = _nextWorkingDay(g("co-due") || _today());   // تاريخٌ يقع في العطلة يُرحَّل لأوّل يوم عمل
   _editing.checklist = g("co-checklist").split("\n").map(s=>s.trim()).filter(Boolean).slice(0,25);
   const dis=document.getElementById("co-disabled");
   _editing.disabled = !!(dis && dis.checked);
@@ -1152,7 +1180,8 @@ function execHTML(){
 
   // الحكم العام — على التغطية لا على البلاغات
   let vKey, vTxt, vSub;
-  if(s.scheduled===0){ vKey="ok";   vTxt="لا مهامّ اليوم"; vSub="لا مهامّ مجدولةً لهذا اليوم"; }
+  if(s.holiday){       vKey="ok";   vTxt="إجازة اليوم"; vSub="الجمعة والسبت إجازة — تعود المهامّ يوم الأحد"; }
+  else if(s.scheduled===0){ vKey="ok";   vTxt="لا مهامّ اليوم"; vSub="لا مهامّ مجدولةً لهذا اليوم"; }
   else if(s.overdue>0){ vKey="crit"; vTxt="متأخّرات"; vSub=s.overdue+" مهمة تجاوزت استحقاقها"; }
   else if(s.due>0){     vKey="warn"; vTxt="قيد التنفيذ"; vSub=s.due+" مهمة متبقّية اليوم"; }
   else {                vKey="ok";   vTxt="مكتمل"; vSub="نُفِّذت كل مهامّ اليوم"; }
@@ -1252,7 +1281,7 @@ function execHTML(){
       </div>
       <div class="ops-live">
         <div class="lbl">نسبة التغطية</div>
-        <div class="big" style="color:${vC}">${s.coverage}%</div>
+        <div class="big" style="color:${vC}">${s.holiday?"إجازة":s.coverage+"%"}</div>
         <div class="u"><span class="live"></span>${visibleTasks().filter(t=>!isDisabled(t)).length} مهمة نشطة</div>
       </div>
     </div>
@@ -1311,8 +1340,8 @@ function cleaningKPIs(){
   let di=0, ti=0; log.forEach(r=>{ di+=Number(r.doneItems)||0; ti+=Number(r.totalItems)||0; });
   const itemsPct = ti>0 ? Math.round(di/ti*100) : 0;
   return [
-    { id:"CLN-01", name:"تغطية اليوم",          val:s.coverage, target:95, dir:"up",
-      sub:s.done+" من "+s.scheduled+" مجدولة" },
+    { id:"CLN-01", name:"تغطية اليوم",          val:s.coverage, target:95, dir:"up", holiday:s.holiday,
+      sub:s.holiday?"اليوم إجازة (الجمعة/السبت)":s.done+" من "+s.scheduled+" مجدولة" },
     { id:"CLN-02", name:"المناطق المكتملة اليوم", val: cov.length?Math.round(zonesDone/cov.length*100):0, target:90, dir:"up",
       sub:zonesDone+" من "+cov.length+" منطقة" },
     { id:"CLN-03", name:"نسبة المهامّ المتأخّرة", val:overduePct, target:5, dir:"down",
@@ -1482,12 +1511,13 @@ function goSupMap(){ try{ showPage(PAGE_ID); setView("sup"); }catch(e){} }
 function kpiHTML(){
   const list=cleaningKPIs();
   const card=k=>{
+    // في الإجازة: تغطيةُ اليوم لا تُقاس (لا عملَ متوقَّع) — تُعرَض «إجازة» محايدةً لا 0% عقابيّاً
     const ok = k.target==null ? true : (k.dir==="up" ? k.val>=k.target : k.val<=k.target);
-    const c  = k.target==null ? "var(--primary)" : (ok?"var(--sla-ok)":(k.dir==="up"?(k.val>=k.target*0.7?"var(--sla-warn)":"var(--sla-crit)"):"var(--sla-crit)"));
-    const pct= k.raw ? 100 : Math.max(0,Math.min(100,k.val));
+    const c  = k.holiday ? "var(--muted)" : (k.target==null ? "var(--primary)" : (ok?"var(--sla-ok)":(k.dir==="up"?(k.val>=k.target*0.7?"var(--sla-warn)":"var(--sla-crit)"):"var(--sla-crit)")));
+    const pct= k.holiday ? 100 : (k.raw ? 100 : Math.max(0,Math.min(100,k.val)));
     return `<div class="card co-kpi" style="--_c:${c}">
       <div class="co-kpi-h"><span class="n">${_esc(k.name)}</span><span class="id">${k.id}</span></div>
-      <div class="co-kpi-v" style="color:${c}">${k.val}${k.raw?"":"%"}</div>
+      <div class="co-kpi-v" style="color:${c};${k.holiday?'font-size:20px':''}">${k.holiday?"إجازة":k.val+(k.raw?"":"%")}</div>
       <div class="hbar"><span style="flex:${Math.max(pct,0.01)};background:${c}"></span><span style="flex:${Math.max(100-pct,0.01)};background:var(--surface2)"></span></div>
       <div class="co-kpi-f">
         <span>${_esc(k.sub)}</span>
@@ -1839,8 +1869,11 @@ function dailyHTML(){
       ${tile('calendar',    s.scheduled, "مجدول اليوم", "var(--primary)")}
       ${tile('checkCircle', s.done,      "نُفِّذ اليوم",  "var(--sla-ok)")}
       ${tile('hourglass',   s.due,       "متبقٍّ اليوم", s.due>0?"var(--sla-warn)":"var(--sla-ok)")}
-      ${tile('target',      s.coverage+"%", "التغطية",  s.coverage>=95?"var(--sla-ok)":(s.coverage>=70?"var(--sla-warn)":"var(--sla-crit)"))}
+      ${tile('target',      s.holiday?"إجازة":s.coverage+"%", "التغطية",  s.holiday?"var(--muted)":(s.coverage>=95?"var(--sla-ok)":(s.coverage>=70?"var(--sla-warn)":"var(--sla-crit)")))}
     </div>
+    ${s.holiday?`<div class="ppm-overdue-banner" style="background:var(--surface2);color:var(--muted);border-color:var(--border)">
+      <span class="co-bnr-ic">${_svg('calendar')}</span>
+      <span>اليوم إجازة — الجمعة والسبت عطلةٌ في مشاريع النظافة، وتعود المهامّ يوم الأحد.</span></div>`:""}
     ${s.scheduled>0?`<div class="card">
       <div class="co-sec"><div class="co-sec-t">${_svg('activity')} تغطية اليوم</div>
         <span class="co-sec-c"><b>${s.done}</b> من ${s.scheduled}</span></div>
@@ -2281,6 +2314,7 @@ window.cleaningOps = {
   _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,
   _addDays: _addDays, _today: _today,
+  _isWeekend: _isWeekend, _nextWorkingDay: _nextWorkingDay, _advanceDue: _advanceDue, _overdueWorkingDays: _overdueWorkingDays,
   _FREQ_DAYS: FREQ_DAYS,
   _WORK_TYPES: CLEANING_WORK_TYPES
 };
