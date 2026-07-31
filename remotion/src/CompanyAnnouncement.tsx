@@ -372,7 +372,7 @@ const SceneReach: React.FC = () => {
           </div>
         </div>
         <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center" }}>
-          <SaudiMap width={860} />
+          <SaudiMap width={920} />
         </div>
       </div>
     </Stage>

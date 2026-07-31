@@ -2,42 +2,50 @@ import React from "react";
 import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { theme } from "./theme";
 import { headingFont } from "./fonts";
-import { regions } from "./regions";
+import { regions as served } from "./regions";
+import regionData from "./saudiRegions.json";
 
-// حدود المملكة تقريبية (خط الطول، خط العرض) — مرسومة باتجاه عقارب الساعة
-// من الشمال الغربي. الغرض تعريفي بصري لا ملاحي.
-const OUTLINE: [number, number][] = [
-  [34.6, 28.1], [36.0, 29.2], [37.5, 30.0], [38.8, 31.5], [39.2, 32.15],
-  [40.4, 31.9], [42.1, 31.1], [44.7, 29.2], [46.4, 29.1], [47.7, 28.5],
-  [48.4, 28.5], [49.0, 27.6], [49.6, 27.0], [50.2, 26.2], [50.6, 25.4],
-  [51.3, 24.6], [51.6, 24.1], [52.6, 24.0], [55.2, 22.7], [55.7, 22.0],
-  [55.2, 20.0], [52.0, 19.0], [49.0, 18.6], [47.0, 17.4], [45.2, 17.4],
-  [43.4, 17.4], [42.8, 16.4], [42.6, 16.4], [41.8, 17.5], [41.0, 18.5],
-  [40.0, 19.8], [39.5, 20.8], [39.1, 21.5], [38.9, 22.5], [38.0, 23.8],
-  [37.2, 24.6], [36.5, 25.5], [36.0, 26.5], [35.2, 27.4],
+// حدود المناطق الإدارية الثلاث عشرة، مستخرجة من بيانات Natural Earth
+// (ne_10m_admin_1) ومبسّطة بخوارزمية دوغلاس-بويكر.
+type RegionShape = { name: string; ring: [number, number][] };
+const SHAPES = regionData as RegionShape[];
+
+// نطاق الإحداثيات محسوب من البيانات نفسها
+const all = SHAPES.flatMap((r) => r.ring);
+const LON: [number, number] = [
+  Math.min(...all.map((p) => p[0])),
+  Math.max(...all.map((p) => p[0])),
+];
+const LAT: [number, number] = [
+  Math.min(...all.map((p) => p[1])),
+  Math.max(...all.map((p) => p[1])),
 ];
 
-const LON = [34.6, 55.7];
-const LAT = [16.4, 32.15];
-// تصحيح تشوّه الإسقاط المستطيل عند خط عرض المملكة الأوسط
-const KX = Math.cos((24.3 * Math.PI) / 180);
+// تصحيح تشوّه الإسقاط المستطيل عند خط العرض الأوسط
+const KX = Math.cos((((LAT[0] + LAT[1]) / 2) * Math.PI) / 180);
 
-const W = 900;
+const W = 1000;
 const H = Math.round((W * (LAT[1] - LAT[0])) / ((LON[1] - LON[0]) * KX));
 
 const px = (lon: number) => ((lon - LON[0]) / (LON[1] - LON[0])) * W;
 const py = (lat: number) => ((LAT[1] - lat) / (LAT[1] - LAT[0])) * H;
 
-const PATH =
-  OUTLINE.map(([lo, la], i) => `${i === 0 ? "M" : "L"}${px(lo).toFixed(1)},${py(la).toFixed(1)}`).join(" ") + " Z";
+const toPath = (ring: [number, number][]) =>
+  ring
+    .map(([lo, la], i) => `${i === 0 ? "M" : "L"}${px(lo).toFixed(1)},${py(la).toFixed(1)}`)
+    .join(" ") + " Z";
 
-export const SaudiMap: React.FC<{ width?: number }> = ({ width = 900 }) => {
+const PATHS = SHAPES.map((r) => ({ name: r.name, d: toPath(r.ring) }));
+
+// أسماء المناطق التي تُخدم — لتمييز شكلها على الخريطة
+const servedRegionNames = new Set(served.map((r) => r.region).filter(Boolean));
+
+export const SaudiMap: React.FC<{ width?: number }> = ({ width = 1000 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // رسم الحدود تدريجياً
-  const draw = spring({ frame: frame - 4, fps, config: { damping: 200, stiffness: 40 } });
-  const fillIn = interpolate(frame, [24, 44], [0, 1], {
+  const draw = spring({ frame: frame - 4, fps, config: { damping: 200, stiffness: 42 } });
+  const fillIn = interpolate(frame, [20, 42], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -49,54 +57,70 @@ export const SaudiMap: React.FC<{ width?: number }> = ({ width = 900 }) => {
       viewBox={`0 0 ${W} ${H}`}
       style={{ overflow: "visible" }}
     >
-      {/* تعبئة ناعمة */}
-      <path d={PATH} fill={theme.primary} opacity={0.07 * fillIn} />
-      {/* الحدود تُرسم تدريجياً */}
-      <path
-        d={PATH}
-        fill="none"
-        stroke={theme.primary}
-        strokeWidth={3}
-        strokeLinejoin="round"
-        pathLength={1}
-        strokeDasharray={1}
-        strokeDashoffset={1 - draw}
-        opacity={0.75}
-      />
+      {/* تعبئة المناطق — المخدومة بلون الهوية والباقي رمادي فاتح */}
+      {PATHS.map((p) => {
+        const isServed = servedRegionNames.has(p.name);
+        return (
+          <path
+            key={p.name}
+            d={p.d}
+            fill={isServed ? theme.accent : theme.primary}
+            opacity={(isServed ? 0.17 : 0.05) * fillIn}
+          />
+        );
+      })}
 
-      {regions.map((r, i) => {
+      {/* الخطوط الفاصلة بين المناطق تُرسم تدريجياً */}
+      {PATHS.map((p, i) => {
+        const isServed = servedRegionNames.has(p.name);
+        return (
+          <path
+            key={p.name}
+            d={p.d}
+            fill="none"
+            stroke={isServed ? theme.accent : theme.primary}
+            strokeWidth={isServed ? 2.6 : 1.6}
+            strokeLinejoin="round"
+            pathLength={1}
+            strokeDasharray={1}
+            strokeDashoffset={1 - Math.min(1, draw * 1.15 - i * 0.012)}
+            opacity={isServed ? 0.9 : 0.48}
+          />
+        );
+      })}
+
+      {/* علامات المدن */}
+      {served.map((r, i) => {
         const x = px(r.lon);
         const y = py(r.lat);
-        const delay = 46 + i * 8;
+        const delay = 44 + i * 6;
         const s = spring({ frame: frame - delay, fps, config: { damping: 11, mass: 0.7 } });
-        const drop = interpolate(s, [0, 1], [-46, 0]);
+        const drop = interpolate(s, [0, 1], [-42, 0]);
         const color = r.hq ? theme.accent : theme.primary;
-        // نبضة مستمرة حول المقر
-        const pulse = (frame - delay) > 0 ? ((frame - delay) % 55) / 55 : 0;
+        const pulse = frame - delay > 0 ? ((frame - delay) % 55) / 55 : 0;
 
         return (
           <g key={r.name} opacity={s} transform={`translate(${x} ${y + drop})`}>
             {r.hq && s > 0.2 ? (
               <circle
-                r={14 + pulse * 34}
+                r={12 + pulse * 32}
                 fill="none"
                 stroke={color}
                 strokeWidth={2.5}
                 opacity={(1 - pulse) * 0.55}
               />
             ) : null}
-            <circle r={r.hq ? 13 : 10} fill={color} />
-            <circle r={r.hq ? 5.5 : 4} fill="#fff" />
+            <circle r={r.hq ? 12 : 9} fill={color} />
+            <circle r={r.hq ? 5 : 3.6} fill="#fff" />
             <text
               x={0}
-              y={r.hq ? -26 : -22}
+              y={r.hq ? -24 : -20}
               textAnchor="middle"
               fill={theme.primary}
-              style={{
-                fontFamily: headingFont,
-                fontWeight: 900,
-                fontSize: r.hq ? 30 : 26,
-              }}
+              stroke={theme.bg}
+              strokeWidth={5}
+              paintOrder="stroke"
+              style={{ fontFamily: headingFont, fontWeight: 900, fontSize: r.hq ? 30 : 26 }}
             >
               {r.name}
             </text>
