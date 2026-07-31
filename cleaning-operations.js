@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9ug";
+const MODULE_BUILD = "v18.9vb";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -1281,11 +1281,17 @@ async function loadMonthLog(force){
   return _monthLog;
 }
 function _ymL(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+/* سجلُّ الشهر في نطاق المستخدم — المهامّ مُنطَّقةٌ بـ visibleTasks لكن السجلَّ كان عامّاً،
+   فيرى المشرفُ تغطيةَ مبانيه ومعها توثيقَ المشروع كلِّه: رقمان من نطاقين في لوحةٍ واحدة. */
+function visibleLog(){
+  const mine=myBuildings(), log=_monthLog||[];
+  return mine ? log.filter(r=>mine.indexOf(r&&r.building)!==-1) : log;
+}
 
 function cleaningKPIs(){
   const s=boardStats();
   const active=visibleTasks().filter(t=>!isDisabled(t));
-  const log=_monthLog||[];
+  const log=visibleLog();
   const cov=coverageByBuilding();
   // ١) تغطية اليوم  ٢) المناطق المكتملة  ٣) نسبة التأخّر  ٤) توثيق بالصور
   // ٥) اكتمال بنود الفحص  ٦) عدد التنفيذات هذا الشهر
@@ -1310,6 +1316,134 @@ function cleaningKPIs(){
       sub:"إجمالي ما نُفِّذ منذ بداية الشهر", raw:true }
   ];
 }
+/* ════════════ أداء المشرفين — لعقود النظافة ════════════
+   صفحةُ الصيانة تُصنِّف الفنيّين والمشرفين بزمن الإغلاق وعدد البلاغات، وهي مقاييسُ
+   بلاغاتٍ لا وجود لها في عقد نظافة (٩٥٪ من العمل جدولٌ مخطَّط لا بلاغ). فحين حجبنا
+   صفحةَ الصيانة اختفى معها قياسُ المشرفين — ولم يكن هذا مقصوداً: البياناتُ اللازمة
+   موجودةٌ كاملةً (كلُّ سطرِ تنفيذٍ يحمل supervisor، وخريطةُ supervisorBuildings تنسب
+   كلَّ مبنًى لمشرفه). فالبديلُ هنا يقيس المشرفَ بما يملكه فعلاً في عقد النظافة:
+   تغطيةُ نطاقه · متأخّراتُه · توثيقُه بالصور · اكتمالُ بنود فحصه.
+
+   الدرجةُ ليست صندوقاً أسود: متوسّطٌ مرجَّحٌ للمكوّنات **القابلة للقياس فقط**، وتُعاد
+   موازنةُ الأوزان على ما توفّر — فمشرفٌ بلا تنفيذاتٍ هذا الشهر لا يُعاقَب بصفرِ توثيقٍ
+   لم يُقَس أصلاً، بل يظهر مكوّنُه «—». وإن لم يتوفّر أيُّ مكوّن فالدرجةُ «—» صراحةً. */
+const SUP_UNASSIGNED = "مبانٍ بلا مشرف";
+const SUP_WEIGHTS = { cov:0.45, late:0.20, doc:0.20, items:0.15 };
+// مشرفُ سطرِ التنفيذ: الحقلُ المخزَّن، وإلا استُنبط من مبناه (سجلّاتٌ سابقةٌ للربط)
+function logSupervisor(r){ return (r&&r.supervisor) ? r.supervisor : supOfBuilding(r&&r.building); }
+
+function supervisorPerf(tasksList, logList){
+  const tasks=(Array.isArray(tasksList)?tasksList:visibleTasks()).filter(t=>!isDisabled(t));
+  const log  = Array.isArray(logList)?logList:visibleLog();
+  const rows={};
+  const row=n=>(rows[n] || (rows[n]={ name:n, _b:{}, done:0, due:0, overdue:0,
+                                      runs:0, withPhotos:0, doneItems:0, totalItems:0 }));
+  tasks.forEach(t=>{
+    const r=row(taskSupervisor(t)||SUP_UNASSIGNED);
+    if(t.building) r._b[t.building]=1;
+    if(doneToday(t)) r.done++;
+    else if(isDue(t)){ r.due++; if(isOverdue(t)) r.overdue++; }
+  });
+  log.forEach(x=>{
+    const r=row(logSupervisor(x)||SUP_UNASSIGNED);
+    if(x&&x.building) r._b[x.building]=1;
+    r.runs++;
+    if(Array.isArray(x.photos)&&x.photos.length) r.withPhotos++;
+    r.doneItems += Number(x.doneItems)||0;
+    r.totalItems+= Number(x.totalItems)||0;
+  });
+  const out=Object.values(rows).map(r=>{
+    const sched=r.done+r.due;
+    const cov  = sched>0        ? Math.round(r.done/sched*100)          : null;
+    const late = sched>0        ? Math.round(r.overdue/sched*100)       : null;
+    const doc  = r.runs>0       ? Math.round(r.withPhotos/r.runs*100)   : null;
+    const items= r.totalItems>0 ? Math.round(r.doneItems/r.totalItems*100) : null;
+    // متوسّطٌ مرجَّحٌ على المكوّنات المتاحة فقط (المتأخّرات تُقلَب: أقلُّ = أفضل)
+    let sum=0, w=0;
+    if(cov  !=null){ sum+=SUP_WEIGHTS.cov  *cov;        w+=SUP_WEIGHTS.cov; }
+    if(late !=null){ sum+=SUP_WEIGHTS.late *(100-late); w+=SUP_WEIGHTS.late; }
+    if(doc  !=null){ sum+=SUP_WEIGHTS.doc  *doc;        w+=SUP_WEIGHTS.doc; }
+    if(items!=null){ sum+=SUP_WEIGHTS.items*items;      w+=SUP_WEIGHTS.items; }
+    const score = w>0 ? Math.round(sum/w) : null;
+    return { name:r.name, zones:Object.keys(r._b).length, sched, done:r.done, due:r.due,
+             overdue:r.overdue, runs:r.runs, withPhotos:r.withPhotos,
+             doneItems:r.doneItems, totalItems:r.totalItems,
+             cov, late, doc, items, score, unassigned:r.name===SUP_UNASSIGNED };
+  });
+  // «بلا مشرف» أسفلَ القائمة دائماً (ليست منافساً)، ثم الدرجةُ تنازلياً، وغيرُ المقيس أخيراً
+  return out.sort((a,b)=>{
+    if(a.unassigned!==b.unassigned) return a.unassigned?1:-1;
+    const as=a.score==null?-1:a.score, bs=b.score==null?-1:b.score;
+    if(bs!==as) return bs-as;
+    return (b.runs+b.sched)-(a.runs+a.sched);
+  });
+}
+
+function supPerfHTML(){
+  const rows=supervisorPerf();
+  const scored=rows.filter(r=>!r.unassigned);
+  const orphan=rows.find(r=>r.unassigned);
+  const head=`<div class="co-sec"><div class="co-sec-t">${_svg('users')} أداء المشرفين — هذا الشهر</div>
+      <span class="co-sec-c">${scored.length?scored.length+" مشرف":"لا مشرفين مربوطين"}</span></div>`;
+
+  if(!scored.length && !orphan){
+    return `<div class="card">${head}
+      <div class="co-empty" style="padding:22px">${_svg('users')}
+        <div class="co-empty-t">لا بياناتٍ لقياس المشرفين بعد</div>
+        <div class="co-empty-s">أضِف مهامّ نظافة وسجِّل تنفيذها ليُحسب الأداء.</div></div></div>`;
+  }
+  if(!scored.length && orphan){
+    return `<div class="card">${head}
+      <div class="co-empty" style="padding:22px">${_svg('users')}
+        <div class="co-empty-t">لا مبنى مرتبطٌ بمشرف</div>
+        <div class="co-empty-s">${orphan.zones} مبنًى بلا مشرف — اربطها من «تشغيل النظافة › المشرفون والمناطق» ليبدأ القياس.</div>
+        ${canEdit()?`<button class="btn btn-sm" style="margin-top:10px" onclick="cleaningOps.goSupMap()">${_svg('users')} ربط المشرفين بالمباني</button>`:""}
+      </div></div>`;
+  }
+
+  const col=v=>v==null?"var(--muted)":(v>=85?"var(--sla-ok)":(v>=60?"var(--sla-warn)":"var(--sla-crit)"));
+  const pill=(lbl,v,sub,invert)=>{
+    const good = v==null ? null : (invert ? (v<=5?"ok":(v<=15?"warn":"crit")) : (v>=85?"ok":(v>=60?"warn":"crit")));
+    const c = good==null ? "var(--muted)" : "var(--sla-"+good+")";
+    return `<div class="co-sup-m"><span class="l">${lbl}</span>
+      <span class="v" style="color:${c}">${v==null?"—":v+"%"}</span>
+      <span class="s">${_esc(sub)}</span></div>`;
+  };
+  const card=(r,i)=>{
+    const c=col(r.score);
+    const pct=r.score==null?0:Math.max(0,Math.min(100,r.score));
+    return `<div class="co-sup ${r.unassigned?"orphan":""}">
+      <div class="co-sup-h">
+        <span class="rk">${r.unassigned?"—":(i+1)}</span>
+        <span class="nm">${_esc(r.name)}</span>
+        <span class="zn">${_svg('pin',13)} ${r.zones} مبنى</span>
+        <span class="sc" style="color:${c}">${r.score==null?"—":r.score}</span>
+      </div>
+      <div class="hbar"><span style="flex:${Math.max(pct,0.01)};background:${c}"></span><span style="flex:${Math.max(100-pct,0.01)};background:var(--surface2)"></span></div>
+      <div class="co-sup-ms">
+        ${pill("تغطية اليوم",  r.cov,  r.done+" من "+r.sched)}
+        ${pill("متأخّرات",     r.late, r.overdue+" مهمة", true)}
+        ${pill("توثيق بالصور", r.doc,  r.withPhotos+" من "+r.runs+" تنفيذ")}
+        ${pill("بنود الفحص",   r.items,r.doneItems+" من "+r.totalItems+" بند")}
+      </div>
+    </div>`;
+  };
+
+  return `<div class="card">${head}
+    ${scored.map(card).join("")}
+    ${orphan?card(orphan,-1):""}
+    <div class="co-hint" style="margin-top:10px">
+      الدرجةُ متوسّطٌ مرجَّح: التغطية ${Math.round(SUP_WEIGHTS.cov*100)}٪ ·
+      انخفاضُ المتأخّرات ${Math.round(SUP_WEIGHTS.late*100)}٪ ·
+      التوثيقُ بالصور ${Math.round(SUP_WEIGHTS.doc*100)}٪ ·
+      بنودُ الفحص ${Math.round(SUP_WEIGHTS.items*100)}٪ — محسوبةً على المتاح فقط،
+      وما لم يُقَس يظهر «—» ولا يُحتسب. التغطيةُ لليوم، والباقي منذ بداية الشهر.
+      ${orphan?` <b>${orphan.zones} مبنًى بلا مشرف</b> — اربطها ليدخل عملُها في القياس.`:""}
+    </div>
+  </div>`;
+}
+function goSupMap(){ try{ showPage(PAGE_ID); setView("sup"); }catch(e){} }
+
 function kpiHTML(){
   const list=cleaningKPIs();
   const card=k=>{
@@ -1330,18 +1464,20 @@ function kpiHTML(){
     <div class="page-hero">
       <div class="page-hero-titles">
         <div class="page-hero-title"><span class="ph-ico">${_svg('sparkles')}</span> مؤشرات أداء النظافة</div>
-        <div class="page-hero-sub">الالتزام بالجدول وجودة التوثيق — لا مؤشّرات الصيانة</div>
+        <div class="page-hero-sub">الالتزام بالجدول وجودة التوثيق وأداء المشرفين — لا مؤشّرات الصيانة</div>
       </div>
       <div class="page-hero-actions">
         <button class="btn btn-sm" onclick="cleaningOps.goOps()">${_svg('clipboardList')} تشغيل النظافة</button>
+        ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.goSupMap()">${_svg('users')} المشرفون والمناطق</button>`:""}
         <button class="btn btn-sm" onclick="cleaningOps.refreshKPI()">${_svg('rotateCcw')} تحديث</button>
       </div>
     </div>
     <div class="co-kpis">${list.map(card).join("")}</div>
-    <div class="co-hint" style="margin-top:4px">
+    <div class="co-hint" style="margin:4px 0 14px">
       المؤشّرات محسوبةٌ من جدول المهامّ وسجلّ التنفيذ لهذا الشهر. «تغطية اليوم» و«المناطق»
       لحظيّتان، والباقي تراكميٌّ منذ بداية الشهر.
-    </div>`;
+    </div>
+    ${supPerfHTML()}`;
 }
 function mountKPI(){
   const host=document.getElementById("page-kpi");
@@ -1900,6 +2036,21 @@ function injectCSS(){
 .co-kpi-v{font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:900;line-height:1;margin-bottom:9px}
 .co-kpi-f{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:7px;font-size:10.5px;color:var(--muted);font-weight:700}
 .co-kpi-f .t{display:inline-flex;align-items:center;gap:4px}
+/* أداء المشرفين — صفٌّ لكل مشرف: ترويسةٌ بالرتبة والاسم والدرجة، شريطٌ، ثم مقاييسُه */
+.co-sup{padding:12px 0;border-bottom:1px solid var(--border)}
+.co-sup:last-of-type{border-bottom:0;padding-bottom:2px}
+.co-sup.orphan{opacity:.82}
+.co-sup-h{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:8px}
+.co-sup-h .rk{flex:0 0 auto;min-width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:7px;background:var(--surface2);color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:900}
+.co-sup-h .nm{font-size:13.5px;font-weight:900;color:var(--text);min-width:0;overflow-wrap:anywhere}
+.co-sup-h .zn{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;color:var(--muted)}
+.co-sup-h .sc{margin-inline-start:auto;font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:900;line-height:1}
+.co-sup-ms{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:8px;margin-top:9px}
+.co-sup-m{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:7px 9px;min-width:0}
+.co-sup-m .l{display:block;font-size:10px;font-weight:800;color:var(--muted);margin-bottom:2px;overflow-wrap:anywhere}
+.co-sup-m .v{display:block;font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:900;line-height:1.15}
+.co-sup-m .s{display:block;font-size:9.5px;font-weight:700;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
 #${EXEC_ID},#${DAILY_ID}{direction:rtl}
 /* إصلاحُ خللٍ في النواة (يصيب مشاريع الصيانة أيضاً): الحالةُ الفارغة في أرشيف البلاغات
    تضع أيقونةً بلا أبعاد داخل حاويةٍ تضبط font-size فقط — وfont-size لا يحجّم SVG، فيتمدّد
@@ -2055,7 +2206,7 @@ window.cleaningOps = {
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   openDetail, closeDetail,
-  saveSupMap,
+  saveSupMap, goSupMap,
   mountExec, unmountExec, refreshExec, goOps,
   mountDaily, unmountDaily, refreshDaily, mountKPI, unmountKPI, refreshKPI, seedWorkTypes, relabelPage, injectPhotoSourceFilter,
   startSync(){ /* لا مزامنة مستقلة — القراءة بـ .get() عند العرض (انضباط المستمعين) */ },
@@ -2065,6 +2216,8 @@ window.cleaningOps = {
   _boardStats: boardStats,
   _coverageByBuilding: coverageByBuilding, _cleaningKPIs: cleaningKPIs, _supOfBuilding: supOfBuilding,
   _logAsTicket: _logAsTicket, _taskSupervisor: taskSupervisor,
+  _supervisorPerf: supervisorPerf, _logSupervisor: logSupervisor,
+  _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
   _salvageObjects: _salvageObjects,
   _svg: _svg,
   _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
