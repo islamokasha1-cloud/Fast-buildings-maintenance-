@@ -977,6 +977,190 @@ async function refreshExec(){ await loadTasks(true); mountExec(); _toast("✅ ح
 function goOps(){ try{ showPage(PAGE_ID); }catch(e){} }
 
 /* ════════════════════════════════════════════════════════════
+   تكييف صفحات أوامر العمل لعقود النظافة
+   ────────────────────────────────────────────────────────────
+   صفحات البلاغات/الأرشيف/بلاغ جديد/متابعة اليومية مكتوبةٌ بلغة الصيانة («وصف العطل»،
+   «نوع الصيانة»، «الفني المسؤول»)، والأخطر: **المشروع الجديد يبدأ بأنواع عملٍ فارغة
+   تماماً** (loadSettings: مشروعٌ غير حائل ⟵ _applyWT({})) فقائمة «نوع الأعمال» بلا
+   خيارات ولا يمكن تسجيل أي ملاحظة.
+
+   نعالج ذلك بلا مساسٍ بمشاريع الصيانة:
+   ١) بذرُ أنواع عمل النظافة في إعدادات المشروع نفسها (meta/{id}_settings) — آليةُ
+      المنصة القائمة، فتظهر في كل القوائم والفلاتر تلقائياً وتبقى قابلةً للتعديل.
+   ٢) تعريبُ المصطلحات على عناصر العناوين والتسميات وحدها (لا محتوى ديناميكي).
+   ٣) متابعةٌ يوميةٌ خاصةٌ بالنظافة (إخفاءُ نسخة الصيانة لا حذفها — كاللوحة التنفيذية).
+   ════════════════════════════════════════════════════════════ */
+
+// أنواع عمل النظافة الافتراضية بصيغة WORK_TYPES في النواة ({icon,techs}).
+const CLEANING_WT_SEED = {
+  "نظافة دورات المياه":      { icon:"🚿", techs:[] },
+  "نظافة الأرضيات":          { icon:"🧹", techs:[] },
+  "نظافة الزجاج والواجهات":  { icon:"🪟", techs:[] },
+  "إدارة النفايات":          { icon:"🗑️", techs:[] },
+  "نظافة المكاتب والأثاث":   { icon:"🧴", techs:[] },
+  "المساحات الخارجية":       { icon:"🌳", techs:[] },
+  "النظافة العميقة الدورية": { icon:"✨", techs:[] },
+  "أخرى":                    { icon:"🧽", techs:[] }
+};
+let _seededFor = {};   // projId → بُذرت أنواع العمل؟ (مرّة لكل مشروع لكل جلسة)
+
+async function seedWorkTypes(){
+  const id=_projId();
+  if(!id || !isCleaningProject() || _seededFor[id]) return;
+  // لا نبذر إلا إن كانت أنواع العمل فارغةً فعلاً — فلا نطمس اختيار المستخدم أبداً
+  let empty=false;
+  try{ empty = (typeof WORK_TYPES==="object" && WORK_TYPES) && Object.keys(WORK_TYPES).length===0; }
+  catch(e){ return; }
+  if(!empty) { _seededFor[id]=true; return; }
+  const database=_db(); if(!database) return;
+  let path=""; try{ path=(typeof SETTINGS_DOC==="function") ? SETTINGS_DOC() : ""; }catch(e){}
+  if(!path) return;
+  _seededFor[id]=true;
+  try{
+    await database.doc(path).set({ workTypes: CLEANING_WT_SEED }, { merge:true });
+    try{ if(typeof _applyWT==="function") _applyWT(CLEANING_WT_SEED); }catch(e){}
+    _audit("بذر أنواع عمل النظافة", _projId()+" — "+Object.keys(CLEANING_WT_SEED).length+" نوع");
+    _toast("✅ أُضيفت أنواع عمل النظافة لهذا المشروع (تُعدَّل من لوحة الإدارة)","success");
+  }catch(e){ console.warn("cleaningOps/seedWorkTypes",e); _seededFor[id]=false; }
+}
+
+/* ── تعريب المصطلحات (عناوين وتسميات فقط) ──
+   مرتّبةٌ من الأطول للأقصر فلا يبتلع بديلٌ جزءاً من عبارةٍ أطول. وكلُّ بديلٍ لا يحوي
+   أصلَه، فإعادةُ التطبيق غير ضارّة (idempotent). */
+const RELABEL = [
+  ["أرشيف البلاغات الشهري",              "أرشيف ملاحظات النظافة الشهري"],
+  ["البلاغات المحفوظة من الأشهر السابقة", "الملاحظات المحفوظة من الأشهر السابقة"],
+  ["تسجيل بلاغ صيانة جديد وإسناده للمبنى ونوع العمل", "تسجيل ملاحظة نظافة وإسنادها للمنطقة ونوع العمل"],
+  ["ابدأ بتسجيل أول بلاغ صيانة",          "ابدأ بتسجيل أول ملاحظة نظافة"],
+  ["ابحث برقم البلاغ أو المبنى أو الفني أو المشرف...", "ابحث برقم الملاحظة أو المنطقة أو العامل أو المشرف..."],
+  ["كل أنواع الصيانة",                    "كل المصادر"],
+  ["تسجيل بلاغ جديد",                     "تسجيل ملاحظة نظافة"],
+  ["لا توجد بلاغات مؤرشفة",               "لا توجد ملاحظات مؤرشفة"],
+  ["لا توجد بلاغات بعد",                  "لا توجد ملاحظات بعد"],
+  ["اكتب وصفاً تفصيلياً للعطل...",         "اكتب وصفاً تفصيلياً للملاحظة..."],
+  ["الفني المسؤول",                       "عامل النظافة المسؤول"],
+  ["وصف العطل",                           "وصف الملاحظة"],
+  ["نوع الصيانة",                          "مصدر الملاحظة"],
+  ["بلاغ جديد",                           "ملاحظة جديدة"],
+  ["أرشيف البلاغات",                       "أرشيف الملاحظات"],
+  ["تاريخ البلاغ",                         "تاريخ الملاحظة"],
+  ["وقت البلاغ",                           "وقت الملاحظة"],
+  ["البلاغات",                             "ملاحظات النظافة"]
+];
+// نقصر التبديل على عناصر العناوين والتسميات والحقول — لا على محتوى الجداول الديناميكي،
+// فلا نمسّ بيانات المستخدم ولا أرقام البلاغات.
+const RELABEL_SEL = ".page-hero-title,.page-hero-sub,.form-label,label,option,.empty-title,.empty-sub,h2,h3,button";
+function _relabelText(s){
+  let out=String(s);
+  for(const [a,b] of RELABEL){ if(out.indexOf(a)!==-1) out=out.split(a).join(b); }
+  return out;
+}
+function relabelPage(pageId){
+  if(!isCleaningProject()) return;
+  const root=document.getElementById(pageId);
+  if(!root) return;
+  try{
+    root.querySelectorAll(RELABEL_SEL).forEach(el=>{
+      // نصوص العنصر المباشرة فقط (لا نغوص في أبنائه فنكرّر العمل)
+      el.childNodes.forEach(n=>{
+        if(n.nodeType===3){ const t=_relabelText(n.nodeValue); if(t!==n.nodeValue) n.nodeValue=t; }
+      });
+      if(el.placeholder){ const p=_relabelText(el.placeholder); if(p!==el.placeholder) el.placeholder=p; }
+    });
+  }catch(e){ console.warn("cleaningOps/relabel",e); }
+}
+
+/* ── متابعة يومية خاصة بالنظافة ──
+   نفس أسلوب اللوحة التنفيذية: إخفاءٌ لا حذف، فتبقى عناصر النواة سليمةً لدوالها. */
+const DAILY_ID="co-daily";
+function dailyHTML(){
+  const s=boardStats();
+  const cov=coverageByBuilding();
+  const tile=(icon,val,lbl,c)=>`
+    <div class="stat-tile" style="--_c:${c}">
+      <div class="st-ico">${_svg(icon)}</div>
+      <div class="st-val" style="color:${c}">${val}</div>
+      <div class="st-lbl">${lbl}</div>
+    </div>`;
+  const pendingOnTime=Math.max(0,s.due-s.overdue);
+  const seg=(n,cls)=> n>0?`<span class="${cls}" style="flex:${n}"></span>`:"";
+  const active=_tasks.filter(t=>!isDisabled(t));
+  const todays=active.filter(t=>isDue(t)||doneToday(t)).sort((a,b)=>dueStatus(a).sort-dueStatus(b).sort);
+  const d=new Date();
+  const dayName=["الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"][d.getDay()];
+  return `
+    <div class="page-hero">
+      <div class="page-hero-titles">
+        <div class="page-hero-title"><span class="ph-ico">${_svg('daily')}</span> المتابعة اليومية — النظافة</div>
+        <div class="page-hero-sub">${dayName}، ${_today()}</div>
+      </div>
+      <div class="page-hero-actions">
+        <button class="btn btn-sm" onclick="cleaningOps.goOps()">${_svg('clipboardList')} تشغيل النظافة</button>
+        <button class="btn btn-sm" onclick="cleaningOps.refreshDaily()">${_svg('rotateCcw')} تحديث</button>
+      </div>
+    </div>
+    <div class="co-tiles">
+      ${tile('calendar',    s.scheduled, "مجدول اليوم", "var(--primary)")}
+      ${tile('checkCircle', s.done,      "نُفِّذ اليوم",  "var(--sla-ok)")}
+      ${tile('hourglass',   s.due,       "متبقٍّ اليوم", s.due>0?"var(--sla-warn)":"var(--sla-ok)")}
+      ${tile('target',      s.coverage+"%", "التغطية",  s.coverage>=95?"var(--sla-ok)":(s.coverage>=70?"var(--sla-warn)":"var(--sla-crit)"))}
+    </div>
+    ${s.scheduled>0?`<div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('activity')} تغطية اليوم</div>
+        <span class="co-sec-c"><b>${s.done}</b> من ${s.scheduled}</span></div>
+      <div class="hbar">${seg(s.done,'s-ok')}${seg(pendingOnTime,'s-warn')}${seg(s.overdue,'s-crit')}</div>
+      <div class="hleg">
+        <div class="it"><i style="background:var(--sla-ok)"></i>نُفِّذ <span class="n">${s.done}</span></div>
+        ${pendingOnTime>0?`<div class="it"><i style="background:var(--sla-warn)"></i>متبقٍّ <span class="n">${pendingOnTime}</span></div>`:""}
+        ${s.overdue>0?`<div class="it"><i style="background:var(--sla-crit)"></i>متأخّر <span class="n">${s.overdue}</span></div>`:""}
+      </div>
+    </div>`:""}
+    ${s.overdue>0?`<div class="ppm-overdue-banner"><span class="co-bnr-ic">${_svg('alertTriangle')}</span>
+      <span>${s.overdue} مهمة متأخّرة — عالجها اليوم قبل أن تتراكم.</span></div>`:""}
+    ${cov.length?`<div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('building2')} التغطية حسب المنطقة</div>
+        <span class="co-sec-c">الأضعف أولاً</span></div>
+      ${cov.map(b=>{
+        const c=b.pct>=100?"var(--sla-ok)":(b.pct>=60?"var(--sla-warn)":"var(--sla-crit)");
+        return `<div class="co-cov">
+          <div class="co-cov-h"><span class="n">${_esc(b.name)}</span>
+            <span class="p" style="color:${c}">${b.pct}% <small>(${b.done}/${b.sched})</small></span></div>
+          <div class="hbar"><span style="flex:${Math.max(b.pct,0.01)};background:${c}"></span><span style="flex:${Math.max(100-b.pct,0.01)};background:var(--surface2)"></span></div>
+        </div>`;
+      }).join("")}
+    </div>`:""}
+    <div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('clipboardCheck')} مهامّ اليوم</div>
+        <span class="co-sec-c">${todays.length} مهمة</span></div>
+      ${todays.length ? todays.map(taskCardHTML).join("")
+        : `<div class="co-empty" style="padding:26px">${_svg('checkCircle')}
+           <div class="co-empty-t">لا مهامّ مستحقّة اليوم</div>
+           <div class="co-empty-s">كل المهامّ ضمن مواعيدها.</div></div>`}
+    </div>`;
+}
+function mountDaily(){
+  const host=document.getElementById("page-daily");
+  if(!host) return;
+  if(!isCleaningProject()){ unmountDaily(); return; }
+  let box=document.getElementById(DAILY_ID);
+  if(!box){ box=document.createElement("div"); box.id=DAILY_ID; host.insertBefore(box, host.firstChild); }
+  host.classList.add("co-daily-mode");
+  if(!_loaded || _loadedFor!==_projId()){
+    box.innerHTML=`<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ تحميل مهامّ اليوم…</div></div></div>`;
+    loadTasks().then(()=>{ const b=document.getElementById(DAILY_ID); if(b && isCleaningProject()) b.innerHTML=dailyHTML(); });
+    return;
+  }
+  box.innerHTML=dailyHTML();
+}
+function unmountDaily(){
+  const host=document.getElementById("page-daily");
+  if(host) host.classList.remove("co-daily-mode");
+  const box=document.getElementById(DAILY_ID);
+  if(box) box.remove();
+}
+async function refreshDaily(){ await loadTasks(true); mountDaily(); _toast("✅ حُدِّثت المتابعة","success"); }
+
+/* ════════════════════════════════════════════════════════════
    التركيب الذاتي: صفحة + زرّ قائمة جانبية + لفّ showPage
    ════════════════════════════════════════════════════════════ */
 function ensurePage(){
@@ -1061,6 +1245,16 @@ function hookShowPage(){
     // اللوحة التنفيذية: لعقود النظافة نعرض لوحتنا ونُخفي لوحة الصيانة (بلا حذف)،
     // ولغيرها نرفع الإخفاء فوراً — فمشاريع الصيانة لا تتأثّر إطلاقاً.
     if(id==="dashboard"){ try{ mountExec(); }catch(e){ console.warn("cleaningOps/mountExec",e); } }
+    // المتابعة اليومية: نسخةُ النظافة بدل نسخة البلاغات (إخفاءٌ لا حذف)
+    if(id==="daily"){ try{ mountDaily(); }catch(e){ console.warn("cleaningOps/mountDaily",e); } }
+    // تعريب مصطلحات صفحات أوامر العمل + ضمانُ وجود أنواع عمل النظافة
+    if(id==="new"||id==="tickets"||id==="tickets-archive"){
+      try{ seedWorkTypes(); }catch(e){}
+      // النواة ترسم محتوى هذه الصفحات بعد التفعيل — نعرّب بعد إطارٍ ثم بعد استقرارها
+      try{ relabelPage("page-"+id); }catch(e){}
+      setTimeout(()=>{ try{ relabelPage("page-"+id); }catch(e){} }, 60);
+      setTimeout(()=>{ try{ relabelPage("page-"+id); }catch(e){} }, 400);
+    }
     if(id===PAGE_ID){
       const pg=document.getElementById("page-"+PAGE_ID);
       if(!pg) return;
@@ -1083,14 +1277,17 @@ function _watchProject(){
       last=cur;
       _tasks=[]; _loaded=false; _loadedFor="";
       _editing=null; _execFor=null; _execState=[]; _genForm=false; _view="board";
-      // ارفع لوحة النظافة فوراً عند مغادرة مشروع النظافة — قبل معرفة نوع الجديد
-      unmountExec();
+      // ارفع لوحات النظافة فوراً عند مغادرة مشروع النظافة — قبل معرفة نوع الجديد
+      unmountExec(); unmountDaily();
       ensureTypeKnown(()=>{
         injectSidebarButton();
         if(_onPage()) render();
-        // لو الصفحة المعروضة هي اللوحة التنفيذية فأعِد تركيبها حسب نوع المشروع الجديد
+        // أعِد تركيب الصفحة المعروضة حسب نوع المشروع الجديد
         const dash=document.getElementById("page-dashboard");
         if(dash && dash.classList.contains("active")) mountExec();
+        const dly=document.getElementById("page-daily");
+        if(dly && dly.classList.contains("active")) mountDaily();
+        seedWorkTypes();
       });
     }
   }, 1500);
@@ -1110,7 +1307,12 @@ function injectCSS(){
 /* اللوحة التنفيذية لعقود النظافة: تُخفى أقسام لوحة الصيانة ولا تُحذف — فتبقى عناصر
    النواة موجودةً يجدها renderDashboard() بلا خطأ، ويُرفَع الإخفاء بإزالة الصنف. */
 #page-dashboard.co-exec-mode > *:not(#${EXEC_ID}){display:none!important}
-#${EXEC_ID}{direction:rtl}
+#page-daily.co-daily-mode > *:not(#${DAILY_ID}){display:none!important}
+#${EXEC_ID},#${DAILY_ID}{direction:rtl}
+/* إصلاحُ خللٍ في النواة (يصيب مشاريع الصيانة أيضاً): الحالةُ الفارغة في أرشيف البلاغات
+   تضع أيقونةً بلا أبعاد داخل حاويةٍ تضبط font-size فقط — وfont-size لا يحجّم SVG، فيتمدّد
+   ليملأ عرض البطاقة. سطرٌ واحد يعيدها لحجمها المقصود، بلا مسّ أي منطق. */
+#archive-content div[style*="font-size:28px"] > svg{width:28px;height:28px}
 .co-fin{display:flex;flex-direction:column;gap:1px}
 .co-fin-i{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px dashed var(--border)}
 .co-fin-i:last-child{border-bottom:none}
@@ -1196,6 +1398,7 @@ window.cleaningOps = {
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec,
   mountExec, unmountExec, refreshExec, goOps,
+  mountDaily, unmountDaily, refreshDaily, seedWorkTypes, relabelPage,
   startSync(){ /* لا مزامنة مستقلة — القراءة بـ .get() عند العرض (انضباط المستمعين) */ },
   version: VERSION,
   build: MODULE_BUILD,
@@ -1203,6 +1406,7 @@ window.cleaningOps = {
   _boardStats: boardStats,
   _coverageByBuilding: coverageByBuilding,
   _salvageObjects: _salvageObjects,
+  _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,
   _addDays: _addDays, _today: _today,
   _FREQ_DAYS: FREQ_DAYS,
