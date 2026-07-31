@@ -2263,6 +2263,22 @@ function cleaningOpsTests() {
     /function _prefetch\(\)\{[\s\S]{0,200}if\(!isCleaningProject\(\)\) return;/.test(src) &&
     (src.match(/_prefetch\(\)/g) || []).length >= 3);
 
+  // ══ عرض تفاصيل المهمة + تصغير البطاقات وشبكة المباني ══
+  T("★ الضغط على البطاقة يفتح تفاصيلها (السبيل الوحيد لمراجعة مهمةٍ نُفِّذت)",
+    /onclick="cleaningOps\.openDetail\('\$\{_esc\(t\.id\)\}'\)"/.test(src));
+  T("★ أزرارُ البطاقة توقف الانتشار فلا تفتح التفاصيل بالخطأ",
+    (src.match(/onclick="event\.stopPropagation\(\);cleaningOps\./g) || []).length >= 2);
+  T("شاشة التفاصيل تُوجَّه من render", /if\(_detailFor\) \{ renderDetail\(el\); return; \}/.test(src));
+  T("★ التفاصيل تعرض سجلّ التنفيذ بصوره", /loadTaskLog\(/.test(src) && /co-logphotos/.test(src));
+  T("سجلّ المهمة بمساواةٍ على حقلٍ واحد (لا يحتاج فهرساً مركّباً)",
+    /where\("taskId","==",taskId\)/.test(src) && !/where\("taskId"[^)]*\)\.orderBy/.test(src));
+  T("نتيجةٌ متأخّرةٌ لمهمةٍ غادرها المستخدم تُهمَل", /if\(!_detailFor \|\| _detailFor\.id!==id\) return;/.test(src));
+  T("★ المباني تُعرض جنباً إلى جنب (شبكة) لا صفاً لكل مهمة",
+    /\.co-groups\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(320px,1fr\)\)/.test(src));
+  T("★ تصغيرُ البطاقات مقصورٌ على صفحات النظافة (لا يمسّ صفحة الوقائية)",
+    /#page-\$\{PAGE_ID\} \.ppm-card,#\$\{EXEC_ID\} \.ppm-card,#\$\{DAILY_ID\} \.ppm-card\{padding:9px 11px/.test(src) &&
+    !/^\.ppm-card\{/m.test(src));
+
   // ══ ربط المشرف بمبانيه + صور التنفيذ + التقرير المصوّر ══
   T("خريطة المشرف↔المباني في مستندٍ خاصٍّ بالوحدة (لا تغيّر شكل إعدادات النواة)",
     /_cleaning_cfg/.test(src) && /supervisorBuildings/.test(src));
