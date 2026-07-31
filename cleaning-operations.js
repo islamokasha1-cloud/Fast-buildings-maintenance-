@@ -71,7 +71,21 @@ function _user(){ try{ return currentUser||null; }catch(e){ return null; } }
 function _role(){ const u=_user(); return u&&u.role ? u.role : ""; }
 function _userName(){ const u=_user(); return (u&&u.name)||(u&&u.email)||""; }
 function _icon(name){ try{ return (typeof _ic==="function") ? _ic(name) : ""; }catch(e){ return ""; } }
-function _svg(name){ try{ return (typeof _svgIcon==="function") ? _svgIcon(name) : ""; }catch(e){ return ""; } }
+/* ★ كلُّ أيقونةٍ تخرج من هذه الوحدة بأبعادٍ صريحة.
+   السبب: _svgIcon في النواة يُرجع <svg> بلا width/height، وSVG بلا أبعاد داخل حاوية
+   flex **يتمدّد ليملأها** — وهو ما أنتج أيقوناتٍ بحجم الشاشة ثلاث مرّات (شريط التنبيه،
+   أرشيف البلاغات، بنود قائمة الفحص). المعالجة هنا عند المنبع لا في كل حاوية: الـCSS
+   يتغلّب على السمات، فكلُّ حاويةٍ لها قاعدةُ حجمٍ (من المنصة أو منّا) تبقى كما هي
+   تماماً، وما لا قاعدةَ له يحصل على حجمٍ معقولٍ بدل التمدّد. */
+function _svg(name, size){
+  try{
+    const raw=(typeof _svgIcon==="function") ? _svgIcon(name) : "";
+    if(!raw) return "";
+    const n=size||16;
+    // \b فيلتقط <svg> و<svg ...> معاً — لا يفلت شكلٌ بلا أبعاد
+    return raw.replace(/^<svg\b/, '<svg width="'+n+'" height="'+n+'"');
+  }catch(e){ return ""; }
+}
 function _isDev(){ try{ return (typeof IS_DEV!=="undefined") && !!IS_DEV; }catch(e){ return false; } }
 function _proj(){ try{ return (typeof CURRENT_PROJECT!=="undefined") ? CURRENT_PROJECT : null; }catch(e){ return null; } }
 function _projId(){ const p=_proj(); return p ? p.id : ""; }
@@ -103,7 +117,6 @@ function canExecute(){ const r=_role(); return canEdit()||r==="supervisor"||r===
    الموازنة (meta/{id}_budget عبر بطاقة المشروع). نقرأ الأول بلا تكلفة، فإن لم يكن نظافةً
    نتحقّق من الثاني مرّةً واحدة لكل مشروع (مستندٌ صغير) — فلا يختلف التصنيف بين الشاشتين. */
 let _typeCache = {};   // projId → "cleaning" | "other"
-let _finCache  = {};   // projId → بيانات عقد النظافة المالية (monthlyValue/monthlySalaries/adminExpenses)
 let _typeChecking = {};
 function isCleaningProject(){
   const p=_proj(); if(!p) return false;
@@ -119,8 +132,7 @@ function ensureTypeKnown(cb){
   _typeChecking[p.id]=true;
   database.doc("meta/"+_safeKey(p.id)+"_budget").get()
     .then(snap=>{ const d=(snap&&snap.exists)?(snap.data()||{}):{};
-      _typeCache[p.id] = (d.type==="cleaning") ? "cleaning" : "other";
-      _finCache[p.id] = (d.cleaning&&typeof d.cleaning==="object") ? d.cleaning : {}; })
+      _typeCache[p.id] = (d.type==="cleaning") ? "cleaning" : "other"; })
     .catch(()=>{ _typeCache[p.id]="other"; })
     .then(()=>{ _typeChecking[p.id]=false; if(cb) cb(); });
 }
@@ -1079,8 +1091,12 @@ async function confirmExec(){
    تظهر «0% — دون الهدف» بالأحمر لمجرّد غياب أعمال الصيانة، وسلّمُ استجابةٍ يتحدّث عن
    «انقطاع كهرباء / مصعد». فهي لا تنقص معلومةً فحسب، بل **تُضلّل**.
 
-   البديل يقيس ما يحكم عقد النظافة فعلاً: التغطيةُ اليوم، والمناطقُ المتخلّفة،
-   والمهامُّ المتأخّرة، والربحيةُ الشهرية، ومدةُ العقد.
+   البديل يقيس ما يحكم **تشغيل** العقد: التغطيةُ اليوم، والمناطقُ المتخلّفة،
+   والمهامُّ المتأخّرة، ومدةُ العقد.
+
+   ── فصلُ المالي عن التشغيلي (قرار صاحب النظام) ──
+   الربحيةُ والمستهلكاتُ لا تظهران هنا إطلاقاً: محلُّهما «إدارة المشاريع › بطاقة
+   المشروع» حيث تُدار بياناتُ العقد المالية. هذه الشاشة تشغيليةٌ خالصة.
 
    ── لا مساس بمشاريع الصيانة ──
    لا نحذف لوحة الصيانة ولا نمسّ renderDashboard() (النواة تحذّر صراحةً من إتلاف
@@ -1089,35 +1105,7 @@ async function confirmExec(){
    ويُرفَع الإخفاء فوراً عند الانتقال لمشروعٍ غير نظافة.
    ════════════════════════════════════════════════════════════ */
 const EXEC_ID = "co-exec";
-const CLEAN_ITEM_TYPE = "مواد نظافة";   // بند المشتريات الذي يغذّي المستهلكات
 
-function _purchases(){ try{ return Array.isArray(purchases)?purchases:[]; }catch(e){ return []; } }
-function _poClosed(p){ try{ return poIsClosed(p); }catch(e){ return false; } }
-function _poActual(p){ try{ return poActualCost(p)||0; }catch(e){ return Number(p&&p.actualCost)||0; } }
-function _money(n){ return (Number(n)||0).toLocaleString('en-US',{maximumFractionDigits:0}); }
-function _ymL(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
-
-/* مستهلكات النظافة من المشتريات — نفس منطق إدارة المشاريع: الطلب المغلق تُوزَّع تكلفته
-   الفعلية على بنوده بنسبة أوزانها، فنأخذ حصّة بنود «مواد نظافة» وحدها. */
-function cleaningSpend(){
-  const id=_projId(); if(!id) return { total:0, month:0 };
-  const thisMonth=_ymL(new Date());
-  let total=0, month=0;
-  _purchases().forEach(p=>{
-    if(!p || p.status==="deleted" || p.projectId!==id) return;
-    if(!_poClosed(p)) return;
-    const items=Array.isArray(p.items)?p.items.filter(Boolean):[];
-    if(!items.length) return;
-    let tot=0, clean=0;
-    items.forEach(it=>{ const c=Number(it.itemCost)||0; tot+=c;
-      if(String(it.itemType||"").trim()===CLEAN_ITEM_TYPE) clean+=c; });
-    if(tot<=0 || clean<=0) return;
-    const share=_poActual(p)*(clean/tot);
-    total+=share;
-    try{ if(p.createdAt && _ymL(new Date(p.createdAt))===thisMonth) month+=share; }catch(e){}
-  });
-  return { total, month };
-}
 
 /* مؤشر مدة العقد — من سجلّ المشروع (نفس حقول بطاقة العقد في النواة) */
 function contractProgress(){
@@ -1150,8 +1138,6 @@ function coverageByBuilding(list){
 
 function execHTML(){
   const s=boardStats();
-  const fin=_finCache[_projId()]||{};
-  const spend=cleaningSpend();
   const cp=contractProgress();
   const cov=coverageByBuilding();
 
@@ -1172,27 +1158,6 @@ function execHTML(){
       <div class="st-val" style="color:${c}">${val}</div>
       <div class="st-lbl">${lbl}</div>
     </div>`;
-
-  // الربحية الشهرية
-  const mv=Number(fin.monthlyValue)||0, sal=Number(fin.monthlySalaries)||0, adm=Number(fin.adminExpenses)||0;
-  const net=mv-sal-adm-spend.month;
-  const margin=mv>0?Math.round(net/mv*100):0;
-  const netC=net<0?"var(--sla-crit)":(margin<15?"var(--sla-warn)":"var(--sla-ok)");
-  const finBlock = mv>0 ? `
-    <div class="card">
-      <div class="co-sec"><div class="co-sec-t">${_svg('banknote')} ربحية الشهر</div>
-        <span class="co-sec-c">هامش <b>${margin}%</b></span></div>
-      <div class="co-fin">
-        <div class="co-fin-i"><span class="k">العقد الشهري</span><span class="v">${_money(mv)}</span></div>
-        <div class="co-fin-i"><span class="k">رواتب الطاقم</span><span class="v neg">−${_money(sal)}</span></div>
-        ${adm>0?`<div class="co-fin-i"><span class="k">مصاريف إدارية</span><span class="v neg">−${_money(adm)}</span></div>`:""}
-        <div class="co-fin-i"><span class="k">مستهلكات الشهر</span><span class="v neg">−${_money(spend.month)}</span></div>
-        <div class="co-fin-i tot"><span class="k">صافي الشهر</span><span class="v" style="color:${netC}">${_money(net)}</span></div>
-      </div>
-      <div class="co-hint" style="margin-top:9px">المستهلكات تُسحب من المشتريات (بند «${CLEAN_ITEM_TYPE}») — تراكمي العقد ${_money(spend.total)} ريال.</div>
-    </div>` : `
-    <div class="card"><div class="co-sec"><div class="co-sec-t">${_svg('banknote')} ربحية الشهر</div></div>
-      <div class="co-hint" style="margin-top:0">أدخل قيمة العقد الشهرية ورواتب الطاقم من: إدارة المشاريع › بطاقة المشروع › تعديل بيانات العقد.</div></div>`;
 
   // مدة العقد
   const cpBlock = cp ? `
@@ -1290,7 +1255,6 @@ function execHTML(){
       ${tile('alertTriangle', s.overdue, "متأخّر",       s.overdue>0?"var(--sla-crit)":"var(--sla-ok)")}
     </div>
 
-    ${finBlock}
     ${covBlock}
     ${lateBlock}
     ${cpBlock}`;
@@ -1851,6 +1815,7 @@ function injectCSS(){
 .co-ck:hover{border-color:var(--primary)}
 .co-ck:has(input:checked){background:var(--sla-ok-bg);border-color:var(--sla-ok-bd);color:var(--sla-ok)}
 .co-ck input{width:17px;height:17px;cursor:pointer;flex:none;accent-color:var(--sla-ok)}
+.co-ck svg{width:16px;height:16px;flex:none;stroke-width:2}
 .co-hint{font-size:11.5px;color:var(--muted);margin-top:11px;line-height:1.9}
 .co-photos{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px}
 .co-photo{position:relative;width:96px;height:96px;border-radius:11px;overflow:hidden;border:1px solid var(--border);background:var(--surface2);flex:none}
@@ -1930,6 +1895,7 @@ window.cleaningOps = {
   _coverageByBuilding: coverageByBuilding, _supOfBuilding: supOfBuilding,
   _logAsTicket: _logAsTicket, _taskSupervisor: taskSupervisor,
   _salvageObjects: _salvageObjects,
+  _svg: _svg,
   _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,
   _addDays: _addDays, _today: _today,
