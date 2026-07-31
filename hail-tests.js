@@ -2151,7 +2151,11 @@ function cleaningOpsTests() {
   T("★ الإخفاء يُرفَع فوراً لمشروعٍ غير نظافة",
     /if\(!isCleaningProject\(\)\)\{\s*unmountExec\(\);\s*return;\s*\}/.test(src) &&
     /host\.classList\.remove\("co-exec-mode"\)/.test(src));
-  T("تبديل المشروع يرفع اللوحة قبل معرفة نوع الجديد", /unmountExec\(\);\s*\n\s*ensureTypeKnown/.test(src));
+  T("تبديل المشروع يرفع لوحتَي النظافة قبل معرفة نوع الجديد",
+    /unmountExec\(\);\s*unmountDaily\(\);\s*\n\s*ensureTypeKnown/.test(src));
+  T("★ المتابعة اليومية تُخفى ولا تُحذف كذلك",
+    /#page-daily\.co-daily-mode > \*:not\(#\$\{DAILY_ID\}\)\{display:none!important\}/.test(src) &&
+    /host\.classList\.remove\("co-daily-mode"\)/.test(src));
 
   // ── التغطية حسب المنطقة: الأضعف أولاً (هذا ما يحتاجه التنفيذيّ) ──
   if (CO._coverageByBuilding) {
@@ -2173,6 +2177,37 @@ function cleaningOpsTests() {
     T("المهام غير المجدولة اليوم لا تدخل التغطية",
       CO._coverageByBuilding([mkb("د", { nextDueDate: day(6) })]).length === 0);
   }
+
+  // ══ تكييف صفحات أوامر العمل لعقود النظافة ══
+  // الجذر: المشروع غير «حائل» يبدأ بأنواع عملٍ فارغة (_applyWT({})) فقائمة نوع الأعمال بلا خيارات
+  T("★ النواة تبدأ المشروع الجديد بأنواع عملٍ فارغة (سبب البذر)", /_applyWT\(isHailProject \? _DEFAULT_WORK_TYPES : \{\}\)/.test(HTML));
+  T("الوحدة تبذر أنواع عمل النظافة في إعدادات المشروع", /database\.doc\(path\)\.set\(\{ workTypes: CLEANING_WT_SEED \}/.test(src));
+  T("★ البذر لا يطمس اختيار المستخدم (يشترط أنواعاً فارغة)",
+    /Object\.keys\(WORK_TYPES\)\.length===0/.test(src) && /if\(!empty\)\s*\{\s*_seededFor\[id\]=true;\s*return;\s*\}/.test(src));
+  T("★ البذر مقصورٌ على مشاريع النظافة", /if\(!id \|\| !isCleaningProject\(\) \|\| _seededFor\[id\]\) return;/.test(src));
+  T("البذر يمرّ عبر آلية إعدادات المنصة (meta/{id}_settings)", /SETTINGS_DOC\(\)/.test(src));
+
+  if (CO && typeof CO._relabelText === "function") {
+    T("★ «وصف العطل» ⟵ «وصف الملاحظة»", CO._relabelText("وصف العطل") === "وصف الملاحظة");
+    T("«نوع الصيانة» ⟵ «مصدر الملاحظة»", CO._relabelText("نوع الصيانة") === "مصدر الملاحظة");
+    T("«الفني المسؤول» ⟵ «عامل النظافة المسؤول»", CO._relabelText("الفني المسؤول") === "عامل النظافة المسؤول");
+    // الأطول أولاً: لا يبتلع بديلٌ قصيرٌ جزءاً من عبارةٍ أطول
+    T("★ العبارة الأطول تُبدَّل ككلّ لا كأجزاء",
+      CO._relabelText("أرشيف البلاغات الشهري") === "أرشيف ملاحظات النظافة الشهري",
+      CO._relabelText("أرشيف البلاغات الشهري"));
+    // idempotent: إعادة التطبيق لا تُفسد النص (الفحص يعمل بعد كل رسمٍ للنواة)
+    const once = CO._relabelText("وصف العطل — البلاغات");
+    T("★ التعريب idempotent (يُطبَّق بعد كل رسم)", CO._relabelText(once) === once, once);
+    T("النصّ غير المعنيّ لا يتغيّر", CO._relabelText("إجمالي المشتريات") === "إجمالي المشتريات");
+  }
+  T("التعريب مقصورٌ على العناوين والتسميات (لا محتوى ديناميكي)",
+    /RELABEL_SEL\s*=\s*"\.page-hero-title/.test(src) && !/document\.body\.innerHTML/.test(src));
+
+  // إصلاح أيقونة الأرشيف العملاقة (خلل نواة يصيب الصيانة أيضاً)
+  T("★ إصلاح أيقونة الأرشيف العملاقة (font-size لا يحجّم SVG)",
+    /#archive-content div\[style\*="font-size:28px"\] > svg\{width:28px;height:28px\}/.test(src));
+  T("العلّة قائمةٌ فعلاً في النواة (وإلا فالإصلاح ميت)",
+    /font-size:28px;margin-bottom:10px">\$\{_svgIcon\("hourglass"\)\}/.test(HTML));
 
   // ══ توليد الجدول بالذكاء الاصطناعي: بترُ الردّ لا يُضيّع المهامّ المكتملة ══
   // العربية مكلفةٌ توكنياً، فسقفٌ ضيّق يبتر الردّ ويُفشل تحليل JSON كلّه.
