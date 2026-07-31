@@ -91,12 +91,22 @@ async function saveCatMap(map){
   }catch(e){ console.warn("saveCatMap",e); _toast("⚠ تعذّر الحفظ","warn"); return false; }
 }
 
-const PROJECT_TYPES = { construction:"مقاولات", renovation:"ترميم", maintenance:"صيانة" };
-const TYPE_ICON    = { construction:"building2", renovation:"hammer", maintenance:"wrench" };
+const PROJECT_TYPES = { construction:"مقاولات", renovation:"ترميم", maintenance:"صيانة", cleaning:"إدارة نظافة" };
+const TYPE_ICON    = { construction:"building2", renovation:"hammer", maintenance:"wrench", cleaning:"sparkles" };
 // شارة النوع بأيقونة المنصة (SVG) بدل الإيموجي
 function typeBadge(type){
   const lbl=PROJECT_TYPES[type]; if(!lbl) return "";
   return `<span class="badge" style="background:var(--surface2);color:var(--muted)">${_icon(TYPE_ICON[type])} ${lbl}</span>`;
+}
+// منتقي نوع المشروع (مشترك بين تبويب «نظرة عامة» لكل الأنواع) — يشمل «إدارة نظافة».
+function typeSelectHTML(t){
+  return `<select class="form-input pm-type-sel" onchange="projectMgmt.setType(this.value)">
+    <option value="" ${!t?'selected':''}>— غير مصنّف (صيانة) —</option>
+    <option value="construction" ${t==='construction'?'selected':''}>مقاولات</option>
+    <option value="renovation" ${t==='renovation'?'selected':''}>ترميم</option>
+    <option value="maintenance" ${t==='maintenance'?'selected':''}>صيانة</option>
+    <option value="cleaning" ${t==='cleaning'?'selected':''}>إدارة نظافة</option>
+  </select>`;
 }
 
 /* ── حالة الوحدة ── */
@@ -104,6 +114,7 @@ let _curId  = null;      // معرّف المشروع المفتوح (null = ش�
 let _curTab = "overview";
 const _budgetCache = {}; // projectId → {categories:[{key,name,planned}], boq:[]}
 let _editing = false;    // وضع تحرير الموازنة
+let _cleaningEditing = false; // وضع تحرير بيانات عقد النظافة
 let _lastList = [];      // آخر قائمة معروضة (للفتح بالفهرس)
 let _manualLoaded = false; // حُمّلت أسماء المشاريع اليدوية من meta؟
 let _mapView = false;    // شاشة «ربط أنواع البنود بالموازنة» مفتوحة؟
@@ -255,13 +266,32 @@ async function saveType(projId, type){
   }catch(e){ console.warn("saveType",e); _toast("⚠ تعذّر حفظ النوع","warn"); return false; }
 }
 
+/* ════════════ عقد النظافة (النوع «cleaning») ════════════
+   عقد تشغيل مستمرّ بربحيةٍ شهريةٍ متكرّرة (لا مقايسة ولا جدول زمني). بياناته المالية
+   (قيمة العقد الشهرية + إجمالي رواتب الطاقم + المصاريف الإدارية) تُخزَّن في مستند الموازنة
+   نفسه تحت المفتاح cleaning — فتُقرأ بنفس تحميل الموازنة بلا مستمعٍ إضافي. المستهلكات تُسحب
+   لحظياً من المشتريات (بند «مواد نظافة») بمصدرٍ واحدٍ للحقيقة (لا إدخال مزدوج). */
+function isCleaning(projId){ return effType(projId)==="cleaning"; }
+function cleaningData(projId){ const b=_budgetCache[projId]; return (b&&b.cleaning&&typeof b.cleaning==="object") ? b.cleaning : {}; }
+async function saveCleaning(projId, patch){
+  const database=_db(); if(!database){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
+  const u=_user();
+  const cur = Object.assign({}, cleaningData(projId), patch);
+  try{
+    await database.doc(budgetDocPath(projId)).set({ cleaning:cur, updatedAt:new Date().toISOString(), updatedBy:(u&&u.name)||(u&&u.email)||"" }, { merge:true });
+    _budgetCache[projId] = Object.assign(_budgetCache[projId]||{categories:[],boq:[]}, { cleaning:cur });
+    _audit("تعديل عقد نظافة", _projName(projId)+" — العقد الشهري: "+money(Number(cur.monthlyValue)||0)+" ريال");
+    return true;
+  }catch(e){ console.warn("saveCleaning",e); _toast("⚠ تعذّر حفظ بيانات العقد","warn"); return false; }
+}
+
 async function loadBudget(projId){
   const database=_db();
   if(!database){ _budgetCache[projId]=_budgetCache[projId]||{categories:[],boq:[]}; return _budgetCache[projId]; }
   try{
     const snap = await database.doc(budgetDocPath(projId)).get();
     const d = (snap&&snap.exists) ? (snap.data()||{}) : {};
-    _budgetCache[projId] = { categories: Array.isArray(d.categories)?d.categories:[], boq: Array.isArray(d.boq)?d.boq:[], type: d.type||"" };
+    _budgetCache[projId] = { categories: Array.isArray(d.categories)?d.categories:[], boq: Array.isArray(d.boq)?d.boq:[], type: d.type||"", cleaning: (d.cleaning&&typeof d.cleaning==="object")?d.cleaning:{} };
   }catch(e){ console.warn("loadBudget",e); _budgetCache[projId]=_budgetCache[projId]||{categories:[],boq:[]}; }
   return _budgetCache[projId];
 }
@@ -421,7 +451,7 @@ function paintList(projects){
 
 /* ── بطاقة مشروع واحد ── */
 function open(projId){
-  _curId=projId; _curTab="overview"; _editing=false;
+  _curId=projId; _curTab="overview"; _editing=false; _cleaningEditing=false;
   _schedEditing=false; _schedGenForm=false; _schedDraft=null; _genErr=""; _boqEditing=false; _boqDraft=null;
   const el=document.getElementById("page-"+PAGE_ID);
   if(!(projId in _budgetCache)){
@@ -459,15 +489,16 @@ function renderCard(el){
     </div>
     <div class="pm-tabs">
       <button class="pm-tab ${_curTab==='overview'?'on':''}" data-tab="overview" onclick="projectMgmt.tab('overview')">نظرة عامة</button>
+      ${isCleaning(_curId) ? "" : `
       <button class="pm-tab ${_curTab==='boq'?'on':''}" data-tab="boq" onclick="projectMgmt.tab('boq')">المقايسة</button>
       <button class="pm-tab ${_curTab==='budget'?'on':''}" data-tab="budget" onclick="projectMgmt.tab('budget')">الموازنة</button>
-      ${needsSchedule(_curId)?`<button class="pm-tab ${_curTab==='schedule'?'on':''}" data-tab="schedule" onclick="projectMgmt.tab('schedule')">الجدول الزمني</button>`:""}
+      ${needsSchedule(_curId)?`<button class="pm-tab ${_curTab==='schedule'?'on':''}" data-tab="schedule" onclick="projectMgmt.tab('schedule')">الجدول الزمني</button>`:""}`}
     </div>
     <div id="pm-tab-body"></div>`;
   renderTabBody();
 }
 function tab(t){
-  _curTab=t; _editing=false; _schedEditing=false; _schedGenForm=false; _schedDraft=null; _genErr=""; _boqEditing=false; _boqDraft=null;
+  _curTab=t; _editing=false; _cleaningEditing=false; _schedEditing=false; _schedGenForm=false; _schedDraft=null; _genErr=""; _boqEditing=false; _boqDraft=null;
   // حدّث تمييز أزرار التبويب (renderTabBody يعيد الجسم فقط)
   document.querySelectorAll("#page-"+PAGE_ID+" .pm-tab").forEach(b=>{
     b.classList.toggle("on", b.dataset.tab===t);
@@ -478,7 +509,7 @@ function tab(t){
 function renderTabBody(){
   const body=document.getElementById("pm-tab-body");
   if(!body) return;
-  if(_curTab==="overview") body.innerHTML = overviewHTML();
+  if(_curTab==="overview") body.innerHTML = isCleaning(_curId) ? cleaningOverviewHTML() : overviewHTML();
   else if(_curTab==="budget") body.innerHTML = budgetHTML();
   else if(_curTab==="boq"){
     if(_curId in _boqCache) body.innerHTML = boqHTML();
@@ -511,12 +542,7 @@ function overviewHTML(){
   // شريط تصنيف نوع المشروع — الجدول الزمني يظهر لمقاولات/ترميم فقط
   const t=effType(_curId);
   const typeCtrl = _canEdit()
-    ? `<select class="form-input pm-type-sel" onchange="projectMgmt.setType(this.value)">
-         <option value="" ${!t?'selected':''}>— غير مصنّف (صيانة) —</option>
-         <option value="construction" ${t==='construction'?'selected':''}>مقاولات</option>
-         <option value="renovation" ${t==='renovation'?'selected':''}>ترميم</option>
-         <option value="maintenance" ${t==='maintenance'?'selected':''}>صيانة</option>
-       </select>`
+    ? typeSelectHTML(t)
     : `<b style="color:var(--text)">${t?PROJECT_TYPES[t]:'صيانة'}</b>`;
   const typeBar = `<div class="pm-typebar">${_icon('building2')} نوع المشروع: ${typeCtrl}
     ${needsSchedule(_curId)?'<span class="pm-hint-inline">— له تبويب «الجدول الزمني»</span>':'<span class="pm-hint-inline">— الصيانة بلا جدول زمني</span>'}</div>`;
@@ -535,6 +561,73 @@ function overviewHTML(){
     ${over?`<div class="pm-alert">${_icon('alertTriangle')} تنبيه: المصروف والمرتبط تجاوزا الموازنة المخطّطة — تحذير فقط، لا يمنع أي إجراء.</div>`:""}
     ${r.planned<=0?`<div class="pm-hint">لم تُدخَل موازنة بعد. افتح تبويب «الموازنة» وأدخل تقديراتك لكل بند.</div>`:""}`;
 }
+
+/* ════════════ بطاقة عقد النظافة (نظرة عامة للنوع «cleaning») ════════════
+   عرضٌ مختلفٌ عن الصيانة/المقاولات: ربحيةٌ شهريةٌ متكرّرة بدل موازنةٍ ومقايسة.
+   الصافي التشغيلي = قيمة العقد الشهرية − رواتب الطاقم − المصاريف الإدارية.
+   المستهلكات تُسحب من المشتريات (بند «مواد نظافة» cleaning) وهي تراكميةٌ منذ العقد. */
+function cleaningOverviewHTML(){
+  const t=effType(_curId);
+  const c=cleaningData(_curId);
+  const monthlyValue=Number(c.monthlyValue)||0;
+  const salaries=Number(c.monthlySalaries)||0;
+  const admin=Number(c.adminExpenses)||0;
+  const byCat=rollupByCategory(_curId);
+  const cons=byCat["cleaning"]||{actual:0,committed:0};
+  const opNet=monthlyValue - salaries - admin;
+  const margin=monthlyValue>0 ? Math.round((opNet/monthlyValue)*100) : 0;
+  const netColor=opNet<0 ? "var(--danger)" : (margin<15 ? "var(--warn)" : "var(--accent)");
+
+  const typeCtrl = _canEdit() ? typeSelectHTML(t) : `<b style="color:var(--text)">${PROJECT_TYPES[t]||'إدارة نظافة'}</b>`;
+  const typeBar = `<div class="pm-typebar">${_icon('sparkles')} نوع المشروع: ${typeCtrl}
+    <span class="pm-hint-inline">— عقد تشغيل نظافة (ربحية شهرية متكرّرة)</span></div>`;
+
+  const card=(lbl,val,sc,sub)=>`
+    <div class="stat-card" style="--sc:${sc}">
+      <div class="sl">${lbl}</div>
+      <div class="sv">${money(val)}</div>
+      ${sub?`<div class="click-hint">${sub}</div>`:""}
+    </div>`;
+
+  const contractBlock = _cleaningEditing
+    ? `<div style="display:grid;gap:10px;max-width:440px;margin-top:10px">
+         <label style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>قيمة العقد الشهرية (ريال)</span>
+           <input type="number" min="0" id="cln-value" class="form-input pm-inp-w" value="${monthlyValue||''}" placeholder="0"></label>
+         <label style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>إجمالي رواتب الطاقم (شهري)</span>
+           <input type="number" min="0" id="cln-sal" class="form-input pm-inp-w" value="${salaries||''}" placeholder="0"></label>
+         <label style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>مصاريف إدارية (شهري)</span>
+           <input type="number" min="0" id="cln-admin" class="form-input pm-inp-w" value="${admin||''}" placeholder="0"></label>
+         <div class="pm-budget-tools" style="margin-top:4px">
+           <button class="btn btn-primary btn-sm" onclick="projectMgmt.saveCleaningEdit()">${_icon('checkCircle')} حفظ</button>
+           <button class="btn btn-ghost btn-sm" onclick="projectMgmt.cancelCleaningEdit()">إلغاء</button>
+         </div>
+       </div>`
+    : (_canEdit()?`<div class="pm-budget-tools"><button class="btn btn-ghost btn-sm" onclick="projectMgmt.editCleaning()">${_icon('edit')} تعديل بيانات العقد</button></div>`:"");
+
+  return `
+    ${typeBar}
+    <div class="pm-stats">
+      ${card("قيمة العقد الشهرية (ريال)", monthlyValue, "var(--primary)", "الإيراد الشهري المتكرّر")}
+      ${card("رواتب الطاقم (شهري)", salaries, "var(--warn)", "أكبر بند تشغيلي")}
+      ${card("صافي الشهر (تشغيلي)", opNet, netColor, margin+"% هامش الربح")}
+      ${card("مستهلكات النظافة (تراكمي)", cons.actual, "var(--accent)", "من المشتريات — بند «مواد نظافة»")}
+    </div>
+    ${contractBlock}
+    ${monthlyValue<=0?`<div class="pm-hint">أدخل قيمة العقد الشهرية ورواتب الطاقم لعرض الربحية الشهرية.</div>`:""}
+    <div class="pm-hint" style="margin-top:12px">
+      <b>الصافي التشغيلي الشهري</b> = قيمة العقد − الرواتب − المصاريف الإدارية (متكرّر شهرياً).
+      <b>المستهلكات</b> تُسحب تلقائياً من المشتريات (بند «مواد نظافة») وهي تراكميةٌ منذ بداية العقد
+      (بلا إدخالٍ مزدوج). التفصيل الشهري للمستهلكات + الطاقم والحضور + الجودة والتفتيش في المراحل التالية.
+    </div>`;
+}
+async function saveCleaningEdit(){
+  const v=id=>{ const el=document.getElementById(id); return el?(Number(el.value)||0):0; };
+  const patch={ monthlyValue:v("cln-value"), monthlySalaries:v("cln-sal"), adminExpenses:v("cln-admin") };
+  const ok=await saveCleaning(_curId, patch);
+  if(ok){ _cleaningEditing=false; _toast("✅ حُفظت بيانات العقد","success"); renderTabBody(); }
+}
+function editCleaning(){ _cleaningEditing=true; renderTabBody(); }
+function cancelCleaningEdit(){ _cleaningEditing=false; renderTabBody(); }
 
 function budgetHTML(){
   const b=_budgetCache[_curId]||{categories:[]};
@@ -1111,7 +1204,10 @@ function _projBadges(projId){
 async function setType(type){
   const ok=await saveType(_curId, type);
   if(ok){
+    // النظافة لا تعرض إلا «نظرة عامة»؛ والجدول الزمني لمقاولات/ترميم فقط — أعِد للتبويب الصالح.
+    if(isCleaning(_curId) && _curTab!=="overview") _curTab="overview";
     if(_curTab==="schedule" && !needsSchedule(_curId)) _curTab="overview";
+    _cleaningEditing=false;
     _toast("✅ حُفظ نوع المشروع","success");
     const el=document.getElementById("page-"+PAGE_ID); if(el) renderCard(el);
   }
@@ -1444,6 +1540,7 @@ window.projectMgmt = {
   editBoq, addBoqLine, delBoqLine, cancelBoqEdit, saveBoqEdit, importBoqExcel, downloadBoqTemplate, aiExtractBoq,
   _parseBoqRows,
   setType,
+  editCleaning, cancelCleaningEdit, saveCleaningEdit,
   openCatMap, closeCatMap, saveCatMapEdit,
   openUsage, closeUsage, openUsageFromNav,
   aiGenSchedule, doAiGen, cancelGen, editSchedule, addPhase, delPhase,

@@ -1998,10 +1998,161 @@ function rollupMonthIsolation() {
     HTML.includes('.where("archiveMonth","==",ym).limit(1)') && HTML.includes("doc(ym).delete()"));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   19) تشغيل النظافة (cleaning-operations.js) — الجدول اليومي والتغطية
+       منطق الاستحقاق (مستحقّ/متأخّر/نُفِّذ اليوم) ونسبة التغطية وتقديم الاستحقاق.
+   ════════════════════════════════════════════════════════════════════ */
+function cleaningOpsTests() {
+  H("19) تشغيل النظافة (cleaning-operations.js)");
+  const CO_PATH = [path.resolve(path.dirname(IDX), "cleaning-operations.js")].find(p => fs.existsSync(p));
+  if (!CO_PATH) { console.log("  ⏭  cleaning-operations.js غير موجود — تُخطّى"); return; }
+  const vm = require("vm");
+  const src = fs.readFileSync(CO_PATH, "utf8");
+  try { new vm.Script(src); T("صياغة cleaning-operations.js سليمة", true); }
+  catch (e) { T("صياغة cleaning-operations.js سليمة", false, String(e.message).slice(0, 120)); return; }
+  T("الوسم موجود في index.html", /<script src="cleaning-operations\.js\?v=/.test(HTML));
+
+  // ★ انضباط المستمعين: الوحدة لا تركّب مستمعاً حيّاً إطلاقاً (تخفيف خلل ca9/b815).
+  // نفحص الاستدعاء الفعلي `.onSnapshot(` لا ذكر الاسم في التعليقات.
+  T("★ بلا onSnapshot — القراءة بـ .get() فقط", !/\.onSnapshot\s*\(/.test(src));
+
+  const docStub = {
+    getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+    addEventListener: () => {}, head: { appendChild() {} }, body: { appendChild() {} },
+    createElement: () => ({ style: {}, classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, setAttribute() {}, dataset: {} })
+  };
+  const sandbox = {
+    window: {}, document: docStub, console,
+    setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
+    MutationObserver: function () { this.observe = () => {}; }
+  };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل cleaningOps", false, String(e.message).slice(0, 120)); return; }
+  const CO = sandbox.window.cleaningOps;
+  T("cleaningOps مكشوفة بدوالها النقية",
+    !!(CO && typeof CO._boardStats === "function" && typeof CO._isDue === "function" && CO._FREQ_DAYS));
+  if (!CO || !CO._boardStats) return;
+
+  // ── التكرارات تطابق تكرارات الوقائية القائمة (PPM_FREQ_DAYS) — مصطلحٌ واحد ──
+  const ppmFreq = (HTML.match(/const PPM_FREQ_DAYS = \{([^}]+)\}/) || [])[1] || "";
+  const ppmKeys = [...ppmFreq.matchAll(/"([^"]+)":\s*\d+/g)].map(m => m[1]);
+  const coKeys = Object.keys(CO._FREQ_DAYS);
+  T("★ تكرارات النظافة تطابق تكرارات الوقائية (مصطلحٌ واحد)",
+    ppmKeys.length > 0 && ppmKeys.every(k => coKeys.includes(k)),
+    `PPM=[${ppmKeys}] النظافة=[${coKeys}]`);
+  T("«يومي» = يوم واحد (قلب جدول النظافة)", CO._FREQ_DAYS["يومي"] === 1);
+
+  const today = CO._today();
+  const day = n => CO._addDays(today, n);
+  const mk = (o) => Object.assign({ id: "t", name: "م", freq: "يومي", nextDueDate: today, lastExecuted: "", disabled: false }, o);
+
+  // ── منطق الاستحقاق ──
+  T("مستحقّة اليوم = due", CO._isDue(mk({ nextDueDate: today })) === true);
+  T("مستحقّة غداً ليست due", CO._isDue(mk({ nextDueDate: day(1) })) === false);
+  T("★ متأخّرة (أمس) = due و overdue معاً", CO._isDue(mk({ nextDueDate: day(-1) })) === true && CO._isOverdue(mk({ nextDueDate: day(-1) })) === true);
+  T("مستحقّة اليوم ليست overdue", CO._isOverdue(mk({ nextDueDate: today })) === false);
+  T("★ المنفَّذة اليوم لا تعود مستحقّة (لا تُحسب مرّتين)",
+    CO._isDue(mk({ nextDueDate: today, lastExecuted: new Date().toISOString() })) === false);
+  T("★ الموقوفة تُستبعَد من الاستحقاق والتأخّر",
+    CO._isDue(mk({ nextDueDate: day(-5), disabled: true })) === false && CO._isOverdue(mk({ nextDueDate: day(-5), disabled: true })) === false);
+
+  // ── نسبة التغطية = المنفَّذ اليوم ÷ (المنفَّذ + المستحقّ) ──
+  const nowISO = new Date().toISOString();
+  const s1 = CO._boardStats([
+    mk({ id: "a", lastExecuted: nowISO, nextDueDate: day(1) }),   // نُفِّذت اليوم
+    mk({ id: "b", lastExecuted: nowISO, nextDueDate: day(1) }),   // نُفِّذت اليوم
+    mk({ id: "c", nextDueDate: today }),                          // مستحقّة
+    mk({ id: "d", nextDueDate: day(-2) }),                        // متأخّرة
+    mk({ id: "e", nextDueDate: day(5) })                          // لاحقاً — خارج جدول اليوم
+  ]);
+  T("مجدول اليوم = المنفَّذ + المستحقّ (لا يشمل اللاحق)", s1.scheduled === 4, JSON.stringify(s1));
+  T("نُفِّذ اليوم = 2", s1.done === 2);
+  T("متبقٍّ اليوم = 2", s1.due === 2);
+  T("متأخّر = 1", s1.overdue === 1);
+  T("★ التغطية = 2/4 = 50%", s1.coverage === 50, "التغطية=" + s1.coverage);
+
+  const s2 = CO._boardStats([mk({ id: "x", lastExecuted: nowISO, nextDueDate: day(1) })]);
+  T("★ كل المجدول منفَّذ ⇒ تغطية 100%", s2.coverage === 100 && s2.due === 0);
+  const s3 = CO._boardStats([mk({ id: "y", nextDueDate: day(9) })]);
+  T("★ لا شيء مجدولٌ اليوم ⇒ تغطية 0% بلا قسمةٍ على صفر", s3.coverage === 0 && s3.scheduled === 0);
+  const s4 = CO._boardStats([mk({ id: "z", nextDueDate: day(-1), disabled: true })]);
+  T("الموقوفة لا تدخل الإجمالي", s4.total === 0 && s4.scheduled === 0);
+
+  // ── ثابت: التغطية دائماً بين 0 و 100 مهما كان الخليط ──
+  let bad = null;
+  for (let i = 0; i < 300; i++) {
+    const n = 1 + Math.floor(Math.random() * 8);
+    const list = Array.from({ length: n }, (_, k) => {
+      const r = Math.random();
+      return mk({
+        id: "r" + k,
+        lastExecuted: r < 0.34 ? nowISO : "",
+        nextDueDate: day(Math.floor(Math.random() * 9) - 4),
+        disabled: Math.random() < 0.15
+      });
+    });
+    const s = CO._boardStats(list);
+    if (s.coverage < 0 || s.coverage > 100 || s.done + s.due !== s.scheduled) { bad = JSON.stringify(s); break; }
+  }
+  T("★ ثابت: 0 ≤ التغطية ≤ 100 و (نُفِّذ + متبقٍّ) = المجدول", bad === null, bad || "300 تركيبة عشوائية");
+
+  // ── التنفيذ يقدّم الاستحقاق من **اليوم** لا من الاستحقاق الفائت (لا تتراكم الفوائت) ──
+  T("★ التنفيذ ينقل الاستحقاق من اليوم بمقدار التكرار",
+    src.includes("nextDueDate: _addDays(_today(), days)"));
+  T("_addDays يومٌ واحد يساوي الغد", CO._addDays(today, 1) === day(1));
+
+  // ── العزل بمعرّف المشروع (كبقية النظام) ──
+  T("★ المجموعتان معزولتان بمعرّف المشروع",
+    /_cleaning_tasks/.test(src) && /_cleaning_log/.test(src) && src.includes('id+"_cleaning_tasks"'));
+  // ── لا يظهر إلا لمشاريع النظافة ──
+  T("الزرّ والصفحة مقصوران على مشاريع «إدارة نظافة»",
+    src.includes("isCleaningProject()") && /shouldShow\s*=\s*canView\(\)\s*&&\s*isCleaningProject\(\)/.test(src));
+
+  // ── ★ مطابقة هوية المنصة: الصفحة تستعمل أصناف المنصة الأصلية لا مفرداتٍ موازية ──
+  // كل صنفٍ تعتمده الصفحة يجب أن يكون **معرَّفاً في index.html** — وإلا فهو صنفٌ ميت
+  // يجعل الصفحة تبدو مختلفةً عن بقية النظام.
+  const PLATFORM = ["page-hero", "page-hero-titles", "page-hero-title", "page-hero-sub",
+    "page-hero-actions", "ph-ico", "stat-tile", "st-ico", "st-val", "st-lbl",
+    "ppm-card", "ppm-chip", "ppm-pill", "ppm-due-badge", "ppm-meta-row", "ppm-overdue-banner",
+    "hbar", "hleg", "form-group", "form-label", "form-input", "form-select"];
+  const usedNotDefined = PLATFORM.filter(c => src.includes(`"${c}`) || src.includes(`${c} `) || src.includes(`class="${c}`))
+    .filter(c => !new RegExp("\\." + c + "[{ ,:.]").test(HTML));
+  T("★ كل أصناف المنصة التي تستعملها الصفحة معرَّفةٌ في index.html",
+    usedNotDefined.length === 0, usedNotDefined.join("، ") || "لا أصناف ميتة");
+
+  // الصفحة تبني رأسها بـ .page-hero وبلاطاتها بـ .stat-tile وبطاقاتها بـ .ppm-card
+  T("★ الرأس بـ .page-hero (نفس كل صفحات المنصة)", /class="page-hero"/.test(src));
+  T("★ المؤشّرات بـ .stat-tile لا بطاقاتٍ خاصة", /class="stat-tile"/.test(src) && !/class="co-stat\b/.test(src));
+  T("★ بطاقة المهمة بـ .ppm-card (مفردة المنصة للعمل الدوريّ)", /class="ppm-card/.test(src));
+  T("★ التغطية بشريط الصحة .hbar لا شريطٍ خاص", /class="hbar"/.test(src) && !/co-progress/.test(src));
+  T("★ تنبيه التأخّر بـ .ppm-overdue-banner لا تنبيهٍ خاص", /ppm-overdue-banner/.test(src) && !/class="co-alert"/.test(src));
+  T("النماذج بـ .form-group/.form-label (لا حقولٌ خاصة)", /class="form-group"/.test(src) && /class="form-label"/.test(src));
+
+  // ── ★ index.html يبقى بلا إضافاتٍ وظيفية: الوحدة تحقن نوع «إدارة نظافة» بنفسها ──
+  T("★ خيار «إدارة نظافة» ليس في index.html (تحقنه الوحدة)",
+    !/<option value="cleaning"/.test(HTML));
+  T("الوحدة تلفّ نافذتَي إنشاء/تعديل المشروع",
+    /window\.openAddProjectModal\s*=/.test(src) && /window\.openEditProjectModal\s*=/.test(src));
+  // حارسٌ ضدّ الحقن الصامت الفاشل: أهداف الحقن يجب أن تبقى موجودةً في index.html
+  ["np-type", "ep-type", "np-type-hint", "ep-type-hint"].forEach(id =>
+    T(`هدف الحقن #${id} موجود في index.html`, HTML.includes(`id="${id}"`)));
+  T("★ الوحدة تختار «نظافة» عند التعديل (النواة لا تعرف الخيار فلا تختاره)",
+    /_addTypeOption\("ep-type"\s*,\s*"ep-type-hint"\s*,\s*isC\)/.test(src));
+
+  // ── الجودة: لا ألوانٍ مصمتة خارج توكنز المنصة (تكسر الثيم الداكن) ──
+  const cssBlock = (src.match(/st\.textContent\s*=\s*`([\s\S]*?)`;/) || [])[1] || "";
+  const hardHex = [...cssBlock.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(m => m[0]);
+  T("★ CSS الصفحة بلا ألوانٍ مصمتة (توكنز فقط ⇒ يعمل في الثيم الداكن)",
+    hardHex.length === 0, hardHex.join("، ") || "لا ألوان مصمتة");
+  T("الأرقام بخطّ المنصة أحاديّ العرض (JetBrains Mono tabular)",
+    /JetBrains Mono/.test(cssBlock) && /tabular-nums/.test(cssBlock));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
   guards();
+  cleaningOpsTests();
   predelivery();
   kpi();
   substituteBudget();
