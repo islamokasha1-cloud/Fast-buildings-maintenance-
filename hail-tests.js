@@ -329,6 +329,16 @@ function predelivery() {
     cb.length >= 1 && cb.length === localMods && cb.every(([, v]) => v === want),
     `${cb.length}/${localMods} موسومة — ` + (cb.map(([f2, v]) => `${f2}?v=${v}`).join("، ") || "لا وسوم"));
 
+  // ══ ★ v18.9vh: «عدم تحميل البيانات مباشرة» — إعادة رسم الصفحة بعد تحميل الإعدادات ══
+  // loadSettings (المباني/المشرفون) غيرُ متزامنة وتُطلَق بلا انتظار؛ صفحتا «خريطة المباني»
+  // و«لوحة الإدارة» تُرسَمان فارغتين إن سبقتاها. الإصلاح: بعد repopulateAllSelects تُعاد
+  // رسمُ الصفحة النشطة إن كانت منهما، وrenderCurrentPage صار يشمل لوحة الإدارة.
+  T("★ renderCurrentPage يشمل لوحة الإدارة (admin-panel)",
+    /pid==="admin-panel"\)\s*\{\s*if\(typeof renderAdminPanel==="function"\) renderAdminPanel\(\)/.test(HTML));
+  T("★ loadSettings يُعيد رسمَ الصفحة النشطة المعتمِدة على المباني بعد التحميل",
+    /_pid==="buildings" \|\| _pid==="admin-panel"\) renderCurrentPage\(\)/.test(HTML) &&
+    /function loadSettings\(\)\{[\s\S]*?repopulateAllSelects\(\);[\s\S]*?renderCurrentPage\(\)/.test(HTML));
+
   // صياغة JS لكل كتلة script داخلية
   const vm = require("vm");
   let bad = 0, n = 0;
