@@ -199,22 +199,35 @@ let _genForm = false;   // نموذج التوليد بالـ AI مفتوح؟
 let _genErr  = "";
 
 /* ════════════ التحميل والحفظ ════════════ */
-async function loadTasks(force){
+/* ★ لا يجوز الرجوع فارغاً أثناء تحميلٍ جارٍ.
+   كانت `if(_loading) return;` تُرجع وعداً محلولاً فوراً **بلا تعيين _loaded**، وكل
+   المستدعين يفعلون `loadTasks().then(()=>render())` — فيرى render أن `!_loaded` فيستدعي
+   loadTasks ثانيةً فترجع فوراً فيُعاد render… حلقةُ microtask لا نهائية تُجوّع حلقة
+   الأحداث فيتجمّد التطبيق كلّه (يحدث حين يُفتح قسمُ النظافة والتحميل جارٍ من اللوحة
+   التنفيذية أو المتابعة اليومية). الصواب: مشاركةُ النداء الجاري نفسه، فينتظر الجميع
+   اكتماله الحقيقي ثم يُرسمون مرّةً واحدة. */
+let _loadPromise = null;
+function loadTasks(force){
   const database=_db(), col=tasksCol();
-  if(!database || !col){ _tasks=[]; _loaded=true; return; }
-  if(_loading) return;
-  if(_loaded && _loadedFor===_projId() && !force) return;
+  if(!database || !col){ _tasks=[]; _loaded=true; _loadedFor=_projId(); return Promise.resolve(); }
+  if(_loadPromise) return _loadPromise;                                   // شارك الجاري
+  if(_loaded && _loadedFor===_projId() && !force) return Promise.resolve();
   _loading=true;
-  try{
-    const snap = await database.collection(col).limit(500).get();
-    _tasks = snap.docs.map(d=>Object.assign({id:d.id}, d.data()||{}));
-    await loadCfg(force);   // خريطة المشرف↔المباني — تحكم ما يراه كلُّ مستخدم
-    _loaded=true; _loadedFor=_projId();
-  }catch(e){
-    console.warn("cleaningOps/loadTasks",e);
-    _toast("⚠ تعذّر تحميل جدول النظافة","warn");
-    _tasks=[]; _loaded=true;
-  }finally{ _loading=false; }
+  _loadPromise = (async()=>{
+    try{
+      const snap = await database.collection(col).limit(500).get();
+      _tasks = snap.docs.map(d=>Object.assign({id:d.id}, d.data()||{}));
+      await loadCfg(force);   // خريطة المشرف↔المباني — تحكم ما يراه كلُّ مستخدم
+    }catch(e){
+      console.warn("cleaningOps/loadTasks",e);
+      _toast("⚠ تعذّر تحميل جدول النظافة","warn");
+      _tasks=[];
+    }finally{
+      // يُضبَط دائماً — نجح التحميل أم فشل — فلا يعود أيُّ مستدعٍ ليطلبه بلا نهاية
+      _loaded=true; _loadedFor=_projId(); _loading=false; _loadPromise=null;
+    }
+  })();
+  return _loadPromise;
 }
 
 async function saveTask(task){
@@ -290,8 +303,10 @@ function _uploadExecPhoto(file){
   const rec={ url:"", uploading:true, error:false, preview:"" };
   try{ rec.preview=URL.createObjectURL(file); }catch(e){}
   _execPhotos.push(rec);
-  renderTabBody();
-  const done=()=>{ const b=document.getElementById("pm-tab-body")||document.getElementById("page-"+PAGE_ID); if(b) render(); };
+  // render() وحدها هي مُعيدة الرسم في هذه الوحدة — renderTabBody تخصّ وحدة إدارة
+  // المشاريع وليست عامّة، فاستدعاؤها هنا كان يرمي ReferenceError عند أول صورة.
+  render();
+  const done=()=>{ if(_onPage()) render(); };
   const comp = (typeof compressImage==="function") ? compressImage(file) : Promise.resolve(file);
   comp.then(blob=>{
     if(!blob){ rec.uploading=false; rec.error=true; done(); return; }
