@@ -23,6 +23,8 @@ const CANDIDATES = [
 const IDX = CANDIDATES.find(p => fs.existsSync(p));
 if (!IDX) { console.error("❌ لم يُعثر على index.html في:\n   " + CANDIDATES.join("\n   ")); process.exit(1); }
 const HTML = fs.readFileSync(IDX, "utf8");
+// مصدرُ هذه السلسلة نفسها — يُقرأ ليُستخرَج منه أيُّ ملفٍ تفتحه الفحوص (حارسُ مسارات CI)
+const SELF = fs.readFileSync(__filename, "utf8");
 const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.v2.js"), path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
 // v18.9ti: وحدة المؤشرات صارت مدموجةً داخل index.html بين علامتين — تُقرأ منها مباشرةً.
 // (احتياطياً: إن وُجد ملفٌ خارجي قديم يُقرأ منه.) فلا يعود يُخدَم ملفٌ منفصلٌ قديماً من الكاش.
@@ -328,6 +330,29 @@ function predelivery() {
   T("cache-busters تطابق الإصدار",
     cb.length >= 1 && cb.length === localMods && cb.every(([, v]) => v === want),
     `${cb.length}/${localMods} موسومة — ` + (cb.map(([f2, v]) => `${f2}?v=${v}`).join("، ") || "لا وسوم"));
+
+  // ★ اكتمالُ مسارات CI: سيرُ العمل يُشغَّل على push **بمرشّح مسارات**، فأيُّ ملفٍ تفحصه
+  // هذه السلسلةُ وليس في القائمة ⟵ يُدفَع وحده بلا فحصٍ إطلاقاً (فشلٌ صامت: CI أخضرُ
+  // لأنه لم يعمل، لا لأنه نجح). اكتُشف بهذا أن project-management.js وcleaning-operations.js
+  // وpurchase-kpi كانت خارج القائمة رغم أن لها مئاتِ الفحوص. الحارس يقارن ما تقرؤه
+  // الفحوصُ فعلاً (من مصدرها) بما يُشغّل CI — فلا يعود الإغفال ممكناً.
+  {
+    const wfPath = path.resolve(path.dirname(IDX), ".github/workflows/hail-tests.yml");
+    if (fs.existsSync(wfPath)) {
+      const wf = fs.readFileSync(wfPath, "utf8");
+      const pushPaths = ((wf.match(/push:\s*\n\s*paths:\s*\n([\s\S]*?)\n\s*(?:pull_request|workflow_dispatch|branches):/) || [])[1] || "");
+      const listed = [...pushPaths.matchAll(/-\s*'([^']+)'/g)].map(m => m[1]);
+      // كل ملفٍ تفتحه السلسلة بجوار index.html + الملفّان الأساسيّان
+      const read = [...new Set([
+        path.basename(IDX), "hail-tests.js",
+        ...[...SELF.matchAll(/path\.resolve\(path\.dirname\(IDX\),\s*"([^"]+\.js)"\)/g)].map(m => m[1])
+      ])];
+      const missing = read.filter(f2 => !listed.includes(f2));
+      T("★ كل ملفٍ تفحصه السلسلة مُدرَجٌ في مسارات CI (لا ملفَّ يُدفَع بلا فحص)",
+        missing.length === 0,
+        missing.length ? "خارج مرشّح المسارات: " + missing.join("، ") : `${read.length} ملفاً مغطّى`);
+    }
+  }
 
   // صياغة JS لكل كتلة script داخلية
   const vm = require("vm");
