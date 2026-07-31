@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vb";
+const MODULE_BUILD = "v18.9vc";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -197,6 +197,16 @@ function inMyScope(t){
 }
 // المهامّ المرئية للمستخدم الحالي — مصدرٌ واحدٌ تستعمله كل الشاشات
 function visibleTasks(){ const mine=myBuildings(); return mine ? _tasks.filter(inMyScope) : _tasks; }
+// المباني غير المسنَدة لأيِّ مشرفٍ في الخريطة، ضمن نطاق المستخدم — تعريفٌ **واحد**
+// تقرؤه شاشتا «الربط» و«أداء المشرفين» فلا يختلف عدُّ «بلا مشرف» بينهما (كان ١ مقابل ١٤).
+function unassignedBuildings(blds, supMap, mine){
+  const list=Array.isArray(blds)?blds:_buildings();
+  const map=(supMap&&typeof supMap==="object")?supMap:(_cfg.supervisorBuildings||{});
+  const scope=(arguments.length>=3)?mine:myBuildings();
+  const assigned=new Set();
+  Object.values(map).forEach(a=>(Array.isArray(a)?a:[]).forEach(b=>assigned.add(b)));
+  return list.filter(b=>(!scope||scope.indexOf(b)!==-1) && !assigned.has(b));
+}
 
 /* ════════════ الحالة ════════════ */
 let _tasks   = [];      // مهام المشروع الحالي
@@ -722,9 +732,8 @@ function supMapHTML(){
       <div class="co-empty-t">${!sups.length?"لا مشرفون مضافون بعد":"لا مبانٍ مضافة بعد"}</div>
       <div class="co-empty-s">أضِفهم من: الإدارة › لوحة الإدارة › ${!sups.length?"المشرفون":"المباني"}.</div></div></div>`;
   }
-  // مبنًى غير مسنَدٍ لأحد = فجوةُ مسؤولية
-  const assigned=new Set(); Object.values(m).forEach(a=>(a||[]).forEach(b=>assigned.add(b)));
-  const orphans=blds.filter(b=>!assigned.has(b));
+  // مبنًى غير مسنَدٍ لأحد = فجوةُ مسؤولية (نفس تعريف «أداء المشرفين»؛ الأدمن يرى الكل ⟵ mine=null)
+  const orphans=unassignedBuildings(blds, m, null);
   return `
     <div class="card">
       <div class="co-sec"><div class="co-sec-t">${_svg('users')} المشرفون والمناطق</div>
@@ -1332,20 +1341,36 @@ const SUP_WEIGHTS = { cov:0.45, late:0.20, doc:0.20, items:0.15 };
 // مشرفُ سطرِ التنفيذ: الحقلُ المخزَّن، وإلا استُنبط من مبناه (سجلّاتٌ سابقةٌ للربط)
 function logSupervisor(r){ return (r&&r.supervisor) ? r.supervisor : supOfBuilding(r&&r.building); }
 
-function supervisorPerf(tasksList, logList){
+function supervisorPerf(tasksList, logList, supMap){
   const tasks=(Array.isArray(tasksList)?tasksList:visibleTasks()).filter(t=>!isDisabled(t));
   const log  = Array.isArray(logList)?logList:visibleLog();
   const rows={};
   const row=n=>(rows[n] || (rows[n]={ name:n, _b:{}, done:0, due:0, overdue:0,
                                       runs:0, withPhotos:0, doneItems:0, totalItems:0 }));
+  /* ★ بذرُ الكشف من خريطة الربط (supervisorBuildings) لا من تيّار المهامّ وحده:
+     كلُّ مشرفٍ مربوطٍ يظهر ولو بلا مهامٍّ بعد — نطاقُه (zones) من الخريطة، ودرجتُه «—»
+     (لا صفراً) حتى يُسجَّل عمل. بهذا لا يختفي المربوطُ من القياس لمجرّد خلوّ مبانيه من
+     مهامّ اليوم (كان سببَ ظهور «لا مشرفين مربوطين» رغم الربط). النطاقُ محترَم: المشرفُ
+     لا يُبذَر إلا بمبانٍ داخل نطاقه، والأدمن/المدير يرى الجميع (mine=null). */
+  const map=(supMap && typeof supMap==="object") ? supMap : (_cfg.supervisorBuildings||{});
+  const mine=myBuildings();
+  Object.keys(map).forEach(s=>{
+    const blds=(Array.isArray(map[s])?map[s]:[]).filter(b=>!mine||mine.indexOf(b)!==-1);
+    if(mine && !blds.length) return;   // مشرفٌ خارجَ نطاق المستخدم الحالي
+    const r=row(s); blds.forEach(b=>r._b[b]=1);
+  });
+  // توزيعُ المهمة/التنفيذ يقرأ **نفس** الخريطة المُعتمَدة أعلاه (المُمرَّرة أو _cfg) فلا
+  // يختلف عن البذر: مهمةٌ بلا تجاوزٍ صريحٍ تُنسَب لمشرف مبناها من هذه الخريطة بعينها.
+  const supOf=b=>{ for(const s of Object.keys(map)){ if(Array.isArray(map[s])&&map[s].indexOf(b)!==-1) return s; } return ""; };
+  const supOfRec=r=>(r&&r.supervisor)?r.supervisor:supOf(r&&r.building);
   tasks.forEach(t=>{
-    const r=row(taskSupervisor(t)||SUP_UNASSIGNED);
+    const r=row(supOfRec(t)||SUP_UNASSIGNED);
     if(t.building) r._b[t.building]=1;
     if(doneToday(t)) r.done++;
     else if(isDue(t)){ r.due++; if(isOverdue(t)) r.overdue++; }
   });
   log.forEach(x=>{
-    const r=row(logSupervisor(x)||SUP_UNASSIGNED);
+    const r=row(supOfRec(x)||SUP_UNASSIGNED);
     if(x&&x.building) r._b[x.building]=1;
     r.runs++;
     if(Array.isArray(x.photos)&&x.photos.length) r.withPhotos++;
@@ -1382,23 +1407,26 @@ function supervisorPerf(tasksList, logList){
 function supPerfHTML(){
   const rows=supervisorPerf();
   const scored=rows.filter(r=>!r.unassigned);
-  const orphan=rows.find(r=>r.unassigned);
+  const orphanRow=rows.find(r=>r.unassigned);         // صفُّ أداءِ المهامّ بلا مشرف (إن وُجدت)
+  const orphanBlds=unassignedBuildings();             // المباني بلا مشرف — نفس تعريف شاشة الربط
+  const nOrphan=orphanBlds.length;
   const head=`<div class="co-sec"><div class="co-sec-t">${_svg('users')} أداء المشرفين — هذا الشهر</div>
       <span class="co-sec-c">${scored.length?scored.length+" مشرف":"لا مشرفين مربوطين"}</span></div>`;
 
-  if(!scored.length && !orphan){
+  // لا مشرفَ مربوطٌ في نطاق المستخدم — النصُّ صادقٌ هنا (لا نزعم ربطاً غير موجود)
+  if(!scored.length){
+    if(nOrphan){
+      return `<div class="card">${head}
+        <div class="co-empty" style="padding:22px">${_svg('users')}
+          <div class="co-empty-t">لا مبنى مرتبطٌ بمشرف</div>
+          <div class="co-empty-s">${nOrphan} مبنًى بلا مشرف — اربطها من «تشغيل النظافة › المشرفون والمناطق» ليبدأ القياس.</div>
+          ${canEdit()?`<button class="btn btn-sm" style="margin-top:10px" onclick="cleaningOps.goSupMap()">${_svg('users')} ربط المشرفين بالمباني</button>`:""}
+        </div></div>`;
+    }
     return `<div class="card">${head}
       <div class="co-empty" style="padding:22px">${_svg('users')}
         <div class="co-empty-t">لا بياناتٍ لقياس المشرفين بعد</div>
         <div class="co-empty-s">أضِف مهامّ نظافة وسجِّل تنفيذها ليُحسب الأداء.</div></div></div>`;
-  }
-  if(!scored.length && orphan){
-    return `<div class="card">${head}
-      <div class="co-empty" style="padding:22px">${_svg('users')}
-        <div class="co-empty-t">لا مبنى مرتبطٌ بمشرف</div>
-        <div class="co-empty-s">${orphan.zones} مبنًى بلا مشرف — اربطها من «تشغيل النظافة › المشرفون والمناطق» ليبدأ القياس.</div>
-        ${canEdit()?`<button class="btn btn-sm" style="margin-top:10px" onclick="cleaningOps.goSupMap()">${_svg('users')} ربط المشرفين بالمباني</button>`:""}
-      </div></div>`;
   }
 
   const col=v=>v==null?"var(--muted)":(v>=85?"var(--sla-ok)":(v>=60?"var(--sla-warn)":"var(--sla-crit)"));
@@ -1429,16 +1457,23 @@ function supPerfHTML(){
     </div>`;
   };
 
+  // صفُّ «بلا مشرف»: عددُ مبانيه = المباني غير المسنَدة (نفس شاشة الربط)، لا مبانيَ المهامّ
+  // وحدها؛ ويظهر ولو بلا مهامٍّ فيها بعد (مقاييسُه «—») ليُبرز فجوةَ المسؤولية صراحةً.
+  const orphanShow = orphanRow ? Object.assign({}, orphanRow, { zones:nOrphan })
+    : (nOrphan ? { name:SUP_UNASSIGNED, unassigned:true, zones:nOrphan, sched:0, done:0, due:0,
+                   overdue:0, runs:0, withPhotos:0, doneItems:0, totalItems:0,
+                   cov:null, late:null, doc:null, items:null, score:null } : null);
+
   return `<div class="card">${head}
     ${scored.map(card).join("")}
-    ${orphan?card(orphan,-1):""}
+    ${orphanShow?card(orphanShow,-1):""}
     <div class="co-hint" style="margin-top:10px">
       الدرجةُ متوسّطٌ مرجَّح: التغطية ${Math.round(SUP_WEIGHTS.cov*100)}٪ ·
       انخفاضُ المتأخّرات ${Math.round(SUP_WEIGHTS.late*100)}٪ ·
       التوثيقُ بالصور ${Math.round(SUP_WEIGHTS.doc*100)}٪ ·
       بنودُ الفحص ${Math.round(SUP_WEIGHTS.items*100)}٪ — محسوبةً على المتاح فقط،
       وما لم يُقَس يظهر «—» ولا يُحتسب. التغطيةُ لليوم، والباقي منذ بداية الشهر.
-      ${orphan?` <b>${orphan.zones} مبنًى بلا مشرف</b> — اربطها ليدخل عملُها في القياس.`:""}
+      ${nOrphan?` <b>${nOrphan} مبنًى بلا مشرف</b> — اربطها ليدخل عملُها في القياس.`:""}
     </div>
   </div>`;
 }
@@ -2217,6 +2252,7 @@ window.cleaningOps = {
   _coverageByBuilding: coverageByBuilding, _cleaningKPIs: cleaningKPIs, _supOfBuilding: supOfBuilding,
   _logAsTicket: _logAsTicket, _taskSupervisor: taskSupervisor,
   _supervisorPerf: supervisorPerf, _logSupervisor: logSupervisor,
+  _unassignedBuildings: unassignedBuildings,
   _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
   _salvageObjects: _salvageObjects,
   _svg: _svg,

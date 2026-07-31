@@ -2423,6 +2423,47 @@ function cleaningOpsTests() {
       CO._supervisorPerf([], []).length === 0);
     T("مهمةٌ موقوفةٌ لا تُحمَّل على مشرفها",
       CO._supervisorPerf([{ id: "x", building: "أ", supervisor: "سالم", nextDueDate: today, disabled: true }], []).length === 0);
+
+    // ══ ★ v18.9vc: الكشفُ من خريطة الربط لا من تيّار المهامّ وحده ══
+    // العيبُ المُبلَّغ: مشرفٌ مربوطٌ بمبانٍ (خريطةُ supervisorBuildings) لكن بلا مهامٍّ بعد
+    // كان يختفي من القياس فتظهر «لا مشرفين مربوطين» رغم الربط. الآن يُبذَر من الخريطة.
+    const seeded = CO._supervisorPerf([], [], { "سارة": ["أ", "ب", "ج"], "نورة": ["د"] });
+    const sara = seeded.find(x => x.name === "سارة") || {};
+    T("★ مشرفٌ مربوطٌ بلا مهامّ يظهر (لا يختفي من القياس)",
+      seeded.filter(x => !x.unassigned).length === 2 && sara.name === "سارة",
+      "المربوطون=" + seeded.filter(x => !x.unassigned).map(x => x.name).join("، "));
+    T("★ نطاقُه (zones) من الخريطة لا من المهامّ، ودرجتُه «—» لا صفراً",
+      sara.zones === 3 && sara.score === null && sara.sched === 0,
+      JSON.stringify({ zones: sara.zones, score: sara.score, sched: sara.sched }));
+    // مهمةٌ في مبنى المشرفِ المبذور تُراكِم عليه (لا تُنشئ صفّاً ثانياً)
+    const seeded2 = CO._supervisorPerf(
+      [{ id: "1", building: "أ", nextDueDate: today, lastExecuted: today }], [],
+      { "سارة": ["أ", "ب", "ج"] });
+    const sara2 = seeded2.find(x => x.name === "سارة") || {};
+    T("★ مهمةٌ في مبنى مشرفٍ مبذورٍ تُراكِم على صفّه (لا تكرار)",
+      seeded2.filter(x => x.name === "سارة").length === 1 && sara2.done === 1 &&
+      sara2.zones === 3 && !seeded2.some(x => x.unassigned),
+      JSON.stringify({ n: seeded2.filter(x => x.name === "سارة").length, done: sara2.done, zones: sara2.zones }));
+  }
+
+  // ══ ★ v18.9vc: توحيد تعريف «مبانٍ بلا مشرف» بين شاشتَي الربط والقياس ══
+  // كان العدُّ يختلف (١ في القياس مقابل ١٤ في الربط) لأن القياس يعُدّ مبانيَ المهامّ
+  // وحدها بينما الربط يعُدّ كلَّ BUILDINGS غير المسنَدة. الآن مصدرٌ واحد: unassignedBuildings.
+  T("★ شاشةُ الربط تقرأ العدَّ من المصدر الموحّد (unassignedBuildings)",
+    /function unassignedBuildings\(/.test(src) &&
+    /const orphans=unassignedBuildings\(blds, m, null\)/.test(src) &&
+    /supPerfHTML[\s\S]*?const orphanBlds=unassignedBuildings\(\)/.test(src));
+  if (CO && typeof CO._unassignedBuildings === "function") {
+    const allB = ["أ", "ب", "ج", "د", "هـ"];
+    const map1 = { "سارة": ["أ", "ب"] };
+    T("★ «بلا مشرف» = كلُّ المباني غير المسنَدة (لا مبانيَ المهامّ وحدها)",
+      CO._unassignedBuildings(allB, map1, null).length === 3 &&
+      CO._unassignedBuildings(allB, map1, null).join(",") === "ج,د,هـ",
+      CO._unassignedBuildings(allB, map1, null).join("،"));
+    T("★ العدُّ محترِمٌ للنطاق (المشرفُ لا يرى إلا مبانيه)",
+      CO._unassignedBuildings(allB, map1, ["ج", "د"]).join(",") === "ج,د" &&
+      CO._unassignedBuildings(allB, map1, []).length === 0);
+    T("خريطةٌ فارغةٌ ⟵ كلُّ المباني بلا مشرف", CO._unassignedBuildings(allB, {}, null).length === 5);
   }
 
   // ══ ★ عموميّة المشاريع: أيُّ مشروع نظافةٍ جديدٍ يعمل بنفس المنطق ══
