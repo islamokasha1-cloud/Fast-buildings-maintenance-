@@ -44,6 +44,7 @@ import {
 } from "./Icons";
 import { clients } from "./clients";
 import { divisions } from "./divisions";
+import { photos } from "./photos";
 import { certifications, classification } from "./certifications";
 import { experienceYears } from "./company";
 import { regions } from "./regions";
@@ -341,6 +342,118 @@ const AnimatedNumber: React.FC<{ to: number; suffix?: string; color: string; del
       {value.toLocaleString("ar-EG")}
       {suffix}
     </span>
+  );
+};
+
+// مشهد «من مواقعنا» — شبكة صور المشاريع
+// يعرض إطارات مبدئية ما دامت photos فارغة، فيبقى التخطيط قابلاً للمعاينة.
+const PHOTO_SLOTS: { caption: string; division: keyof typeof DIVISION_STYLE }[] = [
+  { caption: "موقع إنشاء", division: "contracting" },
+  { caption: "أعمال ترميم", division: "contracting" },
+  { caption: "صيانة فنية", division: "facilities" },
+  { caption: "تشغيل مرافق", division: "facilities" },
+  { caption: "ورشة تصنيع", division: "metals" },
+  { caption: "أعمال حدادة", division: "metals" },
+];
+
+const DIVISION_LABEL = {
+  contracting: "المقاولات",
+  facilities: "إدارة المرافق",
+  metals: "المعادن",
+} as const;
+
+const ScenePhotos: React.FC = () => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+
+  const slots = photos.length
+    ? photos.map((p) => ({
+        caption: p.caption,
+        division: (p.division ?? "facilities") as keyof typeof DIVISION_STYLE,
+        src: p.src,
+      }))
+    : PHOTO_SLOTS.map((s) => ({ ...s, src: undefined as string | undefined }));
+
+  return (
+    <Stage>
+      <div style={{ width: "100%", maxWidth: 1580, display: "flex", flexDirection: "column", gap: 28 }}>
+        <SectionTitle label="من مواقعنا" delay={0} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 24 }}>
+          {slots.slice(0, 6).map((s, i) => {
+            const delay = 10 + i * 5;
+            const sp = spring({ frame: frame - delay, fps, config: { damping: 200 } });
+            const y = interpolate(sp, [0, 1], [38, 0]);
+            // تقريب بطيء يمنح الصور الثابتة إحساس الحركة
+            const zoom = interpolate(frame - delay, [0, 170], [1, 1.09], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+            });
+            const color = DIVISION_STYLE[s.division].color;
+            const DivIcon = DIVISION_STYLE[s.division].Icon;
+
+            return (
+              <div key={i} style={{ opacity: sp, transform: `translateY(${y}px)` }}>
+                <Card padding={0} style={{ overflow: "hidden" }}>
+                  <div
+                    style={{
+                      height: 258,
+                      overflow: "hidden",
+                      background: theme.surface2,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {s.src ? (
+                      <Img
+                        src={staticFile(s.src)}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                          transform: `scale(${zoom})`,
+                        }}
+                      />
+                    ) : (
+                      // إطار مبدئي — يُستبدل تلقائياً عند إضافة الصورة
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: 12,
+                          color: theme.muted,
+                        }}
+                      >
+                        <DivIcon size={52} color={color} />
+                        <div style={{ fontSize: 21, fontWeight: 700 }}>موضع الصورة</div>
+                      </div>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      padding: "16px 20px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 11,
+                      borderTop: `1px solid ${theme.border}`,
+                    }}
+                  >
+                    <div style={{ width: 11, height: 11, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                    <div style={{ fontFamily: headingFont, fontWeight: 800, fontSize: 25, color: theme.primary }}>
+                      {s.caption}
+                    </div>
+                    <div style={{ marginInlineStart: "auto", fontSize: 20, color: theme.muted, fontWeight: 700 }}>
+                      {DIVISION_LABEL[s.division]}
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Stage>
   );
 };
 
