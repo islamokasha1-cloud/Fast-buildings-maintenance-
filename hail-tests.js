@@ -2332,6 +2332,25 @@ function cleaningOpsTests() {
     /#page-\$\{PAGE_ID\} \.ppm-card,#\$\{EXEC_ID\} \.ppm-card,#\$\{DAILY_ID\} \.ppm-card\{padding:9px 11px/.test(src) &&
     !/^\.ppm-card\{/m.test(src));
 
+  // ══ ★ عموميّة المشاريع: أيُّ مشروع نظافةٍ جديدٍ يعمل بنفس المنطق ══
+  T("★ لا معرّفَ مشروعٍ مثبَّتٌ في الوحدة إطلاقاً",
+    !/["'`](hail|bathroom001)["'`]/.test(src) && !/hail_/.test(src));
+  T("★ كلُّ مسارات البيانات مشتقّةٌ من المشروع الحالي",
+    /function tasksCol\(\)\{ const id=_projId\(\);/.test(src) &&
+    /function logCol\(\)\{\s+const id=_projId\(\);/.test(src) &&
+    /function cfgDoc\(\)\{\s+const id=_projId\(\);/.test(src));
+  T("المخابئ مفهرسةٌ بمعرّف المشروع (لا تتسرّب بين المشاريع)",
+    /_typeCache\[p\.id\]/.test(src) && /_seededFor\[id\]/.test(src));
+  // ★ حارسُ اكتمال التصفير: كلُّ متغيّرِ حالةٍ معرَّفٍ بـlet يجب أن يُصفَّر عند تبديل
+  // المشروع — وإلا ظهرت بياناتُ مشروعٍ في آخر. (اكتُشف بهذا أن _detailFor و_cfg
+  // كانا يبقيان: تفاصيلُ مهمةِ المشروع السابق تبقى معروضةً وخريطةُ مشرفيه تحكم الجديد.)
+  const _resetBlock = (src.match(/if\(cur!==last\)\{[\s\S]*?ensureTypeKnown/) || [""])[0];
+  const _mustReset = ["_tasks", "_loaded", "_loadedFor", "_loadPromise", "_cfg", "_cfgFor",
+    "_editing", "_execFor", "_execState", "_execPhotos", "_detailFor", "_detailLog", "_view"];
+  const _missed = _mustReset.filter(v => !new RegExp("\\b" + v + "\\s*=").test(_resetBlock));
+  T("★ تبديلُ المشروع يُصفّر كلَّ حالةِ الوحدة (لا بقايا من السابق)",
+    _missed.length === 0, _missed.length ? "لم يُصفَّر: " + _missed.join("، ") : "كلُّها مُصفَّرة");
+
   // ══ ربط المشرف بمبانيه + صور التنفيذ + التقرير المصوّر ══
   T("خريطة المشرف↔المباني في مستندٍ خاصٍّ بالوحدة (لا تغيّر شكل إعدادات النواة)",
     /_cleaning_cfg/.test(src) && /supervisorBuildings/.test(src));
