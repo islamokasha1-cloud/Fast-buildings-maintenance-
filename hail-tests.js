@@ -2158,8 +2158,11 @@ function cleaningOpsTests() {
   T("★ الإخفاء يُرفَع فوراً لمشروعٍ غير نظافة",
     /if\(!isCleaningProject\(\)\)\{\s*unmountExec\(\);\s*return;\s*\}/.test(src) &&
     /host\.classList\.remove\("co-exec-mode"\)/.test(src));
-  T("تبديل المشروع يرفع لوحتَي النظافة قبل معرفة نوع الجديد",
-    /unmountExec\(\);\s*unmountDaily\(\);\s*\n\s*ensureTypeKnown/.test(src));
+  T("تبديلُ المشروع يرفع كلَّ لوحات النظافة قبل معرفة نوع الجديد",
+    /unmountExec\(\); unmountDaily\(\); unmountKPI\(\);/.test(src));
+  T("★ صفحة المؤشرات تُخفى ولا تُحذف كذلك",
+    /#page-kpi\.co-kpi-mode > \*:not\(#\$\{KPI_ID\}\)\{display:none!important\}/.test(src) &&
+    /host\.classList\.remove\("co-kpi-mode"\)/.test(src));
   T("★ المتابعة اليومية تُخفى ولا تُحذف كذلك",
     /#page-daily\.co-daily-mode > \*:not\(#\$\{DAILY_ID\}\)\{display:none!important\}/.test(src) &&
     /host\.classList\.remove\("co-daily-mode"\)/.test(src));
@@ -2331,6 +2334,30 @@ function cleaningOpsTests() {
   T("★ تصغيرُ البطاقات مقصورٌ على صفحات النظافة (لا يمسّ صفحة الوقائية)",
     /#page-\$\{PAGE_ID\} \.ppm-card,#\$\{EXEC_ID\} \.ppm-card,#\$\{DAILY_ID\} \.ppm-card\{padding:9px 11px/.test(src) &&
     !/^\.ppm-card\{/m.test(src));
+
+  // ══ ★ مؤشرات أداء النظافة بدل مؤشّرات الصيانة ══
+  // السبعةُ في النواة (تصحيحية/SLA/جودة الالتزام الفني/الوقائية…) تقيس ما لا وجود له
+  // في عقد نظافة فتعرض 0% أو 100% بلا معنى — البديل يقيس الالتزام بالجدول والتوثيق.
+  // نفحص **جسم cleaningKPIs وحده**: closedAt يرد في _logAsTicket (تحويلٌ للتقرير
+  // المصوّر) وهو استعمالٌ مشروعٌ لا قراءةً من البلاغات.
+  const _kpiBody = (src.match(/function cleaningKPIs\(\)\{[\s\S]*?\n\}/) || [""])[0];
+  T("★ مؤشّراتُ النظافة مبنيّةٌ من المهامّ وسجلّ التنفيذ لا من البلاغات",
+    _kpiBody.includes("boardStats()") && _kpiBody.includes("visibleTasks()") &&
+    !/allTickets|tickets|closedAt|maintType|priority/.test(_kpiBody),
+    _kpiBody ? "جسمٌ نظيف" : "لم يُعثر على الدالّة");
+  T("سجلُّ الشهر يُقرأ بمساواةٍ على التاريخ (لا فهرسَ مركّب)",
+    /where\("date",">=",from\)/.test(src));
+  if (CO && typeof CO._cleaningKPIs === "function") {
+    const k = CO._cleaningKPIs();
+    T("★ ستةُ مؤشّراتٍ بمعرّفاتٍ خاصةٍ بالنظافة (لا KPI-01 للصيانة)",
+      k.length === 6 && k.every(x => /^CLN-\d\d$/.test(x.id)), k.map(x => x.id).join("، "));
+    T("لكلِّ مؤشّرٍ اسمٌ وهدفٌ واتجاه", k.every(x => x.name && x.dir && ("target" in x)));
+    const late = k.find(x => x.id === "CLN-03");
+    T("★ «نسبة المتأخّرات» هدفُها **انخفاضٌ** لا ارتفاع (وإلا انقلب الحكم)",
+      late && late.dir === "down" && late.target === 5, late && late.dir + "/" + late.target);
+    T("بلا بياناتٍ تُرجع أصفاراً لا NaN (لا قسمةَ على صفر)",
+      k.every(x => typeof x.val === "number" && !isNaN(x.val)), JSON.stringify(k.map(x => x.val)));
+  }
 
   // ══ ★ عموميّة المشاريع: أيُّ مشروع نظافةٍ جديدٍ يعمل بنفس المنطق ══
   T("★ لا معرّفَ مشروعٍ مثبَّتٌ في الوحدة إطلاقاً",
