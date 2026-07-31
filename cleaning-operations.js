@@ -538,7 +538,7 @@ function boardHTML(){
           <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
           <span class="ppm-due-badge ${all?'ok':'today'}">${d}/${list.length} منجزة</span>
         </div>
-        ${list.map(taskCardHTML).join("")}
+        <div class="co-tasklist">${list.map(taskCardHTML).join("")}</div>
       </div>`;
   }).join("")+`</div>`;
 
@@ -573,7 +573,7 @@ function _byBuildingGrid(tasks){
         <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
         <span class="ppm-due-badge ${all?'ok':'today'}">${d}/${list.length}</span>
       </div>
-      ${list.map(taskCardHTML).join("")}
+      <div class="co-tasklist">${list.map(taskCardHTML).join("")}</div>
     </div>`;
   }).join("")+`</div>`;
 }
@@ -602,11 +602,11 @@ function taskCardHTML(t){
             ${done&&t.lastExecutedBy?`<span class="ppm-pill co-by">${_svg('user')} ${_esc(t.lastExecutedBy)}</span>`:""}
           </div>
         </div>
-        <div class="co-card-act">
-          ${done ? "" : (canExecute()?`<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();cleaningOps.exec('${_esc(t.id)}')">${_svg('checkCircle')} تنفيذ</button>`:"")}
-          ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')}</button>`:""}
-        </div>
       </div>
+      ${(!done&&canExecute())||canEdit() ? `<div class="co-card-act">
+        ${done ? "" : (canExecute()?`<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();cleaningOps.exec('${_esc(t.id)}')">${_svg('checkCircle')} تنفيذ</button>`:"")}
+        ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')}</button>`:""}
+      </div>` : ""}
     </div>`;
 }
 function iconOf(wt){ const w=CLEANING_WORK_TYPES[wt]; return w?w.icon:"sparkles"; }
@@ -1767,8 +1767,13 @@ function injectCSS(){
 .co-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
 /* المباني جنباً إلى جنب: عمودٌ لكل مبنى بدل صفٍّ لكل مهمة — يستفيد من عرض الشاشة.
    align-items:start فلا يتمدّد المبنى القليلُ مهامُّه ليطابق أطولَ جاره. */
-.co-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;align-items:start}
-.co-groups .co-group{margin-bottom:0}
+.co-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px;align-items:start}
+.co-groups .co-group{margin-bottom:0;min-width:0}
+/* شبكةٌ داخليةٌ للمهامّ داخل بطاقة المبنى: مبنًى واحدٌ يملأ العرض فتتوزّع مهامُّه على
+   أعمدةٍ متعددة، وعدّةُ مبانٍ تتجاور فتصير مهامُّ كلٍّ عموداً واحداً — تكيُّفٌ تلقائيّ
+   بلا نقطةِ كسرٍ ثابتة، فلا تنحشر البطاقات ولا تُهدَر مساحةُ الشاشة. */
+.co-tasklist{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;align-items:start}
+.co-tasklist>.ppm-card{margin-bottom:0}
 /* بطاقاتٌ مصغَّرة داخل صفحات النظافة وحدها — لا تمسّ .ppm-card في صفحة الوقائية */
 #page-${PAGE_ID} .ppm-card,#${EXEC_ID} .ppm-card,#${DAILY_ID} .ppm-card{padding:9px 11px;margin-bottom:7px;border-radius:11px}
 #page-${PAGE_ID} .ppm-chip,#${EXEC_ID} .ppm-chip,#${DAILY_ID} .ppm-chip{width:30px;height:30px;border-radius:9px}
@@ -1776,7 +1781,13 @@ function injectCSS(){
 #page-${PAGE_ID} .ppm-meta-row,#${EXEC_ID} .ppm-meta-row,#${DAILY_ID} .ppm-meta-row{font-size:10.5px;gap:4px;flex-wrap:wrap}
 #page-${PAGE_ID} .ppm-meta-row .mi svg,#${EXEC_ID} .ppm-meta-row .mi svg,#${DAILY_ID} .ppm-meta-row .mi svg{width:11px;height:11px}
 #page-${PAGE_ID} .ppm-pill,#${EXEC_ID} .ppm-pill,#${DAILY_ID} .ppm-pill,
-#page-${PAGE_ID} .ppm-due-badge,#${EXEC_ID} .ppm-due-badge,#${DAILY_ID} .ppm-due-badge{font-size:9.5px;padding:2px 7px}
+#page-${PAGE_ID} .ppm-due-badge,#${EXEC_ID} .ppm-due-badge,#${DAILY_ID} .ppm-due-badge{
+  font-size:9.5px;padding:3px 8px;white-space:nowrap;line-height:1.6}
+/* العبارات الطويلة («النظافة العميقة الدورية») كانت تُكسَر داخل الشارة فتبدو مبعثرة:
+   الشارةُ الآن لا تُكسَر داخلياً، والصفُّ يلتفّ **بين** الشارات لا داخلها. */
+#page-${PAGE_ID} .co-pills,#${EXEC_ID} .co-pills,#${DAILY_ID} .co-pills{row-gap:6px}
+#page-${PAGE_ID} .ppm-meta-row,#${EXEC_ID} .ppm-meta-row,#${DAILY_ID} .ppm-meta-row{align-items:center}
+.co-card-t{overflow-wrap:anywhere}
 .co-clickable{cursor:pointer;transition:border-color .15s}
 .co-clickable:hover{border-color:var(--primary)}
 .co-clickable:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
@@ -1797,12 +1808,15 @@ function injectCSS(){
 .co-sec-c{font-size:11.5px;color:var(--muted);font-weight:700}
 .co-sec-c b{font-family:'JetBrains Mono',monospace;color:var(--text)}
 .co-card-row{display:flex;align-items:flex-start;gap:11px;flex-wrap:wrap}
-.co-card-main{flex:1;min-width:0}
+.co-card-main{flex:1 1 auto;min-width:0}
 .co-card-t{font-size:12.5px;font-weight:800;color:var(--text);line-height:1.35}
 .co-pills{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:5px}
 .co-pills .co-by{background:var(--sla-ok-bg);color:var(--sla-ok);border:1px solid var(--sla-ok-bd)}
 .co-pills .co-by svg{width:11px;height:11px;stroke-width:2.2}
-.co-card-act{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-inline-start:auto}
+/* الأزرار في سطرٍ مستقلٍّ أسفل البطاقة: مزاحمتُها للنصّ كانت تخنق العنوان في البطاقة
+   الضيّقة (الأيقونة + النصّ + زرّان في 250px). الآن يأخذ النصُّ عرض البطاقة كاملاً. */
+.co-card-act{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;
+  margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)}
 .ppm-card.completed .co-card-t{color:var(--muted)}
 .co-pane{max-width:760px}
 .co-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -1856,7 +1870,7 @@ function injectCSS(){
 .co-td-ic svg{width:15px;height:15px;stroke-width:2}
 .co-num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;direction:ltr;text-align:right}
 .co-tr-off{opacity:.5}
-@media(max-width:620px){.co-card-act{margin-inline-start:0;width:100%}}
+
 `;
   document.head.appendChild(st);
 }
