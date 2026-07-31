@@ -2104,9 +2104,44 @@ function cleaningOpsTests() {
   T("★ ثابت: 0 ≤ التغطية ≤ 100 و (نُفِّذ + متبقٍّ) = المجدول", bad === null, bad || "300 تركيبة عشوائية");
 
   // ── التنفيذ يقدّم الاستحقاق من **اليوم** لا من الاستحقاق الفائت (لا تتراكم الفوائت) ──
-  T("★ التنفيذ ينقل الاستحقاق من اليوم بمقدار التكرار",
-    src.includes("nextDueDate: _addDays(_today(), days)"));
+  T("★ التنفيذ ينقل الاستحقاق من اليوم بمقدار التكرار (مع ترحيل العطلة)",
+    src.includes("nextDueDate: _advanceDue(_today(), days)"));
   T("_addDays يومٌ واحد يساوي الغد", CO._addDays(today, 1) === day(1));
+
+  // ══ ★ v18.9ve: الجمعة والسبت إجازة في مشاريع النظافة ══
+  // تواريخ صريحة (لا تعتمد على يوم تشغيل الفحص): 2026-07-30 خميس · 07-31 جمعة · 08-01 سبت · 08-02 أحد.
+  if (CO && typeof CO._isWeekend === "function") {
+    const THU="2026-07-30", FRI="2026-07-31", SAT="2026-08-01", SUN="2026-08-02", MON="2026-08-03";
+    T("★ الجمعة والسبت عطلة، والأحد–الخميس عمل",
+      CO._isWeekend(FRI)===true && CO._isWeekend(SAT)===true &&
+      CO._isWeekend(SUN)===false && CO._isWeekend(THU)===false && CO._isWeekend(MON)===false);
+    T("★ ترحيل الاستحقاق الواقع في العطلة لأوّل يوم عمل (الأحد)",
+      CO._nextWorkingDay(FRI)===SUN && CO._nextWorkingDay(SAT)===SUN && CO._nextWorkingDay(SUN)===SUN && CO._nextWorkingDay(MON)===MON);
+    T("★ يومي نُفِّذ الخميس ⟵ يُستحقّ الأحد (يتخطّى الجمعة/السبت)",
+      CO._advanceDue(THU, 1)===SUN);
+    T("★ يومي نُفِّذ الأحد ⟵ الاثنين (يوم عمل، بلا ترحيل)",
+      CO._advanceDue(SUN, 1)===MON);
+    T("★ أسبوعي نُفِّذ الأحد ⟵ الأحد التالي (7 أيام، يوم عمل)",
+      CO._advanceDue(SUN, 7)==="2026-08-09" && CO._isWeekend("2026-08-09")===false);
+    T("★ شهري (30 يوماً) يقع على سبت ⟵ يُرحَّل للأحد",
+      CO._advanceDue(THU, 30)==="2026-08-30" && CO._isWeekend("2026-08-30")===false);
+    // التأخّر بأيام العمل فقط — عطلةٌ بين الاستحقاق واليوم لا تُحتسب
+    T("★ التأخّر بأيام العمل: استحقاق الخميس واليوم الأحد ⟵ يوم واحد (لا 3)",
+      CO._overdueWorkingDays(THU, SUN)===1);
+    T("★ التأخّر بأيام العمل: استحقاق الخميس واليوم الاثنين ⟵ يومان (لا 4)",
+      CO._overdueWorkingDays(THU, MON)===2);
+    T("مهمةٌ في موعدها ليست متأخّرة", CO._overdueWorkingDays(SUN, SUN)===0);
+    // الوصل بالسلوك: isDue/isOverdue/dueStatus/boardStats تحترم الإجازة، والإنشاء يرحّل
+    T("★ إشارةُ الإجازة تُبثّ في boardStats وتحترمها isDue/isOverdue",
+      /return \{[^}]*holiday:_isTodayHoliday\(\)[^}]*\}/.test(src) &&
+      /function isDue\(t\)\{ if\(isDisabled\(t\)\|\|doneToday\(t\)\|\|_isTodayHoliday\(\)\)/.test(src) &&
+      /function isOverdue\(t\)\{ if\(isDisabled\(t\)\|\|doneToday\(t\)\|\|_isTodayHoliday\(\)\)/.test(src));
+    T("★ الإنشاء والتحرير يرحّلان تاريخ العطلة لأوّل يوم عمل",
+      /nextDueDate: _nextWorkingDay\(_today\(\)\)/.test(src) &&
+      /_editing\.nextDueDate = _nextWorkingDay\(g\("co-due"\)/.test(src));
+    T("★ لوحة اليوم تعرض «إجازة» بدل 0% عقابيّ",
+      /s\.holiday\?"إجازة"/.test(src) && /vTxt="إجازة اليوم"/.test(src));
+  }
 
   // ── العزل بمعرّف المشروع (كبقية النظام) ──
   T("★ المجموعتان معزولتان بمعرّف المشروع",
