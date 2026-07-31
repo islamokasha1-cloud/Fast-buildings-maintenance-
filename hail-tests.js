@@ -2211,6 +2211,22 @@ function cleaningOpsTests() {
     // القرار: أداءُ المشرفين داخليٌّ لا يظهر في تقرير العميل
     T("★ أداءُ المشرفين غيرُ مُضمَّنٍ في تقرير العميل", html.indexOf("أداء المشرفين") === -1);
   }
+  // تقرير جولةٍ واحدة (طباعة تقرير الجولة)
+  if (CO && typeof CO._buildRoundReportHTML === "function") {
+    const rr = CO._buildRoundReportHTML({ date:"2026-07-31", by:"مدير النظام", violations:"دورات المياه تحتاج تعقيماً",
+      ratings:[{building:"مبنى أ",workType:"نظافة الأرضيات",stars:4},{building:"مبنى أ",workType:"الزجاج",stars:2},{building:"مبنى ب",workType:"دورات المياه",stars:5}] });
+    T("★ تقرير الجولة مستندٌ HTML كاملٌ جاهزٌ للطباعة", typeof rr === "string" &&
+      /^<!DOCTYPE html>/.test(rr) && /@page\{size:A4/.test(rr) && /dir="rtl"/.test(rr));
+    const rneed = ["تقرير جولة تفتيش الجودة","المفتِّش","متوسّط الجودة","التقييم التفصيلي","اعتماد العميل","نظافة الأرضيات","مبنى أ"];
+    const rmiss = rneed.filter(x => rr.indexOf(x) === -1);
+    T("★ تقرير الجولة يحوي الترويسةَ والتقييماتِ والمخالفاتِ والاعتماد", rmiss.length === 0 && rr.indexOf("دورات المياه تحتاج تعقيماً") !== -1,
+      rmiss.length ? "ناقص: " + rmiss.join("، ") : "كامل");
+    // النجومُ الممتلئة/الفارغة بالألوان (تُطبَع على ورق)
+    T("★ نجومُ الطباعة ملوَّنة (ممتلئ ذهبيّ/فارغ رماديّ)", /#f59e0b/.test(rr) && /#cbd5e1/.test(rr));
+  }
+  T("★ زرُّ «طباعة تقرير الجولة» في تفاصيل الجولة + printRound يُعيد استخدام نافذة الطباعة",
+    /cleaningOps\.printRound\('\$\{_esc\(r\.id\)\}'\)/.test(src) &&
+    /function printRound\(id\)\{[\s\S]*?_openPrintWindow\(html\)/.test(src));
   T("★ زرُّ «تصدير تقرير العميل» في صفحة المؤشّرات + يُعيد استخدام نافذة الطباعة (بلا مكتبةٍ جديدة)",
     /cleaningOps\.exportClientReport\(\)/.test(src) &&
     /if\(typeof _openPrintWindow==="function"\)\{ _openPrintWindow\(html\)/.test(src) &&
