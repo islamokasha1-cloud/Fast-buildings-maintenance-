@@ -87,7 +87,7 @@ const SceneIntro: React.FC<{ companyName: string; tagline: string }> = ({ compan
   return (
     <Stage>
       <div style={{ width: "100%", maxWidth: 1320, display: "flex", flexDirection: "column", gap: 26 }}>
-        <HeroBanner title={companyName} subtitle="نظام إدارة المرافق والمشتريات" delay={2} />
+        <HeroBanner title={companyName} subtitle="شركة سعودية منذ عام ١٩٨٣" delay={2} />
         <RevealText delay={18}>
           <Card padding={30} style={{ display: "flex", alignItems: "center", gap: 20 }}>
             <div style={{ width: 8, height: 46, borderRadius: 4, background: theme.accent }} />
@@ -354,8 +354,9 @@ const SceneReach: React.FC = () => {
           <SectionTitle label="نطاق أعمالنا" delay={0} />
           <RevealText delay={8}>
             <div style={{ fontSize: 30, color: theme.ink, fontWeight: 600, lineHeight: 1.65 }}>
-              ننطلق من {hq ? hq.name : "مقرنا"} لخدمة المرافق الحكومية
-              والخاصة، بفرق ميدانية جاهزة وإدارة مركزية تتابع كل موقع.
+              ننطلق من {hq ? hq.name : "مقرنا"} إلى مواقع عملائنا في
+              المقاولات وإدارة المرافق وتصنيع المعادن، بفرق ميدانية جاهزة
+              وإدارة مركزية تتابع كل موقع.
             </div>
           </RevealText>
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 4 }}>
@@ -394,8 +395,8 @@ const SceneReach: React.FC = () => {
 const ScenePlatform: React.FC = () => {
   const features = [
     { Icon: IconProjects, text: "متابعة العقود والمشاريع لحظياً" },
-    { Icon: IconFacility, text: "خريطة تشغيلية لكل مبنى" },
-    { Icon: IconCart, text: "دورة مشتريات موثّقة بالكامل" },
+    { Icon: IconFacility, text: "خريطة تشغيلية لكل موقع ومبنى" },
+    { Icon: IconCart, text: "دورة مشتريات وتوريد موثّقة" },
     { Icon: IconCheckCircle, text: "مؤشرات أداء بأهداف محددة" },
   ];
   return (
@@ -406,8 +407,8 @@ const ScenePlatform: React.FC = () => {
           <SectionTitle label="منصتنا الرقمية" delay={0} />
           <RevealText delay={8}>
             <div style={{ fontSize: 29, color: theme.ink, fontWeight: 600, lineHeight: 1.65 }}>
-              لا نكتفي بتنفيذ الصيانة — ندير أعمالنا عبر نظام رقمي خاص
-              يمنح عملاءنا شفافية كاملة على كل بلاغ وكل ريال.
+              لا نكتفي بالتنفيذ — ندير قطاعاتنا الثلاثة عبر نظام رقمي خاص
+              يمنح عملاءنا شفافية كاملة على كل أمر عمل وكل ريال.
             </div>
           </RevealText>
           <div style={{ display: "flex", flexDirection: "column", gap: 13, marginTop: 4 }}>
