@@ -13,6 +13,7 @@ import {
 import { theme } from "./theme";
 import { headingFont, bodyFont } from "./fonts";
 import {
+  BrandMark,
   Card,
   HeroBanner,
   IconChip,
@@ -469,6 +470,8 @@ export const CompanyAnnouncement: React.FC<AnnouncementProps> = ({
           <SceneOutro companyName={companyName} phone={phone} website={website} />
         </Fade>
       </Sequence>
+      {/* علامة الشركة فوق كل المشاهد */}
+      <BrandMark />
     </AbsoluteFill>
   );
 };

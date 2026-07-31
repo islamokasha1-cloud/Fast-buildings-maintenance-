@@ -154,6 +154,21 @@ export const LogoChip: React.FC<{ size?: number }> = ({ size = 74 }) => (
   </div>
 );
 
+// علامة الشركة الثابتة — تظهر في كل المشاهد أعلى يسار الشاشة.
+// موضوعة على اليسار لأن التخطيط RTL والعناوين تشغل الجهة اليمنى.
+export const BrandMark: React.FC<{ size?: number }> = ({ size = 68 }) => {
+  const frame = useCurrentFrame();
+  const opacity = interpolate(frame, [0, 20], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  return (
+    <div style={{ position: "absolute", top: 46, left: 58, opacity }}>
+      <LogoChip size={size} />
+    </div>
+  );
+};
+
 // ظهور نصي متحرك للأعلى مع تلاشي
 export const RevealText: React.FC<{
   children: React.ReactNode;
