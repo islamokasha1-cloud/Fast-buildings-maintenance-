@@ -17,6 +17,7 @@ export const RemotionRoot: React.FC = () => {
           tagline: "شريكك الموثوق في تشغيل وصيانة المرافق وإدارة المشتريات",
           phone: "",
           website: "",
+          musicVolume: 0.7,
         }}
       />
     </>

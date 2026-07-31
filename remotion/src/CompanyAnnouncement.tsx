@@ -1,6 +1,7 @@
 import React from "react";
 import {
   AbsoluteFill,
+  Audio,
   Img,
   Sequence,
   interpolate,
@@ -43,6 +44,8 @@ export type AnnouncementProps = {
   tagline: string;
   phone: string;
   website: string;
+  /** مستوى موسيقى الخلفية من 0 (صامت) إلى 1 */
+  musicVolume?: number;
 };
 
 const Stage: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -427,10 +430,14 @@ export const CompanyAnnouncement: React.FC<AnnouncementProps> = ({
   tagline,
   phone,
   website,
+  musicVolume = 0.7,
 }) => {
   return (
     <AbsoluteFill style={{ backgroundColor: theme.bg }}>
       <FontLoader />
+      {musicVolume > 0 ? (
+        <Audio src={staticFile("audio/background.mp3")} volume={musicVolume} />
+      ) : null}
       <PlatformCanvas />
       <Sequence durationInFrames={120}>
         <Fade durationInFrames={120}>

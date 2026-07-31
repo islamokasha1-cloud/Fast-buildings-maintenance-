@@ -7,6 +7,7 @@
     "start": "remotion studio",
     "studio": "remotion studio",
     "render": "remotion render CompanyAnnouncement out/company-announcement.mp4",
+    "music": "python3 scripts/make-music.py",
     "render:hd": "remotion render CompanyAnnouncement out/company-announcement.mp4 --scale=1",
     "upgrade": "remotion upgrade"
   },
