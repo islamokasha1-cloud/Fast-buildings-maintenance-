@@ -164,7 +164,7 @@ export const BrandMark: React.FC<{ height?: number }> = ({ height = 104 }) => {
     extrapolateRight: "clamp",
   });
   return (
-    <div style={{ position: "absolute", top: 44, left: 56, opacity }}>
+    <div style={{ position: "absolute", bottom: 44, left: 56, opacity }}>
       <Img
         src={staticFile("logo.png")}
         style={{ height, width: "auto", display: "block" }}
