@@ -2222,6 +2222,23 @@ function cleaningOpsTests() {
   T("العلّة قائمةٌ فعلاً في النواة (وإلا فالإصلاح ميت)",
     /font-size:28px;margin-bottom:10px">\$\{_svgIcon\("hourglass"\)\}/.test(HTML));
 
+  // ══ ★ حلقة الرسم اللانهائية التي جمّدت التطبيق (v18.9uq) ══
+  // كانت `if(_loading) return;` تُرجع وعداً محلولاً فوراً بلا تعيين _loaded، وكل
+  // المستدعين يفعلون loadTasks().then(()=>render()) — فيعاود render الطلبَ بلا نهاية:
+  // حلقةُ microtask تُجوّع حلقة الأحداث فيتجمّد كلُّ شيء.
+  // مُرسًى في بداية السطر: نفحص الكود الفعلي لا ذِكرَ النمط في تعليقٍ توضيحي
+  T("★ لا رجوعَ فارغاً أثناء تحميلٍ جارٍ (سبب التجميد)", !/^\s*if\(_loading\) return;/m.test(src));
+  T("★ النداء الجاري يُشارَك بدل إعادة الطلب", /if\(_loadPromise\) return _loadPromise;/.test(src));
+  T("★ _loaded يُضبَط دائماً في finally (نجح التحميل أم فشل)",
+    /\}finally\{[\s\S]{0,220}_loaded=true; _loadedFor=_projId\(\); _loading=false; _loadPromise=null;/.test(src));
+  T("مسار «لا قاعدة بيانات» يضبط الحالة أيضاً فلا يدور",
+    /if\(!database \|\| !col\)\{ _tasks=\[\]; _loaded=true; _loadedFor=_projId\(\); return Promise\.resolve\(\); \}/.test(src));
+  // كل مُركِّبٍ يعيد الرسم بعد التحميل — فأيُّ رجوعٍ فارغٍ يعيد إنتاج الحلقة
+  T("كل المستدعين يعيدون الرسم بعد اكتمال التحميل (لذا وجب مشاركة الوعد)",
+    (src.match(/loadTasks\(\)\.then\(/g) || []).length >= 3);
+  T("★ دوالُّ إعادة الرسم كلُّها معرَّفةٌ داخل الوحدة (لا استدعاءَ لدالّة وحدةٍ أخرى)",
+    !/^\s*renderTabBody\(\);/m.test(src));
+
   // ══ ربط المشرف بمبانيه + صور التنفيذ + التقرير المصوّر ══
   T("خريطة المشرف↔المباني في مستندٍ خاصٍّ بالوحدة (لا تغيّر شكل إعدادات النواة)",
     /_cleaning_cfg/.test(src) && /supervisorBuildings/.test(src));
