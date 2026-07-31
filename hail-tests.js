@@ -2218,6 +2218,27 @@ function cleaningOpsTests() {
     /if\(isCleaningProject\(\)\) relabelAllPages\(\)/.test(src));
   T("لفّ repopulateAllSelects مرّةً واحدة (حارس idempotent)",
     /window\._coRepopHooked/.test(src) && /hookRepopulate\(\)/.test(src));
+
+  // ★ لوحة الإدارة تُرسم قبل وصول الإعدادات فتبقى قوائمُها فارغةً حتى مغادرة الصفحة
+  // والعودة — لأن loadSettings تُحدِّث القوائمَ المنسدلة ولا تُعيد رسم قوائم اللوحة.
+  // نفحص **جسم loadSettings نفسه** لا الملفَّ كلَّه: «استعادة البيانات الافتراضية»
+  // تستدعي renderAdminPanel وهي مسارٌ آخر لا علاقة له بتحميل الإعدادات.
+  const _loadSettingsBody = (HTML.match(/async function loadSettings\(\)\{[\s\S]*?\n\}/) || [""])[0];
+  T("★ العلّة قائمةٌ في النواة: قوائم اللوحة تُبنى من BUILDINGS ولا تُعاد بعد التحميل",
+    /function renderAdminBuildingsList\(\)\{[\s\S]{0,160}BUILDINGS\.map/.test(HTML) &&
+    /loadSettings\(\)\.catch/.test(HTML) &&
+    _loadSettingsBody.includes("repopulateAllSelects()") &&
+    !_loadSettingsBody.includes("renderAdminPanel"),
+    "جسم loadSettings: repopulate=" + _loadSettingsBody.includes("repopulateAllSelects()") +
+    " renderAdminPanel=" + _loadSettingsBody.includes("renderAdminPanel"));
+  T("★ تُملأ القائمةُ الفارغةُ فقط (فلا يُمحى ما كتبه المستخدم)",
+    /if\(!el \|\| el\.children\.length \|\| !count\) return;/.test(src));
+  T("القوائم الأربع مشمولة", /admin-buildings-list/.test(src) && /admin-supervisors-list/.test(src) &&
+    /admin-worktypes-list/.test(src) && /admin-techs-list/.test(src));
+  T("لا يُنفَّذ إلا واللوحةُ معروضة", /page-admin-panel[\s\S]{0,80}classList\.contains\("active"\)/.test(src));
+  T("دوالُّ الرسم المستدعاةُ عامّةٌ فعلاً في النواة",
+    ["renderAdminBuildingsList","renderAdminSupervisorsList","renderAdminWorkTypesList","renderAdminTechsList"]
+      .every(f => new RegExp("^function " + f + "\\(\\)", "m").test(HTML)));
   T("★ البذر يُحدِّث القوائم فوراً (وإلا بقيت فارغةً حتى بناءٍ لاحق)",
     /repopulateAllSelects\(\);\s*\}catch\(e\)\{\}\s*\n\s*_audit\("بذر أنواع عمل النظافة"/.test(src));
   T("النواة تعيد بناء قوائم المباني من BUILDINGS (فالتأخّر منها لا من الوحدة)",

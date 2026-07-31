@@ -1486,12 +1486,36 @@ function hookPhotoReport(){
    صحيحاً مهما تأخّرت الإعدادات أو تكرّر البناء. (لغير مشاريع النظافة لا شيء يحدث.) */
 const RELABEL_PAGES = ["page-new","page-tickets","page-tickets-archive"];
 function relabelAllPages(){ RELABEL_PAGES.forEach(p=>{ try{ relabelPage(p); }catch(e){} }); }
+/* ★ لوحةُ الإدارة تُرسم قبل وصول الإعدادات فتبقى قوائمُ المباني والمشرفين والفنيين
+   **فارغةً** حتى يغادر المستخدمُ الصفحةَ ويعود: loadSettings تُستدعى بلا انتظار، وعند
+   اكتمالها تُحدِّث القوائمَ المنسدلة (repopulateAllSelects) لكنها لا تُعيد رسم قوائم
+   اللوحة — وهي تُبنى من BUILDINGS/SUPERVISORS مباشرةً.
+
+   التدخّل أضيقُ ما يمكن: نملأ قائمةً **فارغةً** فقط حين تتوفّر بياناتها. فلا يمكن أن
+   يمحو ما كتبه المستخدم (القائمة الفارغة لا شيء فيها لِيُمحى)، ويعمل لكل المشاريع لأن
+   العلّة في النواة لا في النظافة. */
+function refreshEmptyAdminLists(){
+  const pg=document.getElementById("page-admin-panel");
+  if(!pg || !pg.classList.contains("active")) return;
+  const fill=(elId, count, fn)=>{
+    const el=document.getElementById(elId);
+    if(!el || el.children.length || !count) return;      // ليست فارغة أو لا بيانات
+    try{ if(typeof window[fn]==="function") window[fn](); }catch(e){ console.warn("cleaningOps/"+fn,e); }
+  };
+  let wtCount=0; try{ wtCount=Object.keys(WORK_TYPES||{}).length; }catch(e){}
+  fill("admin-buildings-list",   _buildings().length,   "renderAdminBuildingsList");
+  fill("admin-supervisors-list", _supervisors().length, "renderAdminSupervisorsList");
+  fill("admin-worktypes-list",   wtCount,               "renderAdminWorkTypesList");
+  fill("admin-techs-list",       wtCount,               "renderAdminTechsList");
+}
+
 function hookRepopulate(){
   if(window._coRepopHooked || typeof window.repopulateAllSelects!=="function") return;
   const orig=window.repopulateAllSelects;
   window.repopulateAllSelects=function(){
     const r=orig.apply(this, arguments);
     if(isCleaningProject()) relabelAllPages();
+    try{ refreshEmptyAdminLists(); }catch(e){ console.warn("cleaningOps/adminLists",e); }
     return r;
   };
   window._coRepopHooked=true;
