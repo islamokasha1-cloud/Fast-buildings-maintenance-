@@ -293,10 +293,22 @@ function dueStatus(t){
    تُخزَّن الروابط في سجلّ التنفيذ، ومنه تظهر في التقرير المصوّر. */
 let _execPhotos = [];        // [{url, uploading, error, localPreview}]
 function _storage(){ try{ return (typeof storage!=="undefined" && storage) ? storage : null; }catch(e){ return null; } }
-function pickPhoto(){
+/* مصدرا الصورة: الكاميرا مباشرةً (سريعٌ في الميدان) أو معرضُ الجوال (صورةٌ التُقطت
+   سابقاً). كان capture="environment" مفروضاً دائماً فيفتح الكاميرا ويمنع الاختيار من
+   المعرض — لذلك صار المصدر خياراً صريحاً للمستخدم. */
+function pickPhoto(fromCamera){
+  const room=4-_execPhotos.length;
+  if(room<=0){ _toast("⚠ الحدّ الأقصى ٤ صور للمهمة","warn"); return; }
   const inp=document.createElement("input");
-  inp.type="file"; inp.accept="image/*"; inp.capture="environment"; inp.style.display="none";
-  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(f) _uploadExecPhoto(f); try{ document.body.removeChild(inp); }catch(e){} };
+  inp.type="file"; inp.accept="image/*"; inp.style.display="none";
+  if(fromCamera) inp.setAttribute("capture","environment");   // الكاميرا مباشرةً
+  else inp.multiple=true;                                      // من المعرض: عدّة صورٍ دفعةً
+  inp.onchange=()=>{
+    const files=Array.prototype.slice.call(inp.files||[],0,room);
+    if(files.length<((inp.files||[]).length)) _toast("⚠ أُضيفت "+files.length+" صورة (الحدّ ٤ للمهمة)","warn");
+    files.forEach(f=>_uploadExecPhoto(f));
+    try{ document.body.removeChild(inp); }catch(e){}
+  };
   document.body.appendChild(inp); inp.click();
 }
 function _uploadExecPhoto(file){
@@ -730,8 +742,11 @@ function renderExec(el){
             ${p.error?`<span class="co-photo-st">⚠ تعذّر الرفع</span>`:""}
             <button class="co-photo-x" onclick="cleaningOps.delPhoto(${i})" title="حذف">✕</button>
           </div>`).join("")}
-        ${_execPhotos.length<4?`<button class="co-photo-add" onclick="cleaningOps.pickPhoto()">
-          ${_svg('camera')}<span>إضافة صورة</span></button>`:""}
+        ${_execPhotos.length<4?`
+          <button class="co-photo-add" onclick="cleaningOps.pickPhoto(true)">
+            ${_svg('camera')}<span>التقاط بالكاميرا</span></button>
+          <button class="co-photo-add" onclick="cleaningOps.pickPhoto(false)">
+            ${_svg('image')}<span>من المعرض</span></button>`:""}
       </div>
       <div class="form-group"><label class="form-label">ملاحظة (اختياري)</label>
         <input class="form-input" id="co-exec-note" placeholder="أي ملاحظة على التنفيذ"></div>

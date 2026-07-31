@@ -2287,7 +2287,14 @@ function cleaningOpsTests() {
     /compressImage\(file\)/.test(src) && /st\.ref\("cleaning\/"/.test(src));
   T("مهلةُ رفعٍ تمنع التعليق إلى الأبد", /45000/.test(src) && /timedOut/.test(src));
   T("روابط الصور تُحفَظ في سجلّ التنفيذ", /photos: \(_execPhotos\|\|\[\]\)\.map\(p=>p\.url\)\.filter\(Boolean\)/.test(src));
-  T("حدٌّ أقصى للصور لكل مهمة", /_execPhotos\.length>=4/.test(src));
+  T("حدٌّ أقصى للصور لكل مهمة", /const room=4-_execPhotos\.length;/.test(src));
+  // ★ capture المفروض دائماً كان يفتح الكاميرا ويمنع الاختيار من معرض الجوال
+  T("★ capture يُضبَط للكاميرا فقط لا دائماً (وإلا امتنع المعرض)",
+    /if\(fromCamera\) inp\.setAttribute\("capture","environment"\);/.test(src) &&
+    !/inp\.capture="environment";/.test(src));
+  T("زرّان: التقاطٌ بالكاميرا ومن المعرض", /pickPhoto\(true\)/.test(src) && /pickPhoto\(false\)/.test(src));
+  T("اختيارٌ متعدّدٌ من المعرض ضمن المتبقّي من الحدّ",
+    /else inp\.multiple=true;/.test(src) && /slice\.call\(inp\.files\|\|\[\],0,room\)/.test(src));
 
   // التقرير المصوّر — إدراجٌ للعرض فقط بلا تلويث مجموعة البلاغات
   T("★ تنفيذات النظافة لا تُكتب بلاغاتٍ (لا تُغرق القائمة ولا تشوّه مؤشّرات الصيانة)",
