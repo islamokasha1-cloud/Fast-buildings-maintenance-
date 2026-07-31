@@ -2005,6 +2005,9 @@ function rollupMonthIsolation() {
 function cleaningOpsTests() {
   H("19) تشغيل النظافة (cleaning-operations.js)");
   const CO_PATH = [path.resolve(path.dirname(IDX), "cleaning-operations.js")].find(p => fs.existsSync(p));
+  // وحدة إدارة المشاريع — لنتحقّق أن البطاقة المالية باقيةٌ فيها بعد فصلها عن التشغيل
+  const PM_PATH = [path.resolve(path.dirname(IDX), "project-management.js")].find(p => fs.existsSync(p));
+  const PM_SRC = PM_PATH ? fs.readFileSync(PM_PATH, "utf8") : "";
   if (!CO_PATH) { console.log("  ⏭  cleaning-operations.js غير موجود — تُخطّى"); return; }
   const vm = require("vm");
   const src = fs.readFileSync(CO_PATH, "utf8");
@@ -2262,6 +2265,21 @@ function cleaningOpsTests() {
   T("★ استباقُ التحميل عند معرفة أن المشروع نظافة (لا عند أول ضغطة)",
     /function _prefetch\(\)\{[\s\S]{0,200}if\(!isCleaningProject\(\)\) return;/.test(src) &&
     (src.match(/_prefetch\(\)/g) || []).length >= 3);
+
+  // ══ ★ فصلُ المالي عن التشغيلي (قرار صاحب النظام) ══
+  // الربحيةُ والمستهلكاتُ محلُّهما «إدارة المشاريع › بطاقة المشروع» وحدها؛ شاشاتُ
+  // التشغيل (اللوحة التنفيذية/المتابعة اليومية/تشغيل النظافة) تشغيليةٌ خالصة.
+  T("★ لا ربحيةَ ولا مستهلكاتٍ في شاشات التشغيل",
+    !/cleaningSpend|_finCache|monthlySalaries|adminExpenses/.test(src));
+  T("★ لا حساباتٍ ماليةً من المشتريات في وحدة التشغيل",
+    !/poActualCost|poIsClosed|مواد نظافة/.test(src));
+  T("الفصل موثَّقٌ في الكود (فلا يُعاد إدخالها سهواً)",
+    /محلُّهما «إدارة المشاريع › بطاقة/.test(src));
+  // وفي المقابل: البطاقة المالية باقيةٌ في إدارة المشاريع
+  if (PM_SRC) {
+    T("★ البطاقة المالية باقيةٌ في إدارة المشاريع (لم تُنقَل بل فُصلت)",
+      /function cleaningOverviewHTML\(\)/.test(PM_SRC) && /monthlyValue/.test(PM_SRC));
+  }
 
   // ══ عرض تفاصيل المهمة + تصغير البطاقات وشبكة المباني ══
   T("★ الضغط على البطاقة يفتح تفاصيلها (السبيل الوحيد لمراجعة مهمةٍ نُفِّذت)",
