@@ -2295,8 +2295,18 @@ function cleaningOpsTests() {
   T("سجلّ المهمة بمساواةٍ على حقلٍ واحد (لا يحتاج فهرساً مركّباً)",
     /where\("taskId","==",taskId\)/.test(src) && !/where\("taskId"[^)]*\)\.orderBy/.test(src));
   T("نتيجةٌ متأخّرةٌ لمهمةٍ غادرها المستخدم تُهمَل", /if\(!_detailFor \|\| _detailFor\.id!==id\) return;/.test(src));
-  T("★ المباني تُعرض جنباً إلى جنب (شبكة) لا صفاً لكل مهمة",
-    /\.co-groups\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(320px,1fr\)\)/.test(src));
+  // ★ auto-fit لا auto-fill: الأخير يُنشئ أعمدةً فارغة فينحشر المبنى الواحد في عمودٍ
+  // ضيّق وتبقى بقيّةُ الشاشة خالية — وهو ما شكا منه المستخدم.
+  T("★ المباني بشبكة auto-fit (المبنى الواحد يملأ العرض بلا أعمدةٍ فارغة)",
+    /\.co-groups\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(360px,1fr\)\)/.test(src) &&
+    !/\.co-groups\{[^}]*auto-fill/.test(src));
+  T("★ شبكةٌ داخليةٌ للمهامّ داخل بطاقة المبنى (تكيُّفٌ مع عرضها)",
+    /\.co-tasklist\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(280px,1fr\)\)/.test(src) &&
+    /<div class="co-tasklist">\$\{list\.map\(taskCardHTML\)/.test(src));
+  T("★ أزرارُ البطاقة في سطرٍ مستقلٍّ (لا تخنق العنوان في البطاقة الضيّقة)",
+    /\.co-card-act\{[^}]*justify-content:flex-end;[\s\S]{0,80}border-top:1px dashed/.test(src));
+  T("الشارات لا تُكسَر داخلياً والصفُّ يلتفّ بينها",
+    /white-space:nowrap;line-height:1\.6\}/.test(src));
   T("★ تصغيرُ البطاقات مقصورٌ على صفحات النظافة (لا يمسّ صفحة الوقائية)",
     /#page-\$\{PAGE_ID\} \.ppm-card,#\$\{EXEC_ID\} \.ppm-card,#\$\{DAILY_ID\} \.ppm-card\{padding:9px 11px/.test(src) &&
     !/^\.ppm-card\{/m.test(src));
