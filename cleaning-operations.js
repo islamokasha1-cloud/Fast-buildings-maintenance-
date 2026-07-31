@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vh";
+const MODULE_BUILD = "v18.9vi";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -1718,7 +1718,10 @@ function roundDetailHTML(){
     </div>
     ${groups}
     ${photos?`<div class="card"><div class="co-sec"><div class="co-sec-t">${_svg('image')} صور الجولة</div></div><div class="co-logphotos">${photos}</div></div>`:""}
-    ${canEdit()?`<div class="co-actions"><button class="btn btn-ghost btn-sm" onclick="cleaningOps.removeRound('${_esc(r.id)}')">${_svg('trash')} حذف الجولة</button></div>`:""}`;
+    <div class="co-actions">
+      <button class="btn btn-primary btn-sm" onclick="cleaningOps.printRound('${_esc(r.id)}')">${_svg('fileText')} طباعة تقرير الجولة</button>
+      ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.removeRound('${_esc(r.id)}')">${_svg('trash')} حذف الجولة</button>`:""}
+    </div>`;
 }
 
 /* ── التفاعل ── */
@@ -1927,6 +1930,66 @@ async function exportClientReport(){
   try{ await Promise.all([loadTasks(), loadMonthLog(), loadRounds()]); }catch(e){}
   const html=buildClientReportHTML();
   if(typeof _openPrintWindow==="function"){ _openPrintWindow(html); _audit("تصدير تقرير عميل النظافة", (_proj()&&_proj().name)||""); }
+  else _toast("⚠ تعذّر فتح نافذة الطباعة","warn");
+}
+
+/* ── طباعة تقرير جولةٍ واحدة ── مستندٌ رسميٌّ لجولة تفتيشٍ بعينها (تقييماتٌ وصورٌ ومخالفات) */
+function _printStars(n){ n=Math.round(Number(n)||0); let h=""; for(let i=1;i<=QUALITY_STARS;i++) h+=`<span style="color:${i<=n?'#f59e0b':'#cbd5e1'}">★</span>`; return h; }
+function buildRoundReportHTML(r){
+  const p=_proj()||{}, sc=roundScore(r);
+  const c=sc.pct==null?"#64748b":(sc.pct>=85?"#16a34a":(sc.pct>=60?"#d97706":"#dc2626"));
+  const byB={}; (Array.isArray(r.ratings)?r.ratings:[]).forEach(x=>{ (byB[x.building]=byB[x.building]||[]).push(x); });
+  const groups=Object.keys(byB).map(b=>`
+    <div class="rr-b"><div class="rr-bh">🏢 ${_esc(b)}</div>
+      <table>${byB[b].map(x=>`<tr><td>${_esc(x.workType)}</td><td class="rr-st">${_printStars(x.stars)}</td><td class="rr-num">${x.stars}/${QUALITY_STARS}</td></tr>`).join("")}</table></div>`).join("");
+  const photos=(Array.isArray(r.photos)?r.photos:[]).slice(0,4).map(u=>`<img src="${_esc(u)}" alt="صورة الجولة">`).join("");
+  return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">
+<title>تقرير جولة تفتيش — ${_esc(p.name||p.id||"")} — ${_esc(String(r.date||"").slice(0,10))}</title>
+<style>
+@page{size:A4 portrait;margin:12mm}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:'Cairo','Tajawal','Segoe UI',sans-serif;direction:rtl;color:#1e293b;margin:0;font-size:12.5px;line-height:1.7}
+.rr-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1e3a5f;padding-bottom:12px;margin-bottom:16px}
+.rr-co{font-size:17px;font-weight:900;color:#1e3a5f}.rr-co small{display:block;font-size:11px;font-weight:600;color:#64748b;margin-top:2px}
+.rr-ttl{text-align:left}.rr-ttl b{font-size:15px;color:#1e3a5f}.rr-ttl div{font-size:11px;color:#64748b;margin-top:3px}
+.rr-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.rr-tile{border:1px solid #dbe2ee;border-radius:10px;padding:12px;text-align:center;background:#f8fafc}
+.rr-tv{font-size:22px;font-weight:900}.rr-tl{font-size:10.5px;color:#64748b;font-weight:700;margin-top:3px}
+.rr-viol{background:#fef2f2;border:1px solid #dc2626;color:#b91c1c;border-radius:10px;padding:11px 14px;font-size:12px;font-weight:700;margin-bottom:16px}
+.rr-sec{font-size:13px;font-weight:800;color:#1e3a5f;border-inline-start:4px solid #1e3a5f;padding-inline-start:9px;margin:16px 0 10px}
+.rr-b{border:1px solid #dbe2ee;border-radius:10px;padding:10px 12px;margin-bottom:10px;break-inside:avoid}
+.rr-bh{font-weight:800;color:#1e3a5f;font-size:12.5px;margin-bottom:6px}
+table{width:100%;border-collapse:collapse;font-size:12px}td{padding:6px 8px;border-bottom:1px solid #eef2f7}
+.rr-st{font-size:15px;letter-spacing:1px;text-align:center;white-space:nowrap;direction:ltr}.rr-num{font-family:monospace;text-align:left;color:#64748b;white-space:nowrap}
+.rr-photos{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}.rr-photos img{width:150px;height:110px;object-fit:cover;border-radius:8px;border:1px solid #dbe2ee}
+.rr-sign{margin-top:34px;display:flex;justify-content:space-between}.rr-sign div{width:40%;border-top:1px solid #94a3b8;padding-top:6px;text-align:center;font-size:11px;font-weight:700;color:#334155}
+.rr-foot{margin-top:22px;padding-top:12px;border-top:1px solid #dbe2ee;display:flex;justify-content:space-between;font-size:10.5px;color:#64748b}
+</style></head><body>
+  <div class="rr-head">
+    <div class="rr-co">شركة المباني السريعة للمقاولات<small>نظام إدارة النظافة والمرافق</small></div>
+    <div class="rr-ttl"><b>تقرير جولة تفتيش الجودة</b>
+      <div>${_esc(p.name||p.id||"مشروع نظافة")}</div>
+      <div>تاريخ الجولة: ${_esc(String(r.date||"").slice(0,10))} · المفتِّش: ${_esc(r.by||"—")}</div></div>
+  </div>
+  <div class="rr-tiles">
+    <div class="rr-tile"><div class="rr-tv" style="color:${c}">${sc.avg!=null?sc.avg+" ★":"—"}</div><div class="rr-tl">متوسّط الجودة</div></div>
+    <div class="rr-tile"><div class="rr-tv" style="color:${c}">${sc.pct!=null?sc.pct+"%":"—"}</div><div class="rr-tl">النسبة المئوية</div></div>
+    <div class="rr-tile"><div class="rr-tv" style="color:#1e3a5f">${sc.n}</div><div class="rr-tl">عدد التقييمات</div></div>
+    <div class="rr-tile"><div class="rr-tv" style="color:#1e3a5f">${Object.keys(byB).length}</div><div class="rr-tl">المباني المُقيَّمة</div></div>
+  </div>
+  ${r.violations?`<div class="rr-viol">⚠ المخالفات والملاحظات: ${_esc(r.violations)}</div>`:""}
+  <div class="rr-sec">التقييم التفصيلي (النجوم من ${QUALITY_STARS})</div>
+  ${groups||'<div style="color:#94a3b8">لا تقييماتٍ في هذه الجولة.</div>'}
+  ${photos?`<div class="rr-sec">صور الجولة</div><div class="rr-photos">${photos}</div>`:""}
+  <div class="rr-sign"><div>المفتِّش</div><div>اعتماد العميل</div></div>
+  <div class="rr-foot"><span>أُنشئ آليّاً من نظام إدارة النظافة — ${_today()}</span><span>${_esc(p.name||"")}</span></div>
+</body></html>`;
+}
+function printRound(id){
+  const r=(_rounds||[]).find(x=>x.id===id) || (_roundDetail&&_roundDetail.id===id?_roundDetail:null);
+  if(!r){ _toast("⚠ تعذّر إيجاد الجولة","warn"); return; }
+  const html=buildRoundReportHTML(r);
+  if(typeof _openPrintWindow==="function"){ _openPrintWindow(html); _audit("طباعة تقرير جولة جودة", String(r.date||"")); }
   else _toast("⚠ تعذّر فتح نافذة الطباعة","warn");
 }
 
@@ -2781,7 +2844,7 @@ window.cleaningOps = {
   openDetail, closeDetail,
   saveSupMap, goSupMap,
   newRound, cancelRound, toggleRoundBuilding, setStar, saveRoundForm, openRound, closeRound, removeRound,
-  pickRoundPhoto, delRoundPhoto, goQuality, exportClientReport,
+  pickRoundPhoto, delRoundPhoto, goQuality, exportClientReport, printRound,
   mountExec, unmountExec, refreshExec, goOps,
   mountDaily, unmountDaily, refreshDaily, mountKPI, unmountKPI, refreshKPI, seedWorkTypes, relabelPage, injectPhotoSourceFilter,
   startSync(){ /* لا مزامنة مستقلة — القراءة بـ .get() عند العرض (انضباط المستمعين) */ },
@@ -2795,6 +2858,7 @@ window.cleaningOps = {
   _unassignedBuildings: unassignedBuildings,
   _roundScore: roundScore, _qualityTrend: qualityTrend, _QUALITY_STARS: QUALITY_STARS,
   _buildClientReportHTML: buildClientReportHTML, _monthName: _monthName,
+  _buildRoundReportHTML: buildRoundReportHTML,
   _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
   _salvageObjects: _salvageObjects,
   _svg: _svg,
