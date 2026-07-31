@@ -354,7 +354,26 @@ async function executeTask(task, checkedItems, note){
 /* ════════════════════════════════════════════════════════════
    العرض
    ════════════════════════════════════════════════════════════ */
+/* ★ تحصينٌ بنيويّ ضدّ حلقات الرسم:
+   (أ) حارسُ عدم إعادة الدخول — render لا تستدعي نفسها أثناء تنفيذها.
+   (ب) نداءٌ معلّقٌ واحدٌ فقط بعد التحميل لكل مُركِّب — فحتى لو تعذّر ضبطُ الحالة في
+       مسارٍ لم نتوقّعه، تحصل على رسمةٍ إضافيةٍ واحدة لا حلقةً لا نهائية.
+   يقتل هذا الصنفَ كلَّه لا مساراً بعينه. */
+let _rendering=false;
+let _pendingRender=false, _pendingExec=false, _pendingDaily=false;
+function _afterLoad(flagGet, flagSet, cb){
+  if(flagGet()) return;              // نداءٌ معلّقٌ بالفعل — لا تُكدّس
+  flagSet(true);
+  loadTasks().then(()=>{ flagSet(false); cb(); }).catch(()=>{ flagSet(false); });
+}
 function render(){
+  if(_rendering) return;             // لا تعاود الدخول
+  _rendering=true;
+  try{ _render(); }
+  catch(e){ console.warn("cleaningOps/render",e); }
+  finally{ _rendering=false; }
+}
+function _render(){
   ensurePage();
   const el=document.getElementById("page-"+PAGE_ID);
   if(!el) return;
@@ -369,7 +388,7 @@ function render(){
   if(!_loaded || _loadedFor!==_projId()){
     el.innerHTML = heroHTML() + `<div class="card"><div class="co-empty">
       <div class="co-empty-t">جارٍ تحميل جدول النظافة…</div></div></div>`;
-    loadTasks().then(()=>{ if(_onPage()) render(); });
+    _afterLoad(()=>_pendingRender, v=>_pendingRender=v, ()=>{ if(_onPage()) render(); });
     return;
   }
   if(_editing) { renderEditor(el); return; }
@@ -1154,7 +1173,10 @@ function mountExec(){
   host.classList.add("co-exec-mode");
   if(!_loaded || _loadedFor!==_projId()){
     box.innerHTML = `<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ تحميل بيانات التشغيل…</div></div></div>`;
-    loadTasks().then(()=>{ const b=document.getElementById(EXEC_ID); if(b && isCleaningProject()) b.innerHTML=execHTML(); });
+    _afterLoad(()=>_pendingExec, v=>_pendingExec=v, ()=>{
+      const b=document.getElementById(EXEC_ID);
+      if(b && isCleaningProject()){ try{ b.innerHTML=execHTML(); }catch(e){ console.warn("cleaningOps/execHTML",e); } }
+    });
     return;
   }
   box.innerHTML=execHTML();
@@ -1454,7 +1476,10 @@ function mountDaily(){
   host.classList.add("co-daily-mode");
   if(!_loaded || _loadedFor!==_projId()){
     box.innerHTML=`<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ تحميل مهامّ اليوم…</div></div></div>`;
-    loadTasks().then(()=>{ const b=document.getElementById(DAILY_ID); if(b && isCleaningProject()) b.innerHTML=dailyHTML(); });
+    _afterLoad(()=>_pendingDaily, v=>_pendingDaily=v, ()=>{
+      const b=document.getElementById(DAILY_ID);
+      if(b && isCleaningProject()){ try{ b.innerHTML=dailyHTML(); }catch(e){ console.warn("cleaningOps/dailyHTML",e); } }
+    });
     return;
   }
   box.innerHTML=dailyHTML();
