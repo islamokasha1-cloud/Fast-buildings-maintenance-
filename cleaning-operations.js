@@ -1732,8 +1732,12 @@ function _watchProject(){
     const cur=_projId();
     if(cur!==last){
       last=cur;
-      _tasks=[]; _loaded=false; _loadedFor="";
-      _editing=null; _execFor=null; _execState=[]; _genForm=false; _view="board";
+      // تصفيرٌ كامل: أيُّ حالةٍ تبقى من المشروع السابق تُعرَض في الجديد خطأً.
+      _tasks=[]; _loaded=false; _loadedFor=""; _loadPromise=null; _loading=false;
+      _cfg={supervisorBuildings:{}}; _cfgFor="";   // خريطةُ مشرفي السابق لا تحكم الجديد
+      _editing=null; _execFor=null; _execState=[]; _execPhotos=[];
+      _detailFor=null; _detailLog=null;            // تفاصيلُ مهمةِ السابق لا تبقى معروضة
+      _genForm=false; _genErr=""; _view="board";
       // ارفع لوحات النظافة فوراً عند مغادرة مشروع النظافة — قبل معرفة نوع الجديد
       unmountExec(); unmountDaily();
       ensureTypeKnown(()=>{
