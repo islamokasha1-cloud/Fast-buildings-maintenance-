@@ -2222,6 +2222,67 @@ function cleaningOpsTests() {
   T("العلّة قائمةٌ فعلاً في النواة (وإلا فالإصلاح ميت)",
     /font-size:28px;margin-bottom:10px">\$\{_svgIcon\("hourglass"\)\}/.test(HTML));
 
+  // ══ ربط المشرف بمبانيه + صور التنفيذ + التقرير المصوّر ══
+  T("خريطة المشرف↔المباني في مستندٍ خاصٍّ بالوحدة (لا تغيّر شكل إعدادات النواة)",
+    /_cleaning_cfg/.test(src) && /supervisorBuildings/.test(src));
+  T("★ مشرفُ المهمة يُشتقّ من مبناها مع تجاوزٍ اختياري (مصدرٌ واحد للحقيقة)",
+    /function taskSupervisor\(t\)\{ return \(t&&t\.supervisor\) \? t\.supervisor : supOfBuilding\(t&&t\.building\); \}/.test(src));
+  if (CO && typeof CO._supOfBuilding === "function" && typeof CO._taskSupervisor === "function") {
+    T("مهمةٌ بتجاوزٍ صريح تتبع التجاوز",
+      CO._taskSupervisor({ supervisor: "خالد", building: "مبنى أ" }) === "خالد");
+    T("مهمةٌ بلا تجاوز تتبع مشرف مبناها (فارغٌ إن لم يُسنَد)",
+      CO._taskSupervisor({ building: "مبنى غير مسنَد" }) === "");
+  }
+  // ★ الأهم: لا نُعمي مستخدماً بصمت — من ليس مربوطاً بمبانٍ يرى الكل لا لا شيء
+  T("★ غيرُ المربوط بمبانٍ يرى كل المهام (لا حجب صامت)",
+    /return null;\s*\/\/ غيرُ مربوطٍ بمباني/.test(src));
+  T("الأدمن ومدير المشروع يريان كل المباني",
+    /if\(r==="admin"\|\|r==="project_manager"\) return null;/.test(src));
+  T("كل الشاشات تقرأ من مصدرٍ واحدٍ محترمٍ للنطاق (visibleTasks)",
+    (src.match(/visibleTasks\(\)/g) || []).length >= 8);
+
+  // صور التنفيذ
+  T("الصور تُضغط وتُرفع بآلية النواة (compressImage + Storage)",
+    /compressImage\(file\)/.test(src) && /st\.ref\("cleaning\/"/.test(src));
+  T("مهلةُ رفعٍ تمنع التعليق إلى الأبد", /45000/.test(src) && /timedOut/.test(src));
+  T("روابط الصور تُحفَظ في سجلّ التنفيذ", /photos: \(_execPhotos\|\|\[\]\)\.map\(p=>p\.url\)\.filter\(Boolean\)/.test(src));
+  T("حدٌّ أقصى للصور لكل مهمة", /_execPhotos\.length>=4/.test(src));
+
+  // التقرير المصوّر — إدراجٌ للعرض فقط بلا تلويث مجموعة البلاغات
+  T("★ تنفيذات النظافة لا تُكتب بلاغاتٍ (لا تُغرق القائمة ولا تشوّه مؤشّرات الصيانة)",
+    !/collection\(\s*COLLECTION\(\)\s*\)/.test(src) && !/_tickets["'`]\)\.doc\(/.test(src));
+  T("لفُّ generatePhotoReport مقصورٌ على مشاريع النظافة",
+    /window\.generatePhotoReport\s*=\s*function/.test(src) &&
+    /if\(!isCleaningProject\(\)\) return orig\.apply\(this, arguments\);/.test(src));
+
+  // فلتر «مصدر التقرير» — يُحقَن لمشاريع النظافة وحدها
+  T("★ فلتر مصدر التقرير يُحقَن في فلاتر النواة (بلا تعديل index.html)",
+    /#page-photo-report \.report-filters/.test(src) && /co-pr-source/.test(src));
+  T("الفلتر يُزال فوراً لمشروعٍ غير نظافة",
+    /if\(!wrap \|\| !isCleaningProject\(\)\)\{[\s\S]{0,120}existing\.parentElement\.remove\(\);/.test(src));
+  T("خيارات المصدر الثلاثة موجودة",
+    /value=""[^>]*>الكل/.test(src) && /value="cleaning"/.test(src) && /value="tickets"/.test(src));
+  T("★ «البلاغات فقط» يُرجع السلوك الأصلي بلا أي إدراج",
+    /if\(src==="tickets"\) return orig\.apply\(this, arguments\);/.test(src));
+  T("★ «النظافة فقط» يستبدل القائمة ولا يضمّها للبلاغات",
+    /if\(src==="cleaning"\)\{[\s\S]{0,200}photoReportTickets = extra;/.test(src));
+  T("«النظافة فقط» بلا نتائج يعطي رسالةً صريحة لا قائمةَ بلاغاتٍ مضلِّلة",
+    /لا توجد أعمال نظافة مصوّرة مطابقة للتصفية/.test(src));
+  T("الحاوية المستهدَفة موجودةٌ فعلاً في index.html (وإلا فالحقن ميت)",
+    /class="report-filters"/.test(HTML) && /id="page-photo-report"/.test(HTML));
+  T("لا يُدرَج في التقرير إلا ما له صورة", /filter\(r=>Array\.isArray\(r\.photos\)&&r\.photos\.length\)/.test(src));
+  if (CO && typeof CO._logAsTicket === "function") {
+    const tk = CO._logAsTicket({ id: "x", at: "2026-07-31T08:00:00Z", building: "مبنى أ", floor: "الدور 1",
+      workType: "نظافة الأرضيات", supervisor: "خالد", by: "أحمد", taskName: "مسح الأرضيات",
+      doneItems: 3, totalItems: 4, photos: ["u1", "u2"] });
+    T("★ سجلّ التنفيذ يتحوّل لشكل بلاغٍ يفهمه التقرير",
+      tk.status === "مغلق" && tk.building === "مبنى أ" && tk.workType === "نظافة الأرضيات" &&
+      tk.supervisor === "خالد" && tk.photos.length === 2, JSON.stringify(tk.photos));
+    T("الوصف يحمل اسم المهمة ونسبةَ بنودها عند غياب الملاحظة",
+      tk.desc === "مسح الأرضيات" && tk.workDone === "3/4 بند فحص", tk.workDone);
+    T("مُعلَّمٌ أنه من النظافة (يميَّز عند الحاجة)", tk._cleaning === true);
+  }
+
   // ══ توليد الجدول بالذكاء الاصطناعي: بترُ الردّ لا يُضيّع المهامّ المكتملة ══
   // العربية مكلفةٌ توكنياً، فسقفٌ ضيّق يبتر الردّ ويُفشل تحليل JSON كلّه.
   T("★ سقف التوكنات واسع (2500 كانت تبتر الردّ العربي)", /maxTokens:\s*8000/.test(src) && !/maxTokens:\s*2500/.test(src));

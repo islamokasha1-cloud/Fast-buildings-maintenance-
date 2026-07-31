@@ -129,6 +129,62 @@ function _safeKey(projId){ return String(projId).replace(/[\/.]/g,"_"); }
 /* ════════════ مسارات المجموعات (معزولة لكل مشروع كبقية النظام) ════════════ */
 function tasksCol(){ const id=_projId(); if(!id) return ""; return id+"_cleaning_tasks"+(_isDev()?"_dev":""); }
 function logCol(){   const id=_projId(); if(!id) return ""; return id+"_cleaning_log"+(_isDev()?"_dev":""); }
+function cfgDoc(){   const id=_projId(); if(!id) return ""; return "meta/"+_safeKey(id)+"_cleaning_cfg"+(_isDev()?"_dev":""); }
+
+/* ════════════ ربط المشرف بمبانيه ════════════
+   النواة تحفظ المشرفين قائمةَ أسماءٍ مسطّحة بلا نطاقٍ مكاني. نضيف الخريطة في مستندٍ
+   خاصٍّ بنا (لا نغيّر شكل إعدادات النواة) — فيرى كلُّ مشرفٍ جدولَ مبانيه وحدها.
+   مشرفُ المهمة **يُشتقّ من مبناها** (مصدرٌ واحد للحقيقة، فلا يتضارب عند نقل مبنى من
+   مشرفٍ لآخر)، مع إمكان تجاوزٍ صريح لكل مهمة عند الاستثناء (حقل supervisor). */
+let _cfg = { supervisorBuildings:{} };
+let _cfgFor = "";
+async function loadCfg(force){
+  const database=_db(), path=cfgDoc();
+  if(!database || !path){ _cfg={supervisorBuildings:{}}; return _cfg; }
+  if(_cfgFor===_projId() && !force) return _cfg;
+  try{
+    const snap=await database.doc(path).get();
+    const d=(snap&&snap.exists)?(snap.data()||{}):{};
+    _cfg={ supervisorBuildings:(d.supervisorBuildings&&typeof d.supervisorBuildings==="object")?d.supervisorBuildings:{} };
+    _cfgFor=_projId();
+  }catch(e){ console.warn("cleaningOps/loadCfg",e); _cfg={supervisorBuildings:{}}; }
+  return _cfg;
+}
+async function saveCfg(map){
+  const database=_db(), path=cfgDoc();
+  if(!database || !path){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
+  try{
+    await database.doc(path).set({ supervisorBuildings:map, updatedAt:new Date().toISOString(), updatedBy:_userName() }, { merge:true });
+    _cfg={ supervisorBuildings:map }; _cfgFor=_projId();
+    _audit("ربط مشرفي النظافة بالمباني", Object.keys(map).length+" مشرف");
+    return true;
+  }catch(e){ console.warn("cleaningOps/saveCfg",e); _toast("⚠ تعذّر حفظ الربط","warn"); return false; }
+}
+function _supervisors(){ try{ return Array.isArray(SUPERVISORS)?SUPERVISORS:[]; }catch(e){ return []; } }
+// مشرفُ مبنًى معيّن (أوّل من يملكه في الخريطة)
+function supOfBuilding(b){
+  const m=_cfg.supervisorBuildings||{};
+  for(const s of Object.keys(m)){ if(Array.isArray(m[s]) && m[s].indexOf(b)!==-1) return s; }
+  return "";
+}
+// مشرفُ المهمة: التجاوز الصريح إن وُجد، وإلا من مبناها
+function taskSupervisor(t){ return (t&&t.supervisor) ? t.supervisor : supOfBuilding(t&&t.building); }
+// نطاقُ المستخدم الحالي: null = كل المباني (أدمن/مدير)، أو قائمةُ مبانيه (مشرف)
+function myBuildings(){
+  const r=_role();
+  if(r==="admin"||r==="project_manager") return null;
+  const me=_userName();
+  const m=_cfg.supervisorBuildings||{};
+  if(me && Array.isArray(m[me])) return m[me].slice();
+  return null;   // غيرُ مربوطٍ بمباني ⟵ لا نحجب عنه شيئاً (لا نُعمي المستخدم بصمت)
+}
+function inMyScope(t){
+  const mine=myBuildings();
+  if(!mine) return true;
+  return mine.indexOf(t&&t.building)!==-1;
+}
+// المهامّ المرئية للمستخدم الحالي — مصدرٌ واحدٌ تستعمله كل الشاشات
+function visibleTasks(){ const mine=myBuildings(); return mine ? _tasks.filter(inMyScope) : _tasks; }
 
 /* ════════════ الحالة ════════════ */
 let _tasks   = [];      // مهام المشروع الحالي
@@ -152,6 +208,7 @@ async function loadTasks(force){
   try{
     const snap = await database.collection(col).limit(500).get();
     _tasks = snap.docs.map(d=>Object.assign({id:d.id}, d.data()||{}));
+    await loadCfg(force);   // خريطة المشرف↔المباني — تحكم ما يراه كلُّ مستخدم
     _loaded=true; _loadedFor=_projId();
   }catch(e){
     console.warn("cleaningOps/loadTasks",e);
@@ -192,7 +249,7 @@ function overdueDays(t){ return Math.abs(_dayDiff(String(t.nextDueDate||"").slic
 // إحصاءات لوحة اليوم — التغطية = ما نُفِّذ اليوم ÷ ما كان مجدولاً لليوم (منفَّذ + مستحقّ).
 // تقبل قائمةً صريحة (للفحوص) وإلا تعمل على مهام المشروع المحمَّلة.
 function boardStats(list){
-  const active=(Array.isArray(list)?list:_tasks).filter(t=>!isDisabled(t));
+  const active=(Array.isArray(list)?list:visibleTasks()).filter(t=>!isDisabled(t));
   const done  = active.filter(doneToday);
   const due   = active.filter(isDue);
   const over  = active.filter(isOverdue);
@@ -215,6 +272,46 @@ function dueStatus(t){
 // تنفيذ المهمة: يُسجَّل في سجلّ التنفيذ (للتغطية والتاريخ) ثم يُقدَّم الاستحقاق التالي
 // بمقدار تكرارها من **اليوم** (لا من الاستحقاق السابق) — فالمهمة المتأخّرة لا تتراكم
 // استحقاقاتها الفائتة بلا معنى في عملٍ يوميٍّ متكرّر.
+/* ════════════ صور التنفيذ ════════════
+   نعيد استخدام آلية النواة: compressImage للضغط ثم رفعٌ إلى Firebase Storage.
+   تُخزَّن الروابط في سجلّ التنفيذ، ومنه تظهر في التقرير المصوّر. */
+let _execPhotos = [];        // [{url, uploading, error, localPreview}]
+function _storage(){ try{ return (typeof storage!=="undefined" && storage) ? storage : null; }catch(e){ return null; } }
+function pickPhoto(){
+  const inp=document.createElement("input");
+  inp.type="file"; inp.accept="image/*"; inp.capture="environment"; inp.style.display="none";
+  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(f) _uploadExecPhoto(f); try{ document.body.removeChild(inp); }catch(e){} };
+  document.body.appendChild(inp); inp.click();
+}
+function _uploadExecPhoto(file){
+  const st=_storage();
+  if(!st){ _toast("⚠ خدمة التخزين غير متاحة","warn"); return; }
+  if(_execPhotos.length>=4){ _toast("⚠ الحدّ الأقصى ٤ صور للمهمة","warn"); return; }
+  const rec={ url:"", uploading:true, error:false, preview:"" };
+  try{ rec.preview=URL.createObjectURL(file); }catch(e){}
+  _execPhotos.push(rec);
+  renderTabBody();
+  const done=()=>{ const b=document.getElementById("pm-tab-body")||document.getElementById("page-"+PAGE_ID); if(b) render(); };
+  const comp = (typeof compressImage==="function") ? compressImage(file) : Promise.resolve(file);
+  comp.then(blob=>{
+    if(!blob){ rec.uploading=false; rec.error=true; done(); return; }
+    const id=_projId()||"proj", tid=(_execFor&&_execFor.id)||"task";
+    const ref=st.ref("cleaning/"+id+"/"+tid+"/"+Date.now()+".jpg");
+    let timedOut=false;
+    const to=setTimeout(()=>{ timedOut=true; rec.uploading=false; rec.error=true;
+      _toast("⚠ تأخّر رفع الصورة — يمكنك التسجيل بدونها","warn"); done(); }, 45000);
+    ref.put(blob).then(snap=>snap.ref.getDownloadURL()).then(url=>{
+      clearTimeout(to); if(timedOut) return;
+      rec.url=url; rec.uploading=false; rec.error=false; done();
+    }).catch(err=>{
+      clearTimeout(to); if(timedOut) return;
+      console.warn("cleaningOps/uploadPhoto",err);
+      rec.uploading=false; rec.error=true; _toast("⚠ تعذّر رفع الصورة","warn"); done();
+    });
+  }).catch(()=>{ rec.uploading=false; rec.error=true; done(); });
+}
+function delExecPhoto(i){ _execPhotos.splice(i,1); render(); }
+
 async function executeTask(task, checkedItems, note){
   const database=_db(); if(!database){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
   const days = FREQ_DAYS[task.freq] || 1;
@@ -225,8 +322,10 @@ async function executeTask(task, checkedItems, note){
     const rec = {
       id: _uid(), taskId: task.id, taskName: task.name||"",
       building: task.building||"", floor: task.floor||"", workType: task.workType||"",
+      supervisor: taskSupervisor(task)||"",
       date: _today(), at: now, by: _userName(),
       doneItems: doneCount, totalItems: list.length,
+      photos: (_execPhotos||[]).map(p=>p.url).filter(Boolean),
       note: String(note||"").slice(0,500)
     };
     await database.collection(logCol()).doc(rec.id).set(rec);
@@ -261,7 +360,7 @@ function render(){
   if(_editing) { renderEditor(el); return; }
   if(_execFor) { renderExec(el); return; }
   el.innerHTML = heroHTML() + (_genForm ? genFormHTML() : "") +
-                 (_view==="board" ? boardHTML() : allTasksHTML());
+                 (_view==="sup" ? supMapHTML() : _view==="board" ? boardHTML() : allTasksHTML());
 }
 function _onPage(){ const pg=document.getElementById("page-"+PAGE_ID); return !!pg && pg.classList.contains("active"); }
 
@@ -279,6 +378,7 @@ function heroHTML(){
         <button class="btn btn-sm ${_view==='board'?'co-seg-on':''}" onclick="cleaningOps.setView('board')">${_svg('dashboard')} لوحة اليوم</button>
         <button class="btn btn-sm ${_view==='all'?'co-seg-on':''}" onclick="cleaningOps.setView('all')">${_svg('clipboardList')} كل المهام</button>
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.addTask()">${_svg('plus')} مهمة جديدة</button>`:""}
+        ${canEdit()?`<button class="btn btn-sm ${_view==='sup'?'co-seg-on':''}" onclick="cleaningOps.setView('sup')">${_svg('users')} المشرفون والمناطق</button>`:""}
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.toggleGen()">${_svg('sparkles')} توليد بالذكاء الاصطناعي</button>`:""}
         <button class="btn btn-sm" onclick="cleaningOps.refresh()">${_svg('rotateCcw')} تحديث</button>
       </div>
@@ -310,7 +410,7 @@ function boardHTML(){
       <div class="st-lbl">${lbl}</div>
     </div>`;
 
-  if(!_tasks.length){
+  if(!visibleTasks().length){
     return `<div class="card"><div class="co-empty">
       ${_svg('sparkles')}
       <div class="co-empty-t">لا توجد مهام نظافة بعد</div>
@@ -333,7 +433,7 @@ function boardHTML(){
     : `<div class="co-hint" style="margin:0">لا مهام مجدولة لليوم.</div>`;
 
   // مجموعات حسب المبنى (المنطقة) — المتأخّر ثم المستحقّ ثم المنجز
-  const active=_tasks.filter(t=>!isDisabled(t));
+  const active=visibleTasks().filter(t=>!isDisabled(t));
   const todays=active.filter(t=>isDue(t)||doneToday(t));
   const byB={};
   todays.forEach(t=>{ const b=t.building||"بلا مبنى"; (byB[b]=byB[b]||[]).push(t); });
@@ -386,6 +486,7 @@ function taskCardHTML(t){
             ${t.floor?`<span class="mi">${_svg('pin')}</span> ${_esc(t.floor)}`:""}
             ${list.length?`<span class="mi">${_svg('clipboardCheck')}</span> ${list.length} بند`:""}
             ${t.assignee?`<span class="mi">${_svg('user')}</span> ${_esc(t.assignee)}`:""}
+            ${taskSupervisor(t)?`<span class="mi">${_svg('shield')}</span> ${_esc(taskSupervisor(t))}`:""}
           </div>
           <div class="co-pills">
             <span class="ppm-pill freq">${_esc(t.workType||"")}</span>
@@ -404,9 +505,9 @@ function iconOf(wt){ const w=CLEANING_WORK_TYPES[wt]; return w?w.icon:"sparkles"
 
 /* ── كل المهام (جدول داخل .card) ── */
 function allTasksHTML(){
-  if(!_tasks.length) return `<div class="card"><div class="co-empty">
+  if(!visibleTasks().length) return `<div class="card"><div class="co-empty">
     ${_svg('clipboardList')}<div class="co-empty-t">لا توجد مهام نظافة بعد</div></div></div>`;
-  const rows=_tasks.slice().sort((a,b)=>{
+  const rows=visibleTasks().slice().sort((a,b)=>{
     const c=String(a.building||"").localeCompare(String(b.building||""),"ar");
     return c!==0 ? c : dueStatus(a).sort-dueStatus(b).sort;
   }).map(t=>{
@@ -416,6 +517,7 @@ function allTasksHTML(){
       <td class="co-td-name"><span class="co-td-ic">${_svg(iconOf(t.workType))}</span> ${_esc(t.name||"")}</td>
       <td>${_esc(t.building||"—")}${t.floor?" / "+_esc(t.floor):""}</td>
       <td>${_esc(t.workType||"—")}</td>
+      <td>${_esc(taskSupervisor(t)||"—")}</td>
       <td>${_esc(t.freq||"—")}</td>
       <td class="co-num">${list.length}</td>
       <td class="co-num">${t.lastExecuted?_esc(String(t.lastExecuted).slice(0,10)):"—"}</td>
@@ -425,11 +527,64 @@ function allTasksHTML(){
   }).join("");
   return `<div class="card">
     <div class="co-sec"><div class="co-sec-t">${_svg('clipboardList')} كل المهام</div>
-      <span class="co-sec-c">${_tasks.length} مهمة</span></div>
+      <span class="co-sec-c">${visibleTasks().length} مهمة</span></div>
     <div class="co-table-wrap"><table class="co-table">
-      <thead><tr><th>المهمة</th><th>المنطقة</th><th>نوع العمل</th><th>التكرار</th><th>بنود</th><th>آخر تنفيذ</th><th>الحالة</th><th></th></tr></thead>
+      <thead><tr><th>المهمة</th><th>المنطقة</th><th>نوع العمل</th><th>المشرف</th><th>التكرار</th><th>بنود</th><th>آخر تنفيذ</th><th>الحالة</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>
   </div>`;
+}
+
+/* ── ربط المشرفين بالمباني (للأدمن/مدير المشروع) ── */
+function supMapHTML(){
+  const sups=_supervisors(), blds=_buildings();
+  const m=_cfg.supervisorBuildings||{};
+  if(!sups.length || !blds.length){
+    return `<div class="card"><div class="co-empty">${_svg('users')}
+      <div class="co-empty-t">${!sups.length?"لا مشرفون مضافون بعد":"لا مبانٍ مضافة بعد"}</div>
+      <div class="co-empty-s">أضِفهم من: الإدارة › لوحة الإدارة › ${!sups.length?"المشرفون":"المباني"}.</div></div></div>`;
+  }
+  // مبنًى غير مسنَدٍ لأحد = فجوةُ مسؤولية
+  const assigned=new Set(); Object.values(m).forEach(a=>(a||[]).forEach(b=>assigned.add(b)));
+  const orphans=blds.filter(b=>!assigned.has(b));
+  return `
+    <div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('users')} المشرفون والمناطق</div>
+        <span class="co-sec-c">كلُّ مشرفٍ يرى جدولَ مبانيه وحدها</span></div>
+      ${orphans.length?`<div class="ppm-overdue-banner"><span class="co-bnr-ic">${_svg('alertTriangle')}</span>
+        <span>${orphans.length} مبنًى بلا مشرف: ${_esc(orphans.join("، "))} — لن يظهر جدولها لأحدٍ من المشرفين.</span></div>`:""}
+      ${sups.map((s,si)=>`
+        <div class="co-supbox">
+          <div class="co-sup-h">${_svg('user')} ${_esc(s)}
+            <span class="co-sec-c">${((m[s]||[]).length)} مبنى</span></div>
+          <div class="co-sup-blds">
+            ${blds.map(b=>{
+              const on=(m[s]||[]).indexOf(b)!==-1;
+              const other=!on && supOfBuilding(b);
+              return `<label class="co-bld ${on?'on':''} ${other?'taken':''}" title="${other?'مُسنَد إلى '+_esc(other):''}">
+                <input type="checkbox" data-sup="${si}" data-bld="${_esc(b)}" ${on?'checked':''}> ${_esc(b)}
+                ${other?`<small>(${_esc(other)})</small>`:""}
+              </label>`;
+            }).join("")}
+          </div>
+        </div>`).join("")}
+      <div class="co-actions" style="margin-top:12px">
+        <button class="btn btn-primary btn-sm" onclick="cleaningOps.saveSupMap()">${_svg('checkCircle')} حفظ الربط</button>
+        <button class="btn btn-ghost btn-sm" onclick="cleaningOps.setView('board')">إلغاء</button>
+      </div>
+      <div class="co-hint">المبنى الواحد لمشرفٍ واحد. عند اختياره لمشرفٍ جديد يُنزَع من السابق تلقائياً.</div>
+    </div>`;
+}
+async function saveSupMap(){
+  const sups=_supervisors();
+  const map={};
+  document.querySelectorAll('#page-'+PAGE_ID+' .co-sup-blds input[type="checkbox"]').forEach(cb=>{
+    if(!cb.checked) return;
+    const s=sups[parseInt(cb.dataset.sup)]; const b=cb.dataset.bld;
+    if(!s||!b) return;
+    (map[s]=map[s]||[]).push(b);
+  });
+  const ok=await saveCfg(map);
+  if(ok){ _toast("✅ حُفظ ربط المشرفين بالمباني","success"); _view="board"; render(); }
 }
 
 /* ── محرّر المهمة ── */
@@ -462,11 +617,16 @@ function renderEditor(el){
           <select class="form-select" id="co-freq">${opt(FREQ_KEYS, t.freq||"يومي")}</select></div>
       </div>
       <div class="co-grid2">
-        <div class="form-group"><label class="form-label">المسؤول (اختياري)</label>
-          <input class="form-input" id="co-assignee" value="${_esc(t.assignee||"")}" placeholder="اسم العامل/المشرف"></div>
+        <div class="form-group"><label class="form-label">المشرف المسؤول</label>
+          <select class="form-select" id="co-sup">
+            <option value="">— حسب المبنى (${_esc(supOfBuilding(t.building)||"غير مُسنَد")}) —</option>
+            ${_supervisors().map(x=>`<option value="${_esc(x)}" ${t.supervisor===x?'selected':''}>${_esc(x)}</option>`).join("")}
+          </select></div>
         <div class="form-group"><label class="form-label">تاريخ أول/تالي تنفيذ</label>
           <input class="form-input" type="date" id="co-due" value="${_esc(String(t.nextDueDate||_today()).slice(0,10))}"></div>
       </div>
+      <div class="form-group"><label class="form-label">العامل المنفِّذ (اختياري)</label>
+        <input class="form-input" id="co-assignee" value="${_esc(t.assignee||"")}" placeholder="اسم العامل"></div>
       <div class="form-group"><label class="form-label">وصف مختصر (اختياري)</label>
         <input class="form-input" id="co-desc" value="${_esc(t.desc||"")}"></div>
       <div class="form-group"><label class="form-label">بنود قائمة الفحص — بندٌ في كل سطر</label>
@@ -505,6 +665,21 @@ function renderExec(el){
         ${list.length-doneN>0?`<span class="s-warn" style="flex:${list.length-doneN}"></span>`:""}
       </div>`:""}
       <div class="co-ck-list">${items}</div>
+      <div class="co-sec" style="margin:14px 0 8px">
+        <div class="co-sec-t">${_svg('camera')} صور التنفيذ</div>
+        <span class="co-sec-c">${_execPhotos.length}/4 — تظهر في التقرير المصوّر</span>
+      </div>
+      <div class="co-photos">
+        ${_execPhotos.map((p,i)=>`
+          <div class="co-photo ${p.error?'err':''}">
+            ${p.url||p.preview?`<img src="${_esc(p.url||p.preview)}" alt="صورة التنفيذ">`:""}
+            ${p.uploading?`<span class="co-photo-st">⏳ جارٍ الرفع…</span>`:""}
+            ${p.error?`<span class="co-photo-st">⚠ تعذّر الرفع</span>`:""}
+            <button class="co-photo-x" onclick="cleaningOps.delPhoto(${i})" title="حذف">✕</button>
+          </div>`).join("")}
+        ${_execPhotos.length<4?`<button class="co-photo-add" onclick="cleaningOps.pickPhoto()">
+          ${_svg('camera')}<span>إضافة صورة</span></button>`:""}
+      </div>
       <div class="form-group"><label class="form-label">ملاحظة (اختياري)</label>
         <input class="form-input" id="co-exec-note" placeholder="أي ملاحظة على التنفيذ"></div>
       <div class="co-actions">
@@ -653,13 +828,13 @@ async function doGen(){
 }
 
 /* ════════════ معالِجات الواجهة ════════════ */
-function setView(v){ _view=v; render(); }
+function setView(v){ _view=v; _genForm=false; render(); }
 function toggleGen(){ _genForm=!_genForm; _genErr=""; render(); }
 async function refresh(){ await loadTasks(true); render(); _toast("✅ حُدِّث الجدول","success"); }
 
 function addTask(){
   _editing = { id:_uid(), name:"", building:"", floor:"", workType:WT_KEYS[0], freq:"يومي",
-    assignee:"", desc:"", checklist:[], nextDueDate:_today(), lastExecuted:"", lastExecutedBy:"",
+    assignee:"", supervisor:"", desc:"", checklist:[], nextDueDate:_today(), lastExecuted:"", lastExecutedBy:"",
     disabled:false, createdAt:new Date().toISOString(), createdBy:_userName() };
   render();
 }
@@ -676,6 +851,7 @@ function _syncEditor(){
   _editing.workType = g("co-wt");
   _editing.freq     = g("co-freq");
   _editing.assignee = g("co-assignee").trim();
+  _editing.supervisor = g("co-sup");
   _editing.desc     = g("co-desc").trim();
   _editing.nextDueDate = g("co-due") || _today();
   _editing.checklist = g("co-checklist").split("\n").map(s=>s.trim()).filter(Boolean).slice(0,25);
@@ -705,10 +881,11 @@ function exec(id){
   _execFor=t;
   const list=Array.isArray(t.checklist)?t.checklist:[];
   _execState=list.map(()=>false);
+  _execPhotos=[];
   render();
 }
 function toggleItem(i,on){ _execState[i]=!!on; render(); }
-function cancelExec(){ _execFor=null; _execState=[]; render(); }
+function cancelExec(){ _execFor=null; _execState=[]; _execPhotos=[]; render(); }
 async function confirmExec(){
   if(!_execFor) return;
   const note=((document.getElementById("co-exec-note")||{}).value||"").trim();
@@ -721,7 +898,7 @@ async function confirmExec(){
     if(!go) return;
   }
   const ok=await executeTask(_execFor, _execState, note);
-  if(ok){ _execFor=null; _execState=[]; _toast("✅ سُجِّل التنفيذ","success"); render(); }
+  if(ok){ _execFor=null; _execState=[]; _execPhotos=[]; _toast("✅ سُجِّل التنفيذ","success"); render(); }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -788,7 +965,7 @@ function contractProgress(){
 /* التغطية لكل مبنى — أيّ المناطق متخلّفة اليوم */
 function coverageByBuilding(list){
   const m={};
-  (Array.isArray(list)?list:_tasks).filter(t=>!isDisabled(t)).forEach(t=>{
+  (Array.isArray(list)?list:visibleTasks()).filter(t=>!isDisabled(t)).forEach(t=>{
     if(!(isDue(t)||doneToday(t))) return;
     const b=t.building||"بلا مبنى";
     if(!m[b]) m[b]={ name:b, done:0, due:0, overdue:0 };
@@ -878,7 +1055,7 @@ function execHTML(){
     </div>` : "";
 
   // المهام المتأخّرة — أقدم أولاً
-  const late=_tasks.filter(t=>isOverdue(t)).sort((a,b)=>overdueDays(b)-overdueDays(a)).slice(0,8);
+  const late=visibleTasks().filter(t=>isOverdue(t)).sort((a,b)=>overdueDays(b)-overdueDays(a)).slice(0,8);
   const lateBlock = `
     <div class="card">
       <div class="co-sec"><div class="co-sec-t">${_svg('alertTriangle')} المهامّ المتأخّرة</div>
@@ -931,7 +1108,7 @@ function execHTML(){
       <div class="ops-live">
         <div class="lbl">نسبة التغطية</div>
         <div class="big" style="color:${vC}">${s.coverage}%</div>
-        <div class="u"><span class="live"></span>${_tasks.filter(t=>!isDisabled(t)).length} مهمة نشطة</div>
+        <div class="u"><span class="live"></span>${visibleTasks().filter(t=>!isDisabled(t)).length} مهمة نشطة</div>
       </div>
     </div>
 
@@ -1072,6 +1249,101 @@ function relabelPage(pageId){
   }catch(e){ console.warn("cleaningOps/relabel",e); }
 }
 
+/* ════════════ التقرير المصوّر: إدراج تنفيذات النظافة المصوّرة ════════════
+   التقرير يبني قائمته من البلاغات (photoReportTickets). لا نحوّل تنفيذات النظافة إلى
+   بلاغات — جدولٌ يوميٌّ يعني مئات البلاغات شهرياً تُغرق القائمة وتشوّه مؤشّرات الصيانة.
+   بدلاً من ذلك نلفّ generatePhotoReport فنُلحق سجلّات التنفيذ المصوّرة بشكل بلاغٍ
+   للعرض فقط، محترمين نفس فلاتر التقرير. لغير مشاريع النظافة لا شيء يحدث. */
+let _logCache = [];   // سجلّات التنفيذ المصوّرة (تُقرأ عند توليد التقرير فقط)
+async function loadPhotoLog(fromYmd, toYmd){
+  const database=_db(), col=logCol();
+  if(!database || !col){ _logCache=[]; return _logCache; }
+  try{
+    let q=database.collection(col);
+    if(fromYmd) q=q.where("date",">=",fromYmd);
+    if(toYmd)   q=q.where("date","<=",toYmd);
+    const snap=await q.limit(1000).get();
+    _logCache=snap.docs.map(d=>d.data()||{}).filter(r=>Array.isArray(r.photos)&&r.photos.length);
+  }catch(e){ console.warn("cleaningOps/loadPhotoLog",e); _logCache=[]; }
+  return _logCache;
+}
+// سجلّ تنفيذٍ ⟵ شكل بلاغٍ يفهمه التقرير المصوّر (عرضٌ فقط، بلا كتابة)
+function _logAsTicket(r){
+  return {
+    id: r.id, createdAt: r.at, closedAt: r.at,
+    building: r.building||"", location: r.floor||"",
+    workType: r.workType||"", maintType: "نظافة دورية",
+    priority: "روتيني 🔵 (صيانة دورية)",
+    supervisor: r.supervisor||"", tech: r.by||"",
+    status: "مغلق", desc: r.taskName||"مهمة نظافة",
+    workDone: r.note || ((r.doneItems||0)+"/"+(r.totalItems||0)+" بند فحص"),
+    photos: (r.photos||[]).slice(), ticketPhoto:"",
+    _cleaning: true
+  };
+}
+/* فلتر «مصدر التقرير» — يُحقَن في فلاتر التقرير المصوّر لمشاريع النظافة وحدها.
+   الكل | النظافة فقط | البلاغات فقط. */
+const PR_SRC_ID="co-pr-source";
+function injectPhotoSourceFilter(){
+  const wrap=document.querySelector("#page-photo-report .report-filters");
+  const existing=document.getElementById(PR_SRC_ID);
+  if(!wrap || !isCleaningProject()){
+    if(existing && existing.parentElement) existing.parentElement.remove();
+    return;
+  }
+  if(existing) return;
+  const g=document.createElement("div");
+  g.className="form-group"; g.style.marginBottom="0";
+  g.innerHTML='<label class="form-label">مصدر التقرير</label>'+
+    '<select class="form-select" id="'+PR_SRC_ID+'">'+
+      '<option value="">الكل (نظافة + بلاغات)</option>'+
+      '<option value="cleaning">أعمال النظافة فقط</option>'+
+      '<option value="tickets">البلاغات فقط</option>'+
+    '</select>';
+  wrap.insertBefore(g, wrap.firstChild);
+  const sel=g.querySelector("select");
+  if(sel) sel.onchange=()=>{ try{ generatePhotoReport(); }catch(e){} };
+}
+function _prSource(){ const el=document.getElementById(PR_SRC_ID); return el?el.value:""; }
+
+function hookPhotoReport(){
+  if(window._coPhotoHooked || typeof window.generatePhotoReport!=="function") return;
+  const orig=window.generatePhotoReport;
+  window.generatePhotoReport=function(){
+    if(!isCleaningProject()) return orig.apply(this, arguments);
+    const src=_prSource();
+    // «البلاغات فقط» ⟵ السلوك الأصلي بلا أي إدراج
+    if(src==="tickets") return orig.apply(this, arguments);
+    const r=orig.apply(this, arguments);
+    const g=id=>{ const el=document.getElementById(id); return el?el.value:""; };
+    const from=g("pr-from"), to=g("pr-to"), rb=g("pr-building"), rt=g("pr-type"), rs=g("pr-supervisor");
+    loadPhotoLog(from, to).then(recs=>{
+      const extra=recs
+        .filter(x=>(!rb||x.building===rb) && (!rt||x.workType===rt) && (!rs||(x.supervisor||"")===rs))
+        .map(_logAsTicket);
+      try{
+        if(src==="cleaning"){
+          // النظافة وحدها — نستبدل القائمة ولا نضمّها للبلاغات
+          photoReportTickets = extra;
+          const out=document.getElementById("photo-report-output");
+          if(!extra.length){
+            if(out) out.innerHTML='<div class="card" style="text-align:center;color:var(--muted);padding:40px">لا توجد أعمال نظافة مصوّرة مطابقة للتصفية في هذه الفترة</div>';
+            const pb=document.getElementById("print-photo-btn"); if(pb) pb.style.display="none";
+            return;
+          }
+          if(typeof renderPhotoReportOutput==="function") renderPhotoReportOutput(photoReportTickets);
+          return;
+        }
+        if(!extra.length) return;
+        photoReportTickets = (Array.isArray(photoReportTickets)?photoReportTickets:[]).concat(extra);
+        if(typeof renderPhotoReportOutput==="function") renderPhotoReportOutput(photoReportTickets);
+      }catch(e){ console.warn("cleaningOps/photoReport",e); }
+    });
+    return r;
+  };
+  window._coPhotoHooked=true;
+}
+
 /* ══ لفّ repopulateAllSelects — التعريب يصمد أمام وصول الإعدادات المتأخّر ══
    الإعدادات (المباني/المشرفون/أنواع العمل) تصل من Firestore **بعد** رسم الصفحة، وعندها
    تستدعي النواة repopulateAllSelects فتعيد بناء كل الخيارات — فيُمحى تعريبنا السابق
@@ -1104,7 +1376,7 @@ function dailyHTML(){
     </div>`;
   const pendingOnTime=Math.max(0,s.due-s.overdue);
   const seg=(n,cls)=> n>0?`<span class="${cls}" style="flex:${n}"></span>`:"";
-  const active=_tasks.filter(t=>!isDisabled(t));
+  const active=visibleTasks().filter(t=>!isDisabled(t));
   const todays=active.filter(t=>isDue(t)||doneToday(t)).sort((a,b)=>dueStatus(a).sort-dueStatus(b).sort);
   const d=new Date();
   const dayName=["الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"][d.getDay()];
@@ -1267,6 +1539,7 @@ function hookShowPage(){
     if(id==="dashboard"){ try{ mountExec(); }catch(e){ console.warn("cleaningOps/mountExec",e); } }
     // المتابعة اليومية: نسخةُ النظافة بدل نسخة البلاغات (إخفاءٌ لا حذف)
     if(id==="daily"){ try{ mountDaily(); }catch(e){ console.warn("cleaningOps/mountDaily",e); } }
+    if(id==="photo-report"){ try{ injectPhotoSourceFilter(); }catch(e){ console.warn("cleaningOps/prFilter",e); } }
     // تعريب مصطلحات صفحات أوامر العمل + ضمانُ وجود أنواع عمل النظافة
     if(id==="new"||id==="tickets"||id==="tickets-archive"){
       try{ seedWorkTypes(); }catch(e){}
@@ -1307,6 +1580,7 @@ function _watchProject(){
         if(dash && dash.classList.contains("active")) mountExec();
         const dly=document.getElementById("page-daily");
         if(dly && dly.classList.contains("active")) mountDaily();
+        injectPhotoSourceFilter();
         seedWorkTypes();
       });
     }
@@ -1375,6 +1649,27 @@ function injectCSS(){
 .co-ck:has(input:checked){background:var(--sla-ok-bg);border-color:var(--sla-ok-bd);color:var(--sla-ok)}
 .co-ck input{width:17px;height:17px;cursor:pointer;flex:none;accent-color:var(--sla-ok)}
 .co-hint{font-size:11.5px;color:var(--muted);margin-top:11px;line-height:1.9}
+.co-photos{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px}
+.co-photo{position:relative;width:96px;height:96px;border-radius:11px;overflow:hidden;border:1px solid var(--border);background:var(--surface2);flex:none}
+.co-photo.err{border-color:var(--sla-crit)}
+.co-photo img{width:100%;height:100%;object-fit:cover;display:block}
+/* طبقتا الشارة والحذف تعلوان صورةَ المستخدم لا سطحَ المنصة، فألوانهما مستقلةٌ عن الثيم
+   عمداً (أبيضُ فوق حجابٍ داكن يقرأ في الوضعين) — لا تُشتقّ من التوكنز. */
+.co-photo-st{position:absolute;inset-block-end:0;inset-inline:0;background:rgba(0,0,0,.62);color:rgba(255,255,255,.96);font-size:9.5px;font-weight:700;text-align:center;padding:3px 2px}
+.co-photo-x{position:absolute;inset-block-start:3px;inset-inline-end:3px;width:21px;height:21px;border:none;border-radius:50%;background:rgba(0,0,0,.55);color:rgba(255,255,255,.96);font-size:12px;line-height:1;cursor:pointer;padding:0}
+.co-photo-add{width:96px;height:96px;border:1.5px dashed var(--border);border-radius:11px;background:var(--surface2);color:var(--muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;font-size:10.5px;font-weight:700;font-family:'Cairo',sans-serif;cursor:pointer;flex:none}
+.co-photo-add:hover{border-color:var(--primary);color:var(--primary)}
+.co-photo-add svg{width:21px;height:21px;stroke-width:1.8}
+.co-supbox{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--surface2)}
+.co-sup-h{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:800;color:var(--primary);margin-bottom:9px}
+.co-sup-h svg{width:15px;height:15px;stroke-width:2}
+.co-sup-h .co-sec-c{margin-inline-start:auto}
+.co-sup-blds{display:flex;flex-wrap:wrap;gap:7px}
+.co-bld{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-size:11.5px;font-weight:700;cursor:pointer}
+.co-bld.on{background:var(--sla-ok-bg);border-color:var(--sla-ok-bd);color:var(--sla-ok)}
+.co-bld.taken{opacity:.6}
+.co-bld small{color:var(--muted);font-weight:600}
+.co-bld input{width:15px;height:15px;cursor:pointer;accent-color:var(--sla-ok)}
 /* أيقونة شريط التنبيه: المنصة تستعمل في .ppm-overdue-banner نقطةً بالـ CSS لا SVG، فلا
    قاعدة تضبط أبعاده هناك — وSVG بلا width/height داخل حاوية flex يتمدّد ليملأها. نغلّفه
    بمحدِّدٍ خاصٍّ بنا (لا نعرّف قاعدةً على صنف المنصة) فيبقى بحجمه الصحيح. */
@@ -1403,11 +1698,12 @@ function init(){
   hookShowPage();
   hookProjectModals();
   hookRepopulate();
+  hookPhotoReport();
   ensureTypeKnown(()=>injectSidebarButton());
   injectSidebarButton();
   _watchProject();
   // القائمة الجانبية يُعاد بناؤها بعد الدخول/تبديل المشروع — أعِد الحقن عند التغيير
-  const obs=new MutationObserver(()=>{ injectSidebarButton(); hookShowPage(); hookProjectModals(); hookRepopulate(); });
+  const obs=new MutationObserver(()=>{ injectSidebarButton(); hookShowPage(); hookProjectModals(); hookRepopulate(); hookPhotoReport(); injectPhotoSourceFilter(); });
   obs.observe(document.body,{childList:true,subtree:true});
 }
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", init);
@@ -1417,15 +1713,17 @@ else init();
 window.cleaningOps = {
   render, setView, refresh, toggleGen, doGen,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
-  exec, toggleItem, cancelExec, confirmExec,
+  exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
+  saveSupMap,
   mountExec, unmountExec, refreshExec, goOps,
-  mountDaily, unmountDaily, refreshDaily, seedWorkTypes, relabelPage,
+  mountDaily, unmountDaily, refreshDaily, seedWorkTypes, relabelPage, injectPhotoSourceFilter,
   startSync(){ /* لا مزامنة مستقلة — القراءة بـ .get() عند العرض (انضباط المستمعين) */ },
   version: VERSION,
   build: MODULE_BUILD,
   // مكشوفة لفحوص hail-tests (دوال نقية)
   _boardStats: boardStats,
-  _coverageByBuilding: coverageByBuilding,
+  _coverageByBuilding: coverageByBuilding, _supOfBuilding: supOfBuilding,
+  _logAsTicket: _logAsTicket, _taskSupervisor: taskSupervisor,
   _salvageObjects: _salvageObjects,
   _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,
