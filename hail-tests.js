@@ -2189,6 +2189,25 @@ function cleaningOpsTests() {
   T("★ تبديلُ المشروع يُصفّر حالةَ الجولات (لا تسرّب بين المشاريع)",
     /_rounds=\[\]; _roundsLoaded=false;/.test(src) && /_editingRound=null; _roundPhotos=\[\]; _roundDetail=null;/.test(src));
 
+  // ══ ★ v18.9vg: تقرير العميل (PDF) ══
+  if (CO && typeof CO._buildClientReportHTML === "function") {
+    T("اسمُ الشهر بالعربية صحيح", CO._monthName("2026-07") === "يوليو 2026" && CO._monthName("2026-01") === "يناير 2026");
+    const html = CO._buildClientReportHTML();   // آمنٌ بلا بيانات (لا سقوط)
+    T("★ التقرير مستندٌ HTML كاملٌ جاهزٌ للطباعة", typeof html === "string" &&
+      /^<!DOCTYPE html>/.test(html) && /@page\{size:A4/.test(html) && /dir="rtl"/.test(html));
+    const need = ["تقرير أداء أعمال النظافة","الملخّص التنفيذي","الالتزام بالجدول","جودة النتيجة","التغطية حسب المنطقة","جولاتُ التفتيش","اعتماد العميل"];
+    const missing = need.filter(x => html.indexOf(x) === -1);
+    T("★ التقرير يحوي كلَّ أقسام العميل", missing.length === 0, missing.length ? "ناقص: " + missing.join("، ") : "كلُّها موجودة");
+    // القرار: أداءُ المشرفين داخليٌّ لا يظهر في تقرير العميل
+    T("★ أداءُ المشرفين غيرُ مُضمَّنٍ في تقرير العميل", html.indexOf("أداء المشرفين") === -1);
+  }
+  T("★ زرُّ «تصدير تقرير العميل» في صفحة المؤشّرات + يُعيد استخدام نافذة الطباعة (بلا مكتبةٍ جديدة)",
+    /cleaningOps\.exportClientReport\(\)/.test(src) &&
+    /if\(typeof _openPrintWindow==="function"\)\{ _openPrintWindow\(html\)/.test(src) &&
+    !/jspdf|html2pdf|html2canvas/i.test(src));
+  T("★ التصدير يُحمّل البيانات قبل البناء (المهامّ والسجلّ والجولات)",
+    /await Promise\.all\(\[loadTasks\(\), loadMonthLog\(\), loadRounds\(\)\]\)/.test((src.match(/async function exportClientReport\(\)\{[\s\S]*?\n\}/)||[""])[0]));
+
   // ── العزل بمعرّف المشروع (كبقية النظام) ──
   T("★ المجموعتان معزولتان بمعرّف المشروع",
     /_cleaning_tasks/.test(src) && /_cleaning_log/.test(src) && src.includes('id+"_cleaning_tasks"'));

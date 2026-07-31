@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vf";
+const MODULE_BUILD = "v18.9vg";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -1811,6 +1811,125 @@ function _uploadRoundPhoto(file){
 function delRoundPhoto(i){ _captureRoundForm(); _roundPhotos.splice(i,1); render(); }
 function goQuality(){ try{ showPage(PAGE_ID); setView("quality"); }catch(e){} }
 
+/* ════════════════════════════════════════════════════════════
+   تقرير العميل (PDF) — يُثبت الأداء لتجديد العقد
+   يجمع في مستندٍ واحد: الالتزامَ بالجدول + جودةَ النتيجة + التغطية + الاتّجاه الشهري.
+   يعيد استخدام نافذة الطباعة القائمة (_openPrintWindow) فالعربيةُ سليمةٌ RTL بلا مكتبات.
+   المستندُ ذاتيُّ الأنماط (يُفتح في نافذةٍ نظيفة)، فألوانُه صريحةٌ للطباعة على ورقٍ أبيض.
+   ════════════════════════════════════════════════════════════ */
+const _AR_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
+function _monthName(ym){ const m=parseInt(String(ym).slice(5,7),10)-1; return (_AR_MONTHS[m]||"")+" "+String(ym).slice(0,4); }
+function _qcol(pct){ return pct==null?"#64748b":(pct>=85?"#16a34a":(pct>=60?"#d97706":"#dc2626")); }
+
+function buildClientReportHTML(){
+  const p=_proj()||{}, today=_today(), ym=today.slice(0,7);
+  const s=boardStats(), kpis=cleaningKPIs(), cov=coverageByBuilding(), tr=qualityTrend(), cp=contractProgress();
+  const cur=tr.current;
+  const monthRounds=(_rounds||[]).filter(r=>String(r.date||"").slice(0,7)===ym);
+  const execCount=(kpis.find(k=>k.id==="CLN-06")||{}).val||0;
+  const photoPct=(kpis.find(k=>k.id==="CLN-04")||{}).val;
+  const itemsPct=(kpis.find(k=>k.id==="CLN-05")||{}).val;
+
+  const tile=(val,lbl,c)=>`<div class="rp-tile"><div class="rp-tile-v" style="color:${c||'#1e3a5f'}">${val}</div><div class="rp-tile-l">${lbl}</div></div>`;
+  const kpiCard=k=>{
+    const c=k.holiday?"#64748b":(k.target==null?"#1e3a5f":((k.dir==="up"?k.val>=k.target:k.val<=k.target)?"#16a34a":(k.val>=(k.target||0)*0.7?"#d97706":"#dc2626")));
+    return `<div class="rp-kpi"><div class="rp-kpi-h"><span>${_esc(k.name)}</span><span class="rp-kpi-id">${k.id}</span></div>
+      <div class="rp-kpi-v" style="color:${c}">${k.holiday?"إجازة":k.val+(k.raw?"":"%")}</div>
+      <div class="rp-kpi-s">${_esc(k.sub||"")}${k.target!=null?` · الهدف ${k.dir==="up"?"≥":"≤"}${k.target}%`:""}</div></div>`;
+  };
+  const maxBar=Math.max.apply(null,[1].concat(tr.months.map(m=>m.pct||0)));
+  const bars=tr.months.slice(-6).map(m=>`
+    <div class="rp-bar"><div class="rp-bar-t"><span style="height:${Math.round((m.pct||0)/maxBar*100)}%;background:${_qcol(m.pct)}"></span></div>
+      <div class="rp-bar-p" style="color:${_qcol(m.pct)}">${m.pct}%</div><div class="rp-bar-l">${_esc(m.ym.slice(5))}</div></div>`).join("");
+  const weak=tr.dims.slice(0,4).map(d=>`<tr><td>${_esc(d.name)}</td><td class="rp-num">${d.avg} ★</td>
+    <td><div class="rp-track"><span style="width:${d.pct}%;background:${_qcol(d.pct)}"></span></div></td><td class="rp-num" style="color:${_qcol(d.pct)}">${d.pct}%</td></tr>`).join("");
+  const covRows=cov.map(b=>`<tr><td>${_esc(b.name)}</td><td class="rp-num">${b.done}/${b.sched}</td>
+    <td><div class="rp-track"><span style="width:${b.pct}%;background:${_qcol(b.pct)}"></span></div></td><td class="rp-num" style="color:${_qcol(b.pct)}">${b.pct}%</td></tr>`).join("");
+  const roundRows=monthRounds.map(r=>{ const sc=roundScore(r);
+    return `<tr><td class="rp-num">${_esc(String(r.date||"").slice(0,10))}</td><td>${_esc(r.by||"—")}</td>
+      <td class="rp-num" style="color:${_qcol(sc.pct)}">${sc.avg!=null?sc.avg+" ★ ("+sc.pct+"%)":"—"}</td>
+      <td>${_esc(String(r.violations||"—").slice(0,160))}</td></tr>`; }).join("");
+
+  return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">
+<title>تقرير أداء النظافة — ${_esc(p.name||p.id||"")}</title>
+<style>
+@page{size:A4 portrait;margin:12mm 12mm 14mm}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:'Cairo','Tajawal','Segoe UI',sans-serif;direction:rtl;color:#1e293b;margin:0;font-size:12px;line-height:1.6}
+.rp-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1e3a5f;padding-bottom:12px;margin-bottom:16px}
+.rp-co{font-size:17px;font-weight:900;color:#1e3a5f}.rp-co small{display:block;font-size:11px;font-weight:600;color:#64748b;margin-top:2px}
+.rp-title{text-align:left}.rp-title b{font-size:15px;color:#1e3a5f}.rp-title div{font-size:11px;color:#64748b;margin-top:3px}
+.rp-sec{font-size:13px;font-weight:800;color:#1e3a5f;border-inline-start:4px solid #1e3a5f;padding-inline-start:9px;margin:18px 0 10px}
+.rp-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.rp-tile{border:1px solid #dbe2ee;border-radius:10px;padding:12px;text-align:center;background:#f8fafc}
+.rp-tile-v{font-size:22px;font-weight:900}.rp-tile-l{font-size:10.5px;color:#64748b;font-weight:700;margin-top:3px}
+.rp-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.rp-kpi{border:1px solid #dbe2ee;border-radius:9px;padding:10px}
+.rp-kpi-h{display:flex;justify-content:space-between;font-size:10.5px;font-weight:800;color:#334155}.rp-kpi-id{font-family:monospace;color:#94a3b8;font-weight:700}
+.rp-kpi-v{font-size:20px;font-weight:900;margin:3px 0}.rp-kpi-s{font-size:9.5px;color:#64748b;font-weight:600}
+.rp-quality{display:grid;grid-template-columns:1fr 1.4fr;gap:14px;align-items:start}
+.rp-bars{display:flex;gap:8px;align-items:flex-end;height:120px;border:1px solid #dbe2ee;border-radius:10px;padding:12px}
+.rp-bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end}
+.rp-bar-t{width:100%;max-width:40px;flex:1;background:#eef2f7;border-radius:6px;display:flex;align-items:flex-end;overflow:hidden}
+.rp-bar-t span{width:100%;display:block;border-radius:6px 6px 0 0}
+.rp-bar-p{font-family:monospace;font-size:10px;font-weight:900}.rp-bar-l{font-size:9.5px;color:#64748b;font-weight:700}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{background:#eef2f7;color:#1e3a5f;text-align:right;padding:7px 9px;font-size:10.5px;font-weight:800;border-bottom:1px solid #dbe2ee}
+td{padding:6px 9px;border-bottom:1px solid #eef2f7}.rp-num{font-family:monospace;text-align:right;white-space:nowrap}
+.rp-track{width:100%;height:8px;background:#eef2f7;border-radius:5px;overflow:hidden}.rp-track span{display:block;height:100%}
+.rp-summary{font-size:11.5px;color:#475569;background:#f8fafc;border:1px solid #dbe2ee;border-radius:10px;padding:12px 14px}
+.rp-foot{margin-top:26px;padding-top:12px;border-top:1px solid #dbe2ee;display:flex;justify-content:space-between;font-size:10.5px;color:#64748b}
+.rp-sign{margin-top:30px;display:flex;justify-content:space-between}.rp-sign div{width:40%;border-top:1px solid #94a3b8;padding-top:6px;text-align:center;font-size:11px;font-weight:700;color:#334155}
+.rp-empty{color:#94a3b8;font-size:11px;padding:8px}
+</style></head><body>
+  <div class="rp-head">
+    <div class="rp-co">شركة المباني السريعة للمقاولات<small>نظام إدارة النظافة والمرافق</small></div>
+    <div class="rp-title"><b>تقرير أداء أعمال النظافة</b>
+      <div>${_esc(p.name||p.id||"مشروع نظافة")}</div>
+      <div>الفترة: ${_monthName(ym)} · تاريخ الإصدار: ${today}</div></div>
+  </div>
+
+  <div class="rp-summary">يلخّص هذا التقريرُ أداءَ أعمال النظافة لهذا الشهر: جودةَ النتيجة (من جولات التفتيش)،
+    والالتزامَ بالجدول اليومي، وتغطيةَ المناطق — إثباتاً موثَّقاً لمستوى الخدمة المُقدَّمة.</div>
+
+  <div class="rp-sec">الملخّص التنفيذي</div>
+  <div class="rp-tiles">
+    ${tile(cur?cur.avg+" ★":"—", "متوسّط جودة الشهر", _qcol(cur&&cur.pct))}
+    ${tile(s.holiday?"إجازة":s.coverage+"%", "تغطية اليوم", s.holiday?"#64748b":_qcol(s.coverage))}
+    ${tile(execCount, "تنفيذات هذا الشهر", "#1e3a5f")}
+    ${tile(cp?cp.pct+"%":"—", "انقضاء مدة العقد", "#1e3a5f")}
+  </div>
+
+  <div class="rp-sec">الالتزام بالجدول اليومي</div>
+  <div class="rp-kpis">${kpis.map(kpiCard).join("")}</div>
+
+  <div class="rp-sec">جودة النتيجة — اتّجاه التفتيش</div>
+  ${tr.roundsCount?`<div class="rp-quality">
+    <div><div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:6px">الاتّجاه الشهري (آخر ٦ أشهر)</div>
+      <div class="rp-bars">${bars}</div></div>
+    <div><div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:6px">أضعفُ أنواع العمل — أولويةُ التحسين</div>
+      <table>${weak||'<tr><td class="rp-empty">—</td></tr>'}</table></div>
+  </div>`:`<div class="rp-empty">لا جولاتِ تفتيشٍ مُسجَّلةٌ بعد.</div>`}
+
+  <div class="rp-sec">التغطية حسب المنطقة</div>
+  <table><thead><tr><th>المنطقة / المبنى</th><th>المُنفَّذ</th><th>النسبة</th><th>%</th></tr></thead>
+    <tbody>${covRows||'<tr><td colspan="4" class="rp-empty">لا مهامَّ مجدولةٌ لليوم.</td></tr>'}</tbody></table>
+
+  <div class="rp-sec">جولاتُ التفتيش والمخالفات — ${_monthName(ym)}</div>
+  <table><thead><tr><th>التاريخ</th><th>المفتِّش</th><th>الدرجة</th><th>المخالفات والملاحظات</th></tr></thead>
+    <tbody>${roundRows||'<tr><td colspan="4" class="rp-empty">لا جولاتِ تفتيشٍ هذا الشهر.</td></tr>'}</tbody></table>
+
+  <div class="rp-sign"><div>مُعِدُّ التقرير</div><div>اعتماد العميل</div></div>
+  <div class="rp-foot"><span>أُنشئ آليّاً من نظام إدارة النظافة — ${today}</span><span>${_esc(p.name||"")}</span></div>
+</body></html>`;
+}
+async function exportClientReport(){
+  try{ await Promise.all([loadTasks(), loadMonthLog(), loadRounds()]); }catch(e){}
+  const html=buildClientReportHTML();
+  if(typeof _openPrintWindow==="function"){ _openPrintWindow(html); _audit("تصدير تقرير عميل النظافة", (_proj()&&_proj().name)||""); }
+  else _toast("⚠ تعذّر فتح نافذة الطباعة","warn");
+}
+
 function kpiHTML(){
   const list=cleaningKPIs();
   const card=k=>{
@@ -1837,6 +1956,7 @@ function kpiHTML(){
       <div class="page-hero-actions">
         <button class="btn btn-sm" onclick="cleaningOps.goOps()">${_svg('clipboardList')} تشغيل النظافة</button>
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.goSupMap()">${_svg('users')} المشرفون والمناطق</button>`:""}
+        <button class="btn btn-sm" onclick="cleaningOps.exportClientReport()">${_svg('fileText')} تصدير تقرير العميل</button>
         <button class="btn btn-sm" onclick="cleaningOps.refreshKPI()">${_svg('rotateCcw')} تحديث</button>
       </div>
     </div>
@@ -2661,7 +2781,7 @@ window.cleaningOps = {
   openDetail, closeDetail,
   saveSupMap, goSupMap,
   newRound, cancelRound, toggleRoundBuilding, setStar, saveRoundForm, openRound, closeRound, removeRound,
-  pickRoundPhoto, delRoundPhoto, goQuality,
+  pickRoundPhoto, delRoundPhoto, goQuality, exportClientReport,
   mountExec, unmountExec, refreshExec, goOps,
   mountDaily, unmountDaily, refreshDaily, mountKPI, unmountKPI, refreshKPI, seedWorkTypes, relabelPage, injectPhotoSourceFilter,
   startSync(){ /* لا مزامنة مستقلة — القراءة بـ .get() عند العرض (انضباط المستمعين) */ },
@@ -2674,6 +2794,7 @@ window.cleaningOps = {
   _supervisorPerf: supervisorPerf, _logSupervisor: logSupervisor,
   _unassignedBuildings: unassignedBuildings,
   _roundScore: roundScore, _qualityTrend: qualityTrend, _QUALITY_STARS: QUALITY_STARS,
+  _buildClientReportHTML: buildClientReportHTML, _monthName: _monthName,
   _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
   _salvageObjects: _salvageObjects,
   _svg: _svg,
