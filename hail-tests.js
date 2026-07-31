@@ -2107,6 +2107,34 @@ function cleaningOpsTests() {
   // ── لا يظهر إلا لمشاريع النظافة ──
   T("الزرّ والصفحة مقصوران على مشاريع «إدارة نظافة»",
     src.includes("isCleaningProject()") && /shouldShow\s*=\s*canView\(\)\s*&&\s*isCleaningProject\(\)/.test(src));
+
+  // ── ★ مطابقة هوية المنصة: الصفحة تستعمل أصناف المنصة الأصلية لا مفرداتٍ موازية ──
+  // كل صنفٍ تعتمده الصفحة يجب أن يكون **معرَّفاً في index.html** — وإلا فهو صنفٌ ميت
+  // يجعل الصفحة تبدو مختلفةً عن بقية النظام.
+  const PLATFORM = ["page-hero", "page-hero-titles", "page-hero-title", "page-hero-sub",
+    "page-hero-actions", "ph-ico", "stat-tile", "st-ico", "st-val", "st-lbl",
+    "ppm-card", "ppm-chip", "ppm-pill", "ppm-due-badge", "ppm-meta-row", "ppm-overdue-banner",
+    "hbar", "hleg", "form-group", "form-label", "form-input", "form-select"];
+  const usedNotDefined = PLATFORM.filter(c => src.includes(`"${c}`) || src.includes(`${c} `) || src.includes(`class="${c}`))
+    .filter(c => !new RegExp("\\." + c + "[{ ,:.]").test(HTML));
+  T("★ كل أصناف المنصة التي تستعملها الصفحة معرَّفةٌ في index.html",
+    usedNotDefined.length === 0, usedNotDefined.join("، ") || "لا أصناف ميتة");
+
+  // الصفحة تبني رأسها بـ .page-hero وبلاطاتها بـ .stat-tile وبطاقاتها بـ .ppm-card
+  T("★ الرأس بـ .page-hero (نفس كل صفحات المنصة)", /class="page-hero"/.test(src));
+  T("★ المؤشّرات بـ .stat-tile لا بطاقاتٍ خاصة", /class="stat-tile"/.test(src) && !/class="co-stat\b/.test(src));
+  T("★ بطاقة المهمة بـ .ppm-card (مفردة المنصة للعمل الدوريّ)", /class="ppm-card/.test(src));
+  T("★ التغطية بشريط الصحة .hbar لا شريطٍ خاص", /class="hbar"/.test(src) && !/co-progress/.test(src));
+  T("★ تنبيه التأخّر بـ .ppm-overdue-banner لا تنبيهٍ خاص", /ppm-overdue-banner/.test(src) && !/class="co-alert"/.test(src));
+  T("النماذج بـ .form-group/.form-label (لا حقولٌ خاصة)", /class="form-group"/.test(src) && /class="form-label"/.test(src));
+
+  // ── الجودة: لا ألوانٍ مصمتة خارج توكنز المنصة (تكسر الثيم الداكن) ──
+  const cssBlock = (src.match(/st\.textContent\s*=\s*`([\s\S]*?)`;/) || [])[1] || "";
+  const hardHex = [...cssBlock.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(m => m[0]);
+  T("★ CSS الصفحة بلا ألوانٍ مصمتة (توكنز فقط ⇒ يعمل في الثيم الداكن)",
+    hardHex.length === 0, hardHex.join("، ") || "لا ألوان مصمتة");
+  T("الأرقام بخطّ المنصة أحاديّ العرض (JetBrains Mono tabular)",
+    /JetBrains Mono/.test(cssBlock) && /tabular-nums/.test(cssBlock));
 }
 
 /* ══ التشغيل ══ */

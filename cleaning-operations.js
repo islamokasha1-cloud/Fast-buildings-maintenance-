@@ -22,6 +22,16 @@
    ── مؤجَّل (موثّق في docs/cleaning-operations-proposal.md) ──
    الحضور المربوط بالمشروع والتغطية بالعمالة، شكاوى النظافة بلغتها، جولات الجودة بالتقييم.
 
+   ── الهوية البصرية: لغة المنصة نفسها، لا لغةٌ موازية ──
+   الصفحة لا تخترع مفرداتٍ بصرية: تستخدم أصنافَ المنصة الأصلية كما هي —
+   .page-hero (رأس الصفحة) · .stat-tile (بلاطات المؤشّرات) · .card (الحاويات) ·
+   .ppm-card/.ppm-chip/.ppm-pill/.ppm-due-badge/.ppm-meta-row (بطاقةُ عملٍ دوريّ، وهي
+   مفردةُ المنصة لهذا النوع من المحتوى بالضبط) · .ppm-overdue-banner (تنبيه التأخّر) ·
+   .hbar/.hleg (شريط الصحة المُقسَّم — يعبّر عن التغطية بلغة المنصة نفسها) · .btn ·
+   .form-group/.form-label/.form-input. فتتبع الصفحةُ أيَّ تغييرٍ في هوية المنصة تلقائياً،
+   وتعمل في الثيمين الفاتح والداكن بلا كودٍ إضافي. الـ CSS الخاص بها طبقةٌ رقيقةٌ لما لا
+   مقابل له فقط (بنود قائمة الفحص، ترويسة القسم، الحالة الفارغة، الجدول).
+
    ── ملاحظة تقنية مقصودة ──
    لا onSnapshot في هذه الوحدة إطلاقاً: القراءة بـ .get() عند العرض فقط. سببه انضباط
    المستمعين في هذا النظام (تراكم targetId يُطلق خلل Firestore الداخلي ca9/b815) — فلا
@@ -189,13 +199,14 @@ function boardStats(list){
   return { total:active.length, done:done.length, due:due.length, overdue:over.length, scheduled, coverage };
 }
 
+// حالة المهمة بمفردات المنصة: card = صنف .ppm-card (لون شريط الحالة)، badge = صنف .ppm-due-badge
 function dueStatus(t){
-  if(isDisabled(t)) return { lbl:"موقوفة", color:"var(--muted)", sort:9 };
-  if(doneToday(t))  return { lbl:"نُفِّذت اليوم", color:"var(--accent)", sort:3 };
+  if(isDisabled(t)) return { lbl:"موقوفة", color:"var(--muted)", card:"", badge:"soon", sort:9 };
+  if(doneToday(t))  return { lbl:"نُفِّذت اليوم", color:"var(--sla-ok)", card:"completed", badge:"ok", sort:3 };
   const diff=_dayDiff(String(t.nextDueDate||"").slice(0,10), _today());
-  if(diff<0)  return { lbl:"متأخّرة "+Math.abs(diff)+" يوم", color:"var(--danger)", sort:0 };
-  if(diff===0)return { lbl:"مستحقّة اليوم", color:"var(--warn)", sort:1 };
-  return { lbl:"بعد "+diff+" يوم", color:"var(--muted)", sort:2 };
+  if(diff<0)  return { lbl:"متأخّرة "+Math.abs(diff)+" يوم", color:"var(--sla-crit)", card:"due-today", badge:"overdue", sort:0 };
+  if(diff===0)return { lbl:"مستحقّة اليوم", color:"var(--sla-warn)", card:"due-soon", badge:"today", sort:1 };
+  return { lbl:"بعد "+diff+" يوم", color:"var(--muted)", card:"", badge:"soon", sort:2 };
 }
 
 /* ════════════ التنفيذ ════════════ */
@@ -232,114 +243,167 @@ function render(){
   const el=document.getElementById("page-"+PAGE_ID);
   if(!el) return;
   if(!isCleaningProject()){
-    el.innerHTML = `<div class="co-head"><h2 class="co-title">${_icon('sparkles')} تشغيل النظافة</h2></div>
-      <div class="co-empty">هذا القسم يظهر لمشاريع <b>«إدارة نظافة»</b> فقط.<br>
-      صنّف المشروع من: الإدارة › تعديل المشروع › نوع المشروع = «إدارة نظافة».</div>`;
+    el.innerHTML = heroHTML() + `<div class="card"><div class="co-empty">
+      ${_svg('lock')}
+      <div class="co-empty-t">هذا القسم لمشاريع «إدارة نظافة»</div>
+      <div class="co-empty-s">صنّف المشروع من: الإدارة › تعديل المشروع › نوع المشروع = «إدارة نظافة».</div>
+    </div></div>`;
     return;
   }
   if(!_loaded || _loadedFor!==_projId()){
-    el.innerHTML = `<div class="co-head"><h2 class="co-title">${_icon('sparkles')} تشغيل النظافة</h2></div>
-      <div class="co-empty">جارٍ تحميل جدول النظافة…</div>`;
+    el.innerHTML = heroHTML() + `<div class="card"><div class="co-empty">
+      <div class="co-empty-t">جارٍ تحميل جدول النظافة…</div></div></div>`;
     loadTasks().then(()=>{ if(_onPage()) render(); });
     return;
   }
   if(_editing) { renderEditor(el); return; }
   if(_execFor) { renderExec(el); return; }
-  el.innerHTML = headerHTML() + (_genForm ? genFormHTML() : "") +
+  el.innerHTML = heroHTML() + (_genForm ? genFormHTML() : "") +
                  (_view==="board" ? boardHTML() : allTasksHTML());
 }
 function _onPage(){ const pg=document.getElementById("page-"+PAGE_ID); return !!pg && pg.classList.contains("active"); }
 
-function headerHTML(){
+/* رأس الصفحة — نفس .page-hero المستخدَم في كل صفحات المنصة (الوقائية/الأصول/التقارير):
+   تدرّجٌ كحليّ، أيقونةٌ في مربّعٍ زجاجيّ، عنوانٌ ووصفٌ، وأزرارُ إجراءٍ شفّافة. */
+function heroHTML(){
   const p=_proj();
   return `
-    <div class="co-head">
-      <h2 class="co-title">${_icon('sparkles')} تشغيل النظافة ${p?`<span class="co-projname">— ${_esc(p.name||p.id)}</span>`:""}</h2>
-      <div class="co-sub">الجدول اليومي للمهام الدورية — المناطق من مباني المشروع وأدواره</div>
-      <div class="co-tools">
-        <button class="btn btn-ghost btn-sm ${_view==='board'?'co-on':''}" onclick="cleaningOps.setView('board')">${_icon('dashboard')} لوحة اليوم</button>
-        <button class="btn btn-ghost btn-sm ${_view==='all'?'co-on':''}" onclick="cleaningOps.setView('all')">${_icon('clipboardList')} كل المهام</button>
-        ${canEdit()?`<button class="btn btn-primary btn-sm" onclick="cleaningOps.addTask()">${_icon('plus')} مهمة جديدة</button>`:""}
-        ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.toggleGen()">${_icon('sparkles')} توليد الجدول بالذكاء الاصطناعي</button>`:""}
-        <button class="btn btn-ghost btn-sm" onclick="cleaningOps.refresh()">${_icon('rotateCcw')} تحديث</button>
+    <div class="page-hero">
+      <div class="page-hero-titles">
+        <div class="page-hero-title"><span class="ph-ico">${_svg('sparkles')}</span> تشغيل النظافة</div>
+        <div class="page-hero-sub">${p?_esc(p.name||p.id)+" — ":""}الجدول اليومي للمهام الدورية</div>
+      </div>
+      <div class="page-hero-actions">
+        <button class="btn btn-sm ${_view==='board'?'co-seg-on':''}" onclick="cleaningOps.setView('board')">${_svg('dashboard')} لوحة اليوم</button>
+        <button class="btn btn-sm ${_view==='all'?'co-seg-on':''}" onclick="cleaningOps.setView('all')">${_svg('clipboardList')} كل المهام</button>
+        ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.addTask()">${_svg('plus')} مهمة جديدة</button>`:""}
+        ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.toggleGen()">${_svg('sparkles')} توليد بالذكاء الاصطناعي</button>`:""}
+        <button class="btn btn-sm" onclick="cleaningOps.refresh()">${_svg('rotateCcw')} تحديث</button>
+      </div>
+    </div>`;
+}
+// رأسٌ مبسّط للشاشات الفرعية (المحرّر/التنفيذ) — نفس الهيرو بزرّ رجوعٍ واحد
+function subHeroHTML(title, sub, backFn){
+  return `
+    <div class="page-hero">
+      <div class="page-hero-titles">
+        <div class="page-hero-title"><span class="ph-ico">${_svg('sparkles')}</span> ${title}</div>
+        ${sub?`<div class="page-hero-sub">${sub}</div>`:""}
+      </div>
+      <div class="page-hero-actions">
+        <button class="btn btn-sm" onclick="cleaningOps.${backFn}()">${_svg('folderOpen')} رجوع للجدول</button>
       </div>
     </div>`;
 }
 
-/* ── لوحة اليوم ── */
+/* ── لوحة اليوم ──
+   البلاطات .stat-tile ثم شريط الصحة .hbar (نفس إدارة العمليات) ثم بطاقات المهام
+   .ppm-card مجمّعةً حسب المبنى داخل .card — كلها مفرداتُ المنصة نفسها. */
 function boardHTML(){
   const s=boardStats();
-  const covColor = s.coverage>=95 ? "var(--accent)" : (s.coverage>=70 ? "var(--warn)" : "var(--danger)");
-  const card=(lbl,val,sc,sub)=>`
-    <div class="stat-card" style="--sc:${sc}">
-      <div class="sl">${lbl}</div>
-      <div class="sv">${val}</div>
-      ${sub?`<div class="click-hint">${sub}</div>`:""}
+  const tile=(icon,val,lbl,c)=>`
+    <div class="stat-tile" style="--_c:${c}">
+      <div class="st-ico">${_svg(icon)}</div>
+      <div class="st-val" style="color:${c}">${val}</div>
+      <div class="st-lbl">${lbl}</div>
     </div>`;
 
   if(!_tasks.length){
-    return `<div class="co-empty">لا توجد مهام نظافة بعد.<br>
-      ${canEdit()?'أضف مهمة يدوياً، أو استخدم <b>«توليد الجدول بالذكاء الاصطناعي»</b> ليقترح لك جدولاً كاملاً تعدّله بعدها.':'لم يُنشئ الأدمن جدول المهام بعد.'}</div>`;
+    return `<div class="card"><div class="co-empty">
+      ${_svg('sparkles')}
+      <div class="co-empty-t">لا توجد مهام نظافة بعد</div>
+      <div class="co-empty-s">${canEdit()
+        ? 'ابدأ بـ <b>«توليد بالذكاء الاصطناعي»</b> — صِف المبنى فيقترح جدولاً كاملاً تعدّله، أو أضف مهمةً يدوياً.'
+        : 'لم يُنشئ مديرُ المشروع جدولَ المهام بعد.'}</div>
+    </div></div>`;
   }
 
-  // مجموعات حسب المبنى (المنطقة) — المستحقّ والمتأخّر أولاً
+  // شريط التغطية: منفَّذ (أخضر) / متبقٍّ غير متأخّر (برتقالي) / متأخّر (أحمر) — نفس .hbar
+  const pendingOnTime = Math.max(0, s.due - s.overdue);
+  const seg = (n,cls)=> n>0 ? `<span class="${cls}" style="flex:${n}"></span>` : "";
+  const covBar = s.scheduled>0
+    ? `<div class="hbar">${seg(s.done,'s-ok')}${seg(pendingOnTime,'s-warn')}${seg(s.overdue,'s-crit')}</div>
+       <div class="hleg">
+         <div class="it"><i style="background:var(--sla-ok)"></i>نُفِّذ <span class="n">${s.done}</span></div>
+         ${pendingOnTime>0?`<div class="it"><i style="background:var(--sla-warn)"></i>متبقٍّ <span class="n">${pendingOnTime}</span></div>`:""}
+         ${s.overdue>0?`<div class="it"><i style="background:var(--sla-crit)"></i>متأخّر <span class="n">${s.overdue}</span></div>`:""}
+       </div>`
+    : `<div class="co-hint" style="margin:0">لا مهام مجدولة لليوم.</div>`;
+
+  // مجموعات حسب المبنى (المنطقة) — المتأخّر ثم المستحقّ ثم المنجز
   const active=_tasks.filter(t=>!isDisabled(t));
   const todays=active.filter(t=>isDue(t)||doneToday(t));
   const byB={};
-  todays.forEach(t=>{ const b=t.building||"— بلا مبنى —"; (byB[b]=byB[b]||[]).push(t); });
+  todays.forEach(t=>{ const b=t.building||"بلا مبنى"; (byB[b]=byB[b]||[]).push(t); });
   const groups=Object.keys(byB).sort().map(b=>{
     const list=byB[b].slice().sort((x,y)=>dueStatus(x).sort-dueStatus(y).sort);
     const d=list.filter(doneToday).length;
+    const all=d===list.length;
     return `
-      <div class="co-group">
-        <div class="co-group-h">
-          <span>${_icon('building2')} ${_esc(b)}</span>
-          <span class="co-group-c" style="color:${d===list.length?'var(--accent)':'var(--muted)'}">${d}/${list.length} منجزة</span>
+      <div class="card">
+        <div class="co-sec">
+          <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
+          <span class="ppm-due-badge ${all?'ok':'today'}">${d}/${list.length} منجزة</span>
         </div>
-        <div class="co-rows">${list.map(taskRowHTML).join("")}</div>
+        ${list.map(taskCardHTML).join("")}
       </div>`;
   }).join("");
 
   return `
-    <div class="co-stats">
-      ${card("مجدول اليوم", s.scheduled, "var(--primary)", "من "+s.total+" مهمة نشطة")}
-      ${card("نُفِّذ اليوم", s.done, "var(--accent)", "")}
-      ${card("متبقٍّ اليوم", s.due, s.due>0?"var(--warn)":"var(--accent)", s.overdue>0?s.overdue+" منها متأخّرة":"")}
-      ${card("نسبة التغطية", s.coverage+"%", covColor, "المنفَّذ ÷ المجدول")}
+    <div class="co-tiles">
+      ${tile('calendar',    s.scheduled, "مجدول اليوم",  "var(--primary)")}
+      ${tile('checkCircle', s.done,      "نُفِّذ اليوم",   "var(--sla-ok)")}
+      ${tile('hourglass',   s.due,       "متبقٍّ اليوم",  s.due>0?"var(--sla-warn)":"var(--sla-ok)")}
+      ${tile('target',      s.coverage+"%", "نسبة التغطية", s.coverage>=95?"var(--sla-ok)":(s.coverage>=70?"var(--sla-warn)":"var(--sla-crit)"))}
     </div>
-    <div class="co-progress"><div class="co-progress-fill" style="width:${Math.min(s.coverage,100)}%;background:${covColor}"></div></div>
-    ${s.overdue>0?`<div class="co-alert">${_icon('alertTriangle')} ${s.overdue} مهمة متأخّرة عن استحقاقها — فجوةُ تغطيةٍ تحتاج معالجةً اليوم.</div>`:""}
-    ${todays.length? groups : `<div class="co-empty">لا مهام مستحقّة اليوم — كل المهام ضمن مواعيدها. ✅</div>`}`;
+    <div class="card"><div class="co-sec">
+      <div class="co-sec-t">${_svg('activity')} تغطية اليوم</div>
+      <span class="co-sec-c">${s.done} من ${s.scheduled} مجدولة • ${s.total} مهمة نشطة</span>
+    </div>${covBar}</div>
+    ${s.overdue>0?`<div class="ppm-overdue-banner">${_svg('alertTriangle')}
+      <span>${s.overdue} مهمة متأخّرة عن استحقاقها — فجوةُ تغطيةٍ تحتاج معالجةً اليوم.</span></div>`:""}
+    ${todays.length? groups : `<div class="card"><div class="co-empty">
+      ${_svg('checkCircle')}
+      <div class="co-empty-t">لا مهام مستحقّة اليوم</div>
+      <div class="co-empty-s">كل المهام ضمن مواعيدها.</div></div></div>`}`;
 }
 
-function taskRowHTML(t){
+/* بطاقة المهمة — نفس .ppm-card (شريط الحالة 4px، مربّع الأيقونة، الشارات وأسطر البيانات) */
+function taskCardHTML(t){
   const st=dueStatus(t);
   const list=Array.isArray(t.checklist)?t.checklist:[];
   const done=doneToday(t);
   return `
-    <div class="co-row ${done?'co-row-done':''}">
-      <div class="co-row-main">
-        <div class="co-row-name">${_icon(iconOf(t.workType))} ${_esc(t.name||"مهمة")}</div>
-        <div class="co-row-meta">
-          ${t.floor?_esc(t.floor)+" • ":""}${_esc(t.workType||"")} • ${_esc(t.freq||"")}
-          ${list.length?` • ${list.length} بند فحص`:""}
-          ${t.assignee?` • ${_icon('user')} ${_esc(t.assignee)}`:""}
+    <div class="ppm-card ${st.card}">
+      <div class="co-card-row">
+        <div class="ppm-chip">${_svg(iconOf(t.workType))}</div>
+        <div class="co-card-main">
+          <div class="co-card-t">${_esc(t.name||"مهمة")}</div>
+          <div class="ppm-meta-row">
+            <span class="mi">${_svg('repeat')}</span> <b>${_esc(t.freq||"")}</b>
+            ${t.floor?`<span class="mi">${_svg('pin')}</span> ${_esc(t.floor)}`:""}
+            ${list.length?`<span class="mi">${_svg('clipboardCheck')}</span> ${list.length} بند`:""}
+            ${t.assignee?`<span class="mi">${_svg('user')}</span> ${_esc(t.assignee)}`:""}
+          </div>
+          <div class="co-pills">
+            <span class="ppm-pill freq">${_esc(t.workType||"")}</span>
+            <span class="ppm-due-badge ${st.badge}">${st.lbl}</span>
+            ${done&&t.lastExecutedBy?`<span class="ppm-pill co-by">${_svg('user')} ${_esc(t.lastExecutedBy)}</span>`:""}
+          </div>
         </div>
-      </div>
-      <div class="co-row-side">
-        <span class="badge" style="background:var(--surface2);color:${st.color}">${st.lbl}</span>
-        ${done
-          ? `<span class="co-done-by">${_icon('checkCircle')} ${_esc(t.lastExecutedBy||"")}</span>`
-          : (canExecute()?`<button class="btn btn-primary btn-sm" onclick="cleaningOps.exec('${_esc(t.id)}')">${_icon('checkCircle')} تنفيذ</button>`:"")}
-        ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.editTask('${_esc(t.id)}')">${_icon('edit')}</button>`:""}
+        <div class="co-card-act">
+          ${done ? "" : (canExecute()?`<button class="btn btn-primary btn-sm" onclick="cleaningOps.exec('${_esc(t.id)}')">${_svg('checkCircle')} تنفيذ</button>`:"")}
+          ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')}</button>`:""}
+        </div>
       </div>
     </div>`;
 }
 function iconOf(wt){ const w=CLEANING_WORK_TYPES[wt]; return w?w.icon:"sparkles"; }
 
-/* ── كل المهام ── */
+/* ── كل المهام (جدول داخل .card) ── */
 function allTasksHTML(){
-  if(!_tasks.length) return `<div class="co-empty">لا توجد مهام نظافة بعد.</div>`;
+  if(!_tasks.length) return `<div class="card"><div class="co-empty">
+    ${_svg('clipboardList')}<div class="co-empty-t">لا توجد مهام نظافة بعد</div></div></div>`;
   const rows=_tasks.slice().sort((a,b)=>{
     const c=String(a.building||"").localeCompare(String(b.building||""),"ar");
     return c!==0 ? c : dueStatus(a).sort-dueStatus(b).sort;
@@ -347,19 +411,23 @@ function allTasksHTML(){
     const st=dueStatus(t);
     const list=Array.isArray(t.checklist)?t.checklist:[];
     return `<tr class="${isDisabled(t)?'co-tr-off':''}">
-      <td class="co-td-name">${_icon(iconOf(t.workType))} ${_esc(t.name||"")}</td>
+      <td class="co-td-name"><span class="co-td-ic">${_svg(iconOf(t.workType))}</span> ${_esc(t.name||"")}</td>
       <td>${_esc(t.building||"—")}${t.floor?" / "+_esc(t.floor):""}</td>
       <td>${_esc(t.workType||"—")}</td>
       <td>${_esc(t.freq||"—")}</td>
       <td class="co-num">${list.length}</td>
-      <td>${t.lastExecuted?_esc(String(t.lastExecuted).slice(0,10)):"—"}</td>
-      <td style="color:${st.color}">${st.lbl}</td>
-      <td>${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.editTask('${_esc(t.id)}')">${_icon('edit')}</button>`:""}</td>
+      <td class="co-num">${t.lastExecuted?_esc(String(t.lastExecuted).slice(0,10)):"—"}</td>
+      <td><span class="ppm-due-badge ${st.badge}">${st.lbl}</span></td>
+      <td>${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')}</button>`:""}</td>
     </tr>`;
   }).join("");
-  return `<div class="co-table-wrap"><table class="co-table">
-    <thead><tr><th>المهمة</th><th>المنطقة</th><th>نوع العمل</th><th>التكرار</th><th>بنود</th><th>آخر تنفيذ</th><th>الحالة</th><th></th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  return `<div class="card">
+    <div class="co-sec"><div class="co-sec-t">${_svg('clipboardList')} كل المهام</div>
+      <span class="co-sec-c">${_tasks.length} مهمة</span></div>
+    <div class="co-table-wrap"><table class="co-table">
+      <thead><tr><th>المهمة</th><th>المنطقة</th><th>نوع العمل</th><th>التكرار</th><th>بنود</th><th>آخر تنفيذ</th><th>الحالة</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+  </div>`;
 }
 
 /* ── محرّر المهمة ── */
@@ -370,46 +438,42 @@ function renderEditor(el){
   const floors=_floorsOf(t.building);
   const opt=(arr,sel)=>arr.map(v=>`<option value="${_esc(v)}" ${v===sel?'selected':''}>${_esc(v)}</option>`).join("");
   const list=Array.isArray(t.checklist)?t.checklist:[];
-  el.innerHTML = `
-    <div class="co-head">
-      <button class="btn btn-ghost btn-sm" onclick="cleaningOps.cancelEdit()">${_icon('folderOpen')} رجوع للجدول</button>
-      <h2 class="co-title">${_icon(isNew?'plus':'edit')} ${isNew?"مهمة نظافة جديدة":"تعديل المهمة"}</h2>
-    </div>
-    <div class="co-form">
-      <div class="co-f"><label>اسم المهمة</label>
+  el.innerHTML = subHeroHTML(isNew?"مهمة نظافة جديدة":"تعديل المهمة", isNew?"":_esc(t.name||""), "cancelEdit") + `
+    <div class="card co-pane">
+      <div class="form-group"><label class="form-label">اسم المهمة</label>
         <input class="form-input" id="co-name" value="${_esc(t.name||"")}" placeholder="مثال: تنظيف وتعقيم دورات المياه"></div>
-      <div class="co-f2">
-        <div class="co-f"><label>المبنى (المنطقة)</label>
-          <select class="form-input" id="co-bld" onchange="cleaningOps.onBuildingChange(this.value)">
+      <div class="co-grid2">
+        <div class="form-group"><label class="form-label">المبنى (المنطقة)</label>
+          <select class="form-select" id="co-bld" onchange="cleaningOps.onBuildingChange(this.value)">
             <option value="">— اختر —</option>${opt(blds, t.building)}
           </select></div>
-        <div class="co-f"><label>الدور / الموقع</label>
+        <div class="form-group"><label class="form-label">الدور / الموقع</label>
           ${floors.length
-            ? `<select class="form-input" id="co-floor"><option value="">— كل الأدوار —</option>${opt(floors, t.floor)}</select>`
+            ? `<select class="form-select" id="co-floor"><option value="">— كل الأدوار —</option>${opt(floors, t.floor)}</select>`
             : `<input class="form-input" id="co-floor" value="${_esc(t.floor||"")}" placeholder="اختياري">`}
         </div>
       </div>
-      <div class="co-f2">
-        <div class="co-f"><label>نوع العمل</label>
-          <select class="form-input" id="co-wt">${opt(WT_KEYS, t.workType||WT_KEYS[0])}</select></div>
-        <div class="co-f"><label>التكرار</label>
-          <select class="form-input" id="co-freq">${opt(FREQ_KEYS, t.freq||"يومي")}</select></div>
+      <div class="co-grid2">
+        <div class="form-group"><label class="form-label">نوع العمل</label>
+          <select class="form-select" id="co-wt">${opt(WT_KEYS, t.workType||WT_KEYS[0])}</select></div>
+        <div class="form-group"><label class="form-label">التكرار</label>
+          <select class="form-select" id="co-freq">${opt(FREQ_KEYS, t.freq||"يومي")}</select></div>
       </div>
-      <div class="co-f2">
-        <div class="co-f"><label>المسؤول (اختياري)</label>
+      <div class="co-grid2">
+        <div class="form-group"><label class="form-label">المسؤول (اختياري)</label>
           <input class="form-input" id="co-assignee" value="${_esc(t.assignee||"")}" placeholder="اسم العامل/المشرف"></div>
-        <div class="co-f"><label>تاريخ أول/تالي تنفيذ</label>
+        <div class="form-group"><label class="form-label">تاريخ أول/تالي تنفيذ</label>
           <input class="form-input" type="date" id="co-due" value="${_esc(String(t.nextDueDate||_today()).slice(0,10))}"></div>
       </div>
-      <div class="co-f"><label>وصف مختصر (اختياري)</label>
+      <div class="form-group"><label class="form-label">وصف مختصر (اختياري)</label>
         <input class="form-input" id="co-desc" value="${_esc(t.desc||"")}"></div>
-      <div class="co-f"><label>بنود قائمة الفحص — بندٌ في كل سطر</label>
+      <div class="form-group"><label class="form-label">بنود قائمة الفحص — بندٌ في كل سطر</label>
         <textarea class="form-input" id="co-checklist" rows="6" placeholder="تعقيم الأحواض&#10;تنظيف المرايا&#10;تعبئة الصابون والمناديل&#10;تجفيف الأرضية">${_esc(list.join("\n"))}</textarea></div>
       <label class="co-chk"><input type="checkbox" id="co-disabled" ${t.disabled?'checked':''}> إيقاف المهمة مؤقّتاً (تبقى محفوظة ولا تظهر في لوحة اليوم)</label>
-      <div class="co-tools">
-        <button class="btn btn-primary btn-sm" onclick="cleaningOps.saveEdit()">${_icon('checkCircle')} حفظ</button>
+      <div class="co-actions">
+        <button class="btn btn-primary btn-sm" onclick="cleaningOps.saveEdit()">${_svg('checkCircle')} حفظ</button>
         <button class="btn btn-ghost btn-sm" onclick="cleaningOps.cancelEdit()">إلغاء</button>
-        ${!isNew?`<button class="btn btn-ghost btn-sm co-del" onclick="cleaningOps.removeTask()">${_icon('trash')} حذف المهمة</button>`:""}
+        ${!isNew?`<button class="btn btn-ghost btn-sm co-del" onclick="cleaningOps.removeTask()">${_svg('trash')} حذف المهمة</button>`:""}
       </div>
     </div>`;
 }
@@ -427,20 +491,22 @@ function renderExec(el){
     : `<div class="co-hint">لا بنود فحصٍ لهذه المهمة — سجّل التنفيذ مباشرةً.</div>`;
   const doneN=_execState.filter(Boolean).length;
   const pct = list.length ? Math.round(doneN/list.length*100) : 100;
-  el.innerHTML = `
-    <div class="co-head">
-      <button class="btn btn-ghost btn-sm" onclick="cleaningOps.cancelExec()">${_icon('folderOpen')} رجوع للجدول</button>
-      <h2 class="co-title">${_icon('checkCircle')} تنفيذ: ${_esc(t.name||"")}</h2>
-      <div class="co-sub">${_esc(t.building||"")}${t.floor?" / "+_esc(t.floor):""} • ${_esc(t.workType||"")} • ${_esc(t.freq||"")}</div>
-    </div>
-    <div class="co-form">
-      ${list.length?`<div class="co-ck-head"><span>${doneN} / ${list.length} بند</span><span>${pct}%</span></div>
-      <div class="co-progress"><div class="co-progress-fill" style="width:${pct}%;background:${pct===100?'var(--accent)':'var(--warn)'}"></div></div>`:""}
+  const sub = _esc(t.building||"")+(t.floor?" / "+_esc(t.floor):"")+" • "+_esc(t.workType||"")+" • "+_esc(t.freq||"");
+  el.innerHTML = subHeroHTML("تنفيذ: "+_esc(t.name||""), sub, "cancelExec") + `
+    <div class="card co-pane">
+      ${list.length?`<div class="co-sec" style="margin-bottom:8px">
+        <div class="co-sec-t">${_svg('clipboardCheck')} قائمة الفحص</div>
+        <span class="co-sec-c"><b>${doneN}</b> من ${list.length} بند • ${pct}%</span>
+      </div>
+      <div class="hbar" style="margin-bottom:12px">
+        ${doneN>0?`<span class="s-ok" style="flex:${doneN}"></span>`:""}
+        ${list.length-doneN>0?`<span class="s-warn" style="flex:${list.length-doneN}"></span>`:""}
+      </div>`:""}
       <div class="co-ck-list">${items}</div>
-      <div class="co-f"><label>ملاحظة (اختياري)</label>
+      <div class="form-group"><label class="form-label">ملاحظة (اختياري)</label>
         <input class="form-input" id="co-exec-note" placeholder="أي ملاحظة على التنفيذ"></div>
-      <div class="co-tools">
-        <button class="btn btn-primary btn-sm" onclick="cleaningOps.confirmExec()">${_icon('checkCircle')} تسجيل التنفيذ</button>
+      <div class="co-actions">
+        <button class="btn btn-primary btn-sm" onclick="cleaningOps.confirmExec()">${_svg('checkCircle')} تسجيل التنفيذ</button>
         <button class="btn btn-ghost btn-sm" onclick="cleaningOps.cancelExec()">إلغاء</button>
       </div>
       <div class="co-hint">التسجيل ينقل الاستحقاق التالي بمقدار تكرار المهمة من اليوم، ويُحفظ في سجلّ التنفيذ.</div>
@@ -451,24 +517,24 @@ function renderExec(el){
 function genFormHTML(){
   const blds=_buildings();
   return `
-    <div class="co-gen">
-      <div class="co-gen-h">${_icon('sparkles')} توليد جدول مهام النظافة بالذكاء الاصطناعي</div>
-      <div class="co-f2">
-        <div class="co-f"><label>المبنى المستهدف</label>
-          <select class="form-input" id="co-gen-bld">
+    <div class="card co-pane co-gen">
+      <div class="co-sec"><div class="co-sec-t">${_svg('sparkles')} توليد جدول مهام النظافة</div></div>
+      <div class="co-grid2">
+        <div class="form-group"><label class="form-label">المبنى المستهدف</label>
+          <select class="form-select" id="co-gen-bld">
             <option value="">— كل المباني —</option>
             ${blds.map(b=>`<option value="${_esc(b)}">${_esc(b)}</option>`).join("")}
           </select></div>
-        <div class="co-f"><label>نوع المبنى/النشاط</label>
+        <div class="form-group"><label class="form-label">نوع المبنى/النشاط</label>
           <input class="form-input" id="co-gen-kind" placeholder="مثال: مبنى إداري ٤ أدوار، دورتا مياه لكل دور"></div>
       </div>
-      <div class="co-f"><label>ملاحظات إضافية (اختياري)</label>
+      <div class="form-group"><label class="form-label">ملاحظات إضافية (اختياري)</label>
         <input class="form-input" id="co-gen-notes" placeholder="مثال: لوبي بمساحة كبيرة، واجهة زجاجية، موقف سيارات"></div>
-      <div class="co-tools">
-        <button class="btn btn-primary btn-sm" id="co-gen-btn" onclick="cleaningOps.doGen()">${_icon('sparkles')} توليد</button>
+      <div class="co-actions">
+        <button class="btn btn-primary btn-sm" id="co-gen-btn" onclick="cleaningOps.doGen()">${_svg('sparkles')} توليد</button>
         <button class="btn btn-ghost btn-sm" onclick="cleaningOps.toggleGen()">إلغاء</button>
       </div>
-      ${_genErr?`<div class="co-alert">${_icon('alertTriangle')} ${_esc(_genErr)}</div>`:""}
+      ${_genErr?`<div class="ppm-overdue-banner" style="margin-top:12px">${_svg('alertTriangle')} <span>${_esc(_genErr)}</span></div>`:""}
       <div class="co-hint">المُولَّد <b>اقتراحٌ أوّليٌّ قابلٌ للتحرير والحذف</b> — يُضاف للمهام الحالية ولا يستبدلها.</div>
     </div>`;
 }
@@ -684,54 +750,55 @@ function _watchProject(){
 function injectCSS(){
   if(document.getElementById("co-css")) return;
   const st=document.createElement("style"); st.id="co-css";
-  // يعيد استخدام توكنز النظام وكلاساته (.stat-card/.btn/.badge/.form-input) فيطابق الثيمين.
+  // طبقةٌ رقيقة عمداً: كل ما له مقابلٌ في المنصة يُستخدَم بصنفه الأصلي
+  // (.page-hero / .stat-tile / .card / .ppm-card / .ppm-chip / .ppm-pill /
+  //  .ppm-due-badge / .ppm-meta-row / .ppm-overdue-banner / .hbar / .hleg /
+  //  .btn / .form-group / .form-input) — فتتبع الصفحةُ أيَّ تغييرٍ في هوية المنصة تلقائياً.
+  // لا يُعرَّف هنا إلا ما لا مقابل له: شبكةُ البلاطات، ترويسةُ القسم، بنودُ قائمة الفحص،
+  // الحالةُ الفارغة، والجدول.
   st.textContent = `
 #page-${PAGE_ID}{direction:rtl}
-.co-head{margin-bottom:16px}
-.co-title{font-size:19px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary);margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.co-projname{font-size:13px;font-weight:700;color:var(--muted)}
-.co-sub{font-size:12px;color:var(--muted);margin-top:5px}
-.co-tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.co-tools .co-on{background:var(--surface2);color:var(--primary);font-weight:800}
-.co-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}
-.co-stats .stat-card{cursor:default}
-.co-stats .sv{font-variant-numeric:tabular-nums;direction:ltr;text-align:right}
-.co-progress{height:12px;background:var(--surface2);border-radius:20px;overflow:hidden;margin-bottom:14px}
-.co-progress-fill{height:100%;border-radius:20px;transition:width .4s}
-.co-alert{background:color-mix(in srgb,var(--danger) 12%,transparent);border:1px solid var(--danger);color:var(--danger);border-radius:12px;padding:10px 14px;font-size:12.5px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
-.co-empty{text-align:center;color:var(--muted);padding:44px;font-size:13px;line-height:2}
-.co-hint{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.9}
-.co-group{background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:14px;overflow:hidden}
-.co-group-h{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 14px;background:var(--surface2);font-size:13px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary)}
-.co-group-c{font-size:11.5px;font-weight:700;font-variant-numeric:tabular-nums}
-.co-rows{display:flex;flex-direction:column}
-.co-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid var(--border);flex-wrap:wrap}
-.co-row-done{opacity:.62}
-.co-row-main{min-width:0;flex:1}
-.co-row-name{font-size:13px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:7px}
-.co-row-meta{font-size:11px;color:var(--muted);margin-top:3px}
-.co-row-side{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
-.co-done-by{font-size:11px;color:var(--accent);font-weight:700;display:flex;align-items:center;gap:4px}
-.co-form{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;max-width:720px}
-.co-f{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
-.co-f label{font-size:11.5px;font-weight:700;color:var(--muted)}
-.co-f2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media(max-width:560px){.co-f2{grid-template-columns:1fr}}
-.co-chk{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-bottom:12px;cursor:pointer}
+#page-${PAGE_ID} .page-hero-actions .btn.co-seg-on{background:rgba(255,255,255,.34);border-color:rgba(255,255,255,.55);font-weight:800}
+.co-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.co-sec{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:11px}
+.co-sec-t{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary)}
+.co-sec-t svg{width:16px;height:16px;stroke-width:2;flex-shrink:0}
+.co-sec-c{font-size:11.5px;color:var(--muted);font-weight:700}
+.co-sec-c b{font-family:'JetBrains Mono',monospace;color:var(--text)}
+.co-card-row{display:flex;align-items:flex-start;gap:11px;flex-wrap:wrap}
+.co-card-main{flex:1;min-width:0}
+.co-card-t{font-size:13.5px;font-weight:800;color:var(--text);line-height:1.35}
+.co-pills{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:7px}
+.co-pills .co-by{background:var(--sla-ok-bg);color:var(--sla-ok);border:1px solid var(--sla-ok-bd)}
+.co-pills .co-by svg{width:11px;height:11px;stroke-width:2.2}
+.co-card-act{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-inline-start:auto}
+.ppm-card.completed .co-card-t{color:var(--muted)}
+.co-pane{max-width:760px}
+.co-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:560px){.co-grid2{grid-template-columns:1fr}}
+.co-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.co-chk{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-bottom:13px;cursor:pointer}
 .co-del{color:var(--danger)}
-.co-ck-head{display:flex;justify-content:space-between;font-size:11.5px;font-weight:700;color:var(--muted);margin-bottom:6px}
-.co-ck-list{display:flex;flex-direction:column;gap:2px;margin-bottom:14px}
-.co-ck{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid var(--border);border-radius:10px;font-size:12.5px;cursor:pointer;background:var(--surface2)}
-.co-ck input{width:17px;height:17px;cursor:pointer;flex:none}
-.co-gen{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;max-width:720px;margin-bottom:16px}
-.co-gen-h{font-size:13.5px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary);margin-bottom:12px;display:flex;align-items:center;gap:7px}
-.co-table-wrap{overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:14px}
-.co-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px}
+.co-ck-list{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.co-ck{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:12.5px;font-weight:600;color:var(--text);cursor:pointer;background:var(--surface2);transition:border-color .15s,background .15s}
+.co-ck:hover{border-color:var(--primary)}
+.co-ck:has(input:checked){background:var(--sla-ok-bg);border-color:var(--sla-ok-bd);color:var(--sla-ok)}
+.co-ck input{width:17px;height:17px;cursor:pointer;flex:none;accent-color:var(--sla-ok)}
+.co-hint{font-size:11.5px;color:var(--muted);margin-top:11px;line-height:1.9}
+.co-empty{text-align:center;color:var(--muted);padding:38px 20px}
+.co-empty svg{width:34px;height:34px;stroke-width:1.6;opacity:.42;margin-bottom:10px}
+.co-empty-t{font-size:14px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--text)}
+.co-empty-s{font-size:12px;margin-top:5px;line-height:1.85}
+.co-table-wrap{overflow-x:auto}
+.co-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:780px}
 .co-table th{background:var(--surface2);padding:10px 12px;text-align:right;font-weight:800;color:var(--primary);font-size:11.5px;white-space:nowrap}
 .co-table td{padding:10px 12px;border-top:1px solid var(--border);color:var(--text)}
-.co-td-name{font-weight:700;display:flex;align-items:center;gap:7px}
-.co-num{font-variant-numeric:tabular-nums;direction:ltr;text-align:right}
+.co-td-name{font-weight:700;white-space:nowrap}
+.co-td-ic{display:inline-flex;vertical-align:-3px;color:var(--primary)}
+.co-td-ic svg{width:15px;height:15px;stroke-width:2}
+.co-num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;direction:ltr;text-align:right}
 .co-tr-off{opacity:.5}
+@media(max-width:620px){.co-card-act{margin-inline-start:0;width:100%}}
 `;
   document.head.appendChild(st);
 }
