@@ -39,6 +39,7 @@ import {
   IconWrench,
 } from "./Icons";
 import { clients } from "./clients";
+import { experienceYears } from "./company";
 
 export type AnnouncementProps = {
   companyName: string;
@@ -328,11 +329,37 @@ const AnimatedNumber: React.FC<{ to: number; suffix?: string; color: string; del
 };
 
 // المشهد 4 — الأرقام (بأسلوب بطاقات KPI في المنصة)
+// كل رقم مشتقّ من بيانات حقيقية: قائمة العملاء وسنة التأسيس.
 const SceneStats: React.FC = () => {
+  const sectorCount = new Set(
+    clients.map((c) => c.sector).filter(Boolean)
+  ).size;
+
   const stats = [
-    { Icon: IconCheckCircle, color: theme.accent, to: 100, suffix: "٪", label: "التزام بالمواعيد", bar: 100 },
-    { Icon: IconClock, color: theme.primary, to: 24, suffix: "/٧", label: "دعم وصيانة مستمر", bar: 92 },
-    { Icon: IconTarget, color: theme.warn, to: 360, suffix: "°", label: "حلول متكاملة", bar: 100 },
+    {
+      Icon: IconShieldCheck,
+      color: theme.accent,
+      to: clients.length,
+      suffix: "",
+      label: "جهة تثق بنا",
+      bar: 100,
+    },
+    {
+      Icon: IconTarget,
+      color: theme.primary,
+      to: sectorCount,
+      suffix: "",
+      label: "قطاعات نخدمها",
+      bar: 100,
+    },
+    {
+      Icon: IconClock,
+      color: theme.warn,
+      to: experienceYears(),
+      suffix: "",
+      label: "عاماً من الخبرة",
+      bar: 100,
+    },
   ];
   return (
     <Stage>
@@ -394,13 +421,34 @@ const SceneOutro: React.FC<{ companyName: string; phone: string; website: string
               {phone ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 14, padding: "14px 22px", boxShadow: theme.cardShadow }}>
                   <IconPhone size={28} color={theme.primary} />
-                  <span style={{ fontSize: 28, fontWeight: 700, color: theme.ink }}>{phone}</span>
+                  {/* الاتجاه من اليسار حتى يظهر الرقم الدولي بترتيبه الصحيح */}
+                  <span
+                    style={{
+                      fontSize: 28,
+                      fontWeight: 700,
+                      color: theme.ink,
+                      direction: "ltr",
+                      unicodeBidi: "isolate",
+                    }}
+                  >
+                    {phone}
+                  </span>
                 </div>
               ) : null}
               {website ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 14, padding: "14px 22px", boxShadow: theme.cardShadow }}>
                   <IconGlobe size={28} color={theme.primary} />
-                  <span style={{ fontSize: 28, fontWeight: 700, color: theme.ink }}>{website}</span>
+                  <span
+                    style={{
+                      fontSize: 28,
+                      fontWeight: 700,
+                      color: theme.ink,
+                      direction: "ltr",
+                      unicodeBidi: "isolate",
+                    }}
+                  >
+                    {website}
+                  </span>
                 </div>
               ) : null}
             </div>
