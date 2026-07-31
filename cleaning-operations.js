@@ -362,7 +362,7 @@ function boardHTML(){
       <div class="co-sec-t">${_svg('activity')} تغطية اليوم</div>
       <span class="co-sec-c">${s.done} من ${s.scheduled} مجدولة • ${s.total} مهمة نشطة</span>
     </div>${covBar}</div>
-    ${s.overdue>0?`<div class="ppm-overdue-banner">${_svg('alertTriangle')}
+    ${s.overdue>0?`<div class="ppm-overdue-banner"><span class="co-bnr-ic">${_svg('alertTriangle')}</span>
       <span>${s.overdue} مهمة متأخّرة عن استحقاقها — فجوةُ تغطيةٍ تحتاج معالجةً اليوم.</span></div>`:""}
     ${todays.length? groups : `<div class="card"><div class="co-empty">
       ${_svg('checkCircle')}
@@ -536,7 +536,7 @@ function genFormHTML(){
         <button class="btn btn-primary btn-sm" id="co-gen-btn" onclick="cleaningOps.doGen()">${_svg('sparkles')} توليد</button>
         <button class="btn btn-ghost btn-sm" onclick="cleaningOps.toggleGen()">إلغاء</button>
       </div>
-      ${_genErr?`<div class="ppm-overdue-banner" style="margin-top:12px">${_svg('alertTriangle')} <span>${_esc(_genErr)}</span></div>`:""}
+      ${_genErr?`<div class="ppm-overdue-banner" style="margin-top:12px"><span class="co-bnr-ic">${_svg('alertTriangle')}</span> <span>${_esc(_genErr)}</span></div>`:""}
       <div class="co-hint">المُولَّد <b>اقتراحٌ أوّليٌّ قابلٌ للتحرير والحذف</b> — يُضاف للمهام الحالية ولا يستبدلها.</div>
     </div>`;
 }
@@ -548,6 +548,39 @@ function _extractJSON(txt){
   const m=String(txt).match(/\{[\s\S]*\}/);
   if(m){ try{ return JSON.parse(strip(m[0])); }catch(e){} }
   return null;
+}
+
+/* إنقاذ الردّ المبتور: العربية مكلفةٌ توكنياً، فقد يُقطَع ردُّ النموذج في منتصف المهمة
+   الأخيرة فيفشل تحليل JSON كاملاً وتضيع كلُّ المهامّ السليمة قبلها. هنا نمسح النصّ بحثاً
+   عن كائناتٍ متوازنة الأقواس (مع احترام السلاسل النصّية والهروب) ونحلّل كلَّ كائنٍ وحده،
+   فنستردّ كلَّ مهمةٍ اكتملت ونُسقط المبتورة وحدها. */
+function _salvageObjects(txt){
+  const s=String(txt||""), out=[];
+  let i=0;
+  while(i<s.length){
+    if(s[i]!=="{"){ i++; continue; }
+    let depth=0, inStr=false, esc=false, j=i, closed=false;
+    for(; j<s.length; j++){
+      const ch=s[j];
+      if(inStr){
+        if(esc) esc=false;
+        else if(ch==="\\") esc=true;
+        else if(ch==='"') inStr=false;
+        continue;
+      }
+      if(ch==='"'){ inStr=true; continue; }
+      if(ch==="{") depth++;
+      else if(ch==="}"){ depth--; if(depth===0){ j++; closed=true; break; } }
+    }
+    if(closed){
+      try{ const o=JSON.parse(s.slice(i,j)); if(o && typeof o==="object" && !Array.isArray(o)) out.push(o); }catch(e){}
+      i=j;
+    } else {
+      // الكائن الخارجي غير مكتمل (ردٌّ مبتور) — ادخل فيه وابحث عن الكائنات الداخلية
+      i++;
+    }
+  }
+  return out;
 }
 
 async function doGen(){
@@ -566,8 +599,8 @@ async function doGen(){
       (notes?"ملاحظات: "+notes+"\n":"")+
       "أنواع العمل المسموحة (استخدم أحدها حرفياً في workType): "+WT_KEYS.join(" | ")+"\n"+
       "التكرارات المسموحة (استخدم أحدها حرفياً في freq): "+FREQ_KEYS.join(" | ")+"\n"+
-      "أعطِ بين 8 و 16 مهمة تغطّي المناطق الرئيسية، بأسماء عربية مختصرة، ولكل مهمة "+
-      "بين 3 و 6 بنود فحصٍ عملية ومحدّدة.\n"+
+      "أعطِ بين 8 و 12 مهمة تغطّي المناطق الرئيسية، بأسماء عربية مختصرة، ولكل مهمة "+
+      "بين 3 و 5 بنود فحصٍ عملية ومحدّدة وموجزة.\n"+
       "اجعل مهام دورات المياه والأرضيات والنفايات «يومي»، والزجاج والأثاث «أسبوعي»، "+
       "والنظافة العميقة «شهري» أو «ربع سنوي».\n"+
       "أعِد JSON فقط بلا أي شرح، بهذا الشكل تماماً:\n"+
@@ -575,11 +608,23 @@ async function doGen(){
     let tasks=null, lastErr="";
     for(let attempt=1; attempt<=2 && !tasks; attempt++){
       let txt="";
-      try{ txt=await _aiText([{role:"user",content:prompt}], {maxTokens:2500, temperature:0.3, feature:"جدول النظافة"}); }
+      // سقفٌ واسع: العربية مكلفةٌ توكنياً و2500 كانت تبتر الردّ فيفشل التحليل كلّه
+      try{ txt=await _aiText([{role:"user",content:prompt}], {maxTokens:8000, temperature:0.3, feature:"جدول النظافة"}); }
       catch(err){ lastErr=(err&&err.message)||"تعذّر الاتصال بالذكاء الاصطناعي"; console.warn("cleaningOps/doGen#"+attempt,err); continue; }
+      try{ console.log("[cleaningOps] AI tasks raw #"+attempt+":", txt); }catch(_e){}
       const j=_extractJSON(txt);
-      if(j && Array.isArray(j.tasks) && j.tasks.length){
-        tasks=j.tasks.slice(0,30).map(x=>({
+      let raw = (j && Array.isArray(j.tasks) && j.tasks.length) ? j.tasks : null;
+      if(!raw){
+        // الردّ لم يُحلَّل كاملاً (غالباً مبتور) — استردّ المهامّ المكتملة منه.
+        // الماسح يُرجع الكائنات المكتملة في المستوى الأعلى: فإن نجا كائنٌ يحمل tasks
+        // (ردٌّ سليمٌ لفّه النموذج بنصّ) أخذنا مصفوفته، وإلا فالكائنات نفسها هي المهامّ.
+        let sal=_salvageObjects(txt);
+        const wrap=sal.find(o=>o && Array.isArray(o.tasks) && o.tasks.length);
+        sal=(wrap?wrap.tasks:sal).filter(o=>o && o.name);
+        if(sal.length){ raw=sal; try{ console.warn("[cleaningOps] أُنقذت "+sal.length+" مهمة من ردٍّ غير قابلٍ للتحليل الكامل"); }catch(_e){} }
+      }
+      if(raw && raw.length){
+        tasks=raw.slice(0,30).map(x=>({
           id:_uid(),
           name:String(x.name||"مهمة نظافة").trim().slice(0,90),
           building: bld,
@@ -1108,6 +1153,11 @@ function injectCSS(){
 .co-ck:has(input:checked){background:var(--sla-ok-bg);border-color:var(--sla-ok-bd);color:var(--sla-ok)}
 .co-ck input{width:17px;height:17px;cursor:pointer;flex:none;accent-color:var(--sla-ok)}
 .co-hint{font-size:11.5px;color:var(--muted);margin-top:11px;line-height:1.9}
+/* أيقونة شريط التنبيه: المنصة تستعمل في .ppm-overdue-banner نقطةً بالـ CSS لا SVG، فلا
+   قاعدة تضبط أبعاده هناك — وSVG بلا width/height داخل حاوية flex يتمدّد ليملأها. نغلّفه
+   بمحدِّدٍ خاصٍّ بنا (لا نعرّف قاعدةً على صنف المنصة) فيبقى بحجمه الصحيح. */
+.co-bnr-ic{display:inline-flex;flex:none;align-items:center}
+.co-bnr-ic svg{width:16px;height:16px;stroke-width:2;display:block}
 .co-empty{text-align:center;color:var(--muted);padding:38px 20px}
 .co-empty svg{width:34px;height:34px;stroke-width:1.6;opacity:.42;margin-bottom:10px}
 .co-empty-t{font-size:14px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--text)}
@@ -1152,6 +1202,7 @@ window.cleaningOps = {
   // مكشوفة لفحوص hail-tests (دوال نقية)
   _boardStats: boardStats,
   _coverageByBuilding: coverageByBuilding,
+  _salvageObjects: _salvageObjects,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,
   _addDays: _addDays, _today: _today,
   _FREQ_DAYS: FREQ_DAYS,

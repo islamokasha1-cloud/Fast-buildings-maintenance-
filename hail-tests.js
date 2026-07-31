@@ -2174,6 +2174,35 @@ function cleaningOpsTests() {
       CO._coverageByBuilding([mkb("د", { nextDueDate: day(6) })]).length === 0);
   }
 
+  // ══ توليد الجدول بالذكاء الاصطناعي: بترُ الردّ لا يُضيّع المهامّ المكتملة ══
+  // العربية مكلفةٌ توكنياً، فسقفٌ ضيّق يبتر الردّ ويُفشل تحليل JSON كلّه.
+  T("★ سقف التوكنات واسع (2500 كانت تبتر الردّ العربي)", /maxTokens:\s*8000/.test(src) && !/maxTokens:\s*2500/.test(src));
+  T("الوحدة تُنقذ الردّ غير القابل للتحليل الكامل", /_salvageObjects\(txt\)/.test(src));
+  if (CO && typeof CO._salvageObjects === "function") {
+    const pick = txt => {
+      let sal = CO._salvageObjects(txt);
+      const wrap = sal.find(o => o && Array.isArray(o.tasks) && o.tasks.length);
+      return (wrap ? wrap.tasks : sal).filter(o => o && o.name);
+    };
+    const trunc = '```json\n{"tasks":[{"name":"تنظيف دورات المياه","checklist":["تعقيم","مرايا"]},' +
+      '{"name":"مسح الأرضيات","checklist":["كنس"]},{"name":"تنظيف الزج';
+    const r1 = pick(trunc);
+    T("★ الردّ المبتور يعطي كلّ مهمةٍ اكتملت قبل القطع", r1.length === 2, r1.map(o => o.name).join("، "));
+    T("قوائم فحص المهامّ المُنقَذة سليمة", JSON.stringify(r1[0].checklist) === '["تعقيم","مرايا"]');
+    T("الردّ الكامل يمرّ عبر نفس المسار", pick('{"tasks":[{"name":"أ"},{"name":"ب"}]}').length === 2);
+    T("★ الأقواس داخل السلاسل لا تخدع الماسح",
+      pick('{"tasks":[{"name":"مهمة { غريبة }","checklist":["بند \\" فيه اقتباس"]}]}').length === 1);
+    T("نصٌّ قبل JSON وبعده لا يمنع الاستخراج", pick('إليك الجدول:\n{"tasks":[{"name":"ج"}]}\nبالتوفيق').length === 1);
+    T("ردٌّ بلا JSON يُرجع صفراً (لا تلفيق)", pick("عذراً لا أستطيع").length === 0);
+  }
+
+  // ── أيقونات SVG داخل حاويات لا تضبط أبعادها (تتمدّد لملء الشاشة) ──
+  T("★ أيقونة شريط التنبيه مغلَّفةٌ بمحدِّدٍ يضبط أبعادها",
+    /class="co-bnr-ic"/.test(src) && /\.co-bnr-ic svg\{width:16px;height:16px/.test(src));
+  // العلّة كانت SVG **ابناً مباشراً** للشريط (بلا غلافٍ يضبط أبعاده) فيتمدّد ليملأ الشاشة
+  T("لا SVG عارٍ ابناً مباشراً لـ .ppm-overdue-banner",
+    !/ppm-overdue-banner"[^>]*>\s*\$\{_svg\(/.test(src));
+
   // ── الجودة: لا ألوانٍ مصمتة خارج توكنز المنصة (تكسر الثيم الداكن) ──
   const cssBlock = (src.match(/st\.textContent\s*=\s*`([\s\S]*?)`;/) || [])[1] || "";
   const hardHex = [...cssBlock.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(m => m[0]);
