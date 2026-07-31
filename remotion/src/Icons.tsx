@@ -111,6 +111,15 @@ export const IconGlobe: React.FC<IconProps> = ({ size = 24, color = "#1b3a6b", s
   </svg>
 );
 
+// جهة حكومية — مبنى بأعمدة (يُستخدم كبديل عند غياب لوجو العميل)
+export const IconGov: React.FC<IconProps> = ({ size = 24, color = "#1b3a6b", strokeWidth = 1.75 }) => (
+  <svg {...base(size)}>
+    <path d="M12 3l9 4.5H3L12 3Z" {...stroke(color, strokeWidth)} />
+    <path d="M5.5 10v7M9.5 10v7M14.5 10v7M18.5 10v7" {...stroke(color, strokeWidth)} />
+    <path d="M3.5 20.5h17M4.5 17.2h15" {...stroke(color, strokeWidth)} />
+  </svg>
+);
+
 // سهم اتجاه صغير للبطاقات
 export const IconArrow: React.FC<IconProps> = ({ size = 24, color = "#1b3a6b", strokeWidth = 1.75 }) => (
   <svg {...base(size)}>

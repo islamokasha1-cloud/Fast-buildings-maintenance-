@@ -1,9 +1,11 @@
 import React from "react";
 import {
   AbsoluteFill,
+  Img,
   Sequence,
   interpolate,
   spring,
+  staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
@@ -27,12 +29,14 @@ import {
   IconClock,
   IconFacility,
   IconGlobe,
+  IconGov,
   IconPhone,
   IconProjects,
   IconShieldCheck,
   IconTarget,
   IconWrench,
 } from "./Icons";
+import { clients } from "./clients";
 
 export type AnnouncementProps = {
   companyName: string;
@@ -167,6 +171,84 @@ const SceneServices: React.FC = () => {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 26 }}>
           {services.map((sv, i) => (
             <ServiceCard key={sv.title} index={i} {...sv} />
+          ))}
+        </div>
+      </div>
+    </Stage>
+  );
+};
+
+// المشهد 4 — عملاؤنا (لوجو + اسم العميل)
+// التخطيط يتكيّف مع عدد العملاء: بطاقة كبيرة للواحد أو الاثنين، وشبكة لما زاد.
+const SceneClients: React.FC = () => {
+  const count = clients.length;
+  const columns = count <= 2 ? count : count <= 6 ? 3 : 4;
+  const featured = count <= 2;
+
+  return (
+    <Stage>
+      <div style={{ width: "100%", maxWidth: 1500, display: "flex", flexDirection: "column", gap: 34 }}>
+        <SectionTitle label="عملاؤنا" delay={0} />
+        <RevealText delay={6}>
+          <div style={{ fontSize: 30, color: theme.muted, fontWeight: 600, marginTop: -12 }}>
+            نفخر بثقة الجهات التي نعمل معها
+          </div>
+        </RevealText>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${columns}, 1fr)`,
+            gap: 26,
+            justifyContent: "center",
+            maxWidth: featured ? 760 * count : "100%",
+            marginInline: featured ? "auto" : undefined,
+            width: featured ? "100%" : undefined,
+          }}
+        >
+          {clients.map((c, i) => (
+            <RevealText key={c.name} delay={14 + i * 7}>
+              <Card accent={theme.primary} padding={featured ? 44 : 30} style={{ height: "100%" }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+                  <div
+                    style={{
+                      height: featured ? 150 : 110,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {c.logo ? (
+                      <Img
+                        src={staticFile(c.logo)}
+                        style={{ maxHeight: "100%", maxWidth: featured ? 300 : 210, objectFit: "contain" }}
+                      />
+                    ) : (
+                      <IconChip color={theme.primary} size={featured ? 130 : 96}>
+                        <IconGov size={featured ? 74 : 54} color={theme.primary} />
+                      </IconChip>
+                    )}
+                  </div>
+                  <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div
+                      style={{
+                        fontFamily: headingFont,
+                        fontWeight: 800,
+                        fontSize: featured ? 42 : 30,
+                        color: theme.primary,
+                        lineHeight: 1.3,
+                      }}
+                    >
+                      {c.name}
+                    </div>
+                    {c.sector ? (
+                      <div style={{ fontSize: featured ? 26 : 22, color: theme.muted, fontWeight: 600 }}>
+                        {c.sector}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </Card>
+            </RevealText>
           ))}
         </div>
       </div>
@@ -327,10 +409,15 @@ export const CompanyAnnouncement: React.FC<AnnouncementProps> = ({
       </Sequence>
       <Sequence from={510} durationInFrames={150}>
         <Fade durationInFrames={150}>
+          <SceneClients />
+        </Fade>
+      </Sequence>
+      <Sequence from={660} durationInFrames={150}>
+        <Fade durationInFrames={150}>
           <SceneStats />
         </Fade>
       </Sequence>
-      <Sequence from={660} durationInFrames={240}>
+      <Sequence from={810} durationInFrames={240}>
         <Fade durationInFrames={240}>
           <SceneOutro companyName={companyName} phone={phone} website={website} />
         </Fade>
