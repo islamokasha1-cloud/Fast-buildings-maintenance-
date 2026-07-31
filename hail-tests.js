@@ -2143,6 +2143,52 @@ function cleaningOpsTests() {
       /s\.holiday\?"إجازة"/.test(src) && /vTxt="إجازة اليوم"/.test(src));
   }
 
+  // ══ ★ v18.9vf: جولات الجودة بالتقييم (§٣-٣) ══
+  if (CO && typeof CO._roundScore === "function") {
+    T("مقياسُ النجوم خمسٌ", CO._QUALITY_STARS === 5);
+    // درجةُ الجولة = متوسّطُ نجومِ التقييمات المُدخَلة (>0)، ونسبتُها المئوية
+    const r1 = { ratings: [
+      { building:"أ", workType:"نظافة الأرضيات", stars:4 },
+      { building:"أ", workType:"نظافة الزجاج والواجهات", stars:2 },
+      { building:"ب", workType:"نظافة الأرضيات", stars:3 }
+    ]};
+    const sc = CO._roundScore(r1);   // متوسّط (4+2+3)/3 = 3 ⟵ 60%
+    T("★ درجةُ الجولة متوسّطُ النجوم ونسبتُها",
+      sc.n === 3 && sc.avg === 3 && sc.pct === 60, JSON.stringify(sc));
+    T("★ التقييماتُ الصفرية (لم تُقيَّم) لا تُحتسب في المتوسّط",
+      CO._roundScore({ ratings:[{building:"أ",workType:"x",stars:5},{building:"أ",workType:"y",stars:0}] }).avg === 5);
+    T("جولةٌ بلا تقييماتٍ ⟵ لا NaN بل «—»",
+      CO._roundScore({ ratings:[] }).avg === null && CO._roundScore({}).pct === null);
+
+    // اتّجاهٌ شهري + أضعفُ الأنواع (تُرتَّب تصاعديّاً فالأضعفُ أولاً)
+    const rounds = [
+      { date:"2026-06-10", ratings:[{building:"أ",workType:"الأرضيات",stars:2},{building:"أ",workType:"الزجاج",stars:5}] },
+      { date:"2026-07-05", ratings:[{building:"أ",workType:"الأرضيات",stars:3},{building:"ب",workType:"الزجاج",stars:5}] }
+    ];
+    const tr = CO._qualityTrend(rounds);
+    T("★ الاتّجاه يجمّع حسب الشهر", tr.months.length === 2 &&
+      tr.months[0].ym === "2026-06" && tr.months[1].ym === "2026-07",
+      JSON.stringify(tr.months.map(m=>m.ym+":"+m.avg)));
+    T("★ أضعفُ أنواع العمل أوّلاً (تصاعديّاً)",
+      tr.dims[0].name === "الأرضيات" && tr.dims[0].avg < tr.dims[tr.dims.length-1].avg,
+      tr.dims.map(d=>d.name+":"+d.avg).join("، "));
+    T("عددُ الجولات صحيح", tr.roundsCount === 2);
+    T("بلا جولاتٍ ⟵ لا سقوط", CO._qualityTrend([]).roundsCount === 0 && Array.isArray(CO._qualityTrend([]).months));
+  }
+  // العزل والوصل — مجموعةٌ مستقلّةٌ بمعرّف المشروع، وواجهةٌ ضمن «تشغيل النظافة»
+  T("★ جولات الجودة مجموعةٌ معزولةٌ بمعرّف المشروع",
+    /function qualityCol\(\)\{ const id=_projId\(\);/.test(src) && src.includes('id+"_quality_rounds"'));
+  T("★ عرضُ «جولات الجودة» موصولٌ بتوجيه العرض وزرِّ القسم (للأدمن)",
+    /_view==="quality" \? qualityHTML\(\)/.test(src) &&
+    /setView\('quality'\)/.test(src) && /function qualityHTML\(\)\{/.test(src) &&
+    /if\(!canEdit\(\)\)\{/.test((src.match(/function qualityHTML\(\)\{[\s\S]*?\n\}/)||[""])[0]));
+  T("★ اتّجاهُ الجودة معروضٌ في صفحة المؤشّرات ويُحمَّل مع بقيتها",
+    /\$\{qualityTrendHTML\(\)\}/.test(src) && /Promise\.all\(\[loadTasks\(\), loadMonthLog\(\), loadRounds\(\)\]\)/.test(src));
+  T("★ النقرُ على النجمة نفسها يُلغي التقييم (toggle)",
+    /_editingRound\.grid\[key\]=\(cur===n\)\?0:n/.test(src));
+  T("★ تبديلُ المشروع يُصفّر حالةَ الجولات (لا تسرّب بين المشاريع)",
+    /_rounds=\[\]; _roundsLoaded=false;/.test(src) && /_editingRound=null; _roundPhotos=\[\]; _roundDetail=null;/.test(src));
+
   // ── العزل بمعرّف المشروع (كبقية النظام) ──
   T("★ المجموعتان معزولتان بمعرّف المشروع",
     /_cleaning_tasks/.test(src) && /_cleaning_log/.test(src) && src.includes('id+"_cleaning_tasks"'));

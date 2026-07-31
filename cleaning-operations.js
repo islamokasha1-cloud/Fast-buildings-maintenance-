@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9ve";
+const MODULE_BUILD = "v18.9vf";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -164,6 +164,7 @@ function _safeKey(projId){ return String(projId).replace(/[\/.]/g,"_"); }
 function tasksCol(){ const id=_projId(); if(!id) return ""; return id+"_cleaning_tasks"+(_isDev()?"_dev":""); }
 function logCol(){   const id=_projId(); if(!id) return ""; return id+"_cleaning_log"+(_isDev()?"_dev":""); }
 function cfgDoc(){   const id=_projId(); if(!id) return ""; return "meta/"+_safeKey(id)+"_cleaning_cfg"+(_isDev()?"_dev":""); }
+function qualityCol(){ const id=_projId(); if(!id) return ""; return id+"_quality_rounds"+(_isDev()?"_dev":""); }
 
 /* ════════════ ربط المشرف بمبانيه ════════════
    النواة تحفظ المشرفين قائمةَ أسماءٍ مسطّحة بلا نطاقٍ مكاني. نضيف الخريطة في مستندٍ
@@ -235,12 +236,21 @@ let _tasks   = [];      // مهام المشروع الحالي
 let _loaded  = false;   // اكتمل تحميل هذا المشروع؟
 let _loadedFor = "";    // معرّف المشروع المحمَّل
 let _loading = false;
-let _view    = "board"; // board | all
+let _view    = "board"; // board | all | sup | quality
 let _editing = null;    // مسوّدة مهمة قيد التحرير (null = لا تحرير)
 let _execFor = null;    // المهمة قيد التنفيذ (نافذة قائمة الفحص)
 let _execState = [];    // حالة بنود قائمة الفحص أثناء التنفيذ
 let _genForm = false;   // نموذج التوليد بالـ AI مفتوح؟
 let _genErr  = "";
+// جولات الجودة (§٣-٣): تفتيشٌ دوريٌّ يُقيّم نتيجةَ النظافة بالنجوم لكل نوع عملٍ في كل مبنى.
+let _rounds       = [];    // جولات المشروع الحالي (مرتّبة الأحدث أولاً)
+let _roundsLoaded = false;
+let _roundsFor    = "";    // معرّف المشروع المحمَّل لجولاته
+let _roundsLoading= false;
+let _roundsPromise= null;
+let _editingRound = null;  // مسوّدة جولةٍ قيد الإنشاء {id, buildings:[], grid:{}, ...} (null = لا إنشاء)
+let _roundPhotos  = [];    // صور الجولة قيد الإنشاء [{url,uploading,error,preview}]
+let _roundDetail  = null;  // جولةٌ معروضةٌ تفاصيلها (null = لا تفاصيل)
 
 /* ════════════ التحميل والحفظ ════════════ */
 /* ★ لا يجوز الرجوع فارغاً أثناء تحميلٍ جارٍ.
@@ -486,7 +496,7 @@ function _render(){
   if(_execFor)   { renderExec(el);   return; }
   if(_detailFor) { renderDetail(el); return; }
   el.innerHTML = heroHTML() + (_genForm ? genFormHTML() : "") +
-                 (_view==="sup" ? supMapHTML() : _view==="board" ? boardHTML() : allTasksHTML());
+                 (_view==="quality" ? qualityHTML() : _view==="sup" ? supMapHTML() : _view==="board" ? boardHTML() : allTasksHTML());
 }
 function _onPage(){ const pg=document.getElementById("page-"+PAGE_ID); return !!pg && pg.classList.contains("active"); }
 
@@ -505,6 +515,7 @@ function heroHTML(){
         <button class="btn btn-sm ${_view==='all'?'co-seg-on':''}" onclick="cleaningOps.setView('all')">${_svg('clipboardList')} كل المهام</button>
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.addTask()">${_svg('plus')} مهمة جديدة</button>`:""}
         ${canEdit()?`<button class="btn btn-sm ${_view==='sup'?'co-seg-on':''}" onclick="cleaningOps.setView('sup')">${_svg('users')} المشرفون والمناطق</button>`:""}
+        ${canEdit()?`<button class="btn btn-sm ${_view==='quality'?'co-seg-on':''}" onclick="cleaningOps.setView('quality')">${_svg('award')} جولات الجودة</button>`:""}
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.toggleGen()">${_svg('sparkles')} توليد بالذكاء الاصطناعي</button>`:""}
         <button class="btn btn-sm" onclick="cleaningOps.refresh()">${_svg('rotateCcw')} تحديث</button>
       </div>
@@ -1047,7 +1058,9 @@ async function doGen(){
 }
 
 /* ════════════ معالِجات الواجهة ════════════ */
-function setView(v){ _view=v; _genForm=false; _detailFor=null; _detailLog=null; render(); }
+function setView(v){ _view=v; _genForm=false; _detailFor=null; _detailLog=null;
+  if(v!=="quality"){ _editingRound=null; _roundDetail=null; _roundPhotos=[]; }   // غادرَ الجودة ⟵ لا تبقَ مسوّدةٌ معلّقة
+  render(); }
 function toggleGen(){ _genForm=!_genForm; _genErr=""; render(); }
 async function refresh(){ await loadTasks(true); render(); _toast("✅ حُدِّث الجدول","success"); }
 
@@ -1508,6 +1521,296 @@ function supPerfHTML(){
 }
 function goSupMap(){ try{ showPage(PAGE_ID); setView("sup"); }catch(e){} }
 
+/* ════════════════════════════════════════════════════════════
+   جولات الجودة بالتقييم (§٣-٣) — البند المؤجَّل الأخير
+   تفتيشٌ دوريٌّ يقيس **نتيجة** النظافة (لا الالتزام بالجدول ولا زمن الشكوى): المفتِّشُ
+   (أدمن/مدير المشروع) يُقيّم كلَّ نوع عملٍ في كل مبنًى بالنجوم (١–٥) + مخالفاتٍ وصور،
+   فيُنتج درجةً عامةً واتّجاهَ جودةٍ شهريّاً يُعرَض للعميل. معزولٌ بالمشروع كبقية النظام.
+   ════════════════════════════════════════════════════════════ */
+const QUALITY_STARS = 5;
+const _gk = (b,wt)=> String(b)+""+String(wt);   // مفتاحُ خليّة التقييم (مبنى×نوع)
+
+async function loadRounds(force){
+  const database=_db(), col=qualityCol();
+  if(_roundsPromise) return _roundsPromise;
+  if(_roundsLoaded && _roundsFor===_projId() && !force) return Promise.resolve();
+  if(!database || !col){ _rounds=[]; _roundsLoaded=true; _roundsFor=_projId(); return Promise.resolve(); }
+  _roundsLoading=true;
+  _roundsPromise=(async()=>{
+    try{
+      const snap=await database.collection(col).limit(300).get();
+      _rounds=snap.docs.map(d=>Object.assign({id:d.id}, d.data()||{}))
+                       .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")) || String(b.at||"").localeCompare(String(a.at||"")));
+    }catch(e){ console.warn("cleaningOps/loadRounds",e); _toast("⚠ تعذّر تحميل جولات الجودة","warn"); _rounds=[]; }
+    finally{ _roundsLoaded=true; _roundsFor=_projId(); _roundsLoading=false; _roundsPromise=null; }
+  })();
+  return _roundsPromise;
+}
+async function saveRoundDoc(round){
+  const database=_db(), col=qualityCol();
+  if(!database || !col){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
+  try{
+    await database.collection(col).doc(round.id).set(round, {merge:true});
+    const i=_rounds.findIndex(r=>r.id===round.id);
+    if(i>=0) _rounds[i]=round; else _rounds.unshift(round);
+    _rounds.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")) || String(b.at||"").localeCompare(String(a.at||"")));
+    return true;
+  }catch(e){ console.warn("cleaningOps/saveRound",e); _toast("⚠ تعذّر حفظ الجولة","warn"); return false; }
+}
+async function deleteRoundDoc(id){
+  const database=_db(), col=qualityCol();
+  if(!database || !col){ return false; }
+  try{ await database.collection(col).doc(id).delete(); _rounds=_rounds.filter(r=>r.id!==id); return true; }
+  catch(e){ console.warn("cleaningOps/deleteRound",e); _toast("⚠ تعذّر حذف الجولة","warn"); return false; }
+}
+
+// درجةُ الجولة: متوسّطُ نجومِ كلِّ التقييمات المُدخَلة (>0)، ونسبتُها المئوية
+function roundScore(r){
+  const rs=(r && Array.isArray(r.ratings)) ? r.ratings.filter(x=>x && Number(x.stars)>0) : [];
+  if(!rs.length) return { n:0, avg:null, pct:null };
+  const sum=rs.reduce((a,x)=>a+(Number(x.stars)||0),0);
+  const avg=sum/rs.length;
+  return { n:rs.length, avg:Math.round(avg*10)/10, pct:Math.round(avg/QUALITY_STARS*100) };
+}
+// اتّجاهُ الجودة الشهري + أضعفُ الأنواع: من كل الجولات (لكل مبنًى/نوعٍ عمل)
+function qualityTrend(list){
+  const rounds=Array.isArray(list)?list:_rounds;
+  const months={};     // ym → {sum,n}
+  const dims={};        // نوع العمل → {sum,n}
+  const blds={};        // مبنى → {sum,n}
+  rounds.forEach(r=>{
+    const ym=String(r.date||"").slice(0,7);
+    (Array.isArray(r.ratings)?r.ratings:[]).forEach(x=>{
+      const s=Number(x&&x.stars)||0; if(s<=0) return;
+      if(ym){ (months[ym]=months[ym]||{sum:0,n:0}); months[ym].sum+=s; months[ym].n++; }
+      if(x.workType){ (dims[x.workType]=dims[x.workType]||{sum:0,n:0}); dims[x.workType].sum+=s; dims[x.workType].n++; }
+      if(x.building){ (blds[x.building]=blds[x.building]||{sum:0,n:0}); blds[x.building].sum+=s; blds[x.building].n++; }
+    });
+  });
+  const toPct=o=>o.n?Math.round(o.sum/o.n/QUALITY_STARS*100):null;
+  const toAvg=o=>o.n?Math.round(o.sum/o.n*10)/10:null;
+  const monthsArr=Object.keys(months).sort().map(ym=>({ ym, avg:toAvg(months[ym]), pct:toPct(months[ym]), n:months[ym].n }));
+  const dimsArr =Object.keys(dims).map(k=>({ name:k, avg:toAvg(dims[k]), pct:toPct(dims[k]), n:dims[k].n })).sort((a,b)=>a.avg-b.avg);
+  const bldsArr =Object.keys(blds).map(k=>({ name:k, avg:toAvg(blds[k]), pct:toPct(blds[k]), n:blds[k].n })).sort((a,b)=>a.avg-b.avg);
+  const thisYm=_today().slice(0,7);
+  const cur=months[thisYm]?{ avg:toAvg(months[thisYm]), pct:toPct(months[thisYm]), n:months[thisYm].n }:null;
+  return { months:monthsArr, dims:dimsArr, blds:bldsArr, current:cur, roundsCount:rounds.length };
+}
+
+/* ── واجهةُ النجوم ── */
+function starsView(v){   // عرضٌ فقط: ★ ممتلئة بعدد v من ٥
+  const n=Math.round(Number(v)||0); let h="";
+  for(let i=1;i<=QUALITY_STARS;i++) h+=`<span class="q-star ${i<=n?'on':''}">★</span>`;
+  return `<span class="q-stars">${h}</span>`;
+}
+function starsInput(sbi,wi,v){   // تفاعليّ: نقرٌ يضبط، ونقرٌ على النجمة نفسها يُلغي
+  const n=Number(v)||0; let h="";
+  for(let i=1;i<=QUALITY_STARS;i++)
+    h+=`<span class="q-star ${i<=n?'on':''}" role="button" tabindex="0" onclick="cleaningOps.setStar(${sbi},${wi},${i})">★</span>`;
+  return `<span class="q-stars q-input" data-star-row="${sbi}-${wi}">${h}</span>`;
+}
+
+/* ── العرض: قائمة / نموذج / تفاصيل ── */
+function qualityHTML(){
+  if(!canEdit()){
+    return `<div class="card"><div class="co-empty">${_svg('lock')}
+      <div class="co-empty-t">جولات الجودة للأدمن ومدير المشروع</div>
+      <div class="co-empty-s">التفتيشُ الإشرافيُّ يُدخِله من يملك صلاحية الإدارة.</div></div></div>`;
+  }
+  if(_editingRound) return roundFormHTML();
+  if(_roundDetail)  return roundDetailHTML();
+  if(!_roundsLoaded){ loadRounds().then(()=>{ if(_onPage()) render(); });
+    return `<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ تحميل جولات الجودة…</div></div></div>`; }
+  return roundsListHTML();
+}
+function roundsListHTML(){
+  const rows=_rounds.map(r=>{
+    const sc=roundScore(r);
+    const c=sc.pct==null?"var(--muted)":(sc.pct>=85?"var(--sla-ok)":(sc.pct>=60?"var(--sla-warn)":"var(--sla-crit)"));
+    const bcount=new Set((Array.isArray(r.ratings)?r.ratings:[]).map(x=>x.building)).size;
+    return `<div class="co-logrow" onclick="cleaningOps.openRound('${_esc(r.id)}')" style="cursor:pointer">
+      <div class="co-logrow-h">
+        <span class="d">${_svg('calendar',13)} ${_esc(String(r.date||"").slice(0,10))}</span>
+        <span class="b">${_svg('user',13)} ${_esc(r.by||"—")}</span>
+        <span class="b">${_svg('building2',13)} ${bcount} مبنى · ${sc.n} تقييم</span>
+        <span style="margin-inline-start:auto;font-weight:800;color:${c}">${sc.avg!=null?sc.avg+" ★":"—"} ${sc.pct!=null?"("+sc.pct+"%)":""}</span>
+      </div>
+      ${r.violations?`<div class="co-lognote">${_svg('alertTriangle',13)} ${_esc(String(r.violations).slice(0,140))}</div>`:""}
+    </div>`;
+  }).join("");
+  return `<div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('award')} جولات الجودة</div>
+        <span class="co-sec-c">${_rounds.length?_rounds.length+" جولة":"لا جولاتٍ بعد"}</span></div>
+      <button class="btn btn-primary btn-sm" onclick="cleaningOps.newRound()">${_svg('plus')} جولة جودةٍ جديدة</button>
+      ${_rounds.length?`<div style="margin-top:12px">${rows}</div>`:`
+        <div class="co-empty" style="padding:18px">${_svg('award')}
+          <div class="co-empty-t">لا جولاتِ جودةٍ بعد</div>
+          <div class="co-empty-s">ابدأ جولةً: قيّم كلَّ نوع عملٍ في كل مبنًى بالنجوم، وأضِف المخالفات والصور.</div></div>`}
+    </div>`;
+}
+function roundFormHTML(){
+  const r=_editingRound, blds=_buildings(), sel=r.buildings||[];
+  const liveN=Object.keys(r.grid||{}).filter(k=>r.grid[k]>0).length;
+  const liveSum=Object.keys(r.grid||{}).reduce((a,k)=>a+(r.grid[k]>0?r.grid[k]:0),0);
+  const liveAvg=liveN?Math.round(liveSum/liveN*10)/10:null;
+  const picker=blds.map((b,bi)=>{
+    const on=sel.indexOf(b)!==-1;
+    return `<label class="co-bld ${on?'on':''}"><input type="checkbox" ${on?'checked':''} onchange="cleaningOps.toggleRoundBuilding(${bi})"> ${_esc(b)}</label>`;
+  }).join("");
+  const grids=sel.map((b)=>{
+    const sbi=sel.indexOf(b);
+    const rowsHTML=WT_KEYS.map((wt,wi)=>`
+      <div class="q-row">
+        <span class="q-wt">${_esc(wt)}</span>
+        ${starsInput(sbi,wi,(r.grid||{})[_gk(b,wt)]||0)}
+      </div>`).join("");
+    return `<div class="card co-group"><div class="co-sec"><div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div></div>${rowsHTML}</div>`;
+  }).join("");
+  const photos=_roundPhotos.map((p,i)=>`
+    <div class="co-photo ${p.error?'err':''}">
+      ${p.url||p.preview?`<img src="${_esc(p.url||p.preview)}" alt="صورة الجولة">`:""}
+      ${p.uploading?`<span class="co-photo-st">⏳ جارٍ الرفع…</span>`:""}
+      ${p.error?`<span class="co-photo-st">⚠ تعذّر الرفع</span>`:""}
+      <button class="co-photo-x" onclick="cleaningOps.delRoundPhoto(${i})" title="حذف">✕</button>
+    </div>`).join("");
+  return subHeroHTML("جولة جودةٍ جديدة", "قيّم كلَّ نوع عملٍ في كل مبنًى بالنجوم", "cancelRound") + `
+    <div class="card co-pane">
+      <div class="form-group"><label class="form-label">تاريخ الجولة</label>
+        <input class="form-input" type="date" id="q-date" value="${_esc(String(r.date||_today()).slice(0,10))}"></div>
+      <div class="form-group"><label class="form-label">المباني المشمولة (اختر ثم قيّم)</label>
+        <div class="co-sup-blds">${picker}</div></div>
+    </div>
+    ${sel.length?`<div class="co-live-score card"><span>متوسّط الجولة الحيّ:</span> <b id="q-live">${liveAvg!=null?liveAvg+" ★ ("+Math.round(liveAvg/QUALITY_STARS*100)+"%)":"—"}</b> <small id="q-live-n">${liveN} تقييم</small></div>${grids}`
+      :`<div class="card"><div class="co-hint" style="margin:0">اختر مبنًى واحداً على الأقل لبدء التقييم.</div></div>`}
+    <div class="card co-pane">
+      <div class="form-group"><label class="form-label">المخالفات والملاحظات</label>
+        <textarea class="form-input" id="q-violations" rows="3" placeholder="مثال: دورات مياه الدور ٣ تحتاج إعادة تعقيم؛ زجاج الواجهة غير مكتمل.">${_esc(r.violations||"")}</textarea></div>
+      <div class="form-group"><label class="form-label">صور الجولة (حتى ٤)</label>
+        <div class="co-photos">${photos}
+          ${_roundPhotos.length<4?`
+          <button class="co-photo-add" onclick="cleaningOps.pickRoundPhoto(true)">${_svg('camera')}<span>التقاط بالكاميرا</span></button>
+          <button class="co-photo-add" onclick="cleaningOps.pickRoundPhoto(false)">${_svg('image')}<span>من المعرض</span></button>`:""}</div></div>
+      <div class="co-actions" style="margin-top:6px">
+        <button class="btn btn-primary btn-sm" onclick="cleaningOps.saveRoundForm()">${_svg('checkCircle')} حفظ الجولة</button>
+        <button class="btn btn-ghost btn-sm" onclick="cleaningOps.cancelRound()">إلغاء</button>
+      </div>
+    </div>`;
+}
+function roundDetailHTML(){
+  const r=_roundDetail, sc=roundScore(r);
+  const c=sc.pct==null?"var(--muted)":(sc.pct>=85?"var(--sla-ok)":(sc.pct>=60?"var(--sla-warn)":"var(--sla-crit)"));
+  const byB={};
+  (Array.isArray(r.ratings)?r.ratings:[]).forEach(x=>{ (byB[x.building]=byB[x.building]||[]).push(x); });
+  const groups=Object.keys(byB).map(b=>`
+    <div class="card co-group"><div class="co-sec"><div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div></div>
+      ${byB[b].map(x=>`<div class="q-row"><span class="q-wt">${_esc(x.workType)}</span>${starsView(x.stars)}</div>`).join("")}
+    </div>`).join("");
+  const photos=(Array.isArray(r.photos)?r.photos:[]).map(u=>`<div class="co-photo"><img src="${_esc(u)}"></div>`).join("");
+  return subHeroHTML("تفاصيل جولة الجودة", _esc(String(r.date||"").slice(0,10)), "closeRound") + `
+    <div class="card">
+      <div class="co-tiles">
+        <div class="stat-tile" style="--_c:${c}"><div class="st-val" style="color:${c}">${sc.avg!=null?sc.avg+" ★":"—"}</div><div class="st-lbl">متوسّط الجودة</div></div>
+        <div class="stat-tile" style="--_c:${c}"><div class="st-val" style="color:${c}">${sc.pct!=null?sc.pct+"%":"—"}</div><div class="st-lbl">النسبة المئوية</div></div>
+        <div class="stat-tile" style="--_c:var(--primary)"><div class="st-val">${sc.n}</div><div class="st-lbl">تقييمات</div></div>
+        <div class="stat-tile" style="--_c:var(--primary)"><div class="st-val">${_esc(r.by||"—")}</div><div class="st-lbl">المفتِّش</div></div>
+      </div>
+      ${r.violations?`<div class="ppm-overdue-banner"><span class="co-bnr-ic">${_svg('alertTriangle')}</span><span>${_esc(r.violations)}</span></div>`:""}
+    </div>
+    ${groups}
+    ${photos?`<div class="card"><div class="co-sec"><div class="co-sec-t">${_svg('image')} صور الجولة</div></div><div class="co-logphotos">${photos}</div></div>`:""}
+    ${canEdit()?`<div class="co-actions"><button class="btn btn-ghost btn-sm" onclick="cleaningOps.removeRound('${_esc(r.id)}')">${_svg('trash')} حذف الجولة</button></div>`:""}`;
+}
+
+/* ── التفاعل ── */
+function _captureRoundForm(){   // احفظ نصوصَ النموذج في الحالة قبل أي إعادة رسم
+  if(!_editingRound) return;
+  const d=document.getElementById("q-date"); if(d) _editingRound.date=d.value||_today();
+  const v=document.getElementById("q-violations"); if(v) _editingRound.violations=v.value||"";
+}
+function newRound(){ _editingRound={ id:_uid(), date:_today(), buildings:[], grid:{}, violations:"" }; _roundPhotos=[]; _roundDetail=null; render(); }
+function cancelRound(){ _editingRound=null; _roundPhotos=[]; render(); }
+function toggleRoundBuilding(bi){
+  _captureRoundForm();
+  const b=_buildings()[bi]; if(!b || !_editingRound) return;
+  const arr=_editingRound.buildings||(_editingRound.buildings=[]);
+  const i=arr.indexOf(b);
+  if(i===-1) arr.push(b); else { arr.splice(i,1); Object.keys(_editingRound.grid).forEach(k=>{ if(k.indexOf(b+"")===0) delete _editingRound.grid[k]; }); }
+  render();
+}
+function setStar(sbi,wi,n){
+  if(!_editingRound) return;
+  const b=(_editingRound.buildings||[])[sbi], wt=WT_KEYS[wi]; if(!b||!wt) return;
+  const key=_gk(b,wt), cur=_editingRound.grid[key]||0;
+  _editingRound.grid[key]=(cur===n)?0:n;   // نقرٌ على النجمة نفسها يُلغي التقييم
+  // تحديثٌ موضعيٌّ (بلا إعادة رسمٍ كاملة) حفاظاً على نصوص المخالفات
+  const row=document.querySelector('#page-'+PAGE_ID+' [data-star-row="'+sbi+'-'+wi+'"]');
+  if(row) Array.prototype.forEach.call(row.querySelectorAll('.q-star'),(s,idx)=>s.classList.toggle('on', idx<_editingRound.grid[key]));
+  _updateRoundLiveScore();
+}
+function _updateRoundLiveScore(){
+  const g=_editingRound&&_editingRound.grid||{}; const keys=Object.keys(g).filter(k=>g[k]>0);
+  const el=document.getElementById("q-live"), cnt=document.getElementById("q-live-n");
+  if(cnt) cnt.textContent=keys.length+" تقييم";
+  if(!el) return;
+  if(!keys.length){ el.textContent="—"; return; }
+  const avg=Math.round(keys.reduce((a,k)=>a+g[k],0)/keys.length*10)/10;
+  el.textContent=avg+" ★ ("+Math.round(avg/QUALITY_STARS*100)+"%)";
+}
+async function saveRoundForm(){
+  if(!_editingRound) return;
+  _captureRoundForm();
+  const g=_editingRound.grid||{};
+  const ratings=Object.keys(g).filter(k=>g[k]>0).map(k=>{ const p=k.split(""); return { building:p[0], workType:p[1], stars:g[k] }; });
+  if(!ratings.length){ _toast("⚠ قيّم نوعَ عملٍ واحداً على الأقل","warn"); return; }
+  const round={
+    id:_editingRound.id, date:String(_editingRound.date||_today()).slice(0,10),
+    at:new Date().toISOString(), by:_userName(),
+    ratings, violations:String(_editingRound.violations||"").slice(0,1000),
+    photos:(_roundPhotos||[]).map(p=>p.url).filter(Boolean)
+  };
+  const sc=roundScore(round); round.avgStars=sc.avg; round.pct=sc.pct;
+  const ok=await saveRoundDoc(round);
+  if(ok){ _audit("جولة جودة نظافة", round.date+" — "+ratings.length+" تقييم — "+(sc.pct||0)+"%");
+    _toast("✅ حُفظت جولة الجودة","success"); _editingRound=null; _roundPhotos=[]; render(); }
+}
+function openRound(id){ const r=_rounds.find(x=>x.id===id); if(r){ _roundDetail=r; _editingRound=null; render(); } }
+function closeRound(){ _roundDetail=null; render(); }
+async function removeRound(id){
+  if(typeof showConfirm==="function"){ const ok=await showConfirm("حذف جولة الجودة؟","لا يمكن التراجع."); if(!ok) return; }
+  const ok=await deleteRoundDoc(id); if(ok){ _roundDetail=null; _toast("🗑 حُذفت الجولة","success"); render(); }
+}
+/* صور الجولة — نفس آلية النواة (ضغط + Storage)، ببافرٍ مستقلٍّ عن صور التنفيذ */
+function pickRoundPhoto(fromCamera){
+  const room=4-_roundPhotos.length;
+  if(room<=0){ _toast("⚠ الحدّ الأقصى ٤ صور للجولة","warn"); return; }
+  _captureRoundForm();
+  const inp=document.createElement("input"); inp.type="file"; inp.accept="image/*"; inp.style.display="none";
+  if(fromCamera) inp.setAttribute("capture","environment"); else inp.multiple=true;
+  inp.onchange=()=>{ Array.prototype.slice.call(inp.files||[],0,room).forEach(f=>_uploadRoundPhoto(f));
+    try{ document.body.removeChild(inp); }catch(e){} };
+  document.body.appendChild(inp); inp.click();
+}
+function _uploadRoundPhoto(file){
+  const st=_storage(); if(!st){ _toast("⚠ خدمة التخزين غير متاحة","warn"); return; }
+  if(_roundPhotos.length>=4) return;
+  const rec={ url:"", uploading:true, error:false, preview:"" };
+  try{ rec.preview=URL.createObjectURL(file); }catch(e){}
+  _roundPhotos.push(rec); render();
+  const done=()=>{ if(_onPage()) render(); };
+  const comp=(typeof compressImage==="function")?compressImage(file):Promise.resolve(file);
+  comp.then(blob=>{
+    if(!blob){ rec.uploading=false; rec.error=true; done(); return; }
+    const id=_projId()||"proj";
+    const ref=st.ref("cleaning-quality/"+id+"/"+Date.now()+".jpg");
+    let timedOut=false;
+    const to=setTimeout(()=>{ timedOut=true; rec.uploading=false; rec.error=true; _toast("⚠ تأخّر رفع الصورة","warn"); done(); },45000);
+    ref.put(blob).then(s=>s.ref.getDownloadURL()).then(url=>{ clearTimeout(to); if(timedOut) return; rec.url=url; rec.uploading=false; done(); })
+      .catch(err=>{ clearTimeout(to); if(timedOut) return; console.warn("cleaningOps/roundPhoto",err); rec.uploading=false; rec.error=true; _toast("⚠ تعذّر رفع الصورة","warn"); done(); });
+  }).catch(()=>{ rec.uploading=false; rec.error=true; done(); });
+}
+function delRoundPhoto(i){ _captureRoundForm(); _roundPhotos.splice(i,1); render(); }
+function goQuality(){ try{ showPage(PAGE_ID); setView("quality"); }catch(e){} }
+
 function kpiHTML(){
   const list=cleaningKPIs();
   const card=k=>{
@@ -1542,7 +1845,45 @@ function kpiHTML(){
       المؤشّرات محسوبةٌ من جدول المهامّ وسجلّ التنفيذ لهذا الشهر. «تغطية اليوم» و«المناطق»
       لحظيّتان، والباقي تراكميٌّ منذ بداية الشهر.
     </div>
-    ${supPerfHTML()}`;
+    ${supPerfHTML()}
+    ${qualityTrendHTML()}`;
+}
+
+/* اتّجاهُ الجودة الشهري — يُعرض أسفلَ مؤشّرات النظافة، من جولات التفتيش */
+function qualityTrendHTML(){
+  const t=qualityTrend();
+  const col=p=>p==null?"var(--muted)":(p>=85?"var(--sla-ok)":(p>=60?"var(--sla-warn)":"var(--sla-crit)"));
+  const head=`<div class="co-sec"><div class="co-sec-t">${_svg('award')} اتّجاه الجودة — جولات التفتيش</div>
+    <span class="co-sec-c">${t.roundsCount?t.roundsCount+" جولة":"لا جولاتٍ بعد"}</span></div>`;
+  if(!t.roundsCount){
+    return `<div class="card">${head}
+      <div class="co-empty" style="padding:20px">${_svg('award')}
+        <div class="co-empty-t">لا جولاتِ جودةٍ بعد</div>
+        <div class="co-empty-s">جولةُ التفتيش تقيس **جودةَ النتيجة** (لا الالتزام بالجدول) — تُنتج اتّجاهاً شهريّاً يُعرض للعميل.</div>
+        ${canEdit()?`<button class="btn btn-sm" style="margin-top:10px" onclick="cleaningOps.goQuality()">${_svg('award')} بدء جولة جودة</button>`:""}
+      </div></div>`;
+  }
+  const cur=t.current;
+  const bars=t.months.slice(-6).map(m=>`
+    <div class="q-mbar" title="${_esc(m.ym)} — ${m.avg} ★">
+      <div class="q-mbar-track"><span style="height:${Math.max(m.pct||0,3)}%;background:${col(m.pct)}"></span></div>
+      <div class="q-mbar-p" style="color:${col(m.pct)}">${m.pct}%</div>
+      <div class="q-mbar-l">${_esc(m.ym.slice(5))}</div>
+    </div>`).join("");
+  const weak=t.dims.slice(0,3).map(d=>`
+    <div class="co-cov"><div class="co-cov-h"><span class="n">${_esc(d.name)}</span>
+      <span class="p" style="color:${col(d.pct)}">${d.avg} ★ <small>(${d.pct}%)</small></span></div>
+      <div class="hbar"><span style="flex:${Math.max(d.pct,0.01)};background:${col(d.pct)}"></span><span style="flex:${Math.max(100-d.pct,0.01)};background:var(--surface2)"></span></div></div>`).join("");
+  return `<div class="card">${head}
+    <div class="co-tiles" style="margin-bottom:12px">
+      <div class="stat-tile" style="--_c:${col(cur&&cur.pct)}"><div class="st-val" style="color:${col(cur&&cur.pct)}">${cur?cur.avg+" ★":"—"}</div><div class="st-lbl">متوسّط جودة الشهر</div></div>
+      <div class="stat-tile" style="--_c:${col(cur&&cur.pct)}"><div class="st-val" style="color:${col(cur&&cur.pct)}">${cur?cur.pct+"%":"—"}</div><div class="st-lbl">نسبة هذا الشهر</div></div>
+      <div class="stat-tile" style="--_c:var(--primary)"><div class="st-val">${t.roundsCount}</div><div class="st-lbl">إجمالي الجولات</div></div>
+    </div>
+    <div class="co-sec-t" style="font-size:12px;margin-bottom:8px">الاتّجاه الشهري (آخر ٦ أشهر)</div>
+    <div class="q-months">${bars}</div>
+    ${weak?`<div class="co-sec-t" style="font-size:12px;margin:16px 0 8px">${_svg('alertTriangle')} أضعفُ أنواع العمل — أولويةُ التحسين</div>${weak}`:""}
+  </div>`;
 }
 function mountKPI(){
   const host=document.getElementById("page-kpi");
@@ -1551,9 +1892,9 @@ function mountKPI(){
   let box=document.getElementById(KPI_ID);
   if(!box){ box=document.createElement("div"); box.id=KPI_ID; host.insertBefore(box, host.firstChild); }
   host.classList.add("co-kpi-mode");
-  if(!_loaded || _loadedFor!==_projId() || _monthLog===null){
+  if(!_loaded || _loadedFor!==_projId() || _monthLog===null || !_roundsLoaded){
     box.innerHTML=`<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ حساب المؤشّرات…</div></div></div>`;
-    Promise.all([loadTasks(), loadMonthLog()]).then(()=>{
+    Promise.all([loadTasks(), loadMonthLog(), loadRounds()]).then(()=>{
       const b=document.getElementById(KPI_ID);
       if(b && isCleaningProject()) _safeHTML(b, kpiHTML);
     }).catch(e=>console.warn("cleaningOps/mountKPI",e));
@@ -2076,6 +2417,8 @@ function _watchProject(){
       _editing=null; _execFor=null; _execState=[]; _execPhotos=[];
       _detailFor=null; _detailLog=null;            // تفاصيلُ مهمةِ السابق لا تبقى معروضة
       _genForm=false; _genErr=""; _view="board";
+      _rounds=[]; _roundsLoaded=false; _roundsFor=""; _roundsPromise=null;   // جولاتُ السابق لا تبقى
+      _editingRound=null; _roundPhotos=[]; _roundDetail=null;
       // ارفع لوحات النظافة فوراً عند مغادرة مشروع النظافة — قبل معرفة نوع الجديد
       unmountExec(); unmountDaily(); unmountKPI();
       _monthLog=null; _monthLogFor="";
@@ -2268,6 +2611,26 @@ function injectCSS(){
 .co-num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;direction:ltr;text-align:right}
 .co-tr-off{opacity:.5}
 
+/* ── جولات الجودة ── */
+.q-stars{display:inline-flex;gap:2px;font-size:19px;line-height:1;direction:ltr}
+.q-star{color:var(--border);transition:color .1s}
+.q-star.on{color:var(--sla-warn)}
+.q-input .q-star{cursor:pointer;padding:1px;color:var(--muted)}
+.q-input .q-star.on{color:var(--sla-warn)}
+.q-input .q-star:hover{color:var(--sla-warn)}
+.q-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px dashed var(--border)}
+.q-row:last-child{border-bottom:0}
+.q-wt{font-size:12.5px;font-weight:700;color:var(--text)}
+.co-live-score{display:flex;align-items:center;gap:10px;padding:11px 16px;font-size:13px;font-weight:700;color:var(--text)}
+.co-live-score b{font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--primary)}
+.co-live-score small{color:var(--muted);font-weight:700}
+.q-months{display:flex;gap:10px;align-items:flex-end}
+.q-mbar{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;min-width:0}
+.q-mbar-track{width:100%;max-width:46px;height:84px;background:var(--surface2);border-radius:8px;display:flex;align-items:flex-end;overflow:hidden}
+.q-mbar-track span{width:100%;display:block;border-radius:8px 8px 0 0;transition:height .3s}
+.q-mbar-p{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:900}
+.q-mbar-l{font-size:10.5px;color:var(--muted);font-weight:700}
+
 `;
   document.head.appendChild(st);
 }
@@ -2297,6 +2660,8 @@ window.cleaningOps = {
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   openDetail, closeDetail,
   saveSupMap, goSupMap,
+  newRound, cancelRound, toggleRoundBuilding, setStar, saveRoundForm, openRound, closeRound, removeRound,
+  pickRoundPhoto, delRoundPhoto, goQuality,
   mountExec, unmountExec, refreshExec, goOps,
   mountDaily, unmountDaily, refreshDaily, mountKPI, unmountKPI, refreshKPI, seedWorkTypes, relabelPage, injectPhotoSourceFilter,
   startSync(){ /* لا مزامنة مستقلة — القراءة بـ .get() عند العرض (انضباط المستمعين) */ },
@@ -2308,6 +2673,7 @@ window.cleaningOps = {
   _logAsTicket: _logAsTicket, _taskSupervisor: taskSupervisor,
   _supervisorPerf: supervisorPerf, _logSupervisor: logSupervisor,
   _unassignedBuildings: unassignedBuildings,
+  _roundScore: roundScore, _qualityTrend: qualityTrend, _QUALITY_STARS: QUALITY_STARS,
   _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
   _salvageObjects: _salvageObjects,
   _svg: _svg,
