@@ -2359,6 +2359,72 @@ function cleaningOpsTests() {
       k.every(x => typeof x.val === "number" && !isNaN(x.val)), JSON.stringify(k.map(x => x.val)));
   }
 
+  // ══ ★ أداء المشرفين — عاد بعد حجب صفحة الصيانة (v18.9vb) ══
+  // حجبُ صفحة الصيانة في v18.9va أخفى معها «تصنيف المشرفين» بلا بديل، والبياناتُ
+  // اللازمة موجودةٌ أصلاً (كلُّ سطرِ تنفيذٍ يحمل supervisor). هذه الفحوص تمنع اختفاءه
+  // ثانيةً وتحرس عدالةَ الدرجة (لا يُعاقَب مشرفٌ بمكوّنٍ لم يُقَس أصلاً).
+  T("★ قسم أداء المشرفين معروضٌ داخل صفحة مؤشّرات النظافة",
+    /\$\{supPerfHTML\(\)\}/.test(src) && /function supPerfHTML\(\)\{/.test(src));
+  T("زرُّ ربط المشرفين بالمباني متاحٌ من صفحة المؤشّرات",
+    /function goSupMap\(\)\{[^}]*showPage\(PAGE_ID\); setView\("sup"\)/.test(src) &&
+    /cleaningOps\.goSupMap\(\)/.test(src));
+  // ★ نطاقٌ واحدٌ للوحة: التغطيةُ مُنطَّقةٌ بـvisibleTasks، وكان السجلُّ عامّاً — رقمان
+  // من نطاقين في لوحةٍ واحدة يرى معهما المشرفُ توثيقَ المشروع كلِّه مع تغطية مبانيه.
+  const _kpiBody2 = (src.match(/function cleaningKPIs\(\)\{[\s\S]*?\n\}/) || [""])[0];
+  T("★ سجلُّ الشهر يُنطَّق كالمهامّ (لا رقمان من نطاقين في لوحةٍ واحدة)",
+    /function visibleLog\(\)\{/.test(src) && _kpiBody2.includes("visibleLog()") &&
+    !/const log=_monthLog\|\|\[\];/.test(_kpiBody2));
+  if (CO && typeof CO._supervisorPerf === "function") {
+    const wsum = Object.values(CO._SUP_WEIGHTS).reduce((a, b) => a + b, 0);
+    T("أوزانُ الدرجة مجموعُها ١ (لا وزنٌ ضائعٌ أو مضاعف)", Math.abs(wsum - 1) < 1e-9, "المجموع=" + wsum);
+
+    const sTasks = [
+      { id: "1", building: "أ", supervisor: "سالم", nextDueDate: today, lastExecuted: today },
+      { id: "2", building: "أ", supervisor: "سالم", nextDueDate: today, lastExecuted: "" },
+      { id: "3", building: "ب", supervisor: "نورة", nextDueDate: day(-2), lastExecuted: "" },
+      { id: "4", building: "ج", nextDueDate: today, lastExecuted: today }
+    ];
+    const sLog = [
+      { building: "أ", supervisor: "سالم", photos: ["u"], doneItems: 4, totalItems: 4 },
+      { building: "أ", supervisor: "سالم", photos: [], doneItems: 2, totalItems: 4 }
+    ];
+    const perf = CO._supervisorPerf(sTasks, sLog);
+    const salem = perf.find(x => x.name === "سالم") || {};
+    const noura = perf.find(x => x.name === "نورة") || {};
+    const orph = perf.find(x => x.unassigned) || {};
+
+    T("★ المهامُّ وسجلُّ التنفيذ يُجمَّعان لكلِّ مشرفٍ معاً",
+      salem.sched === 2 && salem.done === 1 && salem.runs === 2 && salem.zones === 1,
+      JSON.stringify({ sched: salem.sched, done: salem.done, runs: salem.runs, zones: salem.zones }));
+    T("مقاييسُ المشرف محسوبةٌ من بياناته وحدها",
+      salem.cov === 50 && salem.late === 0 && salem.doc === 50 && salem.items === 75,
+      JSON.stringify({ cov: salem.cov, late: salem.late, doc: salem.doc, items: salem.items }));
+    // 0.45*50 + 0.20*100 + 0.20*50 + 0.15*75 = 63.75 ⟵ كلُّ المكوّنات متاحة
+    T("الدرجةُ متوسّطٌ مرجَّحٌ صحيح", salem.score === 64, "الدرجة=" + salem.score);
+    // ★ العدالة: مَن لا تنفيذاتٍ له لا يُقاس توثيقُه بصفر — يظهر «—» ولا يُحتسب،
+    // وإلا صار كلُّ مشرفٍ جديدٍ فاشلاً بمكوّنين لم يعمل فيهما بعد.
+    T("★ مكوّنٌ بلا بياناتٍ يُرجع null لا صفراً (لا عقوبةَ على ما لم يُقَس)",
+      noura.doc === null && noura.items === null && noura.runs === 0,
+      JSON.stringify({ doc: noura.doc, items: noura.items }));
+    T("★ الأوزانُ تُعاد موازنتُها على المتاح فقط",
+      orph.cov === 100 && orph.late === 0 && orph.score === 100,
+      "بلا مشرف: تغطية=" + orph.cov + " درجة=" + orph.score);
+    T("متأخّراتُ المشرف تُقلَب في الدرجة (أقلُّ = أفضل)",
+      noura.late === 100 && noura.score === 0, JSON.stringify({ late: noura.late, score: noura.score }));
+    T("★ المباني بلا مشرفٍ صفٌّ مستقلٌّ لا تختفي من القياس",
+      orph.name === CO._SUP_UNASSIGNED && orph.zones === 1);
+    T("★ «بلا مشرف» أسفلَ القائمة دائماً وإن علت درجتُه (ليس منافساً)",
+      perf[perf.length - 1].unassigned === true && perf[0].name === "سالم",
+      perf.map(x => x.name + ":" + x.score).join("، "));
+    T("سطرُ تنفيذٍ قديمٍ بلا حقل supervisor يُنسَب لمشرف مبناه",
+      CO._logSupervisor({ supervisor: "هند", building: "أ" }) === "هند" &&
+      CO._logSupervisor({ building: "مبنى غير مسنَد" }) === "");
+    T("بلا أيِّ بياناتٍ لا NaN ولا سقوط", Array.isArray(CO._supervisorPerf([], [])) &&
+      CO._supervisorPerf([], []).length === 0);
+    T("مهمةٌ موقوفةٌ لا تُحمَّل على مشرفها",
+      CO._supervisorPerf([{ id: "x", building: "أ", supervisor: "سالم", nextDueDate: today, disabled: true }], []).length === 0);
+  }
+
   // ══ ★ عموميّة المشاريع: أيُّ مشروع نظافةٍ جديدٍ يعمل بنفس المنطق ══
   T("★ لا معرّفَ مشروعٍ مثبَّتٌ في الوحدة إطلاقاً",
     !/["'`](hail|bathroom001)["'`]/.test(src) && !/hail_/.test(src));
