@@ -2128,6 +2128,17 @@ function cleaningOpsTests() {
   T("★ تنبيه التأخّر بـ .ppm-overdue-banner لا تنبيهٍ خاص", /ppm-overdue-banner/.test(src) && !/class="co-alert"/.test(src));
   T("النماذج بـ .form-group/.form-label (لا حقولٌ خاصة)", /class="form-group"/.test(src) && /class="form-label"/.test(src));
 
+  // ── ★ index.html يبقى بلا إضافاتٍ وظيفية: الوحدة تحقن نوع «إدارة نظافة» بنفسها ──
+  T("★ خيار «إدارة نظافة» ليس في index.html (تحقنه الوحدة)",
+    !/<option value="cleaning"/.test(HTML));
+  T("الوحدة تلفّ نافذتَي إنشاء/تعديل المشروع",
+    /window\.openAddProjectModal\s*=/.test(src) && /window\.openEditProjectModal\s*=/.test(src));
+  // حارسٌ ضدّ الحقن الصامت الفاشل: أهداف الحقن يجب أن تبقى موجودةً في index.html
+  ["np-type", "ep-type", "np-type-hint", "ep-type-hint"].forEach(id =>
+    T(`هدف الحقن #${id} موجود في index.html`, HTML.includes(`id="${id}"`)));
+  T("★ الوحدة تختار «نظافة» عند التعديل (النواة لا تعرف الخيار فلا تختاره)",
+    /_addTypeOption\("ep-type"\s*,\s*"ep-type-hint"\s*,\s*isC\)/.test(src));
+
   // ── الجودة: لا ألوانٍ مصمتة خارج توكنز المنصة (تكسر الثيم الداكن) ──
   const cssBlock = (src.match(/st\.textContent\s*=\s*`([\s\S]*?)`;/) || [])[1] || "";
   const hardHex = [...cssBlock.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(m => m[0]);

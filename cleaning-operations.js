@@ -710,6 +710,45 @@ function injectSidebarButton(){
   else nav.insertBefore(btn, nav.firstChild);
 }
 
+/* ══ حقن نوع «إدارة نظافة» في نافذتَي إنشاء/تعديل المشروع دون تعديل index.html ══
+   index.html ملفٌ ضخم (٢.٤ ميغابايت)، فنبقيه بلا إضافاتٍ وظيفية: نلفّ دالتَي فتح
+   النافذتين (نفس نمط لفّ showPage الذي تستعمله وحدات المنصة) ونُلحق الخيار بالقائمة
+   بعد بنائها. النواة لا تعرف الخيار فلا تختاره عند التعديل — نضبطه هنا من سجلّ المشروع.
+   حارسٌ في hail-tests يتحقّق أن هدفَي الحقن (np-type/ep-type) ما زالا موجودين. */
+const TYPE_OPT_LABEL = "إدارة نظافة (عقد تشغيل)";
+function _addTypeOption(selId, hintId, selectIt){
+  const sel=document.getElementById(selId);
+  if(!sel || sel.querySelector('option[value="cleaning"]')) return;
+  const o=document.createElement("option");
+  o.value="cleaning"; o.textContent=TYPE_OPT_LABEL;
+  sel.appendChild(o);
+  if(selectIt) sel.value="cleaning";
+  const hint=document.getElementById(hintId);
+  if(hint && hint.textContent.indexOf("نظافة")===-1){
+    hint.textContent += " و«إدارة نظافة» يظهر لها قسم «تشغيل النظافة» (الجدول اليومي) وبطاقةُ عقدٍ ماليةٌ بربحيةٍ شهرية.";
+  }
+}
+function hookProjectModals(){
+  if(window._coModalsHooked) return;
+  const add=window.openAddProjectModal, edit=window.openEditProjectModal;
+  if(typeof add!=="function" || typeof edit!=="function") return;
+  window.openAddProjectModal=function(){
+    add.apply(this, arguments);
+    try{ _addTypeOption("np-type","np-type-hint",false); }catch(e){ console.warn("cleaningOps/np-type",e); }
+  };
+  window.openEditProjectModal=function(projId){
+    edit.apply(this, arguments);
+    try{
+      let isC=false;
+      const list=(typeof _projectsList!=="undefined" && Array.isArray(_projectsList)) ? _projectsList : [];
+      const p=list.find(x=>x&&x.id===projId);
+      if(p && p.type==="cleaning") isC=true;
+      _addTypeOption("ep-type","ep-type-hint",isC);
+    }catch(e){ console.warn("cleaningOps/ep-type",e); }
+  };
+  window._coModalsHooked=true;
+}
+
 /* ══ لفّ showPage دون تعديل النواة ══ */
 function hookShowPage(){
   if(window._coHooked || typeof window.showPage!=="function") return;
@@ -806,11 +845,12 @@ function injectCSS(){
 function init(){
   ensurePage();
   hookShowPage();
+  hookProjectModals();
   ensureTypeKnown(()=>injectSidebarButton());
   injectSidebarButton();
   _watchProject();
   // القائمة الجانبية يُعاد بناؤها بعد الدخول/تبديل المشروع — أعِد الحقن عند التغيير
-  const obs=new MutationObserver(()=>{ injectSidebarButton(); hookShowPage(); });
+  const obs=new MutationObserver(()=>{ injectSidebarButton(); hookShowPage(); hookProjectModals(); });
   obs.observe(document.body,{childList:true,subtree:true});
 }
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", init);
