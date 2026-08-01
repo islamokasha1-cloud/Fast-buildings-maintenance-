@@ -42,6 +42,9 @@
   // ══ جسور آمنة لدوال النواة ══
   function T(msg,type){ try{ if(typeof toast==='function') toast(msg,type); }catch(e){} }
   function E(s){ try{ return (typeof esc==='function') ? esc(s) : String(s==null?'':s); }catch(e){ return String(s==null?'':s); } }
+  // JQ: تهريب قيمة داخل سلسلة JS بعلامة مفردة داخل سمة onclick — esc وحده لا يكفي
+  // (يحوّل ' إلى &#39; فيفكّها مُحلِّل HTML قبل تصريف JS، فتُكسَر السلسلة). يستعمل _jsq النواة.
+  function JQ(s){ try{ return (typeof window!=='undefined' && typeof window._jsq==='function') ? window._jsq(s) : E(s); }catch(e){ return E(s); } }
   function ICON(name){ try{ return (typeof _svgIcon==='function') ? _svgIcon(name) : ''; }catch(e){ return ''; } }
   function ICONsz(name,px){ var s=ICON(name); return s ? s.replace('<svg ','<svg width="'+px+'" height="'+px+'" style="vertical-align:-1px;flex-shrink:0" ') : ''; }
   function canManage(){ try{ return (typeof canManageCatalog==='function') ? canManageCatalog() : false; }catch(e){ return false; } }
@@ -688,7 +691,7 @@ table tfoot td{background:#f1f5f9;font-weight:800}
         <td style="text-align:center">
           ${canEdit?`
             <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();window.priceAnalysis.openEditor('${E(it.id)}')" style="padding:4px 9px;font-size:11px" title="تعديل">${ICON("edit")}</button>
-            <button class="btn btn-delete btn-sm" onclick="event.stopPropagation();window.priceAnalysis.del('${E(it.id)}','${E((it.name||"").replace(/'/g,"\\'"))}')" style="padding:4px 9px;font-size:11px" title="حذف">${ICON("trash")}</button>
+            <button class="btn btn-delete btn-sm" onclick="event.stopPropagation();window.priceAnalysis.del('${JQ(it.id)}','${JQ(it.name||"")}')" style="padding:4px 9px;font-size:11px" title="حذف">${ICON("trash")}</button>
           `:"—"}
         </td>
       </tr>`;
@@ -1260,4 +1263,8 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     _num: num,           // مكشوف للاختبار فقط (hail-tests.js) — دالة نقية
     _nextCodeNum: _nextCodeNum   // منطق العدّاد الذرّي — للاختبار
   };
+  // جسر ترقيم: pgBar في النواة يولّد onclick باسم render+<PG_KEY> = renderPriceAnalysisTable()
+  // (نمطٌ لأقسام النواة). الوحدة تعرّض render على كائنها، فنعرّف الاسم العام حتى تعمل
+  // أزرار الصفحات (كان الضغط على صفحةٍ تالية يرمي ReferenceError فلا يُعاد الرسم).
+  window.renderPriceAnalysisTable = function(){ try{ return window.priceAnalysis.render(); }catch(e){} };
 })();

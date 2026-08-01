@@ -58,7 +58,10 @@
   function _estTotal(p){ try{ return (typeof getPOTotal==="function") ? Number(getPOTotal(p))||0 : (Number(p&&p.estCost)||0); }catch(e){ return Number(p&&p.estCost)||0; } }
   // الطلب «ميّت» = ملغى/مرفوض/محذوف — لا مغلقٌ (لا يُخصَم) ولا جارٍ (لا يُحسَب WIP).
   // بدونه كان الطلب الملغى يبقى «قيد التنفيذ» أبداً فيضخّم wipSell وعدّ الطلبات.
-  var _DEAD_STATUSES = ["cancelled","deleted","rejected","pm_rejected","wh_rejected","ceo_rejected"];
+  // v18.9vu — H10: أُضيف rejected_final (مرفوض نهائي) — كان ناقصاً فيسقط الطلب المرفوض
+  // نهائياً في فرع WIP فيبقى «قيد التنفيذ» أبداً ويضخّم wipSell وعدّ الطلبات. مطابق الآن
+  // لقائمة «خارج المسار» المركزية في index.html (PO_STAGES).
+  var _DEAD_STATUSES = ["cancelled","deleted","rejected","rejected_final","pm_rejected","wh_rejected","ceo_rejected"];
   function _isDead(p){
     try{
       if(!p) return false;
