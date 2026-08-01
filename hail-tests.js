@@ -357,6 +357,15 @@ function predelivery() {
     HTML.includes('_diagMark("dash:renderKPIData:before")') &&
     HTML.includes('_diagMark("dash:renderDashboardPurchaseSummary:before")') &&
     HTML.includes('_diagMark("dash:end'));
+  // ── v18.9vs: كاشف انهيار لوحة المعلومات الذاتي (سنتينل قبل/بعد العرض) ──
+  T("★ vs: السنتينل يُرفع قبل العرض ويُخفض بعد اكتماله (لكل مشروع)",
+    HTML.includes('var _dashSentinelKey="hail_dash_render:"') &&
+    HTML.includes('localStorage.setItem(_dashSentinelKey,"1")') &&
+    HTML.includes("localStorage.removeItem(_dashSentinelKey); }catch(e){}\n}"));
+  T("★ vs: بقاء السنتينل مرفوعاً ⇒ تخطٍّ تلقائيّ للوحة ذلك المشروع",
+    /if\(!_dashForce && localStorage\.getItem\(_dashSentinelKey\)==="1"\)\{/.test(HTML));
+  T("★ vs: زرُّ المحاولة اليدوية يتجاوز التخطّي مرّةً واحدة (hail_dash_force)",
+    HTML.includes("hail_dash_force") && HTML.includes('sessionStorage.removeItem("hail_dash_force")'));
   T("★ vq: مسار الدخول مُجهّز بعلامات المراحل (loadData/enterApp/renderCurrentPage)",
     HTML.includes('_diagMark("loadData:start")') && HTML.includes('_diagMark("enterApp:start")') &&
     HTML.includes('_diagMark("renderCurrentPage:"+pid)'));
