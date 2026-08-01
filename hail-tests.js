@@ -340,6 +340,18 @@ function predelivery() {
       uniq.length === 1 && uniq[0] === "12.17.0", `النسخة الحالية: ${uniq[0] || "?"}`);
   }
 
+  // ── v18.9vq: وضع التشخيص الآمن (?diag=1) مُسوَّرٌ ولا يمسّ المستخدم العادي ──
+  T("★ vq: DIAG_MODE يُشتقّ من ?diag=1 فقط", HTML.includes("/[?&]diag=1/.test(location.search"));
+  T("★ vq: _diagMark يعود فوراً بلا وضع التشخيص (صفر أثر على العادي)",
+    /function _diagMark\(stage\)\{\s*if\(!DIAG_MODE\) return;/.test(HTML));
+  T("★ vq: _diagMark يحفظ المراحل في localStorage (تبقى بعد الانهيار)",
+    HTML.includes('localStorage.setItem("hail_diag_log"'));
+  T("★ vq: renderDashboard يتخطّى العرض الثقيل في وضع التشخيص فقط",
+    HTML.includes('_diagMark("renderDashboard:start")') && HTML.includes('_diagMark("renderDashboard:SKIPPED (diag)")'));
+  T("★ vq: مسار الدخول مُجهّز بعلامات المراحل (loadData/enterApp/renderCurrentPage)",
+    HTML.includes('_diagMark("loadData:start")') && HTML.includes('_diagMark("enterApp:start")') &&
+    HTML.includes('_diagMark("renderCurrentPage:"+pid)'));
+
   // ══ ★ v18.9vh: «عدم تحميل البيانات مباشرة» — إعادة رسم الصفحة بعد تحميل الإعدادات ══
   // loadSettings (المباني/المشرفون) غيرُ متزامنة وتُطلَق بلا انتظار؛ صفحتا «خريطة المباني»
   // و«لوحة الإدارة» تُرسَمان فارغتين إن سبقتاها. الإصلاح: بعد repopulateAllSelects تُعاد
