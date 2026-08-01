@@ -1275,6 +1275,20 @@ function listenerChurn() {
     HTML.includes("if(document.hidden){ try{ location.reload();"));
   T("التحديث الوقائي محروسٌ بوجود Firestore وبعدم إطلاقٍ مزدوج",
     HTML.includes('if(typeof db==="undefined" || !db) return;') && HTML.includes("if(_armed) return;"));
+
+  // ── v18.9vo: كسر حلقة انهيار Firestore عند المنبع (STATUS_ACCESS_VIOLATION) ──
+  // خلل الـ SDK يُبقي تيّار Watch يرمي assertion كل ~ثانية؛ terminate فوري يوقف التدفّق
+  // فلا يتراكم استهلاك الموارد حتى ينهار التبويب، ثم يتكفّل _fsAutoRecover بإعادة التحميل.
+  T("★ vo: _fsHardHalt يُنهي عميل Firestore فوراً (terminate) لكسر تدفّق الـ assertion",
+    HTML.includes("function _fsHardHalt()") &&
+    /_fsHardHalt\(\)\{\s*if\(_fsHalted\) return;\s*_fsHalted = true;/.test(HTML) &&
+    HTML.includes('typeof db.terminate === "function") db.terminate().catch('));
+  T("★ vo: أول INTERNAL ASSERTION يُستدعى فيه _fsHardHalt قبل _fsAutoRecover",
+    HTML.includes('if(m.indexOf("INTERNAL ASSERTION FAILED") !== -1){ _fsHardHalt(); _fsAutoRecover(); return; }'));
+  T("★ vo: بعد الـ halt يُبتلَع تدفّق الـ assertion المتتالي صامتاً (لا تسجيل/تعافٍ متكرّر)",
+    HTML.includes('if(_fsHalted && m.indexOf("INTERNAL ASSERTION FAILED") !== -1) return;'));
+  T("vo: علَم _fsHalted معرَّف ويعمل مرّةً واحدة",
+    HTML.includes("var _fsHalted = false;") && HTML.includes("if(_fsHalted) return;"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
