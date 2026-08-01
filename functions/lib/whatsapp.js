@@ -6,6 +6,21 @@
 const { WA } = require("./config");
 
 /**
+ * تطبيع رقم الجوال إلى الصيغة الدولية بلا + (كما تطلب Meta).
+ * v18.9vu — M15: كان الإرسال يزيل الرموز فقط بلا تحويل، فرقمٌ محلي مثل 0501234567
+ * يُرسَل بصفرٍ بادئ فترفضه Meta أو يذهب لرقمٍ خاطئ. الآن: 05XXXXXXXX ⇒ 9665XXXXXXXX.
+ */
+function normalizeMsisdn(raw) {
+  let d = String(raw == null ? "" : raw).replace(/[^\d]/g, "");
+  if (!d) return "";
+  if (d.startsWith("00")) d = d.slice(2);                 // بادئة اتصال دولي 00
+  if (d.startsWith("966")) return d;                       // دولي سعودي بالفعل
+  if (d.length === 10 && d.startsWith("05")) return "966" + d.slice(1); // محلي 05XXXXXXXX
+  if (d.length === 9 && d.startsWith("5")) return "966" + d;            // بلا صفر بادئ
+  return d;                                                // رقمٌ دوليٌّ آخر — كما هو
+}
+
+/**
  * يرسل رسالة قالب (Template) عبر WhatsApp Cloud API.
  * @param {object} p
  * @param {string} p.token       توكن الوصول (سرّ — يُحقن من Secret Manager).
@@ -55,7 +70,7 @@ async function sendTemplate({ token, to, template, lang, params, buttonParam }) 
 
   const body = {
     messaging_product: "whatsapp",
-    to: String(to).replace(/[^\d]/g, ""), // أرقام فقط
+    to: normalizeMsisdn(to), // أرقام فقط + تطبيع الصيغة السعودية 05→966
     type: "template",
     template: {
       name: template,
@@ -90,4 +105,4 @@ async function sendTemplate({ token, to, template, lang, params, buttonParam }) 
   }
 }
 
-module.exports = { sendTemplate };
+module.exports = { sendTemplate, normalizeMsisdn };

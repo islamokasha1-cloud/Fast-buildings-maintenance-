@@ -157,7 +157,7 @@ exports.waSender = onDocumentCreated(
     const ref = event.data.ref;
     const doc = event.data.data();
     if (!doc || doc.status !== "queued") return; // نرسل المُدرَج فقط
-    await deliver(ref, doc);
+    await deliver(ref);
   }
 );
 
@@ -172,8 +172,20 @@ exports.waRetry = onSchedule(
       .where("createdAt", "<", cutoff)
       .limit(20)
       .get();
-    for (const d of snap.docs) {
-      await deliver(d.ref, d.data());
+    // v18.9vu — C5: استعادة الرسائل العالقة في "sending" (حُجزت ثم مات التنفيذ قبل
+    // الإرسال أو التحديث) — أقدم من 5 دقائق. الحجز الذرّي في deliver يمنع الإرسال المزدوج.
+    const staleSending = await db
+      .collection(cfg.OUTBOX_COLLECTION)
+      .where("status", "==", "sending")
+      .where("updatedAt", "<", new Date(Date.now() - 5 * 60 * 1000))
+      .limit(20)
+      .get();
+    const refs = [];
+    const seen = new Set();
+    for (const d of snap.docs) { refs.push(d.ref); seen.add(d.ref.id); }
+    for (const d of staleSending.docs) { if (!seen.has(d.ref.id)) refs.push(d.ref); }
+    for (const r of refs) {
+      await deliver(r);
     }
   }
 );
@@ -181,7 +193,28 @@ exports.waRetry = onSchedule(
 /**
  * إرسال فعلي لرسالة صادرة واحدة + تحديث حالتها + أرشفة في wa_log.
  */
-async function deliver(ref, doc) {
+async function deliver(ref) {
+  // v18.9vu — C5: احجز الرسالة ذرّياً (queued/sending عالق → sending) قبل الإرسال.
+  // كان deliver يقرأ الحالة ثم يرسل ثم يحدّث بلا حجز — فتنفيذان متزامنان (waSender
+  // مزدوج، أو waSender + waRetry) يريان "queued" فيرسلان مرتين. الآن من يفشل الحجز
+  // لا يرسل. الحجز يقبل أيضاً "sending" العالق أقدم من 5 دقائق (تنفيذٌ مات في المنتصف).
+  const STALE_MS = 5 * 60 * 1000;
+  const doc = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return null;
+    const cur = snap.data();
+    const isQueued = cur.status === "queued";
+    const staleSending =
+      cur.status === "sending" &&
+      cur.updatedAt &&
+      typeof cur.updatedAt.toMillis === "function" &&
+      Date.now() - cur.updatedAt.toMillis() > STALE_MS;
+    if (!isQueued && !staleSending) return null; // عولجت/يعالجها آخر — لا نرسل
+    tx.update(ref, { status: "sending", updatedAt: new Date() });
+    return cur;
+  });
+  if (!doc) return; // لم نحجزها
+
   const attempts = (doc.attempts || 0) + 1;
 
   const result = await sendTemplate({

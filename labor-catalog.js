@@ -34,6 +34,9 @@
   // ══ جسور آمنة لدوال النواة ══
   function T(msg,type){ try{ if(typeof toast==='function') toast(msg,type); }catch(e){} }
   function E(s){ try{ return (typeof esc==='function') ? esc(s) : String(s==null?'':s); }catch(e){ return String(s==null?'':s); } }
+  // JQ: تهريب قيمة داخل سلسلة JS بعلامة مفردة داخل سمة onclick — esc وحده لا يكفي
+  // (يحوّل ' إلى &#39; فيفكّها مُحلِّل HTML قبل تصريف JS، فتُكسَر السلسلة). يستعمل _jsq النواة.
+  function JQ(s){ try{ return (typeof window!=='undefined' && typeof window._jsq==='function') ? window._jsq(s) : E(s); }catch(e){ return E(s); } }
   function ICON(name){ try{ return (typeof _svgIcon==='function') ? _svgIcon(name) : ''; }catch(e){ return ''; } }
   // تحويل نصّ إلى رقم يقبل الفاصلة العربية العشرية دون إفساد فاصلة الآلاف: القديم
   // replace(/,/g,".") كان يحوّل «1,250.00» إلى «1.250.00»→parseFloat=1.25 (بخس 1000×).
@@ -362,7 +365,7 @@
         <td style="text-align:center">
           ${canEdit?`
             <button class="btn btn-ghost btn-sm" onclick="window.laborCatalog.openItemModal('${E(it.id)}')" style="padding:4px 9px;font-size:11px" title="تعديل">${ICON("edit")}</button>
-            <button class="btn btn-delete btn-sm" onclick="window.laborCatalog.del('${E(it.id)}','${E((it.name||"").replace(/'/g,"\\'"))}')" style="padding:4px 9px;font-size:11px" title="حذف">${ICON("trash")}</button>
+            <button class="btn btn-delete btn-sm" onclick="window.laborCatalog.del('${JQ(it.id)}','${JQ(it.name||"")}')" style="padding:4px 9px;font-size:11px" title="حذف">${ICON("trash")}</button>
           `:"—"}
         </td>
       </tr>`;
@@ -622,4 +625,8 @@
     _num: num,           // مكشوف للاختبار فقط (hail-tests.js) — دالة نقية
     _nextCodeNum: _nextCodeNum   // منطق العدّاد الذرّي — للاختبار
   };
+  // جسر ترقيم: pgBar في النواة يولّد onclick باسم render+<PG_KEY> = renderLaborCatalogTable()
+  // الوحدة تعرّض render على كائنها، فنعرّف الاسم العام حتى تعمل أزرار الصفحات
+  // (كان الضغط على صفحةٍ تالية يرمي ReferenceError فلا يُعاد الرسم).
+  window.renderLaborCatalogTable = function(){ try{ return window.laborCatalog.render(); }catch(e){} };
 })();

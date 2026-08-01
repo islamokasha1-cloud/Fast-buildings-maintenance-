@@ -2945,6 +2945,98 @@ function comprehensiveReviewV18_9vl() {
     })());
 }
 
+function deepReviewV18_9vu() {
+  H("28) الفحص العميق — دفعة إصلاحات (v18.9vu)");
+
+  // ── H4: تهريب اسم الفني/نوع العمل في تقرير الصيانة ──
+  T("★ H4: تقرير الصيانة يهرّب اسم الفني (esc(name))",
+    HTML.includes('<td style="font-weight:700">${esc(name)}</td>') &&
+    !HTML.includes('<td style="font-weight:700">${name}</td>'));
+  T("★ H4: تقرير الصيانة يهرّب نوع العمل (esc(wt)/esc(wt2))",
+    HTML.includes("${typeIcon(wt)} ${esc(wt)}") && HTML.includes("${typeIcon(wt2)} ${esc(wt2)}") &&
+    !/\$\{typeIcon\(wt\)\} \$\{wt\}</.test(HTML));
+
+  // ── H5: تهريب سلسلة JS في زرّي حذف الكتالوجَين (JQ لا esc) ──
+  const _paSrc = PA_PATH ? fs.readFileSync(PA_PATH, "utf8") : "";
+  const _lcSrc = LC_PATH ? fs.readFileSync(LC_PATH, "utf8") : "";
+  T("★ H5: price-analysis يعرّف JQ ويستعمله في زر الحذف",
+    /function JQ\(s\)\{/.test(_paSrc) && _paSrc.includes("window.priceAnalysis.del('${JQ(it.id)}','${JQ(it.name||\"\")}')"));
+  T("★ H5: labor-catalog يعرّف JQ ويستعمله في زر الحذف",
+    /function JQ\(s\)\{/.test(_lcSrc) && _lcSrc.includes("window.laborCatalog.del('${JQ(it.id)}','${JQ(it.name||\"\")}')"));
+  T("★ H5: لم يعُد يُستعمل النمط esc(...).replace في زرّ الحذف (تراجع)",
+    !_paSrc.includes('.replace(/\'/g,"\\\\\'")') && !_lcSrc.includes('.replace(/\'/g,"\\\\\'")'));
+
+  // ── H6: جسور الترقيم العامة للكتالوجَين ──
+  T("★ H6: price-analysis يعرّف window.renderPriceAnalysisTable",
+    _paSrc.includes("window.renderPriceAnalysisTable = function()"));
+  T("★ H6: labor-catalog يعرّف window.renderLaborCatalogTable",
+    _lcSrc.includes("window.renderLaborCatalogTable = function()"));
+
+  // ── M2: عمود «التكلفة الفعلية» للمغلق فقط في التقرير/Excel/PDF ──
+  T("★ M2: صف تقرير الشاشة يشترط poIsClosed للتكلفة الفعلية",
+    HTML.includes("${poIsClosed(p)&&poActualCost(p)?poActualCost(p).toLocaleString"));
+  T("★ M2: تصدير Excel يشترط poIsClosed للتكلفة الفعلية",
+    HTML.includes('"التكلفة الفعلية":idx===0&&poIsClosed(p)?poActualCost(p)||0:""') &&
+    HTML.includes('"التكلفة الفعلية":poIsClosed(p)?poActualCost(p)||0:""'));
+  T("★ M2: تقرير PDF يشترط poIsClosed للتكلفة الفعلية",
+    HTML.includes("const cost=poIsClosed(p)?poActualCost(p):0;"));
+
+  // ── C3: حذف الطلب وعكس المخزون في معاملة ذرّية واحدة ──
+  T("★ C3: deletePurchase يحذف وثيقة الطلب داخل معاملة العكس",
+    HTML.includes("tx.delete(db.collection(PURCHASES_COLLECTION()).doc(poId));") &&
+    HTML.includes("_deletedInTx = true;"));
+  T("★ C3: الحذف الخارجي مشروط بعدم الحذف داخل المعاملة",
+    HTML.includes("if(db && !_deletedInTx) await db.collection(PURCHASES_COLLECTION()).doc(poId).delete();"));
+
+  // ── C4: مراجعة المخزون تنتظر تأكيد حفظ الطلب ──
+  T("★ C4: savePurchaseAwait موجودة وتُستعمل في doInventoryReview",
+    /async function savePurchaseAwait\(/.test(HTML) &&
+    HTML.includes("const _saved = await savePurchaseAwait(poId);"));
+
+  // ── M4/M5: حركات المخزون الذرّية ──
+  T("★ M4/M5: _atomicStockMove معرّفة (سجل + رصيد في معاملة)",
+    /async function _atomicStockMove\(invId, delta, logData\)\{/.test(HTML));
+  T("★ M4: أمر الصرف يستعمل _atomicStockMove لكل بند",
+    HTML.includes("await _atomicStockMove(it.itemId, -Number(it.qty)||0, {"));
+  T("★ M4: صرف العهدة يخصم المخزون داخل معاملة (custody+inv)",
+    HTML.includes("tx.set(_custRef, rec);") && HTML.includes("tx.set(_invRef, { currentQty:newQty, lastUpdated:now }"));
+  T("★ M5: إرجاع العهدة يقرأ returnedQty الطازجة داخل المعاملة",
+    HTML.includes("const prevRet= parseFloat(cData.returnedQty)||0;"));
+  T("★ M5: حذف العهدة يسترجع الرصيد ويحذف في معاملة واحدة",
+    HTML.includes("tx.delete(_custRef);"));
+  T("★ H8: النقل بين المستودعين في معاملة ذرّية (قراءة المصدر قبل الكتابة)",
+    HTML.includes("if(tq > srcPrev + 1e-9) throw new Error"));
+
+  // ── H10: rejected_final ضمن الحالات الميتة في رصيد الاستعاضة ──
+  const _sbSrc = SB_PATH ? fs.readFileSync(SB_PATH, "utf8") : "";
+  T("★ H10: _DEAD_STATUSES تشمل rejected_final",
+    /_DEAD_STATUSES = \[[^\]]*"rejected_final"[^\]]*\]/.test(_sbSrc));
+
+  // ── C5 + M15: واتساب — حجز ذرّي قبل الإرسال + تطبيع الأرقام ──
+  const _fnDir = path.resolve(path.dirname(IDX), "functions");
+  const _fnIdx = fs.existsSync(path.join(_fnDir, "index.js")) ? fs.readFileSync(path.join(_fnDir, "index.js"), "utf8") : "";
+  const _waLib = fs.existsSync(path.join(_fnDir, "lib", "whatsapp.js")) ? fs.readFileSync(path.join(_fnDir, "lib", "whatsapp.js"), "utf8") : "";
+  T("★ C5: deliver يحجز الرسالة ذرّياً (runTransaction → status:sending) قبل الإرسال",
+    /async function deliver\(ref\)/.test(_fnIdx) && _fnIdx.includes('tx.update(ref, { status: "sending"'));
+  T("★ C5: waRetry يستعيد الرسائل العالقة في sending",
+    _fnIdx.includes('.where("status", "==", "sending")'));
+  T("★ M15: normalizeMsisdn يحوّل 05→966 ويُستعمل في sendTemplate",
+    /function normalizeMsisdn\(/.test(_waLib) && _waLib.includes('return "966" + d.slice(1)') &&
+    _waLib.includes("to: normalizeMsisdn(to)"));
+  // سلوكي: تطبيع رقمٍ محلّي
+  if (_waLib) {
+    try {
+      const { normalizeMsisdn } = require(path.join(_fnDir, "lib", "whatsapp.js"));
+      T("★ M15 سلوكي: 0501234567 ⇒ 966501234567",
+        normalizeMsisdn("0501234567") === "966501234567" &&
+        normalizeMsisdn("966501234567") === "966501234567" &&
+        normalizeMsisdn("+966 50 123 4567") === "966501234567");
+    } catch (e) {
+      T("★ M15 سلوكي: تحميل normalizeMsisdn", false, String(e.message).slice(0, 80));
+    }
+  }
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -2978,6 +3070,7 @@ function comprehensiveReviewV18_9vl() {
   fuzz();
   rollupMonthIsolation();
   comprehensiveReviewV18_9vl();
+  deepReviewV18_9vu();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }
