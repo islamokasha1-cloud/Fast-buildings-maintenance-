@@ -2853,6 +2853,14 @@ function comprehensiveReviewV18_9vl() {
   const _coBuild = (_coSrc.match(/const MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
   T("★ #5b: بصمة cleaning-operations.js تطابق APP_VERSION (تمنع الانحراف الصامت)",
     _coBuild === VER, `MODULE_BUILD=${_coBuild}  APP_VERSION=${VER}`);
+  // ── v18.9vm: إلغاء تسجيل Service Worker لا يُسرّب رفضاً للمعالج العام ──
+  // الأثر: شريطٌ أحمر «حدث خطأ غير متوقع» كان يظهر للمستخدم لأمرٍ لا ضرر فيه،
+  // ويُلوّث سجلَّ الأخطاء بضجيجٍ يُخفي الأعطال الحقيقية.
+  T("★ vm: إلغاء تسجيل Service Worker يبتلع الرفض (.catch)",
+    /navigator\.serviceWorker\.getRegistrations\(\)[\s\S]{0,160}?\.catch\(\(\)=>\{\}\)/.test(HTML));
+  T("★ vm: لم يعُد ثمّة استدعاءُ getRegistrations بلا معالجة",
+    !/navigator\.serviceWorker\.getRegistrations\(\)\.then\(regs => regs\.forEach\(r => r\.unregister\(\)\)\);/.test(HTML));
+
   T("★ #5c: مُرشّح مسارات CI يشمل الوحدتين الكبيرتين",
     (() => {
       const wf = fs.existsSync(path.resolve(path.dirname(IDX), ".github/workflows/hail-tests.yml"))
