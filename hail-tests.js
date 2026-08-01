@@ -366,6 +366,27 @@ function predelivery() {
     /if\(!_dashForce && localStorage\.getItem\(_dashSentinelKey\)==="1"\)\{/.test(HTML));
   T("★ vs: زرُّ المحاولة اليدوية يتجاوز التخطّي مرّةً واحدة (hail_dash_force)",
     HTML.includes("hail_dash_force") && HTML.includes('sessionStorage.removeItem("hail_dash_force")'));
+
+  // ── v18.9vt: السبب الجذريّ — دوالّ ساعات العمل بلا مُعدِّلات Date (ولا حلقة لا نهائية) ──
+  // `setHours/setDate` تفشل إن كان Date العام ملفوفاً في بيئة المستخدم (إضافات المتصفّح)،
+  // وتقدّمُ الحلقة كان يعتمد على setDate — فتصير لا نهائيةً وتُسقط المتصفّح.
+  {
+    const cut = (name) => {
+      const i = HTML.indexOf("function " + name + "(");
+      return i < 0 ? "" : HTML.slice(i, HTML.indexOf("\nfunction ", i + 10));
+    };
+    const wmb = cut("workingMinutesBetween"), awm = cut("addWorkingMinutes");
+    T("★ vt: workingMinutesBetween بلا أي مُعدِّل Date (setHours/setDate)",
+      !!wmb && !/\.setHours\(|\.setDate\(/.test(wmb));
+    T("★ vt: addWorkingMinutes بلا أي مُعدِّل Date (setHours/setDate)",
+      !!awm && !/\.setHours\(|\.setDate\(/.test(awm));
+    T("★ vt: حارسٌ صلبٌ يمنع الحلقة اللانهائية في workingMinutesBetween",
+      /guard\+\+\s*<\s*\d+/.test(wmb));
+    T("★ vt: التقدّم يوماً بيوم ببناء تاريخٍ جديد لا بتعديل القائم",
+      wmb.includes("cur=new Date(cur.getFullYear(),cur.getMonth(),cur.getDate()+1)"));
+    T("★ vt: حمايةٌ من التواريخ غير الصالحة (isFinite على الطوابع)",
+      wmb.includes("!isFinite(fromMs)||!isFinite(toMs)") && awm.includes("!isFinite(startMs)"));
+  }
   T("★ vq: مسار الدخول مُجهّز بعلامات المراحل (loadData/enterApp/renderCurrentPage)",
     HTML.includes('_diagMark("loadData:start")') && HTML.includes('_diagMark("enterApp:start")') &&
     HTML.includes('_diagMark("renderCurrentPage:"+pid)'));
