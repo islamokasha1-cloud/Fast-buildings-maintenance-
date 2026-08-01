@@ -341,13 +341,22 @@ function predelivery() {
   }
 
   // ── v18.9vq: وضع التشخيص الآمن (?diag=1) مُسوَّرٌ ولا يمسّ المستخدم العادي ──
-  T("★ vq: DIAG_MODE يُشتقّ من ?diag=1 فقط", HTML.includes("/[?&]diag=1/.test(location.search"));
+  T("★ vq: DIAG_MODE يُشتقّ من علامة الرابط diag فقط", HTML.includes("/[?&]diag=[12]/.test(location.search"));
   T("★ vq: _diagMark يعود فوراً بلا وضع التشخيص (صفر أثر على العادي)",
     /function _diagMark\(stage\)\{\s*if\(!DIAG_MODE\) return;/.test(HTML));
   T("★ vq: _diagMark يحفظ المراحل في localStorage (تبقى بعد الانهيار)",
     HTML.includes('localStorage.setItem("hail_diag_log"'));
   T("★ vq: renderDashboard يتخطّى العرض الثقيل في وضع التشخيص فقط",
-    HTML.includes('_diagMark("renderDashboard:start")') && HTML.includes('_diagMark("renderDashboard:SKIPPED (diag)")'));
+    HTML.includes('_diagMark("renderDashboard:start")') && HTML.includes('_diagMark("renderDashboard:SKIPPED (diag=1)")'));
+  // ── v18.9vr: diag=2 يُشغّل الجسم مع علاماتٍ دقيقة (تحديد الجزء المنهار) ──
+  T("★ vr: DIAG_TRACE يُشتقّ من ?diag=2 وDIAG_MODE يشمل diag=[12]",
+    HTML.includes("/[?&]diag=2/.test(location.search") && HTML.includes("/[?&]diag=[12]/.test(location.search"));
+  T("★ vr: التخطّي الكامل مقصورٌ على diag=1 (diag=2 يُشغّل الجسم)",
+    HTML.includes("if(DIAG_MODE && !DIAG_TRACE){"));
+  T("★ vr: علاماتٌ دقيقة حول الجزأين المشتبه بهما (KPI + ملخّص المشتريات)",
+    HTML.includes('_diagMark("dash:renderKPIData:before")') &&
+    HTML.includes('_diagMark("dash:renderDashboardPurchaseSummary:before")') &&
+    HTML.includes('_diagMark("dash:end'));
   // ── v18.9vs: كاشف انهيار لوحة المعلومات الذاتي (سنتينل قبل/بعد العرض) ──
   T("★ vs: السنتينل يُرفع قبل العرض ويُخفض بعد اكتماله (لكل مشروع)",
     HTML.includes('var _dashSentinelKey="hail_dash_render:"') &&
