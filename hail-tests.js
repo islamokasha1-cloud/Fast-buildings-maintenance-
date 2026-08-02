@@ -330,6 +330,15 @@ function predelivery() {
     cb.length >= 1 && cb.length === localMods && cb.every(([, v]) => v === want),
     `${cb.length}/${localMods} موسومة — ` + (cb.map(([f2, v]) => `${f2}?v=${v}`).join("، ") || "لا وسوم"));
 
+  // ── v18.9wk: NOTES.md يُحدَّث مع كل تغيير — حارسٌ يمنع النسيان ──
+  // القاعدة (CLAUDE.md): كل رفعِ إصدارٍ يرافقه قيدٌ في «سجل أهم التعديلات» (§6).
+  // الحارس يطابق قيدَ الإصدار الحالي حرفياً — فيسقط الفحص إن دُفع تعديلٌ بلا توثيق.
+  const NOTES_PATH = path.resolve(path.dirname(IDX), "NOTES.md");
+  const NOTES = fs.existsSync(NOTES_PATH) ? fs.readFileSync(NOTES_PATH, "utf8") : "";
+  T("★ wk: NOTES.md موجود ويحوي سجل التعديلات", NOTES.includes("## 6) سجل موجز بأهم التعديلات"));
+  T("★ wk: قيدُ الإصدار الحالي موثَّق في NOTES.md (حدّث NOTES مع كل تغيير)",
+    NOTES.includes("**" + VER + " —"), "لا قيد لـ " + VER + " في §6 — أضف سطر التغيير قبل الدفع");
+
   // ── v18.9vp: وسوم Firebase SDK الخمسة موحّدة على نسخة واحدة (المعالجة الجذرية لـ ca9/b815) ──
   // ترقية مجزّأة (وسمٌ متأخّرٌ عن البقية) تُدخل النظام في حالة غير مُختبَرة — نُثبّت التوحيد.
   {
