@@ -36,7 +36,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9wm";
+  var MODULE_BUILD = "v18.9wn";
 
   // ── معايير العينة والأعلام (قابلة للتعديل من هنا — تُخزَّن مع كل دورة) ──
   var FA_PCT            = 10;    // نسبة العينة العشوائية من طلبات الشهر المغلقة
@@ -544,6 +544,35 @@
     }
   }
 
+  // حذف طلب واحد من عينة الدورة — المسؤول فقط (قرارٌ رقابي حسّاس: إخراج طلب من
+  // التدقيق يُسجَّل في سجل التدقيق بمصدره وحالته حتى لا يكون باباً خلفياً صامتاً).
+  function removeSample(poId){
+    if(!_isAdmin()){ _toast("⚠ حذف طلب من العينة — صلاحية المسؤول فقط","warn"); return; }
+    var a=_auditOf(_curMonth);
+    if(!a || a.status==="closed"){ _toast("⚠ الدورة مغلقة — لا حذف بعد الإغلاق","warn"); return; }
+    var s=(a.samples||[]).find(function(x){ return x && x.poId===poId; });
+    if(!s) return;
+    Promise.resolve(_confirm({
+      title:"حذف الطلب من العينة؟",
+      msg:"سيُحذف "+poId+" من عينة دورة "+_monthLabel(a.month||a.id)+
+          (s.status!=="pending"?" بما فيه مراجعته وردوده المسجّلة":"")+
+          ".\nالحذف يُقيَّد في سجل التدقيق باسمك.",
+      icon:"🗑", okText:"حذف من العينة", okClass:"btn-danger"
+    })).then(function(ok){
+      if(!ok) return;
+      _txAudit(a.month||a.id, function(doc){
+        doc.samples=(doc.samples||[]).filter(function(x){ return x && x.poId!==poId; });
+        return doc;
+      }).then(function(){
+        _toast("✅ حُذف "+poId+" من العينة","success");
+        _log("حذف طلب من عينة الرقابة المالية",
+             poId+" — دورة "+_monthLabel(a.month||a.id)+" — المصدر: "+(s.source||"—")+
+             " — حالته عند الحذف: "+((STATUS_LABEL[s.status]||{}).l||s.status||"—"));
+        render();
+      }).catch(function(){ _toast("⚠ خطأ في الحذف — تحقق من الاتصال","warn"); });
+    });
+  }
+
   function removeAudit(month){
     if(!_isAdmin()){ _toast("⚠ صلاحية المسؤول فقط","warn"); return; }
     var a=_auditOf(month);
@@ -767,10 +796,15 @@
         acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openReply(\''+_esc(s.poId)+'\')">💬 رد المشتريات</button>';
       if(canA && open && s.status==="responded")
         acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openClose(\''+_esc(s.poId)+'\')">'+_icn("checkCircle")+' إغلاق البند</button>';
+      if(_isAdmin() && open)
+        acts+=' <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--danger)" title="حذف الطلب من العينة (المسؤول فقط)" onclick="event.stopPropagation();window.financeAudit.removeSample(\''+_esc(s.poId)+'\')">🗑</button>';
       var savings=Number(s.potentialSaving)||0;
+      // أسباب الإدراج الآلي ظاهرة نصاً تحت الشارة — الـ tooltip وحده لا يظهر على اللمس (آيباد/جوال)
+      var reasonsTxt=_reasonsTitle(s);
+      var srcCell=_srcBadge(s)+(reasonsTxt?'<div style="font-size:9px;color:var(--muted);margin-top:3px;max-width:230px;line-height:1.7">'+_esc(reasonsTxt)+'</div>':"");
       return '<tr>'+
         '<td style="font-weight:700"><span class="fa-num">'+_esc(s.poId)+'</span></td>'+
-        '<td>'+_srcBadge(s)+'</td>'+
+        '<td>'+srcCell+'</td>'+
         '<td>'+_esc(vend||"—")+'</td>'+
         '<td style="text-align:center"><span class="fa-num">'+_fmt(cost)+'</span></td>'+
         '<td>'+_verdictBadge(s.verdict)+(s.escalated?' '+_pill("مُصعَّد للتنفيذي","var(--danger)"):"")+'</td>'+
@@ -1147,7 +1181,7 @@
   window.financeAudit = {
     startSync:startSync, render:render,
     open:open, back:back,
-    openCreate:openCreate, createAudit:createAudit, removeAudit:removeAudit,
+    openCreate:openCreate, createAudit:createAudit, removeAudit:removeAudit, removeSample:removeSample,
     openReview:openReview, saveReview:saveReview,
     addManualQuote:addManualQuote, removeManualQuote:removeManualQuote,
     openReply:openReply, saveReply:saveReply,

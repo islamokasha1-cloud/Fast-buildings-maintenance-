@@ -3476,6 +3476,15 @@ function financeAuditTests() {
   T("★ wm: لا ألوان hex مثبّتة لحبوب الحالة/التنبيهات (توكنز الثيم عبر color-mix — لا تنكسر في الداكن)",
     !/#fef3c7|#dcfce7|#fee2e2|#dbeafe|#fef2f2|#fff7ed|#fecaca/.test(src) && src.includes("color-mix(in srgb,var(--pc"));
 
+  // ── v18.9wn: حذف طلب من العينة (المسؤول فقط) + أسباب الإدراج ظاهرة نصاً ──
+  T("★ wn: removeSample محروسة بالمسؤول وحده (حارس داخل الدالة لا إخفاء زر فقط)",
+    /function removeSample\(poId\)\{\s*if\(!_isAdmin\(\)\)/.test(src) &&
+    src.includes("window.financeAudit.removeSample(") && src.includes("_isAdmin() && open"));
+  T("★ wn: حذف العينة يُقيَّد في سجل التدقيق ويُمنع على الدورة المغلقة",
+    src.includes('"حذف طلب من عينة الرقابة المالية"') && /a\.status==="closed"[^}]*لا حذف بعد الإغلاق/.test(src));
+  T("★ wn: أسباب الإدراج الآلي ظاهرة نصاً تحت الشارة (لا tooltip وحده — يعمل على اللمس)",
+    src.includes("reasonsTxt") && src.includes("srcCell"));
+
   // ── مفاتيح الشهور (بلا مُعدِّلات Date — درس v18.9vt) ──
   T("مفتاح الشهر من ISO", FA._monthKey("2026-07-15T10:00:00Z") === "2026-07");
   T("الشهر السابق يعبر حدود السنة", FA._prevMonthKey("2026-01") === "2025-12" && FA._prevMonthKey("2026-08") === "2026-07");
