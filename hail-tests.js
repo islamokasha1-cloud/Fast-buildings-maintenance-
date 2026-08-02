@@ -39,6 +39,7 @@ const SB_PATH  = [path.resolve(path.dirname(IDX), "substitute-budget.js")].find(
 const PA_PATH  = [path.resolve(path.dirname(IDX), "price-analysis.js")].find(p => fs.existsSync(p));
 const LC_PATH  = [path.resolve(path.dirname(IDX), "labor-catalog.js")].find(p => fs.existsSync(p));
 const ST_PATH  = [path.resolve(path.dirname(IDX), "stocktake.js")].find(p => fs.existsSync(p));
+const FA_PATH  = [path.resolve(path.dirname(IDX), "finance-audit.js")].find(p => fs.existsSync(p));
 
 const VER = (HTML.match(/const APP_VERSION = "(v[\d.a-z]+)"/) || [])[1] || "?";
 
@@ -3360,6 +3361,136 @@ function deepReviewV18_9vu() {
   }
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   وحدة الرقابة المالية على المشتريات (finance-audit.js) — v18.9wk
+   تركيبٌ صحيح في index.html + حتمية العينة العشوائية + أعلام الإدراج الآلي
+   + مقارنة البنود بالمرجع (دوال نقية تُنفَّذ فعلاً).
+   ════════════════════════════════════════════════════════════════════ */
+function financeAuditTests() {
+  H("وحدة الرقابة المالية على المشتريات (finance-audit.js)");
+  if (!FA_PATH) { T("finance-audit.js موجود", false); return; }
+  const src = fs.readFileSync(FA_PATH, "utf8");
+  const vm = require("vm");
+  try { new vm.Script(src); T("صياغة finance-audit.js سليمة", true); }
+  catch (e) { T("صياغة finance-audit.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  // ── نقاط الربط في index.html ──
+  T("الوسم موجود في index.html", /<script src="finance-audit\.js\?v=/.test(HTML));
+  T("زر القائمة الجانبية موجود (مخفي افتراضياً — تُظهره الوحدة للمخوَّلين)",
+    HTML.includes('data-page="finance-audit"') && HTML.includes('id="nav-finance-audit-btn"'));
+  T("حاوية الصفحة موجودة", HTML.includes('id="page-finance-audit"'));
+  T("showPage يرسم الوحدة", HTML.includes('id==="finance-audit"') && HTML.includes("window.financeAudit.render"));
+  T("تُشغَّل مع بقية الوحدات (startSync)", HTML.includes("window.financeAudit.startSync"));
+  T("تُعاد رسمها مع مستمع الطلبات (تقرأ المغلق والتاريخ الشرائي)",
+    /page-finance-audit"\)&&document\.getElementById\("page-finance-audit"\)\.classList\.contains\("active"\)\s*&& window\.financeAudit && window\.financeAudit\.render\) window\.financeAudit\.render\(\);/.test(HTML));
+  T("الصفحة ضمن مجموعة المشتريات في pageGroupMap", HTML.includes('"finance-audit":"grp-po"'));
+  T("مسجّلة في كاشف الوحدات القديمة (REG)",
+    HTML.includes('{name:"finance-audit.js", get:function(){ return window.financeAudit; }}'));
+
+  // ── بصمة البناء تطابق الإصدار (نفس حارس cleaning-operations — v18.9vl) ──
+  const faBuild = (src.match(/var MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
+  T("★ MODULE_BUILD في finance-audit.js يطابق APP_VERSION (يُرفَعان معاً)",
+    faBuild === VER, `MODULE_BUILD=${faBuild}  APP_VERSION=${VER}`);
+  T("الوحدة تُصدّر build على واجهتها العامة", /build:MODULE_BUILD/.test(src));
+
+  // ── تحميل الوحدة فعلياً واختبار الدوال النقية ──
+  const sandbox = { window: {}, console };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل الوحدة", false, String(e.message).slice(0, 120)); return; }
+  const FA = sandbox.window.financeAudit;
+  T("تعرّض window.financeAudit والدوال النقية",
+    FA && ["_pickSample", "_autoFlags", "_itemBench", "_norm", "_monthKey", "_prevMonthKey", "_poClosedAtISO", "_unitNet"].every(k => typeof FA[k] === "function"));
+  if (!FA || typeof FA._pickSample !== "function") return;
+
+  // ── التطبيع العربي: «مواد نظافة» ≡ «مواد  نظافه» ≡ «مَوَاد نظافة» ──
+  T("التطبيع: تاء مربوطة/همزة/تشكيل/مسافات لا تفرّق بين الاسمين",
+    FA._norm("مواد نظافة") === FA._norm("مواد  نظافه") &&
+    FA._norm("أسمنت مقاوم") === FA._norm("اسمنت مقاوم") &&
+    FA._norm("مَوَاد نظافة") === FA._norm("مواد نظافه"));
+
+  // ── حتمية العينة: نفس المدخلات ⇒ نفس العينة مهما تكرر السحب أو تغيّر ترتيب الإدخال ──
+  const pool30 = Array.from({ length: 30 }, (_, i) => ({ id: "PO-" + String(1000 + i), cost: (i + 1) * 500 }));
+  const p1 = FA._pickSample(pool30, { pct: 10, min: 3, max: 10, seed: "2026-07|test" });
+  const p2 = FA._pickSample(pool30, { pct: 10, min: 3, max: 10, seed: "2026-07|test" });
+  const shuffled = pool30.slice().reverse();
+  const p3 = FA._pickSample(shuffled, { pct: 10, min: 3, max: 10, seed: "2026-07|test" });
+  T("★ العينة حتمية: نفس البذرة ⇒ نفس الاختيار (لا «إعادة سحب»)",
+    JSON.stringify(p1.picked) === JSON.stringify(p2.picked), p1.picked.join("، "));
+  T("★ العينة مستقلة عن ترتيب الإدخال (فرز داخلي بالمعرّف)",
+    JSON.stringify(p1.picked) === JSON.stringify(p3.picked));
+  T("حجم العينة = ceil(10% من 30) = 3 ضمن [3..10]",
+    p1.target === 3 && p1.picked.length === 3);
+  const pDiff = FA._pickSample(pool30, { pct: 10, min: 3, max: 10, seed: "2026-08|test" });
+  T("بذرة مختلفة (شهر آخر) ⇒ عينة مختلفة", JSON.stringify(p1.picked) !== JSON.stringify(pDiff.picked));
+  // الحدود: أدنى 3 وأقصى 10 وقصر على حجم المرشّحين
+  const small = [{ id: "A", cost: 1 }, { id: "B", cost: 2 }];
+  const rs = FA._pickSample(small, { pct: 10, min: 3, max: 10, seed: "s" });
+  T("عينة أصغر من الحد الأدنى تُقصَر على حجم المرشّحين", rs.picked.length === 2);
+  const big = Array.from({ length: 500 }, (_, i) => ({ id: "P" + i, cost: 100 }));
+  const rb = FA._pickSample(big, { pct: 10, min: 3, max: 10, seed: "s" });
+  T("الحد الأقصى 10 يُحترم على 500 مرشّح", rb.picked.length === 10 && rb.target === 10);
+  T("لا تكرار في العينة وكلها من المرشّحين",
+    new Set(p1.picked).size === p1.picked.length && p1.picked.every(id => pool30.some(x => x.id === id)));
+  // الترجيح بالقيمة: طلب قيمته ساحقة يظهر في كل عينات بذور متعددة
+  const heavy = [{ id: "HEAVY", cost: 1e9 }].concat(Array.from({ length: 29 }, (_, i) => ({ id: "L" + i, cost: 1 })));
+  const heavyIn = ["a", "b", "c", "d", "e"].every(s => FA._pickSample(heavy, { pct: 10, min: 3, max: 10, seed: s }).picked.includes("HEAVY"));
+  T("★ الترجيح بالقيمة: الطلب الأغلى (وزن ساحق) يدخل العينة عبر بذور متعددة", heavyIn);
+
+  // ── أعلام الإدراج الآلي (نقية من أرقام مجرّدة) ──
+  const P = { bigLimit: 20000, estOverPct: 25, tolPct: 5, vat: 1.15 };
+  T("★ over_quote: الفعلي تجاوز أرخص عرض (صافي×1.15×1.05)",
+    FA._autoFlags(Object.assign({ actual: 13000, est: 0, quoteMin: 10000, hasComparison: true }, P)).includes("over_quote") &&
+    !FA._autoFlags(Object.assign({ actual: 12000, est: 0, quoteMin: 10000, hasComparison: true }, P)).includes("over_quote"));
+  T("★ over_estimate: الفعلي تجاوز التقدير بأكثر من 25%",
+    FA._autoFlags(Object.assign({ actual: 12600, est: 10000, quoteMin: 0, hasComparison: true }, P)).includes("over_estimate") &&
+    !FA._autoFlags(Object.assign({ actual: 12400, est: 10000, quoteMin: 0, hasComparison: true }, P)).includes("over_estimate"));
+  T("★ no_compare_big: مبلغ عالٍ بلا أي مقارنة أسعار — ومع مقارنة لا يُعلَّم",
+    FA._autoFlags(Object.assign({ actual: 25000, est: 0, quoteMin: 0, hasComparison: false }, P)).includes("no_compare_big") &&
+    !FA._autoFlags(Object.assign({ actual: 25000, est: 0, quoteMin: 0, hasComparison: true }, P)).includes("no_compare_big") &&
+    !FA._autoFlags(Object.assign({ actual: 15000, est: 0, quoteMin: 0, hasComparison: false }, P)).includes("no_compare_big"));
+  T("طلب سليم بلا أعلام",
+    FA._autoFlags(Object.assign({ actual: 9000, est: 10000, quoteMin: 9000, hasComparison: true }, P)).length === 0);
+
+  // ── مقارنة البنود بالمرجع: مثال محسوب باليد ──
+  // بندنا: 10 حبات بسعر وحدة 12 — أفضل مرجع لنفس الاسم (بتطبيع مختلف): 10 ⇒ وفر 20
+  const bench = FA._itemBench(
+    [{ name: "مواد نظافة", qty: 10, unit: 12 }, { name: "بند بلا مرجع", qty: 5, unit: 7 }],
+    [
+      { name: "مواد  نظافه", vendor: "المورد أ", unit: 10, src: "history", ref: "PO-1" },
+      { name: "مواد نظافة", vendor: "المورد ب", unit: 11, src: "catalog", ref: "كتالوج" },
+      { name: "مواد نظافة", vendor: "بلا سعر", unit: 0, src: "history", ref: "PO-2" },
+    ], 5);
+  T("★ أفضل بديل = الأرخص لنفس الاسم المطبّع (10 لا 11)، والوفر = (12−10)×10 = 20",
+    bench.rows[0].best && bench.rows[0].best.unit === 10 && bench.rows[0].best.vendor === "المورد أ" &&
+    bench.rows[0].saving === 20 && bench.totalSaving === 20,
+    JSON.stringify({ best: bench.rows[0].best && bench.rows[0].best.unit, saving: bench.rows[0].saving }));
+  T("سعر صفري في المرجع لا يُحتسب بديلاً", bench.rows[0].best.unit !== 0);
+  T("بند بلا مرجع: لا بديل ولا وفر", bench.rows[1].best === null && bench.rows[1].saving === 0);
+  T("تجاوز التسامح يُعلَّم (12 > 10×1.05)", bench.rows[0].overTol === true);
+
+  // ── مفاتيح الشهور (بلا مُعدِّلات Date — درس v18.9vt) ──
+  T("مفتاح الشهر من ISO", FA._monthKey("2026-07-15T10:00:00Z") === "2026-07");
+  T("الشهر السابق يعبر حدود السنة", FA._prevMonthKey("2026-01") === "2025-12" && FA._prevMonthKey("2026-08") === "2026-07");
+
+  // ── لحظة الإغلاق الفعلي من timeline ──
+  const po = { timeline: [
+    { code: "pending_pm", at: "2026-07-01T08:00:00Z" },
+    { code: "closed", at: "2026-07-20T08:00:00Z" },
+    { code: "closed_after_receipt", at: "2026-07-22T08:00:00Z" },
+  ], updatedAt: "2026-07-25T08:00:00Z" };
+  T("لحظة الإغلاق = آخر حدث إغلاق في timeline (لا updatedAt)",
+    FA._poClosedAtISO(po) === "2026-07-22T08:00:00Z");
+  T("طلب مغلق قديم بلا حدث موقوت: الرجوع لـ updatedAt",
+    FA._poClosedAtISO({ timeline: [], updatedAt: "2026-06-01T00:00:00Z" }) === "2026-06-01T00:00:00Z");
+
+  // ── صافي سعر الوحدة للبند المخزّن ──
+  T("صافي الوحدة = (إجمالي − ضريبة) ÷ المستلَم",
+    FA._unitNet({ itemCost: 1150, vat: 150, rcvQty: 10, qty: 12 }) === 100);
+  T("بلا إجمالي مخزّن: الرجوع لـ unitCost", FA._unitNet({ unitCost: 55 }) === 55);
+  T("كمية صفرية: لا قسمة على صفر — الرجوع لـ unitCost",
+    FA._unitNet({ itemCost: 1150, vat: 150, rcvQty: 0, qty: 0, unitCost: 33 }) === 33);
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -3368,6 +3499,7 @@ function deepReviewV18_9vu() {
   predelivery();
   kpi();
   substituteBudget();
+  financeAuditTests();
   numParsing();
   hailNotify();
   writeRaceRoot();
