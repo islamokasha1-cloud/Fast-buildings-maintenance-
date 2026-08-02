@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vx";
+const MODULE_BUILD = "v18.9vy";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -574,7 +574,7 @@ function boardHTML(){
   const todays=active.filter(t=>isDue(t)||doneToday(t));
   const byB={};
   todays.forEach(t=>{ const b=t.building||"بلا مبنى"; (byB[b]=byB[b]||[]).push(t); });
-  const groups=`<div class="co-groups">`+Object.keys(byB).sort().map(b=>{
+  const groups=`<div class="co-groups">`+_bldOrder(byB).map(b=>{
     const list=byB[b].slice().sort((x,y)=>dueStatus(x).sort-dueStatus(y).sort);
     const d=list.filter(doneToday).length;
     const all=d===list.length;
@@ -617,6 +617,18 @@ function boardHTML(){
    فلا يكسر onclick مهما كانت محارف اسم المبنى. */
 const BOARD_CARDS_PER_BLD = 2;
 let _expandedBlds = {};
+/* ترتيب مباني اللوحة: الأكثر تأخّراً أولاً (فجوة التغطية تتصدّر)، ثم الأكثر
+   متبقّياً اليوم، وعند التعادل أبجدياً — بدل الترتيب الأبجدي الصِرف الذي كان
+   يدفن المبنى المتعثّر وسط القائمة. مصدرٌ واحد للوحة اليوم والمتابعة اليومية. */
+function _bldOrder(byB){
+  const ov={}, due={};
+  Object.keys(byB).forEach(b=>{
+    ov[b]=byB[b].filter(isOverdue).length;
+    due[b]=byB[b].filter(isDue).length;
+  });
+  return Object.keys(byB).sort((a,b)=>
+    (ov[b]-ov[a]) || (due[b]-due[a]) || String(a).localeCompare(String(b),"ar"));
+}
 function toggleBld(key){
   const b=decodeURIComponent(key);
   _expandedBlds[b]=!_expandedBlds[b];
@@ -636,7 +648,7 @@ function _cappedTaskListHTML(b, list){
 function _byBuildingGrid(tasks){
   const byB={};
   tasks.forEach(t=>{ const b=t.building||"بلا مبنى"; (byB[b]=byB[b]||[]).push(t); });
-  return `<div class="co-groups">`+Object.keys(byB).sort().map(b=>{
+  return `<div class="co-groups">`+_bldOrder(byB).map(b=>{
     const list=byB[b].slice().sort((x,y)=>dueStatus(x).sort-dueStatus(y).sort);
     const d=list.filter(doneToday).length, all=d===list.length;
     return `<div class="card co-group">
@@ -2972,7 +2984,7 @@ window.cleaningOps = {
   _buildRoundReportHTML: buildRoundReportHTML,
   _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
   _salvageObjects: _salvageObjects, _genPrompt: _genPrompt,
-  _cappedTaskListHTML: _cappedTaskListHTML, _BOARD_CARDS_PER_BLD: BOARD_CARDS_PER_BLD,
+  _cappedTaskListHTML: _cappedTaskListHTML, _BOARD_CARDS_PER_BLD: BOARD_CARDS_PER_BLD, _bldOrder: _bldOrder,
   _svg: _svg,
   _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,

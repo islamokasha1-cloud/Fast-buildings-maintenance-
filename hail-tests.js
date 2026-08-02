@@ -2943,6 +2943,40 @@ function cleaningOpsTests() {
     /function toggleBld\(key\)\{[\s\S]{0,220}?render\(\);[\s\S]{0,80}?mountDaily\(\);/.test(src));
   T("vx: زرّ التوسيع له قاعدة عرضٍ كاملة", src.includes(".co-more-btn{width:100%"));
 
+  // ══ ★ v18.9vy: ترتيب مباني اللوحة — الأكثر تأخّراً أولاً ══
+  // الترتيب الأبجدي كان يدفن المبنى المتعثّر وسط القائمة. الآن: متأخّر أكثر ← مستحقّ
+  // أكثر ← أبجدي، عبر مصدرٍ واحد (_bldOrder) للوحة اليوم والمتابعة اليومية.
+  T("★ vy: _bldOrder مكشوفة والشاشتان تمرّان عبرها (لا .sort() أبجدي متبقٍّ)",
+    CO && typeof CO._bldOrder === "function" &&
+    (src.match(/\+_bldOrder\(byB\)\.map\(b=>\{/g) || []).length === 2 &&
+    !src.includes("Object.keys(byB).sort().map(b=>{"));
+  if (CO && typeof CO._bldOrder === "function") {
+    const byB = {
+      "أ نظيف":   [mk({ nextDueDate: day(1) }), mk({ nextDueDate: day(2) })],            // لا مستحقّ
+      "ب مستحق":  [mk({ nextDueDate: today }), mk({ nextDueDate: today })],              // 2 مستحقّ
+      "ج متأخر":  [mk({ nextDueDate: day(-1) })],                                        // 1 متأخّر
+      "د متأخران": [mk({ nextDueDate: day(-3) }), mk({ nextDueDate: day(-1) })]          // 2 متأخّر
+    };
+    T("★ vy: المتأخّر أكثر يتصدّر ثم الأقل تأخّراً ثم المستحقّ ثم النظيف",
+      JSON.stringify(CO._bldOrder(byB)) === JSON.stringify(["د متأخران", "ج متأخر", "ب مستحق", "أ نظيف"]),
+      JSON.stringify(CO._bldOrder(byB)));
+    T("★ vy: تعادل التأخّر يحسمه المستحقّ الأكثر",
+      JSON.stringify(CO._bldOrder({
+        "س": [mk({ nextDueDate: day(-1) })],
+        "ش": [mk({ nextDueDate: day(-1) }), mk({ nextDueDate: today })]
+      })) === JSON.stringify(["ش", "س"]));
+    T("vy: تعادلٌ كامل ⟵ أبجدي (ترتيبٌ مستقرّ لا عشوائي)",
+      JSON.stringify(CO._bldOrder({
+        "ب": [mk({ nextDueDate: today })],
+        "أ": [mk({ nextDueDate: today })]
+      })) === JSON.stringify(["أ", "ب"]));
+    T("vy: المنفَّذة اليوم لا تُحسب مستحقّةً في الترتيب (isDue نفسها)",
+      JSON.stringify(CO._bldOrder({
+        "منجز": [mk({ nextDueDate: today, lastExecuted: new Date().toISOString() })],
+        "معلّق": [mk({ nextDueDate: today })]
+      })) === JSON.stringify(["معلّق", "منجز"]));
+  }
+
   // ══ ★ صنفُ «الأيقونة العملاقة» — معالجةٌ عند المنبع بعد تكرّره ثلاث مرّات ══
   // _svgIcon في النواة يُرجع <svg> بلا width/height، وSVG بلا أبعادٍ داخل حاوية flex
   // يتمدّد ليملأها. رُقِّع موضعياً مرّتين (شريط التنبيه، أرشيف البلاغات) ثم تكرّر ثالثةً
