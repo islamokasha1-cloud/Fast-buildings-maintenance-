@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vw";
+const MODULE_BUILD = "v18.9vx";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -584,7 +584,7 @@ function boardHTML(){
           <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
           <span class="ppm-due-badge ${all?'ok':'today'}">${d}/${list.length} منجزة</span>
         </div>
-        <div class="co-tasklist">${list.map(taskCardHTML).join("")}</div>
+        ${_cappedTaskListHTML(b, list)}
       </div>`;
   }).join("")+`</div>`;
 
@@ -610,6 +610,28 @@ function boardHTML(){
       <div class="co-empty-s">كل المهام ضمن مواعيدها.</div></div></div>`}`;
 }
 
+/* ── عرضٌ مضغوط: بطاقتان لكل مبنى + زرّ توسيع/طيّ ──
+   الترتيب بالأولوية (متأخّر ← مستحقّ ← منجز) يسبق القصّ، فالظاهر دوماً هو
+   الأكثر إلحاحاً والمطويُّ أقلُّه. الحالة لكل مبنى (تنجو من إعادة الرسم بعد
+   التنفيذ/التحديث) وتُصفَّر مع تبديل المشروع. المفتاح يُمرَّر بالـ URI-encoding
+   فلا يكسر onclick مهما كانت محارف اسم المبنى. */
+const BOARD_CARDS_PER_BLD = 2;
+let _expandedBlds = {};
+function toggleBld(key){
+  const b=decodeURIComponent(key);
+  _expandedBlds[b]=!_expandedBlds[b];
+  render();        // لوحة اليوم (يتجاهل نفسه إن لم تكن الصفحة معروضة)
+  mountDaily();    // المتابعة اليومية (تتحقّق من وجود صفحتها بنفسها)
+}
+function _cappedTaskListHTML(b, list){
+  const open=!!_expandedBlds[b];
+  const shown=open?list:list.slice(0,BOARD_CARDS_PER_BLD);
+  const rest=list.length-BOARD_CARDS_PER_BLD;
+  return `<div class="co-tasklist">${shown.map(taskCardHTML).join("")}</div>`+
+    (rest>0?`<button class="btn btn-ghost btn-sm co-more-btn" onclick="event.stopPropagation();cleaningOps.toggleBld('${encodeURIComponent(b)}')">${
+      open?"▲ طيّ — أول بطاقتين فقط":"▼ عرض "+rest+" "+(rest===1?"مهمة أخرى":"مهام أخرى")}</button>`:"");
+}
+
 /* تجميعُ المهامّ حسب المبنى في شبكةٍ متجاورة — يستفيد من عرض الشاشة بدل صفٍّ لكل مهمة */
 function _byBuildingGrid(tasks){
   const byB={};
@@ -622,7 +644,7 @@ function _byBuildingGrid(tasks){
         <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
         <span class="ppm-due-badge ${all?'ok':'today'}">${d}/${list.length}</span>
       </div>
-      <div class="co-tasklist">${list.map(taskCardHTML).join("")}</div>
+      ${_cappedTaskListHTML(b, list)}
     </div>`;
   }).join("")+`</div>`;
 }
@@ -2687,7 +2709,7 @@ function _watchProject(){
       _cfg={supervisorBuildings:{}}; _cfgFor="";   // خريطةُ مشرفي السابق لا تحكم الجديد
       _editing=null; _execFor=null; _execState=[]; _execPhotos=[];
       _detailFor=null; _detailLog=null;            // تفاصيلُ مهمةِ السابق لا تبقى معروضة
-      _genForm=false; _genErr=""; _view="board";
+      _genForm=false; _genErr=""; _view="board"; _expandedBlds={};
       _rounds=[]; _roundsLoaded=false; _roundsFor=""; _roundsPromise=null;   // جولاتُ السابق لا تبقى
       _editingRound=null; _roundPhotos=[]; _roundDetail=null;
       // ارفع لوحات النظافة فوراً عند مغادرة مشروع النظافة — قبل معرفة نوع الجديد
@@ -2784,6 +2806,7 @@ function injectCSS(){
    أعمدةٍ متعددة، وعدّةُ مبانٍ تتجاور فتصير مهامُّ كلٍّ عموداً واحداً — تكيُّفٌ تلقائيّ
    بلا نقطةِ كسرٍ ثابتة، فلا تنحشر البطاقات ولا تُهدَر مساحةُ الشاشة. */
 .co-tasklist{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;align-items:start}
+.co-more-btn{width:100%;margin-top:8px;justify-content:center;font-weight:700}
 .co-tasklist>.ppm-card{margin-bottom:0}
 /* بطاقاتٌ مصغَّرة داخل صفحات النظافة وحدها — لا تمسّ .ppm-card في صفحة الوقائية */
 #page-${PAGE_ID} .ppm-card,#${EXEC_ID} .ppm-card,#${DAILY_ID} .ppm-card{padding:9px 11px;margin-bottom:7px;border-radius:11px}
@@ -2926,7 +2949,7 @@ else init();
 
 /* ════════════ الواجهة العامة ════════════ */
 window.cleaningOps = {
-  render, setView, refresh, toggleGen, doGen, genModeChanged,
+  render, setView, refresh, toggleGen, doGen, genModeChanged, toggleBld,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   openDetail, closeDetail,
@@ -2949,6 +2972,7 @@ window.cleaningOps = {
   _buildRoundReportHTML: buildRoundReportHTML,
   _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
   _salvageObjects: _salvageObjects, _genPrompt: _genPrompt,
+  _cappedTaskListHTML: _cappedTaskListHTML, _BOARD_CARDS_PER_BLD: BOARD_CARDS_PER_BLD,
   _svg: _svg,
   _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,
