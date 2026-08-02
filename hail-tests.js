@@ -2870,6 +2870,41 @@ function cleaningOpsTests() {
   T("vv: تبديل الوضع لا يعيد render (لا تضيع القيم المكتوبة)",
     /function genModeChanged\(\)\{/.test(src) && src.includes("cleaningOps.genModeChanged()"));
 
+  // ══ ★ v18.9vw: «مبنى مرجعي» في التوليد الكامل — مبنى جديد على منوال القائم ══
+  // توليد مبنى جديد كان عامّاً (٨–١٢ مهمة نمطية) فلا يرث تعديلات المستخدم على
+  // المباني القائمة. الآن يُمرَّر جدول مبنى مرجعي فعليّ للنموذج مع أمر المحاكاة.
+  if (CO && typeof CO._genPrompt === "function") {
+    const refTasks = [
+      { name: "تنظيف دورات المياه", workType: "نظافة دورات المياه", freq: "يومي", checklist: ["تعقيم", "مرايا"] },
+      { name: "مسح الأرضيات", workType: "نظافة الأرضيات", freq: "يومي" }
+    ];
+    const pRef = CO._genPrompt({ mode: "full", bld: "مبنى ج", kind: "إداري", ref: { name: "مبنى أ", tasks: refTasks } });
+    T("★ vw: الموجّه مع مرجع يأمر بمحاكاة جدول المبنى القائم",
+      pRef.includes("«مبنى أ»") && pRef.includes("اجعله مرجعك الأول") && pRef.includes("حاكِ نمطه"));
+    T("★ vw: جدول المرجع يصل للنموذج (اسم | نوع | تكرار | بنود)",
+      pRef.includes("- تنظيف دورات المياه | نظافة دورات المياه | يومي | بنود الفحص: تعقيم؛ مرايا") &&
+      pRef.includes("- مسح الأرضيات | نظافة الأرضيات | يومي"));
+    T("★ vw: مع مرجعٍ لا تُطلَب 8–12 نمطية (المنوال يحكم العدد)",
+      !pRef.includes("بين 8 و 12 مهمة") && pRef.includes("على منوال المرجع"));
+    T("vw: شكل JSON نفسه مع المرجع (مسار تحليل واحد)", pRef.includes('{"tasks":[{"name"'));
+    T("★ vw: بلا مرجع يبقى التوليد العام القديم حرفياً (لا ارتداد)",
+      CO._genPrompt({ mode: "full", bld: "مبنى ج" }).includes("بين 8 و 12 مهمة تغطّي المناطق الرئيسية"));
+    T("★ vw: وضع «مهام محددة» يتجاهل المرجع (لا خلط بين الوضعين)",
+      !CO._genPrompt({ mode: "specific", spec: "س", ref: { name: "مبنى أ", tasks: refTasks } }).includes("اجعله مرجعك"));
+    const many = Array.from({ length: 40 }, (_, i) => ({ name: "م" + i, workType: "أخرى", freq: "يومي" }));
+    T("vw: سقف جدول المرجع 30 مهمة (لا موجّه منفلت)",
+      (CO._genPrompt({ mode: "full", ref: { name: "ب", tasks: many } }).match(/\n- /g) || []).length === 30);
+    T("vw: مرجع فارغ = بلا مرجع (لا قسم محاكاة فارغ)",
+      !CO._genPrompt({ mode: "full", ref: { name: "ب", tasks: [] } }).includes("اجعله مرجعك"));
+  }
+  T("★ vw: نموذج التوليد فيه منتقي المبنى المرجعي بخيار تلقائي وبلا مرجع",
+    src.includes('id="co-gen-ref"') && src.includes('value="__auto__"') &&
+    src.includes("— بلا مرجع (توليد عام) —"));
+  T("★ vw: التلقائي يحسم بالأكثر مهامّاً ويستثني المبنى المستهدف",
+    src.includes("byBld[b].length-byBld[a].length") && src.includes("t.building!==bld"));
+  T("vw: منتقي المرجع يُخفى في وضع «مهام محددة»",
+    src.includes('m==="specific"||!hasRefs'));
+
   // ══ ★ صنفُ «الأيقونة العملاقة» — معالجةٌ عند المنبع بعد تكرّره ثلاث مرّات ══
   // _svgIcon في النواة يُرجع <svg> بلا width/height، وSVG بلا أبعادٍ داخل حاوية flex
   // يتمدّد ليملأها. رُقِّع موضعياً مرّتين (شريط التنبيه، أرشيف البلاغات) ثم تكرّر ثالثةً

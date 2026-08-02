@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vv";
+const MODULE_BUILD = "v18.9vw";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -923,6 +923,10 @@ function renderExec(el){
 /* ── نموذج التوليد بالذكاء الاصطناعي ── */
 function genFormHTML(){
   const blds=_buildings();
+  // المباني القائمة ذات المهام النشطة — مرشّحات «المبنى المرجعي» (الأكثر مهامّاً أولاً)
+  const byBld={};
+  _tasks.filter(t=>!isDisabled(t)&&t.building).forEach(t=>{ byBld[t.building]=(byBld[t.building]||0)+1; });
+  const refBlds=Object.keys(byBld).sort((a,b)=>byBld[b]-byBld[a]);
   return `
     <div class="card co-pane co-gen">
       <div class="co-sec"><div class="co-sec-t">${_svg('sparkles')} توليد جدول مهام النظافة</div></div>
@@ -933,6 +937,12 @@ function genFormHTML(){
         </select></div>
       <div class="form-group" id="co-gen-spec-wrap" style="display:none"><label class="form-label">المهام المطلوب إضافتها</label>
         <textarea class="form-input" id="co-gen-spec" rows="2" placeholder="مثال: تنظيف خزانات المياه شهرياً، وتلميع درابزين السلالم أسبوعياً"></textarea></div>
+      <div class="form-group" id="co-gen-ref-wrap" ${refBlds.length?"":'style="display:none"'}><label class="form-label">مبنى مرجعي (يُنسَج الجدول الجديد على منواله)</label>
+        <select class="form-select" id="co-gen-ref">
+          ${refBlds.length?`<option value="__auto__">— تلقائي: المبنى الأكثر مهامّاً —</option>`:""}
+          <option value="">— بلا مرجع (توليد عام) —</option>
+          ${refBlds.map(b=>`<option value="${_esc(b)}">${_esc(b)} (${byBld[b]} مهمة)</option>`).join("")}
+        </select></div>
       <div class="co-grid2">
         <div class="form-group"><label class="form-label">المبنى المستهدف</label>
           <select class="form-select" id="co-gen-bld">
@@ -952,11 +962,17 @@ function genFormHTML(){
       <div class="co-hint">المُولَّد <b>اقتراحٌ أوّليٌّ قابلٌ للتحرير والحذف</b> — يُضاف للمهام الحالية ولا يستبدلها.</div>
     </div>`;
 }
-// إظهار/إخفاء حقل الوصف حسب الوضع — بلا إعادة render كي لا تضيع القيم المكتوبة
+// إظهار/إخفاء الحقول حسب الوضع — بلا إعادة render كي لا تضيع القيم المكتوبة.
+// الوصف للوضع المحدد وحده، والمبنى المرجعي للوضع الكامل وحده (وبوجود مبانٍ ذات مهام).
 function genModeChanged(){
   const m=(document.getElementById("co-gen-mode")||{}).value||"full";
   const w=document.getElementById("co-gen-spec-wrap");
   if(w) w.style.display=(m==="specific")?"":"none";
+  const r=document.getElementById("co-gen-ref-wrap");
+  if(r){
+    const hasRefs=!!(r.querySelector&&r.querySelector('option[value="__auto__"]'));
+    r.style.display=(m==="specific"||!hasRefs)?"none":"";
+  }
 }
 
 function _extractJSON(txt){
@@ -1002,14 +1018,23 @@ function _salvageObjects(txt){
 }
 
 /* بناء موجّه التوليد — دالة نقية مكشوفة للفحوص. وضعان:
-   "full" (الافتراضي) = جدول كامل ٨–١٢ مهمة (السلوك القائم حرفياً)؛
+   "full" (الافتراضي) = جدول كامل. بلا مرجعٍ يولَّد عامّاً (٨–١٢ مهمة — السلوك
+   القديم حرفياً)؛ ومع `ref` (مبنى قائم عدّله المستخدم: {name, tasks}) يُمرَّر
+   جدولُه الفعلي للنموذج ليُنسَج الجدول الجديد على منواله — فمبنى جديد يرث نمط
+   المباني التي ضبطها المستخدم من قبل لا اقتراحاً عاماً.
    "specific" = إضافة مهام محددة وصفها المستخدم وحدها لمبنى قائم، مع تمرير
-   أسماء المهام الموجودة في المبنى كي لا يقترح النموذج مكرراً. */
+   أسماء المهام الموجودة في المبنى كي لا يقترح النموذج مكرراً (المرجع يُتجاهَل). */
 function _genPrompt(o){
   o=o||{};
   const specific=o.mode==="specific";
   const bld=String(o.bld||""), kind=String(o.kind||""), notes=String(o.notes||"");
   const existing=Array.isArray(o.existing)?o.existing.filter(Boolean):[];
+  const ref=(!specific && o.ref && o.ref.name && Array.isArray(o.ref.tasks) && o.ref.tasks.length) ? o.ref : null;
+  const refLines=ref ? ref.tasks.slice(0,30).map(t=>{
+    const ck=(Array.isArray(t.checklist)?t.checklist:[]).slice(0,6).map(s=>String(s).trim()).filter(Boolean);
+    return "- "+String(t.name||"").trim()+" | "+String(t.workType||"أخرى")+" | "+String(t.freq||"يومي")+
+           (ck.length?" | بنود الفحص: "+ck.join("؛ "):"");
+  }).join("\n") : "";
   return (
     "أنت مدير عمليات نظافة مبانٍ محترف. "+
     (specific ? "أضِف مهام نظافة محددة لمبنى قائم — لا تُنشئ جدولاً كاملاً.\n"
@@ -1027,6 +1052,12 @@ function _genPrompt(o){
         "أعطِ المهام الموصوفة أعلاه فقط (مهمة لكل وصف، وعدّة مهامّ إن وُصفت عدّة)، "+
         "بأسماء عربية مختصرة، ولكل مهمة بين 3 و 5 بنود فحصٍ عملية ومحدّدة وموجزة، "+
         "واختر لكل مهمة التكرار الأنسب من وصفها.\n"
+      : ref
+      ? "هذا جدول مهامّ مبنى «"+String(ref.name)+"» القائم كما ضبطه المستخدم — اجعله مرجعك الأول: "+
+        "حاكِ نمطه في اختيار المهام والتسمية والتكرارات وبنود الفحص وعدد المهام، "+
+        "وكيّف ما يلزم فقط ليناسب وصف المبنى الجديد (أدواره ومرافقه):\n"+refLines+"\n"+
+        "أعطِ جدولاً كاملاً على منوال المرجع، بأسماء عربية مختصرة، ولكل مهمة "+
+        "بين 3 و 5 بنود فحصٍ عملية ومحدّدة وموجزة.\n"
       : "أعطِ بين 8 و 12 مهمة تغطّي المناطق الرئيسية، بأسماء عربية مختصرة، ولكل مهمة "+
         "بين 3 و 5 بنود فحصٍ عملية ومحدّدة وموجزة.\n"+
         "اجعل مهام دورات المياه والأرضيات والنفايات «يومي»، والزجاج والأثاث «أسبوعي»، "+
@@ -1052,7 +1083,21 @@ async function doGen(){
     const existing = mode==="specific"
       ? _tasks.filter(t=>!isDisabled(t) && (!bld || t.building===bld)).map(t=>t.name).filter(Boolean).slice(0,60)
       : [];
-    const prompt=_genPrompt({mode, bld, kind, notes, spec, existing});
+    // المبنى المرجعي (الوضع الكامل): يُنسَج الجدول الجديد على منوال مبنى قائم ضبطه
+    // المستخدم — "__auto__" = الأكثر مهامّاً (عدا المبنى المستهدف)، "" = بلا مرجع.
+    let ref=null;
+    if(mode!=="specific"){
+      const refSel=(document.getElementById("co-gen-ref")||{value:"__auto__"}).value;
+      if(refSel!==""){
+        const byBld={};
+        _tasks.filter(t=>!isDisabled(t) && t.building && t.building!==bld)
+              .forEach(t=>{ (byBld[t.building]=byBld[t.building]||[]).push(t); });
+        const name=(refSel!=="__auto__") ? refSel
+          : (Object.keys(byBld).sort((a,b)=>byBld[b].length-byBld[a].length)[0]||"");
+        if(name && byBld[name] && byBld[name].length) ref={name, tasks:byBld[name]};
+      }
+    }
+    const prompt=_genPrompt({mode, bld, kind, notes, spec, existing, ref});
     let tasks=null, lastErr="";
     for(let attempt=1; attempt<=2 && !tasks; attempt++){
       let txt="";
@@ -1092,7 +1137,7 @@ async function doGen(){
     }
     let ok=0;
     for(const t of tasks){ if(await saveTask(t)) ok++; }
-    _audit("توليد جدول نظافة بالذكاء الاصطناعي", (bld||"كل المباني")+" — "+ok+" مهمة"+(mode==="specific"?" (مهام محددة)":""));
+    _audit("توليد جدول نظافة بالذكاء الاصطناعي", (bld||"كل المباني")+" — "+ok+" مهمة"+(mode==="specific"?" (مهام محددة)":(ref?" (على منوال "+ref.name+")":"")));
     _toast("✅ أُضيفت "+ok+" مهمة — راجعها وعدّلها كما تحب","success");
     _genForm=false; render();
   } finally {
