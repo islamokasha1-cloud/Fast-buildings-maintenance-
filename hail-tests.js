@@ -2949,7 +2949,17 @@ function cleaningOpsTests() {
     src.includes("decodeURIComponent(key)"));
   T("wa: للنافذة قواعدُ عرضٍ ثابتة (overlay مثبّت + جسمٌ يتمرّر)",
     src.includes(".co-bld-overlay{position:fixed;inset:0") &&
-    src.includes(".co-bld-modal{width:min(960px,100%);max-height:88vh;overflow-y:auto"));
+    src.includes(".co-bld-modal{width:min(560px,96vw);max-height:80vh;overflow-y:auto"));
+
+  // ══ ★ v18.9wb: النافذة أصغر وفي المنتصف + ESC للإغلاق (ملاحظة المستخدم) ══
+  T("★ wb: النافذة في منتصف الشاشة تماماً (align-items:center)",
+    src.includes("z-index:1200;display:flex;align-items:center;justify-content:center"));
+  T("★ wb: بطاقات النافذة عمودٌ واحدٌ مرتّب (لا شبكة تتناثر بعرض الشاشة)",
+    src.includes(".co-bld-modal .co-tasklist{grid-template-columns:1fr}"));
+  T("★ wb: ESC يغلق النافذة — تركيبٌ عند الفتح وفكٌّ عند الإغلاق (لا مستمع دائم)",
+    src.includes('if(e && e.key==="Escape") closeBldTasks()') &&
+    src.includes('document.addEventListener("keydown", _bldEscHandler)') &&
+    src.includes('document.removeEventListener("keydown", _bldEscHandler)'));
   T("vx: زرّ «مهام أخرى» له قاعدة عرضٍ كاملة", src.includes(".co-more-btn{width:100%"));
 
   // ══ ★ v18.9vy: ترتيب مباني اللوحة — الأكثر تأخّراً أولاً ══

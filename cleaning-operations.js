@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9wa";
+const MODULE_BUILD = "v18.9wb";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -640,7 +640,12 @@ function _cappedTaskListHTML(b, list){
    بترتيب الأولوية). أيُّ إجراءٍ داخلها (تنفيذ/تحرير/تفاصيل) يغلقها أولاً ليظهر
    ما فتحه — بمستمعِ capture فلا يعطّله stopPropagation في أزرار البطاقة. */
 const BLD_MODAL_ID = "co-bld-modal";
-function closeBldTasks(){ const el=document.getElementById(BLD_MODAL_ID); if(el&&el.remove) el.remove(); }
+// ESC يغلق النافذة — المستمع يُركَّب عند الفتح ويُفكّ عند الإغلاق (لا مستمع دائم)
+function _bldEscHandler(e){ if(e && e.key==="Escape") closeBldTasks(); }
+function closeBldTasks(){
+  const el=document.getElementById(BLD_MODAL_ID); if(el&&el.remove) el.remove();
+  try{ document.removeEventListener("keydown", _bldEscHandler); }catch(e){}
+}
 function openBldTasks(key){
   closeBldTasks();
   const b=decodeURIComponent(key);
@@ -666,6 +671,7 @@ function openBldTasks(key){
     if(el) setTimeout(closeBldTasks,0);   // بعد تنفيذ onclick البطاقة نفسه
   }, true);
   document.body.appendChild(ov);
+  document.addEventListener("keydown", _bldEscHandler);
 }
 
 /* تجميعُ المهامّ حسب المبنى في شبكةٍ متجاورة — يستفيد من عرض الشاشة بدل صفٍّ لكل مهمة */
@@ -2843,8 +2849,9 @@ function injectCSS(){
    بلا نقطةِ كسرٍ ثابتة، فلا تنحشر البطاقات ولا تُهدَر مساحةُ الشاشة. */
 .co-tasklist{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;align-items:start}
 .co-more-btn{width:100%;margin-top:8px;justify-content:center;font-weight:700}
-.co-bld-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:1200;display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow-y:auto}
-.co-bld-modal{width:min(960px,100%);max-height:88vh;overflow-y:auto;margin:0}
+.co-bld-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:1200;display:flex;align-items:center;justify-content:center;padding:12px}
+.co-bld-modal{width:min(560px,96vw);max-height:80vh;overflow-y:auto;margin:0}
+.co-bld-modal .co-tasklist{grid-template-columns:1fr}
 .co-bld-modal .co-sec{position:sticky;top:0;background:var(--surface);z-index:1;padding-top:2px}
 .co-bld-close{margin-inline-start:auto;flex:none}
 .co-tasklist>.ppm-card{margin-bottom:0}
