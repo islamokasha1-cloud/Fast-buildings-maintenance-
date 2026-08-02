@@ -3515,6 +3515,17 @@ function financeAuditTests() {
   T("★ wq: اسم المورد الحقيقي «عالم الريتاج» حُذف من الأمثلة (لا يعود)",
     !src.includes("عالم الريتاج"));
 
+  // ── v18.9wr: الفحص الوقائي عند إنشاء طلب الشراء ──
+  T("★ wr: النواة تستدعي renderPrecheck بعد كل تعديل على بنود الطلب الجديد (محروساً) + الحاوية موجودة",
+    HTML.includes('window.financeAudit.renderPrecheck(currentPurchaseItems,"np-precheck-host")') &&
+    HTML.includes('id="np-precheck-host"'));
+  T("★ wr: الفحص الوقائي يعيد استخدام محرك التدقيق نفسه (_itemBench + _refRowsAt بمركز «الآن»)",
+    src.includes("function renderPrecheck") && src.includes("_itemBench(list, _refRowsAt(_now(), null), FA_TOL_PCT)") &&
+    src.includes("function _refRowsAt(refISO, excludeId)"));
+  T("★ wr: صامت عندما لا بديل أرخص يتجاوز التسامح (لا ضوضاء) واسترشادي لا يمنع الإرسال",
+    src.includes("r.best && r.overTol") && src.includes("if(!hits.length){ host.innerHTML=\"\"; return; }") &&
+    src.includes("قد يبرَّر الفرق بالجودة أو سرعة التوريد"));
+
   // ── مفاتيح الشهور (بلا مُعدِّلات Date — درس v18.9vt) ──
   T("مفتاح الشهر من ISO", FA._monthKey("2026-07-15T10:00:00Z") === "2026-07");
   T("الشهر السابق يعبر حدود السنة", FA._prevMonthKey("2026-01") === "2025-12" && FA._prevMonthKey("2026-08") === "2026-07");

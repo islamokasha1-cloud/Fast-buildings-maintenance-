@@ -36,7 +36,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9wq";
+  var MODULE_BUILD = "v18.9wr";
 
   // ── معايير العينة والأعلام (قابلة للتعديل من هنا — تُخزَّن مع كل دورة) ──
   var FA_PCT            = 10;    // نسبة العينة العشوائية من طلبات الشهر المغلقة
@@ -304,15 +304,16 @@
     return false;
   }
 
-  // صفوف المرجع لطلبٍ ما: بنود الطلبات المغلقة الأخرى خلال نافذة التاريخ + الكتالوج.
-  function _refRows(p){
+  // صفوف المرجع حول لحظةٍ ما: بنود الطلبات المغلقة خلال نافذة التاريخ + الكتالوج.
+  // refISO = مركز النافذة (لحظة إغلاق الطلب المُدقَّق، أو «الآن» للفحص الوقائي)،
+  // excludeId = طلب يُستثنى من المرجع (الطلب نفسه عند التدقيق).
+  function _refRowsAt(refISO, excludeId){
     var rows=[];
-    var refAt=_poClosedAtISO(p,_normStatus) || _now();
-    var refTS=new Date(refAt).getTime();
+    var refTS=new Date(refISO||_now()).getTime();
     if(isNaN(refTS)) refTS=Date.now();
     var winMs=FA_HIST_MONTHS*30.44*24*3600*1000;
     _pos().forEach(function(q){
-      if(!q || q.id===(p&&p.id) || !_isClosed(q)) return;
+      if(!q || (excludeId && q.id===excludeId) || !_isClosed(q)) return;
       var at=_poClosedAtISO(q,_normStatus);
       var ts=new Date(at).getTime();
       if(isNaN(ts) || Math.abs(refTS-ts)>winMs) return;
@@ -331,6 +332,9 @@
       }
     }catch(e){}
     return rows;
+  }
+  function _refRows(p){
+    return _refRowsAt(_poClosedAtISO(p,_normStatus)||_now(), p&&p.id);
   }
 
   // أعلام الإدراج الآلي لطلبٍ حي (تجمع الأرقام ثم تمرّ بالنقية).
@@ -1322,6 +1326,40 @@
     }
   }
 
+  /* ════════════════════════════════════════════════════════════════════
+     الفحص الوقائي عند إنشاء طلب الشراء — نفس محرك مقارنة التدقيق يعمل
+     لحظة الإدخال: تستدعيه النواة (renderPurchaseItemsTable) بعد كل تعديل
+     على بنود الطلب الجديد. يُنبَّه فقط عند وجود بديل أرخص يتجاوز التسامح —
+     صمت تام عندما الأسعار سليمة (لا ضوضاء تعوّد المستخدم على التجاهل).
+     ════════════════════════════════════════════════════════════════════ */
+  function renderPrecheck(items, hostId){
+    var host=document.getElementById(hostId||"np-precheck-host");
+    if(!host) return;
+    var list=(items||[]).map(function(it){
+      return { name:(it&&it.itemName)||"", qty:Number(it&&it.qty)||1, unit:Number(it&&it.unitCost)||0 };
+    }).filter(function(x){ return x.name && x.unit>0; });
+    if(!list.length){ host.innerHTML=""; return; }
+    var bench;
+    try{ bench=_itemBench(list, _refRowsAt(_now(), null), FA_TOL_PCT); }
+    catch(e){ host.innerHTML=""; return; }
+    var hits=bench.rows.filter(function(r){ return r.best && r.overTol; });
+    if(!hits.length){ host.innerHTML=""; return; }
+    _injectCSS();
+    var lines=hits.map(function(r){
+      var b=r.best;
+      return '<div style="margin-top:4px">• <b>'+_esc(r.name)+'</b>: سعرك <span class="fa-num" style="display:inline">'+_fmt(r.unit)+'</span>'+
+        ' مقابل <span class="fa-num" style="display:inline;font-weight:800">'+_fmt(b.unit)+'</span> من '+_esc(b.vendor||"—")+
+        ' <span style="font-size:9px;color:var(--muted)">('+(b.src==="catalog"?"كتالوج الأسعار":"طلب "+_esc(b.ref))+')</span>'+
+        (r.saving>0?' — وفر محتمل <b class="fa-num" style="display:inline">'+_fmt(r.saving)+'</b> ر.س':"")+
+      '</div>';
+    }).join("");
+    host.innerHTML='<div class="fa-flag" style="margin-top:10px">'+
+      '💡 <b>فحص وقائي (الرقابة المالية):</b> بنود لها بديل أرخص خلال آخر '+FA_HIST_MONTHS+' أشهر:'+
+      lines+
+      '<div style="font-size:9px;color:var(--muted);margin-top:5px">استرشادي — أسعار صافي ضريبة بمطابقة اسم البند؛ قد يبرَّر الفرق بالجودة أو سرعة التوريد أو حد أدنى للطلب.</div>'+
+    '</div>';
+  }
+
   /* ════════ التنقّل ════════ */
   function open(month){ _curMonth=month; render(); }
   function back(){ _curMonth=null; render(); }
@@ -1329,6 +1367,7 @@
   /* ════════ التصدير ════════ */
   window.financeAudit = {
     startSync:startSync, render:render, retryLoad:retryLoad,
+    renderPrecheck:renderPrecheck,
     open:open, back:back,
     openCreate:openCreate, createAudit:createAudit, removeAudit:removeAudit, removeSample:removeSample,
     openReview:openReview, saveReview:saveReview,
