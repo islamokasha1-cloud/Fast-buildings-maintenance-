@@ -36,7 +36,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9wl";
+  var MODULE_BUILD = "v18.9wm";
 
   // ── معايير العينة والأعلام (قابلة للتعديل من هنا — تُخزَّن مع كل دورة) ──
   var FA_PCT            = 10;    // نسبة العينة العشوائية من طلبات الشهر المغلقة
@@ -363,6 +363,49 @@
     }catch(e){}
   }
 
+  // ── ورقة أنماط الوحدة — بلغة تصميم المنصة نفسها ──
+  // كل الألوان من توكنز النواة (--primary/--surface/--warn...) عبر color-mix،
+  // فتعمل في الثيمين الفاتح والداكن تلقائياً (لا hex مثبّتة تنكسر في الداكن)،
+  // والأرقام JetBrains Mono بأرقام جدولية كبقية شاشات المنصة.
+  function _injectCSS(){
+    if(document.getElementById("fa-css")) return;
+    var st=document.createElement("style"); st.id="fa-css";
+    st.textContent=
+      '#page-finance-audit{direction:rtl}'+
+      '.fa-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:14px}'+
+      '.fa-stats .stat-card{cursor:default}'+
+      '.fa-stats .sv{font-family:\'JetBrains Mono\',monospace}'+
+      '.fa-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow-x:auto}'+
+      '.fa-table{width:100%;border-collapse:collapse;font-size:12px}'+
+      '.fa-table th{background:var(--surface2);padding:10px 12px;text-align:right;font-weight:700;color:var(--muted);font-size:11px;border-bottom:1px solid var(--border);white-space:nowrap}'+
+      '.fa-table td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:middle}'+
+      '.fa-table tbody tr:last-child td{border-bottom:none}'+
+      '.fa-table tbody tr.fa-click{cursor:pointer}'+
+      '.fa-table tbody tr.fa-click:hover td{background:var(--surface2)}'+
+      '.fa-num{direction:ltr;text-align:right;font-family:\'JetBrains Mono\',monospace;font-variant-numeric:tabular-nums}'+
+      '.fa-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap;background:color-mix(in srgb,var(--pc,var(--muted)) 12%,var(--surface));color:var(--pc,var(--muted))}'+
+      '.fa-pill .fa-dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}'+
+      '.fa-seed{display:inline-flex;align-items:center;gap:6px;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--muted);background:var(--surface2);border:1px dashed var(--border);border-radius:8px;padding:3px 9px;direction:ltr}'+
+      '.fa-progress{height:7px;background:var(--surface2);border-radius:20px;overflow:hidden;min-width:80px;flex:1}'+
+      '.fa-progress i{display:block;height:100%;border-radius:20px;background:var(--accent);transition:width .3s}'+
+      '.fa-progress-cell{display:flex;align-items:center;gap:8px;min-width:130px}'+
+      '.fa-empty{text-align:center;color:var(--muted);padding:46px 20px}'+
+      '.fa-empty-ic{width:52px;height:52px;border-radius:14px;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;background:var(--surface2);color:var(--muted)}'+
+      '.fa-empty-ic svg{width:26px;height:26px}'+
+      '.fa-sec{font-size:11px;font-weight:800;color:var(--muted);margin:12px 0 6px;display:flex;align-items:center;gap:6px}'+
+      '.fa-note{background:var(--surface2);border-radius:10px;padding:10px 13px;font-size:11px;color:var(--muted);line-height:1.9}'+
+      '.fa-alert{background:color-mix(in srgb,var(--danger) 9%,var(--surface));border:1px solid color-mix(in srgb,var(--danger) 30%,var(--border));color:var(--danger);border-radius:10px;padding:9px 12px;font-size:12px;font-weight:600;margin-bottom:10px}'+
+      '.fa-flag{background:color-mix(in srgb,var(--warn) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 30%,var(--border));color:var(--warn);border-radius:10px;padding:8px 12px;font-size:11px;font-weight:600;margin-bottom:10px}'+
+      '.fa-mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:10px;text-align:center;background:var(--surface2);border-radius:10px;padding:10px}'+
+      '.fa-mini b{display:block;font-size:17px;font-family:\'JetBrains Mono\',monospace;font-variant-numeric:tabular-nums}'+
+      '.fa-mini span{font-size:10px;color:var(--muted)}'+
+      '.fa-mq-row{display:flex;align-items:center;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px dashed var(--border)}'+
+      '.fa-benchrow-hi td{background:color-mix(in srgb,var(--warn) 8%,var(--surface))}'+
+      '.fa-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted)}'+
+      '@media (max-width:560px){ .fa-stats{grid-template-columns:repeat(2,1fr)} }';
+    document.head.appendChild(st);
+  }
+
   function _auditOf(month){ return _audits.find(function(a){ return (a.month||a.id)===month; }) || null; }
 
   // معاملة على وثيقة الدورة: تقرأ الطازج، تطبّق mutate على نسخة، تكتب.
@@ -484,6 +527,9 @@
       _toast("✅ بدأت دورة تدقيق "+_monthLabel(month)+" — "+samples.length+" طلب في العينة","success");
       _log("بدء دورة رقابة مالية على المشتريات",
            _monthLabel(month)+" — عينة "+samples.length+"/"+pool.length+" (عشوائي "+pick.picked.length+" + آلي "+samples.filter(function(s){ return s.source==="auto"; }).length+")");
+      // إدراجٌ متفائل محلياً حتى تظهر التفاصيل فوراً — onSnapshot يوحّدها لاحقاً
+      _audits=_audits.filter(function(a){ return (a.month||a.id)!==month; });
+      _audits.unshift(Object.assign({id:month}, doc));
       _curMonth=month; render();
       return true;
     }catch(e){
@@ -522,31 +568,36 @@
      ════════════════════════════════════════════════════════════════════ */
 
   var STATUS_LABEL={
-    pending:              {l:"بانتظار المراجعة",      c:"var(--muted)",  bg:"var(--surface2)"},
-    awaiting_procurement: {l:"بانتظار رد المشتريات",  c:"#b45309",       bg:"#fef3c7"},
-    responded:            {l:"ردّت المشتريات",         c:"#1d4ed8",       bg:"#dbeafe"},
-    closed:               {l:"مغلقة",                  c:"#166534",       bg:"#dcfce7"}
+    pending:              {l:"بانتظار المراجعة",     c:"var(--muted)"},
+    awaiting_procurement: {l:"بانتظار رد المشتريات", c:"var(--warn)"},
+    responded:            {l:"ردّت المشتريات",        c:"var(--info)"},
+    closed:               {l:"مغلقة",                 c:"var(--accent)"}
   };
   var VERDICT_LABEL={
-    match:      {l:"✅ مطابق — أفضل سعر متاح", c:"#166534"},
-    acceptable: {l:"🟡 فرق ضمن التسامح",       c:"#a16207"},
-    note:       {l:"🟠 ملاحظة — يوجد بديل أرخص", c:"#c2410c"},
-    violation:  {l:"🔴 مخالفة — فرق جوهري",     c:"#b91c1c"}
+    match:      {l:"مطابق — أفضل سعر متاح",     c:"var(--accent)"},
+    acceptable: {l:"فرق ضمن التسامح",            c:"var(--info)"},
+    note:       {l:"ملاحظة — يوجد بديل أرخص",   c:"var(--warn)"},
+    violation:  {l:"مخالفة — فرق جوهري",         c:"var(--danger)"}
   };
+  // حبة موحّدة على نمط .badge في النواة — اللون من توكنز الثيم عبر --pc
+  function _pill(label,color,title){
+    return '<span class="fa-pill" style="--pc:'+color+'"'+(title?' title="'+_esc(title)+'"':'')+'><span class="fa-dot"></span>'+label+'</span>';
+  }
   function _statusBadge(st){
     var m=STATUS_LABEL[st]||STATUS_LABEL.pending;
-    return '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:'+m.bg+';color:'+m.c+'">'+m.l+'</span>';
+    return _pill(m.l, m.c);
   }
   function _verdictBadge(v){
     var m=VERDICT_LABEL[v];
-    return m ? '<span style="font-size:11px;font-weight:700;color:'+m.c+'">'+m.l+'</span>' : '<span style="color:var(--muted)">—</span>';
+    return m ? _pill(m.l, m.c) : '<span style="color:var(--muted)">—</span>';
+  }
+  function _reasonsTitle(s){
+    return (s.reasons||[]).map(function(r){ return FLAG_LABELS[r]||r; }).join(" · ");
   }
   function _srcBadge(s){
-    if(s.source==="auto")
-      return '<span title="'+_esc((s.reasons||[]).map(function(r){ return FLAG_LABELS[r]||r; }).join(" · "))+'" style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#fee2e2;color:#b91c1c">⚠ مُدرج آلياً</span>';
-    if(s.source==="random_auto")
-      return '<span title="'+_esc((s.reasons||[]).map(function(r){ return FLAG_LABELS[r]||r; }).join(" · "))+'" style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#fef3c7;color:#b45309">🎲+⚠ عشوائي وعليه إشارة</span>';
-    return '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--surface2);color:var(--muted)">🎲 عشوائي</span>';
+    if(s.source==="auto")        return _pill("مُدرج آلياً","var(--danger)",_reasonsTitle(s));
+    if(s.source==="random_auto") return _pill("عشوائي + إشارة","var(--warn)",_reasonsTitle(s));
+    return _pill("عشوائي","var(--muted)");
   }
   function _monthLabel(mk){
     try{
@@ -560,9 +611,10 @@
   function render(){
     var host=document.getElementById("page-finance-audit");
     if(!host) return;
+    _injectCSS();
     _navToggle();
     if(!_canView()){
-      host.innerHTML='<div class="card" style="text-align:center;color:var(--muted);padding:40px">🔒 هذا القسم متاح للمالية والمشتريات والإدارة فقط.</div>';
+      host.innerHTML='<div class="card"><div class="fa-empty"><div class="fa-empty-ic">'+_icn("lock")+'</div>هذا القسم متاح للمالية والمشتريات والإدارة فقط.</div></div>';
       return;
     }
     if(_curMonth){
@@ -572,6 +624,17 @@
     } else {
       host.innerHTML=_listHtml();
     }
+  }
+
+  // هيرو الصفحة — نفس نمط page-hero في النواة (تدرّج كحلي + أزرار شفافة بيضاء)
+  function _heroHtml(title, sub, actionsHtml){
+    return '<div class="page-hero">'+
+      '<div class="page-hero-titles">'+
+        '<div class="page-hero-title"><span class="ph-ico">'+_icn("shield")+'</span>'+title+'</div>'+
+        '<div class="page-hero-sub">'+sub+'</div>'+
+      '</div>'+
+      '<div class="page-hero-actions">'+(actionsHtml||"")+'</div>'+
+    '</div>';
   }
 
   function _auditStats(a){
@@ -588,126 +651,154 @@
 
   function _listHtml(){
     var canA=_canAudit();
-    var head='<div class="card" style="margin-bottom:12px">'+
-      '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'+
-        '<div>'+
-          '<div style="font-size:17px;font-weight:800">'+_icn("shield","ic-lg")+'🔍 الرقابة المالية على المشتريات</div>'+
-          '<div style="font-size:12px;color:var(--muted);margin-top:2px">عينة شهرية يحددها النظام (عشوائية حتمية + استثناءات آلية) لتدقيق المالية على الطلبات المنفذة — هل كان هناك مورد أرخص لنفس البنود؟</div>'+
-        '</div>'+
-        (canA?'<button class="btn btn-primary btn-sm" onclick="window.financeAudit.openCreate()">🎯 بدء دورة تدقيق</button>':"")+
-      '</div>'+
-    '</div>';
+    var hero=_heroHtml(
+      "الرقابة المالية على المشتريات",
+      "عينة شهرية يحددها النظام (عشوائية حتمية + استثناءات آلية) لتدقيق المالية على الطلبات المنفَّذة.",
+      canA?'<button class="btn btn-sm" onclick="window.financeAudit.openCreate()">'+_icn("target")+' بدء دورة تدقيق</button>':""
+    );
 
     if(!_audits.length){
-      return head+'<div class="card" style="text-align:center;color:var(--muted);padding:40px">لا توجد دورات تدقيق بعد.'+
-        (canA?'<div style="margin-top:12px">اضغط «🎯 بدء دورة تدقيق» لاختيار عينة أول شهر.</div>':"")+'</div>';
+      return hero+'<div class="card"><div class="fa-empty">'+
+        '<div class="fa-empty-ic">'+_icn("search")+'</div>'+
+        'لا توجد دورات تدقيق بعد.'+
+        (canA?'<div style="margin-top:14px"><button class="btn btn-primary btn-sm" onclick="window.financeAudit.openCreate()">'+_icn("target")+' بدء أول دورة تدقيق</button></div>':'<div style="margin-top:10px">يتولّى قسم المالية بدء الدورات.</div>')+
+      '</div></div>';
     }
+
+    // إجماليات تراكمية عبر كل الدورات
+    var tTotal=0,tIssues=0,tSaving=0,tOpen=0;
+    _audits.forEach(function(a){
+      var st=_auditStats(a);
+      tTotal+=st.total; tIssues+=st.issues; tSaving+=st.saving;
+      if(a.status!=="closed") tOpen++;
+    });
+    var stats='<div class="fa-stats">'+
+      _stat("دورات التدقيق", _audits.length, "var(--primary)")+
+      _stat("دورات جارية", tOpen, tOpen?"var(--warn)":"var(--muted)")+
+      _stat("بنود مُدقَّقة", tTotal, "var(--info)")+
+      _stat("ملاحظات ومخالفات", tIssues, tIssues?"var(--danger)":"var(--muted)")+
+      _stat("وفر محتمل (ريال)", _fmt(tSaving), tSaving>0?"var(--accent)":"var(--muted)")+
+    '</div>';
 
     var rows=_audits.map(function(a){
       var st=_auditStats(a);
       var open=a.status!=="closed";
-      return '<tr style="cursor:pointer;border-top:1px solid var(--border)" onclick="window.financeAudit.open(\''+_esc(a.month||a.id)+'\')">'+
-        '<td style="padding:8px;font-weight:700">'+_monthLabel(a.month||a.id)+'</td>'+
-        '<td style="padding:8px;text-align:center">'+st.total+' <span style="color:var(--muted);font-size:10px">من '+((a.pool&&a.pool.size)||"—")+'</span></td>'+
-        '<td style="padding:8px;text-align:center">'+st.closed+'/'+st.total+'</td>'+
-        '<td style="padding:8px;text-align:center;color:'+(st.issues?'#c2410c':'var(--muted)')+';font-weight:700">'+st.issues+'</td>'+
-        '<td style="padding:8px;text-align:center;font-weight:700;color:'+(st.saving>0?'var(--warn,#b45309)':'var(--muted)')+'">'+_fmt(st.saving)+'</td>'+
-        '<td style="padding:8px;text-align:center">'+(open?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#dbeafe;color:#1d4ed8">جارية</span>':'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#dcfce7;color:#166534">مغلقة</span>')+'</td>'+
+      var pct=st.total?Math.round(st.closed/st.total*100):0;
+      return '<tr class="fa-click" onclick="window.financeAudit.open(\''+_esc(a.month||a.id)+'\')">'+
+        '<td style="font-weight:700">'+_monthLabel(a.month||a.id)+'</td>'+
+        '<td style="text-align:center"><span class="fa-num">'+st.total+'</span> <span style="color:var(--muted);font-size:10px">من '+((a.pool&&a.pool.size)||"—")+'</span></td>'+
+        '<td><div class="fa-progress-cell"><div class="fa-progress"><i style="width:'+pct+'%"></i></div><span class="fa-num" style="font-size:11px;color:var(--muted)">'+st.closed+'/'+st.total+'</span></div></td>'+
+        '<td style="text-align:center;font-weight:700;color:'+(st.issues?'var(--danger)':'var(--muted)')+'"><span class="fa-num">'+st.issues+'</span></td>'+
+        '<td style="text-align:center;font-weight:700;color:'+(st.saving>0?'var(--accent)':'var(--muted)')+'"><span class="fa-num">'+_fmt(st.saving)+'</span></td>'+
+        '<td style="text-align:center">'+(open?_pill("جارية","var(--info)"):_pill("مغلقة","var(--accent)"))+'</td>'+
       '</tr>';
     }).join("");
 
-    return head+
-      '<div class="card" style="overflow-x:auto">'+
-        '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
-          '<thead><tr style="background:var(--surface2)">'+
-            '<th style="padding:8px;text-align:right">الشهر المُدقَّق</th>'+
-            '<th style="padding:8px;text-align:center">العينة</th>'+
-            '<th style="padding:8px;text-align:center">أُغلق</th>'+
-            '<th style="padding:8px;text-align:center">ملاحظات/مخالفات</th>'+
-            '<th style="padding:8px;text-align:center">وفر محتمل (ريال)</th>'+
-            '<th style="padding:8px;text-align:center">الحالة</th>'+
+    return hero+stats+
+      '<div class="fa-table-wrap">'+
+        '<table class="fa-table">'+
+          '<thead><tr>'+
+            '<th>الشهر المُدقَّق</th>'+
+            '<th style="text-align:center">العينة</th>'+
+            '<th>التقدّم</th>'+
+            '<th style="text-align:center">ملاحظات/مخالفات</th>'+
+            '<th style="text-align:center">وفر محتمل (ريال)</th>'+
+            '<th style="text-align:center">الحالة</th>'+
           '</tr></thead><tbody>'+rows+'</tbody>'+
         '</table>'+
       '</div>';
   }
 
+  // بطاقة إحصاء بنمط stat-card في النواة (شريط علوي بلون --sc + رقم جدولي)
+  function _stat(label,val,color){
+    return '<div class="stat-card" style="--sc:'+color+'"><div class="sl">'+label+'</div><div class="sv">'+val+'</div></div>';
+  }
+  // إحصاء مصغّر داخل النوافذ/الملخصات
   function _kpi(label,val,color){
-    return '<div><div style="font-size:20px;font-weight:800;color:'+color+'">'+val+'</div>'+
-           '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+label+'</div></div>';
+    return '<div><b style="color:'+color+'">'+val+'</b><span>'+label+'</span></div>';
   }
 
   function _detailHtml(a){
     var st=_auditStats(a);
     var canA=_canAudit(), canR=_canRespond();
     var open=a.status!=="closed";
+    var month=a.month||a.id;
 
-    var tools='<button class="btn btn-ghost btn-sm" onclick="window.financeAudit.printReport()">🖨 تقرير الشهر</button>';
+    var tools='<button class="btn btn-sm" onclick="window.financeAudit.back()">← رجوع</button>'+
+      ' <button class="btn btn-sm" onclick="window.financeAudit.printReport()">'+_icn("printer")+' تقرير الشهر</button>';
     if(canA && open && st.closed===st.total && st.total>0)
-      tools+=' <button class="btn btn-primary btn-sm" onclick="window.financeAudit.closeAudit()">✅ إغلاق الدورة</button>';
+      tools+=' <button class="btn btn-sm" onclick="window.financeAudit.closeAudit()">'+_icn("checkCircle")+' إغلاق الدورة</button>';
     if(_isAdmin())
-      tools+=' <button class="btn btn-danger btn-sm" onclick="window.financeAudit.removeAudit(\''+_esc(a.month||a.id)+'\')">🗑 حذف</button>';
+      tools+=' <button class="btn btn-sm" onclick="window.financeAudit.removeAudit(\''+_esc(month)+'\')">'+_icn("trash")+' حذف</button>';
 
-    var head='<div class="card" style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'+
-      '<div>'+
-        '<button class="btn btn-ghost btn-sm" onclick="window.financeAudit.back()">← رجوع</button> '+
-        '<span style="font-size:17px;font-weight:800;margin-inline-start:8px">🔍 دورة تدقيق '+_monthLabel(a.month||a.id)+'</span>'+
-        '<div style="font-size:11px;color:var(--muted);margin-top:4px">أنشأها '+_esc(a.createdBy||"—")+' — عينة '+st.total+' من '+((a.pool&&a.pool.size)||"—")+' طلباً مغلقاً · بصمة البذرة: '+((a.pool&&a.pool.seedHash)||"—")+' (حتمية — لا يمكن إعادة السحب)</div>'+
-      '</div>'+
-      '<div>'+tools+'</div>'+
-    '</div>';
+    var hero=_heroHtml(
+      "دورة تدقيق "+_monthLabel(month),
+      "الرقابة المالية على المشتريات — أنشأها "+_esc(a.createdBy||"—")+" · عينة "+st.total+" من "+((a.pool&&a.pool.size)||"—")+" طلباً مغلقاً"+(open?"":" · الدورة مغلقة"),
+      tools
+    );
 
-    var kpis='<div class="card" style="margin-bottom:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;text-align:center">'+
-      _kpi("حجم العينة", st.total, "var(--primary)")+
-      _kpi("بانتظار المراجعة", st.pending, st.pending?"#b45309":"var(--muted)")+
-      _kpi("بانتظار رد المشتريات", st.awaiting, st.awaiting?"#b45309":"var(--muted)")+
-      _kpi("ردّت المشتريات", st.responded, st.responded?"#1d4ed8":"var(--muted)")+
-      _kpi("مغلقة", st.closed, "#166534")+
-      _kpi("وفر محتمل (ريال)", _fmt(st.saving), st.saving>0?"var(--warn,#b45309)":"var(--muted)")+
+    // شريط النزاهة: بصمة البذرة الحتمية (لا يمكن إعادة السحب) + معايير الدورة المخزّنة
+    var prm=a.params||{};
+    var meta='<div class="card" style="padding:10px 14px"><div class="fa-meta">'+
+      '<span class="fa-seed" title="البذرة مشتقة من الشهر ومعرّفات كل المرشّحين — نفس المدخلات تعطي نفس العينة دائماً">'+_icn("lock")+' seed '+((a.pool&&a.pool.seedHash)||"—")+'</span>'+
+      '<span>عينة حتمية — لا يمكن إعادة السحب</span>'+
+      '<span>·</span><span>عشوائي '+(prm.pct!=null?prm.pct:"—")+'٪ ['+(prm.min!=null?prm.min:"—")+'–'+(prm.max!=null?prm.max:"—")+']</span>'+
+      '<span>·</span><span>تسامح '+(prm.tolerancePct!=null?prm.tolerancePct:"—")+'٪</span>'+
+      '<span>·</span><span>تاريخ '+(prm.histMonths!=null?prm.histMonths:"—")+' أشهر</span>'+
+    '</div></div>';
+
+    var kpis='<div class="fa-stats">'+
+      _stat("حجم العينة", st.total, "var(--primary)")+
+      _stat("بانتظار المراجعة", st.pending, st.pending?"var(--warn)":"var(--muted)")+
+      _stat("بانتظار رد المشتريات", st.awaiting, st.awaiting?"var(--warn)":"var(--muted)")+
+      _stat("ردّت المشتريات", st.responded, st.responded?"var(--info)":"var(--muted)")+
+      _stat("مغلقة", st.closed, "var(--accent)")+
+      _stat("وفر محتمل (ريال)", _fmt(st.saving), st.saving>0?"var(--accent)":"var(--muted)")+
     '</div>';
 
     var rows=(a.samples||[]).map(function(s){
       var p=_poMeta(s.poId);
       var cost=p?_actualCost(p):(Number(s.actualCost)||0);
       var vend=p?_vendorOf(p):(s.vendor||"");
-      var acts='<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="event.stopPropagation();try{openPurchaseDetail(\''+_esc(s.poId)+'\')}catch(e){}">📄 الطلب</button>';
+      var acts='<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="event.stopPropagation();try{openPurchaseDetail(\''+_esc(s.poId)+'\')}catch(e){}">'+_icn("receipt")+' الطلب</button>';
       if(canA && open && (s.status==="pending"||s.status==="awaiting_procurement"))
-        acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openReview(\''+_esc(s.poId)+'\')">🔎 '+(s.status==="pending"?"مراجعة":"تعديل المراجعة")+'</button>';
+        acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openReview(\''+_esc(s.poId)+'\')">'+_icn("search")+' '+(s.status==="pending"?"مراجعة":"تعديل المراجعة")+'</button>';
       if(canR && open && s.status==="awaiting_procurement")
         acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openReply(\''+_esc(s.poId)+'\')">💬 رد المشتريات</button>';
       if(canA && open && s.status==="responded")
-        acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openClose(\''+_esc(s.poId)+'\')">🔏 إغلاق البند</button>';
+        acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openClose(\''+_esc(s.poId)+'\')">'+_icn("checkCircle")+' إغلاق البند</button>';
       var savings=Number(s.potentialSaving)||0;
-      return '<tr style="border-top:1px solid var(--border)">'+
-        '<td style="padding:8px;font-weight:700;font-family:monospace">'+_esc(s.poId)+'</td>'+
-        '<td style="padding:8px">'+_srcBadge(s)+'</td>'+
-        '<td style="padding:8px">'+_esc(vend||"—")+'</td>'+
-        '<td style="padding:8px;text-align:center;direction:ltr">'+_fmt(cost)+'</td>'+
-        '<td style="padding:8px">'+_verdictBadge(s.verdict)+(s.escalated?' <span style="font-size:10px;color:#b91c1c;font-weight:700">⬆ مُصعَّد</span>':"")+'</td>'+
-        '<td style="padding:8px;text-align:center;color:'+(savings>0?'var(--warn,#b45309)':'var(--muted)')+';font-weight:700">'+(savings>0?_fmt(savings):"—")+'</td>'+
-        '<td style="padding:8px;text-align:center">'+_statusBadge(s.status)+'</td>'+
-        '<td style="padding:8px;white-space:nowrap">'+acts+'</td>'+
+      return '<tr>'+
+        '<td style="font-weight:700"><span class="fa-num">'+_esc(s.poId)+'</span></td>'+
+        '<td>'+_srcBadge(s)+'</td>'+
+        '<td>'+_esc(vend||"—")+'</td>'+
+        '<td style="text-align:center"><span class="fa-num">'+_fmt(cost)+'</span></td>'+
+        '<td>'+_verdictBadge(s.verdict)+(s.escalated?' '+_pill("مُصعَّد للتنفيذي","var(--danger)"):"")+'</td>'+
+        '<td style="text-align:center;font-weight:700;color:'+(savings>0?'var(--accent)':'var(--muted)')+'"><span class="fa-num">'+(savings>0?_fmt(savings):"—")+'</span></td>'+
+        '<td style="text-align:center">'+_statusBadge(s.status)+'</td>'+
+        '<td style="white-space:nowrap">'+acts+'</td>'+
       '</tr>';
     }).join("");
 
     if(!rows) rows='<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--muted)">لا عينات في هذه الدورة.</td></tr>';
 
-    return head+kpis+
-      '<div class="card" style="overflow-x:auto">'+
-        '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
-          '<thead><tr style="background:var(--surface2)">'+
-            '<th style="padding:8px;text-align:right">رقم الطلب</th>'+
-            '<th style="padding:8px;text-align:right">مصدر الإدراج</th>'+
-            '<th style="padding:8px;text-align:right">المورد الفعلي</th>'+
-            '<th style="padding:8px;text-align:center">التكلفة الفعلية</th>'+
-            '<th style="padding:8px;text-align:right">الحكم</th>'+
-            '<th style="padding:8px;text-align:center">وفر محتمل</th>'+
-            '<th style="padding:8px;text-align:center">الحالة</th>'+
-            '<th style="padding:8px;text-align:right">إجراءات</th>'+
+    return hero+meta+kpis+
+      '<div class="fa-table-wrap">'+
+        '<table class="fa-table">'+
+          '<thead><tr>'+
+            '<th>رقم الطلب</th>'+
+            '<th>مصدر الإدراج</th>'+
+            '<th>المورد الفعلي</th>'+
+            '<th style="text-align:center">التكلفة الفعلية</th>'+
+            '<th>الحكم</th>'+
+            '<th style="text-align:center">وفر محتمل</th>'+
+            '<th style="text-align:center">الحالة</th>'+
+            '<th>إجراءات</th>'+
           '</tr></thead><tbody>'+rows+'</tbody>'+
         '</table>'+
       '</div>'+
-      '<div class="card" style="margin-top:12px;font-size:11px;color:var(--muted);line-height:1.9">'+
-        'ℹ️ المقارنات <b>استرشادية</b>: أسعار التاريخ والكتالوج صافي ضريبة وتُقارن بصافي سعر الوحدة الفعلي، وأرخص عرض مسجّل يُرفع '+Math.round((FA_VAT-1)*100)+'٪ ضريبةً قبل مقارنته بإجمالي الفاتورة. '+
+      '<div class="fa-note" style="margin-top:12px">'+
+        'المقارنات <b>استرشادية</b>: أسعار التاريخ والكتالوج صافي ضريبة وتُقارن بصافي سعر الوحدة الفعلي، وأرخص عرض مسجّل يُرفع '+Math.round((FA_VAT-1)*100)+'٪ ضريبةً قبل مقارنته بإجمالي الفاتورة. '+
         'الملاحظة/المخالفة تُحال لرد قسم المشتريات قبل الإغلاق — الفرق السعري قد يبرَّر بالجودة أو سرعة التوريد أو حد أدنى للطلب.'+
       '</div>';
   }
@@ -726,41 +817,41 @@
 
   function _benchHtml(p, bench){
     var actual=_actualCost(p), est=_estTotal(p), qmin=_quoteMin(p);
-    var head='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:10px;text-align:center;background:var(--surface2);border-radius:10px;padding:10px">'+
+    var head='<div class="fa-mini">'+
       _kpi("التكلفة الفعلية (شامل الضريبة)", _fmt(actual), "var(--primary)")+
       _kpi("التقديرية عند الطلب", est?_fmt(est):"—", "var(--muted)")+
-      _kpi("أرخص عرض مسجّل (صافي)", qmin?_fmt(qmin):"—", qmin&&actual>qmin*FA_VAT?"#c2410c":"var(--muted)")+
-      _kpi("وفر محتمل من البدائل", _fmt(bench.totalSaving), bench.totalSaving>0?"var(--warn,#b45309)":"var(--muted)")+
+      _kpi("أرخص عرض مسجّل (صافي)", qmin?_fmt(qmin):"—", qmin&&actual>qmin*FA_VAT?"var(--danger)":"var(--muted)")+
+      _kpi("وفر محتمل من البدائل", _fmt(bench.totalSaving), bench.totalSaving>0?"var(--accent)":"var(--muted)")+
     '</div>';
     if(qmin>0 && actual>qmin*FA_VAT*(1+FA_TOL_PCT/100)){
-      head+='<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:10px;padding:9px 12px;font-size:12px;font-weight:600;margin-bottom:10px">⚠ التكلفة الفعلية تجاوزت أرخص عرض كامل مسجّل على الطلب ('+_fmt(qmin)+' صافي ≈ '+_fmt(qmin*FA_VAT)+' مع الضريبة).</div>';
+      head+='<div class="fa-alert">'+_icn("alertTriangle")+' التكلفة الفعلية تجاوزت أرخص عرض كامل مسجّل على الطلب ('+_fmt(qmin)+' صافي ≈ '+_fmt(qmin*FA_VAT)+' مع الضريبة).</div>';
     }
     var rows=bench.rows.map(function(r){
       var b=r.best;
       var alt=b
-        ? _esc(b.vendor||"—")+' — <b style="direction:ltr">'+_fmt(b.unit)+'</b> <span style="font-size:9px;color:var(--muted)">('+(b.src==="catalog"?"الكتالوج":"طلب "+_esc(b.ref))+')</span>'
+        ? _esc(b.vendor||"—")+' — <b class="fa-num" style="display:inline">'+_fmt(b.unit)+'</b> <span style="font-size:9px;color:var(--muted)">('+(b.src==="catalog"?"الكتالوج":"طلب "+_esc(b.ref))+')</span>'
         : '<span style="color:var(--muted)">لا مرجع لنفس البند</span>';
       var diff=(b&&r.unit>0)?Math.round((r.unit-b.unit)/b.unit*1000)/10:null;
-      return '<tr style="border-top:1px solid var(--border)'+(r.overTol?';background:#fff7ed':'')+'">'+
-        '<td style="padding:6px 8px">'+_esc(r.name)+'</td>'+
-        '<td style="padding:6px 8px;text-align:center">'+r.qty+'</td>'+
-        '<td style="padding:6px 8px;text-align:center;direction:ltr;font-weight:700">'+_fmt(r.unit)+'</td>'+
-        '<td style="padding:6px 8px">'+alt+'</td>'+
-        '<td style="padding:6px 8px;text-align:center;font-weight:700;color:'+(diff==null?'var(--muted)':(diff>0?'#c2410c':'#166534'))+'">'+(diff==null?"—":(diff>0?"+":"")+diff+"٪")+'</td>'+
-        '<td style="padding:6px 8px;text-align:center;font-weight:700;color:'+(r.saving>0?'var(--warn,#b45309)':'var(--muted)')+'">'+(r.saving>0?_fmt(r.saving):"—")+'</td>'+
+      return '<tr'+(r.overTol?' class="fa-benchrow-hi"':'')+'>'+
+        '<td>'+_esc(r.name)+'</td>'+
+        '<td style="text-align:center"><span class="fa-num">'+r.qty+'</span></td>'+
+        '<td style="text-align:center;font-weight:700"><span class="fa-num">'+_fmt(r.unit)+'</span></td>'+
+        '<td>'+alt+'</td>'+
+        '<td style="text-align:center;font-weight:700;color:'+(diff==null?'var(--muted)':(diff>0?'var(--danger)':'var(--accent)'))+'"><span class="fa-num">'+(diff==null?"—":(diff>0?"+":"")+diff+"٪")+'</span></td>'+
+        '<td style="text-align:center;font-weight:700;color:'+(r.saving>0?'var(--accent)':'var(--muted)')+'"><span class="fa-num">'+(r.saving>0?_fmt(r.saving):"—")+'</span></td>'+
       '</tr>';
     }).join("");
     if(!rows) rows='<tr><td colspan="6" style="padding:14px;text-align:center;color:var(--muted)">لا بنود مسمّاة في الطلب.</td></tr>';
     return head+
-      '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:10px">'+
-      '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
-        '<thead><tr style="background:var(--surface2)">'+
-          '<th style="padding:6px 8px;text-align:right">البند</th>'+
-          '<th style="padding:6px 8px;text-align:center">الكمية</th>'+
-          '<th style="padding:6px 8px;text-align:center">سعر وحدتنا (صافي)</th>'+
-          '<th style="padding:6px 8px;text-align:right">أفضل بديل (تاريخ '+FA_HIST_MONTHS+' أشهر + كتالوج)</th>'+
-          '<th style="padding:6px 8px;text-align:center">الفرق</th>'+
-          '<th style="padding:6px 8px;text-align:center">وفر محتمل</th>'+
+      '<div class="fa-table-wrap" style="margin-bottom:10px;box-shadow:none">'+
+      '<table class="fa-table" style="font-size:11px">'+
+        '<thead><tr>'+
+          '<th>البند</th>'+
+          '<th style="text-align:center">الكمية</th>'+
+          '<th style="text-align:center">سعر وحدتنا (صافي)</th>'+
+          '<th>أفضل بديل (تاريخ '+FA_HIST_MONTHS+' أشهر + كتالوج)</th>'+
+          '<th style="text-align:center">الفرق</th>'+
+          '<th style="text-align:center">وفر محتمل</th>'+
         '</tr></thead><tbody>'+rows+'</tbody>'+
       '</table></div>';
   }
@@ -768,9 +859,9 @@
   function _mqListHtml(){
     if(!_mq.length) return '<div style="font-size:11px;color:var(--muted)">لا عروض يدوية مضافة.</div>';
     return _mq.map(function(q,i){
-      return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px dashed var(--border)">'+
+      return '<div class="fa-mq-row">'+
         '<b>'+_esc(q.supplier)+'</b>'+
-        '<span style="direction:ltr">'+_fmt(q.price)+' ر.س</span>'+
+        '<span class="fa-num" style="text-align:left">'+_fmt(q.price)+' ر.س</span>'+
         (q.note?'<span style="color:var(--muted)">— '+_esc(q.note)+'</span>':"")+
         '<button class="btn btn-ghost btn-sm" style="font-size:10px;margin-inline-start:auto" onclick="window.financeAudit.removeManualQuote('+i+')">✖</button>'+
       '</div>';
@@ -790,7 +881,7 @@
     var reasons=(s.reasons||[]).map(function(r){ return FLAG_LABELS[r]||r; });
 
     var body=
-      (reasons.length?'<div style="background:#fef3c7;border-radius:10px;padding:8px 12px;font-size:11px;color:#92400e;font-weight:600;margin-bottom:10px">⚠ أسباب الإدراج الآلي: '+_esc(reasons.join(" · "))+'</div>':"")+
+      (reasons.length?'<div class="fa-flag">'+_icn("alertTriangle")+' أسباب الإدراج الآلي: '+_esc(reasons.join(" · "))+'</div>':"")+
       _benchHtml(p, bench)+
       '<div class="form-group" style="margin-top:6px"><label class="form-label">عروض بديلة يدوية (اتصال المدقّق بموردين)</label>'+
         '<div id="fa-mq-list" style="margin-bottom:6px">'+_mqListHtml()+'</div>'+
@@ -890,7 +981,7 @@
     var s=a&&(a.samples||[]).find(function(x){ return x.poId===poId; });
     if(!s){ _toast("⚠ العينة غير موجودة","warn"); return; }
     var body=
-      '<div style="background:var(--surface2);border-radius:10px;padding:10px 12px;font-size:12px;margin-bottom:10px;line-height:1.9">'+
+      '<div class="fa-note" style="margin-bottom:10px;color:var(--text)">'+
         '<div><b>حكم المالية:</b> '+_verdictBadge(s.verdict)+'</div>'+
         (s.findings?'<div><b>الملاحظات:</b> '+_esc(s.findings)+'</div>':"")+
         (s.recommendation?'<div><b>التوصية:</b> '+_esc(s.recommendation)+'</div>':"")+
@@ -932,7 +1023,7 @@
     var s=a&&(a.samples||[]).find(function(x){ return x.poId===poId; });
     if(!s){ _toast("⚠ العينة غير موجودة","warn"); return; }
     var body=
-      '<div style="background:var(--surface2);border-radius:10px;padding:10px 12px;font-size:12px;margin-bottom:10px;line-height:1.9">'+
+      '<div class="fa-note" style="margin-bottom:10px;color:var(--text)">'+
         '<div><b>الحكم:</b> '+_verdictBadge(s.verdict)+'</div>'+
         (s.findings?'<div><b>ملاحظات المالية:</b> '+_esc(s.findings)+'</div>':"")+
         (s.procurementReply?'<div><b>رد المشتريات:</b> '+_esc(s.procurementReply)+' <span style="color:var(--muted);font-size:10px">('+_esc(s.procurementBy||"")+')</span></div>':"")+
