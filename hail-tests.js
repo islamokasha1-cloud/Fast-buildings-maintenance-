@@ -2563,7 +2563,8 @@ function cleaningOpsTests() {
   // ★ auto-fit لا auto-fill: الأخير يُنشئ أعمدةً فارغة فينحشر المبنى الواحد في عمودٍ
   // ضيّق وتبقى بقيّةُ الشاشة خالية — وهو ما شكا منه المستخدم.
   T("★ المباني بشبكة auto-fit (المبنى الواحد يملأ العرض بلا أعمدةٍ فارغة)",
-    /\.co-groups\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(360px,1fr\)\)/.test(src) &&
+    // vz: الحدّ الأدنى 400px — ستةُ أعمدة بـ360 كانت تنضغط بصفٍّ واحد على الشاشة العريضة
+    /\.co-groups\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(400px,1fr\)\)/.test(src) &&
     !/\.co-groups\{[^}]*auto-fill/.test(src));
   T("★ شبكةٌ داخليةٌ للمهامّ داخل بطاقة المبنى (تكيُّفٌ مع عرضها)",
     /\.co-tasklist\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(280px,1fr\)\)/.test(src) &&
@@ -2942,6 +2943,51 @@ function cleaningOpsTests() {
   T("vx: التبديل يعيد رسم اللوحة والمتابعة اليومية معاً",
     /function toggleBld\(key\)\{[\s\S]{0,220}?render\(\);[\s\S]{0,80}?mountDaily\(\);/.test(src));
   T("vx: زرّ التوسيع له قاعدة عرضٍ كاملة", src.includes(".co-more-btn{width:100%"));
+
+  // ══ ★ v18.9vy: ترتيب مباني اللوحة — الأكثر تأخّراً أولاً ══
+  // الترتيب الأبجدي كان يدفن المبنى المتعثّر وسط القائمة. الآن: متأخّر أكثر ← مستحقّ
+  // أكثر ← أبجدي، عبر مصدرٍ واحد (_bldOrder) للوحة اليوم والمتابعة اليومية.
+  T("★ vy: _bldOrder مكشوفة والشاشتان تمرّان عبرها (لا .sort() أبجدي متبقٍّ)",
+    CO && typeof CO._bldOrder === "function" &&
+    (src.match(/\+_bldOrder\(byB\)\.map\(b=>\{/g) || []).length === 2 &&
+    !src.includes("Object.keys(byB).sort().map(b=>{"));
+  if (CO && typeof CO._bldOrder === "function") {
+    const byB = {
+      "أ نظيف":   [mk({ nextDueDate: day(1) }), mk({ nextDueDate: day(2) })],            // لا مستحقّ
+      "ب مستحق":  [mk({ nextDueDate: today }), mk({ nextDueDate: today })],              // 2 مستحقّ
+      "ج متأخر":  [mk({ nextDueDate: day(-1) })],                                        // 1 متأخّر
+      "د متأخران": [mk({ nextDueDate: day(-3) }), mk({ nextDueDate: day(-1) })]          // 2 متأخّر
+    };
+    T("★ vy: المتأخّر أكثر يتصدّر ثم الأقل تأخّراً ثم المستحقّ ثم النظيف",
+      JSON.stringify(CO._bldOrder(byB)) === JSON.stringify(["د متأخران", "ج متأخر", "ب مستحق", "أ نظيف"]),
+      JSON.stringify(CO._bldOrder(byB)));
+    T("★ vy: تعادل التأخّر يحسمه المستحقّ الأكثر",
+      JSON.stringify(CO._bldOrder({
+        "س": [mk({ nextDueDate: day(-1) })],
+        "ش": [mk({ nextDueDate: day(-1) }), mk({ nextDueDate: today })]
+      })) === JSON.stringify(["ش", "س"]));
+    T("vy: تعادلٌ كامل ⟵ أبجدي (ترتيبٌ مستقرّ لا عشوائي)",
+      JSON.stringify(CO._bldOrder({
+        "ب": [mk({ nextDueDate: today })],
+        "أ": [mk({ nextDueDate: today })]
+      })) === JSON.stringify(["أ", "ب"]));
+    T("vy: المنفَّذة اليوم لا تُحسب مستحقّةً في الترتيب (isDue نفسها)",
+      JSON.stringify(CO._bldOrder({
+        "منجز": [mk({ nextDueDate: today, lastExecuted: new Date().toISOString() })],
+        "معلّق": [mk({ nextDueDate: today })]
+      })) === JSON.stringify(["معلّق", "منجز"]));
+  }
+
+  // ══ ★ v18.9vz: إصلاحان من بلاغ المستخدم ══
+  // (١) جلب الأرشيف كان يفشل: where(archived)+orderBy(createdAt) يتطلّب فهرساً مركّباً،
+  // ومجموعات البلاغات مسمّاة لكل مشروع ({id}_tickets) فيلزم فهرس يدوي لكل مشروع جديد.
+  // الحل: بلا orderBy خادمي والفرز محلياً — حارس يمنع عودة الـorderBy.
+  T("★ vz: استعلام الأرشيف بلا orderBy خادمي (لا فهرس مركّباً لكل مشروع)",
+    /where\("archived","==",true\)/.test(HTML) &&
+    !/where\("archived","==",true\)\s*\.orderBy/.test(HTML));
+  T("★ vz: فرز الأرشيف محلياً الأحدث أولاً — يقبل ISO وTimestamp معاً",
+    /\.sort\(\(a,b\)=>_ts\(b\)-_ts\(a\)\)/.test(HTML) &&
+    HTML.includes('typeof c.toDate==="function"'));
 
   // ══ ★ صنفُ «الأيقونة العملاقة» — معالجةٌ عند المنبع بعد تكرّره ثلاث مرّات ══
   // _svgIcon في النواة يُرجع <svg> بلا width/height، وSVG بلا أبعادٍ داخل حاوية flex
