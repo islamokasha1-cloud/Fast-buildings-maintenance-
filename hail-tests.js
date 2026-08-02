@@ -2949,7 +2949,13 @@ function cleaningOpsTests() {
     src.includes("decodeURIComponent(key)"));
   T("wa: للنافذة قواعدُ عرضٍ ثابتة (overlay مثبّت + جسمٌ يتمرّر)",
     src.includes(".co-bld-overlay{position:fixed;inset:0") &&
-    src.includes(".co-bld-modal{width:min(440px,96vw);max-height:80vh;overflow-y:auto"));
+    src.includes(".co-bld-modal{width:min(440px,96vw) !important;max-height:80vh;overflow-y:auto"));
+  // ★ wd: النواة تفرض width:100% !important على .card (قاعدة الداشبورد الجماعية —
+  // ابحث عن `.card,` في قاعدة .dash-top) فتقهر أي عرضٍ عادي — لذا عرضُ النافذة
+  // !important وجوباً. هذا الحارس يمنع إسقاطها سهواً فتعود النافذة بعرض الشاشة.
+  T("★ wd: عرض النافذة !important (النواة تفرض width:100%!important على .card)",
+    /\.co-bld-modal\{width:min\(440px,96vw\) !important/.test(src) &&
+    /\.card,\s*\.filters,\s*\.buildings-grid\s*\{[^}]*width:\s*100%\s*!important/.test(HTML));
 
   // ══ ★ v18.9wb: النافذة أصغر وفي المنتصف + ESC للإغلاق (ملاحظة المستخدم) ══
   T("★ wb: النافذة في منتصف الشاشة تماماً (align-items:center)",

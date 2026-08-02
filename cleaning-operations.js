@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9wc";
+const MODULE_BUILD = "v18.9wd";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -2897,7 +2897,9 @@ function injectCSS(){
 .co-tasklist{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;align-items:start}
 .co-more-btn{width:100%;margin-top:8px;justify-content:center;font-weight:700}
 .co-bld-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:1200;display:flex;align-items:center;justify-content:center;padding:12px}
-.co-bld-modal{width:min(440px,96vw);max-height:80vh;overflow-y:auto;margin:0}
+/* !important ضرورية: النواة تفرض width:100% !important على .card (قاعدة الداشبورد
+   الجماعية) فتقهر أي عرضٍ عادي — وهي سببُ بقاء النافذة بعرض الشاشة رغم إصلاحَي wb/wc. */
+.co-bld-modal{width:min(440px,96vw) !important;max-height:80vh;overflow-y:auto;margin:0}
 .co-bld-back{flex:none}
 .co-bld-modal .co-tasklist{grid-template-columns:1fr}
 .co-bld-modal .co-sec{position:sticky;top:0;background:var(--surface);z-index:1;padding-top:2px}
