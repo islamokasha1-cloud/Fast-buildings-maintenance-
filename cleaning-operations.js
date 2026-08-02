@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9we";
+const MODULE_BUILD = "v18.9wf";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -2739,7 +2739,12 @@ function ensurePage(){
 
 /* ══ حقن زرّ القائمة الجانبية — يظهر لمشاريع النظافة فقط ══ */
 function injectSidebarButton(){
-  const shouldShow = canView() && isCleaningProject();
+  // v18.9wf: صلاحية «تشغيل النظافة» (permissions.cleaning عبر خريطة النواة) — الزرّ
+  // يُحقن بعد applyPermissions فلا تحجبه النواة، لذا نقرأ حاجبها بأنفسنا. والنواة
+  // تمنع فتح الصفحة مباشرةً عبر showPage (نفس المجموعة _blockedPages).
+  const blocked = (window._blockedPages && typeof window._blockedPages.has==="function")
+    ? window._blockedPages.has(PAGE_ID) : false;
+  const shouldShow = canView() && isCleaningProject() && !blocked;
   const existing=document.getElementById("nav-cleaning-ops-btn");
   if(!shouldShow){ if(existing) existing.remove(); return; }
   if(existing) return;
