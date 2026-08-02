@@ -2310,7 +2310,18 @@ function cleaningOpsTests() {
     /if\(!canQuality\(\)\)\{/.test((src.match(/function qualityHTML\(\)\{[\s\S]*?\n\}/)||[""])[0]));
   // ══ ★ v18.9wi: جولات الجودة للمشرف — canQuality ونطاق المباني والحرّاس ══
   T("★ v18.9wi: canQuality = الإدارة أو المشرف (لا الفنيّ)",
-    /function canQuality\(\)\{ return canEdit\(\)\|\|_role\(\)==="supervisor"; \}/.test(src));
+    /function canQuality\(\)\{ return canEdit\(\)\|\|_isSupRole\(\); \}/.test(src));
+  // ══ ★ v18.9wj: الدور المخزّن قد يكون بالعربية «مشرف» (قيمة قائمة إدارة المستخدمين) ══
+  T("★ v18.9wj: فحص دور المشرف يقبل «مشرف» العربية وsupervisor معاً",
+    /function _isSupRole\(\)\{ const r=_role\(\); return r==="supervisor"\|\|r==="مشرف"; \}/.test(src));
+  T("★ v18.9wj: فحص دور الفني يقبل «فني» العربية وtechnician معاً",
+    /function _isTechRole\(\)\{ const r=_role\(\); return r==="technician"\|\|r==="فني"; \}/.test(src));
+  T("★ v18.9wj: canExecute مبنيةٌ على الفحصين المطبَّعين (يظهر زرّ التنفيذ للمشرف/الفني)",
+    /function canExecute\(\)\{ return canEdit\(\)\|\|_isSupRole\(\)\|\|_isTechRole\(\); \}/.test(src));
+  T("★ v18.9wj: قائمة الأدوار في إدارة المستخدمين تحفظ المشرف بقيمة «مشرف» (توثيق الجذر)",
+    /<option value="مشرف">مشرف<\/option>/.test(HTML));
+  T("★ v18.9wj: إشعارات البلاغات الجديدة تشمل الدور العربي «مشرف»",
+    /_hnRoleIn\(\["admin","project_manager","supervisor","مشرف"\]\)/.test(HTML));
   T("★ v18.9wi: زرّا «جولات الجودة» و«بدء جولة جودة» مفتوحان بـ canQuality",
     /canQuality\(\)\?`<button[^`]*setView\('quality'\)/.test(src) &&
     /canQuality\(\)\?`<button[^`]*goQuality\(\)/.test(src));
