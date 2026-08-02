@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9wh";
+const MODULE_BUILD = "v18.9wi";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -133,6 +133,8 @@ function _overdueWorkingDays(ymd, todayYmd){
 function canView(){ return !!_role(); }
 function canEdit(){ const r=_role(); return r==="admin"||r==="project_manager"; }
 function canExecute(){ const r=_role(); return canEdit()||r==="supervisor"||r==="technician"; }
+// جولات الجودة: الإدارة + المشرف (يُفتّش نطاقَه بنفسه) — لا الفنيّ
+function canQuality(){ return canEdit()||_role()==="supervisor"; }
 
 /* ════════════ هل المشروع الحالي مشروع نظافة؟ ════════════
    مصدران للنوع في النظام: سجلّ المشروع (meta/projects عبر نافذة تعديل المشروع) ومستند
@@ -515,7 +517,7 @@ function heroHTML(){
         <button class="btn btn-sm ${_view==='all'?'co-seg-on':''}" onclick="cleaningOps.setView('all')">${_svg('clipboardList')} كل المهام</button>
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.addTask()">${_svg('plus')} مهمة جديدة</button>`:""}
         ${canEdit()?`<button class="btn btn-sm ${_view==='sup'?'co-seg-on':''}" onclick="cleaningOps.setView('sup')">${_svg('users')} المشرفون والمناطق</button>`:""}
-        ${canEdit()?`<button class="btn btn-sm ${_view==='quality'?'co-seg-on':''}" onclick="cleaningOps.setView('quality')">${_svg('award')} جولات الجودة</button>`:""}
+        ${canQuality()?`<button class="btn btn-sm ${_view==='quality'?'co-seg-on':''}" onclick="cleaningOps.setView('quality')">${_svg('award')} جولات الجودة</button>`:""}
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.toggleGen()">${_svg('sparkles')} توليد بالذكاء الاصطناعي</button>`:""}
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.toggleLaunch()">${_svg('calendar')} إطلاق المهام</button>`:""}
         <button class="btn btn-sm" onclick="cleaningOps.refresh()">${_svg('rotateCcw')} تحديث</button>
@@ -1091,6 +1093,60 @@ async function onBuildingRenamed(oldName, newName){
     render();
   }catch(e){
     console.warn("cleaningOps/onBuildingRenamed",e);
+    _toast("⚠ تعذّرت مهاجرة بعض بيانات النظافة للاسم الجديد — أعد المحاولة من لوحة الإدارة","warn");
+  }
+}
+
+/* ── v18.9wi: إعادةُ تسميةِ مشرفٍ تُهاجرُ بياناتِ النظافة كذلك ──
+   اسمُ المشرف مخزَّنٌ نصاً في أربعة مواضع: تجاوزُ المهمة (t.supervisor)، سطرُ التنفيذ
+   (r.supervisor — أداءُ المشرفين يجمع به)، **مفتاحُ** خريطة الربط (supervisorBuildings —
+   نطاقُ المشرف myBuildings يطابق اسمَ حسابه بهذا المفتاح حرفياً، فبقاؤه القديم يعمي
+   المشرفَ عن مبانيه)، ومُنشئُ جولة الجودة (r.by). فتعديلُ الاسم في لوحة الإدارة كان
+   يترك المهامَّ على القديم (أبلغها المستخدم: سارة ← ساره). النواة تستدعينا بعد
+   adminSaveSupervisor — لا شيء يحدث في غير مشاريع النظافة. */
+async function onSupervisorRenamed(oldName, newName){
+  try{
+    oldName=String(oldName||"").trim(); newName=String(newName||"").trim();
+    if(!oldName || !newName || oldName===newName) return;
+    if(!isCleaningProject()) return;
+    const database=_db(); if(!database) return;
+    let nTasks=0, nLogs=0, nRounds=0, mapChanged=false;
+    // ١) المهام — التجاوز الصريح
+    const tCol=tasksCol();
+    if(tCol){
+      const snap=await database.collection(tCol).where("supervisor","==",oldName).get();
+      for(const d of snap.docs){ await d.ref.set({supervisor:newName},{merge:true}); nTasks++; }
+      _tasks.forEach(t=>{ if(t && t.supervisor===oldName) t.supervisor=newName; });
+    }
+    // ٢) سجلّ التنفيذ — كي لا ينقسم أداء المشرف على اسمين
+    const lCol=logCol();
+    if(lCol){
+      const snap=await database.collection(lCol).where("supervisor","==",oldName).get();
+      for(const d of snap.docs){ await d.ref.set({supervisor:newName},{merge:true}); nLogs++; }
+    }
+    // ٣) مفتاح خريطة الربط — يُدمَج إن وُجد الاسمان معاً (بلا تكرار مبانٍ)
+    await loadCfg(true);
+    const map=_cfg.supervisorBuildings||{};
+    if(Array.isArray(map[oldName])){
+      const merged=[]; (Array.isArray(map[newName])?map[newName]:[]).concat(map[oldName])
+        .forEach(b=>{ if(merged.indexOf(b)===-1) merged.push(b); });
+      map[newName]=merged; delete map[oldName]; mapChanged=true;
+      await saveCfg(map);
+    }
+    // ٤) جولات الجودة — مُنشئ الجولة (حقلٌ بسيطٌ فالاستعلام يكفي)
+    const qCol=qualityCol();
+    if(qCol){
+      const snap=await database.collection(qCol).where("by","==",oldName).get();
+      for(const d of snap.docs){ await d.ref.set({by:newName},{merge:true}); nRounds++; }
+      _rounds.forEach(r=>{ if(r && r.by===oldName) r.by=newName; });
+    }
+    _audit("إعادة تسمية مشرف في بيانات النظافة",
+      oldName+" → "+newName+" — "+nTasks+" مهمة، "+nLogs+" سجلّ، "+nRounds+" جولة"+(mapChanged?"، ومفتاح الربط":""));
+    if(nTasks||nLogs||nRounds||mapChanged)
+      _toast("✅ حُدّثت بيانات النظافة لاسم المشرف الجديد ("+nTasks+" مهمة)","success");
+    render();
+  }catch(e){
+    console.warn("cleaningOps/onSupervisorRenamed",e);
     _toast("⚠ تعذّرت مهاجرة بعض بيانات النظافة للاسم الجديد — أعد المحاولة من لوحة الإدارة","warn");
   }
 }
@@ -1853,7 +1909,7 @@ function goSupMap(){ try{ showPage(PAGE_ID); setView("sup"); }catch(e){} }
 /* ════════════════════════════════════════════════════════════
    جولات الجودة بالتقييم (§٣-٣) — البند المؤجَّل الأخير
    تفتيشٌ دوريٌّ يقيس **نتيجة** النظافة (لا الالتزام بالجدول ولا زمن الشكوى): المفتِّشُ
-   (أدمن/مدير المشروع) يُقيّم كلَّ نوع عملٍ في كل مبنًى بالنجوم (١–٥) + مخالفاتٍ وصور،
+   (أدمن/مدير المشروع/مشرف — canQuality، والمشرفُ ضمن مبانيه وحدها) يُقيّم كلَّ نوع عملٍ في كل مبنًى بالنجوم (١–٥) + مخالفاتٍ وصور،
    فيُنتج درجةً عامةً واتّجاهَ جودةٍ شهريّاً يُعرَض للعميل. معزولٌ بالمشروع كبقية النظام.
    ════════════════════════════════════════════════════════════ */
 const QUALITY_STARS = 5;
@@ -1941,10 +1997,10 @@ function starsInput(sbi,wi,v){   // تفاعليّ: نقرٌ يضبط، ونقر
 
 /* ── العرض: قائمة / نموذج / تفاصيل ── */
 function qualityHTML(){
-  if(!canEdit()){
+  if(!canQuality()){
     return `<div class="card"><div class="co-empty">${_svg('lock')}
-      <div class="co-empty-t">جولات الجودة للأدمن ومدير المشروع</div>
-      <div class="co-empty-s">التفتيشُ الإشرافيُّ يُدخِله من يملك صلاحية الإدارة.</div></div></div>`;
+      <div class="co-empty-t">جولات الجودة للأدمن ومدير المشروع والمشرف</div>
+      <div class="co-empty-s">التفتيشُ الإشرافيُّ يُدخِله من يملك صلاحية الإدارة أو الإشراف.</div></div></div>`;
   }
   if(_editingRound) return roundFormHTML();
   if(_roundDetail)  return roundDetailHTML();
@@ -1977,8 +2033,11 @@ function roundsListHTML(){
           <div class="co-empty-s">ابدأ جولةً: قيّم كلَّ نوع عملٍ في كل مبنًى بالنجوم، وأضِف المخالفات والصور.</div></div>`}
     </div>`;
 }
+// مباني الجولة بنطاق المستخدم: المشرفُ مبانيه وحدها (خريطة الربط)، والإدارةُ كلَّها.
+// غيرُ المربوط لا يُعمى (myBuildings تعيد null) فيرى الكلّ — كسياسة النطاق العامة.
+function _qualityBuildings(){ const mine=myBuildings(); const all=_buildings(); return mine?all.filter(b=>mine.indexOf(b)!==-1):all; }
 function roundFormHTML(){
-  const r=_editingRound, blds=_buildings(), sel=r.buildings||[];
+  const r=_editingRound, blds=_qualityBuildings(), sel=r.buildings||[];
   const liveN=Object.keys(r.grid||{}).filter(k=>r.grid[k]>0).length;
   const liveSum=Object.keys(r.grid||{}).reduce((a,k)=>a+(r.grid[k]>0?r.grid[k]:0),0);
   const liveAvg=liveN?Math.round(liveSum/liveN*10)/10:null;
@@ -2007,7 +2066,8 @@ function roundFormHTML(){
       <div class="form-group"><label class="form-label">تاريخ الجولة</label>
         <input class="form-input" type="date" id="q-date" value="${_esc(String(r.date||_today()).slice(0,10))}"></div>
       <div class="form-group"><label class="form-label">المباني المشمولة (اختر ثم قيّم)</label>
-        <div class="co-sup-blds">${picker}</div></div>
+        ${blds.length?`<div class="co-sup-blds">${picker}</div>`
+          :`<div class="co-hint" style="margin:0">لا مبانيَ ضمن نطاقك — اطلب من مدير المشروع ربطَك بالمباني من «المشرفون والمناطق».</div>`}</div>
     </div>
     ${sel.length?`<div class="co-live-score card"><span>متوسّط الجولة الحيّ:</span> <b id="q-live">${liveAvg!=null?liveAvg+" ★ ("+Math.round(liveAvg/QUALITY_STARS*100)+"%)":"—"}</b> <small id="q-live-n">${liveN} تقييم</small></div>${grids}`
       :`<div class="card"><div class="co-hint" style="margin:0">اختر مبنًى واحداً على الأقل لبدء التقييم.</div></div>`}
@@ -2059,11 +2119,13 @@ function _captureRoundForm(){   // احفظ نصوصَ النموذج في ال�
   const d=document.getElementById("q-date"); if(d) _editingRound.date=d.value||_today();
   const v=document.getElementById("q-violations"); if(v) _editingRound.violations=v.value||"";
 }
-function newRound(){ _editingRound={ id:_uid(), date:_today(), buildings:[], grid:{}, violations:"" }; _roundPhotos=[]; _roundDetail=null; render(); }
+function newRound(){
+  if(!canQuality()){ _toast("⚠ جولات الجودة للإدارة والمشرفين فقط","warn"); return; }
+  _editingRound={ id:_uid(), date:_today(), buildings:[], grid:{}, violations:"" }; _roundPhotos=[]; _roundDetail=null; render(); }
 function cancelRound(){ _editingRound=null; _roundPhotos=[]; render(); }
 function toggleRoundBuilding(bi){
   _captureRoundForm();
-  const b=_buildings()[bi]; if(!b || !_editingRound) return;
+  const b=_qualityBuildings()[bi]; if(!b || !_editingRound) return;
   const arr=_editingRound.buildings||(_editingRound.buildings=[]);
   const i=arr.indexOf(b);
   if(i===-1) arr.push(b); else { arr.splice(i,1); Object.keys(_editingRound.grid).forEach(k=>{ if(k.indexOf(b+"")===0) delete _editingRound.grid[k]; }); }
@@ -2090,6 +2152,7 @@ function _updateRoundLiveScore(){
 }
 async function saveRoundForm(){
   if(!_editingRound) return;
+  if(!canQuality()){ _toast("⚠ جولات الجودة للإدارة والمشرفين فقط","warn"); return; }
   _captureRoundForm();
   const g=_editingRound.grid||{};
   const ratings=Object.keys(g).filter(k=>g[k]>0).map(k=>{ const p=k.split(""); return { building:p[0], workType:p[1], stars:g[k] }; });
@@ -2108,6 +2171,7 @@ async function saveRoundForm(){
 function openRound(id){ const r=_rounds.find(x=>x.id===id); if(r){ _roundDetail=r; _editingRound=null; render(); } }
 function closeRound(){ _roundDetail=null; render(); }
 async function removeRound(id){
+  if(!canEdit()){ _toast("⚠ حذفُ الجولات لصلاحية الإدارة وحدها","warn"); return; }
   if(typeof showConfirm==="function"){ const ok=await showConfirm("حذف جولة الجودة؟","لا يمكن التراجع."); if(!ok) return; }
   const ok=await deleteRoundDoc(id); if(ok){ _roundDetail=null; _toast("🗑 حُذفت الجولة","success"); render(); }
 }
@@ -2372,7 +2436,7 @@ function qualityTrendHTML(){
       <div class="co-empty" style="padding:20px">${_svg('award')}
         <div class="co-empty-t">لا جولاتِ جودةٍ بعد</div>
         <div class="co-empty-s">جولةُ التفتيش تقيس **جودةَ النتيجة** (لا الالتزام بالجدول) — تُنتج اتّجاهاً شهريّاً يُعرض للعميل.</div>
-        ${canEdit()?`<button class="btn btn-sm" style="margin-top:10px" onclick="cleaningOps.goQuality()">${_svg('award')} بدء جولة جودة</button>`:""}
+        ${canQuality()?`<button class="btn btn-sm" style="margin-top:10px" onclick="cleaningOps.goQuality()">${_svg('award')} بدء جولة جودة</button>`:""}
       </div></div>`;
   }
   const cur=t.current;
@@ -3185,7 +3249,7 @@ else init();
 /* ════════════ الواجهة العامة ════════════ */
 window.cleaningOps = {
   render, setView, refresh, toggleGen, doGen, genModeChanged, openBldTasks, closeBldTasks, bldBack,
-  toggleLaunch, doLaunch, onBuildingRenamed,
+  toggleLaunch, doLaunch, onBuildingRenamed, onSupervisorRenamed,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   openDetail, closeDetail,

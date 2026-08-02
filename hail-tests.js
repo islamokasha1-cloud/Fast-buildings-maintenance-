@@ -2304,10 +2304,36 @@ function cleaningOpsTests() {
   // العزل والوصل — مجموعةٌ مستقلّةٌ بمعرّف المشروع، وواجهةٌ ضمن «تشغيل النظافة»
   T("★ جولات الجودة مجموعةٌ معزولةٌ بمعرّف المشروع",
     /function qualityCol\(\)\{ const id=_projId\(\);/.test(src) && src.includes('id+"_quality_rounds"'));
-  T("★ عرضُ «جولات الجودة» موصولٌ بتوجيه العرض وزرِّ القسم (للأدمن)",
+  T("★ عرضُ «جولات الجودة» موصولٌ بتوجيه العرض وزرِّ القسم (للإدارة والمشرف)",
     /_view==="quality" \? qualityHTML\(\)/.test(src) &&
     /setView\('quality'\)/.test(src) && /function qualityHTML\(\)\{/.test(src) &&
-    /if\(!canEdit\(\)\)\{/.test((src.match(/function qualityHTML\(\)\{[\s\S]*?\n\}/)||[""])[0]));
+    /if\(!canQuality\(\)\)\{/.test((src.match(/function qualityHTML\(\)\{[\s\S]*?\n\}/)||[""])[0]));
+  // ══ ★ v18.9wi: جولات الجودة للمشرف — canQuality ونطاق المباني والحرّاس ══
+  T("★ v18.9wi: canQuality = الإدارة أو المشرف (لا الفنيّ)",
+    /function canQuality\(\)\{ return canEdit\(\)\|\|_role\(\)==="supervisor"; \}/.test(src));
+  T("★ v18.9wi: زرّا «جولات الجودة» و«بدء جولة جودة» مفتوحان بـ canQuality",
+    /canQuality\(\)\?`<button[^`]*setView\('quality'\)/.test(src) &&
+    /canQuality\(\)\?`<button[^`]*goQuality\(\)/.test(src));
+  T("★ v18.9wi: نموذجُ الجولة محصورٌ بنطاق المشرف (_qualityBuildings من myBuildings)",
+    /function _qualityBuildings\(\)\{ const mine=myBuildings\(\);/.test(src) &&
+    /const r=_editingRound, blds=_qualityBuildings\(\)/.test(src) &&
+    /const b=_qualityBuildings\(\)\[bi\]/.test(src));
+  T("★ v18.9wi: حارسا الإنشاء والحفظ يمنعان غيرَ المخوَّل (canQuality)",
+    /function newRound\(\)\{\s*\n?\s*if\(!canQuality\(\)\)/.test(src) &&
+    /if\(!_editingRound\) return;\s*\n\s*if\(!canQuality\(\)\)/.test(src));
+  T("★ v18.9wi: حذفُ الجولة يبقى للإدارة وحدها (حارسٌ داخل removeRound)",
+    /async function removeRound\(id\)\{\s*\n?\s*if\(!canEdit\(\)\)/.test(src));
+  // ══ ★ v18.9wi: إعادةُ تسميةِ مشرفٍ تُهاجر بيانات النظافة (سارة ← ساره) ══
+  T("★ v18.9wi: onSupervisorRenamed تُهاجر المواضعَ الأربعة (مهام/سجل/مفتاح الربط/جولات)",
+    /async function onSupervisorRenamed\(oldName, newName\)\{/.test(src) &&
+    /where\("supervisor","==",oldName\)/.test(src) &&
+    /where\("by","==",oldName\)/.test(src) &&
+    /map\[newName\]=merged; delete map\[oldName\]; mapChanged=true;/.test(src));
+  T("★ v18.9wi: الهجرة معزولةٌ بمشاريع النظافة ومعروضةٌ للنواة",
+    (src.match(/async function onSupervisorRenamed\(oldName, newName\)\{[\s\S]*?isCleaningProject\(\)/)||[]).length===1 &&
+    /onBuildingRenamed, onSupervisorRenamed,/.test(src));
+  T("★ v18.9wi: adminSaveSupervisor في النواة يستدعي هجرةَ الاسم",
+    /adminSaveSupervisor[\s\S]{0,900}cleaningOps\.onSupervisorRenamed==="function"\) window\.cleaningOps\.onSupervisorRenamed\(oldName,newName\)/.test(HTML));
   T("★ اتّجاهُ الجودة معروضٌ في صفحة المؤشّرات ويُحمَّل مع بقيتها",
     /\$\{qualityTrendHTML\(\)\}/.test(src) && /Promise\.all\(\[loadTasks\(\), loadMonthLog\(\), loadRounds\(\)\]\)/.test(src));
   T("★ النقرُ على النجمة نفسها يُلغي التقييم (toggle)",
