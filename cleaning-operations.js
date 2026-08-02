@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9wg";
+const MODULE_BUILD = "v18.9wh";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -1560,14 +1560,14 @@ function execHTML(){
     <div class="card">
       <div class="co-sec"><div class="co-sec-t">${_svg('building2')} التغطية حسب المنطقة</div>
         <span class="co-sec-c">الأضعف أولاً</span></div>
-      ${cov.map(b=>{
+      <div class="co-2col">${cov.map(b=>{
         const c=b.pct>=100?"var(--sla-ok)":(b.pct>=60?"var(--sla-warn)":"var(--sla-crit)");
         return `<div class="co-cov">
           <div class="co-cov-h"><span class="n">${_esc(b.name)}</span>
             <span class="p" style="color:${c}">${b.pct}% <small>(${b.done}/${b.sched})</small></span></div>
           <div class="hbar"><span style="flex:${Math.max(b.pct,0.01)};background:${c}"></span><span style="flex:${Math.max(100-b.pct,0.01)};background:var(--surface2)"></span></div>
         </div>`;
-      }).join("")}
+      }).join("")}</div>
     </div>` : "";
 
   // المهام المتأخّرة — أقدم أولاً
@@ -1576,7 +1576,7 @@ function execHTML(){
     <div class="card">
       <div class="co-sec"><div class="co-sec-t">${_svg('alertTriangle')} المهامّ المتأخّرة</div>
         <span class="co-sec-c">${late.length?late.length+" مهمة":"لا متأخّرات"}</span></div>
-      ${late.length ? late.map(t=>`
+      ${late.length ? `<div class="co-2col">`+late.map(t=>`
         <div class="ppm-card due-today">
           <div class="co-card-row">
             <div class="ppm-chip">${_svg(iconOf(t.workType))}</div>
@@ -1586,7 +1586,7 @@ function execHTML(){
             </div>
             <div class="co-card-act"><span class="ppm-due-badge overdue">متأخّرة ${overdueDays(t)} يوم</span></div>
           </div>
-        </div>`).join("")
+        </div>`).join("")+`</div>`
        : `<div class="co-empty" style="padding:22px">${_svg('checkCircle')}
           <div class="co-empty-t">لا مهامّ متأخّرة</div></div>`}
     </div>`;
@@ -2742,14 +2742,14 @@ function dailyHTML(){
     ${cov.length?`<div class="card">
       <div class="co-sec"><div class="co-sec-t">${_svg('building2')} التغطية حسب المنطقة</div>
         <span class="co-sec-c">الأضعف أولاً</span></div>
-      ${cov.map(b=>{
+      <div class="co-2col">${cov.map(b=>{
         const c=b.pct>=100?"var(--sla-ok)":(b.pct>=60?"var(--sla-warn)":"var(--sla-crit)");
         return `<div class="co-cov">
           <div class="co-cov-h"><span class="n">${_esc(b.name)}</span>
             <span class="p" style="color:${c}">${b.pct}% <small>(${b.done}/${b.sched})</small></span></div>
           <div class="hbar"><span style="flex:${Math.max(b.pct,0.01)};background:${c}"></span><span style="flex:${Math.max(100-b.pct,0.01)};background:var(--surface2)"></span></div>
         </div>`;
-      }).join("")}
+      }).join("")}</div>
     </div>`:""}
     ${todays.length ? _byBuildingGrid(todays)
       : `<div class="card"><div class="co-empty" style="padding:26px">${_svg('checkCircle')}
@@ -3086,7 +3086,10 @@ function injectCSS(){
 .ppm-card.completed .co-card-t{color:var(--muted)}
 .co-pane{max-width:760px}
 .co-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media(max-width:560px){.co-grid2{grid-template-columns:1fr}}
+/* عمودان لقوائم التغطية والمهامّ المتأخّرة — عمود واحد على الجوال (الميديا أدناه) */
+.co-2col{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;align-items:start}
+.co-2col .co-cov{margin-bottom:0}
+@media(max-width:560px){.co-grid2{grid-template-columns:1fr}.co-2col{grid-template-columns:1fr}}
 .co-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
 .co-chk{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-bottom:13px;cursor:pointer}
 .co-del{color:var(--danger)}
