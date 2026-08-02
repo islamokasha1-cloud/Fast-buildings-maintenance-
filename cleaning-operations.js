@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9wb";
+const MODULE_BUILD = "v18.9wc";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -636,42 +636,83 @@ function _cappedTaskListHTML(b, list){
       "▢ عرض "+rest+" "+(rest===1?"مهمة أخرى":"مهام أخرى")}</button>`:"");
 }
 /* نافذة مهامّ المبنى — تُركَّب على body مباشرةً فتعمل من لوحة اليوم والمتابعة
-   اليومية معاً. القائمة تُبنى عند الفتح من نفس مصدر اللوحة (مهامّ اليوم للمبنى
-   بترتيب الأولوية). أيُّ إجراءٍ داخلها (تنفيذ/تحرير/تفاصيل) يغلقها أولاً ليظهر
-   ما فتحه — بمستمعِ capture فلا يعطّله stopPropagation في أزرار البطاقة. */
+   اليومية معاً، وبعرضَين داخليين: **القائمة** (مهامّ اليوم للمبنى بترتيب الأولوية
+   من نفس مصدر اللوحة)، و**تفاصيل مهمة** تُعرض داخل النافذة نفسها (بطلب المستخدم —
+   لا انتقال لصفحةٍ كاملة) بزرّ رجوعٍ للقائمة، ويُعاد فيها استخدام جسم التفاصيل
+   الموحّد `_taskDetailBodyHTML` مع تحميل سجلّ التنفيذ. أزرارُ تنفيذ/تحرير تُغلق
+   النافذةَ أولاً ليظهر ما فتحته — بمستمعِ capture فلا يعطّله stopPropagation. */
 const BLD_MODAL_ID = "co-bld-modal";
+let _bldModalBld = null;     // المبنى المعروض (null = النافذة مغلقة)
+let _bldDetailFor = null;    // مهمة معروضة تفاصيلُها داخل النافذة (null = عرض القائمة)
+let _bldDetailLog = null;    // سجلّ تنفيذها (null = يُحمَّل)
 // ESC يغلق النافذة — المستمع يُركَّب عند الفتح ويُفكّ عند الإغلاق (لا مستمع دائم)
 function _bldEscHandler(e){ if(e && e.key==="Escape") closeBldTasks(); }
 function closeBldTasks(){
   const el=document.getElementById(BLD_MODAL_ID); if(el&&el.remove) el.remove();
+  _bldModalBld=null; _bldDetailFor=null; _bldDetailLog=null;
   try{ document.removeEventListener("keydown", _bldEscHandler); }catch(e){}
 }
-function openBldTasks(key){
-  closeBldTasks();
-  const b=decodeURIComponent(key);
+function _bldModalRender(){
+  const ov=document.getElementById(BLD_MODAL_ID); if(!ov) return;
+  const box=ov.querySelector(".co-bld-modal"); if(!box) return;
+  if(_bldDetailFor){
+    const t=_bldDetailFor;
+    box.innerHTML=`
+      <div class="co-sec">
+        <button class="btn btn-ghost btn-sm co-bld-back" onclick="cleaningOps.bldBack()">→ رجوع</button>
+        <div class="co-sec-t">${_esc(t.name||"مهمة")}</div>
+        <button class="btn btn-ghost btn-sm co-bld-close" onclick="cleaningOps.closeBldTasks()">✕ إغلاق</button>
+      </div>
+      ${_taskDetailBodyHTML(t, _bldDetailLog)}`;
+    return;
+  }
+  const b=_bldModalBld;
   const list=visibleTasks()
     .filter(t=>!isDisabled(t) && (isDue(t)||doneToday(t)) && ((t.building||"بلا مبنى")===b))
     .sort((x,y)=>dueStatus(x).sort-dueStatus(y).sort);
-  if(!list.length) return;
   const d=list.filter(doneToday).length;
+  box.innerHTML=`
+    <div class="co-sec">
+      <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
+      <span class="ppm-due-badge ${d===list.length?'ok':'today'}">${d}/${list.length} منجزة</span>
+      <button class="btn btn-ghost btn-sm co-bld-close" onclick="cleaningOps.closeBldTasks()">✕ إغلاق</button>
+    </div>
+    <div class="co-tasklist">${list.map(taskCardHTML).join("")}</div>`;
+}
+function _bldOpenDetail(id){
+  const t=_tasks.find(x=>x.id===id); if(!t) return;
+  _bldDetailFor=t; _bldDetailLog=null;
+  _bldModalRender();
+  loadTaskLog(id).then(rows=>{
+    if(!_bldDetailFor || _bldDetailFor.id!==id) return;   // غادر قبل الوصول
+    _bldDetailLog=rows; _bldModalRender();
+  });
+}
+function bldBack(){ _bldDetailFor=null; _bldDetailLog=null; _bldModalRender(); }
+function openBldTasks(key){
+  closeBldTasks();
+  const b=decodeURIComponent(key);
+  _bldModalBld=b;
   const ov=document.createElement("div");
   ov.id=BLD_MODAL_ID; ov.className="co-bld-overlay"; ov.dir="rtl";
-  ov.innerHTML=`
-    <div class="co-bld-modal card" role="dialog" aria-label="${_esc(b)}">
-      <div class="co-sec">
-        <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
-        <span class="ppm-due-badge ${d===list.length?'ok':'today'}">${d}/${list.length} منجزة</span>
-        <button class="btn btn-ghost btn-sm co-bld-close" onclick="cleaningOps.closeBldTasks()">✕ إغلاق</button>
-      </div>
-      <div class="co-tasklist">${list.map(taskCardHTML).join("")}</div>
-    </div>`;
-  ov.addEventListener("click", e=>{ if(e.target===ov) closeBldTasks(); });                  // خلفية = إغلاق
+  ov.innerHTML=`<div class="co-bld-modal card" role="dialog" aria-label="${_esc(b)}"></div>`;
+  ov.addEventListener("click", e=>{ if(e.target===ov) closeBldTasks(); });   // خلفية = إغلاق
   ov.addEventListener("click", e=>{
-    const el=(e.target&&e.target.closest)?e.target.closest("button, .ppm-card"):null;
-    if(el) setTimeout(closeBldTasks,0);   // بعد تنفيذ onclick البطاقة نفسه
+    const btn=(e.target&&e.target.closest)?e.target.closest("button"):null;
+    if(btn){
+      // زرّا النافذة نفسها (إغلاق/رجوع) يتكفّل بهما onclick الخاصّ بهما
+      if(btn.classList.contains("co-bld-close")||btn.classList.contains("co-bld-back")) return;
+      setTimeout(closeBldTasks,0); return;   // تنفيذ/تحرير: أغلِق ودَع onclick يعمل
+    }
+    const card=(e.target&&e.target.closest)?e.target.closest(".ppm-card"):null;
+    if(card && card.getAttribute && card.getAttribute("data-tid")){
+      e.stopPropagation();                   // امنع openDetail صفحةَ التفاصيل الكاملة
+      _bldOpenDetail(card.getAttribute("data-tid"));
+    }
   }, true);
   document.body.appendChild(ov);
   document.addEventListener("keydown", _bldEscHandler);
+  _bldModalRender();
 }
 
 /* تجميعُ المهامّ حسب المبنى في شبكةٍ متجاورة — يستفيد من عرض الشاشة بدل صفٍّ لكل مهمة */
@@ -697,7 +738,7 @@ function taskCardHTML(t){
   const list=Array.isArray(t.checklist)?t.checklist:[];
   const done=doneToday(t);
   return `
-    <div class="ppm-card ${st.card} co-clickable" onclick="cleaningOps.openDetail('${_esc(t.id)}')" title="اضغط لعرض التفاصيل وسجلّ التنفيذ">
+    <div class="ppm-card ${st.card} co-clickable" data-tid="${_esc(t.id)}" onclick="cleaningOps.openDetail('${_esc(t.id)}')" title="اضغط لعرض التفاصيل وسجلّ التنفيذ">
       <div class="co-card-row">
         <div class="ppm-chip">${_svg(iconOf(t.workType))}</div>
         <div class="co-card-main">
@@ -758,19 +799,21 @@ function allTasksHTML(){
 /* ── تفاصيل المهمة: بياناتها وقائمة فحصها وسجلّ تنفيذها بالصور ──
    الضغط على أيّ بطاقة يفتحها — وهي السبيل الوحيد لمراجعة مهمةٍ أُغلقت (نُفِّذت)،
    فأزرارُ التنفيذ تختفي عنها بعد الإنجاز. */
-function renderDetail(el){
-  const t=_detailFor;
+/* جسمُ التفاصيل (بيانات + قائمة فحص + سجلّ تنفيذ) — مصدرٌ واحد تستعمله صفحةُ
+   التفاصيل الكاملة **ونافذةُ مهامّ المبنى** (عرضُ التفاصيل داخل النافذة نفسها).
+   log: null = ما زال يُحمَّل، [] = لا تنفيذات، وإلا صفوف السجلّ. */
+function _taskDetailBodyHTML(t, log){
   const list=Array.isArray(t.checklist)?t.checklist:[];
   const st=dueStatus(t);
   const sup=taskSupervisor(t);
   const info=(k,v)=> v?`<div class="co-fin-i"><span class="k">${k}</span><span class="v" style="font-family:'Cairo',sans-serif;font-size:12.5px">${_esc(v)}</span></div>`:"";
-  const logHTML = _detailLog===null
+  const logHTML = log===null
     ? `<div class="co-empty" style="padding:22px"><div class="co-empty-t">جارٍ تحميل سجلّ التنفيذ…</div></div>`
-    : (!_detailLog.length
+    : (!log.length
         ? `<div class="co-empty" style="padding:22px">${_svg('clipboardList')}
              <div class="co-empty-t">لم تُنفَّذ بعد</div>
              <div class="co-empty-s">سيظهر هنا كلُّ تنفيذٍ بتاريخه ومنفِّذه وصوره.</div></div>`
-        : _detailLog.map(r=>`
+        : log.map(r=>`
             <div class="co-logrow">
               <div class="co-logrow-h">
                 <span class="d">${_svg('calendar')} ${_esc(String(r.date||"").slice(0,10))}</span>
@@ -783,9 +826,7 @@ function renderDetail(el){
               </div>`:`<div class="co-hint" style="margin:6px 0 0">بلا صور</div>`}
             </div>`).join(""));
 
-  el.innerHTML = subHeroHTML(_esc(t.name||"مهمة"),
-      _esc(t.building||"")+(t.floor?" / "+_esc(t.floor):"")+" • "+_esc(t.workType||"")+" • "+_esc(t.freq||""),
-      "closeDetail") + `
+  return `
     <div class="card co-pane">
       <div class="co-sec"><div class="co-sec-t">${_svg('clipboardList')} بيانات المهمة</div>
         <span class="ppm-due-badge ${st.badge}">${st.lbl}</span></div>
@@ -811,9 +852,15 @@ function renderDetail(el){
     </div>`:""}
     <div class="card co-pane">
       <div class="co-sec"><div class="co-sec-t">${_svg('activity')} سجلّ التنفيذ</div>
-        <span class="co-sec-c">${_detailLog===null?"…":_detailLog.length+" تنفيذ"}</span></div>
+        <span class="co-sec-c">${log===null?"…":log.length+" تنفيذ"}</span></div>
       ${logHTML}
     </div>`;
+}
+function renderDetail(el){
+  const t=_detailFor;
+  el.innerHTML = subHeroHTML(_esc(t.name||"مهمة"),
+      _esc(t.building||"")+(t.floor?" / "+_esc(t.floor):"")+" • "+_esc(t.workType||"")+" • "+_esc(t.freq||""),
+      "closeDetail") + _taskDetailBodyHTML(t, _detailLog);
 }
 function openDetail(id){
   const t=_tasks.find(x=>x.id===id); if(!t) return;
@@ -2850,7 +2897,8 @@ function injectCSS(){
 .co-tasklist{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;align-items:start}
 .co-more-btn{width:100%;margin-top:8px;justify-content:center;font-weight:700}
 .co-bld-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:1200;display:flex;align-items:center;justify-content:center;padding:12px}
-.co-bld-modal{width:min(560px,96vw);max-height:80vh;overflow-y:auto;margin:0}
+.co-bld-modal{width:min(440px,96vw);max-height:80vh;overflow-y:auto;margin:0}
+.co-bld-back{flex:none}
 .co-bld-modal .co-tasklist{grid-template-columns:1fr}
 .co-bld-modal .co-sec{position:sticky;top:0;background:var(--surface);z-index:1;padding-top:2px}
 .co-bld-close{margin-inline-start:auto;flex:none}
@@ -2996,7 +3044,7 @@ else init();
 
 /* ════════════ الواجهة العامة ════════════ */
 window.cleaningOps = {
-  render, setView, refresh, toggleGen, doGen, genModeChanged, openBldTasks, closeBldTasks,
+  render, setView, refresh, toggleGen, doGen, genModeChanged, openBldTasks, closeBldTasks, bldBack,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   openDetail, closeDetail,

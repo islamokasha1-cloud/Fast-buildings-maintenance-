@@ -2935,10 +2935,10 @@ function cleaningOpsTests() {
   T("★ wa: النافذة على body — تعمل من اللوحة والمتابعة اليومية معاً",
     src.includes("document.body.appendChild(ov)") && src.includes('ov.className="co-bld-overlay"'));
   T("★ wa: قائمة النافذة من نفس مصدر اللوحة (مهامّ اليوم بترتيب الأولوية)",
-    /openBldTasks[\s\S]{0,400}?visibleTasks\(\)\s*\n?\s*\.filter\(t=>!isDisabled\(t\) && \(isDue\(t\)\|\|doneToday\(t\)\)/.test(src) &&
-    /openBldTasks[\s\S]{0,600}?dueStatus\(x\)\.sort-dueStatus\(y\)\.sort/.test(src));
-  T("★ wa: أيُّ إجراءٍ داخل النافذة يغلقها بمستمع capture (لا يعطّله stopPropagation)",
-    /closest\("button, \.ppm-card"\)/.test(src) && /setTimeout\(closeBldTasks,0\)/.test(src) &&
+    /_bldModalRender[\s\S]{0,900}?visibleTasks\(\)\s*\n?\s*\.filter\(t=>!isDisabled\(t\) && \(isDue\(t\)\|\|doneToday\(t\)\)/.test(src) &&
+    /_bldModalRender[\s\S]{0,1100}?dueStatus\(x\)\.sort-dueStatus\(y\)\.sort/.test(src));
+  T("★ wa: أزرار تنفيذ/تحرير داخل النافذة تُغلقها بمستمع capture (لا يعطّله stopPropagation)",
+    /closest\("button"\)/.test(src) && /setTimeout\(closeBldTasks,0\)/.test(src) &&
     /\}, true\);/.test(src));
   T("wa: الخلفية تُغلق النافذة وزرّ ✕ موجود",
     src.includes("if(e.target===ov) closeBldTasks()") && src.includes("cleaningOps.closeBldTasks()"));
@@ -2949,7 +2949,7 @@ function cleaningOpsTests() {
     src.includes("decodeURIComponent(key)"));
   T("wa: للنافذة قواعدُ عرضٍ ثابتة (overlay مثبّت + جسمٌ يتمرّر)",
     src.includes(".co-bld-overlay{position:fixed;inset:0") &&
-    src.includes(".co-bld-modal{width:min(560px,96vw);max-height:80vh;overflow-y:auto"));
+    src.includes(".co-bld-modal{width:min(440px,96vw);max-height:80vh;overflow-y:auto"));
 
   // ══ ★ v18.9wb: النافذة أصغر وفي المنتصف + ESC للإغلاق (ملاحظة المستخدم) ══
   T("★ wb: النافذة في منتصف الشاشة تماماً (align-items:center)",
@@ -2960,6 +2960,24 @@ function cleaningOpsTests() {
     src.includes('if(e && e.key==="Escape") closeBldTasks()') &&
     src.includes('document.addEventListener("keydown", _bldEscHandler)') &&
     src.includes('document.removeEventListener("keydown", _bldEscHandler)'));
+
+  // ══ ★ v18.9wc: النافذة أضيق (440px) والتفاصيل داخلها لا صفحةً كاملة ══
+  T("★ wc: بطاقة المهمة تحمل data-tid (تُلتقط داخل النافذة بلا onclick الصفحة)",
+    src.includes('data-tid="${_esc(t.id)}"'));
+  T("★ wc: ضغط البطاقة داخل النافذة يفتح تفاصيلها داخلياً بمنع onclick الأصلي",
+    /card\.getAttribute\("data-tid"\)[\s\S]{0,120}?e\.stopPropagation\(\);[\s\S]{0,120}?_bldOpenDetail\(card\.getAttribute\("data-tid"\)\)/.test(src));
+  T("★ wc: جسم التفاصيل مصدرٌ واحد للصفحة والنافذة (_taskDetailBodyHTML)",
+    /function _taskDetailBodyHTML\(t, log\)\{/.test(src) &&
+    src.includes("subHeroHTML") && (src.match(/_taskDetailBodyHTML\(/g)||[]).length >= 3);
+  T("★ wc: تفاصيل النافذة بزرّ «رجوع» يعيد للقائمة",
+    src.includes("cleaningOps.bldBack()") &&
+    /function bldBack\(\)\{ _bldDetailFor=null; _bldDetailLog=null; _bldModalRender\(\); \}/.test(src));
+  T("★ wc: سجلّ التنفيذ يُحمَّل داخل النافذة (ولا يُكتب إن غادر المستخدم)",
+    /_bldOpenDetail[\s\S]{0,300}?loadTaskLog\(id\)\.then\(rows=>\{\s*\n?\s*if\(!_bldDetailFor \|\| _bldDetailFor\.id!==id\) return;/.test(src));
+  T("wc: زرّا الرجوع والإغلاق مستثنيان من إغلاق-أي-زر",
+    src.includes('btn.classList.contains("co-bld-close")||btn.classList.contains("co-bld-back")'));
+  T("wc: حالة النافذة تُصفَّر عند الإغلاق (لا تفاصيل يتيمة عند فتحٍ تالٍ)",
+    /closeBldTasks[\s\S]{0,200}?_bldModalBld=null; _bldDetailFor=null; _bldDetailLog=null;/.test(src));
   T("vx: زرّ «مهام أخرى» له قاعدة عرضٍ كاملة", src.includes(".co-more-btn{width:100%"));
 
   // ══ ★ v18.9vy: ترتيب مباني اللوحة — الأكثر تأخّراً أولاً ══
