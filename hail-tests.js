@@ -2262,7 +2262,8 @@ function cleaningOpsTests() {
       /function isDue\(t\)\{ if\(isDisabled\(t\)\|\|doneToday\(t\)\|\|_isTodayHoliday\(\)\)/.test(src) &&
       /function isOverdue\(t\)\{ if\(isDisabled\(t\)\|\|doneToday\(t\)\|\|_isTodayHoliday\(\)\)/.test(src));
     T("★ الإنشاء والتحرير يرحّلان تاريخ العطلة لأوّل يوم عمل",
-      /nextDueDate: _nextWorkingDay\(_today\(\)\)/.test(src) &&
+      // we: التوليد صار يمرّ عبر start (وهي _nextWorkingDay بدورها) — يغطّيه حارس we
+      /nextDueDate:\s*_nextWorkingDay\(_today\(\)\)/.test(src) &&
       /_editing\.nextDueDate = _nextWorkingDay\(g\("co-due"\)/.test(src));
     T("★ لوحة اليوم تعرض «إجازة» بدل 0% عقابيّ",
       /s\.holiday\?"إجازة"/.test(src) && /vTxt="إجازة اليوم"/.test(src));
@@ -2956,6 +2957,39 @@ function cleaningOpsTests() {
   T("★ wd: عرض النافذة !important (النواة تفرض width:100%!important على .card)",
     /\.co-bld-modal\{width:min\(440px,96vw\) !important/.test(src) &&
     /\.card,\s*\.filters,\s*\.buildings-grid\s*\{[^}]*width:\s*100%\s*!important/.test(HTML));
+
+  // ══ ★ v18.9we: إطلاق المهام في وقت محدد — لا تأخير وهمي أثناء التجهيز ══
+  // المهام تُنشأ اليوم والتشغيل يبدأ لاحقاً فيتراكم «تأخير» بلا داعٍ. الإطلاق يعيد
+  // جدولة استحقاق مهامّ المبنى لتاريخ البدء، والتوليد يقبل تاريخ بدءٍ من الأساس.
+  T("★ we: _launchTargets نقيةٌ مكشوفة", CO && typeof CO._launchTargets === "function");
+  if (CO && typeof CO._launchTargets === "function") {
+    const pool = [
+      mk({ id: "l1", building: "مبنى أ" }), mk({ id: "l2", building: "مبنى أ", disabled: true }),
+      mk({ id: "l3", building: "مبنى ب" }), mk({ id: "l4", building: "" })
+    ];
+    T("★ we: الإطلاق لمبنى بعينه يستهدف مهامّه النشطة وحدها (الموقوفة تُستثنى)",
+      JSON.stringify(CO._launchTargets(pool, "مبنى أ").map(t => t.id)) === '["l1"]');
+    T("★ we: «كل المباني» يستهدف كل النشطة (بلا مبنى ضمناً)",
+      JSON.stringify(CO._launchTargets(pool, "").map(t => t.id)) === '["l1","l3","l4"]');
+    T("we: المهمة بلا مبنى تُستهدف تحت «بلا مبنى»",
+      JSON.stringify(CO._launchTargets(pool, "بلا مبنى").map(t => t.id)) === '["l4"]');
+  }
+  T("★ we: doLaunch يرفض الماضي ويرحّل العطلة لأول يوم عمل",
+    /if\(raw<_today\(\)\)\{ _toast\("⚠ التاريخ في الماضي/.test(src) &&
+    /const date=_nextWorkingDay\(raw\);/.test(src));
+  T("★ we: الإطلاق يكتب nextDueDate وحدها بدمجٍ (لا يمسّ بقية حقول المهمة)",
+    src.includes("saveTask({id:t.id, nextDueDate:date})"));
+  T("we: الإطلاق مسوَّر بالصلاحية ومسجَّل في التدقيق",
+    /doLaunch\(\)\{\s*\n?\s*if\(!canEdit\(\)\)/.test(src) &&
+    src.includes('_audit("إطلاق مهام النظافة"'));
+  T("we: زرّ «إطلاق المهام» في الهيرو لمالكي الصلاحية",
+    src.includes('cleaningOps.toggleLaunch()') && /canEdit\(\)\?`<button[^`]*toggleLaunch/.test(src));
+  T("★ we: التوليد يقبل تاريخ بدءٍ — الماضي يُقصّ لليوم والعطلة تُرحَّل",
+    src.includes('id="co-gen-start"') &&
+    src.includes("const start=_nextWorkingDay(startRaw && startRaw>_today() ? startRaw : _today())") &&
+    src.includes("nextDueDate: start,"));
+  T("we: نموذجا الإطلاق والتوليد لا يفتحان معاً",
+    src.includes("if(_genForm) _launchForm=false") && src.includes("if(_launchForm) _genForm=false"));
 
   // ══ ★ v18.9wb: النافذة أصغر وفي المنتصف + ESC للإغلاق (ملاحظة المستخدم) ══
   T("★ wb: النافذة في منتصف الشاشة تماماً (align-items:center)",
