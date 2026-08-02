@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vy";
+const MODULE_BUILD = "v18.9vz";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -2812,7 +2812,7 @@ function injectCSS(){
 .co-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
 /* المباني جنباً إلى جنب: عمودٌ لكل مبنى بدل صفٍّ لكل مهمة — يستفيد من عرض الشاشة.
    align-items:start فلا يتمدّد المبنى القليلُ مهامُّه ليطابق أطولَ جاره. */
-.co-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px;align-items:start}
+.co-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:12px;align-items:start}
 .co-groups .co-group{margin-bottom:0;min-width:0}
 /* شبكةٌ داخليةٌ للمهامّ داخل بطاقة المبنى: مبنًى واحدٌ يملأ العرض فتتوزّع مهامُّه على
    أعمدةٍ متعددة، وعدّةُ مبانٍ تتجاور فتصير مهامُّ كلٍّ عموداً واحداً — تكيُّفٌ تلقائيّ

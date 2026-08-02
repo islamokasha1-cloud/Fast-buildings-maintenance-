@@ -2563,7 +2563,8 @@ function cleaningOpsTests() {
   // ★ auto-fit لا auto-fill: الأخير يُنشئ أعمدةً فارغة فينحشر المبنى الواحد في عمودٍ
   // ضيّق وتبقى بقيّةُ الشاشة خالية — وهو ما شكا منه المستخدم.
   T("★ المباني بشبكة auto-fit (المبنى الواحد يملأ العرض بلا أعمدةٍ فارغة)",
-    /\.co-groups\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(360px,1fr\)\)/.test(src) &&
+    // vz: الحدّ الأدنى 400px — ستةُ أعمدة بـ360 كانت تنضغط بصفٍّ واحد على الشاشة العريضة
+    /\.co-groups\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(400px,1fr\)\)/.test(src) &&
     !/\.co-groups\{[^}]*auto-fill/.test(src));
   T("★ شبكةٌ داخليةٌ للمهامّ داخل بطاقة المبنى (تكيُّفٌ مع عرضها)",
     /\.co-tasklist\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(280px,1fr\)\)/.test(src) &&
@@ -2976,6 +2977,17 @@ function cleaningOpsTests() {
         "معلّق": [mk({ nextDueDate: today })]
       })) === JSON.stringify(["معلّق", "منجز"]));
   }
+
+  // ══ ★ v18.9vz: إصلاحان من بلاغ المستخدم ══
+  // (١) جلب الأرشيف كان يفشل: where(archived)+orderBy(createdAt) يتطلّب فهرساً مركّباً،
+  // ومجموعات البلاغات مسمّاة لكل مشروع ({id}_tickets) فيلزم فهرس يدوي لكل مشروع جديد.
+  // الحل: بلا orderBy خادمي والفرز محلياً — حارس يمنع عودة الـorderBy.
+  T("★ vz: استعلام الأرشيف بلا orderBy خادمي (لا فهرس مركّباً لكل مشروع)",
+    /where\("archived","==",true\)/.test(HTML) &&
+    !/where\("archived","==",true\)\s*\.orderBy/.test(HTML));
+  T("★ vz: فرز الأرشيف محلياً الأحدث أولاً — يقبل ISO وTimestamp معاً",
+    /\.sort\(\(a,b\)=>_ts\(b\)-_ts\(a\)\)/.test(HTML) &&
+    HTML.includes('typeof c.toDate==="function"'));
 
   // ══ ★ صنفُ «الأيقونة العملاقة» — معالجةٌ عند المنبع بعد تكرّره ثلاث مرّات ══
   // _svgIcon في النواة يُرجع <svg> بلا width/height، وSVG بلا أبعادٍ داخل حاوية flex
