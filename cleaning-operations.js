@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vu";
+const MODULE_BUILD = "v18.9vv";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -926,6 +926,13 @@ function genFormHTML(){
   return `
     <div class="card co-pane co-gen">
       <div class="co-sec"><div class="co-sec-t">${_svg('sparkles')} توليد جدول مهام النظافة</div></div>
+      <div class="form-group"><label class="form-label">وضع التوليد</label>
+        <select class="form-select" id="co-gen-mode" onchange="cleaningOps.genModeChanged()">
+          <option value="full">جدول كامل (8–12 مهمة)</option>
+          <option value="specific">إضافة مهام محددة لمبنى قائم</option>
+        </select></div>
+      <div class="form-group" id="co-gen-spec-wrap" style="display:none"><label class="form-label">المهام المطلوب إضافتها</label>
+        <textarea class="form-input" id="co-gen-spec" rows="2" placeholder="مثال: تنظيف خزانات المياه شهرياً، وتلميع درابزين السلالم أسبوعياً"></textarea></div>
       <div class="co-grid2">
         <div class="form-group"><label class="form-label">المبنى المستهدف</label>
           <select class="form-select" id="co-gen-bld">
@@ -944,6 +951,12 @@ function genFormHTML(){
       ${_genErr?`<div class="ppm-overdue-banner" style="margin-top:12px"><span class="co-bnr-ic">${_svg('alertTriangle')}</span> <span>${_esc(_genErr)}</span></div>`:""}
       <div class="co-hint">المُولَّد <b>اقتراحٌ أوّليٌّ قابلٌ للتحرير والحذف</b> — يُضاف للمهام الحالية ولا يستبدلها.</div>
     </div>`;
+}
+// إظهار/إخفاء حقل الوصف حسب الوضع — بلا إعادة render كي لا تضيع القيم المكتوبة
+function genModeChanged(){
+  const m=(document.getElementById("co-gen-mode")||{}).value||"full";
+  const w=document.getElementById("co-gen-spec-wrap");
+  if(w) w.style.display=(m==="specific")?"":"none";
 }
 
 function _extractJSON(txt){
@@ -988,28 +1001,58 @@ function _salvageObjects(txt){
   return out;
 }
 
+/* بناء موجّه التوليد — دالة نقية مكشوفة للفحوص. وضعان:
+   "full" (الافتراضي) = جدول كامل ٨–١٢ مهمة (السلوك القائم حرفياً)؛
+   "specific" = إضافة مهام محددة وصفها المستخدم وحدها لمبنى قائم، مع تمرير
+   أسماء المهام الموجودة في المبنى كي لا يقترح النموذج مكرراً. */
+function _genPrompt(o){
+  o=o||{};
+  const specific=o.mode==="specific";
+  const bld=String(o.bld||""), kind=String(o.kind||""), notes=String(o.notes||"");
+  const existing=Array.isArray(o.existing)?o.existing.filter(Boolean):[];
+  return (
+    "أنت مدير عمليات نظافة مبانٍ محترف. "+
+    (specific ? "أضِف مهام نظافة محددة لمبنى قائم — لا تُنشئ جدولاً كاملاً.\n"
+              : "أنشئ جدول مهام نظافة دورية لمبنى.\n")+
+    "المبنى: "+(bld||"غير محدّد")+"\n"+
+    "وصف المبنى/النشاط: "+(kind||"مبنى إداري عام")+"\n"+
+    (notes?"ملاحظات: "+notes+"\n":"")+
+    "أنواع العمل المسموحة (استخدم أحدها حرفياً في workType): "+WT_KEYS.join(" | ")+"\n"+
+    "التكرارات المسموحة (استخدم أحدها حرفياً في freq): "+FREQ_KEYS.join(" | ")+"\n"+
+    (specific
+      ? "المهام المطلوب إضافتها (كما وصفها المستخدم):\n"+String(o.spec||"").trim()+"\n"+
+        (existing.length
+          ? "المهام الموجودة مسبقاً في هذا المبنى — لا تكرّرها ولا تقترح ما يشابهها:\n- "+existing.join("\n- ")+"\n"
+          : "")+
+        "أعطِ المهام الموصوفة أعلاه فقط (مهمة لكل وصف، وعدّة مهامّ إن وُصفت عدّة)، "+
+        "بأسماء عربية مختصرة، ولكل مهمة بين 3 و 5 بنود فحصٍ عملية ومحدّدة وموجزة، "+
+        "واختر لكل مهمة التكرار الأنسب من وصفها.\n"
+      : "أعطِ بين 8 و 12 مهمة تغطّي المناطق الرئيسية، بأسماء عربية مختصرة، ولكل مهمة "+
+        "بين 3 و 5 بنود فحصٍ عملية ومحدّدة وموجزة.\n"+
+        "اجعل مهام دورات المياه والأرضيات والنفايات «يومي»، والزجاج والأثاث «أسبوعي»، "+
+        "والنظافة العميقة «شهري» أو «ربع سنوي».\n")+
+    "أعِد JSON فقط بلا أي شرح، بهذا الشكل تماماً:\n"+
+    '{"tasks":[{"name":"اسم المهمة","workType":"نظافة دورات المياه","freq":"يومي","floor":"","checklist":["بند","بند"]}]}');
+}
+
 async function doGen(){
   if(typeof _aiText!=="function"){ _toast("⚠ الذكاء الاصطناعي غير مُفعّل — فعّله من: الإدارة › إعدادات الذكاء الاصطناعي","warn"); return; }
   const bld  =(document.getElementById("co-gen-bld")||{}).value||"";
   const kind =((document.getElementById("co-gen-kind")||{}).value||"").trim();
   const notes=((document.getElementById("co-gen-notes")||{}).value||"").trim();
+  const mode =(document.getElementById("co-gen-mode")||{}).value||"full";
+  const spec =((document.getElementById("co-gen-spec")||{}).value||"").trim();
+  if(mode==="specific" && !spec){ _toast("⚠ اكتب وصف المهام المطلوب إضافتها أولاً","warn"); return; }
   const btn=document.getElementById("co-gen-btn");
   if(btn){ btn.disabled=true; btn.textContent="⏳ جارٍ التوليد…"; }
   _genErr="";
   try{
-    const prompt =
-      "أنت مدير عمليات نظافة مبانٍ محترف. أنشئ جدول مهام نظافة دورية لمبنى.\n"+
-      "المبنى: "+(bld||"غير محدّد")+"\n"+
-      "وصف المبنى/النشاط: "+(kind||"مبنى إداري عام")+"\n"+
-      (notes?"ملاحظات: "+notes+"\n":"")+
-      "أنواع العمل المسموحة (استخدم أحدها حرفياً في workType): "+WT_KEYS.join(" | ")+"\n"+
-      "التكرارات المسموحة (استخدم أحدها حرفياً في freq): "+FREQ_KEYS.join(" | ")+"\n"+
-      "أعطِ بين 8 و 12 مهمة تغطّي المناطق الرئيسية، بأسماء عربية مختصرة، ولكل مهمة "+
-      "بين 3 و 5 بنود فحصٍ عملية ومحدّدة وموجزة.\n"+
-      "اجعل مهام دورات المياه والأرضيات والنفايات «يومي»، والزجاج والأثاث «أسبوعي»، "+
-      "والنظافة العميقة «شهري» أو «ربع سنوي».\n"+
-      "أعِد JSON فقط بلا أي شرح، بهذا الشكل تماماً:\n"+
-      '{"tasks":[{"name":"اسم المهمة","workType":"نظافة دورات المياه","freq":"يومي","floor":"","checklist":["بند","بند"]}]}';
+    // في الوضع المحدد نمرّر مهامّ المبنى القائمة (من كل المشروع لا نطاق المستخدم)
+    // كي لا يقترح النموذج ما هو موجود — والبنية مقيّدة بالمبنى المختار إن اختير.
+    const existing = mode==="specific"
+      ? _tasks.filter(t=>!isDisabled(t) && (!bld || t.building===bld)).map(t=>t.name).filter(Boolean).slice(0,60)
+      : [];
+    const prompt=_genPrompt({mode, bld, kind, notes, spec, existing});
     let tasks=null, lastErr="";
     for(let attempt=1; attempt<=2 && !tasks; attempt++){
       let txt="";
@@ -1029,7 +1072,7 @@ async function doGen(){
         if(sal.length){ raw=sal; try{ console.warn("[cleaningOps] أُنقذت "+sal.length+" مهمة من ردٍّ غير قابلٍ للتحليل الكامل"); }catch(_e){} }
       }
       if(raw && raw.length){
-        tasks=raw.slice(0,30).map(x=>({
+        tasks=raw.slice(0, mode==="specific"?10:30).map(x=>({
           id:_uid(),
           name:String(x.name||"مهمة نظافة").trim().slice(0,90),
           building: bld,
@@ -1049,7 +1092,7 @@ async function doGen(){
     }
     let ok=0;
     for(const t of tasks){ if(await saveTask(t)) ok++; }
-    _audit("توليد جدول نظافة بالذكاء الاصطناعي", (bld||"كل المباني")+" — "+ok+" مهمة");
+    _audit("توليد جدول نظافة بالذكاء الاصطناعي", (bld||"كل المباني")+" — "+ok+" مهمة"+(mode==="specific"?" (مهام محددة)":""));
     _toast("✅ أُضيفت "+ok+" مهمة — راجعها وعدّلها كما تحب","success");
     _genForm=false; render();
   } finally {
@@ -2838,7 +2881,7 @@ else init();
 
 /* ════════════ الواجهة العامة ════════════ */
 window.cleaningOps = {
-  render, setView, refresh, toggleGen, doGen,
+  render, setView, refresh, toggleGen, doGen, genModeChanged,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   openDetail, closeDetail,
@@ -2860,7 +2903,7 @@ window.cleaningOps = {
   _buildClientReportHTML: buildClientReportHTML, _monthName: _monthName,
   _buildRoundReportHTML: buildRoundReportHTML,
   _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
-  _salvageObjects: _salvageObjects,
+  _salvageObjects: _salvageObjects, _genPrompt: _genPrompt,
   _svg: _svg,
   _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,
