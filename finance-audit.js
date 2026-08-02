@@ -36,7 +36,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9wn";
+  var MODULE_BUILD = "v18.9wo";
 
   // ── معايير العينة والأعلام (قابلة للتعديل من هنا — تُخزَّن مع كل دورة) ──
   var FA_PCT            = 10;    // نسبة العينة العشوائية من طلبات الشهر المغلقة
@@ -56,6 +56,7 @@
 
   // ── الحالة ──
   var _audits  = [];    // كل دورات التدقيق (من onSnapshot، الأحدث أولاً)
+  var _loaded  = false; // وصلت أول لقطة من Firestore؟ قبلها تُعرض حالة تحميل لا «لا دورات» المضللة
   var _unsub   = null;  // إلغاء الاشتراك
   var _curMonth= null;  // الدورة المفتوحة في شاشة التفاصيل (أو null = القائمة)
   var _busy    = false; // حارس ضد النقر المزدوج
@@ -349,10 +350,17 @@
     _unsub = db.collection(COLL()).onSnapshot(function(snap){
       _audits = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
         .sort(function(a,b){ return String(b.month||b.id).localeCompare(String(a.month||a.id)); });
+      _loaded = true;
       _navToggle();
       var pg=document.getElementById("page-finance-audit");
       if(pg && pg.classList.contains("active")) render();
-    }, function(e){ console.warn("finance-audit sync error:", e); });
+    }, function(e){
+      console.warn("finance-audit sync error:", e);
+      // خطأ المزامنة لا يترك الصفحة على «جارٍ التحميل» للأبد — تُعرض القائمة (الفارغة) بدلاً
+      _loaded = true;
+      var pg=document.getElementById("page-finance-audit");
+      if(pg && pg.classList.contains("active")) render();
+    });
   }
 
   // إظهار زر القائمة الجانبية لأصحاب الصلاحية فقط (الزر مخفي افتراضياً في HTML).
@@ -402,8 +410,27 @@
       '.fa-mq-row{display:flex;align-items:center;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px dashed var(--border)}'+
       '.fa-benchrow-hi td{background:color-mix(in srgb,var(--warn) 8%,var(--surface))}'+
       '.fa-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted)}'+
+      // مؤشر تحميل بنود التدقيق — قبل وصول أول لقطة من Firestore
+      '.fa-spin{width:34px;height:34px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--primary);margin:0 auto 12px;animation:fa-rot .8s linear infinite}'+
+      '@keyframes fa-rot{to{transform:rotate(360deg)}}'+
+      '@media (prefers-reduced-motion: reduce){ .fa-spin{animation:none} }'+
+      // نافذة المراجعة بحجم نافذة تفاصيل طلب الشراء (max-width:min(1180px,96vw))
+      // مع تمرير داخلي وارتفاع أقصى 92vh — showCustomModal النواة صندوقها 420px
+      // بلا max-height فيفيض المحتوى الطويل خارج الشاشة (أبلغها المستخدم من الآيباد).
+      // الأنماط inline على الصندوق فالتجاوز يحتاج !important، وورقة الوحدة تُحقن
+      // لاحقاً فتفوز (نفس درس v18.9wd). الخلفية من توكن الثيم بدل #fff الصلبة.
+      '#_dyn-inv-modal > div.fa-modal-wide{max-width:min(1180px,96vw)!important;width:96%!important;max-height:92vh;overflow-y:auto;background:var(--surface)!important;color:var(--text)}'+
+      '@media (max-width:560px){ #_dyn-inv-modal > div.fa-modal-wide{max-height:97vh;border-radius:12px} }'+
       '@media (max-width:560px){ .fa-stats{grid-template-columns:repeat(2,1fr)} }';
     document.head.appendChild(st);
+  }
+
+  // توسيع نافذة showCustomModal المفتوحة لحجم نافذة تفاصيل طلب الشراء — يُستدعى بعد فتحها
+  function _widenModal(){
+    try{
+      var box=document.querySelector('#_dyn-inv-modal > div');
+      if(box) box.classList.add("fa-modal-wide");
+    }catch(e){}
   }
 
   function _auditOf(month){ return _audits.find(function(a){ return (a.month||a.id)===month; }) || null; }
@@ -644,6 +671,15 @@
     _navToggle();
     if(!_canView()){
       host.innerHTML='<div class="card"><div class="fa-empty"><div class="fa-empty-ic">'+_icn("lock")+'</div>هذا القسم متاح للمالية والمشتريات والإدارة فقط.</div></div>';
+      return;
+    }
+    // قبل وصول أول لقطة من Firestore: مؤشر تحميل — لا «لا توجد دورات» المضللة
+    if(!_loaded){
+      host.innerHTML=_heroHtml(
+        "الرقابة المالية على المشتريات",
+        "عينة شهرية يحددها النظام (عشوائية حتمية + استثناءات آلية) لتدقيق المالية على الطلبات المنفَّذة.",
+        ""
+      )+'<div class="card"><div class="fa-empty"><div class="fa-spin"></div>جارٍ تحميل بنود التدقيق…</div></div>';
       return;
     }
     if(_curMonth){
@@ -948,6 +984,7 @@
         okText:"💾 حفظ المراجعة",
         onOk:function(){ return saveReview(poId); }
       });
+      _widenModal();   // بحجم نافذة تفاصيل طلب الشراء + تمرير داخلي (كانت تفيض خارج الشاشة)
     }catch(e){ _toast("⚠ تعذّر فتح نافذة المراجعة","warn"); }
   }
 

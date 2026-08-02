@@ -3485,6 +3485,16 @@ function financeAuditTests() {
   T("★ wn: أسباب الإدراج الآلي ظاهرة نصاً تحت الشارة (لا tooltip وحده — يعمل على اللمس)",
     src.includes("reasonsTxt") && src.includes("srcCell"));
 
+  // ── v18.9wo: مؤشر تحميل + نافذة المراجعة بحجم نافذة تفاصيل الطلب ──
+  T("★ wo: علم _loaded يمنع «لا توجد دورات» المضللة قبل أول لقطة (ويُرفع أيضاً عند خطأ المزامنة)",
+    src.includes("if(!_loaded){") && src.includes("جارٍ تحميل بنود التدقيق") &&
+    (src.match(/_loaded\s*=\s*true/g)||[]).length>=2);
+  T("★ wo: نافذة المراجعة تتوسّع لحجم نافذة تفاصيل الطلب مع تمرير داخلي",
+    src.includes("fa-modal-wide") && src.includes("max-width:min(1180px,96vw)!important") &&
+    src.includes("max-height:92vh;overflow-y:auto") && src.includes("_widenModal();"));
+  T("★ wo: دوّار التحميل يحترم prefers-reduced-motion وخلفية النافذة الموسّعة من توكن الثيم",
+    src.includes("prefers-reduced-motion") && src.includes("background:var(--surface)!important"));
+
   // ── مفاتيح الشهور (بلا مُعدِّلات Date — درس v18.9vt) ──
   T("مفتاح الشهر من ISO", FA._monthKey("2026-07-15T10:00:00Z") === "2026-07");
   T("الشهر السابق يعبر حدود السنة", FA._prevMonthKey("2026-01") === "2025-12" && FA._prevMonthKey("2026-08") === "2026-07");
