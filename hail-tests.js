@@ -3526,6 +3526,17 @@ function financeAuditTests() {
     src.includes("r.best && r.overTol") && src.includes("if(!hits.length){ host.innerHTML=\"\"; return; }") &&
     src.includes("قد يبرَّر الفرق بالجودة أو سرعة التوريد"));
 
+  // ── v18.9ws: تحصين onclick بـ_jq + الذاكرة المحلية تُحدَّث مع كل معاملة ──
+  T("★ ws: معاملات onclick النصية كلها عبر _jq لا esc (صنف ثغرة v18.9vu-H5 لا يعود)",
+    src.includes("function _jq(s)") && src.includes("_jq(s.poId)") && src.includes("_jq(month)") &&
+    !/onclick="[^"]*_esc\((?:s\.poId|month|a\.month)/.test(src));
+  T("★ ws: كل معاملة تُحدّث الذاكرة المحلية فوراً (closeAudit لا يُرفض ظلماً بانتظار اللقطة)",
+    src.includes("function _applyLocalDoc") &&
+    src.includes(".then(function(next){ _applyLocalDoc(month, next); return next; });"));
+  T("★ ws: الإدراج المتفائل للإنشاء من نفس المصدر (_applyLocalDoc — لا نسختين)",
+    src.includes("_applyLocalDoc(month, doc);") &&
+    !src.includes("_audits.unshift(Object.assign({id:month}, doc))"));
+
   // ── مفاتيح الشهور (بلا مُعدِّلات Date — درس v18.9vt) ──
   T("مفتاح الشهر من ISO", FA._monthKey("2026-07-15T10:00:00Z") === "2026-07");
   T("الشهر السابق يعبر حدود السنة", FA._prevMonthKey("2026-01") === "2025-12" && FA._prevMonthKey("2026-08") === "2026-07");
