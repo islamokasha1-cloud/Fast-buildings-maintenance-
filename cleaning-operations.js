@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9wd";
+const MODULE_BUILD = "v18.9we";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -495,7 +495,7 @@ function _render(){
   if(_editing)   { renderEditor(el); return; }
   if(_execFor)   { renderExec(el);   return; }
   if(_detailFor) { renderDetail(el); return; }
-  el.innerHTML = heroHTML() + (_genForm ? genFormHTML() : "") +
+  el.innerHTML = heroHTML() + (_genForm ? genFormHTML() : "") + (_launchForm ? launchFormHTML() : "") +
                  (_view==="quality" ? qualityHTML() : _view==="sup" ? supMapHTML() : _view==="board" ? boardHTML() : allTasksHTML());
 }
 function _onPage(){ const pg=document.getElementById("page-"+PAGE_ID); return !!pg && pg.classList.contains("active"); }
@@ -517,6 +517,7 @@ function heroHTML(){
         ${canEdit()?`<button class="btn btn-sm ${_view==='sup'?'co-seg-on':''}" onclick="cleaningOps.setView('sup')">${_svg('users')} المشرفون والمناطق</button>`:""}
         ${canEdit()?`<button class="btn btn-sm ${_view==='quality'?'co-seg-on':''}" onclick="cleaningOps.setView('quality')">${_svg('award')} جولات الجودة</button>`:""}
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.toggleGen()">${_svg('sparkles')} توليد بالذكاء الاصطناعي</button>`:""}
+        ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.toggleLaunch()">${_svg('calendar')} إطلاق المهام</button>`:""}
         <button class="btn btn-sm" onclick="cleaningOps.refresh()">${_svg('rotateCcw')} تحديث</button>
       </div>
     </div>`;
@@ -1031,6 +1032,63 @@ function renderExec(el){
     </div>`;
 }
 
+/* ── إطلاق المهام في وقت محدد ──
+   مرحلة تجهيز المباني: المهام تُنشأ اليوم لكن التشغيل الفعلي يبدأ لاحقاً، فيتراكم
+   «تأخير» وهمي بلا داعٍ. الإطلاق يعيد جدولة استحقاق كل مهامّ المبنى (أو كل المباني)
+   إلى تاريخ البدء الفعلي — فلا استحقاق ولا تأخير قبله، ويُصفَّر أي تأخيرٍ متراكم. */
+let _launchForm=false;
+function toggleLaunch(){ _launchForm=!_launchForm; if(_launchForm) _genForm=false; render(); }
+// المهامّ المستهدفة بالإطلاق — نقية للفحوص: النشطة، وللمبنى المحدد ("" = كل المباني)
+function _launchTargets(tasks, bld){
+  return (Array.isArray(tasks)?tasks:[]).filter(t=>!isDisabled(t) && (!bld || (t.building||"بلا مبنى")===bld));
+}
+function launchFormHTML(){
+  const byBld={};
+  _tasks.filter(t=>!isDisabled(t)).forEach(t=>{ const b=t.building||"بلا مبنى"; byBld[b]=(byBld[b]||0)+1; });
+  const blds=Object.keys(byBld).sort((a,b)=>String(a).localeCompare(String(b),"ar"));
+  const total=_tasks.filter(t=>!isDisabled(t)).length;
+  return `
+    <div class="card co-pane co-gen">
+      <div class="co-sec"><div class="co-sec-t">${_svg('calendar')} إطلاق المهام في وقت محدد</div></div>
+      <div class="co-grid2">
+        <div class="form-group"><label class="form-label">المبنى</label>
+          <select class="form-select" id="co-launch-bld">
+            <option value="">— كل المباني (${total} مهمة) —</option>
+            ${blds.map(b=>`<option value="${_esc(b)}">${_esc(b)} (${byBld[b]} مهمة)</option>`).join("")}
+          </select></div>
+        <div class="form-group"><label class="form-label">تاريخ بدء التنفيذ</label>
+          <input class="form-input" type="date" id="co-launch-date" min="${_today()}" value="${_today()}"></div>
+      </div>
+      <div class="co-actions">
+        <button class="btn btn-primary btn-sm" id="co-launch-btn" onclick="cleaningOps.doLaunch()">${_svg('checkCircle')} إطلاق</button>
+        <button class="btn btn-ghost btn-sm" onclick="cleaningOps.toggleLaunch()">إلغاء</button>
+      </div>
+      <div class="co-hint">تُعاد جدولة استحقاق كل مهامّ المبنى المختار إلى هذا التاريخ — فلا تُستحق (ولا يُحسب تأخير)
+      قبله، ويُصفَّر أي تأخيرٍ متراكمٍ أثناء التجهيز. الجمعة/السبت تُرحَّل تلقائياً لأول يوم عمل.</div>
+    </div>`;
+}
+async function doLaunch(){
+  if(!canEdit()){ _toast("⚠ لا تملك صلاحية إطلاق المهام","warn"); return; }
+  const bld=(document.getElementById("co-launch-bld")||{}).value||"";
+  const raw=((document.getElementById("co-launch-date")||{}).value||"").trim();
+  if(!raw){ _toast("⚠ اختر تاريخ بدء التنفيذ أولاً","warn"); return; }
+  if(raw<_today()){ _toast("⚠ التاريخ في الماضي — اختر اليوم أو تاريخاً قادماً","warn"); return; }
+  const date=_nextWorkingDay(raw);   // الجمعة/السبت ⟵ الأحد
+  const targets=_launchTargets(_tasks, bld);
+  if(!targets.length){ _toast("⚠ لا مهامّ نشطة في النطاق المختار","warn"); return; }
+  const btn=document.getElementById("co-launch-btn");
+  if(btn){ btn.disabled=true; btn.textContent="⏳ جارٍ الإطلاق…"; }
+  try{
+    let ok=0;
+    for(const t of targets){ if(await saveTask({id:t.id, nextDueDate:date})) ok++; }
+    _audit("إطلاق مهام النظافة", (bld||"كل المباني")+" — "+ok+" مهمة تبدأ "+date);
+    _toast("✅ أُطلقت "+ok+" مهمة — تبدأ الاستحقاق من "+date,"success");
+    _launchForm=false; render();
+  } finally {
+    const b=document.getElementById("co-launch-btn"); if(b){ b.disabled=false; b.textContent="إطلاق"; }
+  }
+}
+
 /* ── نموذج التوليد بالذكاء الاصطناعي ── */
 function genFormHTML(){
   const blds=_buildings();
@@ -1063,8 +1121,13 @@ function genFormHTML(){
         <div class="form-group"><label class="form-label">نوع المبنى/النشاط</label>
           <input class="form-input" id="co-gen-kind" placeholder="مثال: مبنى إداري ٤ أدوار، دورتا مياه لكل دور"></div>
       </div>
-      <div class="form-group"><label class="form-label">ملاحظات إضافية (اختياري)</label>
-        <input class="form-input" id="co-gen-notes" placeholder="مثال: لوبي بمساحة كبيرة، واجهة زجاجية، موقف سيارات"></div>
+      <div class="co-grid2">
+        <div class="form-group"><label class="form-label">ملاحظات إضافية (اختياري)</label>
+          <input class="form-input" id="co-gen-notes" placeholder="مثال: لوبي بمساحة كبيرة، واجهة زجاجية، موقف سيارات"></div>
+        <div class="form-group"><label class="form-label">تاريخ بدء التنفيذ (اختياري)</label>
+          <input class="form-input" type="date" id="co-gen-start" min="${_today()}">
+          <div class="co-hint" style="margin-top:4px">اتركه فارغاً للبدء فوراً — وبتحديده لا تُستحق المهام (ولا يُحسب تأخير) قبل هذا التاريخ.</div></div>
+      </div>
       <div class="co-actions">
         <button class="btn btn-primary btn-sm" id="co-gen-btn" onclick="cleaningOps.doGen()">${_svg('sparkles')} توليد</button>
         <button class="btn btn-ghost btn-sm" onclick="cleaningOps.toggleGen()">إلغاء</button>
@@ -1184,6 +1247,10 @@ async function doGen(){
   const notes=((document.getElementById("co-gen-notes")||{}).value||"").trim();
   const mode =(document.getElementById("co-gen-mode")||{}).value||"full";
   const spec =((document.getElementById("co-gen-spec")||{}).value||"").trim();
+  // تاريخ بدء التنفيذ (اختياري): المهام لا تُستحق قبله فلا يُحسب تأخيرٌ بلا داعٍ
+  // أثناء تجهيز المباني. الماضي يُقصّ لليوم، والعطلة تُرحَّل لأول يوم عمل.
+  const startRaw=((document.getElementById("co-gen-start")||{}).value||"").trim();
+  const start=_nextWorkingDay(startRaw && startRaw>_today() ? startRaw : _today());
   if(mode==="specific" && !spec){ _toast("⚠ اكتب وصف المهام المطلوب إضافتها أولاً","warn"); return; }
   const btn=document.getElementById("co-gen-btn");
   if(btn){ btn.disabled=true; btn.textContent="⏳ جارٍ التوليد…"; }
@@ -1237,7 +1304,7 @@ async function doGen(){
           freq: FREQ_KEYS.indexOf(x.freq)!==-1 ? x.freq : "يومي",
           assignee:"", desc:"",
           checklist: Array.isArray(x.checklist) ? x.checklist.slice(0,15).map(s=>String(s).trim().slice(0,120)).filter(Boolean) : [],
-          nextDueDate: _nextWorkingDay(_today()), lastExecuted:"", lastExecutedBy:"",
+          nextDueDate: start, lastExecuted:"", lastExecutedBy:"",
           disabled:false, createdAt:new Date().toISOString(), createdBy:_userName(), generatedByAI:true
         }));
       } else lastErr="تعذّر قراءة رد الذكاء الاصطناعي";
@@ -1248,7 +1315,7 @@ async function doGen(){
     }
     let ok=0;
     for(const t of tasks){ if(await saveTask(t)) ok++; }
-    _audit("توليد جدول نظافة بالذكاء الاصطناعي", (bld||"كل المباني")+" — "+ok+" مهمة"+(mode==="specific"?" (مهام محددة)":(ref?" (على منوال "+ref.name+")":"")));
+    _audit("توليد جدول نظافة بالذكاء الاصطناعي", (bld||"كل المباني")+" — "+ok+" مهمة"+(mode==="specific"?" (مهام محددة)":(ref?" (على منوال "+ref.name+")":""))+(start>_today()?" — يبدأ "+start:""));
     _toast("✅ أُضيفت "+ok+" مهمة — راجعها وعدّلها كما تحب","success");
     _genForm=false; render();
   } finally {
@@ -1257,10 +1324,10 @@ async function doGen(){
 }
 
 /* ════════════ معالِجات الواجهة ════════════ */
-function setView(v){ _view=v; _genForm=false; _detailFor=null; _detailLog=null; closeBldTasks();
+function setView(v){ _view=v; _genForm=false; _launchForm=false; _detailFor=null; _detailLog=null; closeBldTasks();
   if(v!=="quality"){ _editingRound=null; _roundDetail=null; _roundPhotos=[]; }   // غادرَ الجودة ⟵ لا تبقَ مسوّدةٌ معلّقة
   render(); }
-function toggleGen(){ _genForm=!_genForm; _genErr=""; render(); }
+function toggleGen(){ _genForm=!_genForm; _genErr=""; if(_genForm) _launchForm=false; render(); }
 async function refresh(){ await loadTasks(true); render(); _toast("✅ حُدِّث الجدول","success"); }
 
 function addTask(){
@@ -2798,7 +2865,7 @@ function _watchProject(){
       _cfg={supervisorBuildings:{}}; _cfgFor="";   // خريطةُ مشرفي السابق لا تحكم الجديد
       _editing=null; _execFor=null; _execState=[]; _execPhotos=[];
       _detailFor=null; _detailLog=null;            // تفاصيلُ مهمةِ السابق لا تبقى معروضة
-      _genForm=false; _genErr=""; _view="board"; closeBldTasks();
+      _genForm=false; _genErr=""; _launchForm=false; _view="board"; closeBldTasks();
       _rounds=[]; _roundsLoaded=false; _roundsFor=""; _roundsPromise=null;   // جولاتُ السابق لا تبقى
       _editingRound=null; _roundPhotos=[]; _roundDetail=null;
       // ارفع لوحات النظافة فوراً عند مغادرة مشروع النظافة — قبل معرفة نوع الجديد
@@ -3047,6 +3114,7 @@ else init();
 /* ════════════ الواجهة العامة ════════════ */
 window.cleaningOps = {
   render, setView, refresh, toggleGen, doGen, genModeChanged, openBldTasks, closeBldTasks, bldBack,
+  toggleLaunch, doLaunch,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   openDetail, closeDetail,
@@ -3068,7 +3136,7 @@ window.cleaningOps = {
   _buildClientReportHTML: buildClientReportHTML, _monthName: _monthName,
   _buildRoundReportHTML: buildRoundReportHTML,
   _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
-  _salvageObjects: _salvageObjects, _genPrompt: _genPrompt,
+  _salvageObjects: _salvageObjects, _genPrompt: _genPrompt, _launchTargets: _launchTargets,
   _cappedTaskListHTML: _cappedTaskListHTML, _BOARD_CARDS_PER_BLD: BOARD_CARDS_PER_BLD, _bldOrder: _bldOrder,
   _svg: _svg,
   _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
