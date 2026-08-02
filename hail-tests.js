@@ -3028,6 +3028,18 @@ function cleaningOpsTests() {
   T("wg: المهاجرة مقيّدة في سجلّ التدقيق",
     src.includes('_audit("إعادة تسمية مبنى في بيانات النظافة"'));
 
+  // ══ ★ v18.9wh: التغطية والمهامّ المتأخّرة بعمودين ══
+  T("★ wh: قاعدة العمودين معرّفة وقبل ميديا الجوال (وإلا غلبت الجوال)",
+    src.indexOf(".co-2col{display:grid;grid-template-columns:1fr 1fr") !== -1 &&
+    src.indexOf(".co-2col{display:grid;grid-template-columns:1fr 1fr") <
+      src.indexOf("@media(max-width:560px){.co-grid2{grid-template-columns:1fr}.co-2col{grid-template-columns:1fr}}"));
+  T("★ wh: التغطية بعمودين في اللوحة التنفيذية والمتابعة اليومية (موضعان)",
+    (src.match(/<div class="co-2col">\$\{cov\.map\(b=>\{/g) || []).length === 2);
+  T("★ wh: المهامّ المتأخّرة بعمودين",
+    /`<div class="co-2col">`\+late\.map\(t=>`/.test(src));
+  T("wh: هوامش عناصر التغطية داخل الشبكة مصفّرة (المسافة من gap وحده)",
+    src.includes(".co-2col .co-cov{margin-bottom:0}"));
+
   // ══ ★ v18.9wb: النافذة أصغر وفي المنتصف + ESC للإغلاق (ملاحظة المستخدم) ══
   T("★ wb: النافذة في منتصف الشاشة تماماً (align-items:center)",
     src.includes("z-index:1200;display:flex;align-items:center;justify-content:center"));
