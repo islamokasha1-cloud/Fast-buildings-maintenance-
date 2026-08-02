@@ -36,7 +36,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9wo";
+  var MODULE_BUILD = "v18.9wp";
 
   // ── معايير العينة والأعلام (قابلة للتعديل من هنا — تُخزَّن مع كل دورة) ──
   var FA_PCT            = 10;    // نسبة العينة العشوائية من طلبات الشهر المغلقة
@@ -61,6 +61,8 @@
   var _curMonth= null;  // الدورة المفتوحة في شاشة التفاصيل (أو null = القائمة)
   var _busy    = false; // حارس ضد النقر المزدوج
   var _mq      = [];    // مسودة العروض اليدوية داخل نافذة المراجعة المفتوحة
+  var _mqBusy  = false; // حارس ضد النقر المزدوج أثناء رفع مرفق الدليل
+  var _curPoIdForMq=""; // الطلب المفتوح في نافذة المراجعة — مسار تخزين مرفقات أدلته
 
   // ════════ أدوات مساعدة داخلية ════════
   function _now(){ return new Date().toISOString(); }
@@ -926,6 +928,14 @@
       '</table></div>';
   }
 
+  // رابط مرفق الدليل (صورة عرض المورد/PDF) — عبر safeUrl النواة، يفتح في تبويب جديد
+  function _mqFileLink(q){
+    if(!q || !q.fileUrl) return "";
+    var u=q.fileUrl;
+    try{ if(typeof safeUrl==="function") u=safeUrl(u); }catch(e){}
+    return ' <a href="'+u+'" target="_blank" rel="noopener" style="font-size:10px;color:var(--info);font-weight:700;white-space:nowrap">📎 '+_esc(q.fileName||"مرفق")+'</a>';
+  }
+
   function _mqListHtml(){
     if(!_mq.length) return '<div style="font-size:11px;color:var(--muted)">لا عروض يدوية مضافة.</div>';
     return _mq.map(function(q,i){
@@ -933,9 +943,20 @@
         '<b>'+_esc(q.supplier)+'</b>'+
         '<span class="fa-num" style="text-align:left">'+_fmt(q.price)+' ر.س</span>'+
         (q.note?'<span style="color:var(--muted)">— '+_esc(q.note)+'</span>':"")+
+        _mqFileLink(q)+
         '<button class="btn btn-ghost btn-sm" style="font-size:10px;margin-inline-start:auto" onclick="window.financeAudit.removeManualQuote('+i+')">✖</button>'+
       '</div>';
     }).join("");
+  }
+
+  // عرضٌ قرائي للعروض اليدوية المحفوظة على عينة (لنافذتي رد المشتريات والإغلاق):
+  // المشتريات تحتاج رؤية العرض البديل ودليله المرفق لتكتب مبررها على بيّنة.
+  function _mqReadonlyHtml(s){
+    var list=(s&&s.manualQuotes)||[];
+    if(!list.length) return "";
+    return '<div><b>عروض بديلة سجّلها التدقيق:</b> '+list.map(function(q){
+      return _esc(q.supplier)+' — <span class="fa-num" style="display:inline">'+_fmt(q.price)+'</span> ر.س'+_mqFileLink(q);
+    }).join(" · ")+'</div>';
   }
 
   function openReview(poId){
@@ -947,6 +968,7 @@
     if(!p){ _toast("⚠ الطلب غير موجود في الذاكرة — حدّث الصفحة","warn"); return; }
 
     _mq=(s.manualQuotes||[]).map(function(q){ return Object.assign({},q); });
+    _curPoIdForMq=poId;
     var bench=_benchForPO(p);
     var reasons=(s.reasons||[]).map(function(r){ return FLAG_LABELS[r]||r; });
 
@@ -955,12 +977,14 @@
       _benchHtml(p, bench)+
       '<div class="form-group" style="margin-top:6px"><label class="form-label">عروض بديلة يدوية (اتصال المدقّق بموردين)</label>'+
         '<div id="fa-mq-list" style="margin-bottom:6px">'+_mqListHtml()+'</div>'+
-        '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+
           '<input class="form-input" id="fa-mq-sup" placeholder="اسم المورد" style="flex:2;min-width:120px">'+
           '<input class="form-input" id="fa-mq-price" type="number" min="0" step="0.01" placeholder="السعر (ريال)" style="flex:1;min-width:90px">'+
           '<input class="form-input" id="fa-mq-note" placeholder="ملاحظة (اختياري)" style="flex:2;min-width:120px">'+
-          '<button class="btn btn-ghost btn-sm" onclick="window.financeAudit.addManualQuote()">➕ إضافة</button>'+
+          '<input class="form-input" id="fa-mq-file" type="file" accept="image/*,application/pdf" style="flex:2;min-width:150px;font-size:11px" title="دليل العرض: صورة عرض المورد أو PDF (اختياري)">'+
+          '<button class="btn btn-ghost btn-sm" id="fa-mq-add-btn" onclick="window.financeAudit.addManualQuote()">➕ إضافة</button>'+
         '</div>'+
+        '<div id="fa-mq-status" style="font-size:10px;color:var(--muted);margin-top:4px"></div>'+
       '</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
         '<div class="form-group"><label class="form-label">الحكم *</label>'+
@@ -988,16 +1012,61 @@
     }catch(e){ _toast("⚠ تعذّر فتح نافذة المراجعة","warn"); }
   }
 
-  function addManualQuote(){
+  // رفع دليل العرض اليدوي إلى Storage — نفس نمط رفع الفاتورة في النواة:
+  // انتظار المصادقة، ضغط الصورة فوق 300KB (PDF كما هو)، ثم put + getDownloadURL.
+  async function _uploadEvidence(file, poId){
+    if(typeof storage==="undefined" || !storage) throw new Error("no-storage");
+    try{ if(typeof _waitForFirebaseAuth==="function") await _waitForFirebaseAuth(); }catch(e){}
+    var isPdf=(file.type==="application/pdf");
+    var toUpload=file;
+    if(!isPdf && file.size>300*1024 && typeof _compressImage==="function"){
+      try{ toUpload=await _compressImage(file, 1800, 0.78); }catch(e){ toUpload=file; }
+    }
+    var ext=isPdf?"pdf":"jpg";
+    var ref=storage.ref("finance_audits/"+(_curMonth||"misc")+"/"+poId+"/mq_"+Date.now()+"."+ext);
+    var snap=await ref.put(toUpload, isPdf?{contentType:"application/pdf"}:{contentType:"image/jpeg"});
+    var url=await snap.ref.getDownloadURL();
+    return { url:url, name:(file.name||("دليل."+ext)) };
+  }
+
+  async function addManualQuote(){
+    if(_mqBusy) return;
     var sup=((document.getElementById("fa-mq-sup")||{}).value||"").trim();
     var price=parseFloat((document.getElementById("fa-mq-price")||{}).value);
     var note=((document.getElementById("fa-mq-note")||{}).value||"").trim();
+    var fileEl=document.getElementById("fa-mq-file");
+    var file=(fileEl && fileEl.files && fileEl.files[0])||null;
     if(!sup || !(price>0)){ _toast("⚠ أدخل اسم المورد وسعراً صحيحاً","warn"); return; }
-    _mq.push({supplier:sup, price:price, note:note, by:_me(), at:_now()});
+
+    var q={supplier:sup, price:price, note:note, fileUrl:"", fileName:"", by:_me(), at:_now()};
+    var status=document.getElementById("fa-mq-status");
+    var addBtn=document.getElementById("fa-mq-add-btn");
+    if(file){
+      _mqBusy=true;
+      if(addBtn){ addBtn.disabled=true; addBtn.textContent="⏳ جارٍ رفع الدليل..."; }
+      if(status) status.textContent="⏳ جارٍ رفع مرفق الدليل ("+_esc(file.name)+")…";
+      try{
+        var up=await _uploadEvidence(file, _curPoIdForMq||"");
+        q.fileUrl=up.url; q.fileName=up.name;
+        if(status) status.textContent="";
+      }catch(e){
+        _mqBusy=false;
+        if(addBtn){ addBtn.disabled=false; addBtn.textContent="➕ إضافة"; }
+        if(status) status.textContent="";
+        _toast(String(e&&e.message)==="no-storage"
+          ? "⚠ خدمة التخزين غير متاحة — أزل الملف لإضافة العرض بلا مرفق"
+          : "⚠ فشل رفع المرفق — تحقق من الاتصال وأعد المحاولة","warn");
+        return;   // لا يُضاف العرض بلا دليله المختار — حتى لا يظن المدقق أنه أُرفق
+      }
+      _mqBusy=false;
+      if(addBtn){ addBtn.disabled=false; addBtn.textContent="➕ إضافة"; }
+    }
+    _mq.push(q);
     var list=document.getElementById("fa-mq-list");
     if(list) list.innerHTML=_mqListHtml();
     var i1=document.getElementById("fa-mq-sup"), i2=document.getElementById("fa-mq-price"), i3=document.getElementById("fa-mq-note");
     if(i1) i1.value=""; if(i2) i2.value=""; if(i3) i3.value="";
+    if(fileEl) fileEl.value="";
   }
   function removeManualQuote(i){
     _mq.splice(i,1);
@@ -1056,6 +1125,7 @@
         '<div><b>حكم المالية:</b> '+_verdictBadge(s.verdict)+'</div>'+
         (s.findings?'<div><b>الملاحظات:</b> '+_esc(s.findings)+'</div>':"")+
         (s.recommendation?'<div><b>التوصية:</b> '+_esc(s.recommendation)+'</div>':"")+
+        _mqReadonlyHtml(s)+
       '</div>'+
       '<div class="form-group"><label class="form-label">رد قسم المشتريات (المبرر) *</label>'+
         '<textarea class="form-input" id="fa-reply" rows="3" placeholder="مثال: المورد الأرخص لا يوفر التوريد خلال 24 ساعة المطلوبة للموقع / جودة الصنف البديل أقل...">'+_esc(s.procurementReply||"")+'</textarea></div>';
@@ -1097,6 +1167,7 @@
       '<div class="fa-note" style="margin-bottom:10px;color:var(--text)">'+
         '<div><b>الحكم:</b> '+_verdictBadge(s.verdict)+'</div>'+
         (s.findings?'<div><b>ملاحظات المالية:</b> '+_esc(s.findings)+'</div>':"")+
+        _mqReadonlyHtml(s)+
         (s.procurementReply?'<div><b>رد المشتريات:</b> '+_esc(s.procurementReply)+' <span style="color:var(--muted);font-size:10px">('+_esc(s.procurementBy||"")+')</span></div>':"")+
       '</div>'+
       '<div class="form-group"><label class="form-label">قرار الإغلاق *</label>'+
@@ -1178,7 +1249,9 @@
         '<td style="padding:5px 8px;text-align:center;direction:ltr">'+_fmt(cost)+'</td>'+
         '<td style="padding:5px 8px">'+(v?v.l:"—")+(s.escalated?' (مُصعَّد)':'')+'</td>'+
         '<td style="padding:5px 8px;text-align:center;direction:ltr">'+((Number(s.potentialSaving)||0)>0?_fmt(s.potentialSaving):"—")+'</td>'+
-        '<td style="padding:5px 8px;font-size:10px">'+_esc(s.findings||"—")+(s.procurementReply?'<div style="color:#1d4ed8;margin-top:2px">رد المشتريات: '+_esc(s.procurementReply)+'</div>':"")+'</td>'+
+        '<td style="padding:5px 8px;font-size:10px">'+_esc(s.findings||"—")+
+          ((s.manualQuotes&&s.manualQuotes.length)?'<div style="color:#0e7490;margin-top:2px">عروض بديلة: '+s.manualQuotes.map(function(q){ return _esc(q.supplier)+" — "+_fmt(q.price)+" ر.س"+(q.fileUrl?' <a href="'+(typeof safeUrl==="function"?safeUrl(q.fileUrl):q.fileUrl)+'" style="color:#0e7490">📎 مرفق</a>':""); }).join(" · ")+'</div>':"")+
+          (s.procurementReply?'<div style="color:#1d4ed8;margin-top:2px">رد المشتريات: '+_esc(s.procurementReply)+'</div>':"")+'</td>'+
       '</tr>';
     }).join("");
     var html=

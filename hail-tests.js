@@ -3495,6 +3495,16 @@ function financeAuditTests() {
   T("★ wo: دوّار التحميل يحترم prefers-reduced-motion وخلفية النافذة الموسّعة من توكن الثيم",
     src.includes("prefers-reduced-motion") && src.includes("background:var(--surface)!important"));
 
+  // ── v18.9wp: مرفقات أدلة على العروض اليدوية (Storage) ──
+  T("★ wp: رفع الدليل بنمط النواة (مصادقة + ضغط صورة + finance_audits/ + getDownloadURL)",
+    src.includes("_waitForFirebaseAuth") && src.includes("_compressImage(file, 1800, 0.78)") &&
+    src.includes('storage.ref("finance_audits/"') && src.includes("getDownloadURL()"));
+  T("★ wp: فشل الرفع لا يضيف العرض (لا دليل وهمي) وحارس _mqBusy ضد النقر المزدوج",
+    src.includes("لا يُضاف العرض بلا دليله المختار") && src.includes("if(_mqBusy) return;"));
+  T("★ wp: رابط الدليل عبر safeUrl ويظهر في نافذتي الرد والإغلاق وتقرير الطباعة",
+    src.includes("function _mqFileLink") && src.includes("safeUrl") &&
+    (src.match(/_mqReadonlyHtml\(s\)/g)||[]).length>=2 && src.includes("📎 مرفق"));
+
   // ── مفاتيح الشهور (بلا مُعدِّلات Date — درس v18.9vt) ──
   T("مفتاح الشهر من ISO", FA._monthKey("2026-07-15T10:00:00Z") === "2026-07");
   T("الشهر السابق يعبر حدود السنة", FA._prevMonthKey("2026-01") === "2025-12" && FA._prevMonthKey("2026-08") === "2026-07");
