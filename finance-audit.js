@@ -36,7 +36,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9wr";
+  var MODULE_BUILD = "v18.9ws";
 
   // ── معايير العينة والأعلام (قابلة للتعديل من هنا — تُخزَّن مع كل دورة) ──
   var FA_PCT            = 10;    // نسبة العينة العشوائية من طلبات الشهر المغلقة
@@ -69,6 +69,10 @@
   function _now(){ return new Date().toISOString(); }
   function _me(){ try{ return (currentUser && currentUser.name) || "النظام"; }catch(e){ return "النظام"; } }
   function _esc(s){ try{ return esc(s); }catch(e){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); } }
+  // تهريب معاملات onclick داخل سياق سلسلة JS — درس v18.9vu (H5): esc تحوّل ' إلى
+  // &#39; فتُفكّ داخل الخاصية ويُكسر سياق الـ JS (XSS مخزّن). JQ النواة تهرّب \ و '
+  // أولاً ثم محارف HTML — فلا يكسر أي معرّفٍ خبيث السياقَ مهما كان مصدره.
+  function _jq(s){ try{ return _jsq(s); }catch(e){ return String(s==null?"":s).replace(/\\/g,"\\\\").replace(/'/g,"\\'").replace(/[&<>"]/g,function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); } }
   function _toast(m,t){ try{ toast(m,t); }catch(e){} }
   function _log(a,d){ try{ if(typeof logAudit==="function") logAudit(a,d); }catch(e){} }
   function _notify(t,b,id,ty){ try{ if(typeof addNotification==="function") addNotification(t,b,id,ty||"po"); }catch(e){} }
@@ -472,7 +476,18 @@
 
   function _auditOf(month){ return _audits.find(function(a){ return (a.month||a.id)===month; }) || null; }
 
-  // معاملة على وثيقة الدورة: تقرأ الطازج، تطبّق mutate على نسخة، تكتب.
+  // تحديث النسخة المحلية لدورةٍ بعد نجاح معاملة — فتعكس الشاشة الحالة الجديدة
+  // فوراً (closeAudit يقرأ المحلي!) ولا تنتظر لقطة onSnapshot؛ اللقطة توحّد لاحقاً.
+  // كشفته رحلة E2E: بلا هذا كان إغلاق الدورة يُرفض ظلماً («بنود مفتوحة») لأن
+  // الذاكرة المحلية بقيت على الحالة السابقة رغم نجاح كل المعاملات.
+  function _applyLocalDoc(month, doc){
+    _audits=_audits.filter(function(a){ return (a.month||a.id)!==month; });
+    _audits.unshift(Object.assign({id:month}, JSON.parse(JSON.stringify(doc))));
+    _audits.sort(function(a,b){ return String(b.month||b.id).localeCompare(String(a.month||a.id)); });
+  }
+
+  // معاملة على وثيقة الدورة: تقرأ الطازج، تطبّق mutate على نسخة، تكتب —
+  // وعند النجاح تحدّث النسخة المحلية فوراً.
   function _txAudit(month, mutate){
     if(typeof db==="undefined" || !db) return Promise.reject(new Error("no db"));
     var ref=db.collection(COLL()).doc(month);
@@ -484,7 +499,7 @@
         tx.set(ref, next, {merge:false});
         return next;
       });
-    });
+    }).then(function(next){ _applyLocalDoc(month, next); return next; });
   }
 
   // تعديل عينة واحدة داخل الدورة (بالدمج على الطازج — لا دهس لعمل متزامن).
@@ -592,8 +607,7 @@
       _log("بدء دورة رقابة مالية على المشتريات",
            _monthLabel(month)+" — عينة "+samples.length+"/"+pool.length+" (عشوائي "+pick.picked.length+" + آلي "+samples.filter(function(s){ return s.source==="auto"; }).length+")");
       // إدراجٌ متفائل محلياً حتى تظهر التفاصيل فوراً — onSnapshot يوحّدها لاحقاً
-      _audits=_audits.filter(function(a){ return (a.month||a.id)!==month; });
-      _audits.unshift(Object.assign({id:month}, doc));
+      _applyLocalDoc(month, doc);
       _curMonth=month; render();
       return true;
     }catch(e){
@@ -794,7 +808,7 @@
       var st=_auditStats(a);
       var open=a.status!=="closed";
       var pct=st.total?Math.round(st.closed/st.total*100):0;
-      return '<tr class="fa-click" onclick="window.financeAudit.open(\''+_esc(a.month||a.id)+'\')">'+
+      return '<tr class="fa-click" onclick="window.financeAudit.open(\''+_jq(a.month||a.id)+'\')">'+
         '<td style="font-weight:700">'+_monthLabel(a.month||a.id)+'</td>'+
         '<td style="text-align:center"><span class="fa-num">'+st.total+'</span> <span style="color:var(--muted);font-size:10px">من '+((a.pool&&a.pool.size)||"—")+'</span></td>'+
         '<td><div class="fa-progress-cell"><div class="fa-progress"><i style="width:'+pct+'%"></i></div><span class="fa-num" style="font-size:11px;color:var(--muted)">'+st.closed+'/'+st.total+'</span></div></td>'+
@@ -839,7 +853,7 @@
     if(canA && open && st.closed===st.total && st.total>0)
       tools+=' <button class="btn btn-sm" onclick="window.financeAudit.closeAudit()">'+_icn("checkCircle")+' إغلاق الدورة</button>';
     if(_isAdmin())
-      tools+=' <button class="btn btn-sm" onclick="window.financeAudit.removeAudit(\''+_esc(month)+'\')">'+_icn("trash")+' حذف</button>';
+      tools+=' <button class="btn btn-sm" onclick="window.financeAudit.removeAudit(\''+_jq(month)+'\')">'+_icn("trash")+' حذف</button>';
 
     var hero=_heroHtml(
       "دورة تدقيق "+_monthLabel(month),
@@ -870,15 +884,15 @@
       var p=_poMeta(s.poId);
       var cost=p?_actualCost(p):(Number(s.actualCost)||0);
       var vend=p?_vendorOf(p):(s.vendor||"");
-      var acts='<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="event.stopPropagation();try{openPurchaseDetail(\''+_esc(s.poId)+'\')}catch(e){}">'+_icn("receipt")+' الطلب</button>';
+      var acts='<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="event.stopPropagation();try{openPurchaseDetail(\''+_jq(s.poId)+'\')}catch(e){}">'+_icn("receipt")+' الطلب</button>';
       if(canA && open && (s.status==="pending"||s.status==="awaiting_procurement"))
-        acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openReview(\''+_esc(s.poId)+'\')">'+_icn("search")+' '+(s.status==="pending"?"مراجعة":"تعديل المراجعة")+'</button>';
+        acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openReview(\''+_jq(s.poId)+'\')">'+_icn("search")+' '+(s.status==="pending"?"مراجعة":"تعديل المراجعة")+'</button>';
       if(canR && open && s.status==="awaiting_procurement")
-        acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openReply(\''+_esc(s.poId)+'\')">💬 رد المشتريات</button>';
+        acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openReply(\''+_jq(s.poId)+'\')">💬 رد المشتريات</button>';
       if(canA && open && s.status==="responded")
-        acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openClose(\''+_esc(s.poId)+'\')">'+_icn("checkCircle")+' إغلاق البند</button>';
+        acts+=' <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.financeAudit.openClose(\''+_jq(s.poId)+'\')">'+_icn("checkCircle")+' إغلاق البند</button>';
       if(_isAdmin() && open)
-        acts+=' <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--danger)" title="حذف الطلب من العينة (المسؤول فقط)" onclick="event.stopPropagation();window.financeAudit.removeSample(\''+_esc(s.poId)+'\')">🗑</button>';
+        acts+=' <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--danger)" title="حذف الطلب من العينة (المسؤول فقط)" onclick="event.stopPropagation();window.financeAudit.removeSample(\''+_jq(s.poId)+'\')">🗑</button>';
       var savings=Number(s.potentialSaving)||0;
       // أسباب الإدراج الآلي ظاهرة نصاً تحت الشارة — الـ tooltip وحده لا يظهر على اللمس (آيباد/جوال)
       var reasonsTxt=_reasonsTitle(s);
