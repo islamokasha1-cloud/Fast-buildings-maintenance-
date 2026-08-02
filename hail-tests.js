@@ -2991,6 +2991,20 @@ function cleaningOpsTests() {
   T("we: نموذجا الإطلاق والتوليد لا يفتحان معاً",
     src.includes("if(_genForm) _launchForm=false") && src.includes("if(_launchForm) _genForm=false"));
 
+  // ══ ★ v18.9wf: صلاحية «تشغيل النظافة» في إدارة المستخدمين ══
+  // لم يكن للنظافة مفتاح صلاحية — فلا سبيل لمنح/حجب الوحدة عند إضافة مستخدم.
+  T("★ wf: مربّع «تشغيل النظافة» في نموذج إضافة المستخدم",
+    HTML.includes('id="perm-cleaning" checked> تشغيل النظافة'));
+  T("★ wf: مفتاح cleaning في مصفوفتَي الحفظ (إضافة + تعديل الصلاحيات)",
+    (HTML.match(/'tickets','ppm','assets','purchases','reports','kpi','globalPurchases','cleaning'/g) || []).length === 2);
+  T("★ wf: الخريطة تربط cleaning بصفحة cleaning-ops (حجبُ showPage المباشر)",
+    /cleaning:\s*\["cleaning-ops"\]/.test(HTML));
+  T("★ wf: تسمية «تشغيل النظافة» في شارات القائمة ونافذة التعديل",
+    (HTML.match(/cleaning:"تشغيل النظافة"/g) || []).length === 2);
+  T("★ wf: زرّ الوحدة يقرأ حاجب النواة بنفسه (يُحقن بعد applyPermissions)",
+    src.includes("window._blockedPages.has(PAGE_ID)") &&
+    /shouldShow = canView\(\) && isCleaningProject\(\) && !blocked/.test(src));
+
   // ══ ★ v18.9wb: النافذة أصغر وفي المنتصف + ESC للإغلاق (ملاحظة المستخدم) ══
   T("★ wb: النافذة في منتصف الشاشة تماماً (align-items:center)",
     src.includes("z-index:1200;display:flex;align-items:center;justify-content:center"));
