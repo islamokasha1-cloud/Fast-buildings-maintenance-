@@ -3505,6 +3505,16 @@ function financeAuditTests() {
     src.includes("function _mqFileLink") && src.includes("safeUrl") &&
     (src.match(/_mqReadonlyHtml\(s\)/g)||[]).length>=2 && src.includes("📎 مرفق"));
 
+  // ── v18.9wq: تسريع التحميل الأولي + حذف اسم مورد حقيقي من المثال ──
+  T("★ wq: get() فوري يوازي onSnapshot (مصافحة Watch البطيئة لا تحجب المحتوى)",
+    src.includes("db.collection(COLL()).get().then(function(snap){ if(!_loaded) _applySnap(snap); })") &&
+    src.includes("_unsub = db.collection(COLL()).onSnapshot(_applySnap"));
+  T("★ wq: مهلة أمان 8 ثوانٍ + رسالة اتصال صادقة مع إعادة المحاولة (لا دوّار أبدي ولا «لا دورات» مضللة)",
+    src.includes("}, 8000);") && src.includes("_connIssue = true") &&
+    src.includes("تعذّر تحميل بيانات التدقيق") && src.includes("retryLoad"));
+  T("★ wq: اسم المورد الحقيقي «عالم الريتاج» حُذف من الأمثلة (لا يعود)",
+    !src.includes("عالم الريتاج"));
+
   // ── مفاتيح الشهور (بلا مُعدِّلات Date — درس v18.9vt) ──
   T("مفتاح الشهر من ISO", FA._monthKey("2026-07-15T10:00:00Z") === "2026-07");
   T("الشهر السابق يعبر حدود السنة", FA._prevMonthKey("2026-01") === "2025-12" && FA._prevMonthKey("2026-08") === "2026-07");
