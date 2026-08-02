@@ -3468,6 +3468,14 @@ function financeAuditTests() {
   T("بند بلا مرجع: لا بديل ولا وفر", bench.rows[1].best === null && bench.rows[1].saving === 0);
   T("تجاوز التسامح يُعلَّم (12 > 10×1.05)", bench.rows[0].overTol === true);
 
+  // ── v18.9wm: طبقة العرض بلغة تصميم المنصة (طلب المستخدم) ──
+  T("★ wm: جملة «هل كان هناك مورد أرخص» حُذفت من الواجهة (طلب المستخدم — لا تعود)",
+    !src.includes("هل كان هناك مورد أرخص"));
+  T("★ wm: هيرو page-hero وبطاقات stat-card من لغة النواة",
+    src.includes('class="page-hero"') && src.includes('class="stat-card"') && src.includes('st.id="fa-css"'));
+  T("★ wm: لا ألوان hex مثبّتة لحبوب الحالة/التنبيهات (توكنز الثيم عبر color-mix — لا تنكسر في الداكن)",
+    !/#fef3c7|#dcfce7|#fee2e2|#dbeafe|#fef2f2|#fff7ed|#fecaca/.test(src) && src.includes("color-mix(in srgb,var(--pc"));
+
   // ── مفاتيح الشهور (بلا مُعدِّلات Date — درس v18.9vt) ──
   T("مفتاح الشهر من ISO", FA._monthKey("2026-07-15T10:00:00Z") === "2026-07");
   T("الشهر السابق يعبر حدود السنة", FA._prevMonthKey("2026-01") === "2025-12" && FA._prevMonthKey("2026-08") === "2026-07");
