@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9vz";
+const MODULE_BUILD = "v18.9wa";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -610,13 +610,12 @@ function boardHTML(){
       <div class="co-empty-s">كل المهام ضمن مواعيدها.</div></div></div>`}`;
 }
 
-/* ── عرضٌ مضغوط: بطاقتان لكل مبنى + زرّ توسيع/طيّ ──
+/* ── عرضٌ مضغوط: بطاقتان لكل مبنى + نافذةُ «مهام أخرى» ──
    الترتيب بالأولوية (متأخّر ← مستحقّ ← منجز) يسبق القصّ، فالظاهر دوماً هو
-   الأكثر إلحاحاً والمطويُّ أقلُّه. الحالة لكل مبنى (تنجو من إعادة الرسم بعد
-   التنفيذ/التحديث) وتُصفَّر مع تبديل المشروع. المفتاح يُمرَّر بالـ URI-encoding
-   فلا يكسر onclick مهما كانت محارف اسم المبنى. */
+   الأكثر إلحاحاً. زرُّ «عرض N مهام أخرى» يفتح **نافذةً منبثقة** بكل مهامّ
+   المبنى (بطلب المستخدم — لا تمدُّدَ لأسفل يُطيل الصفحة). المفتاح يُمرَّر
+   بالـ URI-encoding فلا يكسر onclick مهما كانت محارف اسم المبنى. */
 const BOARD_CARDS_PER_BLD = 2;
-let _expandedBlds = {};
 /* ترتيب مباني اللوحة: الأكثر تأخّراً أولاً (فجوة التغطية تتصدّر)، ثم الأكثر
    متبقّياً اليوم، وعند التعادل أبجدياً — بدل الترتيب الأبجدي الصِرف الذي كان
    يدفن المبنى المتعثّر وسط القائمة. مصدرٌ واحد للوحة اليوم والمتابعة اليومية. */
@@ -629,19 +628,44 @@ function _bldOrder(byB){
   return Object.keys(byB).sort((a,b)=>
     (ov[b]-ov[a]) || (due[b]-due[a]) || String(a).localeCompare(String(b),"ar"));
 }
-function toggleBld(key){
-  const b=decodeURIComponent(key);
-  _expandedBlds[b]=!_expandedBlds[b];
-  render();        // لوحة اليوم (يتجاهل نفسه إن لم تكن الصفحة معروضة)
-  mountDaily();    // المتابعة اليومية (تتحقّق من وجود صفحتها بنفسها)
-}
 function _cappedTaskListHTML(b, list){
-  const open=!!_expandedBlds[b];
-  const shown=open?list:list.slice(0,BOARD_CARDS_PER_BLD);
+  const shown=list.slice(0,BOARD_CARDS_PER_BLD);
   const rest=list.length-BOARD_CARDS_PER_BLD;
   return `<div class="co-tasklist">${shown.map(taskCardHTML).join("")}</div>`+
-    (rest>0?`<button class="btn btn-ghost btn-sm co-more-btn" onclick="event.stopPropagation();cleaningOps.toggleBld('${encodeURIComponent(b)}')">${
-      open?"▲ طيّ — أول بطاقتين فقط":"▼ عرض "+rest+" "+(rest===1?"مهمة أخرى":"مهام أخرى")}</button>`:"");
+    (rest>0?`<button class="btn btn-ghost btn-sm co-more-btn" onclick="event.stopPropagation();cleaningOps.openBldTasks('${encodeURIComponent(b)}')">${
+      "▢ عرض "+rest+" "+(rest===1?"مهمة أخرى":"مهام أخرى")}</button>`:"");
+}
+/* نافذة مهامّ المبنى — تُركَّب على body مباشرةً فتعمل من لوحة اليوم والمتابعة
+   اليومية معاً. القائمة تُبنى عند الفتح من نفس مصدر اللوحة (مهامّ اليوم للمبنى
+   بترتيب الأولوية). أيُّ إجراءٍ داخلها (تنفيذ/تحرير/تفاصيل) يغلقها أولاً ليظهر
+   ما فتحه — بمستمعِ capture فلا يعطّله stopPropagation في أزرار البطاقة. */
+const BLD_MODAL_ID = "co-bld-modal";
+function closeBldTasks(){ const el=document.getElementById(BLD_MODAL_ID); if(el&&el.remove) el.remove(); }
+function openBldTasks(key){
+  closeBldTasks();
+  const b=decodeURIComponent(key);
+  const list=visibleTasks()
+    .filter(t=>!isDisabled(t) && (isDue(t)||doneToday(t)) && ((t.building||"بلا مبنى")===b))
+    .sort((x,y)=>dueStatus(x).sort-dueStatus(y).sort);
+  if(!list.length) return;
+  const d=list.filter(doneToday).length;
+  const ov=document.createElement("div");
+  ov.id=BLD_MODAL_ID; ov.className="co-bld-overlay"; ov.dir="rtl";
+  ov.innerHTML=`
+    <div class="co-bld-modal card" role="dialog" aria-label="${_esc(b)}">
+      <div class="co-sec">
+        <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
+        <span class="ppm-due-badge ${d===list.length?'ok':'today'}">${d}/${list.length} منجزة</span>
+        <button class="btn btn-ghost btn-sm co-bld-close" onclick="cleaningOps.closeBldTasks()">✕ إغلاق</button>
+      </div>
+      <div class="co-tasklist">${list.map(taskCardHTML).join("")}</div>
+    </div>`;
+  ov.addEventListener("click", e=>{ if(e.target===ov) closeBldTasks(); });                  // خلفية = إغلاق
+  ov.addEventListener("click", e=>{
+    const el=(e.target&&e.target.closest)?e.target.closest("button, .ppm-card"):null;
+    if(el) setTimeout(closeBldTasks,0);   // بعد تنفيذ onclick البطاقة نفسه
+  }, true);
+  document.body.appendChild(ov);
 }
 
 /* تجميعُ المهامّ حسب المبنى في شبكةٍ متجاورة — يستفيد من عرض الشاشة بدل صفٍّ لكل مهمة */
@@ -1180,7 +1204,7 @@ async function doGen(){
 }
 
 /* ════════════ معالِجات الواجهة ════════════ */
-function setView(v){ _view=v; _genForm=false; _detailFor=null; _detailLog=null;
+function setView(v){ _view=v; _genForm=false; _detailFor=null; _detailLog=null; closeBldTasks();
   if(v!=="quality"){ _editingRound=null; _roundDetail=null; _roundPhotos=[]; }   // غادرَ الجودة ⟵ لا تبقَ مسوّدةٌ معلّقة
   render(); }
 function toggleGen(){ _genForm=!_genForm; _genErr=""; render(); }
@@ -2721,7 +2745,7 @@ function _watchProject(){
       _cfg={supervisorBuildings:{}}; _cfgFor="";   // خريطةُ مشرفي السابق لا تحكم الجديد
       _editing=null; _execFor=null; _execState=[]; _execPhotos=[];
       _detailFor=null; _detailLog=null;            // تفاصيلُ مهمةِ السابق لا تبقى معروضة
-      _genForm=false; _genErr=""; _view="board"; _expandedBlds={};
+      _genForm=false; _genErr=""; _view="board"; closeBldTasks();
       _rounds=[]; _roundsLoaded=false; _roundsFor=""; _roundsPromise=null;   // جولاتُ السابق لا تبقى
       _editingRound=null; _roundPhotos=[]; _roundDetail=null;
       // ارفع لوحات النظافة فوراً عند مغادرة مشروع النظافة — قبل معرفة نوع الجديد
@@ -2819,6 +2843,10 @@ function injectCSS(){
    بلا نقطةِ كسرٍ ثابتة، فلا تنحشر البطاقات ولا تُهدَر مساحةُ الشاشة. */
 .co-tasklist{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;align-items:start}
 .co-more-btn{width:100%;margin-top:8px;justify-content:center;font-weight:700}
+.co-bld-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:1200;display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow-y:auto}
+.co-bld-modal{width:min(960px,100%);max-height:88vh;overflow-y:auto;margin:0}
+.co-bld-modal .co-sec{position:sticky;top:0;background:var(--surface);z-index:1;padding-top:2px}
+.co-bld-close{margin-inline-start:auto;flex:none}
 .co-tasklist>.ppm-card{margin-bottom:0}
 /* بطاقاتٌ مصغَّرة داخل صفحات النظافة وحدها — لا تمسّ .ppm-card في صفحة الوقائية */
 #page-${PAGE_ID} .ppm-card,#${EXEC_ID} .ppm-card,#${DAILY_ID} .ppm-card{padding:9px 11px;margin-bottom:7px;border-radius:11px}
@@ -2961,7 +2989,7 @@ else init();
 
 /* ════════════ الواجهة العامة ════════════ */
 window.cleaningOps = {
-  render, setView, refresh, toggleGen, doGen, genModeChanged, toggleBld,
+  render, setView, refresh, toggleGen, doGen, genModeChanged, openBldTasks, closeBldTasks,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   openDetail, closeDetail,
