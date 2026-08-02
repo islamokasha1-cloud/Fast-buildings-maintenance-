@@ -2567,7 +2567,8 @@ function cleaningOpsTests() {
     !/\.co-groups\{[^}]*auto-fill/.test(src));
   T("★ شبكةٌ داخليةٌ للمهامّ داخل بطاقة المبنى (تكيُّفٌ مع عرضها)",
     /\.co-tasklist\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(280px,1fr\)\)/.test(src) &&
-    /<div class="co-tasklist">\$\{list\.map\(taskCardHTML\)/.test(src));
+    // منذ v18.9vx تمرّ القائمة عبر _cappedTaskListHTML (بطاقتان + توسيع) — الشبكة نفسها باقية
+    /<div class="co-tasklist">\$\{shown\.map\(taskCardHTML\)/.test(src));
   T("★ أزرارُ البطاقة في سطرٍ مستقلٍّ (لا تخنق العنوان في البطاقة الضيّقة)",
     /\.co-card-act\{[^}]*justify-content:flex-end;[\s\S]{0,80}border-top:1px dashed/.test(src));
   T("الشارات لا تُكسَر داخلياً والصفُّ يلتفّ بينها",
@@ -2904,6 +2905,43 @@ function cleaningOpsTests() {
     src.includes("byBld[b].length-byBld[a].length") && src.includes("t.building!==bld"));
   T("vw: منتقي المرجع يُخفى في وضع «مهام محددة»",
     src.includes('m==="specific"||!hasRefs'));
+
+  // ══ ★ v18.9vx: عرض مضغوط — بطاقتان لكل مبنى + زرّ توسيع/طيّ ══
+  // اللوحة كانت تعرض كل بطاقات المبنى فتطول وتتفاوت الأعمدة. الآن أول بطاقتين
+  // بالأولوية + زرّ يوسّع البقية ويطويها — مصدرٌ واحد للوحة اليوم والمتابعة اليومية.
+  T("★ vx: _cappedTaskListHTML مكشوفة وسقف البطاقات 2",
+    CO && typeof CO._cappedTaskListHTML === "function" && CO._BOARD_CARDS_PER_BLD === 2);
+  T("★ vx: الشاشتان تمرّان عبر المصدر الواحد (لا قائمة كاملة متبقّية)",
+    (src.match(/\$\{_cappedTaskListHTML\(b, list\)\}/g) || []).length === 2 &&
+    !src.includes('<div class="co-tasklist">${list.map(taskCardHTML).join("")}</div>'));
+  if (CO && typeof CO._cappedTaskListHTML === "function") {
+    const five = Array.from({ length: 5 }, (_, i) =>
+      mk({ id: "c" + i, name: "مهمة " + i, building: "مبنى الفحص", nextDueDate: today }));
+    const closed = CO._cappedTaskListHTML("مبنى الفحص", five);
+    T("★ vx: افتراضياً بطاقتان فقط وزرّ «عرض 3 مهام أخرى»",
+      (closed.match(/ppm-card/g) || []).length === 2 && closed.includes("عرض 3 مهام أخرى"),
+      "cards=" + (closed.match(/ppm-card/g) || []).length);
+    CO.toggleBld(encodeURIComponent("مبنى الفحص"));
+    const opened = CO._cappedTaskListHTML("مبنى الفحص", five);
+    T("★ vx: بعد التوسيع تظهر الخمس كلّها وزرّ «طيّ»",
+      (opened.match(/ppm-card/g) || []).length === 5 && opened.includes("طيّ"),
+      "cards=" + (opened.match(/ppm-card/g) || []).length);
+    CO.toggleBld(encodeURIComponent("مبنى الفحص"));
+    T("vx: الطيّ يعيد بطاقتين",
+      (CO._cappedTaskListHTML("مبنى الفحص", five).match(/ppm-card/g) || []).length === 2);
+    T("vx: مبنيان أو أقل = لا زرّ (لا ضجيج)",
+      !CO._cappedTaskListHTML("مبنى ب", five.slice(0, 2)).includes("co-more-btn"));
+    T("vx: مهمة زائدة واحدة تُصاغ مفردةً",
+      CO._cappedTaskListHTML("مبنى ج", five.slice(0, 3)).includes("عرض 1 مهمة أخرى"));
+  }
+  T("★ vx: مفتاح المبنى بالـ URI-encoding (اسمٌ بأي محارف لا يكسر onclick)",
+    src.includes("cleaningOps.toggleBld('${encodeURIComponent(b)}')") &&
+    src.includes("decodeURIComponent(key)"));
+  T("vx: حالة التوسيع تُصفَّر مع تبديل المشروع",
+    src.includes('_view="board"; _expandedBlds={};'));
+  T("vx: التبديل يعيد رسم اللوحة والمتابعة اليومية معاً",
+    /function toggleBld\(key\)\{[\s\S]{0,220}?render\(\);[\s\S]{0,80}?mountDaily\(\);/.test(src));
+  T("vx: زرّ التوسيع له قاعدة عرضٍ كاملة", src.includes(".co-more-btn{width:100%"));
 
   // ══ ★ صنفُ «الأيقونة العملاقة» — معالجةٌ عند المنبع بعد تكرّره ثلاث مرّات ══
   // _svgIcon في النواة يُرجع <svg> بلا width/height، وSVG بلا أبعادٍ داخل حاوية flex
