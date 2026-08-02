@@ -3005,6 +3005,29 @@ function cleaningOpsTests() {
     src.includes("window._blockedPages.has(PAGE_ID)") &&
     /shouldShow = canView\(\) && isCleaningProject\(\) && !blocked/.test(src));
 
+  // ══ ★ v18.9wg: إعادة تسمية مبنى تُهاجر بيانات النظافة تلقائياً ══
+  // الاسم مخزّن نصاً في المهام/السجل/الربط/تقييمات الجولات — تغييره في لوحة
+  // الإدارة كان يترك المهام على الاسم القديم (بلاغ المستخدم).
+  T("★ wg: النواة تُبلغ الوحدة بعد حفظ تعديل اسم المبنى",
+    HTML.includes('window.cleaningOps.onBuildingRenamed==="function"') &&
+    HTML.includes("window.cleaningOps.onBuildingRenamed(oldName,newName)"));
+  T("★ wg: onBuildingRenamed مكشوفة ومسوّرة بمشروع النظافة",
+    CO && typeof CO.onBuildingRenamed === "function" &&
+    /onBuildingRenamed\(oldName, newName\)\{[\s\S]{0,400}?if\(!isCleaningProject\(\)\) return;/.test(src));
+  T("★ wg: المهاجرة تشمل المهام والسجلّ بالاستعلام بالاسم",
+    (src.match(/\.where\("building","==",oldName\)\.get\(\)/g) || []).length === 2);
+  T("★ wg: المهاجرة تشمل ربط المشرفين (استبدال في المصفوفة ثم حفظ)",
+    /arr\.indexOf\(oldName\);\s*\n?\s*if\(i!==-1\)\{ arr\[i\]=newName; supChanged=true; \}/.test(src) &&
+    src.includes("if(supChanged) await saveCfg(map)"));
+  T("★ wg: المهاجرة تشمل تقييمات الجولات (تعديل الحامل للاسم وحده)",
+    src.includes("if(!rs.some(x=>x && x.building===oldName)) continue;") &&
+    src.includes("Object.assign({},x,{building:newName})"));
+  T("wg: الذاكرة المحلية تُحدَّث (مهامّ وجولات) والفشل يُنبّه",
+    src.includes("_tasks.forEach(t=>{ if(t && t.building===oldName) t.building=newName; })") &&
+    src.includes("تعذّرت مهاجرة بعض بيانات النظافة"));
+  T("wg: المهاجرة مقيّدة في سجلّ التدقيق",
+    src.includes('_audit("إعادة تسمية مبنى في بيانات النظافة"'));
+
   // ══ ★ v18.9wb: النافذة أصغر وفي المنتصف + ESC للإغلاق (ملاحظة المستخدم) ══
   T("★ wb: النافذة في منتصف الشاشة تماماً (align-items:center)",
     src.includes("z-index:1200;display:flex;align-items:center;justify-content:center"));

@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9wf";
+const MODULE_BUILD = "v18.9wg";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -1030,6 +1030,69 @@ function renderExec(el){
       </div>
       <div class="co-hint">التسجيل ينقل الاستحقاق التالي بمقدار تكرار المهمة من اليوم، ويُحفظ في سجلّ التنفيذ.</div>
     </div>`;
+}
+
+/* ══ مهاجرة اسم مبنى معاد تسميته ══
+   النواة تخزّن أسماء المباني قائمةً في الإعدادات، وبيانات النظافة تخزّن الاسم **نصاً**
+   في أربعة مواضع: المهام (t.building) وسجلّ التنفيذ (r.building — تغطية الشهر وتقرير
+   العميل يجمعان به) وربط المشرفين (supervisorBuildings) وتقييمات جولات الجودة
+   (ratings[].building). فتغييرُ الاسم في لوحة الإدارة كان يترك المهامَّ على الاسم القديم
+   (أبلغها المستخدم). النواة تستدعينا بعد حفظ التعديل (adminSaveBuilding) فنُهاجر
+   المواضع الأربعة دفعةً واحدة — لا شيء يحدث في غير مشاريع النظافة. */
+async function onBuildingRenamed(oldName, newName){
+  try{
+    oldName=String(oldName||"").trim(); newName=String(newName||"").trim();
+    if(!oldName || !newName || oldName===newName) return;
+    if(!isCleaningProject()) return;
+    const database=_db(); if(!database) return;
+    let nTasks=0, nLogs=0, nRounds=0, supChanged=false;
+    // ١) المهام
+    const tCol=tasksCol();
+    if(tCol){
+      const snap=await database.collection(tCol).where("building","==",oldName).get();
+      for(const d of snap.docs){ await d.ref.set({building:newName},{merge:true}); nTasks++; }
+      _tasks.forEach(t=>{ if(t && t.building===oldName) t.building=newName; });
+    }
+    // ٢) سجلّ التنفيذ — كي لا تنقسم تغطية الشهر وتقرير العميل على اسمين
+    const lCol=logCol();
+    if(lCol){
+      const snap=await database.collection(lCol).where("building","==",oldName).get();
+      for(const d of snap.docs){ await d.ref.set({building:newName},{merge:true}); nLogs++; }
+    }
+    // ٣) ربط المشرفين بالمباني
+    await loadCfg(true);
+    const map=_cfg.supervisorBuildings||{};
+    Object.keys(map).forEach(s=>{
+      const arr=Array.isArray(map[s])?map[s]:[];
+      const i=arr.indexOf(oldName);
+      if(i!==-1){ arr[i]=newName; supChanged=true; }
+    });
+    if(supChanged) await saveCfg(map);
+    // ٤) جولات الجودة — ratings مصفوفةُ كائنات فلا استعلامَ عليها؛ نقرأ الجولات
+    //    (عددها صغير بطبيعته) ونعدّل ما يحمل الاسمَ القديم وحده
+    const qCol=qualityCol();
+    if(qCol){
+      const snap=await database.collection(qCol).get();
+      for(const d of snap.docs){
+        const r=d.data()||{};
+        const rs=Array.isArray(r.ratings)?r.ratings:[];
+        if(!rs.some(x=>x && x.building===oldName)) continue;
+        const fixed=rs.map(x=>(x && x.building===oldName)?Object.assign({},x,{building:newName}):x);
+        await d.ref.set({ratings:fixed},{merge:true}); nRounds++;
+      }
+      _rounds.forEach(r=>{
+        if(r && Array.isArray(r.ratings)) r.ratings.forEach(x=>{ if(x && x.building===oldName) x.building=newName; });
+      });
+    }
+    _audit("إعادة تسمية مبنى في بيانات النظافة",
+      oldName+" → "+newName+" — "+nTasks+" مهمة، "+nLogs+" سجلّ، "+nRounds+" جولة"+(supChanged?"، وربط المشرفين":""));
+    if(nTasks||nLogs||nRounds||supChanged)
+      _toast("✅ حُدّثت بيانات النظافة للاسم الجديد ("+nTasks+" مهمة)","success");
+    render();
+  }catch(e){
+    console.warn("cleaningOps/onBuildingRenamed",e);
+    _toast("⚠ تعذّرت مهاجرة بعض بيانات النظافة للاسم الجديد — أعد المحاولة من لوحة الإدارة","warn");
+  }
 }
 
 /* ── إطلاق المهام في وقت محدد ──
@@ -3119,7 +3182,7 @@ else init();
 /* ════════════ الواجهة العامة ════════════ */
 window.cleaningOps = {
   render, setView, refresh, toggleGen, doGen, genModeChanged, openBldTasks, closeBldTasks, bldBack,
-  toggleLaunch, doLaunch,
+  toggleLaunch, doLaunch, onBuildingRenamed,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   openDetail, closeDetail,
