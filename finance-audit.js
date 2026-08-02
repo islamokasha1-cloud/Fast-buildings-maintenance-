@@ -36,7 +36,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9wp";
+  var MODULE_BUILD = "v18.9wq";
 
   // ── معايير العينة والأعلام (قابلة للتعديل من هنا — تُخزَّن مع كل دورة) ──
   var FA_PCT            = 10;    // نسبة العينة العشوائية من طلبات الشهر المغلقة
@@ -57,6 +57,7 @@
   // ── الحالة ──
   var _audits  = [];    // كل دورات التدقيق (من onSnapshot، الأحدث أولاً)
   var _loaded  = false; // وصلت أول لقطة من Firestore؟ قبلها تُعرض حالة تحميل لا «لا دورات» المضللة
+  var _connIssue=false; // تعذّر الوصول للبيانات (خطأ/مهلة)؟ تُعرض رسالة اتصال صادقة لا «لا دورات»
   var _unsub   = null;  // إلغاء الاشتراك
   var _curMonth= null;  // الدورة المفتوحة في شاشة التفاصيل (أو null = القائمة)
   var _busy    = false; // حارس ضد النقر المزدوج
@@ -345,24 +346,54 @@
      المزامنة والتخزين
      ════════════════════════════════════════════════════════════════════ */
 
+  function _rerenderIfActive(){
+    var pg=document.getElementById("page-finance-audit");
+    if(pg && pg.classList.contains("active")) render();
+  }
+
+  function _applySnap(snap){
+    _audits = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
+      .sort(function(a,b){ return String(b.month||b.id).localeCompare(String(a.month||a.id)); });
+    _loaded = true; _connIssue = false;
+    _navToggle();
+    _rerenderIfActive();
+  }
+
   function startSync(){
     _navToggle();
     if(typeof db==="undefined" || !db) return;
     if(_unsub) return; // idempotent — المستمعون العامون يُركَّبون مرة واحدة (v18.9sz)
-    _unsub = db.collection(COLL()).onSnapshot(function(snap){
-      _audits = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
-        .sort(function(a,b){ return String(b.month||b.id).localeCompare(String(a.month||a.id)); });
-      _loaded = true;
-      _navToggle();
-      var pg=document.getElementById("page-finance-audit");
-      if(pg && pg.classList.contains("active")) render();
-    }, function(e){
+    // (١) جلبٌ فوري بطلبٍ واحد يوازي فتح التيار: مصافحة تيار Watch قد تستغرق
+    // ثوانيَ طويلة على اتصال بارد (أبلغها المستخدم: «جارٍ تحميل بنود التدقيق»
+    // تطول) — بينما get() يعود أسرع بكثير فيظهر المحتوى فوراً، والتيار يتكفل
+    // بالتحديث الحي بعد لحوقه. أيهما وصل أولاً يعرض (حارس _loaded).
+    try{
+      db.collection(COLL()).get().then(function(snap){ if(!_loaded) _applySnap(snap); })
+        .catch(function(){ /* يتكفل به مسار التيار أو المهلة */ });
+    }catch(e){}
+    _unsub = db.collection(COLL()).onSnapshot(_applySnap, function(e){
       console.warn("finance-audit sync error:", e);
-      // خطأ المزامنة لا يترك الصفحة على «جارٍ التحميل» للأبد — تُعرض القائمة (الفارغة) بدلاً
-      _loaded = true;
-      var pg=document.getElementById("page-finance-audit");
-      if(pg && pg.classList.contains("active")) render();
+      // خطأ المزامنة لا يترك الصفحة على «جارٍ التحميل» للأبد — رسالة اتصال صادقة
+      _loaded = true; _connIssue = true;
+      _rerenderIfActive();
     });
+    // (٢) مهلة أمان: مهما حدث لا دوّار أبدياً — بعد 8 ثوانٍ بلا أي بيانات تُعرض
+    // رسالة الاتصال (لا «لا توجد دورات» المضللة)، وأي لقطة لاحقة تصحح تلقائياً.
+    setTimeout(function(){
+      if(_loaded) return;
+      _loaded = true; _connIssue = true;
+      _rerenderIfActive();
+    }, 8000);
+  }
+
+  // إعادة محاولة يدوية من رسالة تعذر الاتصال — جلبة واحدة جديدة
+  function retryLoad(){
+    _loaded=false; _connIssue=false; render();
+    try{
+      db.collection(COLL()).get()
+        .then(function(snap){ _applySnap(snap); })
+        .catch(function(){ _loaded=true; _connIssue=true; render(); });
+    }catch(e){ _loaded=true; _connIssue=true; render(); }
   }
 
   // إظهار زر القائمة الجانبية لأصحاب الصلاحية فقط (الزر مخفي افتراضياً في HTML).
@@ -725,6 +756,14 @@
     );
 
     if(!_audits.length){
+      // تعذر الوصول للبيانات ≠ «لا دورات» — رسالة صادقة مع إعادة محاولة
+      if(_connIssue){
+        return hero+'<div class="card"><div class="fa-empty">'+
+          '<div class="fa-empty-ic">'+_icn("alertTriangle")+'</div>'+
+          'تعذّر تحميل بيانات التدقيق — تحقق من الاتصال.'+
+          '<div style="margin-top:14px"><button class="btn btn-primary btn-sm" onclick="window.financeAudit.retryLoad()">🔄 إعادة المحاولة</button></div>'+
+        '</div></div>';
+      }
       return hero+'<div class="card"><div class="fa-empty">'+
         '<div class="fa-empty-ic">'+_icn("search")+'</div>'+
         'لا توجد دورات تدقيق بعد.'+
@@ -996,7 +1035,7 @@
           '<input class="form-input" type="number" min="0" step="0.01" id="fa-saving" value="'+(s.potentialSaving||bench.totalSaving||"")+'"></div>'+
       '</div>'+
       '<div class="form-group"><label class="form-label">الملاحظات (ما وجده التدقيق)</label>'+
-        '<textarea class="form-input" id="fa-findings" rows="2" placeholder="مثال: مورد عالم الريتاج ورّد مواد النظافة بسعر أعلى 12% من مورد X في طلب سابق...">'+_esc(s.findings||"")+'</textarea></div>'+
+        '<textarea class="form-input" id="fa-findings" rows="2" placeholder="مثال: المورد Y ورّد مواد النظافة بسعر أعلى 12% من المورد X في طلب سابق...">'+_esc(s.findings||"")+'</textarea></div>'+
       '<div class="form-group"><label class="form-label">التوصية</label>'+
         '<textarea class="form-input" id="fa-reco" rows="2" placeholder="مثال: اعتماد المورد X لمواد النظافة في الطلبات القادمة">'+_esc(s.recommendation||"")+'</textarea></div>'+
       '<div style="font-size:11px;color:var(--muted)">حكم «ملاحظة» أو «مخالفة» يُحيل البند تلقائياً لرد قسم المشتريات قبل الإغلاق؛ «مطابق» و«فرق مقبول» يُغلقان البند مباشرة.</div>';
@@ -1289,7 +1328,7 @@
 
   /* ════════ التصدير ════════ */
   window.financeAudit = {
-    startSync:startSync, render:render,
+    startSync:startSync, render:render, retryLoad:retryLoad,
     open:open, back:back,
     openCreate:openCreate, createAudit:createAudit, removeAudit:removeAudit, removeSample:removeSample,
     openReview:openReview, saveReview:saveReview,
