@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9wi";
+const MODULE_BUILD = "v18.9wj";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -132,9 +132,15 @@ function _overdueWorkingDays(ymd, todayYmd){
 // التنفيذ (تعليم مهمةٍ منجزة): يضاف إليهم المشرف والفني — فهم من ينفّذ ميدانياً.
 function canView(){ return !!_role(); }
 function canEdit(){ const r=_role(); return r==="admin"||r==="project_manager"; }
-function canExecute(){ const r=_role(); return canEdit()||r==="supervisor"||r==="technician"; }
+/* ★ الدور المخزَّن في حسابات المستخدمين قد يكون **بالعربية**: قائمة الأدوار في إدارة
+   المستخدمين تحفظ المشرف بالقيمة «مشرف» (لا supervisor) — فالمقارنة بالمفتاح الإنجليزي
+   وحده كانت تحجب زرَّي التنفيذ وجولات الجودة عن المشرفين الحقيقيين (أبلغها المستخدم:
+   حساب حنان). نقبل القيمتين هنا ولا نلمس الحسابات المخزّنة. */
+function _isSupRole(){ const r=_role(); return r==="supervisor"||r==="مشرف"; }
+function _isTechRole(){ const r=_role(); return r==="technician"||r==="فني"; }
+function canExecute(){ return canEdit()||_isSupRole()||_isTechRole(); }
 // جولات الجودة: الإدارة + المشرف (يُفتّش نطاقَه بنفسه) — لا الفنيّ
-function canQuality(){ return canEdit()||_role()==="supervisor"; }
+function canQuality(){ return canEdit()||_isSupRole(); }
 
 /* ════════════ هل المشروع الحالي مشروع نظافة؟ ════════════
    مصدران للنوع في النظام: سجلّ المشروع (meta/projects عبر نافذة تعديل المشروع) ومستند
