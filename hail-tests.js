@@ -339,6 +339,26 @@ function predelivery() {
   T("★ wk: قيدُ الإصدار الحالي موثَّق في NOTES.md (حدّث NOTES مع كل تغيير)",
     NOTES.includes("**" + VER + " —"), "لا قيد لـ " + VER + " في §6 — أضف سطر التغيير قبل الدفع");
 
+  // ── v18.9ww: تجاوب الجوال — حارسان لعطلين رُصدا بفحص Playwright عند 375px ──
+  // كلاهما انحرافٌ عن نمطٍ يطبّقه الملف نفسه في موضعٍ مجاور، فالارتداد وارد.
+  {
+    // (١) جدول سجل التدقيق كان بلا حاوي تمرير — يدفع الصفحة كلّها للتمرير الأفقي 80px.
+    // الصنف .report-table-wrap كان معرَّفاً في CSS وغيرَ مستعمَل إطلاقاً (نمطٌ نُوي ولم يُطبَّق).
+    const wrapDefined = /\.report-table-wrap\{[^}]*overflow-x:\s*auto/.test(HTML);
+    const wrapUsed = (HTML.match(/class="report-table-wrap"/g) || []).length;
+    T("★ ww: .report-table-wrap معرَّفة بتمرير أفقي في CSS", wrapDefined);
+    T("★ ww: جدول سجل التدقيق ملفوفٌ بحاوي التمرير (لا تمرير أفقي للصفحة على الجوال)",
+      wrapDefined && wrapUsed >= 1 && /out\.innerHTML=`<div class="report-table-wrap"><table class="report-table">/.test(HTML),
+      `مواضع الاستعمال: ${wrapUsed}`);
+
+    // (٢) شبكات .ast-stats بأعمدة ثابتة inline تتخطّى media query الجوال
+    // (@media(max-width:760px) → 1fr 1fr) لأن الأنماط السطرية أعلى أولوية — فتفيض عن الشاشة.
+    const fixedGrids = [...HTML.matchAll(/class="ast-stats"[^>]*style="[^"]*grid-template-columns:\s*repeat\((\d+),\s*1fr\)/g)].map(m => m[1]);
+    T("★ ww: لا شبكة ast-stats بعدد أعمدة ثابت في نمطٍ سطريّ (auto-fit فقط)",
+      fixedGrids.length === 0,
+      fixedGrids.length ? `وُجدت repeat(${fixedGrids.join("،")},1fr) — استخدم repeat(auto-fit,minmax(150px,1fr))` : "نظيف");
+  }
+
   // ── v18.9vp: وسوم Firebase SDK الخمسة موحّدة على نسخة واحدة (المعالجة الجذرية لـ ca9/b815) ──
   // ترقية مجزّأة (وسمٌ متأخّرٌ عن البقية) تُدخل النظام في حالة غير مُختبَرة — نُثبّت التوحيد.
   {
