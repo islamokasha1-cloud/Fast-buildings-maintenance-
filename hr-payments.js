@@ -56,7 +56,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9wz";
+  var MODULE_BUILD = "v18.9x";
 
   function COLL(){
     var dev=false;
@@ -223,6 +223,9 @@
   var _fStatus   = "";    // فلاتر القائمة
   var _fType     = "";
   var _fSearch   = "";
+  // معرّفات حُذفت في هذه الجلسة — تمنع لقطةً في الطريق من إعادة الطلب للقائمة
+  // بين الحذف المحلّي ووصول لقطة الخادم (نفس حارس _deletedPurchaseIds في النواة).
+  var _deletedIds = {};
 
   function byId(id){ for(var i=0;i<_reqs.length;i++){ if(_reqs[i] && _reqs[i].id===id) return _reqs[i]; } return null; }
   function all(){ return _reqs.slice(); }
@@ -240,6 +243,7 @@
 
   function _applySnap(snap){
     _reqs = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
+      .filter(function(r){ return !_deletedIds[r.id]; })
       .sort(function(a,b){ return String(b.createdAt||"").localeCompare(String(a.createdAt||"")); });
     _loaded=true; _connIssue=false;
     _rerenderIfActive();
@@ -926,6 +930,61 @@
     }
   }
 
+  /* ── حذف الطلب — المسؤول وحده ──
+     الحذف نهائيّ ولا يُسجَّل في الطلب نفسه (فالوثيقة تزول)، فيُسجَّل في «سجل التدقيق»
+     بكل ما يعرّف المحذوف: رقمه ونوع عمله ومبلغه وحالته وقت الحذف — وإلا اختفى الطلب
+     بلا أثرٍ يُسأل عنه أحد. ومرفقاته تُحذف من التخزين بعده: مستندات الإقامات والتأشيرات
+     بياناتُ أشخاص، وتركها يتيمةً بعد حذف سجلّها أسوأ من فقدها. الحذف أولاً والملفات
+     بعده وبأفضل جهد — فشلُ ملفٍ لا يُبقي وثيقةً محذوفةً في القائمة. */
+  function remove(id){
+    var r=byId(id); if(!r) return;
+    if(!_isAdmin()){ _toast("⚠ صلاحية المسؤول فقط","warn"); return; }
+    _confirm({
+      title:"حذف الطلب "+id,
+      // نصٌّ في فقرةٍ واحدة: #confirm-msg لا يحترم أسطر \n (بلا white-space:pre-line)،
+      // فالفواصل هنا « — » لا أسطراً تنهار إلى مسافات.
+      msg:workTypeLabel(r)+" — "+(r.title||"")+" — المبلغ: "+_fmt(r.amount)+" ر.س"+
+          " — الحالة: "+statusLabel(r.status)+
+          ". يُحذف الطلب ومرفقاته نهائياً ولا يمكن التراجع.",
+      icon:"🗑", okText:"حذف الطلب", okClass:"btn-danger"
+    }).then(function(){ return _doRemove(id, r); }).catch(function(){});
+  }
+
+  async function _doRemove(id, snapshotOfReq){
+    if(_busy) return false;
+    if(!_isAdmin()){ _toast("⚠ صلاحية المسؤول فقط","warn"); return false; }
+    _busy=true;
+    try{
+      var r=snapshotOfReq||{};
+      // قيد التدقيق يُكتب قبل الحذف — فلو فشل الحذف بقي السجل صادقاً بالمحاولة،
+      // ولو نجح بقي الأثر الوحيد لطلبٍ لم تعد له وثيقة.
+      _log("سداد موارد بشرية — حذف طلب",
+        "رقم الطلب: "+id+" — "+workTypeLabel(r)+" — "+_fmt(r.amount)+" ر.س — الحالة عند الحذف: "+statusLabel(r.status)+
+        (r.createdBy?(" — أنشأه: "+r.createdBy):""));
+
+      _deletedIds[id]=1;
+      await db.collection(COLL()).doc(id).delete();
+
+      var i=_reqs.findIndex(function(x){ return x && x.id===id; });
+      if(i>=0) _reqs.splice(i,1);
+      if(_curId===id) _curId=null;
+
+      // المرفقات: أفضل جهد بعد نجاح الحذف — فشلها يترك ملفاً يتيماً لا وثيقةً شبحاً.
+      (r.attachments||[]).forEach(function(a){
+        try{ if(a && a.url && typeof storage!=="undefined" && storage) storage.refFromURL(a.url).delete().catch(function(){}); }catch(e){}
+      });
+
+      _toast("تم حذف الطلب "+id,"success");
+      render(); _badge();
+      return true;
+    }catch(e){
+      console.warn("hrp remove error", e);
+      delete _deletedIds[id];          // فشل الحذف — يعود الطلب للظهور مع اللقطة التالية
+      _toast("⚠ تعذّر حذف الطلب — تحقق من الاتصال","warn");
+      return false;
+    }finally{ _busy=false; }
+  }
+
   /* ════════ الإشعارات ════════
      نصٌّ مقتضب بلا أسماء موظفين — الإشعارات في وثيقةٍ مشتركة، والتفاصيل تُقرأ
      من داخل الوحدة التي لا يفتحها إلا أصحاب الصلاحية. */
@@ -1325,6 +1384,8 @@
     }
     if(canEdit(r)) out.push('<button class="btn btn-ghost btn-sm" onclick="hrPayments.editModal(\''+id+'\')">'+_icon("edit")+' تعديل وإعادة إرسال</button>');
     if(isOwner(r) && !isFinalStatus(r.status)) out.push('<button class="btn btn-ghost btn-sm" onclick="hrPayments.cancel(\''+id+'\')">'+_icon("ban")+' إلغاء الطلب</button>');
+    // الحذف للمسؤول وحده وفي أي حالة — آخر الصفّ، فالإجراءات النافعة تسبق الهادمة.
+    if(_isAdmin()) out.push('<button class="btn btn-danger btn-sm" onclick="hrPayments.remove(\''+id+'\')">'+_icon("trash")+' حذف الطلب</button>');
     return out.join("");
   }
 
@@ -1369,7 +1430,7 @@
     onTypeChange:onTypeChange, onAmountChange:onAmountChange, submitNew:submitNew,
     approvePM:approvePM, approveCEO:approveCEO, reject:reject,
     payModal:payModal, financeReturn:financeReturn,
-    editModal:editModal, attachModal:attachModal, cancel:cancel,
+    editModal:editModal, attachModal:attachModal, cancel:cancel, remove:remove,
     canView:canView, canCreate:canCreate, pendingForMe:pendingForMe,
     all:all, byId:byId, refreshNav:_navToggle,
     // دوال نقية مكشوفة لفحوص hail-tests

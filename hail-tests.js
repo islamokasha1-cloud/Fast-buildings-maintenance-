@@ -3703,6 +3703,38 @@ function hrPaymentsTests() {
     HTML.includes('showPage(_hrOnly ? "hr-payments" : "purchases")'));
   T("سايدبار مسؤول الموارد البشرية مقصور على مجموعته",
     /body\.role-hr-officer #hdr-grp-po/.test(HTML) && /classList\.toggle\("role-hr-officer"/.test(HTML));
+  /* ── حذف الطلب (المسؤول وحده) ──
+     الحذف نهائيّ ولا رجعة فيه، فترتيب خطواته هو ما يمنع الأذى: قيدُ التدقيق يسبق
+     الحذف (وإلا اختفى الطلب بلا أثر)، والمرفقات بعده (وإلا أبقى فشلُ ملفٍ وثيقةً
+     محذوفةً معروضة)، والقائمة السوداء تُنظَّف عند الفشل (وإلا اختفى طلبٌ باقٍ). */
+  T("★ الحذف للمسؤول وحده", /function remove\(id\)\{[\s\S]{0,200}?if\(!_isAdmin\(\)\)\{ _toast\("⚠ صلاحية المسؤول فقط"/.test(src) &&
+    /async function _doRemove\([\s\S]{0,240}?if\(!_isAdmin\(\)\)/.test(src));
+  {
+    var rm = src.slice(src.indexOf("async function _doRemove("), src.indexOf("/* ════════ الإشعارات"));
+    var iLog = rm.indexOf('_log("سداد موارد بشرية — حذف طلب"');
+    var iDel = rm.indexOf(".delete()");
+    var iAtt = rm.indexOf("refFromURL");
+    T("★ قيد سجل التدقيق يُكتب قبل الحذف (فالوثيقة تزول ولا تحمل أثرها)",
+      iLog > 0 && iDel > iLog, "log@"+iLog+" delete@"+iDel);
+    T("★ قيد الحذف يحمل ما يعرّف المحذوف (النوع والمبلغ والحالة)",
+      /workTypeLabel\(r\)[\s\S]{0,120}_fmt\(r\.amount\)[\s\S]{0,120}statusLabel\(r\.status\)/.test(rm));
+    T("★ المرفقات تُحذف بعد نجاح حذف الوثيقة لا قبله",
+      iAtt > iDel, "attachments@"+iAtt+" delete@"+iDel);
+    T("★ حذف المرفقات بأفضل جهد لا يُسقط العملية", /refFromURL\(a\.url\)\.delete\(\)\.catch\(/.test(rm));
+    T("★ فشل الحذف يرفع المعرّف من القائمة السوداء (لا يختفي طلبٌ باقٍ)",
+      /catch\([\s\S]{0,200}?delete _deletedIds\[id\];/.test(rm));
+    T("القائمة السوداء تُصفّي كل لقطة (لا يعود المحذوف مع لقطةٍ في الطريق)",
+      /\.filter\(function\(r\)\{ return !_deletedIds\[r\.id\]; \}\)/.test(src));
+    T("زرّ الحذف يظهر للمسؤول في تفاصيل الطلب",
+      /if\(_isAdmin\(\)\) out\.push\([\s\S]{0,140}hrPayments\.remove/.test(src));
+  }
+  /* ── أيقونات السايدبار ──
+     المنصة تستبدل إيموجي السايدبار بأيقونات _ICON عبر applyNavIcons من خريطتين؛
+     صفحةٌ غير مسجّلة فيهما تبقى على الإيموجي الخام وسط سايدبار كلّه SVG. */
+  T("★ صفحتا الوحدة ومجموعتها مسجّلة في خرائط أيقونات السايدبار (لا إيموجي خام)",
+    /'hr-payments':'banknote'/.test(HTML) && /'new-hr-payment':'filePlus'/.test(HTML) &&
+    /'hdr-grp-hrp':'users'/.test(HTML));
+
   /* ── لغة التصميم: الوحدة تستعير مكوّنات المنصة ولا تخترع بديلاً ──
      العطل الذي تمنعه هذه الحرّاس ليس بصرياً وحده: صفحةٌ بمفرداتٍ خاصة تنحرف عن
      المنصة مع كل تحديثٍ للتوكنز (الثيم الداكن أولاً)، وتُجبر المستخدم على تعلّم
