@@ -1179,8 +1179,9 @@ function financialInvariants() {
   // ── v18.9ts — تنظيف منخفض (L7/L9/L10/L11) ──
   T("L7: تقريب estCost عند إنشاء الطلب (لا تسرّب عائم)",
     HTML.includes("Math.round(currentPurchaseItems.reduce((s,item)=>s+(item.itemCost||0),0)*100)/100"));
+  // v18.9wx: نُقل الشرط إلى _sameItem داخل _waPrevRcv (بحث الهوية عند انزياح الفهرس) — والسُّلَّم كما هو.
   T("L9: _waPrevRcv يطابق بالكود قبل الاسم للبند الحرّ",
-    HTML.includes("else if(gi.itemCode && it && it.itemCode) _idOk = (String(gi.itemCode).trim() === String(it.itemCode).trim())"));
+    HTML.includes("if(gi.itemCode && it && it.itemCode) return String(gi.itemCode).trim() === String(it.itemCode).trim();"));
   T("L10: تكلفة بطاقة القائمة بمنزلتين (تطابق التفاصيل)",
     HTML.includes('display:inline-block">${sum.toLocaleString("en-US",{maximumFractionDigits:2})}</span> ر.س'));
 
@@ -1521,6 +1522,125 @@ function adminEditKeepsStatus() {
   // قائمة pae-status في الـ HTML فارغة (تُبنى ديناميكياً) — لا خيارات ثابتة قديمة داخلها
   T("★ قائمة pae-status فارغة في الـ HTML (تُملأ من PO_STATUS)",
     HTML.includes('<select class="form-select" id="pae-status"></select>'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   21ب) v18.9wx — الفهرس ليس هوية: اصطفاف صفوف التدقيق/السند على البنود
+        الجذر: نافذة تعديل المسؤول تكتب pf.items بلا لمس auditItems، فحذف
+        بندٍ من طلبٍ مُدقَّق يزيح كل ما بعده صفّاً واحداً — فيُقارَن سعر البند
+        بتقدير جاره («ديانه رمل» 140 من الكتالوج تظهر «تغيّرت من 14.79»،
+        وبندٌ أُضيف عند الاستلام يظهر «تغيّر سعره» وهو لم يكن في الطلب)،
+        ويقرأ _waPrevRcv صفَّ غيره فيُصفّر المستلَم السابق ويتضاعف الرصيد.
+   ════════════════════════════════════════════════════════════════════ */
+function auditRowAlignment() {
+  H("21ب) اصطفاف صفوف التدقيق على بنود الطلب بالهوية لا بالفهرس");
+
+  const ka = HTML.indexOf("function _poItemKey(");
+  const kb = HTML.indexOf("\nfunction _poItemsActual(", ka);
+  const pa = HTML.indexOf("function _waPrevRcv(");
+  const pb = HTML.indexOf("\nfunction _waSumGrn(", pa);
+  let M = null;
+  if (ka >= 0 && kb > ka && pa >= 0 && pb > pa) {
+    try {
+      M = new Function(HTML.slice(ka, kb) + "\n" + HTML.slice(pa, pb) +
+        "\nreturn {_poItemKey,_poAlignRows,_poAuditRows,_waPrevRcv};")();
+    } catch (e) { T("تُبنى دوال الاصطفاف", false, String(e.message).slice(0, 120)); }
+  }
+  T("تُبنى دوال الاصطفاف (_poItemKey/_poAlignRows/_poAuditRows/_waPrevRcv)", !!M);
+  if (!M) return;
+
+  // ── سُلَّم الهوية: itemId ثم الكود ثم الاسم (نفس سُلَّم _waPrevRcv) ──
+  T("الهوية: itemId يسبق الكود يسبق الاسم",
+    M._poItemKey({ itemId: "A", itemCode: "X", itemName: "ن" }) === "id:A" &&
+    M._poItemKey({ itemCode: "X", itemName: "ن" }) === "cd:X" &&
+    M._poItemKey({ itemName: "ن" }) === "nm:ن" &&
+    M._poItemKey({}) === "");
+
+  // ── محاكاة PO-202608-0130 حرفياً ──
+  // بنود الطلب المُدقَّق قبل تدخّل المسؤول (٥ بنود + بندٌ أُضيف عند الاستلام)
+  const row = (id, code, name, est, act) => ({
+    itemId: id, itemCode: code, itemName: name,
+    estUnitCost: est, unitCost: act, unitPrice: act
+  });
+  const A = row("A", "BLDG-555", "غراء الجزيرة", 41, 40.87);
+  const B = row("B", "", "بلدورة 90 سم", 14, 14);
+  const Z = row("Z", "BLDG-900", "بلدورة زراعة", 0, 0);      // البند الذي حذفه المسؤول
+  const C = row("C", "BLDG-024", "اسمنت اسود", 14.79, 14.79);
+  const D = row("D", "BLDG-575", "ديانه رمل", 140, 140);      // سعر الكتالوج = سعر الفاتورة
+  const E = row("E", "BLDG-692", "بردورة اسمنتي", 10, 10);    // بندٌ مضاف عند الاستلام
+  const auditItems = [A, B, Z, C, D, E].map(x => ({ ...x }));
+  const items = [A, B, C, D, E].map(x => ({ ...x }));          // بعد حذف «بلدورة زراعة»
+  const rows = M._poAuditRows({ items, auditItems });
+
+  T("★ الانزياح موجودٌ فعلاً بالفهرس الخام (تكرار العطل الأصلي)",
+    auditItems[3].estUnitCost === 14.79 && auditItems[4].estUnitCost === 140);
+  T("★ الاصطفاف بالهوية يعيد لكل بندٍ صفَّه هو",
+    rows.length === 5 && rows.every((r, i) => r && r.itemId === items[i].itemId));
+  T("★ «ديانه رمل» تُقارَن بتقديرها 140 لا بتقدير جارها 14.79",
+    rows[3].estUnitCost === 140);
+  T("★ البند المضاف عند الاستلام يُقارَن بتقديره هو لا بسعر البند السابق",
+    rows[4].estUnitCost === 10);
+
+  // البادج نفسه: نُعيد معادلة _estUnit/_priceChanged من index.html على الصفوف المصطفّة
+  const badge = (item, r) => {
+    const est = parseFloat(
+      (r && r.estUnitCost != null) ? r.estUnitCost
+        : (item.estUnitCost != null) ? item.estUnitCost
+          : (r ? r.unitCost : 0)) || 0;
+    return est > 0 && item.unitCost > 0 && Math.abs(item.unitCost - est) > 0.001;
+  };
+  T("★ لا «تغيّر سعر» على بندٍ لم يتغيّر سعره (ديانه رمل/البردورة/الاسمنت)",
+    !badge(items[2], rows[2]) && !badge(items[3], rows[3]) && !badge(items[4], rows[4]));
+  T("★ التغيّر الحقيقي يبقى ظاهراً (غراء: 41 ← 40.87)", badge(items[0], rows[0]));
+
+  // بندان لنفس الصنف في طلبٍ واحد — الفهرس يحسم، لا يلتهم الأول صفَّ الثاني
+  {
+    const it2 = [{ itemId: "S", qty: 5 }, { itemId: "S", qty: 7 }];
+    const ai2 = [{ itemId: "S", rcvQty: 5 }, { itemId: "S", rcvQty: 7 }];
+    const r2 = M._poAlignRows(it2, ai2);
+    T("★ بندان لنفس الصنف: كلٌّ على صفّه (لا التهام)",
+      r2[0].rcvQty === 5 && r2[1].rcvQty === 7);
+  }
+  // بندٌ أُضيف بعد التدقيق: لا صفَّ له ⇒ null (لا صفّ جارٍ مُستعار)
+  T("بندٌ بلا صفّ تدقيق يُرجع null لا صفَّ غيره",
+    M._poAlignRows([{ itemId: "NEW" }], [{ itemId: "OLD" }])[0] === null);
+
+  // ── _waPrevRcv: سندٌ مُوقَّع سابقاً انزاح عنه ترتيب p.items ──
+  const grn = { items: [
+    { itemId: "A", itemCode: "BLDG-555", itemName: "غراء الجزيرة", rcvQty: 15 },
+    { itemId: "B", itemCode: "", itemName: "بلدورة 90 سم", rcvQty: 0 },
+    { itemId: "Z", itemCode: "BLDG-900", itemName: "بلدورة زراعة", rcvQty: 0 },
+    { itemId: "C", itemCode: "BLDG-024", itemName: "اسمنت اسود", rcvQty: 20 },
+    { itemId: "D", itemCode: "BLDG-575", itemName: "ديانه رمل", rcvQty: 0 },
+  ] };
+  const po = { grnDocs: [grn] };
+  T("★ المستلَم السابق يُقرأ من صفّ البند نفسه رغم انزياح الفهرس (20 لا 0)",
+    M._waPrevRcv(po, 2, items[2]) === 20);
+  T("الفهرس المطابق يبقى المسار الأول (غراء: 15)",
+    M._waPrevRcv(po, 0, items[0]) === 15);
+  T("بندٌ لا صفَّ له في السند ⇒ صفر (لا استعارة)",
+    M._waPrevRcv(po, 4, items[4]) === 0);
+  {   // بندان لنفس الصنف: لا تخمين — يبقى الفهرس ولا تُجمع كل المطابقات
+    const g2 = { items: [{ itemId: "S", rcvQty: 5 }, { itemId: "S", rcvQty: 7 }] };
+    T("★ بندان لنفس الصنف: كل بندٍ يقرأ صفَّه (5 و7 لا 12)",
+      M._waPrevRcv({ grnDocs: [g2] }, 0, { itemId: "S" }) === 5 &&
+      M._waPrevRcv({ grnDocs: [g2] }, 1, { itemId: "S" }) === 7);
+  }
+
+  // ── حرّاس المسار: أين تُستعمل الدوال فعلاً ──
+  T("★ بادج تغيّر السعر يقرأ الصفوف المصطفّة لا p.auditItems[i]",
+    HTML.includes("const _aiRow   = _auditRows[i];") &&
+    !HTML.includes("const _aiRow   = p.auditItems && p.auditItems[i];"));
+  T("★ تفاصيل الطلب تحسب الاصطفاف مرةً واحدة خارج حلقة البنود",
+    HTML.includes("const _auditRows = _poAuditRows(p);"));
+  T("★ صندوق «تغيّر الأسعار» يمرّ على بنود الطلب الحالية مصطفّةً",
+    HTML.includes("const _rows = (p.items && p.items.length) ? _poAlignRows(p.items, ai) : ai;"));
+  T("★ تعديل المسؤول يعيد اصطفاف auditItems على البنود بعد الحفظ",
+    HTML.includes("const _alignedAI = _poAlignRows(pf.items, pf.auditItems);") &&
+    HTML.includes("pf.auditItems = pf.items.map((it,i)=> _alignedAI[i] || {"));
+  T("★ _waPrevRcv يبحث بالهوية حين لا يطابق الفهرس (L9: الكود قبل الاسم محفوظ)",
+    HTML.includes("const hits = rows.filter(r=> _poItemKey(r)===key);") &&
+    HTML.includes("if(gi.itemCode && it && it.itemCode) return String(gi.itemCode).trim() === String(it.itemCode).trim();"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -3602,6 +3722,7 @@ function financeAuditTests() {
   closedOrdersCard();
   extrasCardGating();
   adminEditKeepsStatus();
+  auditRowAlignment();
   waExtrasPreserveQty();
   procToFinance();
   mergeManualProject();
