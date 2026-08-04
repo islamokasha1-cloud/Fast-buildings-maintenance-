@@ -3703,6 +3703,39 @@ function hrPaymentsTests() {
     HTML.includes('showPage(_hrOnly ? "hr-payments" : "purchases")'));
   T("سايدبار مسؤول الموارد البشرية مقصور على مجموعته",
     /body\.role-hr-officer #hdr-grp-po/.test(HTML) && /classList\.toggle\("role-hr-officer"/.test(HTML));
+  /* ── لغة التصميم: الوحدة تستعير مكوّنات المنصة ولا تخترع بديلاً ──
+     العطل الذي تمنعه هذه الحرّاس ليس بصرياً وحده: صفحةٌ بمفرداتٍ خاصة تنحرف عن
+     المنصة مع كل تحديثٍ للتوكنز (الثيم الداكن أولاً)، وتُجبر المستخدم على تعلّم
+     شكلٍ ثانٍ لنفس المعنى. */
+  var _hrpUses = function(cls){ return src.indexOf(cls) >= 0; };
+  T("★ تستعمل مكوّنات المنصة لا بدائل خاصة (هيرو/بطاقة/نموذج/تفاصيل/خط زمني)",
+    ["page-hero","card-title","form-group","form-label","form-row","d-hero","d-facts",
+     "d-sec-label","d-grid","d-item","dtl-item","dtl-dot","stat-tile","st-val","desc-box"].every(_hrpUses));
+  T("★ شريط المراحل هو شريط سير عمل المشتريات نفسه (po-wf/po-step/po-link)",
+    ["po-wf","po-wf-track","po-step","ps-ico","ps-l","po-link","po-wf-tag"].every(_hrpUses));
+  T("★ الشارات شارات المنصة (badge b-po-*) لا صنفٌ ثالث",
+    /class="badge '\+m\.cls\+'/.test(src) && ["b-po-approval","b-po-ceo","b-po-closed","b-po-rejected"].every(_hrpUses) &&
+    src.indexOf("status-badge") < 0);
+  T("★ الأيقونات من مجموعة أيقونات المنصة لا إيموجي في متن الصفحة",
+    /function _icon\([\s\S]{0,120}_ic\(/.test(src) && /function _svg\([\s\S]{0,120}_svgIcon\(/.test(src));
+  {
+    // ورقة أنماط الوحدة لا تعيد تعريف أي مكوّنٍ للمنصة — تعرّف ما لا نظير له فقط.
+    var cssA = src.indexOf("st.textContent="), cssB = src.indexOf("document.head.appendChild(st)", cssA);
+    var css  = cssA >= 0 ? src.slice(cssA, cssB) : "";
+    var owned = (css.match(/'\.[a-z][a-z0-9-]*/g) || []).map(function(x){ return x.slice(1); });
+    var strays = owned.filter(function(c){ return c.indexOf(".hrp-") !== 0; });
+    T("★ لا تعيد تعريف مكوّنات المنصة في ورقتها (كل أصنافها .hrp-*)",
+      strays.length === 0, strays.join("، ") || "نظيفة");
+    T("ورقة أنماط الوحدة صغيرة (تستعير ولا تبني نظاماً ثانياً)",
+      owned.length <= 14, owned.length + " صنفاً");
+  }
+  /* مرحلةٌ منجَزة لا تكون «حالية»: قاعدة .po-step.active تلي .done في ورقة المنصة
+     فتغلبها — والطلب المغلق كان يظهر بمرحلة «إغلاق» جارية كأنه ينتظر. رُصد بلقطة شاشة. */
+  T("★ مرحلة منجَزة لا تُرسَم «جارية» (المغلق لا يبدو منتظِراً)",
+    /var active=\(effIdx===i\) && !done;/.test(src));
+  // وحدة العملة تتبع اتجاه الصفحة والرقم وحده معزول LTR — كما في بطاقة طلب الشراء.
+  T("مبلغ البطاقة لا يقلب اتجاه وحدة العملة", !/\.hrp-card-amt\{[^}]*direction:ltr/.test(src));
+
   /* زرّ السايدبار يقصد «القائمة» دائماً: بلا تصفير _curId كان showPage يعيد رسم
      تفاصيل آخر طلبٍ فُتح — وأوضحُ ظهورٍ لذلك بعد إنشاء طلبٍ جديد (يُفتح تفصيله)،
      فيبدو الزرّ معطّلاً. رُصد في رحلة متصفّح فعلية. */

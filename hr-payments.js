@@ -72,16 +72,18 @@
   /* ════════ نوعية الأعمال ════════
      قائمة مغلقة + «أخرى» بنصّ حرّ. المفاتيح إنجليزية ثابتة (لا تتغيّر مع تحرير
      التسمية العربية)، والتسمية وحدها هي المعروضة. */
+  // الأيقونات من مجموعة أيقونات المنصة (_ICON) — لا إيموجي في متن الصفحات، كما في
+  // بقية شاشات المشتريات؛ الإيموجي يبقى في السايدبار وحده حيث تستعمله المنصة.
   var WORK_TYPES = [
-    {k:"residency",   l:"إقامات (إصدار / تجديد)",      icon:"🪪"},
-    {k:"work_permit", l:"رخص عمل",                     icon:"📄"},
-    {k:"visa",        l:"تأشيرات",                     icon:"🛂"},
-    {k:"exit_reentry",l:"خروج وعودة",                  icon:"✈️"},
-    {k:"sponsor_move",l:"نقل كفالة",                   icon:"🔁"},
-    {k:"insurance",   l:"تأمين طبي",                   icon:"🏥"},
-    {k:"labor_office",l:"مكتب العمل / رسوم حكومية",    icon:"🏛️"},
-    {k:"passport",    l:"جوازات / أحوال",              icon:"📕"},
-    {k:"other",       l:"أخرى",                        icon:"🗂️"}
+    {k:"residency",   l:"إقامات (إصدار / تجديد)",      icon:"user"},
+    {k:"work_permit", l:"رخص عمل",                     icon:"fileText"},
+    {k:"visa",        l:"تأشيرات",                     icon:"scrollText"},
+    {k:"exit_reentry",l:"خروج وعودة",                  icon:"repeat"},
+    {k:"sponsor_move",l:"نقل كفالة",                   icon:"rotateCcw"},
+    {k:"insurance",   l:"تأمين طبي",                   icon:"shield"},
+    {k:"labor_office",l:"مكتب العمل / رسوم حكومية",    icon:"landmark"},
+    {k:"passport",    l:"جوازات / أحوال",              icon:"book"},
+    {k:"other",       l:"أخرى",                        icon:"folderOpen"}
   ];
   var _WT_MAP = (function(){ var m={}; WORK_TYPES.forEach(function(w){ m[w.k]=w; }); return m; })();
   function workTypeLabel(req){
@@ -91,7 +93,7 @@
     if(req.workType==="other") return (req.workTypeOther||"").trim() || w.l;
     return w.l;
   }
-  function workTypeIcon(req){ var w=_WT_MAP[req&&req.workType]; return w?w.icon:"🗂️"; }
+  function workTypeIcon(req){ var w=_WT_MAP[req&&req.workType]; return w?w.icon:"folderOpen"; }
 
   /* ════════ الحالات ════════ */
   var HRP_STATUS = {
@@ -109,28 +111,37 @@
   // الحالات المرتدّة لمسؤول الموارد البشرية — قابلة للتصحيح وإعادة الإرسال.
   var HRP_BOUNCED = ["hrp_pm_rejected","hrp_ceo_rejected","hrp_finance_returned"];
 
+  /* البوّابات: نفس أيقونات المنصة وشاراتها لنفس المعاني — بوّابة التنفيذي هنا هي
+     بوّابة التنفيذي في طلبات الشراء، فتُقرأ بلا تعلّمٍ جديد (PO_STAGES/poStatusBadge). */
   var HRP_STAGES = [
-    {key:"hrp_pending_pm",      lbl:"مدير المشاريع",   icon:"👔", color:"#f59e0b", cls:"b-po-approval"},
-    {key:"hrp_pending_ceo",     lbl:"المدير التنفيذي", icon:"🏢", color:"#7c3aed", cls:"b-po-ceo"},
-    {key:"hrp_pending_finance", lbl:"سداد المالية",    icon:"💳", color:"#0891b2", cls:"b-po-approval"},
-    {key:"hrp_closed",          lbl:"مغلق",            icon:"🔒", color:"#0a7c59", cls:"b-po-closed"}
+    {key:"hrp_pending_pm",      lbl:"مدير المشاريع",   icon:"send"},
+    {key:"hrp_pending_ceo",     lbl:"المدير التنفيذي", icon:"building2"},
+    {key:"hrp_pending_finance", lbl:"سداد المالية",    icon:"banknote"},
+    {key:"hrp_closed",          lbl:"إغلاق",           icon:"lock"}
   ];
-  var _STATUS_CLS = {
-    hrp_pending_pm:"b-po-approval", hrp_pending_ceo:"b-po-ceo",
-    hrp_pending_finance:"b-po-approval", hrp_closed:"b-po-closed",
-    hrp_pm_rejected:"b-po-rejected", hrp_ceo_rejected:"b-po-rejected",
-    hrp_finance_returned:"b-po-rejected", hrp_cancelled:"b-po-cancelled"
+  var _BADGE = {
+    hrp_pending_pm:      {cls:"b-po-approval",  icon:"send"},
+    hrp_pending_ceo:     {cls:"b-po-ceo",       icon:"building2"},
+    hrp_pending_finance: {cls:"b-po-approval",  icon:"banknote"},
+    hrp_closed:          {cls:"b-po-closed",    icon:"lock"},
+    hrp_pm_rejected:     {cls:"b-po-rejected",  icon:"xCircle"},
+    hrp_ceo_rejected:    {cls:"b-po-rejected",  icon:"xCircle"},
+    hrp_finance_returned:{cls:"b-po-rejected",  icon:"rotateCcw"},
+    hrp_cancelled:       {cls:"b-po-cancelled", icon:"ban"}
   };
-  var _STATUS_ICON = {
-    hrp_pending_pm:"👔", hrp_pending_ceo:"🏢", hrp_pending_finance:"💳", hrp_closed:"🔒",
-    hrp_pm_rejected:"❌", hrp_ceo_rejected:"❌", hrp_finance_returned:"↩", hrp_cancelled:"🚫"
+  // لون شريط بطاقة الطلب — نفس دلالات ألوان المنصة (توكنز، بلا ألوان جديدة).
+  var _RAIL = {
+    hrp_pending_pm:"var(--warn)", hrp_pending_ceo:"#7e22ce",
+    hrp_pending_finance:"var(--info)", hrp_closed:"var(--accent)",
+    hrp_pm_rejected:"var(--danger)", hrp_ceo_rejected:"var(--danger)",
+    hrp_finance_returned:"var(--danger)", hrp_cancelled:"var(--muted)"
   };
   function statusLabel(s){ return HRP_STATUS[s] || s || "—"; }
   function isFinalStatus(s){ return HRP_FINAL.indexOf(s)>=0; }
   function isBouncedStatus(s){ return HRP_BOUNCED.indexOf(s)>=0; }
   function statusBadge(s){
-    return '<span class="status-badge '+(_STATUS_CLS[s]||"status-open")+'" style="font-size:10px">'+
-      (_STATUS_ICON[s]||"") + ' ' + _esc(statusLabel(s)) + '</span>';
+    var m=_BADGE[s]||{cls:"",icon:"alertCircle"};
+    return '<span class="badge '+m.cls+'">'+_icon(m.icon,"ic-sm")+' '+_esc(statusLabel(s))+'</span>';
   }
 
   /* ════════════════════════════════════════════════════════════════════
@@ -171,6 +182,9 @@
     try{ return _jsq(s); }
     catch(e){ return String(s==null?"":s).replace(/\\/g,"\\\\").replace(/'/g,"\\'").replace(/[&<>"]/g,function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
   }
+  // أيقونات المنصة — نفس الدالتين اللتين يستعملهما متن الصفحات في index.html
+  function _icon(n,cls){ try{ return _ic(n,cls||"ic-sm"); }catch(e){ return ""; } }
+  function _svg(n){ try{ return _svgIcon(n); }catch(e){ return ""; } }
   function _toast(m,t){ try{ toast(m,t); }catch(e){} }
   function _log(a,d){ try{ if(typeof logAudit==="function") logAudit(a,d); }catch(e){} }
   function _notify(t,b,id){ try{ if(typeof addNotification==="function") addNotification(t,b,id,"hr_payment"); }catch(e){} }
@@ -343,71 +357,89 @@
     if(!canView()){ el.innerHTML=_lockHtml(); return; }
     if(!canCreate()){
       el.innerHTML=_hero("طلب سداد جديد","إنشاء طلب سداد لأعمال الموارد البشرية")+
-        '<div class="card"><div class="card-body hrp-note hrp-note-warn">🔒 إنشاء الطلبات من صلاحية مسؤول الموارد البشرية فقط.</div></div>';
+        '<div class="card"><div style="text-align:center;padding:34px;color:var(--muted);font-size:13px">'+
+        _icon("lock","ic-lg")+' إنشاء الطلبات من صلاحية مسؤول الموارد البشرية فقط.</div></div>';
       return;
     }
     var th=_threshold();
     el.innerHTML =
-      _hero("➕ طلب سداد جديد — الموارد البشرية","نوع العمل، تكلفة السداد، والمستند — لا أكثر") +
-      '<div class="card"><div class="card-body">' +
-        '<div class="hrp-note">ℹ️ الطلب مختصر عمداً: نوعية الأعمال المطلوب سدادها، تكلفة السداد، ومستندٌ مرفق (ملف الإقامات مثلاً). '+
-          'ما يتجاوز <b>'+_fmt0(th)+' ر.س</b> يمرّ على المدير التنفيذي تلقائياً قبل المالية.</div>' +
+      '<div class="page-hero"><div class="page-hero-titles">'+
+        '<div class="page-hero-title">'+_icon("filePlus")+' طلب سداد جديد</div>'+
+        '<div class="page-hero-sub">نوعية الأعمال، تكلفة السداد، والمستند — لا أكثر</div>'+
+      '</div><div class="page-hero-actions">'+
+        '<button class="btn btn-ghost btn-sm" onclick="hrPayments.list()">'+_icon("scrollText")+' الطلبات</button>'+
+      '</div></div>'+
 
-        '<div class="hrp-form">' +
-          '<div class="hrp-field">' +
-            '<label for="hrp-n-type">نوعية الأعمال المطلوب سدادها <span class="hrp-req">*</span></label>' +
-            '<select class="form-select" id="hrp-n-type" onchange="hrPayments.onTypeChange()">' +
-              WORK_TYPES.map(function(w){ return '<option value="'+w.k+'">'+w.icon+' '+_esc(w.l)+'</option>'; }).join("") +
-            '</select>' +
-          '</div>' +
-          '<div class="hrp-field" id="hrp-n-other-wrap" style="display:none">' +
-            '<label for="hrp-n-other">حدّد نوع العمل <span class="hrp-req">*</span></label>' +
-            '<input class="form-input" id="hrp-n-other" placeholder="مثال: رسوم شهادة صحية">' +
-          '</div>' +
-          '<div class="hrp-field hrp-span2">' +
-            '<label for="hrp-n-title">بيان مختصر <span class="hrp-req">*</span></label>' +
-            '<input class="form-input" id="hrp-n-title" maxlength="140" placeholder="مثال: تجديد إقامات 12 عاملاً — دفعة أغسطس">' +
-          '</div>' +
-          '<div class="hrp-field">' +
-            '<label for="hrp-n-amount">تكلفة السداد (ر.س) <span class="hrp-req">*</span></label>' +
-            '<input class="form-input hrp-num" id="hrp-n-amount" type="number" min="0" step="0.01" placeholder="0.00" oninput="hrPayments.onAmountChange()">' +
-          '</div>' +
-          '<div class="hrp-field">' +
-            '<label for="hrp-n-pm">اعتماد مدير المشاريع</label>' +
-            '<select class="form-select" id="hrp-n-pm">' +
-              '<option value="yes">نعم — يحتاج اعتماد مدير المشاريع</option>' +
-              '<option value="no">لا — يُرفع مباشرةً</option>' +
-            '</select>' +
-          '</div>' +
-          '<div class="hrp-field hrp-span2">' +
-            '<label for="hrp-n-file">المستند المرفق (صورة أو PDF)</label>' +
-            '<input type="file" id="hrp-n-file" accept="image/*,application/pdf" style="font-size:12px">' +
-            '<div class="hrp-hint">مثال: كشف الإقامات، فاتورة الرسوم، إشعار مكتب العمل.</div>' +
-          '</div>' +
-          '<div class="hrp-field hrp-span2">' +
-            '<div class="hrp-sub">بيانات التحويل (اختيارية — تُسهّل على المالية السداد)</div>' +
-          '</div>' +
-          '<div class="hrp-field">' +
-            '<label for="hrp-n-benef">المستفيد</label>' +
-            '<input class="form-input" id="hrp-n-benef" placeholder="اسم الجهة أو الشخص">' +
-          '</div>' +
-          '<div class="hrp-field">' +
-            '<label for="hrp-n-iban">الآيبان</label>' +
-            '<input class="form-input" id="hrp-n-iban" placeholder="SA…" style="direction:ltr;text-align:left">' +
-          '</div>' +
-          '<div class="hrp-field hrp-span2">' +
-            '<label for="hrp-n-note">ملاحظة</label>' +
-            '<input class="form-input" id="hrp-n-note" maxlength="240" placeholder="اختياري">' +
-          '</div>' +
-        '</div>' +
+      '<div class="card">'+
+        '<div class="card-title">'+_icon("clipboardList")+' بيانات الطلب</div>'+
 
-        '<div id="hrp-n-route" class="hrp-route"></div>' +
+        '<div class="form-row">'+
+          '<div class="form-group">'+
+            '<label class="form-label" for="hrp-n-type">نوعية الأعمال المطلوب سدادها <span>*</span></label>'+
+            '<select class="form-select" id="hrp-n-type" onchange="hrPayments.onTypeChange()">'+
+              WORK_TYPES.map(function(w){ return '<option value="'+w.k+'">'+_esc(w.l)+'</option>'; }).join("")+
+            '</select>'+
+          '</div>'+
+          '<div class="form-group" id="hrp-n-other-wrap" style="display:none">'+
+            '<label class="form-label" for="hrp-n-other">حدّد نوع العمل <span>*</span></label>'+
+            '<input class="form-input" id="hrp-n-other" placeholder="مثال: رسوم شهادة صحية">'+
+          '</div>'+
+        '</div>'+
 
-        '<div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;flex-wrap:wrap">' +
-          '<button class="btn btn-ghost" onclick="showPage(\'hr-payments\')">إلغاء</button>' +
-          '<button class="btn btn-primary" id="hrp-n-submit" onclick="hrPayments.submitNew()">📨 إرسال الطلب</button>' +
-        '</div>' +
-      '</div></div>';
+        '<div class="form-group">'+
+          '<label class="form-label" for="hrp-n-title">بيان مختصر <span>*</span></label>'+
+          '<input class="form-input" id="hrp-n-title" maxlength="140" placeholder="مثال: تجديد إقامات 12 عاملاً — دفعة أغسطس">'+
+        '</div>'+
+
+        '<div class="form-row">'+
+          '<div class="form-group">'+
+            '<label class="form-label" for="hrp-n-amount">تكلفة السداد (ر.س) <span>*</span></label>'+
+            '<input class="form-input mono" id="hrp-n-amount" type="number" min="0" step="0.01" placeholder="0.00" oninput="hrPayments.onAmountChange()">'+
+          '</div>'+
+          '<div class="form-group">'+
+            '<label class="form-label" for="hrp-n-pm">اعتماد مدير المشاريع</label>'+
+            '<select class="form-select" id="hrp-n-pm" onchange="hrPayments.onAmountChange()">'+
+              '<option value="yes">نعم — يحتاج اعتماد مدير المشاريع</option>'+
+              '<option value="no">لا — يُرفع مباشرةً</option>'+
+            '</select>'+
+          '</div>'+
+        '</div>'+
+
+        /* ══ مسار الطلب — قبل الإرسال لا بعده ══
+           بقيّة الشاشات تعرض شريط المراحل لتقول «أين وصل الطلب». هذا الشريط يقول
+           «إلى أين سيذهب»، ويُعاد رسمه مع كل رقمٍ يُكتب في التكلفة ومع تبديل خيار
+           مدير المشاريع — فقاعدةُ سقف التنفيذي تُرى لحظةَ القرار لا بعد الإرسال.
+           موضعه هنا مباشرةً بعد الحقلين اللذين يحرّكانه. نفس مكوّن المنصة (.po-wf)
+           في لحظةٍ جديدة، بلا مفردات بصرية جديدة. */
+        '<div id="hrp-n-route"></div>'+
+
+        '<div class="form-group">'+
+          '<label class="form-label" for="hrp-n-file">المستند المرفق</label>'+
+          '<input type="file" class="form-input" id="hrp-n-file" accept="image/*,application/pdf">'+
+          '<div class="hrp-hint">صورة أو PDF — كشف الإقامات، فاتورة الرسوم، إشعار مكتب العمل. يمكن الإرسال بدونه بتأكيد.</div>'+
+        '</div>'+
+
+        '<div class="d-sec-label" style="margin-top:6px">بيانات التحويل — اختيارية، تُسهّل على المالية السداد</div>'+
+        '<div class="form-row">'+
+          '<div class="form-group">'+
+            '<label class="form-label" for="hrp-n-benef">المستفيد</label>'+
+            '<input class="form-input" id="hrp-n-benef" placeholder="اسم الجهة أو الشخص">'+
+          '</div>'+
+          '<div class="form-group">'+
+            '<label class="form-label" for="hrp-n-iban">الآيبان</label>'+
+            '<input class="form-input mono" id="hrp-n-iban" placeholder="SA…">'+
+          '</div>'+
+        '</div>'+
+        '<div class="form-group">'+
+          '<label class="form-label" for="hrp-n-note">ملاحظة للمالية</label>'+
+          '<input class="form-input" id="hrp-n-note" maxlength="240" placeholder="اختياري">'+
+        '</div>'+
+
+        '<div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;flex-wrap:wrap">'+
+          '<button class="btn btn-ghost" onclick="hrPayments.list()">إلغاء</button>'+
+          '<button class="btn btn-primary" id="hrp-n-submit" onclick="hrPayments.submitNew()">'+_icon("send")+' إرسال الطلب</button>'+
+        '</div>'+
+      '</div>';
     onTypeChange();
     onAmountChange();
   }
@@ -418,29 +450,39 @@
     if(w) w.style.display = (t==="other") ? "" : "none";
   }
 
-  // معاينة حيّة للمسار — المستخدم يرى إلى أين يذهب طلبه قبل أن يرسله.
+  /* معاينة المسار الحيّة — تُبنى بمكوّن شريط سير العمل نفسه (.po-wf/.po-step/.po-link)
+     الذي تعرضه تفاصيل طلب الشراء، فلا يتعلّم المستخدم شكلاً جديداً. */
+  function _trackHtml(steps, curIdx, tags){
+    return '<div class="po-wf">'+
+      '<div class="po-wf-head">'+(tags||"")+'</div>'+
+      '<div class="po-wf-track">'+steps.map(function(st,i){
+        var done = curIdx>i, active = curIdx===i;
+        return '<div class="po-step'+(done?" done":"")+(active?" active":"")+'">'+
+            '<div class="ps-ico">'+_svg(st.icon)+'</div>'+
+            '<div class="ps-l">'+_esc(st.lbl)+'</div>'+
+          '</div>'+(i<steps.length-1?'<div class="po-link'+(done?" done":"")+'"></div>':"");
+      }).join("")+'</div>'+
+    '</div>';
+  }
+
   function onAmountChange(){
     var host=document.getElementById("hrp-n-route");
     if(!host) return;
-    var amt=_num("hrp-n-amount");
+    var amt=_num("hrp-n-amount"); if(!isFinite(amt)) amt=0;
     var needsPM=_val("hrp-n-pm")!=="no";
     var th=_threshold();
-    var draft={amount:isFinite(amt)?amt:0, needsPM:needsPM};
+    var overTh = amt >= th;
     var steps=[];
-    if(needsPM) steps.push("👔 مدير المشاريع");
-    if((isFinite(amt)?amt:0) >= th) steps.push("🏢 المدير التنفيذي");
-    steps.push("💳 المالية للسداد");
-    steps.push("🔒 إغلاق");
-    host.innerHTML =
-      '<div class="hrp-route-t">مسار هذا الطلب:</div>' +
-      '<div class="hrp-route-steps">'+steps.map(function(s){ return '<span class="hrp-route-step">'+s+'</span>'; }).join('<span class="hrp-route-arrow">←</span>')+'</div>' +
-      ((isFinite(amt)?amt:0) >= th
-        ? '<div class="hrp-route-note">التكلفة بلغت '+_fmt0(th)+' ر.س فأكثر — اعتماد المدير التنفيذي إلزامي ولا يُتخطّى.</div>'
-        : '');
-    // إبقاء المعاينة متزامنة مع تبديل خيار مدير المشاريع أيضاً
-    var sel=document.getElementById("hrp-n-pm");
-    if(sel && !sel._hrpBound){ sel._hrpBound=true; sel.addEventListener("change", onAmountChange); }
-    return draft;
+    if(needsPM) steps.push({icon:"send", lbl:"مدير المشاريع"});
+    if(overTh)  steps.push({icon:"building2", lbl:"المدير التنفيذي"});
+    steps.push({icon:"banknote", lbl:"سداد المالية"});
+    steps.push({icon:"lock", lbl:"إغلاق"});
+    var tags='<span>مسار هذا الطلب</span>'+
+      (overTh
+        ? '<span class="po-wf-tag ceo">'+_fmt0(amt)+' ≥ '+_fmt0(th)+' ر.س — اعتماد التنفيذي إلزامي</span>'
+        : (amt>0 ? '<span class="po-wf-tag fin">أقل من '+_fmt0(th)+' ر.س — بلا بوّابة التنفيذي</span>' : ''));
+    // لا مرحلة «حالية»: الطلب لم يُنشأ بعد، فالشريط كلّه قادم.
+    host.innerHTML=_trackHtml(steps, -1, tags);
   }
 
   async function submitNew(){
@@ -535,12 +577,13 @@
       title:"اعتماد مدير المشاريع",
       body:
         _summaryHtml(r)+
-        '<div class="hrp-note" style="margin-top:10px">'+
+        '<div class="desc-box" style="margin:10px 0 0">'+
           (willCEO
             ? 'التكلفة '+_fmt(r.amount)+' ر.س ≥ '+_fmt0(th)+' — سيُحال للمدير التنفيذي بعد اعتمادك، ثم للمالية.'
             : 'سيُحال مباشرةً إلى المالية للسداد بعد اعتمادك.')+
         '</div>'+
-        '<input class="form-input" id="hrp-pm-note" placeholder="ملاحظة (اختياري)" style="margin-top:10px">',
+        '<div class="form-group" style="margin:10px 0 0"><label class="form-label" for="hrp-pm-note">ملاحظة</label>'+
+        '<input class="form-input" id="hrp-pm-note" placeholder="اختياري"></div>',
       okText:"اعتماد",
       onOk:function(){ return _doApprove(id, "pm", _val("hrp-pm-note")); }
     });
@@ -555,8 +598,9 @@
       title:"اعتماد المدير التنفيذي",
       body:
         _summaryHtml(r)+
-        '<div class="hrp-note" style="margin-top:10px">بعد اعتمادك يُحال الطلب إلى المالية للسداد مباشرةً.</div>'+
-        '<input class="form-input" id="hrp-ceo-note" placeholder="ملاحظة (اختياري)" style="margin-top:10px">',
+        '<div class="desc-box" style="margin:10px 0 0">بعد اعتمادك يُحال الطلب إلى المالية للسداد مباشرةً.</div>'+
+        '<div class="form-group" style="margin:10px 0 0"><label class="form-label" for="hrp-ceo-note">ملاحظة</label>'+
+        '<input class="form-input" id="hrp-ceo-note" placeholder="اختياري"></div>',
       okText:"اعتماد",
       onOk:function(){ return _doApprove(id, "ceo", _val("hrp-ceo-note")); }
     });
@@ -602,8 +646,9 @@
       title: gate==="pm" ? "رفض — مدير المشاريع" : "رفض — المدير التنفيذي",
       body:
         _summaryHtml(r)+
-        '<div class="hrp-note hrp-note-warn" style="margin-top:10px">يعود الطلب لمسؤول الموارد البشرية لتصحيحه وإعادة إرساله. سبب الرفض إلزامي.</div>'+
-        '<textarea class="form-input" id="hrp-rej-reason" rows="3" placeholder="سبب الرفض" style="margin-top:10px"></textarea>',
+        '<div class="desc-box" style="margin:10px 0 0;border-right:3px solid var(--danger)">يعود الطلب لمسؤول الموارد البشرية لتصحيحه وإعادة إرساله. سبب الرفض إلزامي.</div>'+
+        '<div class="form-group" style="margin:10px 0 0"><label class="form-label" for="hrp-rej-reason">سبب الرفض <span>*</span></label>'+
+        '<textarea class="form-textarea" id="hrp-rej-reason" rows="3" placeholder="ما الذي يمنع اعتماد هذا الطلب؟"></textarea></div>',
       okText:"رفض الطلب",
       onOk:function(){ return _doReject(id, gate, _val("hrp-rej-reason")); }
     });
@@ -644,8 +689,9 @@
       title:"إعادة الطلب للتصحيح",
       body:
         _summaryHtml(r)+
-        '<div class="hrp-note hrp-note-warn" style="margin-top:10px">يعود لمسؤول الموارد البشرية لتصحيح البيانات وإعادة الإرسال.</div>'+
-        '<textarea class="form-input" id="hrp-fr-reason" rows="3" placeholder="سبب الإعادة (بيانات ناقصة، آيبان خاطئ، مستند غير واضح…)" style="margin-top:10px"></textarea>',
+        '<div class="desc-box" style="margin:10px 0 0;border-right:3px solid var(--warn)">يعود لمسؤول الموارد البشرية لتصحيح البيانات وإعادة الإرسال.</div>'+
+        '<div class="form-group" style="margin:10px 0 0"><label class="form-label" for="hrp-fr-reason">سبب الإعادة <span>*</span></label>'+
+        '<textarea class="form-textarea" id="hrp-fr-reason" rows="3" placeholder="بيانات ناقصة، آيبان خاطئ، مستند غير واضح…"></textarea></div>',
       okText:"إعادة للتصحيح",
       onOk:function(){ return _doFinanceReturn(id, _val("hrp-fr-reason")); }
     });
@@ -684,13 +730,16 @@
       title:"تسجيل السداد وإغلاق الطلب",
       body:
         _summaryHtml(r)+
-        (pay.beneficiary?'<div class="hrp-kv"><span>المستفيد</span><b>'+_esc(pay.beneficiary)+'</b></div>':'')+
-        (pay.iban?'<div class="hrp-kv"><span>الآيبان</span><b style="direction:ltr;font-family:\'JetBrains Mono\',monospace">'+_esc(pay.iban)+'</b></div>':'')+
-        (pay.note?'<div class="hrp-kv"><span>ملاحظة</span><b>'+_esc(pay.note)+'</b></div>':'')+
-        '<div class="hrp-note" style="margin-top:10px">السداد دفعة واحدة كاملة بمبلغ <b>'+_fmt(r.amount)+' ر.س</b>؛ بتسجيله يُغلق الطلب.</div>'+
-        '<input class="form-input" id="hrp-pay-ref" placeholder="رقم عملية التحويل (اختياري)" style="margin-top:10px">'+
-        '<div class="hrp-hint" style="margin-top:10px">إيصال التحويل (صورة أو PDF) — إلزامي:</div>'+
-        '<input type="file" id="hrp-pay-file" accept="image/*,application/pdf" style="font-size:12px;margin-top:4px">',
+        ((pay.beneficiary||pay.iban||pay.note)?'<div class="d-facts" style="margin-bottom:10px">'+
+          (pay.beneficiary?'<span class="d-fact"><span class="fl">المستفيد</span>'+_esc(pay.beneficiary)+'</span>':'')+
+          (pay.iban?'<span class="d-fact"><span class="fl">الآيبان</span><span class="mono">'+_esc(pay.iban)+'</span></span>':'')+
+          (pay.note?'<span class="d-fact"><span class="fl">ملاحظة</span>'+_esc(pay.note)+'</span>':'')+
+        '</div>':'')+
+        '<div class="desc-box">السداد دفعة واحدة كاملة بمبلغ <b class="mono">'+_fmt(r.amount)+'</b> ر.س؛ بتسجيله يُغلق الطلب.</div>'+
+        '<div class="form-group"><label class="form-label" for="hrp-pay-ref">رقم عملية التحويل</label>'+
+        '<input class="form-input mono" id="hrp-pay-ref" placeholder="اختياري"></div>'+
+        '<div class="form-group" style="margin-bottom:0"><label class="form-label" for="hrp-pay-file">إيصال التحويل <span>*</span></label>'+
+        '<input type="file" class="form-input" id="hrp-pay-file" accept="image/*,application/pdf"></div>',
       okText:"تسجيل السداد",
       onOk:function(){ return _doPay(id); }
     });
@@ -755,16 +804,18 @@
     showCustomModal({
       title:"تعديل الطلب",
       body:
-        '<div class="hrp-note">تعديل التكلفة يعيد حساب المسار: ما يبلغ '+_fmt0(th)+' ر.س فأكثر يعود لبوابة المدير التنفيذي — حتى لو اعتُمد سابقاً بمبلغٍ أقل.</div>'+
-        '<div style="margin-top:10px"><label class="hrp-lbl">بيان مختصر</label>'+
+        '<div class="desc-box">تعديل التكلفة يعيد حساب المسار: ما يبلغ '+_fmt0(th)+' ر.س فأكثر يعود لبوّابة المدير التنفيذي — حتى لو اعتُمد سابقاً بمبلغٍ أقل.</div>'+
+        '<div class="form-group"><label class="form-label" for="hrp-e-title">بيان مختصر</label>'+
         '<input class="form-input" id="hrp-e-title" maxlength="140" value="'+_esc(r.title||"")+'"></div>'+
-        '<div style="margin-top:8px"><label class="hrp-lbl">تكلفة السداد (ر.س)</label>'+
-        '<input class="form-input hrp-num" id="hrp-e-amount" type="number" min="0" step="0.01" value="'+(Number(r.amount)||0)+'"></div>'+
-        '<div style="margin-top:8px"><label class="hrp-lbl">المستفيد</label>'+
-        '<input class="form-input" id="hrp-e-benef" value="'+_esc((r.payment&&r.payment.beneficiary)||"")+'"></div>'+
-        '<div style="margin-top:8px"><label class="hrp-lbl">الآيبان</label>'+
-        '<input class="form-input" id="hrp-e-iban" style="direction:ltr;text-align:left" value="'+_esc((r.payment&&r.payment.iban)||"")+'"></div>'+
-        '<div style="margin-top:8px"><label class="hrp-lbl">ملاحظة</label>'+
+        '<div class="form-group"><label class="form-label" for="hrp-e-amount">تكلفة السداد (ر.س)</label>'+
+        '<input class="form-input mono" id="hrp-e-amount" type="number" min="0" step="0.01" value="'+(Number(r.amount)||0)+'"></div>'+
+        '<div class="form-row">'+
+          '<div class="form-group"><label class="form-label" for="hrp-e-benef">المستفيد</label>'+
+          '<input class="form-input" id="hrp-e-benef" value="'+_esc((r.payment&&r.payment.beneficiary)||"")+'"></div>'+
+          '<div class="form-group"><label class="form-label" for="hrp-e-iban">الآيبان</label>'+
+          '<input class="form-input mono" id="hrp-e-iban" value="'+_esc((r.payment&&r.payment.iban)||"")+'"></div>'+
+        '</div>'+
+        '<div class="form-group" style="margin-bottom:0"><label class="form-label" for="hrp-e-note">ملاحظة</label>'+
         '<input class="form-input" id="hrp-e-note" maxlength="240" value="'+_esc((r.payment&&r.payment.note)||"")+'"></div>',
       okText:"حفظ وإعادة الإرسال",
       onOk:function(){ return _doEdit(id); }
@@ -817,8 +868,9 @@
     if(!_canAttach(r)){ _toast("⚠ لا تملك صلاحية الإرفاق على هذا الطلب","warn"); return; }
     showCustomModal({
       title:"إضافة مرفق",
-      body:'<div class="hrp-hint">صورة أو PDF — يُضاف إلى مرفقات الطلب ويبقى في سجلّه.</div>'+
-           '<input type="file" id="hrp-at-file" accept="image/*,application/pdf" style="font-size:12px;margin-top:8px">',
+      body:'<div class="desc-box">صورة أو PDF — يُضاف إلى مرفقات الطلب ويبقى في سجلّه.</div>'+
+           '<div class="form-group" style="margin-bottom:0"><label class="form-label" for="hrp-at-file">الملف</label>'+
+           '<input type="file" class="form-input" id="hrp-at-file" accept="image/*,application/pdf"></div>',
       okText:"رفع المرفق",
       onOk:function(){ return _doAttach(id); }
     });
@@ -940,15 +992,24 @@
       '</div></div>';
   }
   function _lockHtml(){
-    return _hero("🔒 غير مصرّح","سداد أعمال الموارد البشرية")+
-      '<div class="card"><div class="card-body hrp-note hrp-note-warn">لا تملك صلاحية الاطلاع على طلبات سداد الموارد البشرية.</div></div>';
+    return _hero(_icon("lock")+' غير مصرّح',"سداد أعمال الموارد البشرية")+
+      '<div class="card"><div style="text-align:center;padding:34px;color:var(--muted);font-size:13px">'+
+      'لا تملك صلاحية الاطلاع على طلبات سداد الموارد البشرية.</div></div>';
+  }
+  function _empty(icon, msg){
+    return '<div style="text-align:center;color:var(--muted);padding:32px">'+
+      '<div style="margin-bottom:10px;display:flex;justify-content:center;color:var(--border)">'+
+        _svg(icon).replace('<svg ','<svg width="46" height="46" ')+'</div>'+msg+'</div>';
   }
 
+  // ملخّص الطلب داخل نوافذ الاعتماد — بلغة .d-hero/.d-facts نفسها.
   function _summaryHtml(r){
-    return '<div class="hrp-sum">'+
-      '<div class="hrp-sum-t">'+workTypeIcon(r)+' '+_esc(workTypeLabel(r))+'</div>'+
-      '<div class="hrp-sum-s">'+_esc(r.id)+' — '+_esc(r.title||"")+'</div>'+
-      '<div class="hrp-sum-a">'+_fmt(r.amount)+' <span>ر.س</span></div>'+
+    return '<div class="d-hero" style="border-right-color:'+(_RAIL[r.status]||"var(--muted)")+';margin-bottom:12px">'+
+      '<div class="d-hero-top"><span class="po-id">'+_esc(r.id)+'</span>'+statusBadge(r.status)+'</div>'+
+      '<div class="d-building">'+_icon(workTypeIcon(r))+' '+_esc(workTypeLabel(r))+'</div>'+
+      '<div class="d-loc">'+_esc(r.title||"")+'</div>'+
+      '<div class="d-facts"><span class="d-fact"><span class="fl">التكلفة</span>'+
+        '<span class="mono">'+_fmt(r.amount)+'</span> ر.س</span></div>'+
     '</div>';
   }
 
@@ -967,82 +1028,96 @@
     _badge();
   }
 
+  /* ════════ القائمة ════════ */
   function _listHtml(){
-    var h=_hero("🪪 سداد أعمال الموارد البشرية","إقامات، رخص عمل، تأشيرات ورسوم حكومية — من الإنشاء حتى السداد");
+    var h='<div class="page-hero"><div class="page-hero-titles">'+
+      '<div class="page-hero-title">'+_icon("users")+' سداد أعمال الموارد البشرية</div>'+
+      '<div class="page-hero-sub">إقامات ورخص عمل وتأشيرات ورسوم حكومية — من إنشاء الطلب حتى السداد</div>'+
+      '</div><div class="page-hero-actions">'+
+        (canCreate()?'<button class="btn btn-ghost btn-sm" onclick="showPage(\'new-hr-payment\')">'+_icon("plus")+' طلب سداد جديد</button>':'')+
+      '</div></div>';
 
     if(!_loaded){
-      return h+'<div class="card"><div class="card-body" style="text-align:center;color:var(--muted);font-size:13px;padding:26px">جارٍ تحميل الطلبات…</div></div>';
+      return h+'<div class="card"><div style="text-align:center;padding:30px;color:var(--muted);font-size:13px">جارٍ تحميل الطلبات…</div></div>';
     }
     if(_connIssue){
-      return h+'<div class="card"><div class="card-body" style="text-align:center;padding:22px">'+
+      return h+'<div class="card"><div style="text-align:center;padding:26px">'+
         '<div style="font-size:13px;color:var(--muted);margin-bottom:10px">تعذّر الوصول إلى بيانات الطلبات — تحقّق من الاتصال.</div>'+
-        '<button class="btn btn-primary btn-sm" onclick="hrPayments.retryLoad()">↻ إعادة المحاولة</button></div></div>';
+        '<button class="btn btn-primary btn-sm" onclick="hrPayments.retryLoad()">'+_icon("repeat")+' إعادة المحاولة</button></div></div>';
     }
 
-    var mine=pendingForMe().length;
-    var wip=_reqs.filter(function(r){ return !isFinalStatus(r.status); });
-    var cnt=function(s){ return _reqs.filter(function(r){ return r.status===s; }).length; };
+    var cnt=function(st){ return _reqs.filter(function(r){ return r.status===st; }).length; };
     var mk=(new Date()).toISOString().slice(0,7);
     var paidMonth=_reqs.filter(function(r){ return r.status==="hrp_closed" && String(r.closedAt||"").slice(0,7)===mk; })
                        .reduce(function(s,r){ return s+(Number(r.amount)||0); },0);
 
-    h+='<div class="hrp-stats">'+
-      _stat("بانتظار إجرائك", mine, "#b45309", "mine")+
-      _stat("مدير المشاريع", cnt("hrp_pending_pm"), "#f59e0b", "hrp_pending_pm")+
-      _stat("المدير التنفيذي", cnt("hrp_pending_ceo"), "#7c3aed", "hrp_pending_ceo")+
-      _stat("سداد المالية", cnt("hrp_pending_finance"), "#0891b2", "hrp_pending_finance")+
-      _stat("مرتدّ للتصحيح", _reqs.filter(function(r){ return isBouncedStatus(r.status); }).length, "#dc2626", "bounced")+
-      _stat("مسدَّد هذا الشهر", _fmt0(paidMonth)+" ر.س", "#0a7c59", "hrp_closed")+
+    // بطاقات اللوحة — نفس مكوّن لوحة المشتريات (.dash-top/.stat-tile)، وكلٌّ منها فلترٌ بنقرة.
+    h+='<div class="dash-top" id="hrp-dash">'+
+      _tile("mine",    "بانتظار إجرائك", pendingForMe().length, "var(--danger)", "bell")+
+      _tile("hrp_pending_pm",     "مدير المشاريع",   cnt("hrp_pending_pm"),     "var(--warn)",  "send")+
+      _tile("hrp_pending_ceo",    "المدير التنفيذي", cnt("hrp_pending_ceo"),    "#7e22ce",      "building2")+
+      _tile("hrp_pending_finance","سداد المالية",    cnt("hrp_pending_finance"),"var(--info)",  "banknote")+
+      _tile("hrp_closed",         "مسدَّد هذا الشهر", _fmt0(paidMonth),          "var(--accent)","checkCircle", "ر.س")+
     '</div>';
 
-    // الفلاتر
-    h+='<div class="card" style="margin-bottom:12px"><div class="card-body hrp-filters">'+
+    h+='<div class="card"><div class="filters">'+
       '<input class="form-input" id="hrp-f-search" placeholder="بحث برقم الطلب أو البيان…" value="'+_esc(_fSearch)+'" oninput="hrPayments.setFilter(\'search\',this.value)">'+
-      '<select class="form-select" id="hrp-f-status" onchange="hrPayments.setFilter(\'status\',this.value)">'+
-        '<option value="">كل الحالات</option>'+
-        '<option value="__wip"'+(_fStatus==="__wip"?" selected":"")+'>الجارية فقط ('+wip.length+')</option>'+
-        '<option value="mine"'+(_fStatus==="mine"?" selected":"")+'>بانتظار إجرائي</option>'+
-        '<option value="bounced"'+(_fStatus==="bounced"?" selected":"")+'>مرتدّ للتصحيح</option>'+
-        Object.keys(HRP_STATUS).map(function(k){
-          return '<option value="'+k+'"'+(_fStatus===k?" selected":"")+'>'+_esc(HRP_STATUS[k])+'</option>';
-        }).join("")+
-      '</select>'+
-      '<select class="form-select" id="hrp-f-type" onchange="hrPayments.setFilter(\'type\',this.value)">'+
-        '<option value="">كل أنواع الأعمال</option>'+
-        WORK_TYPES.map(function(w){ return '<option value="'+w.k+'"'+(_fType===w.k?" selected":"")+'>'+w.icon+' '+_esc(w.l)+'</option>'; }).join("")+
-      '</select>'+
-      (canCreate()?'<button class="btn btn-primary btn-sm" onclick="showPage(\'new-hr-payment\')">➕ طلب سداد جديد</button>':'')+
+      '<div class="filters-row">'+
+        '<select class="form-select" id="hrp-f-status" onchange="hrPayments.setFilter(\'status\',this.value)">'+
+          '<option value="">كل الحالات</option>'+
+          '<option value="__wip"'+(_fStatus==="__wip"?" selected":"")+'>الجارية فقط</option>'+
+          '<option value="mine"'+(_fStatus==="mine"?" selected":"")+'>بانتظار إجرائي</option>'+
+          '<option value="bounced"'+(_fStatus==="bounced"?" selected":"")+'>مرتدّ للتصحيح</option>'+
+          Object.keys(HRP_STATUS).map(function(k){
+            return '<option value="'+k+'"'+(_fStatus===k?" selected":"")+'>'+_esc(HRP_STATUS[k])+'</option>';
+          }).join("")+
+        '</select>'+
+        '<select class="form-select" id="hrp-f-type" onchange="hrPayments.setFilter(\'type\',this.value)">'+
+          '<option value="">كل أنواع الأعمال</option>'+
+          WORK_TYPES.map(function(w){ return '<option value="'+w.k+'"'+(_fType===w.k?" selected":"")+'>'+_esc(w.l)+'</option>'; }).join("")+
+        '</select>'+
+      '</div>'+
     '</div></div>';
 
     var rows=_filtered();
     if(!rows.length){
-      h+='<div class="card"><div class="card-body" style="text-align:center;color:var(--muted);font-size:13px;padding:26px">'+
-         (_reqs.length?'لا توجد طلبات مطابقة للتصفية':'لا توجد طلبات سداد بعد')+'</div></div>';
-      return h;
+      return h+'<div class="card">'+_empty("receipt", _reqs.length?"لا توجد طلبات مطابقة للتصفية":"لا توجد طلبات سداد بعد")+'</div>';
     }
 
-    h+='<div class="hrp-table-wrap"><table class="hrp-table"><thead><tr>'+
-      '<th>الطلب</th><th>نوع العمل</th><th>البيان</th><th>التكلفة</th><th>الحالة</th><th>أنشأه</th><th>التاريخ</th>'+
-    '</tr></thead><tbody>'+
-    rows.map(function(r){
-      return '<tr class="hrp-click" onclick="hrPayments.open(\''+_jq(r.id)+'\')">'+
-        '<td style="font-family:\'JetBrains Mono\',monospace;font-weight:700;white-space:nowrap">'+_esc(r.id)+'</td>'+
-        '<td style="white-space:nowrap">'+workTypeIcon(r)+' '+_esc(workTypeLabel(r))+'</td>'+
-        '<td>'+_esc(r.title||"—")+(r.attachments&&r.attachments.length?' <span title="مرفقات">📎'+r.attachments.length+'</span>':'')+'</td>'+
-        '<td class="hrp-num">'+_fmt(r.amount)+'</td>'+
-        '<td>'+statusBadge(r.status)+'</td>'+
-        '<td style="white-space:nowrap">'+_esc(r.createdBy||"—")+'</td>'+
-        '<td style="white-space:nowrap;color:var(--muted);font-size:11px">'+_esc(_date(r.createdAt))+'</td>'+
-      '</tr>';
-    }).join("")+
-    '</tbody></table></div>';
+    h+=rows.map(_cardHtml).join("");
     return h;
   }
 
-  function _stat(lbl, val, color, filterKey){
-    return '<div class="hrp-stat" style="--sc:'+color+'" onclick="hrPayments.setFilter(\'status\',\''+_jq(filterKey||"")+'\')">'+
-      '<div class="hrp-stat-v">'+(typeof val==="number"?_fmt0(val):_esc(val))+'</div>'+
-      '<div class="hrp-stat-l">'+_esc(lbl)+'</div>'+
+  // بطاقة الطلب — بنية بطاقات المنصة نفسها (شريط جانبي ملوّن بالحالة + معرّف + شارة + سطر بيانات).
+  function _cardHtml(r){
+    var atts=(r.attachments||[]).length;
+    return '<div class="hrp-card" style="border-right-color:'+(_RAIL[r.status]||"var(--muted)")+'" onclick="hrPayments.open(\''+_jq(r.id)+'\')">'+
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px">'+
+            '<span class="po-id">'+_esc(r.id)+'</span>'+statusBadge(r.status)+
+          '</div>'+
+          '<div style="font-size:13px;font-weight:700;margin-bottom:3px">'+_icon(workTypeIcon(r))+' '+_esc(workTypeLabel(r))+'</div>'+
+          '<div style="font-size:12px;color:var(--muted);margin-bottom:5px">'+_esc(r.title||"—")+'</div>'+
+          '<div style="font-size:11px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap">'+
+            '<span>'+_icon("user")+' '+_esc(r.createdBy||"—")+'</span>'+
+            '<span>'+_icon("calendar")+' '+_esc(_date(r.createdAt))+'</span>'+
+            (atts?'<span>'+_icon("paperclip")+' '+atts+' مرفق</span>':'')+
+          '</div>'+
+        '</div>'+
+        '<div class="hrp-card-amt"><span class="mono">'+_fmt(r.amount)+'</span> <small>ر.س</small></div>'+
+      '</div>'+
+    '</div>';
+  }
+
+  function _tile(key, lbl, val, color, icon, unit){
+    var active = _fStatus===key;
+    return '<div class="stat-tile'+(active?" tile-active-filter":"")+'" style="--_c:'+color+';cursor:pointer" '+
+      'title="اضغط للتصفية — اضغط مجدداً للإلغاء" onclick="hrPayments.setFilter(\'status\',\''+_jq(active?"":key)+'\')">'+
+      '<div class="st-ico">'+_svg(icon)+'</div>'+
+      '<div class="st-val" style="color:'+color+'">'+(typeof val==="number"?_fmt0(val):_esc(val))+
+        (unit?' <span style="font-size:11px;font-family:\'Cairo\',sans-serif;color:var(--muted)">'+_esc(unit)+'</span>':'')+'</div>'+
+      '<div class="st-lbl">'+_esc(lbl)+'</div>'+
     '</div>';
   }
 
@@ -1070,19 +1145,16 @@
     else if(kind==="type") _fType=v||"";
     else if(kind==="search") _fSearch=v||"";
     if(kind==="search"){
-      // إعادة رسم الجدول وحده حتى لا يفقد حقل البحث التركيز مع كل حرف
-      var host=document.querySelector("#page-hr-payments .hrp-table-wrap");
+      // إعادة رسم القائمة وحدها مع إعادة التركيز — حتى لا يفقد حقل البحث المؤشّر مع كل حرف
       var el=document.getElementById("page-hr-payments");
-      if(el){
-        var scroll=window.scrollY;
-        var sel=document.getElementById("hrp-f-search");
-        var pos=sel?sel.selectionStart:null;
-        el.innerHTML=_listHtml();
-        var again=document.getElementById("hrp-f-search");
-        if(again){ again.focus(); if(pos!=null){ try{ again.setSelectionRange(pos,pos); }catch(e){} } }
-        window.scrollTo(0, scroll);
-      }
-      void host;
+      if(!el) return;
+      var scroll=window.scrollY;
+      var box=document.getElementById("hrp-f-search");
+      var pos=box?box.selectionStart:null;
+      el.innerHTML=_listHtml();
+      var again=document.getElementById("hrp-f-search");
+      if(again){ again.focus(); if(pos!=null){ try{ again.setSelectionRange(pos,pos); }catch(e){} } }
+      window.scrollTo(0, scroll);
       return;
     }
     render();
@@ -1095,9 +1167,9 @@
      تفاصيل آخر طلبٍ فُتح (أو الذي أنشأه المستخدم للتوّ) — فيبدو الزرّ معطّلاً. */
   function list(){ _curId=null; try{ showPage("hr-payments"); }catch(e){} render(); }
 
+  // شريط المراحل الفعلي — المراحل المعروضة تتبع شكل الطلب: مدير المشاريع يظهر إن
+  // طُلب، والتنفيذي إن بلغت التكلفة السقف — فلا يرى المستخدم بوّابةً لا تخصّه.
   function _stepperHtml(r){
-    // المراحل المعروضة تتبع شكل الطلب نفسه: مدير المشاريع يظهر إن طُلب،
-    // والتنفيذي يظهر إن بلغت التكلفة السقف — فلا يرى المستخدم بوابةً لا تخصّه.
     var th=_threshold();
     var keys=[];
     if(r.needsPM) keys.push("hrp_pending_pm");
@@ -1109,188 +1181,184 @@
       hrp_pending_finance: (r.payment&&r.payment.paidAt),
       hrp_closed:          r.closedAt
     };
-    return '<div class="hrp-steps">'+keys.map(function(k){
-      var d=HRP_STAGES.find(function(x){ return x.key===k; }) || {lbl:k, icon:"•"};
-      var state = doneAt[k] ? "done" : (r.status===k ? "cur" : "todo");
-      if(isFinalStatus(r.status) && r.status!=="hrp_closed") state = doneAt[k] ? "done" : "todo";
-      return '<div class="hrp-step hrp-step-'+state+'">'+
-        '<span class="hrp-step-i">'+d.icon+'</span>'+
-        '<span class="hrp-step-l">'+_esc(d.lbl)+'</span>'+
-        (doneAt[k]?'<span class="hrp-step-d">'+_esc(_date(doneAt[k]))+'</span>':'')+
-      '</div>';
-    }).join('<span class="hrp-step-sep">←</span>')+'</div>';
+    var steps=keys.map(function(k){
+      var d=HRP_STAGES.filter(function(x){ return x.key===k; })[0] || {lbl:k, icon:"alertCircle"};
+      return {icon:d.icon, lbl:d.lbl, key:k};
+    });
+    var bounced=isBouncedStatus(r.status), cancelled=(r.status==="hrp_cancelled");
+    var curIdx=-1;
+    steps.forEach(function(st,i){ if(r.status===st.key) curIdx=i; });
+    // المرتدّ والملغى: لا مرحلة «حالية» — ما أُنجز يبقى مُنجزاً وما بعده يُنتظر.
+    var effIdx = (bounced||cancelled) ? -1 : curIdx;
+    var html='<div class="po-wf"><div class="po-wf-head"><span>مسار الاعتماد</span>'+
+      (bounced?'<span class="po-wf-tag rej">'+_esc(statusLabel(r.status))+'</span>':'')+
+      (cancelled?'<span class="po-wf-tag rej">ملغي</span>':'')+
+      ((Number(r.amount)||0)>=th?'<span class="po-wf-tag ceo">فوق سقف التنفيذي ('+_fmt0(th)+' ر.س)</span>':'')+
+    '</div><div class="po-wf-track">'+
+      steps.map(function(st,i){
+        var done=!!doneAt[st.key] || (effIdx>i);
+        var active=(effIdx===i) && !done;
+        return '<div class="po-step'+(done?" done":"")+(active?" active":"")+'">'+
+            '<div class="ps-ico">'+_svg(st.icon)+'</div>'+
+            '<div class="ps-l">'+_esc(st.lbl)+'</div>'+
+          '</div>'+(i<steps.length-1?'<div class="po-link'+(done?" done":"")+'"></div>':"");
+      }).join("")+
+    '</div></div>';
+    return html;
   }
 
   function _detailHtml(r){
-    var th=_threshold();
-    var h='<div class="page-hero"><div class="page-hero-titles">'+
-      '<div class="page-hero-title">'+workTypeIcon(r)+' '+_esc(r.id)+'</div>'+
-      '<div class="page-hero-sub">'+_esc(workTypeLabel(r))+' — '+_esc(r.title||"")+'</div>'+
-      '</div><div class="page-hero-actions">'+
-      '<button class="btn btn-ghost btn-sm" onclick="hrPayments.back()">→ رجوع للقائمة</button>'+
-      '</div></div>';
-
-    // شريط الحالة الحالية + الارتداد إن وُجد
+    var th=_threshold(), pay=r.payment||{};
+    var rail=_RAIL[r.status]||"var(--muted)";
     var reason = r.status==="hrp_pm_rejected" ? r.pmRejectReason
                : r.status==="hrp_ceo_rejected" ? r.ceoRejectReason
                : r.status==="hrp_finance_returned" ? r.financeReturnReason : "";
-    h+='<div class="card" style="margin-bottom:12px"><div class="card-body">'+
-      '<div class="hrp-head">'+
-        '<div>'+statusBadge(r.status)+'</div>'+
-        '<div class="hrp-amount">'+_fmt(r.amount)+' <span>ر.س</span></div>'+
-      '</div>'+
-      (reason?'<div class="hrp-note hrp-note-warn" style="margin-top:10px"><b>سبب الارتداد:</b> '+_esc(reason)+'</div>':'')+
-      _stepperHtml(r)+
-    '</div></div>';
 
-    // البيانات
-    var pay=r.payment||{};
-    h+='<div class="hrp-cols">'+
-      '<div class="card"><div class="card-body">'+
-        '<div class="hrp-card-t">بيانات الطلب</div>'+
-        _kv("نوعية الأعمال", workTypeIcon(r)+" "+workTypeLabel(r))+
-        _kv("البيان", r.title||"—")+
-        _kv("تكلفة السداد", _fmt(r.amount)+" ر.س")+
-        _kv("اعتماد مدير المشاريع", r.needsPM?"مطلوب":"غير مطلوب")+
-        _kv("بوابة المدير التنفيذي", (Number(r.amount)||0)>=th ? ("إلزامية — التكلفة ≥ "+_fmt0(th)+" ر.س") : ("غير مطلوبة — أقل من "+_fmt0(th)+" ر.س"))+
-        _kv("أنشأه", (r.createdBy||"—")+" — "+_date(r.createdAt))+
-      '</div></div>'+
-      '<div class="card"><div class="card-body">'+
-        '<div class="hrp-card-t">السداد</div>'+
-        _kv("المستفيد", pay.beneficiary||"—")+
-        _kv("الآيبان", pay.iban?('<span style="direction:ltr;font-family:\'JetBrains Mono\',monospace">'+_esc(pay.iban)+'</span>'):"—", true)+
-        _kv("ملاحظة", pay.note||"—")+
-        _kv("الحالة", pay.paid?("مسدَّد — "+_date(pay.paidAt)+" بواسطة "+(pay.paidBy||"—")):"لم يُسدَّد بعد")+
-        (pay.transferRef?_kv("رقم العملية", pay.transferRef):"")+
-      '</div></div>'+
+    // الشريط العلويّ = مكانك في النظام (المعرّف + الوحدة)، و.d-hero = السجل نفسه.
+    // بلا تكرارٍ ثلاثيّ للمعرّف ونوع العمل والبيان في ثلاثة أسطر متتالية.
+    var h='<div class="page-hero"><div class="page-hero-titles">'+
+      '<div class="page-hero-title">'+_esc(r.id)+'</div>'+
+      '<div class="page-hero-sub">سداد أعمال الموارد البشرية</div>'+
+      '</div><div class="page-hero-actions">'+
+      '<button class="btn btn-ghost btn-sm" onclick="hrPayments.back()">'+_icon("scrollText")+' كل الطلبات</button>'+
+      '</div></div>';
+
+    // رأس التفاصيل — نفس بنية d-hero في تفاصيل طلب الشراء والبلاغ
+    h+='<div class="d-hero" style="border-right-color:'+rail+'">'+
+      '<div class="d-hero-top">'+statusBadge(r.status)+'</div>'+
+      '<div class="d-building">'+_icon(workTypeIcon(r))+' '+_esc(workTypeLabel(r))+'</div>'+
+      '<div class="d-loc">'+_esc(r.title||"—")+'</div>'+
+      '<div class="d-facts">'+
+        '<span class="d-fact"><span class="fl">التكلفة</span><span class="mono">'+_fmt(r.amount)+'</span> ر.س</span>'+
+        '<span class="d-fact"><span class="fl">أنشأه</span>'+_esc(r.createdBy||"—")+'</span>'+
+        '<span class="d-fact"><span class="fl">التاريخ</span>'+_esc(_date(r.createdAt))+'</span>'+
+        (pay.paid?'<span class="d-fact" style="color:var(--accent);border-color:var(--accent)">'+_icon("checkCircle")+' سُدِّد '+_esc(_date(pay.paidAt))+'</span>':'')+
+      '</div>'+
     '</div>';
+
+    if(reason){
+      h+='<div class="d-hero" style="border-right-color:var(--danger);background:color-mix(in srgb,var(--danger) 7%,var(--surface2))">'+
+        '<div style="font-size:12px;font-weight:800;color:var(--danger);margin-bottom:4px">'+_icon("alertTriangle")+' سبب الارتداد</div>'+
+        '<div style="font-size:12.5px;line-height:1.8">'+_esc(reason)+'</div>'+
+      '</div>';
+    }
+
+    h+=_stepperHtml(r);
 
     // الأزرار
     var acts=_actionsHtml(r);
-    if(acts) h+='<div class="card" style="margin-top:12px"><div class="card-body"><div class="hrp-actions">'+acts+'</div></div></div>';
+    if(acts) h+='<div class="card"><div class="card-title">'+_icon("zap")+' الإجراءات المتاحة لك</div><div class="hrp-actions">'+acts+'</div></div>';
+
+    // البيانات
+    h+='<div class="card">'+
+      '<div class="d-sec">'+
+        '<div class="d-sec-label">بيانات الطلب</div>'+
+        '<div class="d-grid">'+
+          _item("نوعية الأعمال", workTypeLabel(r))+
+          _item("تكلفة السداد", '<span class="mono">'+_fmt(r.amount)+'</span> ر.س', true)+
+          _item("اعتماد مدير المشاريع", '<span class="po-bool '+(r.needsPM?"yes":"no")+'">'+(r.needsPM?"مطلوب":"غير مطلوب")+'</span>', true)+
+          _item("بوّابة المدير التنفيذي",
+            (Number(r.amount)||0)>=th
+              ? '<span class="po-wf-tag ceo">إلزامية — التكلفة ≥ '+_fmt0(th)+' ر.س</span>'
+              : '<span class="po-wf-tag fin">غير مطلوبة — أقل من '+_fmt0(th)+' ر.س</span>', true)+
+        '</div>'+
+      '</div>'+
+      '<div class="d-sec" style="margin-bottom:0">'+
+        '<div class="d-sec-label">السداد</div>'+
+        '<div class="d-grid">'+
+          _item("المستفيد", pay.beneficiary||"—")+
+          _item("الآيبان", pay.iban?('<span class="mono">'+_esc(pay.iban)+'</span>'):"—", true)+
+          _item("ملاحظة", pay.note||"—")+
+          _item("الحالة", pay.paid ? ("سُدِّد بواسطة "+(pay.paidBy||"—")) : "لم يُسدَّد بعد")+
+          (pay.transferRef?_item("رقم العملية", '<span class="mono">'+_esc(pay.transferRef)+'</span>', true):"")+
+        '</div>'+
+      '</div>'+
+    '</div>';
 
     // المرفقات
-    h+='<div class="card" style="margin-top:12px"><div class="card-body">'+
-      '<div class="hrp-card-t">المرفقات'+(_canAttach(r)?'<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="hrPayments.attachModal(\''+_jq(r.id)+'\')">📎 إضافة مرفق</button>':'')+'</div>'+
+    h+='<div class="card">'+
+      '<div class="card-title"><span>'+_icon("paperclip")+' المرفقات</span>'+
+      (_canAttach(r)?'<button class="btn btn-ghost btn-sm" onclick="hrPayments.attachModal(\''+_jq(r.id)+'\')">'+_icon("plus")+' إضافة مرفق</button>':'')+'</div>'+
       ((r.attachments&&r.attachments.length)
         ? '<div class="hrp-atts">'+r.attachments.map(function(a){
             return '<a class="hrp-att" href="'+_esc(a.url)+'" target="_blank" rel="noopener">'+
-              '<span>'+((a.contentType||"").indexOf("pdf")>=0?"📄":"🖼️")+'</span>'+
+              _icon((a.contentType||"").indexOf("pdf")>=0?"fileText":"image")+
               '<span class="hrp-att-n">'+_esc(a.label||a.name||"مرفق")+'</span>'+
               '<span class="hrp-att-m">'+_esc(a.by||"")+' — '+_esc(_date(a.at))+'</span>'+
             '</a>';
           }).join("")+'</div>'
         : '<div style="color:var(--muted);font-size:12px">لا مرفقات على هذا الطلب.</div>')+
-    '</div></div>';
+    '</div>';
 
-    // السجل الزمني
-    h+='<div class="card" style="margin-top:12px"><div class="card-body">'+
-      '<div class="hrp-card-t">سجل الطلب</div>'+
-      '<div class="hrp-tl">'+((r.timeline||[]).slice().reverse().map(function(t){
-        return '<div class="hrp-tl-i">'+
-          '<span class="hrp-tl-ic">'+_esc(t.icon||"•")+'</span>'+
-          '<div><div class="hrp-tl-e">'+_esc(t.event||"")+'</div>'+
-          (t.notes?'<div class="hrp-tl-n">'+_esc(t.notes)+'</div>':'')+
-          '<div class="hrp-tl-m">'+_esc(t.by||"—")+' — '+_esc(_date(t.at))+'</div></div>'+
-        '</div>';
+    // السجل الزمني — مكوّن الخط الزمني نفسه في تفاصيل طلب الشراء (.dtl)
+    h+='<div class="card">'+
+      '<div class="card-title">'+_icon("clock")+' سجل الطلب</div>'+
+      '<div class="dtl">'+((r.timeline||[]).slice().reverse().map(function(t){
+        var c=_RAIL[t.code]||"var(--muted)";
+        return '<div class="dtl-item"><div class="dtl-dot" style="background:'+c+'"></div><div>'+
+          '<div class="dtl-ev">'+_esc(t.event||"")+'</div>'+
+          (t.notes?'<div style="font-size:11.5px;color:var(--text);opacity:.8;margin-top:1px">'+_esc(t.notes)+'</div>':'')+
+          '<div class="dtl-meta">'+_esc(t.by||"—")+' — '+_esc(_date(t.at))+'</div></div></div>';
       }).join("")||'<div style="color:var(--muted);font-size:12px">لا سجل بعد.</div>')+'</div>'+
-    '</div></div>';
+    '</div>';
 
     return h;
   }
 
-  function _kv(k, v, raw){
-    return '<div class="hrp-kv"><span>'+_esc(k)+'</span><b>'+(raw?v:_esc(v))+'</b></div>';
+  function _item(label, value, raw){
+    return '<div class="d-item"><div class="dl">'+_esc(label)+'</div><div class="dv">'+(raw?value:_esc(value))+'</div></div>';
   }
 
   function _actionsHtml(r){
     var id=_jq(r.id), out=[];
     if(r.status==="hrp_pending_pm" && canPM()){
-      out.push('<button class="btn btn-primary btn-sm" onclick="hrPayments.approvePM(\''+id+'\')">✅ اعتماد مدير المشاريع</button>');
-      out.push('<button class="btn btn-delete btn-sm" onclick="hrPayments.reject(\''+id+'\',\'pm\')">❌ رفض</button>');
+      out.push('<button class="btn btn-success btn-sm" onclick="hrPayments.approvePM(\''+id+'\')">'+_icon("checkCircle")+' اعتماد</button>');
+      out.push('<button class="btn btn-danger btn-sm" onclick="hrPayments.reject(\''+id+'\',\'pm\')">'+_icon("xCircle")+' رفض</button>');
     }
     if(r.status==="hrp_pending_ceo" && canCEO()){
-      out.push('<button class="btn btn-primary btn-sm" onclick="hrPayments.approveCEO(\''+id+'\')">✅ اعتماد المدير التنفيذي</button>');
-      out.push('<button class="btn btn-delete btn-sm" onclick="hrPayments.reject(\''+id+'\',\'ceo\')">❌ رفض</button>');
+      out.push('<button class="btn btn-success btn-sm" onclick="hrPayments.approveCEO(\''+id+'\')">'+_icon("checkCircle")+' اعتماد</button>');
+      out.push('<button class="btn btn-danger btn-sm" onclick="hrPayments.reject(\''+id+'\',\'ceo\')">'+_icon("xCircle")+' رفض</button>');
     }
     if(r.status==="hrp_pending_finance" && canFinance()){
-      out.push('<button class="btn btn-primary btn-sm" onclick="hrPayments.payModal(\''+id+'\')">💳 تسجيل السداد وإغلاق</button>');
-      out.push('<button class="btn btn-ghost btn-sm" onclick="hrPayments.financeReturn(\''+id+'\')">↩ إعادة للتصحيح</button>');
+      out.push('<button class="btn btn-primary btn-sm" onclick="hrPayments.payModal(\''+id+'\')">'+_icon("banknote")+' تسجيل السداد وإغلاق</button>');
+      out.push('<button class="btn btn-ghost btn-sm" onclick="hrPayments.financeReturn(\''+id+'\')">'+_icon("rotateCcw")+' إعادة للتصحيح</button>');
     }
-    if(canEdit(r)) out.push('<button class="btn btn-ghost btn-sm" onclick="hrPayments.editModal(\''+id+'\')">✏️ تعديل وإعادة إرسال</button>');
-    if(isOwner(r) && !isFinalStatus(r.status)) out.push('<button class="btn btn-delete btn-sm" onclick="hrPayments.cancel(\''+id+'\')">🚫 إلغاء الطلب</button>');
+    if(canEdit(r)) out.push('<button class="btn btn-ghost btn-sm" onclick="hrPayments.editModal(\''+id+'\')">'+_icon("edit")+' تعديل وإعادة إرسال</button>');
+    if(isOwner(r) && !isFinalStatus(r.status)) out.push('<button class="btn btn-ghost btn-sm" onclick="hrPayments.cancel(\''+id+'\')">'+_icon("ban")+' إلغاء الطلب</button>');
     return out.join("");
   }
 
-  /* ════════ ورقة الأنماط — بتوكنز المنصة (تعمل في الثيمين) ════════ */
+  /* ════════ ورقة الأنماط ════════
+     الوحدة تستعير مكوّنات المنصة كما هي (page-hero / card / card-title / dash-top /
+     stat-tile / filters / form-group / d-hero / d-facts / d-sec / d-grid / d-item /
+     po-wf / po-step / po-link / po-bool / po-id / badge b-po-* / dtl / mono).
+     ما يبقى هنا هو ما لا نظير له فيها فقط — أربع قواعد لا أكثر. */
   function _injectCSS(){
     if(document.getElementById("hrp-css")) return;
     var st=document.createElement("style"); st.id="hrp-css";
     st.textContent=
       '#page-hr-payments,#page-new-hr-payment{direction:rtl}'+
-      '.hrp-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:12px}'+
-      '.hrp-stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow);cursor:pointer;border-top:3px solid var(--sc,var(--primary))}'+
-      '.hrp-stat:hover{background:var(--surface2)}'+
-      '.hrp-stat-v{font-family:\'JetBrains Mono\',monospace;font-size:19px;font-weight:800;color:var(--sc,var(--primary));font-variant-numeric:tabular-nums}'+
-      '.hrp-stat-l{font-size:11px;color:var(--muted);font-weight:700;margin-top:3px}'+
-      '.hrp-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}'+
-      '.hrp-filters .form-input{flex:1 1 200px;min-width:150px}'+
-      '.hrp-filters .form-select{flex:0 1 200px;min-width:150px}'+
-      '.hrp-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow-x:auto}'+
-      '.hrp-table{width:100%;border-collapse:collapse;font-size:12px;min-width:640px}'+
-      '.hrp-table th{background:var(--surface2);padding:10px 12px;text-align:right;font-weight:700;color:var(--muted);font-size:11px;border-bottom:1px solid var(--border);white-space:nowrap}'+
-      '.hrp-table td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:middle}'+
-      '.hrp-table tbody tr:last-child td{border-bottom:none}'+
-      '.hrp-table tbody tr.hrp-click{cursor:pointer}'+
-      '.hrp-table tbody tr.hrp-click:hover td{background:var(--surface2)}'+
-      '.hrp-num{direction:ltr;text-align:right;font-family:\'JetBrains Mono\',monospace;font-variant-numeric:tabular-nums}'+
-      '.hrp-note{background:color-mix(in srgb,var(--primary) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--primary) 22%,var(--border));border-radius:8px;padding:9px 12px;font-size:12px;color:var(--text);line-height:1.7}'+
-      '.hrp-note-warn{background:color-mix(in srgb,#f59e0b 12%,var(--surface));border-color:color-mix(in srgb,#f59e0b 32%,var(--border))}'+
-      '.hrp-form{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}'+
-      '.hrp-form .hrp-span2{grid-column:1/-1}'+
-      '.hrp-field label,.hrp-lbl{display:block;font-size:11.5px;font-weight:700;color:var(--muted);margin-bottom:5px}'+
-      '.hrp-req{color:#dc2626}'+
-      '.hrp-hint{font-size:11px;color:var(--muted);margin-top:5px}'+
-      '.hrp-sub{font-size:12px;font-weight:800;color:var(--primary);border-top:1px solid var(--border);padding-top:10px}'+
-      '.hrp-route{margin-top:14px;background:var(--surface2);border:1px dashed var(--border);border-radius:10px;padding:10px 12px}'+
-      '.hrp-route-t{font-size:11px;font-weight:800;color:var(--muted);margin-bottom:6px}'+
-      '.hrp-route-steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}'+
-      '.hrp-route-step{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:3px 11px;font-size:11.5px;font-weight:700;white-space:nowrap}'+
-      '.hrp-route-arrow{color:var(--muted);font-size:11px}'+
-      '.hrp-route-note{margin-top:7px;font-size:11px;color:#7c3aed;font-weight:700}'+
-      '.hrp-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}'+
-      '.hrp-amount{font-family:\'JetBrains Mono\',monospace;font-size:22px;font-weight:800;color:var(--primary);font-variant-numeric:tabular-nums}'+
-      '.hrp-amount span{font-size:12px;font-family:\'Cairo\',sans-serif;color:var(--muted)}'+
-      '.hrp-steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:12px}'+
-      '.hrp-step{display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:11.5px;font-weight:700;background:var(--surface2);color:var(--muted)}'+
-      '.hrp-step-done{background:color-mix(in srgb,#0a7c59 14%,var(--surface));border-color:color-mix(in srgb,#0a7c59 34%,var(--border));color:#0a7c59}'+
-      '.hrp-step-cur{background:color-mix(in srgb,var(--primary) 14%,var(--surface));border-color:var(--primary);color:var(--primary)}'+
-      '.hrp-step-d{font-family:\'JetBrains Mono\',monospace;font-size:9.5px;opacity:.75}'+
-      '.hrp-step-sep{color:var(--muted);font-size:11px}'+
-      '.hrp-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}'+
-      '.hrp-card-t{display:flex;align-items:center;font-size:12.5px;font-weight:800;color:var(--primary);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)}'+
-      '.hrp-kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 0;border-bottom:1px dashed var(--border)}'+
-      '.hrp-kv:last-child{border-bottom:none}'+
-      '.hrp-kv span{color:var(--muted);white-space:nowrap}'+
-      '.hrp-kv b{text-align:left}'+
+      /* بطاقة الطلب: هندسة .po-card نفسها، لكن بتوكنز السطح والحدود بدل #fff
+         المثبّت فيها — فتعمل في الثيم الداكن أيضاً. */
+      '.hrp-card{background:var(--surface);border:1px solid var(--border);border-right:4px solid var(--muted);'+
+        'border-radius:12px;padding:14px 16px;margin-bottom:10px;cursor:pointer;box-shadow:var(--shadow);transition:box-shadow .15s}'+
+      '.hrp-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.11)}'+
+      '.hrp-card-amt{font-size:19px;font-weight:800;color:var(--primary);white-space:nowrap;align-self:center}'+
+      '.hrp-card-amt .mono{font-family:\'JetBrains Mono\',monospace;font-variant-numeric:tabular-nums}'+
+      '.hrp-card-amt small{font-size:11px;font-family:\'Cairo\',sans-serif;color:var(--muted);font-weight:700}'+
       '.hrp-actions{display:flex;flex-wrap:wrap;gap:8px}'+
+      '.hrp-hint{font-size:11px;color:var(--muted);margin-top:5px}'+
       '.hrp-atts{display:flex;flex-direction:column;gap:7px}'+
-      '.hrp-att{display:flex;align-items:center;gap:9px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:8px 11px;font-size:12px;text-decoration:none;color:var(--text)}'+
+      '.hrp-att{display:flex;align-items:center;gap:9px;background:var(--surface2);border:1px solid var(--border);'+
+        'border-radius:9px;padding:8px 11px;font-size:12px;text-decoration:none;color:var(--text)}'+
       '.hrp-att:hover{border-color:var(--primary)}'+
       '.hrp-att-n{font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'+
       '.hrp-att-m{font-size:10px;color:var(--muted);white-space:nowrap}'+
-      '.hrp-tl{display:flex;flex-direction:column;gap:9px}'+
-      '.hrp-tl-i{display:flex;gap:10px;align-items:flex-start}'+
-      '.hrp-tl-ic{width:24px;height:24px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}'+
-      '.hrp-tl-e{font-size:12px;font-weight:700}'+
-      '.hrp-tl-n{font-size:11.5px;color:var(--text);opacity:.85;margin-top:2px}'+
-      '.hrp-tl-m{font-size:10.5px;color:var(--muted);margin-top:2px}'+
-      '.hrp-sum{background:var(--surface2);border-radius:9px;padding:10px 12px;margin-bottom:4px}'+
-      '.hrp-sum-t{font-size:12.5px;font-weight:800}'+
-      '.hrp-sum-s{font-size:11px;color:var(--muted);margin-top:2px}'+
-      '.hrp-sum-a{font-family:\'JetBrains Mono\',monospace;font-size:17px;font-weight:800;color:var(--primary);margin-top:5px}'+
-      '.hrp-sum-a span{font-size:11px;font-family:\'Cairo\',sans-serif;color:var(--muted)}'+
-      '@media(max-width:720px){.hrp-form,.hrp-cols{grid-template-columns:1fr}}';
+      '#hrp-dash{grid-template-columns:repeat(5,minmax(0,1fr))}'+
+      // خمس بطاقات على عمودين تترك الأخيرة وحيدةً في نصف صفّ — تمتدّ على العرض كاملاً.
+      '@media(max-width:900px){#hrp-dash{grid-template-columns:repeat(2,minmax(0,1fr))}'+
+        '#hrp-dash>:last-child{grid-column:1/-1}}'+
+      '@media(max-width:560px){.hrp-card-amt{font-size:16px}}';
     document.head.appendChild(st);
   }
 
