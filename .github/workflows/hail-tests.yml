@@ -11,6 +11,8 @@ on:
       - 'substitute-budget.js'
       - 'project-management.js'
       - 'cleaning-operations.js'
+      - 'finance-audit.js'
+      - 'hr-payments.js'
       - 'HailNotify.js'
       - 'hail-tests.js'
       - '.github/workflows/hail-tests.yml'
