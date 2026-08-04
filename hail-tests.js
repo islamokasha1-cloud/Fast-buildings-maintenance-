@@ -40,6 +40,7 @@ const PA_PATH  = [path.resolve(path.dirname(IDX), "price-analysis.js")].find(p =
 const LC_PATH  = [path.resolve(path.dirname(IDX), "labor-catalog.js")].find(p => fs.existsSync(p));
 const ST_PATH  = [path.resolve(path.dirname(IDX), "stocktake.js")].find(p => fs.existsSync(p));
 const FA_PATH  = [path.resolve(path.dirname(IDX), "finance-audit.js")].find(p => fs.existsSync(p));
+const HRP_PATH = [path.resolve(path.dirname(IDX), "hr-payments.js")].find(p => fs.existsSync(p));
 
 const VER = (HTML.match(/const APP_VERSION = "(v[\d.a-z]+)"/) || [])[1] || "?";
 
@@ -3555,6 +3556,195 @@ function deepReviewV18_9vu() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   وحدة سداد أعمال الموارد البشرية (hr-payments.js) — v18.9wz
+   تركيبٌ صحيح في index.html + تسلسل الاعتماد (دالة التوجيه النقية تُنفَّذ فعلاً)
+   + عزلها التام عن مسار المشتريات + الصلاحيات.
+   ════════════════════════════════════════════════════════════════════ */
+function hrPaymentsTests() {
+  H("وحدة سداد أعمال الموارد البشرية (hr-payments.js)");
+  if (!HRP_PATH) { T("hr-payments.js موجود", false); return; }
+  const src = fs.readFileSync(HRP_PATH, "utf8");
+  const vm = require("vm");
+  try { new vm.Script(src); T("صياغة hr-payments.js سليمة", true); }
+  catch (e) { T("صياغة hr-payments.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  // ── نقاط الربط في index.html ──
+  T("الوسم موجود في index.html", /<script src="hr-payments\.js\?v=/.test(HTML));
+  T("حاويتا الصفحتين موجودتان",
+    HTML.includes('id="page-hr-payments"') && HTML.includes('id="page-new-hr-payment"'));
+  T("مجموعة السايدبار موجودة ومخفية افتراضياً (تُظهرها الوحدة للمخوَّلين وحدهم)",
+    /id="hdr-grp-hrp"[^>]*style="display:none"/.test(HTML) &&
+    /id="grp-hrp"[^>]*display:none/.test(HTML));
+  T("زرّا التنقّل موجودان", HTML.includes('data-page="hr-payments"') && HTML.includes('data-page="new-hr-payment"'));
+  T("showPage يرسم الصفحتين",
+    HTML.includes('id==="hr-payments"') && HTML.includes("window.hrPayments.render") &&
+    HTML.includes('id==="new-hr-payment"') && HTML.includes("window.hrPayments.renderNew"));
+  T("تُشغَّل مع بقية الوحدات (startSync)", HTML.includes("window.hrPayments.startSync"));
+  T("الصفحتان في pageGroupMap تحت مجموعتهما", HTML.includes('"hr-payments":"grp-hrp"') && HTML.includes('"new-hr-payment":"grp-hrp"'));
+  T("مسجّلة في كاشف الوحدات القديمة (REG)",
+    HTML.includes('{name:"hr-payments.js", get:function(){ return window.hrPayments; }}'));
+  T("الدور hr_officer مضاف لقائمتَي إضافة المستخدمين",
+    (HTML.match(/<option value="hr_officer">/g) || []).length >= 2);
+
+  // ── بصمة البناء تطابق الإصدار ──
+  const hrBuild = (src.match(/var MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
+  T("★ MODULE_BUILD في hr-payments.js يطابق APP_VERSION (يُرفَعان معاً)",
+    hrBuild === VER, `MODULE_BUILD=${hrBuild}  APP_VERSION=${VER}`);
+  T("الوحدة تُصدّر build على واجهتها العامة", /build:MODULE_BUILD/.test(src));
+
+  /* ── العزل عن مسار المشتريات ──
+     الوحدة مصروفٌ إداري لا شراء: أي لمسٍ لـ purchases/savePurchase/global_purchases
+     يعني تسرّب أرقامها إلى تكاليف المشاريع ومؤشّرات التوريد. */
+  // الاسم يرد في تعليق الرأس شرحاً للعزل — الحارس على الاستعمال الفعلي (سلسلة مقتبسة).
+  T("★ لا تكتب ولا تقرأ مجموعة المشتريات (global_purchases)",
+    !/["']global_purchases/.test(src) && !/PURCHASES_COLLECTION\s*\(/.test(src));
+  T("★ لا تستدعي savePurchase ولا تلمس مصفوفة purchases",
+    !/\bsavePurchase\s*\(/.test(src) && !/\bpurchases\s*\.(find|filter|map|push)\b/.test(src));
+  T("★ لا تلمس المخزون ولا البند المستعاض",
+    !/_inventoryItems|substituteBudget|substituteAccountId/.test(src));
+  T("مجموعتها الخاصة معرّفة مع نسخة التطوير", /global_hr_payments_dev/.test(src) && /global_hr_payments/.test(src));
+
+  /* ── السقف يُقرأ من المصدر الموحّد، لا رقماً مكتوباً في الوحدة ── */
+  T("★ سقف التنفيذي يُقرأ من CEO_APPROVAL_THRESHOLD الموحّد",
+    /CEO_APPROVAL_THRESHOLD/.test(src));
+
+  // ── تحميل الوحدة فعلياً واختبار دالة التوجيه النقية ──
+  const sandbox = { window: {}, console, document: undefined };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل الوحدة", false, String(e.message).slice(0, 120)); return; }
+  const HR = sandbox.window.hrPayments;
+  T("تعرّض window.hrPayments والدوال النقية",
+    HR && typeof HR._nextStage === "function" && typeof HR._iban === "function" && typeof HR.statusLabel === "function");
+  if (!HR || typeof HR._nextStage !== "function") return;
+
+  const TH = 2000;
+  const ns = (r) => HR._nextStage(r, TH);
+
+  // (١) اختيار مدير المشاريع يقدَّم على كل شيء
+  T("★ اختار «يحتاج مدير المشاريع» ⇒ يبدأ عنده",
+    ns({ amount: 100, needsPM: true }) === "hrp_pending_pm" &&
+    ns({ amount: 99999, needsPM: true }) === "hrp_pending_pm");
+
+  // (٢) بلا مدير مشاريع: أقل من السقف ⇒ المالية مباشرة
+  T("بلا مدير مشاريع وتحت السقف ⇒ المالية مباشرة",
+    ns({ amount: 1999.99, needsPM: false }) === "hrp_pending_finance");
+
+  /* (٣) الثابت الحارس: بوابة التنفيذي تُحسب من التكلفة لا من اختيار بشري.
+     لو رُبطت باختيار المُنشئ لأمكن تمرير أي مبلغ للمالية باختيار «لا». */
+  T("★ اختيار «لا» لمدير المشاريع لا يتخطّى المدير التنفيذي فوق السقف",
+    ns({ amount: 2000, needsPM: false }) === "hrp_pending_ceo" &&
+    ns({ amount: 50000, needsPM: false }) === "hrp_pending_ceo");
+
+  T("السقف شامل (≥) لا حصري (>)",
+    ns({ amount: TH, needsPM: false }) === "hrp_pending_ceo" &&
+    ns({ amount: TH - 0.01, needsPM: false }) === "hrp_pending_finance");
+
+  // (٤) بعد اعتماد مدير المشاريع يُعاد الحساب من الدالة نفسها
+  T("بعد اعتماد مدير المشاريع: فوق السقف ⇒ التنفيذي، وتحته ⇒ المالية",
+    ns({ amount: 5000, needsPM: true, pmApprovedAt: "2026-08-01T00:00:00Z" }) === "hrp_pending_ceo" &&
+    ns({ amount: 500,  needsPM: true, pmApprovedAt: "2026-08-01T00:00:00Z" }) === "hrp_pending_finance");
+
+  // (٥) بعد اعتماد التنفيذي ⇒ المالية
+  T("بعد اعتماد التنفيذي ⇒ المالية للسداد",
+    ns({ amount: 5000, needsPM: false, ceoApprovedAt: "2026-08-01T00:00:00Z", ceoApprovedAmount: 5000 }) === "hrp_pending_finance");
+
+  /* (٦) الثابت الثاني: اعتماد التنفيذي مربوطٌ بالمبلغ الذي رآه. رفع التكلفة بعد
+     اعتماده يعيد الطلب إليه — وإلا سُدِّد مبلغٌ لم يوقّع عليه أحد. */
+  T("★ رفع التكلفة فوق ما اعتمده التنفيذي يُسقط اعتماده ويعيد الطلب لبوابته",
+    ns({ amount: 9000, needsPM: false, ceoApprovedAt: "2026-08-01T00:00:00Z", ceoApprovedAmount: 5000 }) === "hrp_pending_ceo");
+  T("خفض التكلفة بعد اعتماد التنفيذي لا يعيد الطلب إليه",
+    ns({ amount: 3000, needsPM: false, ceoApprovedAt: "2026-08-01T00:00:00Z", ceoApprovedAmount: 5000 }) === "hrp_pending_finance");
+  T("★ اعتمادٌ قديم بلا ceoApprovedAmount لا يمرّر مبلغاً فوق السقف",
+    ns({ amount: 8000, needsPM: false, ceoApprovedAt: "2026-08-01T00:00:00Z" }) === "hrp_pending_ceo");
+
+  // (٧) جدول الحالات مكتمل ومتّسق
+  const need = ["hrp_pending_pm","hrp_pending_ceo","hrp_pending_finance","hrp_closed",
+                "hrp_pm_rejected","hrp_ceo_rejected","hrp_finance_returned","hrp_cancelled"];
+  T("جدول الحالات يغطّي كل مراحل المسار", need.every(k => !!HR.HRP_STATUS[k]));
+  T("كل مخرجات دالة التوجيه حالاتٌ معرَّفة",
+    [ns({amount:1,needsPM:true}), ns({amount:1,needsPM:false}), ns({amount:1e6,needsPM:false})]
+      .every(k => !!HR.HRP_STATUS[k]));
+  T("الحالات النهائية والمرتدّة معرَّفة ولا تتقاطع",
+    HR.HRP_FINAL.every(k => !!HR.HRP_STATUS[k]) &&
+    HR.HRP_BOUNCED.every(k => !!HR.HRP_STATUS[k]) &&
+    !HR.HRP_FINAL.some(k => HR.HRP_BOUNCED.indexOf(k) >= 0));
+
+  // (٨) نوعية الأعمال — قائمة مغلقة + «أخرى» بنصّ حرّ
+  T("قائمة نوعية الأعمال تشمل الإقامات ورخص العمل والتأشيرات و«أخرى»",
+    ["residency","work_permit","visa","other"].every(k => HR.WORK_TYPES.some(w => w.k === k)));
+  T("«أخرى» تعرض النص الحرّ المُدخل",
+    HR.workTypeLabel({ workType: "other", workTypeOther: "رسوم شهادة صحية" }) === "رسوم شهادة صحية");
+
+  // (٩) الآيبان — نفس قاعدة مسار الشراء
+  T("تحقق الآيبان: SA + 22 رقماً، والفراغ مقبول",
+    HR._iban("SA" + "1".repeat(22)).ok && HR._iban("").ok &&
+    !HR._iban("SA123").ok && !HR._iban("XX" + "1".repeat(22)).ok);
+
+  // (١٠) الصلاحيات — الأدوار المعنية وحدها
+  T("★ العرض مقصور على الأدوار المعنية (لا المستودع ولا المشتريات ولا الزائر)",
+    /function canView\(\)\{ return canCreate\(\) \|\| canPM\(\) \|\| canCEO\(\) \|\| canFinance\(\); \}/.test(src.replace(/\s+/g, " ").replace(/function canView\(\)/, "function canView()")) ||
+    (/canCreate\(\)\s*\|\|\s*canPM\(\)\s*\|\|\s*canCEO\(\)\s*\|\|\s*canFinance\(\)/.test(src) &&
+     !/warehouse_manager|procurement_officer/.test(src)));
+  T("الإنشاء لمسؤول الموارد البشرية والمسؤول فقط",
+    /function canCreate\(\)\s*\{\s*return _role\(\)==="hr_officer" \|\| _isAdmin\(\); \}/.test(src));
+  T("تسجيل السداد يفرض إيصالاً إلزامياً", /إيصال التحويل إلزامي/.test(src));
+  T("كل كتابة تمرّ بمعاملة على الوثيقة الطازجة", /runTransaction/.test(src));
+
+  // (١١) نقاط الربط في النواة — دورٌ واحد وقائمةٌ واحدة
+  T("★ _isGlobalOnlyRole مصدرٌ واحد لأدوار الوضع المركزي (يشمل hr_officer)",
+    /function _isGlobalOnlyRole\(role\)\{[\s\S]*?hr_officer/.test(HTML) &&
+    (HTML.match(/_isGlobalOnlyRole\(/g) || []).length >= 5);
+  T("★ _notifVisible مصدرٌ واحد لفلترة الجرس ويحجب إشعارات الموارد البشرية عن غير المخوَّل",
+    /function _notifVisible\(n, isGP\)\{[\s\S]*?hrPayments\.canView/.test(HTML) &&
+    (HTML.match(/_notifVisible\(/g) || []).length >= 4);
+  T("النقر على إشعار سداد يفتح الطلب في وحدته",
+    HTML.includes('n.type==="hr_payment"') && HTML.includes("window.hrPayments.open(n.ticketId)"));
+  T("مسؤول الموارد البشرية يهبط على شاشته لا على طلبات الشراء",
+    HTML.includes('showPage(_hrOnly ? "hr-payments" : "purchases")'));
+  T("سايدبار مسؤول الموارد البشرية مقصور على مجموعته",
+    /body\.role-hr-officer #hdr-grp-po/.test(HTML) && /classList\.toggle\("role-hr-officer"/.test(HTML));
+  /* ── لغة التصميم: الوحدة تستعير مكوّنات المنصة ولا تخترع بديلاً ──
+     العطل الذي تمنعه هذه الحرّاس ليس بصرياً وحده: صفحةٌ بمفرداتٍ خاصة تنحرف عن
+     المنصة مع كل تحديثٍ للتوكنز (الثيم الداكن أولاً)، وتُجبر المستخدم على تعلّم
+     شكلٍ ثانٍ لنفس المعنى. */
+  var _hrpUses = function(cls){ return src.indexOf(cls) >= 0; };
+  T("★ تستعمل مكوّنات المنصة لا بدائل خاصة (هيرو/بطاقة/نموذج/تفاصيل/خط زمني)",
+    ["page-hero","card-title","form-group","form-label","form-row","d-hero","d-facts",
+     "d-sec-label","d-grid","d-item","dtl-item","dtl-dot","stat-tile","st-val","desc-box"].every(_hrpUses));
+  T("★ شريط المراحل هو شريط سير عمل المشتريات نفسه (po-wf/po-step/po-link)",
+    ["po-wf","po-wf-track","po-step","ps-ico","ps-l","po-link","po-wf-tag"].every(_hrpUses));
+  T("★ الشارات شارات المنصة (badge b-po-*) لا صنفٌ ثالث",
+    /class="badge '\+m\.cls\+'/.test(src) && ["b-po-approval","b-po-ceo","b-po-closed","b-po-rejected"].every(_hrpUses) &&
+    src.indexOf("status-badge") < 0);
+  T("★ الأيقونات من مجموعة أيقونات المنصة لا إيموجي في متن الصفحة",
+    /function _icon\([\s\S]{0,120}_ic\(/.test(src) && /function _svg\([\s\S]{0,120}_svgIcon\(/.test(src));
+  {
+    // ورقة أنماط الوحدة لا تعيد تعريف أي مكوّنٍ للمنصة — تعرّف ما لا نظير له فقط.
+    var cssA = src.indexOf("st.textContent="), cssB = src.indexOf("document.head.appendChild(st)", cssA);
+    var css  = cssA >= 0 ? src.slice(cssA, cssB) : "";
+    var owned = (css.match(/'\.[a-z][a-z0-9-]*/g) || []).map(function(x){ return x.slice(1); });
+    var strays = owned.filter(function(c){ return c.indexOf(".hrp-") !== 0; });
+    T("★ لا تعيد تعريف مكوّنات المنصة في ورقتها (كل أصنافها .hrp-*)",
+      strays.length === 0, strays.join("، ") || "نظيفة");
+    T("ورقة أنماط الوحدة صغيرة (تستعير ولا تبني نظاماً ثانياً)",
+      owned.length <= 14, owned.length + " صنفاً");
+  }
+  /* مرحلةٌ منجَزة لا تكون «حالية»: قاعدة .po-step.active تلي .done في ورقة المنصة
+     فتغلبها — والطلب المغلق كان يظهر بمرحلة «إغلاق» جارية كأنه ينتظر. رُصد بلقطة شاشة. */
+  T("★ مرحلة منجَزة لا تُرسَم «جارية» (المغلق لا يبدو منتظِراً)",
+    /var active=\(effIdx===i\) && !done;/.test(src));
+  // وحدة العملة تتبع اتجاه الصفحة والرقم وحده معزول LTR — كما في بطاقة طلب الشراء.
+  T("مبلغ البطاقة لا يقلب اتجاه وحدة العملة", !/\.hrp-card-amt\{[^}]*direction:ltr/.test(src));
+
+  /* زرّ السايدبار يقصد «القائمة» دائماً: بلا تصفير _curId كان showPage يعيد رسم
+     تفاصيل آخر طلبٍ فُتح — وأوضحُ ظهورٍ لذلك بعد إنشاء طلبٍ جديد (يُفتح تفصيله)،
+     فيبدو الزرّ معطّلاً. رُصد في رحلة متصفّح فعلية. */
+  T("★ زرّ قائمة السداد يفتح القائمة لا تفاصيل آخر طلب",
+    HTML.includes("hrPayments.list()") && typeof HR.list === "function" &&
+    /function list\(\)\{\s*_curId=null;/.test(src));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    وحدة الرقابة المالية على المشتريات (finance-audit.js) — v18.9wk
    تركيبٌ صحيح في index.html + حتمية العينة العشوائية + أعلام الإدراج الآلي
    + مقارنة البنود بالمرجع (دوال نقية تُنفَّذ فعلاً).
@@ -3762,6 +3952,7 @@ function financeAuditTests() {
   kpi();
   substituteBudget();
   financeAuditTests();
+  hrPaymentsTests();
   numParsing();
   hailNotify();
   writeRaceRoot();
