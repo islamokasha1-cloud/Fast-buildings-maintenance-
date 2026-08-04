@@ -3199,6 +3199,81 @@ function cleaningOpsTests() {
     /\.co-bld-modal\{width:min\(440px,96vw\) !important/.test(src) &&
     /\.card,\s*\.filters,\s*\.buildings-grid\s*\{[^}]*width:\s*100%\s*!important/.test(HTML));
 
+  // ══ ★ v18.9y: «كل المهام» ببطاقات المباني — والمجدولُ القادم ظاهرٌ قابلٌ للتنفيذ ══
+  // لوحةُ اليوم لا تعرض إلا المستحقَّ اليوم، فمهمةٌ تبدأ غداً لا يراها المستخدم. الآن
+  // شاشة «كل المهام» تعرض المهامّ **كلَّها** مقسَّمةً في بطاقات المباني (نفس مفردات
+  // اللوحة) مع مرشِّح حالةٍ جدوليّ، ومبدّلٍ للجدول القديم.
+  T("★ y: تصنيفٌ جدوليٌّ مستقلٌّ مكشوف (schedClass/schedSort/allPass)",
+    CO && typeof CO._schedClass === "function" && typeof CO._schedSort === "function" &&
+    typeof CO._allPass === "function");
+  if (CO && typeof CO._schedClass === "function") {
+    const tmr = CO._addDays(today, 1), yst = CO._addDays(today, -3);
+    const up = mk({ id: "u1", nextDueDate: tmr });
+    const td = mk({ id: "u2", nextDueDate: today });
+    const ov = mk({ id: "u3", nextDueDate: yst });
+    const off = mk({ id: "u4", nextDueDate: tmr, disabled: true });
+    const dn = mk({ id: "u5", nextDueDate: CO._addDays(today, 1), lastExecuted: today + "T08:00:00.000Z" });
+    T("★ y: القادم/اليوم/المتأخّر/الموقوف/المنفَّذ اليوم تُصنَّف بالتاريخ وحده",
+      CO._schedClass(up) === "upcoming" && CO._schedClass(td) === "today" &&
+      CO._schedClass(ov) === "overdue" && CO._schedClass(off) === "off" &&
+      CO._schedClass(dn) === "today",
+      [up, td, ov, off, dn].map(CO._schedClass).join("،"));
+    T("★ y: المرشِّح «قادمة» يُظهر ما يبدأ غداً — وهو ما كانت اللوحة تُخفيه",
+      CO._allPass(up, "upcoming") && !CO._allPass(td, "upcoming") && !CO._allPass(ov, "upcoming"));
+    T("y: «الكل» يمرّر كلَّ شيء والموقوفة لها تصنيفها",
+      CO._allPass(off, "all") && CO._allPass(off, "off") && !CO._allPass(off, "today"));
+    T("★ y: الترتيب: الأكثر تأخّراً ← اليوم ← الأقرب موعداً ← المنفَّذ ← الموقوف",
+      JSON.stringify([off, dn, up, td, ov].slice().sort((a, b) => CO._schedSort(a) - CO._schedSort(b)).map(t => t.id))
+      === '["u3","u2","u1","u5","u4"]');
+  }
+  // الحارس الجوهري: الإجازة تُصفّر isDue/isOverdue (لا ضغطَ يوم عطلة) وهو صحيحٌ
+  // للتغطية — لكن لو بُني عليهما تصنيفُ الجدول لصارت كلُّ المهامّ «قادمة» يوم الجمعة.
+  T("★ y: التصنيف الجدولي يقرأ التاريخ وحده (لا isDue/isOverdue فتنهار الشاشة في الإجازة)",
+    /function schedClass\(t\)\{[\s\S]{0,320}?\n\}/.test(src) &&
+    !/function schedClass\(t\)\{[\s\S]{0,320}?(isDue|isOverdue)\(/.test(src) &&
+    !/function schedSort\(t\)\{[\s\S]{0,320}?(isDue|isOverdue)\(/.test(src));
+  T("★ y: العرض البطاقي هو الافتراضي في «كل المهام» (لا الجدول)",
+    /let _allMode\s*=\s*"cards"/.test(src) &&
+    src.includes('_allMode==="table" ? _allTableHTML(rows) : _allGroupsHTML(rows)'));
+  T("★ y: بطاقات المباني بنفس مفردات اللوحة (co-groups/co-group/ppm-card عبر بطاقة المهمة)",
+    /_allGroupsHTML[\s\S]{0,700}?<div class="co-groups">/.test(src) &&
+    /_allGroupsHTML[\s\S]{0,900}?_bldOrder\(byB\)/.test(src) &&
+    /_allGroupsHTML[\s\S]{0,900}?_allBldListHTML\(b, items\)/.test(src));
+  if (CO && typeof CO._allBldListHTML === "function") {
+    T("★ y: سقفُ الشاشة أعلى من اللوحة (جدولٌ لا لوحةَ يوم)",
+      CO._ALL_CARDS_PER_BLD === 4 && CO._ALL_CARDS_PER_BLD > CO._BOARD_CARDS_PER_BLD);
+    const six = Array.from({ length: 6 }, (_, i) =>
+      mk({ id: "a" + i, name: "مهمة " + i, building: "مبنى الجدول", nextDueDate: CO._addDays(today, 1) }));
+    const capped = CO._allBldListHTML("مبنى الجدول", six);
+    T("★ y: أربع بطاقات وزرٌّ يفتح النافذة بنطاق **كل** مهامّ المبنى",
+      (capped.match(/ppm-card/g) || []).length === 4 && capped.includes("عرض 2 مهام أخرى") &&
+      capped.includes("openBldTasks('" + encodeURIComponent("مبنى الجدول") + "','all')"),
+      "cards=" + (capped.match(/ppm-card/g) || []).length);
+    T("★ y: بطاقةُ المهمة القادمة تحمل تاريخ استحقاقها (لا «بعد N يوم» وحدها)",
+      capped.includes(CO._addDays(today, 1)));
+  }
+  T("★ y: نافذة المبنى تفرّق النطاقين — والمرشِّح يسري داخلها",
+    /_bldModalScope==="all"/.test(src) && src.includes("allPass(t,_allFilter)") &&
+    /function openBldTasks\(key, scope\)/.test(src) &&
+    src.includes('_bldModalScope=(scope==="all")?"all":"today"'));
+  T("★ y: مبدّل العرض والمرشِّح مكشوفان ويُغلقان نافذة المبنى (لا نافذةٌ بنطاقٍ زائل)",
+    typeof CO.setAllMode === "function" && typeof CO.setAllFilter === "function" &&
+    /function setAllMode\(m\)\{[^\n]*closeBldTasks\(\);/.test(src) &&
+    /function setAllFilter\(f\)\{[^\n]*closeBldTasks\(\);/.test(src));
+  T("y: شريط المرشِّحات فيه العدّادات ومبدّل بطاقات/جدول",
+    src.includes("cleaningOps.setAllFilter('") && src.includes("بطاقات المباني") &&
+    src.includes('cleaningOps.setAllMode(\'table\')') && src.includes(".co-chips{display:flex"));
+  // الموقوفة كانت تُصفَّى قبل بطاقات اللوحة فلم يظهر زرُّ تنفيذها قطّ — والشاشة
+  // البطاقية الجديدة تعرضها، فلولا الشرط لعُرض «تنفيذ» على مهمةٍ أوقفها المدير.
+  T("★ y: بطاقة المهمة الموقوفة بلا زرّ تنفيذ وبمظهرٍ خافت",
+    /const off=isDisabled\(t\);/.test(src) &&
+    src.includes("${(!done&&!off&&canExecute())||canEdit()") &&
+    src.includes("${(done||off) ? \"\" : (canExecute()?") &&
+    src.includes("co-card-off") && /\.co-card-off\{opacity:/.test(src));
+  T("y: الجدول باقٍ بعمود الاستحقاق واسمُ المهمة يفتح تفاصيلها",
+    src.includes("<th>الاستحقاق</th>") &&
+    /co-td-name co-clickable" onclick="cleaningOps\.openDetail/.test(src));
+
   // ══ ★ v18.9we: إطلاق المهام في وقت محدد — لا تأخير وهمي أثناء التجهيز ══
   // المهام تُنشأ اليوم والتشغيل يبدأ لاحقاً فيتراكم «تأخير» بلا داعٍ. الإطلاق يعيد
   // جدولة استحقاق مهامّ المبنى لتاريخ البدء، والتوليد يقبل تاريخ بدءٍ من الأساس.
@@ -3313,9 +3388,10 @@ function cleaningOpsTests() {
   // ══ ★ v18.9vy: ترتيب مباني اللوحة — الأكثر تأخّراً أولاً ══
   // الترتيب الأبجدي كان يدفن المبنى المتعثّر وسط القائمة. الآن: متأخّر أكثر ← مستحقّ
   // أكثر ← أبجدي، عبر مصدرٍ واحد (_bldOrder) للوحة اليوم والمتابعة اليومية.
-  T("★ vy: _bldOrder مكشوفة والشاشتان تمرّان عبرها (لا .sort() أبجدي متبقٍّ)",
+  // v18.9y: صارت ثلاث شاشات — لوحةُ اليوم والمتابعة اليومية و«كل المهام» البطاقية
+  T("★ vy: _bldOrder مكشوفة والشاشات تمرّ عبرها (لا .sort() أبجدي متبقٍّ)",
     CO && typeof CO._bldOrder === "function" &&
-    (src.match(/\+_bldOrder\(byB\)\.map\(b=>\{/g) || []).length === 2 &&
+    (src.match(/\+_bldOrder\(byB\)\.map\(b=>\{/g) || []).length === 3 &&
     !src.includes("Object.keys(byB).sort().map(b=>{"));
   if (CO && typeof CO._bldOrder === "function") {
     const byB = {

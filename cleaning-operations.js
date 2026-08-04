@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9x";
+const MODULE_BUILD = "v18.9y";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -245,6 +245,11 @@ let _loaded  = false;   // اكتمل تحميل هذا المشروع؟
 let _loadedFor = "";    // معرّف المشروع المحمَّل
 let _loading = false;
 let _view    = "board"; // board | all | sup | quality
+/* «كل المهام»: عرضٌ ببطاقات المباني (افتراضي) أو جدول، ومرشِّحُ حالةٍ جدوليّ.
+   العرض البطاقي يُظهر **المجدولة القادمة** أيضاً (التي تبدأ غداً وما بعده) — فلوحةُ
+   اليوم لا تعرض إلا المستحقّ اليوم، والمستخدم يحتاج أن يرى القادم ويتصرّف فيه. */
+let _allMode   = "cards"; // cards | table
+let _allFilter = "all";   // all | overdue | today | upcoming | off
 let _editing = null;    // مسوّدة مهمة قيد التحرير (null = لا تحرير)
 let _execFor = null;    // المهمة قيد التنفيذ (نافذة قائمة الفحص)
 let _execState = [];    // حالة بنود قائمة الفحص أثناء التنفيذ
@@ -324,6 +329,27 @@ function isDue(t){ if(isDisabled(t)||doneToday(t)||_isTodayHoliday()) return fal
 function isOverdue(t){ if(isDisabled(t)||doneToday(t)||_isTodayHoliday()) return false; return _dayDiff(String(t.nextDueDate||"").slice(0,10), _today())<0; }
 // التأخّر بأيام العمل (يتجاهل الجمعة/السبت) — فعطلةٌ بين الاستحقاق واليوم لا تُضخّم الرقم
 function overdueDays(t){ return _overdueWorkingDays(String(t.nextDueDate||"").slice(0,10)); }
+
+/* ── تصنيفٌ جدوليّ (لشاشة «كل المهام») ──
+   isDue/isOverdue تُصفِّران في الإجازة عمداً (لا ضغطَ يوم عطلة) — وهذا صحيحٌ للوحة
+   اليوم والتغطية، لكنه يُخفي **الجدول** نفسه: يوم الجمعة تصير كلُّ المهامّ «قادمة».
+   لذلك لشاشة الجدول تصنيفٌ مستقلٌّ من التاريخ وحده: متأخّرة/اليوم/قادمة/موقوفة. */
+function _dueIn(t){ return _dayDiff(String(t&&t.nextDueDate||"").slice(0,10), _today()); }
+function schedClass(t){
+  if(isDisabled(t)) return "off";
+  if(doneToday(t))  return "today";          // نُفِّذت اليوم = من جدول اليوم
+  const d=_dueIn(t);
+  return d<0 ? "overdue" : (d===0 ? "today" : "upcoming");
+}
+function allPass(t, f){ return !f || f==="all" ? true : schedClass(t)===f; }
+/* ترتيب داخل بطاقة المبنى: الأكثر تأخّراً ← اليوم ← الأقرب موعداً ← ما نُفِّذ اليوم
+   ← الموقوفة. لا يعتمد على dueStatus لأن الأخيرة تُسوّي الكلَّ في الإجازة. */
+function schedSort(t){
+  if(isDisabled(t)) return 90000;
+  if(doneToday(t))  return 80000;
+  const d=_dueIn(t);
+  return d<0 ? -10000+d : d;
+}
 
 // إحصاءات لوحة اليوم — التغطية = ما نُفِّذ اليوم ÷ ما كان مجدولاً لليوم (منفَّذ + مستحقّ).
 // تقبل قائمةً صريحة (للفحوص) وإلا تعمل على مهام المشروع المحمَّلة.
@@ -652,13 +678,14 @@ function _cappedTaskListHTML(b, list){
    النافذةَ أولاً ليظهر ما فتحته — بمستمعِ capture فلا يعطّله stopPropagation. */
 const BLD_MODAL_ID = "co-bld-modal";
 let _bldModalBld = null;     // المبنى المعروض (null = النافذة مغلقة)
+let _bldModalScope = "today";// today = مهامّ اليوم (اللوحة) | all = كل مهامّ المبنى (شاشة كل المهام)
 let _bldDetailFor = null;    // مهمة معروضة تفاصيلُها داخل النافذة (null = عرض القائمة)
 let _bldDetailLog = null;    // سجلّ تنفيذها (null = يُحمَّل)
 // ESC يغلق النافذة — المستمع يُركَّب عند الفتح ويُفكّ عند الإغلاق (لا مستمع دائم)
 function _bldEscHandler(e){ if(e && e.key==="Escape") closeBldTasks(); }
 function closeBldTasks(){
   const el=document.getElementById(BLD_MODAL_ID); if(el&&el.remove) el.remove();
-  _bldModalBld=null; _bldDetailFor=null; _bldDetailLog=null;
+  _bldModalBld=null; _bldDetailFor=null; _bldDetailLog=null; _bldModalScope="today";
   try{ document.removeEventListener("keydown", _bldEscHandler); }catch(e){}
 }
 function _bldModalRender(){
@@ -675,15 +702,18 @@ function _bldModalRender(){
       ${_taskDetailBodyHTML(t, _bldDetailLog)}`;
     return;
   }
-  const b=_bldModalBld;
-  const list=visibleTasks()
+  const b=_bldModalBld, wide=_bldModalScope==="all";
+  const list=wide
+    ? visibleTasks().filter(t=>((t.building||"بلا مبنى")===b) && allPass(t,_allFilter))
+        .sort((x,y)=>schedSort(x)-schedSort(y))
+    : visibleTasks()
     .filter(t=>!isDisabled(t) && (isDue(t)||doneToday(t)) && ((t.building||"بلا مبنى")===b))
     .sort((x,y)=>dueStatus(x).sort-dueStatus(y).sort);
   const d=list.filter(doneToday).length;
   box.innerHTML=`
     <div class="co-sec">
       <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
-      <span class="ppm-due-badge ${d===list.length?'ok':'today'}">${d}/${list.length} منجزة</span>
+      <span class="ppm-due-badge ${wide?'soon':(d===list.length?'ok':'today')}">${wide?list.length+" مهمة":d+"/"+list.length+" منجزة"}</span>
       <button class="btn btn-ghost btn-sm co-bld-close" onclick="cleaningOps.closeBldTasks()">✕ إغلاق</button>
     </div>
     <div class="co-tasklist">${list.map(taskCardHTML).join("")}</div>`;
@@ -698,10 +728,10 @@ function _bldOpenDetail(id){
   });
 }
 function bldBack(){ _bldDetailFor=null; _bldDetailLog=null; _bldModalRender(); }
-function openBldTasks(key){
+function openBldTasks(key, scope){
   closeBldTasks();
   const b=decodeURIComponent(key);
-  _bldModalBld=b;
+  _bldModalBld=b; _bldModalScope=(scope==="all")?"all":"today";
   const ov=document.createElement("div");
   ov.id=BLD_MODAL_ID; ov.className="co-bld-overlay"; ov.dir="rtl";
   ov.innerHTML=`<div class="co-bld-modal card" role="dialog" aria-label="${_esc(b)}"></div>`;
@@ -722,6 +752,17 @@ function openBldTasks(key){
   document.body.appendChild(ov);
   document.addEventListener("keydown", _bldEscHandler);
   _bldModalRender();
+}
+
+/* نظيرُ _cappedTaskListHTML لشاشة «كل المهام»: سقفٌ أعلى (الشاشة جدولٌ لا لوحةَ يوم)
+   وزرُّ التوسيع يفتح النافذة بنطاق **كل مهامّ المبنى** لا مهامّ اليوم وحدها. */
+const ALL_CARDS_PER_BLD = 4;
+function _allBldListHTML(b, list){
+  const shown=list.slice(0,ALL_CARDS_PER_BLD);
+  const rest=list.length-ALL_CARDS_PER_BLD;
+  return `<div class="co-tasklist">${shown.map(taskCardHTML).join("")}</div>`+
+    (rest>0?`<button class="btn btn-ghost btn-sm co-more-btn" onclick="event.stopPropagation();cleaningOps.openBldTasks('${encodeURIComponent(b)}','all')">${
+      "▢ عرض "+rest+" "+(rest===1?"مهمة أخرى":"مهام أخرى")}</button>`:"");
 }
 
 /* تجميعُ المهامّ حسب المبنى في شبكةٍ متجاورة — يستفيد من عرض الشاشة بدل صفٍّ لكل مهمة */
@@ -746,8 +787,11 @@ function taskCardHTML(t){
   const st=dueStatus(t);
   const list=Array.isArray(t.checklist)?t.checklist:[];
   const done=doneToday(t);
+  // الموقوفة لا تُنفَّذ: كانت اللوحة تُصفّيها فلم يظهر زرُّها قطّ، وشاشةُ «كل المهام»
+  // البطاقية تعرضها — فلولا هذا الشرط لعُرض «تنفيذ» على مهمةٍ أوقفها مديرُ المشروع.
+  const off=isDisabled(t);
   return `
-    <div class="ppm-card ${st.card} co-clickable" data-tid="${_esc(t.id)}" onclick="cleaningOps.openDetail('${_esc(t.id)}')" title="اضغط لعرض التفاصيل وسجلّ التنفيذ">
+    <div class="ppm-card ${st.card} co-clickable${off?" co-card-off":""}" data-tid="${_esc(t.id)}" onclick="cleaningOps.openDetail('${_esc(t.id)}')" title="اضغط لعرض التفاصيل وسجلّ التنفيذ">
       <div class="co-card-row">
         <div class="ppm-chip">${_svg(iconOf(t.workType))}</div>
         <div class="co-card-main">
@@ -762,45 +806,99 @@ function taskCardHTML(t){
           <div class="co-pills">
             <span class="ppm-pill freq">${_esc(t.workType||"")}</span>
             <span class="ppm-due-badge ${st.badge}">${st.lbl}</span>
+            ${schedClass(t)==="upcoming"?`<span class="ppm-pill co-when">${_svg('calendar')} ${_esc(String(t.nextDueDate||"").slice(0,10))}</span>`:""}
             ${done&&t.lastExecutedBy?`<span class="ppm-pill co-by">${_svg('user')} ${_esc(t.lastExecutedBy)}</span>`:""}
           </div>
         </div>
       </div>
-      ${(!done&&canExecute())||canEdit() ? `<div class="co-card-act">
-        ${done ? "" : (canExecute()?`<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();cleaningOps.exec('${_esc(t.id)}')">${_svg('checkCircle')} تنفيذ</button>`:"")}
+      ${(!done&&!off&&canExecute())||canEdit() ? `<div class="co-card-act">
+        ${(done||off) ? "" : (canExecute()?`<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();cleaningOps.exec('${_esc(t.id)}')">${_svg('checkCircle')} تنفيذ</button>`:"")}
         ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')}</button>`:""}
       </div>` : ""}
     </div>`;
 }
 function iconOf(wt){ const w=CLEANING_WORK_TYPES[wt]; return w?w.icon:"sparkles"; }
 
-/* ── كل المهام (جدول داخل .card) ── */
+/* ── كل المهام ──
+   عرضان: **بطاقات المباني** (الافتراضي — نفس مفردات لوحة اليوم، لكن بكل المهامّ لا
+   مهامّ اليوم وحدها فتظهر المجدولة التي تبدأ غداً ويمكن فتحُها وتنفيذها قبل موعدها)،
+   و**جدول** (النظرة الإدارية الكاملة: المشرف/آخر تنفيذ/البنود). ومرشِّحُ حالةٍ جدوليّ
+   بعدّادات (متأخّرة/اليوم/قادمة/موقوفة) يخدم العرضين معاً. */
 function allTasksHTML(){
   if(!visibleTasks().length) return `<div class="card"><div class="co-empty">
     ${_svg('clipboardList')}<div class="co-empty-t">لا توجد مهام نظافة بعد</div></div></div>`;
-  const rows=visibleTasks().slice().sort((a,b)=>{
+  const all=visibleTasks();
+  const n=k=>all.filter(t=>schedClass(t)===k).length;
+  const cnt={ all:all.length, overdue:n("overdue"), today:n("today"), upcoming:n("upcoming"), off:n("off") };
+  const rows=all.filter(t=>allPass(t,_allFilter));
+  const chip=(k,lbl,c)=>`<button class="btn btn-sm co-chip ${_allFilter===k?'on':''}" onclick="cleaningOps.setAllFilter('${k}')">${lbl} <b>${c}</b></button>`;
+  const head=`<div class="card">
+    <div class="co-sec"><div class="co-sec-t">${_svg('clipboardList')} كل المهام</div>
+      <span class="co-sec-c">${_allFilter==="all"?cnt.all+" مهمة":"<b>"+rows.length+"</b> من "+cnt.all+" مهمة"}</span></div>
+    <div class="co-chips">
+      ${chip('all','الكل',cnt.all)}
+      ${cnt.overdue?chip('overdue','متأخّرة',cnt.overdue):""}
+      ${chip('today','اليوم',cnt.today)}
+      ${chip('upcoming','قادمة',cnt.upcoming)}
+      ${cnt.off?chip('off','موقوفة',cnt.off):""}
+      <span class="co-chips-sp"></span>
+      <button class="btn btn-sm co-chip ${_allMode==='cards'?'on':''}" onclick="cleaningOps.setAllMode('cards')">${_svg('building2')} بطاقات المباني</button>
+      <button class="btn btn-sm co-chip ${_allMode==='table'?'on':''}" onclick="cleaningOps.setAllMode('table')">${_svg('clipboardList')} جدول</button>
+    </div>
+  </div>`;
+  if(!rows.length) return head+`<div class="card"><div class="co-empty">
+    ${_svg('checkCircle')}<div class="co-empty-t">لا مهام في هذا التصنيف</div>
+    <div class="co-empty-s">اختر تصنيفاً آخر من الأعلى.</div></div></div>`;
+  return head + (_allMode==="table" ? _allTableHTML(rows) : _allGroupsHTML(rows));
+}
+
+/* بطاقات المباني — نفس شبكة لوحة اليوم (.co-groups/.co-group/.ppm-card) مع شارات
+   عدٍّ لكل مبنى: كم متأخّرة وكم اليوم وكم قادمة — فيُقرأ حِمل المبنى من رأس بطاقته. */
+function _allGroupsHTML(list){
+  const byB={};
+  list.forEach(t=>{ const b=t.building||"بلا مبنى"; (byB[b]=byB[b]||[]).push(t); });
+  return `<div class="co-groups">`+_bldOrder(byB).map(b=>{
+    const items=byB[b].slice().sort((x,y)=>schedSort(x)-schedSort(y));
+    const c=k=>items.filter(t=>schedClass(t)===k).length;
+    const ov=c("overdue"), td=c("today"), up=c("upcoming"), off=c("off");
+    return `<div class="card co-group">
+      <div class="co-sec">
+        <div class="co-sec-t">${_svg('building2')} ${_esc(b)}</div>
+        <span class="co-bld-badges">
+          ${ov?`<span class="ppm-due-badge overdue">${ov} متأخّرة</span>`:""}
+          ${td?`<span class="ppm-due-badge today">${td} اليوم</span>`:""}
+          ${up?`<span class="ppm-due-badge soon">${up} قادمة</span>`:""}
+          ${off?`<span class="ppm-due-badge soon">${off} موقوفة</span>`:""}
+        </span>
+      </div>
+      ${_allBldListHTML(b, items)}
+    </div>`;
+  }).join("")+`</div>`;
+}
+
+function _allTableHTML(tasks){
+  const rows=tasks.slice().sort((a,b)=>{
     const c=String(a.building||"").localeCompare(String(b.building||""),"ar");
     return c!==0 ? c : dueStatus(a).sort-dueStatus(b).sort;
   }).map(t=>{
     const st=dueStatus(t);
     const list=Array.isArray(t.checklist)?t.checklist:[];
     return `<tr class="${isDisabled(t)?'co-tr-off':''}">
-      <td class="co-td-name"><span class="co-td-ic">${_svg(iconOf(t.workType))}</span> ${_esc(t.name||"")}</td>
+      <td class="co-td-name co-clickable" onclick="cleaningOps.openDetail('${_esc(t.id)}')" title="اضغط لعرض التفاصيل وسجلّ التنفيذ"><span class="co-td-ic">${_svg(iconOf(t.workType))}</span> ${_esc(t.name||"")}</td>
       <td>${_esc(t.building||"—")}${t.floor?" / "+_esc(t.floor):""}</td>
       <td>${_esc(t.workType||"—")}</td>
       <td>${_esc(taskSupervisor(t)||"—")}</td>
       <td>${_esc(t.freq||"—")}</td>
       <td class="co-num">${list.length}</td>
+      <td class="co-num">${t.nextDueDate?_esc(String(t.nextDueDate).slice(0,10)):"—"}</td>
       <td class="co-num">${t.lastExecuted?_esc(String(t.lastExecuted).slice(0,10)):"—"}</td>
       <td><span class="ppm-due-badge ${st.badge}">${st.lbl}</span></td>
       <td>${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')}</button>`:""}</td>
     </tr>`;
   }).join("");
   return `<div class="card">
-    <div class="co-sec"><div class="co-sec-t">${_svg('clipboardList')} كل المهام</div>
-      <span class="co-sec-c">${visibleTasks().length} مهمة</span></div>
     <div class="co-table-wrap"><table class="co-table">
-      <thead><tr><th>المهمة</th><th>المنطقة</th><th>نوع العمل</th><th>المشرف</th><th>التكرار</th><th>بنود</th><th>آخر تنفيذ</th><th>الحالة</th><th></th></tr></thead>
+      <thead><tr><th>المهمة</th><th>المنطقة</th><th>نوع العمل</th><th>المشرف</th><th>التكرار</th><th>بنود</th><th>الاستحقاق</th><th>آخر تنفيذ</th><th>الحالة</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>
   </div>`;
 }
@@ -1452,6 +1550,10 @@ async function doGen(){
 function setView(v){ _view=v; _genForm=false; _launchForm=false; _detailFor=null; _detailLog=null; closeBldTasks();
   if(v!=="quality"){ _editingRound=null; _roundDetail=null; _roundPhotos=[]; }   // غادرَ الجودة ⟵ لا تبقَ مسوّدةٌ معلّقة
   render(); }
+// عرضُ «كل المهام» ومرشِّحُه — تبديلٌ محليّ لا يمسّ الشاشات الأخرى، ويغلق نافذة المبنى
+// فلا تبقى معروضةً بنطاقٍ أو مرشِّحٍ لم يعد قائماً
+function setAllMode(m){ _allMode=(m==="table")?"table":"cards"; closeBldTasks(); render(); }
+function setAllFilter(f){ _allFilter=["overdue","today","upcoming","off"].indexOf(f)>=0?f:"all"; closeBldTasks(); render(); }
 function toggleGen(){ _genForm=!_genForm; _genErr=""; if(_genForm) _launchForm=false; render(); }
 async function refresh(){ await loadTasks(true); render(); _toast("✅ حُدِّث الجدول","success"); }
 
@@ -3101,6 +3203,14 @@ function injectCSS(){
    بلا نقطةِ كسرٍ ثابتة، فلا تنحشر البطاقات ولا تُهدَر مساحةُ الشاشة. */
 .co-tasklist{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;align-items:start}
 .co-more-btn{width:100%;margin-top:8px;justify-content:center;font-weight:700}
+/* شريطُ مرشِّحات «كل المهام» + مبدّل العرض — أزرارُ المنصة نفسها بحالة on واحدة.
+   .co-chips-sp يدفع مبدّل العرض لطرف الشريط فينفصل بصرياً عن مرشِّحات الحالة. */
+.co-chips{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.co-chips-sp{flex:1 1 auto;min-width:8px}
+.co-chip b{font-family:'JetBrains Mono',monospace;margin-inline-start:4px}
+.co-chip.on{background:color-mix(in srgb,var(--primary) 12%,var(--surface));border-color:var(--primary);color:var(--primary);font-weight:800}
+.co-chip.on b{color:var(--primary)}
+.co-bld-badges{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
 .co-bld-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:1200;display:flex;align-items:center;justify-content:center;padding:12px}
 /* !important ضرورية: النواة تفرض width:100% !important على .card (قاعدة الداشبورد
    الجماعية) فتقهر أي عرضٍ عادي — وهي سببُ بقاء النافذة بعرض الشاشة رغم إصلاحَي wb/wc. */
@@ -3148,7 +3258,10 @@ function injectCSS(){
 .co-card-t{font-size:12.5px;font-weight:800;color:var(--text);line-height:1.35}
 .co-pills{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:5px}
 .co-pills .co-by{background:var(--sla-ok-bg);color:var(--sla-ok);border:1px solid var(--sla-ok-bd)}
-.co-pills .co-by svg{width:11px;height:11px;stroke-width:2.2}
+/* تاريخ استحقاق المهمة القادمة — في صفّ الشارات لا في صفّ البيانات: الأخير لا يلتفّ
+   داخلياً فكان السطرُ الزائد يخنق البطاقة في نافذة المبنى الضيّقة (٤٤٠px). */
+.co-pills .co-when{font-family:'JetBrains Mono',monospace;direction:ltr}
+.co-pills .co-by svg,.co-pills .co-when svg{width:11px;height:11px;stroke-width:2.2}
 /* الأزرار في سطرٍ مستقلٍّ أسفل البطاقة: مزاحمتُها للنصّ كانت تخنق العنوان في البطاقة
    الضيّقة (الأيقونة + النصّ + زرّان في 250px). الآن يأخذ النصُّ عرض البطاقة كاملاً. */
 .co-card-act{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;
@@ -3209,6 +3322,7 @@ function injectCSS(){
 .co-td-ic svg{width:15px;height:15px;stroke-width:2}
 .co-num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;direction:ltr;text-align:right}
 .co-tr-off{opacity:.5}
+.co-card-off{opacity:.62}
 
 /* ── جولات الجودة ── */
 .q-stars{display:inline-flex;gap:2px;font-size:19px;line-height:1;direction:ltr}
@@ -3254,7 +3368,7 @@ else init();
 
 /* ════════════ الواجهة العامة ════════════ */
 window.cleaningOps = {
-  render, setView, refresh, toggleGen, doGen, genModeChanged, openBldTasks, closeBldTasks, bldBack,
+  render, setView, setAllMode, setAllFilter, refresh, toggleGen, doGen, genModeChanged, openBldTasks, closeBldTasks, bldBack,
   toggleLaunch, doLaunch, onBuildingRenamed, onSupervisorRenamed,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
@@ -3279,6 +3393,8 @@ window.cleaningOps = {
   _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
   _salvageObjects: _salvageObjects, _genPrompt: _genPrompt, _launchTargets: _launchTargets,
   _cappedTaskListHTML: _cappedTaskListHTML, _BOARD_CARDS_PER_BLD: BOARD_CARDS_PER_BLD, _bldOrder: _bldOrder,
+  _allBldListHTML: _allBldListHTML, _ALL_CARDS_PER_BLD: ALL_CARDS_PER_BLD, _allGroupsHTML: _allGroupsHTML,
+  _schedClass: schedClass, _schedSort: schedSort, _allPass: allPass, _dueIn: _dueIn,
   _svg: _svg,
   _relabelText: _relabelText, _RELABEL: RELABEL, _WT_SEED: CLEANING_WT_SEED,
   _isDue: isDue, _isOverdue: isOverdue, _doneToday: doneToday, _dueStatus: dueStatus,
