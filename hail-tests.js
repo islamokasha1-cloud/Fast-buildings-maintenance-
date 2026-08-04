@@ -3703,7 +3703,105 @@ function hrPaymentsTests() {
     HTML.includes('showPage(_hrOnly ? "hr-payments" : "purchases")'));
   T("سايدبار مسؤول الموارد البشرية مقصور على مجموعته",
     /body\.role-hr-officer #hdr-grp-po/.test(HTML) && /classList\.toggle\("role-hr-officer"/.test(HTML));
-  /* ── لغة التصميم: الوحدة تستعير مكوّنات المنصة ولا تخترع بديلاً ──
+  /* ── حذف الطلب (المسؤول وحده) ──
+     الحذف نهائيّ ولا رجعة فيه، فترتيب خطواته هو ما يمنع الأذى: قيدُ التدقيق يسبق
+     الحذف (وإلا اختفى الطلب بلا أثر)، والمرفقات بعده (وإلا أبقى فشلُ ملفٍ وثيقةً
+     محذوفةً معروضة)، والقائمة السوداء تُنظَّف عند الفشل (وإلا اختفى طلبٌ باقٍ). */
+  T("★ الحذف للمسؤول وحده", /function remove\(id\)\{[\s\S]{0,200}?if\(!_isAdmin\(\)\)\{ _toast\("⚠ صلاحية المسؤول فقط"/.test(src) &&
+    /async function _doRemove\([\s\S]{0,240}?if\(!_isAdmin\(\)\)/.test(src));
+  {
+    var rm = src.slice(src.indexOf("async function _doRemove("), src.indexOf("/* ════════ الإشعارات"));
+    var iLog = rm.indexOf('_log("سداد موارد بشرية — حذف طلب"');
+    var iDel = rm.indexOf(".delete()");
+    var iAtt = rm.indexOf("refFromURL");
+    T("★ قيد سجل التدقيق يُكتب قبل الحذف (فالوثيقة تزول ولا تحمل أثرها)",
+      iLog > 0 && iDel > iLog, "log@"+iLog+" delete@"+iDel);
+    T("★ قيد الحذف يحمل ما يعرّف المحذوف (النوع والمبلغ والحالة)",
+      /workTypeLabel\(r\)[\s\S]{0,120}_fmt\(r\.amount\)[\s\S]{0,120}statusLabel\(r\.status\)/.test(rm));
+    T("★ المرفقات تُحذف بعد نجاح حذف الوثيقة لا قبله",
+      iAtt > iDel, "attachments@"+iAtt+" delete@"+iDel);
+    T("★ حذف المرفقات بأفضل جهد لا يُسقط العملية", /refFromURL\(a\.url\)\.delete\(\)\.catch\(/.test(rm));
+    T("★ فشل الحذف يرفع المعرّف من القائمة السوداء (لا يختفي طلبٌ باقٍ)",
+      /catch\([\s\S]{0,200}?delete _deletedIds\[id\];/.test(rm));
+    T("القائمة السوداء تُصفّي كل لقطة (لا يعود المحذوف مع لقطةٍ في الطريق)",
+      /\.filter\(function\(r\)\{ return !_deletedIds\[r\.id\]; \}\)/.test(src));
+    T("زرّ الحذف يظهر للمسؤول في تفاصيل الطلب",
+      /if\(_isAdmin\(\)\) out\.push\([\s\S]{0,140}hrPayments\.remove/.test(src));
+  }
+  /* ── أيقونات السايدبار ──
+     المنصة تستبدل إيموجي السايدبار بأيقونات _ICON عبر applyNavIcons من خريطتين؛
+     صفحةٌ غير مسجّلة فيهما تبقى على الإيموجي الخام وسط سايدبار كلّه SVG. */
+  T("★ صفحتا الوحدة ومجموعتها مسجّلة في خرائط أيقونات السايدبار (لا إيموجي خام)",
+    /'hr-payments':'banknote'/.test(HTML) && /'new-hr-payment':'filePlus'/.test(HTML) &&
+    /'hdr-grp-hrp':'users'/.test(HTML));
+  navIconCoverage();
+
+/* ════════════════════════════════════════════════════════════════════
+   تغطية أيقونات السايدبار — v18.9x
+   في index.html مُطبِّقان يعملان على DOMContentLoaded بالترتيب: applyNavIcons
+   (NAV_ICON_BY_PAGE/NAV_ICON_BY_HDR، مفرداتها _ICON) ثم injectSidebarIcons
+   (SB_PAGE_ICON/SB_GRP_ICON، مفرداتها SB_ICON_PATHS). الثاني يُسجَّل بعد الأول
+   فيعمل بعده، ولا يكتب إلا حين يجد اسماً — فالنتيجة تتالٍ: SB يغلب حيث يعرف،
+   وNAV يملأ الباقي. زرٌّ غائب عن **الاثنين** يبقى على إيموجيه الخام وسط سايدبار
+   كلّه SVG: عطلٌ صامت لا يكسر شيئاً فلا ينتبه له أحد حتى يراه المستخدم.
+   الحارس يفحص التتالي كما هو (لا خريطةً واحدة — فحصُ خريطةٍ وحدها ينجح لسببٍ
+   خاطئ ويُخفي أن الغالب هو الآخر).
+   ════════════════════════════════════════════════════════════════════ */
+function navIconCoverage() {
+  const grab = (re) => (HTML.match(re) || [])[1] || "";
+  const keys = (body) => new Set([...("{" + body).matchAll(/(?:^|[{,])\s*['"]?([A-Za-z0-9-]+)['"]?\s*:/g)].map(m => m[1]));
+
+  const navPage = keys(grab(/const NAV_ICON_BY_PAGE = \{([\s\S]*?)\};/));
+  const navHdr  = keys(grab(/const NAV_ICON_BY_HDR = \{([\s\S]*?)\};/));
+  const sbPage  = keys(grab(/const SB_PAGE_ICON=\{([\s\S]*?)\};/));
+  const sbHdr   = keys(grab(/const SB_GRP_ICON=\{([\s\S]*?)\};/));
+
+  T("كلا مُطبِّقَي أيقونات السايدبار موجود (التتالي قائم)",
+    /function applyNavIcons\(/.test(HTML) && /function injectSidebarIcons\(/.test(HTML) &&
+    navPage.size > 0 && sbPage.size > 0);
+
+  const btns = [...new Set([...HTML.matchAll(/<button class="sidebar-nav-btn[^>]*?data-page="([^"]+)"/g)].map(m => m[1]))];
+  const missP = btns.filter(p => !sbPage.has(p) && !navPage.has(p));
+  T("★ كل زرّ سايدبار يجد أيقونته في أحد النظامين (لا إيموجي خام)",
+    missP.length === 0, missP.join("، ") || `${btns.length} زرّاً`);
+
+  const hdrs = [...new Set([...HTML.matchAll(/id="(hdr-grp-[a-z]+)"/g)].map(m => m[1]))];
+  const missH = hdrs.filter(h => !sbHdr.has(h) && !navHdr.has(h));
+  T("★ كل رأس مجموعة يجد أيقونته في أحد النظامين",
+    missH.length === 0, missH.join("، ") || `${hdrs.length} مجموعة`);
+
+  /* الصفحات التي أُضيفت في v18.9x تُسجَّل في نظامٍ واحد فقط — النظام الذي يصل
+     فعلاً إليها. قيدٌ مُظلَّل (في NAV وSB معاً) لا يُنفَّذ أبداً، ولو خالف الغالب
+     صار فخّاً: يقرؤه من يصحّح عطلاً فيظنّه المصدر. (التظليل القائم في الخريطة
+     منذ v9hd متروك كما هو — تنظيفه تغييرٌ في مشتركٍ خارج نطاق هذا العمل.) */
+  const mine = ["hr-payments", "new-hr-payment", "finance-audit", "errors"];
+  const shadowed = mine.filter(p => sbPage.has(p) && navPage.has(p));
+  T("★ صفحات v18.9x مسجّلة في نظامٍ واحد لا في الاثنين (لا قيد مُظلَّل)",
+    shadowed.length === 0, shadowed.join("، ") || "نظيفة");
+  T("★ الصفحتان اللتان كانتا بإيموجي خام صارتا مغطّاتين",
+    ["finance-audit", "errors"].every(p => sbPage.has(p) || navPage.has(p)));
+
+  // كل اسم أيقونة مُشار إليه معرَّف في مجموعة مفرداته — وإلا رُسم فراغاً
+  const iconSet = (from, to) => new Set([...HTML.slice(HTML.indexOf(from), HTML.indexOf(to))
+    .matchAll(/(?:^|[{,\n])\s*([A-Za-z0-9_]+)\s*:\s*['"`]/g)].map(m => m[1]));
+  const ICON = iconSet("const _ICON", "function _ic(");
+  const SBP  = iconSet("const SB_ICON_PATHS=", "function SVIC(");
+  const refs = (re, set) => [...new Set([...grab(re).matchAll(/:\s*['"]([A-Za-z0-9]+)['"]/g)].map(m => m[1]))]
+    .filter(n => !set.has(n));
+  const ghostNav = refs(/const NAV_ICON_BY_PAGE = \{([\s\S]*?)\};/, ICON)
+    .concat(refs(/const NAV_ICON_BY_HDR = \{([\s\S]*?)\};/, ICON));
+  const ghostSb  = refs(/const SB_PAGE_ICON=\{([\s\S]*?)\};/, SBP)
+    .concat(refs(/const SB_GRP_ICON=\{([\s\S]*?)\};/, SBP));
+  T("★ كل أيقونة مُشار إليها معرَّفة في مفرداتها (لا أيقونة تُرسَم فراغاً)",
+    ghostNav.length === 0 && ghostSb.length === 0,
+    [...ghostNav.map(x => "NAV:" + x), ...ghostSb.map(x => "SB:" + x)].join("، ") || "سليمة");
+
+  T("زرّ الخروج تُطبَّق أيقونته بمعرّفه (لا يطاله مسار data-page)",
+    /id="sidebar-logout-btn"/.test(HTML) && /_svgIcon\('logout'\)/.test(HTML) &&
+    /btn\.id==="sidebar-logout-btn"\) name="logout"/.test(HTML));
+}
+
+/* ── لغة التصميم: الوحدة تستعير مكوّنات المنصة ولا تخترع بديلاً ──
      العطل الذي تمنعه هذه الحرّاس ليس بصرياً وحده: صفحةٌ بمفرداتٍ خاصة تنحرف عن
      المنصة مع كل تحديثٍ للتوكنز (الثيم الداكن أولاً)، وتُجبر المستخدم على تعلّم
      شكلٍ ثانٍ لنفس المعنى. */
