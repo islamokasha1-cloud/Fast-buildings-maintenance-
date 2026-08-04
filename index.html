@@ -8988,7 +8988,14 @@ function _openRowMenu(btn, html){
   setTimeout(()=>document.addEventListener("click", _closeRowMenu, {once:true, capture:true}), 50);
 }
 document.addEventListener("keydown", e=>{ if(e.key === "Escape") _closeRowMenu(); });
-const NAV_ICON_BY_PAGE = { dashboard:'dashboard', daily:'daily', tv:'tv', tickets:'ticket', 'tickets-archive':'archive', 'new':'filePlus', kpi:'award', buildings:'map', 'monthly-compare':'trendingUp', reports:'fileText', 'photo-report':'image', assets:'wrench', ppm:'calendarClock', purchases:'cart', 'new-purchase':'filePlus', 'purchase-reports':'barChart', 'substitute-budget':'landmark', inventory:'package', 'inventory-log':'scroll', 'inventory-add':'plus', 'stocktake':'barChart', 'issue-order':'packageMinus', 'issue-orders':'scrollText', custody:'clipboardCheck', 'custody-new':'filePlus', 'item-catalog':'book', rfq:'receipt', 'new-rfq':'filePlus', 'purchase-users':'users', 'admin-panel':'settings', audit:'scrollText', 'system-stats':'activity', 'import-assets':'download', 'hr-payments':'banknote', 'new-hr-payment':'filePlus' };
+/* ══ أيقونات السايدبار — نظامان متتاليان، لا متنافسان ══
+   يعمل هنا مُطبِّقان على DOMContentLoaded بالترتيب: applyNavIcons (هذه الخريطة، مفرداتها
+   _ICON) ثم injectSidebarIcons (خريطتا SB_PAGE_ICON/SB_GRP_ICON، مفرداتها SB_ICON_PATHS).
+   الثاني يُسجَّل بعد الأول فيعمل بعده، ولا يكتب إلا حين يجد اسماً في خريطته — فالنتيجة
+   تتالٍ: **SB يغلب حيث يعرف، وهذه الخريطة تملأ ما لا يعرفه**.
+   لذلك: صفحةٌ في SB لا حاجة لها هنا (قيدٌ ميّت، وإن خالف الغالب صار فخّاً)، وصفحةٌ
+   غائبة عن الاثنين تبقى على إيموجيها الخام. يحرس التغطية الكلّية فحصٌ في hail-tests. */
+const NAV_ICON_BY_PAGE = { dashboard:'dashboard', daily:'daily', tv:'tv', tickets:'ticket', 'tickets-archive':'archive', 'new':'filePlus', kpi:'award', buildings:'map', 'monthly-compare':'trendingUp', reports:'fileText', 'photo-report':'image', assets:'wrench', ppm:'calendarClock', purchases:'cart', 'new-purchase':'filePlus', 'purchase-reports':'barChart', 'substitute-budget':'landmark', inventory:'package', 'inventory-log':'scroll', 'inventory-add':'plus', 'stocktake':'barChart', 'issue-order':'packageMinus', 'issue-orders':'scrollText', custody:'clipboardCheck', 'custody-new':'filePlus', 'item-catalog':'book', rfq:'receipt', 'new-rfq':'filePlus', 'purchase-users':'users', 'admin-panel':'settings', audit:'scrollText', 'system-stats':'activity', 'import-assets':'download', 'hr-payments':'banknote', 'new-hr-payment':'filePlus', 'finance-audit':'search', errors:'alertTriangle' };
 const NAV_ICON_BY_HDR = { 'hdr-grp-work':'clipboardList','hdr-grp-kpi':'trophy','hdr-grp-reports':'fileText','hdr-grp-assets':'wrench','hdr-grp-po':'cart','hdr-grp-inventory':'warehouse','hdr-grp-custody':'clipboardCheck','hdr-grp-catalog':'book','hdr-grp-rfq':'receipt','hdr-grp-hrp':'users','hdr-grp-system':'settings' };
 function applyNavIcons(){
   try{
