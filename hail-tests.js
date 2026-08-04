@@ -1627,6 +1627,59 @@ function auditRowAlignment() {
       M._waPrevRcv({ grnDocs: [g2] }, 1, { itemId: "S" }) === 7);
   }
 
+  // ── v18.9wy: الفحص الذاتي — النظام يكشف الانزياح بنفسه بدل انتظار من ينتبه ──
+  {
+    const sa = HTML.indexOf("const _poAlignBreaks   = new Map();");
+    const sb = HTML.indexOf("\nfunction renderAlignWarning(", sa);
+    let S = null, logged = [];
+    if (sa >= 0 && sb > sa) {
+      try {
+        S = new Function("_poItemKey", "captureError",
+          HTML.slice(sa, sb) + "\nreturn {_poAlignScan,_poAuditSelfCheck,_poAlignBreaks,_poAlignReported};")(
+          M._poItemKey, (kind, msg) => logged.push({ kind, msg }));
+      } catch (e) { T("تُبنى دوال الفحص الذاتي", false, String(e.message).slice(0, 120)); }
+    }
+    T("تُبنى دوال الفحص الذاتي (_poAlignScan/_poAuditSelfCheck)", !!S);
+    if (S) {
+      const broken = { id: "PO-202608-0130", auditedBy: "محمد", items, auditItems };
+      const okPo = { id: "PO-OK", auditedBy: "محمد", items, auditItems: items.map(x => ({ ...x })) };
+
+      T("★ الفحص يرصد الانزياح ويسمّي السطر والبندين",
+        S._poAlignScan(broken).length === 4 &&
+        S._poAlignScan(broken)[0].includes("الطول") &&
+        S._poAlignScan(broken).some(b => b.includes("ديانه رمل") && b.includes("اسمنت اسود")));
+      T("★ الطلب السليم لا يُنتج إنذاراً (لا إزعاج كاذب)", S._poAlignScan(okPo).length === 0);
+      T("الطلب غير المُدقَّق خارج الفحص", S._poAlignScan({ id: "X", items, auditItems }).length === 0);
+
+      S._poAuditSelfCheck(broken);
+      T("★ الانزياح يُقيَّد في سجل الأخطاء باسم الطلب",
+        logged.length === 1 && logged[0].kind === "align" && logged[0].msg.includes("PO-202608-0130"));
+      T("★ يُسجَّل الطلب في خريطة التشخيص (يقرأها شريط الإعلان)",
+        S._poAlignBreaks.get("PO-202608-0130").length === 4);
+      S._poAuditSelfCheck(broken); S._poAuditSelfCheck(broken);
+      T("★ لا يُغرق السجل: بلاغٌ واحد لكل طلب في الجلسة (اللقطات تتكرر)", logged.length === 1);
+      S._poAuditSelfCheck(okPo);
+      T("الطلب السليم لا يدخل الخريطة ولا السجل",
+        !S._poAlignBreaks.has("PO-OK") && logged.length === 1);
+      // شفاء الطلب لاحقاً يمحو قيده من الخريطة
+      S._poAuditSelfCheck({ id: "PO-202608-0130", auditedBy: "محمد", items, auditItems: items.map(x => ({ ...x })) });
+      T("★ بعد الشفاء يسقط قيد الطلب من الخريطة", !S._poAlignBreaks.has("PO-202608-0130"));
+      // الفحص لا يجوز أن يُعطّل التحميل مهما كانت الوثيقة مشوّهة
+      let threw = false;
+      try { S._poAuditSelfCheck({ id: "Z", auditedBy: "ن", items: null, auditItems: "مشوّهة" }); }
+      catch (e) { threw = true; }
+      T("★ وثيقةٌ مشوّهة لا تُعطّل تحميل الطلبات", !threw);
+    }
+    T("★ الفحص الذاتي يعمل على كل طلب عند التحميل (داخل _poHealItems)",
+      HTML.includes("return _poAuditSelfCheck(p);"));
+    T("★ شريط الإعلان للمسؤول وحده، ومعروضٌ في تفاصيل الطلب",
+      HTML.includes('if(!(currentUser && currentUser.role==="admin")) return "";') &&
+      HTML.includes("${renderAlignWarning(p)}"));
+    T("★ لا إصلاح صامت للمخزَّن عند التحميل (الشفاء عند الحفظ فقط)",
+      HTML.includes("_poAlignBreaks.delete(poId);   // v18.9wy") &&
+      !/_poAuditSelfCheck[\s\S]{0,600}p\.auditItems\s*=/.test(HTML));
+  }
+
   // ── حرّاس المسار: أين تُستعمل الدوال فعلاً ──
   T("★ بادج تغيّر السعر يقرأ الصفوف المصطفّة لا p.auditItems[i]",
     HTML.includes("const _aiRow   = _auditRows[i];") &&
