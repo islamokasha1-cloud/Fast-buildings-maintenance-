@@ -3636,6 +3636,52 @@ function deepReviewV18_9vu() {
    تركيبٌ صحيح في index.html + تسلسل الاعتماد (دالة التوجيه النقية تُنفَّذ فعلاً)
    + عزلها التام عن مسار المشتريات + الصلاحيات.
    ════════════════════════════════════════════════════════════════════ */
+// ══ ★ v18.9z: «مَن» في نافذة البلاغ — ثلاثةُ معانٍ لا اسمان متناقضان ══
+// شبكةُ التفاصيل تقرأ `createdByName` (الحسابُ المُدخِل) بينما `timeline[0].by` يحمل
+// **المشرف** منذ الإنشاء — فظهر اسمان مختلفان لحدثٍ واحد بلا تفسير. العلاجُ عرضيٌّ
+// بحت (لا يُغيَّر المخزَّن) عبر `timelineWho`، وهذا الحارس يمنع الارتداد إليه.
+function ticketWhoLabels() {
+  H("مَن سجّل البلاغ: الحساب/المشرف/المُبلِّغ (v18.9z)");
+
+  T("★ z: حقلُ الشبكة يسمّي معناه «مسجّل البلاغ (الحساب)»",
+    HTML.includes('["مسجّل البلاغ (الحساب)",esc(t.createdByName||t.createdBy||"—")]'));
+  T("★ z: صفُّ «المُبلِّغ عن العطل» مشروطٌ بوجود reporter (لا صفَّ فارغاً)",
+    /\.\.\.\(t\.reporter\?\[\["المُبلِّغ عن العطل",esc\(t\.reporter\)\]\]:\[\]\)/.test(HTML));
+  T("★ z: سجلُّ الأحداث يمرّ عبر timelineWho لا esc(ev.by) مباشرةً (تراجع)",
+    HTML.includes("const who=timelineWho(t,ev);") &&
+    HTML.includes('<div class="dtl-meta">${who} — ${fmtDate(ev.at)}</div>') &&
+    !HTML.includes('<div class="dtl-meta">${esc(ev.by)} — ${fmtDate(ev.at)}</div>'));
+
+  const fsrc = slice("function timelineWho(t,ev){", "\n//  DETAIL");
+  let W = null;
+  try { W = new Function("esc", fsrc + "\nreturn timelineWho;")(s => String(s)); }
+  catch (e) { T("★ z: timelineWho قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
+  if (W) {
+    const CREATE = { event: "تم تسجيل البلاغ", by: "عبدالله المشعان" };
+    T("★ z: عند اختلاف الحساب عن المشرف يظهر الاثنان (جذر الالتباس)",
+      W({ createdByName: "ثامر فريح" }, CREATE).includes("ثامر فريح") &&
+      W({ createdByName: "ثامر فريح" }, CREATE).includes("(المشرف: عبدالله المشعان)"),
+      W({ createdByName: "ثامر فريح" }, CREATE));
+    T("★ z: عند تطابقهما لا يتكرّر الاسم",
+      W({ createdByName: "عبدالله المشعان" }, CREATE) === "عبدالله المشعان");
+    T("★ z: البلاغاتُ القديمة/التجريبية (لا createdByName) تبقى كما كانت",
+      W({}, CREATE) === "عبدالله المشعان" &&
+      W({ createdBy: "عبدالله المشعان" }, CREATE) === "عبدالله المشعان");
+    T("★ z: الأحداثُ غيرُ التسجيل لا تُمَسّ (تعيين/إغلاق)",
+      W({ createdByName: "ثامر فريح" }, { event: "تم تعيين الفني: عبد العزيز", by: "النظام" }) === "النظام" &&
+      W({ createdByName: "ثامر فريح" }, { event: "تم إغلاق البلاغ", by: "عبد العزيز" }) === "عبد العزيز");
+    T("z: حدثٌ بلا by لا يكسر السطر",
+      W({ createdByName: "ثامر فريح" }, { event: "تم إغلاق البلاغ" }) === "—");
+  }
+
+  // الحقول الثلاثة تُكتب فعلاً عند إنشاء البلاغ — وإلا صار التوضيح بلا مصدر
+  const nt = slice("createdBy:(currentUser&&currentUser.user)||null", "tickets.push(t);");
+  T("z: إنشاءُ البلاغ يحفظ الحسابَ والمُبلِّغ والمشرفَ في السجل",
+    !!nt && nt.includes("createdByName:(currentUser&&currentUser.name)||null") &&
+    HTML.includes("reporter:reporter||null") &&
+    nt.includes('{event:"تم تسجيل البلاغ",by:supervisor||"النظام"'));
+}
+
 function hrPaymentsTests() {
   H("وحدة سداد أعمال الموارد البشرية (hr-payments.js)");
   if (!HRP_PATH) { T("hr-payments.js موجود", false); return; }
@@ -4154,6 +4200,7 @@ function financeAuditTests() {
   rollupMonthIsolation();
   comprehensiveReviewV18_9vl();
   deepReviewV18_9vu();
+  ticketWhoLabels();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }
