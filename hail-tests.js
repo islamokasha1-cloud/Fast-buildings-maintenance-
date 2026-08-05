@@ -321,6 +321,13 @@ function predelivery() {
   const f = (HTML.match(/id="login-version-footer">نظام صيانة المباني — (v[\d.a-z]+)</) || [])[1];
   T("الإصدار متطابق في الموضعين", f === VER, `footer=${f}  APP_VERSION=${VER}`);
 
+  // ★ v18.9yb: لاحقةُ الإصدار حرفان دائماً — السلسلة …ua…ue → vc…vz → wa…wz، وكان
+  // المفترض بعد wz أن يأتي xa فجاء «x» ثم «y» أُحاديَّي الحرف، فانكسر الترتيبُ
+  // الأبجدي (بحرفٍ واحد لا يبقى بعد z موضعٌ للزيادة). يُسمح بلا لاحقةٍ أصلاً
+  // لرفعٍ رئيسيّ (v19.0)، ويُمنع ما بينهما.
+  T("★ yb: لاحقةُ الإصدار حرفان أو بلا لاحقة (تمنع تكرار v18.9x/y)",
+    /^v\d+\.\d+([a-z]{2})?$/.test(VER), `APP_VERSION=${VER}`);
+
   // cache-busters — كل وحدة محلية (.js نسبية) يجب أن تحمل ?v= مطابقاً للإصدار.
   // لا نثبّت العدد (كان 4 ثم أُضيفت وحدة خامسة فسقط الاختبار): نتحقّق أن كل وحدة محلية
   // موسومة، وأن كل الوسوم تطابق APP_VERSION — فلا يعود يسقط عند إضافة/حذف وحدة.
@@ -3636,18 +3643,18 @@ function deepReviewV18_9vu() {
    تركيبٌ صحيح في index.html + تسلسل الاعتماد (دالة التوجيه النقية تُنفَّذ فعلاً)
    + عزلها التام عن مسار المشتريات + الصلاحيات.
    ════════════════════════════════════════════════════════════════════ */
-// ══ ★ v18.9z: «مَن» في نافذة البلاغ — ثلاثةُ معانٍ لا اسمان متناقضان ══
+// ══ ★ v18.9ya: «مَن» في نافذة البلاغ — ثلاثةُ معانٍ لا اسمان متناقضان ══
 // شبكةُ التفاصيل تقرأ `createdByName` (الحسابُ المُدخِل) بينما `timeline[0].by` يحمل
 // **المشرف** منذ الإنشاء — فظهر اسمان مختلفان لحدثٍ واحد بلا تفسير. العلاجُ عرضيٌّ
 // بحت (لا يُغيَّر المخزَّن) عبر `timelineWho`، وهذا الحارس يمنع الارتداد إليه.
 function ticketWhoLabels() {
-  H("مَن سجّل البلاغ: الحساب/المشرف/المُبلِّغ (v18.9z)");
+  H("مَن سجّل البلاغ: الحساب/المشرف/المُبلِّغ (v18.9ya)");
 
-  T("★ z: حقلُ الشبكة يسمّي معناه «مسجّل البلاغ (الحساب)»",
+  T("★ ya: حقلُ الشبكة يسمّي معناه «مسجّل البلاغ (الحساب)»",
     HTML.includes('["مسجّل البلاغ (الحساب)",esc(t.createdByName||t.createdBy||"—")]'));
-  T("★ z: صفُّ «المُبلِّغ عن العطل» مشروطٌ بوجود reporter (لا صفَّ فارغاً)",
+  T("★ ya: صفُّ «المُبلِّغ عن العطل» مشروطٌ بوجود reporter (لا صفَّ فارغاً)",
     /\.\.\.\(t\.reporter\?\[\["المُبلِّغ عن العطل",esc\(t\.reporter\)\]\]:\[\]\)/.test(HTML));
-  T("★ z: سجلُّ الأحداث يمرّ عبر timelineWho لا esc(ev.by) مباشرةً (تراجع)",
+  T("★ ya: سجلُّ الأحداث يمرّ عبر timelineWho لا esc(ev.by) مباشرةً (تراجع)",
     HTML.includes("const who=timelineWho(t,ev);") &&
     HTML.includes('<div class="dtl-meta">${who} — ${fmtDate(ev.at)}</div>') &&
     !HTML.includes('<div class="dtl-meta">${esc(ev.by)} — ${fmtDate(ev.at)}</div>'));
@@ -3655,36 +3662,36 @@ function ticketWhoLabels() {
   const fsrc = slice("function timelineWho(t,ev){", "\n//  DETAIL");
   let W = null;
   try { W = new Function("esc", fsrc + "\nreturn timelineWho;")(s => String(s)); }
-  catch (e) { T("★ z: timelineWho قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
+  catch (e) { T("★ ya: timelineWho قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
   if (W) {
     const CREATE = { event: "تم تسجيل البلاغ", by: "عبدالله المشعان" };
-    T("★ z: عند اختلاف الحساب عن المشرف يظهر الاثنان (جذر الالتباس)",
+    T("★ ya: عند اختلاف الحساب عن المشرف يظهر الاثنان (جذر الالتباس)",
       W({ createdByName: "ثامر فريح" }, CREATE).includes("ثامر فريح") &&
       W({ createdByName: "ثامر فريح" }, CREATE).includes("(المشرف: عبدالله المشعان)"),
       W({ createdByName: "ثامر فريح" }, CREATE));
-    T("★ z: عند تطابقهما لا يتكرّر الاسم",
+    T("★ ya: عند تطابقهما لا يتكرّر الاسم",
       W({ createdByName: "عبدالله المشعان" }, CREATE) === "عبدالله المشعان");
-    T("★ z: البلاغاتُ القديمة/التجريبية (لا createdByName) تبقى كما كانت",
+    T("★ ya: البلاغاتُ القديمة/التجريبية (لا createdByName) تبقى كما كانت",
       W({}, CREATE) === "عبدالله المشعان" &&
       W({ createdBy: "عبدالله المشعان" }, CREATE) === "عبدالله المشعان");
-    T("★ z: الأحداثُ غيرُ التسجيل لا تُمَسّ (تعيين/إغلاق)",
+    T("★ ya: الأحداثُ غيرُ التسجيل لا تُمَسّ (تعيين/إغلاق)",
       W({ createdByName: "ثامر فريح" }, { event: "تم تعيين الفني: عبد العزيز", by: "النظام" }) === "النظام" &&
       W({ createdByName: "ثامر فريح" }, { event: "تم إغلاق البلاغ", by: "عبد العزيز" }) === "عبد العزيز");
-    T("z: حدثٌ بلا by لا يكسر السطر",
+    T("ya: حدثٌ بلا by لا يكسر السطر",
       W({ createdByName: "ثامر فريح" }, { event: "تم إغلاق البلاغ" }) === "—");
   }
 
   // الحقول الثلاثة تُكتب فعلاً عند إنشاء البلاغ — وإلا صار التوضيح بلا مصدر
   const nt = slice("createdBy:(currentUser&&currentUser.user)||null", "tickets.push(t);");
-  T("z: إنشاءُ البلاغ يحفظ الحسابَ والمُبلِّغ والمشرفَ في السجل",
+  T("ya: إنشاءُ البلاغ يحفظ الحسابَ والمُبلِّغ والمشرفَ في السجل",
     !!nt && nt.includes("createdByName:(currentUser&&currentUser.name)||null") &&
     HTML.includes("reporter:reporter||null") &&
     nt.includes('{event:"تم تسجيل البلاغ",by:supervisor||"النظام"'));
 
-  // ══ ★ v18.9za: قيمةُ «المشرف المسؤول» لا تُورَّث بين المستخدمين ══
+  // ══ ★ v18.9yb: قيمةُ «المشرف المسؤول» لا تُورَّث بين المستخدمين ══
   // الحلقةُ القديمة كانت تُسند عند التطابق وتترك ما كان عند عدمه، والخروجُ لا يمسح
   // النموذج ولا يعيد تحميل الصفحة — فورث الداخلُ اسمَ من خرج قبله في حقلٍ اختياري.
-  T("★ za: التعبئةُ التلقائية صارت دالّةً واحدة لا حلقةً مكرَّرة",
+  T("★ yb: التعبئةُ التلقائية صارت دالّةً واحدة لا حلقةً مكرَّرة",
     HTML.includes("function prefillSupervisorField(name){") &&
     HTML.includes("try{ prefillSupervisorField(found&&found.name); }catch(e){}") &&
     !/for\(let o of supSel\.options\)\{if\(o\.value===found\.name\)/.test(HTML));
@@ -3696,21 +3703,21 @@ function ticketWhoLabels() {
     P = new Function("document", "currentUser", "syncIconSelect",
       psrc + "\nreturn prefillSupervisorField;")(
         { getElementById: id => (id === "n-supervisor" ? SEL : null) }, null, () => {});
-  } catch (e) { T("★ za: prefillSupervisorField قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
+  } catch (e) { T("★ yb: prefillSupervisorField قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
   if (P) {
-    T("★ za: اسمٌ موجودٌ في قائمة المشرفين يُعبَّأ",
+    T("★ yb: اسمٌ موجودٌ في قائمة المشرفين يُعبَّأ",
       (P("ثامر فريح"), SEL.value === "ثامر فريح"), SEL.value);
     SEL.value = "عبدالله المشعان";
-    T("★ za: اسمٌ غيرُ موجود يمسح القيمة العالقة (جذر البلاغ المنسوب لغير مشرفه)",
+    T("★ yb: اسمٌ غيرُ موجود يمسح القيمة العالقة (جذر البلاغ المنسوب لغير مشرفه)",
       (P("ثامر الفريح"), SEL.value === ""), `القيمة بعد التعبئة="${SEL.value}"`);
     SEL.value = "عبدالله المشعان";
-    T("★ za: غيابُ المستخدم (خروج) يمسح كذلك — لا تسرُّبَ بين الجلسات",
+    T("★ yb: غيابُ المستخدم (خروج) يمسح كذلك — لا تسرُّبَ بين الجلسات",
       (P(""), SEL.value === "") && (SEL.value = "عبدالله المشعان", P(null), SEL.value === ""));
   }
 
-  T("★ za: كلا مسارَي الخروج يمسحان نموذج البلاغ",
-    (HTML.match(/\/\/ v18\.9za: نموذجُ البلاغ كان يبقى بمحتوى المستخدم الخارج[\s\S]{0,80}?try\{ clearForm\(\); \}catch\(e\)\{\}/g) || []).length === 2);
-  T("★ za: clearForm تُعيد التعبئة فيتّسق أولُ بلاغٍ مع ما بعده",
+  T("★ yb: كلا مسارَي الخروج يمسحان نموذج البلاغ",
+    (HTML.match(/\/\/ v18\.9yb: نموذجُ البلاغ كان يبقى بمحتوى المستخدم الخارج[\s\S]{0,80}?try\{ clearForm\(\); \}catch\(e\)\{\}/g) || []).length === 2);
+  T("★ yb: clearForm تُعيد التعبئة فيتّسق أولُ بلاغٍ مع ما بعده",
     /function clearForm\(\)\{[\s\S]*?prefillSupervisorField\(\);[\s\S]*?\n\}/.test(HTML));
 
   // لافتةُ التفاوت بين USERS وSUPERVISORS
@@ -3721,7 +3728,7 @@ function ticketWhoLabels() {
       msrc + "\nreturn supervisorNameMismatches;")(
         ["admin", "project_manager", "ceo", "warehouse_manager", "procurement_officer",
          "finance", "hr_officer", "viewer", "observer"]);
-  } catch (e) { T("★ za: supervisorNameMismatches قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
+  } catch (e) { T("★ yb: supervisorNameMismatches قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
   if (MM) {
     const users = [
       { name: "ثامر الفريح", role: "" },          // مشرف — لا مطابق ⇒ يُبلَّغ عنه
@@ -3731,13 +3738,13 @@ function ticketWhoLabels() {
       { name: "ثامر الفريح", role: "" },          // مكرَّر ⇒ مرةً واحدة
     ];
     const sups = ["ثامر فريح", "عبدالله المشعان"];
-    T("★ za: اللافتة تسمّي مشرفاً بلا اسمٍ مطابق فقط (بلا تكرارٍ ولا أدوارٍ أخرى)",
+    T("★ yb: اللافتة تسمّي مشرفاً بلا اسمٍ مطابق فقط (بلا تكرارٍ ولا أدوارٍ أخرى)",
       JSON.stringify(MM(users, sups)) === '["ثامر الفريح"]', JSON.stringify(MM(users, sups)));
-    T("za: تطابقٌ تامّ ⇒ لا لافتة", MM([{ name: "عبدالله المشعان", role: "" }], sups).length === 0);
-    T("za: الفراغُ والمسافاتُ الزائدة لا تُنتج بلاغاً كاذباً",
+    T("yb: تطابقٌ تامّ ⇒ لا لافتة", MM([{ name: "عبدالله المشعان", role: "" }], sups).length === 0);
+    T("yb: الفراغُ والمسافاتُ الزائدة لا تُنتج بلاغاً كاذباً",
       MM([{ name: "  ", role: "" }, { name: " ثامر فريح ", role: "" }], sups).length === 0);
   }
-  T("★ za: اللافتة تُعرض فوق قائمة المشرفين في لوحة الإدارة",
+  T("★ yb: اللافتة تُعرض فوق قائمة المشرفين في لوحة الإدارة",
     HTML.includes("el.innerHTML = warn + SUPERVISORS.map((s,i)=>") &&
     HTML.includes("const mism = supervisorNameMismatches("));
 }

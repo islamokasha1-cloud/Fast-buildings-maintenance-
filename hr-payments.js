@@ -56,7 +56,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9za";
+  var MODULE_BUILD = "v18.9yb";
 
   function COLL(){
     var dev=false;
