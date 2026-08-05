@@ -3680,6 +3680,66 @@ function ticketWhoLabels() {
     !!nt && nt.includes("createdByName:(currentUser&&currentUser.name)||null") &&
     HTML.includes("reporter:reporter||null") &&
     nt.includes('{event:"تم تسجيل البلاغ",by:supervisor||"النظام"'));
+
+  // ══ ★ v18.9za: قيمةُ «المشرف المسؤول» لا تُورَّث بين المستخدمين ══
+  // الحلقةُ القديمة كانت تُسند عند التطابق وتترك ما كان عند عدمه، والخروجُ لا يمسح
+  // النموذج ولا يعيد تحميل الصفحة — فورث الداخلُ اسمَ من خرج قبله في حقلٍ اختياري.
+  T("★ za: التعبئةُ التلقائية صارت دالّةً واحدة لا حلقةً مكرَّرة",
+    HTML.includes("function prefillSupervisorField(name){") &&
+    HTML.includes("try{ prefillSupervisorField(found&&found.name); }catch(e){}") &&
+    !/for\(let o of supSel\.options\)\{if\(o\.value===found\.name\)/.test(HTML));
+
+  const psrc = slice("function prefillSupervisorField(name){", "\nfunction clearForm(");
+  let P = null, SEL = null;
+  try {
+    SEL = { options: [{ value: "ثامر فريح" }, { value: "عبدالله المشعان" }], value: "عبدالله المشعان" };
+    P = new Function("document", "currentUser", "syncIconSelect",
+      psrc + "\nreturn prefillSupervisorField;")(
+        { getElementById: id => (id === "n-supervisor" ? SEL : null) }, null, () => {});
+  } catch (e) { T("★ za: prefillSupervisorField قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
+  if (P) {
+    T("★ za: اسمٌ موجودٌ في قائمة المشرفين يُعبَّأ",
+      (P("ثامر فريح"), SEL.value === "ثامر فريح"), SEL.value);
+    SEL.value = "عبدالله المشعان";
+    T("★ za: اسمٌ غيرُ موجود يمسح القيمة العالقة (جذر البلاغ المنسوب لغير مشرفه)",
+      (P("ثامر الفريح"), SEL.value === ""), `القيمة بعد التعبئة="${SEL.value}"`);
+    SEL.value = "عبدالله المشعان";
+    T("★ za: غيابُ المستخدم (خروج) يمسح كذلك — لا تسرُّبَ بين الجلسات",
+      (P(""), SEL.value === "") && (SEL.value = "عبدالله المشعان", P(null), SEL.value === ""));
+  }
+
+  T("★ za: كلا مسارَي الخروج يمسحان نموذج البلاغ",
+    (HTML.match(/\/\/ v18\.9za: نموذجُ البلاغ كان يبقى بمحتوى المستخدم الخارج[\s\S]{0,80}?try\{ clearForm\(\); \}catch\(e\)\{\}/g) || []).length === 2);
+  T("★ za: clearForm تُعيد التعبئة فيتّسق أولُ بلاغٍ مع ما بعده",
+    /function clearForm\(\)\{[\s\S]*?prefillSupervisorField\(\);[\s\S]*?\n\}/.test(HTML));
+
+  // لافتةُ التفاوت بين USERS وSUPERVISORS
+  const msrc = slice("function supervisorNameMismatches(users,sups){", "\nfunction renderAdminSupervisorsList(");
+  let MM = null;
+  try {
+    MM = new Function("_NON_SUPERVISOR_ROLES",
+      msrc + "\nreturn supervisorNameMismatches;")(
+        ["admin", "project_manager", "ceo", "warehouse_manager", "procurement_officer",
+         "finance", "hr_officer", "viewer", "observer"]);
+  } catch (e) { T("★ za: supervisorNameMismatches قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
+  if (MM) {
+    const users = [
+      { name: "ثامر الفريح", role: "" },          // مشرف — لا مطابق ⇒ يُبلَّغ عنه
+      { name: "عبدالله المشعان", role: "" },      // مشرف — مطابق ⇒ لا
+      { name: "محمد داوود", role: "admin" },      // دورٌ آخر ⇒ لا
+      { name: "سارة", role: "finance" },          // دورٌ آخر ⇒ لا
+      { name: "ثامر الفريح", role: "" },          // مكرَّر ⇒ مرةً واحدة
+    ];
+    const sups = ["ثامر فريح", "عبدالله المشعان"];
+    T("★ za: اللافتة تسمّي مشرفاً بلا اسمٍ مطابق فقط (بلا تكرارٍ ولا أدوارٍ أخرى)",
+      JSON.stringify(MM(users, sups)) === '["ثامر الفريح"]', JSON.stringify(MM(users, sups)));
+    T("za: تطابقٌ تامّ ⇒ لا لافتة", MM([{ name: "عبدالله المشعان", role: "" }], sups).length === 0);
+    T("za: الفراغُ والمسافاتُ الزائدة لا تُنتج بلاغاً كاذباً",
+      MM([{ name: "  ", role: "" }, { name: " ثامر فريح ", role: "" }], sups).length === 0);
+  }
+  T("★ za: اللافتة تُعرض فوق قائمة المشرفين في لوحة الإدارة",
+    HTML.includes("el.innerHTML = warn + SUPERVISORS.map((s,i)=>") &&
+    HTML.includes("const mism = supervisorNameMismatches("));
 }
 
 function hrPaymentsTests() {
