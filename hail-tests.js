@@ -3770,6 +3770,70 @@ function partialReceiptBackToProc() {
     !HTML.includes('{event:"pending_pm",code:"pending_pm"'));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   الملاحظات تظهر فعلاً في تفاصيل طلب الشراء (v18.9ab)
+   ───────────────────────────────────────────────────────────────────
+   ملاحظتان مختلفتان، وكلتاهما كانت تُكتب ولا تُقرأ:
+   (١) items[].notes — «ملاحظات / مواصفات» البند في نموذج طلب التسعير،
+       ينقلها _rfqToPO إلى بنود طلب الشراء ثم لا يعرضها جدولُ البنود
+       لا في الشاشة ولا في نسختَي الطباعة.
+   (٢) rf.notes — ملاحظاتُ طلب التسعير نفسه، كان سطرُ «تحويل من طلب
+       تسعير …» يدهسها كلياً عند التحويل.
+   ════════════════════════════════════════════════════════════════════ */
+function poNotesVisible() {
+  H("ملاحظاتُ الطلب والبند تظهر في التفاصيل والطباعة");
+
+  // ── (١) ملاحظةُ البند: دالةٌ واحدة تخدم المواضع الثلاثة ──
+  const srcNote = slice("function poItemNote(it){", "\n");
+  let NF = null;
+  try { NF = new Function(srcNote + "\nreturn poItemNote;")(); }
+  catch (e) { T("poItemNote قابلة للتنفيذ", false, String(e.message).slice(0, 140)); }
+  if (NF) {
+    T("★ poItemNote تُرجع نصَّ الملاحظة مشذّباً", NF({ notes: "  مقاس 40×80  " }) === "مقاس 40×80");
+    T("بندٌ بلا ملاحظة يُرجع فراغاً (فلا يُرسَم سطرٌ خاوٍ)",
+      NF({}) === "" && NF(null) === "" && NF({ notes: "   " }) === "");
+  }
+
+  // المواضع الثلاثة تستدعيها فعلاً — ثلاثة استدعاءات على الأقل في العرض
+  const uses = (HTML.match(/poItemNote\(it(?:em)?\)/g) || []).length;
+  T("★ ملاحظةُ البند مرسومةٌ في المواضع الثلاثة (تفاصيل + PDF + PDF بلا أسعار)",
+    uses >= 4, "عدد الاستدعاءات = " + uses);
+  T("★ تفاصيل الطلب ترسم ملاحظة البند تحت اسم المادة",
+    /const _n=poItemNote\(item\);return _n\?/.test(HTML));
+  T("★ نسختا الطباعة كلتاهما ترسمان noteLine في خلية الاسم",
+    (HTML.match(/const noteLine\s*=\s*poItemNote\(it\)/g) || []).length === 2 &&
+    (HTML.match(/\$\{substBadge\}\$\{noteLine\}/g) || []).length === 2);
+
+  // ── (٢) تحويل طلب التسعير لا يدهس ملاحظاته ──
+  const _a = HTML.indexOf('notes: [ String(rf.notes||"").trim(),');
+  const _b = HTML.indexOf('.join("\\n")', _a);
+  T("تعبيرُ الملاحظات في _rfqToPO موجود", _a >= 0 && _b > _a);
+  if (_a >= 0 && _b > _a) {
+    const expr = HTML.slice(_a + "notes: ".length, _b + '.join("\\n")'.length);
+    let CF = null;
+    try { CF = new Function("rf", "rfqId", "q", "return " + expr + ";"); }
+    catch (e) { T("التعبير قابل للتنفيذ", false, String(e.message).slice(0, 140)); }
+    if (CF) {
+      const withNote = CF({ notes: "الحديد درجة أولى — توريد خلال أسبوع" }, "RFQ-2026-0007", { supplier: "مصادر الوطنية" });
+      T("★ ملاحظةُ طلب التسعير تنجو من التحويل (كانت تُدهس)",
+        withNote.startsWith("الحديد درجة أولى — توريد خلال أسبوع"), withNote.replace(/\n/g, " ⏎ "));
+      T("★ وسطرُ المصدر يبقى أسفلها — لا يُفقَد أثرُ التحويل",
+        withNote.includes("تحويل من طلب تسعير RFQ-2026-0007 — عرض: مصادر الوطنية"));
+      T("طلبُ تسعيرٍ بلا ملاحظات ⇒ سطرُ المصدر وحده بلا سطرٍ فارغ",
+        CF({}, "RFQ-1", { supplier: "س" }) === "تحويل من طلب تسعير RFQ-1 — عرض: س" &&
+        CF({ notes: "   " }, "RFQ-1", { supplier: "س" }) === "تحويل من طلب تسعير RFQ-1 — عرض: س");
+    }
+  }
+
+  // ── الملاحظاتُ متعددةُ الأسطر تُعرض بأسطرها ──
+  T("★ .d-desc يحترم أسطر الملاحظة (white-space:pre-line)",
+    /\.d-desc\{[^}]*white-space:pre-line/.test(HTML));
+  T("★ كتلةُ الملاحظات في نسختَي الطباعة تحترم الأسطر",
+    (HTML.match(/border:1px solid #c7d7f5;white-space:pre-line"><b>ملاحظات:<\/b>/g) || []).length === 2);
+  T("تفاصيل الطلب ما زالت تعرض ملاحظاتِ الطلب نفسها (تراجع)",
+    HTML.includes('<div class="d-sec-label">ملاحظات</div><div class="d-desc">${esc(p.notes)}</div>'));
+}
+
 function ticketWhoLabels() {
   H("مَن سجّل البلاغ: الحساب/المشرف/المُبلِّغ (v18.9z)");
 
@@ -4332,6 +4396,7 @@ function financeAuditTests() {
   deepReviewV18_9vu();
   ticketWhoLabels();
   partialReceiptBackToProc();
+  poNotesVisible();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }
