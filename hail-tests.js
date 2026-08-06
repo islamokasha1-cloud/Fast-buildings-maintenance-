@@ -3640,6 +3640,136 @@ function deepReviewV18_9vu() {
 // شبكةُ التفاصيل تقرأ `createdByName` (الحسابُ المُدخِل) بينما `timeline[0].by` يحمل
 // **المشرف** منذ الإنشاء — فظهر اسمان مختلفان لحدثٍ واحد بلا تفسير. العلاجُ عرضيٌّ
 // بحت (لا يُغيَّر المخزَّن) عبر `timelineWho`، وهذا الحارس يمنع الارتداد إليه.
+/* ════════════════════════════════════════════════════════════════════
+   استلامٌ جزئي ⇒ الطلب يعود «قيد تنفيذ المشتريات» (v18.9aa)
+   ───────────────────────────────────────────────────────────────────
+   القاعدة: ما دام في الطلب بندٌ واحدٌ لم تكتمل كميّته عبر **كل** سندات
+   الاستلام، فالطلب لا يُقفل ولا يبقى معلّقاً عند المستودع — يعود إلى
+   مسؤول المشتريات لاستكمال التوريد. القاعدة مطبَّقة في موضعين، وكلاهما
+   يجب أن يبقى: doWarehouseAudit (بعد كل تدقيق) و_poSettleExtras (بعد
+   البتّ في آخر بندٍ إضافي). وكانت بلا أي حارس تنفيذي.
+   ════════════════════════════════════════════════════════════════════ */
+function partialReceiptBackToProc() {
+  H("استلامٌ جزئي ⇒ العودة لتنفيذ المشتريات");
+
+  const srcKey    = slice("function _poItemKey(it){", "\nfunction _poAlignRows");
+  const srcPrev   = slice("function _waPrevRcv(p, idx, it){", "\n// جمع حقل على مستوى السند");
+  const srcOut    = slice("function _poOutstanding(p){", "\n// ══════════ v18.9ns");
+  const srcExtras = slice("function poExtras(p){", "function canDecideExtra");
+  const srcSettle = slice("function _poSettleExtras(p, now){", "\nasync function poExtraDecide");
+  T("دوال القاعدة مستخرَجة من index.html",
+    !!srcKey && !!srcPrev && !!srcOut && !!srcExtras && !!srcSettle);
+  if (!(srcKey && srcPrev && srcOut && srcExtras && srcSettle)) return;
+
+  let A = null;
+  try {
+    A = new Function("normalizePOStatus", "currentUser",
+      [srcKey, srcPrev, srcOut, srcExtras, srcSettle].join("\n") +
+      "\nreturn {_poOutstanding, _waPrevRcv, _poSettleExtras, poPendingExtras};"
+    )(s => s, { name: "محمد" });
+  } catch (e) { T("الدوال قابلة للتنفيذ", false, String(e.message).slice(0, 140)); return; }
+
+  // ── نموذج PO-202608-0123: ثلاثة بنودٍ مطلوبة لم يصل منها شيء، وبندان
+  //    إضافيان وصلا كاملَين. المستلم 25 قطعة — والطلب مع ذلك ناقص. ──
+  const mk = () => ({
+    id: "PO-TEST-0123",
+    items: [
+      { itemId: "i1", itemCode: "BLDG-129", itemName: "تيوب فارغ مربع 50*50", qty: 5 },
+      { itemId: "i2", itemCode: "BLDG-085", itemName: "تيوب فارغ مربع 19*19", qty: 2 },
+      { itemId: "i3", itemName: "صاج اسود 1.22*244*1.25", qty: 1 },
+      { itemId: "i4", itemCode: "BLDG-117", itemName: "تيوب فارغ مستطيل 40*80", qty: 24, _extra: true, _extraStatus: "pending_pm" },
+      { itemId: "i5", itemCode: "SERV-003", itemName: "نقل مواد", qty: 1, _extra: true, _extraStatus: "pending_pm" },
+    ],
+    grnDocs: [{
+      grnRef: "GRN-2026-0062", vendor: "مصادر الوطنية",
+      items: [{ itemId: "i1", rcvQty: 0 }, { itemId: "i2", rcvQty: 0 }, { itemId: "i3", rcvQty: 0 },
+              { itemId: "i4", rcvQty: 24 }, { itemId: "i5", rcvQty: 1 }],
+    }],
+    timeline: [], status: "wh_auditing",
+  });
+
+  const out = A._poOutstanding(mk());
+  T("★ البنود الثلاثة غير المورَّدة تُرصَد رغم استلام 25 قطعة إضافية",
+    out.length === 3 && out.map(o => o.idx).join(",") === "0,1,2",
+    "outstanding=" + JSON.stringify(out.map(o => ({ i: o.idx, req: o.req, cum: o.cum }))));
+
+  // تراكم عبر سندين: 4 ثم 3 من أصل 10 ⇒ يبقى ناقصاً؛ ثم 3 ⇒ يكتمل
+  const multi = {
+    items: [{ itemId: "x", itemName: "بند", qty: 10 }],
+    grnDocs: [{ items: [{ itemId: "x", rcvQty: 4 }] }, { items: [{ itemId: "x", rcvQty: 3 }] }],
+  };
+  T("★ المستلم تراكمي عبر كل السندات لا الدفعة الأخيرة",
+    A._poOutstanding(multi).length === 1 && A._poOutstanding(multi)[0].cum === 7,
+    "cum=" + (A._poOutstanding(multi)[0] || {}).cum);
+  multi.grnDocs.push({ items: [{ itemId: "x", rcvQty: 3 }] });
+  T("اكتمال الكمية يُخرِج البند من النقص", A._poOutstanding(multi).length === 0);
+
+  T("البند المغطّى كاملاً من المخزون ليس نقصَ توريد",
+    A._poOutstanding({ items: [{ itemId: "s", qty: 4, _fullyCoveredByStock: true }], grnDocs: [] }).length === 0);
+
+  // ── الموضع (١): قرار doWarehouseAudit — مصدرياً، فالدالة كلّها DOM ──
+  const dec = slice("const _outstanding = _poOutstanding(pCurrent);", "// v18.9rv: حفظ الطلب");
+  T("★ تدقيق الاستلام: فرعُ «بنود لم تكتمل» يضع proc_executing",
+    !!dec && /if\(_outstanding\.length > 0\)\{\s*pCurrent\.status = "proc_executing";/.test(dec));
+  T("★ فرعُ النقص يسبق الإقفال — لا يُقفل طلبٌ ناقص",
+    !!dec && dec.indexOf('pCurrent.status = "proc_executing"') >= 0 &&
+    dec.indexOf('pCurrent.status = "proc_executing"') < dec.indexOf('pCurrent.status = "closed"'));
+  T("★ القيد يحمل code:\"proc_executing\" فيصحّ اشتقاق المراحل والزمن",
+    !!dec && /code:"proc_executing"/.test(dec) &&
+    dec.includes("بنود لم تكتمل بعد"));
+  T("النقص يُشعِر المشتريات بإكمال التوريد",
+    !!dec && dec.includes("توريد لم يكتمل — مطلوب إكمال التوريد"));
+
+  // ── الموضع (٢): بعد البتّ في آخر بندٍ إضافي ──
+  const pEx = mk();
+  pEx.status = "pending_extra";
+  pEx.items[3]._extraStatus = "approved";
+  pEx.items[4]._extraStatus = "approved";
+  A._poSettleExtras(pEx, "2026-08-03T15:01:00.000Z");
+  T("★ البتّ في آخر بندٍ إضافي مع بقاء نقصٍ ⇒ proc_executing لا closed",
+    pEx.status === "proc_executing", "status=" + pEx.status);
+  T("★ العودة مقيَّدةٌ في السجل (لا انتقال صامت)",
+    pEx.timeline.length === 1 && pEx.timeline[0].code === "proc_executing" &&
+    pEx.timeline[0].event.includes("استكمال البنود الناقصة"));
+
+  const pFull = mk();
+  pFull.status = "pending_extra";
+  pFull.items.forEach(it => { if (it._extra) it._extraStatus = "approved"; });
+  pFull.grnDocs[0].items[0].rcvQty = 5;
+  pFull.grnDocs[0].items[1].rcvQty = 2;
+  pFull.grnDocs[0].items[2].rcvQty = 1;
+  A._poSettleExtras(pFull, "2026-08-03T15:01:00.000Z");
+  T("اكتمال كل البنود مع البتّ في الإضافي ⇒ إقفال", pFull.status === "closed");
+
+  const pPend = mk();
+  pPend.status = "pending_extra";
+  pPend.items[3]._extraStatus = "approved";   // بقي i5 معلَّقاً
+  A._poSettleExtras(pPend, "2026-08-03T15:01:00.000Z");
+  T("بندٌ إضافيٌّ لم يُبَتّ فيه ⇒ الطلب يبقى موقوفاً",
+    pPend.status === "pending_extra" && pPend.timeline.length === 0);
+
+  // ── سجل الأحداث: رمزُ الحالة الخام لا يُعرض كما هو ──
+  const srcEv = slice("function poTimelineEvent(tl){", "\nfunction poStatusBadge");
+  let EV = null;
+  try {
+    EV = new Function("PO_STATUS", "RFQ_STATUS", "poStatusLabel",
+      srcEv + "\nreturn poTimelineEvent;"
+    )({ pending_pm: "بانتظار موافقة مدير المشاريع" }, {}, s => "بانتظار موافقة مدير المشاريع");
+  } catch (e) { T("poTimelineEvent قابلة للتنفيذ", false, String(e.message).slice(0, 140)); }
+  if (EV) {
+    T("★ قيدٌ نصُّه رمزُ حالةٍ يُعرض بالعربية (طلبات قائمة)",
+      EV({ event: "pending_pm" }) === "تغيير الحالة: بانتظار موافقة مدير المشاريع");
+    T("النصُّ العربي يمرّ كما هو", EV({ event: "تم إنشاء الطلب وتقديمه" }) === "تم إنشاء الطلب وتقديمه");
+    T("قيدٌ بلا نص لا يكسر السطر", EV({}) === "—" && EV(null) === "—");
+  }
+  T("★ الشاشة وPDF كلاهما يمرّ عبر poTimelineEvent",
+    HTML.includes("const e = poTimelineEvent(tl);") &&
+    HTML.includes("${esc(poTimelineEvent(tl))}") &&
+    !HTML.includes("${esc(tl.event)}"));
+  T("★ إنشاء الطلب لم يعد يخزّن رمزاً خاماً في event",
+    !HTML.includes('{event:"pending_pm",code:"pending_pm"'));
+}
+
 function ticketWhoLabels() {
   H("مَن سجّل البلاغ: الحساب/المشرف/المُبلِّغ (v18.9z)");
 
@@ -4201,6 +4331,7 @@ function financeAuditTests() {
   comprehensiveReviewV18_9vl();
   deepReviewV18_9vu();
   ticketWhoLabels();
+  partialReceiptBackToProc();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }
