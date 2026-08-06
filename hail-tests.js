@@ -3834,6 +3834,117 @@ function poNotesVisible() {
     HTML.includes('<div class="d-sec-label">ملاحظات</div><div class="d-desc">${esc(p.notes)}</div>'));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   دفعة الفحص العميق الثانية (v18.9ac) — M7 / M9 / M20 + خانة ملاحظة البند
+   ───────────────────────────────────────────────────────────────────
+   تنبيه للقارئ: H4/H5/H6/C3/C4/C5/H8/H10/M2/M4/M5/M15 أُصلحت في v18.9vu
+   ويحرسها القسم 28. ما هنا هو ما بقي مفتوحاً من البنود المستقلّة.
+   ════════════════════════════════════════════════════════════════════ */
+function deepReviewV18_9ac() {
+  H("دفعة الفحص العميق الثانية — M7 / M9 / M20 + ملاحظة البند");
+
+  const pmSrc = fs.existsSync(path.resolve(path.dirname(IDX), "project-management.js"))
+    ? fs.readFileSync(path.resolve(path.dirname(IDX), "project-management.js"), "utf8") : "";
+  const coSrc = fs.existsSync(path.resolve(path.dirname(IDX), "cleaning-operations.js"))
+    ? fs.readFileSync(path.resolve(path.dirname(IDX), "cleaning-operations.js"), "utf8") : "";
+
+  // ── M7: saveBoq لا يبتلع فشل saveBudget ──
+  T("★ M7: saveBoq يفحص نتيجة saveBudget ولا يعلن نجاحاً كاذباً",
+    /if\(!\(await saveBudget\(projId, cats\)\)\)\{/.test(pmSrc) &&
+    !/\n\s*await saveBudget\(projId, cats\);\s*\n\s*return true;/.test(pmSrc));
+  T("★ M7: الفشل الجزئي مُعلَن للمستخدم (المقايسة حُفظت والموازنة لا)",
+    pmSrc.includes("حُفظت المقايسة لكن تعذّر تحديث الموازنة"));
+
+  // ── M9: poForProject يطبّع projectId الفارغ إلى hail كما تفعل النواة ──
+  const _pf = pmSrc.indexOf("function poForProject(projId){");
+  const _pfSrc = _pf >= 0 ? pmSrc.slice(_pf, pmSrc.indexOf("\nfunction ", _pf + 10)) : "";
+  T("★ M9: poForProject يطابق بالمفتاح المُطبَّع لا بالمساواة الصارمة",
+    /\(p\.projectId\|\|"hail"\)===projId/.test(_pfSrc) && !/p\.projectId===projId/.test(_pfSrc));
+  T("★ M9: النواة والوحدة على اصطلاحٍ واحد (الفارغ = hail)",
+    /return p\.projectId\|\|"hail";/.test(HTML) && /\(p\.projectId\|\|"hail"\)===filterVal/.test(HTML));
+
+  // ── M20: يومُ التنفيذ محلّي لا UTC ──
+  const _ed = coSrc.indexOf("function execDay(t){");
+  const _edSrc = _ed >= 0 ? coSrc.slice(_ed, coSrc.indexOf("function doneToday", _ed)) : "";
+  T("execDay مستخرَجة", !!_edSrc);
+  if (_edSrc) {
+    let EX = null;
+    try {
+      EX = new Function("_ymdL",
+        _edSrc + "\nreturn execDay;"
+      )(d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"));
+    } catch (e) { T("execDay قابلة للتنفيذ", false, String(e.message).slice(0, 140)); }
+    if (EX) {
+      T("★ M20: الحقل المحلّي الصريح يُقدَّم (سجلٌّ جديد)",
+        EX({ lastExecutedDate: "2026-08-09", lastExecuted: "2026-08-08T22:00:00.000Z" }) === "2026-08-09");
+      // سجلٌّ قديم: طابعٌ UTC يُحوَّل لتاريخٍ محلّي — لا يُقتطَع
+      const iso = "2026-08-08T22:00:00.000Z";
+      const localY = new Date(iso).getFullYear() + "-" +
+        String(new Date(iso).getMonth() + 1).padStart(2, "0") + "-" +
+        String(new Date(iso).getDate()).padStart(2, "0");
+      T("★ M20: الطابع القديم يُحوَّل لتاريخٍ محلّي (لا slice على UTC)",
+        EX({ lastExecuted: iso }) === localY, "execDay=" + EX({ lastExecuted: iso }) + "  محلّي=" + localY);
+      T("مهمّة لم تُنفَّذ ⇒ فراغ", EX({}) === "" && EX(null) === "");
+      T("طابعٌ فاسد لا يرمي — يرجع للاقتطاع", EX({ lastExecuted: "غير صالح" }) === "غير صالح");
+      // العطل نفسه: بيئة +٣ (الرياض) — التنفيذ 1:00 صباح ٠٩/٠٨ محلّياً = 22:00 ٠٨/٠٨ UTC.
+      // نحقن مُنسِّقاً يحاكي +٣ فيُثبت أن execDay ترجع اليوم المحلّي لا المقتطَع من UTC.
+      let EX3 = null;
+      try {
+        EX3 = new Function("_ymdL", _edSrc + "\nreturn execDay;")(d => {
+          const s = new Date(d.getTime() + 3 * 3600 * 1000);
+          return s.getUTCFullYear() + "-" + String(s.getUTCMonth() + 1).padStart(2, "0") + "-" + String(s.getUTCDate()).padStart(2, "0");
+        });
+      } catch (e) { /* غُطّي أعلاه */ }
+      if (EX3) {
+        const t3 = { lastExecuted: "2026-08-08T22:00:00.000Z" };
+        T("★★ M20: في +٣ التنفيذُ ١:٠٠ صباحاً يُحسب لليوم المحلّي (٠٩) لا لـUTC (٠٨)",
+          EX3(t3) === "2026-08-09" && String(t3.lastExecuted).slice(0, 10) === "2026-08-08",
+          "execDay=" + EX3(t3) + "  والاقتطاع القديم=" + String(t3.lastExecuted).slice(0, 10));
+      }
+    }
+  }
+  T("★ M20: doneToday تمرّ عبر execDay لا عبر slice(0,10)",
+    /function doneToday\(t\)\{ const d=execDay\(t\); return !!d && d===_today\(\); \}/.test(coSrc) &&
+    !/String\(t\.lastExecuted\)\.slice\(0,10\)===_today\(\)/.test(coSrc));
+  T("★ M20: التنفيذ يكتب lastExecutedDate محلّياً",
+    /lastExecuted: now, lastExecutedDate: _today\(\)/.test(coSrc));
+  T("★ M20: شاشتا «آخر تنفيذ» تعرضان اليوم المحلّي",
+    (coSrc.match(/execDay\(t\)/g) || []).length >= 4 &&
+    !/_esc\(String\(t\.lastExecuted\)\.slice\(0,10\)\)/.test(coSrc));
+
+  // ── خانة ملاحظة البند في «طلب شراء جديد» ──
+  T("★ الحقل موجود في النموذج", HTML.includes('id="np-item-notes"'));
+  T("★ addPurchaseItem يقرأه ويخزّنه في notes (نفس حقل طلب التسعير)",
+    HTML.includes('const itemNotes = ((document.getElementById("np-item-notes")||{}).value||"").trim().slice(0,300);') &&
+    HTML.includes("itemId: catalogItemId, notes: itemNotes }"));
+  T("★ يُمسح بعد إضافة البند وعند تفريغ النموذج (لا يتسرّب للبند التالي ولا للطلب التالي)",
+    /"np-item-total","np-vendor","np-item-notes"\]\.forEach/.test(HTML) &&
+    /"np-vendor","np-item-notes","np-notes"/.test(HTML));
+  // ── التقرير نفسه: كل بندٍ موسومٌ بحالته، فلا يعود يُقرأ كأنه كله مفتوح ──
+  const DR_PATH = path.resolve(path.dirname(IDX), "docs", "deep-review-2026-08.md");
+  const DR = fs.existsSync(DR_PATH) ? fs.readFileSync(DR_PATH, "utf8") : "";
+  T("★ تقرير الفحص العميق موجود", !!DR);
+  if (DR) {
+    const heads = DR.split("\n").filter(l => /^### [CHML]\d{1,2} /.test(l));
+    const untagged = heads.filter(l => !/(✅ مُصلَح|⏳ مؤجَّل|🔴 مفتوح|⚪ إنذار كاذب)/.test(l));
+    T("★ كل بندٍ في التقرير يحمل وسمَ حالة (يمنع إعادة إصلاح المُصلَح)",
+      heads.length >= 40 && untagged.length === 0,
+      heads.length + " بنداً" + (untagged.length ? " — بلا وسم: " + untagged.slice(0, 3).join(" | ").slice(0, 160) : ""));
+    T("★ الترويسة تُعلن أن الوثيقة حيّة لا لقطة",
+      DR.includes("**الوثيقة حيّة لا لقطة.**") && !DR.includes("النطاق: كشف الأخطاء فقط (لم تُطبَّق إصلاحات)"));
+    ["C3", "C4", "H4", "H5", "H6"].forEach(c =>
+      T("وسمُ " + c + " = مُصلَح v18.9vu", new RegExp("^### " + c + " .*✅ مُصلَح v18\\.9vu", "m").test(DR)));
+    ["M7", "M9", "M20"].forEach(c =>
+      T("وسمُ " + c + " = مُصلَح v18.9ac", new RegExp("^### " + c + " .*✅ مُصلَح v18\\.9ac", "m").test(DR)));
+    T("★ M19 موسومٌ إنذاراً كاذباً (الفاصل U+0001 موجودٌ في الكود)",
+      /^### M19 .*⚪ إنذار كاذب/m.test(DR) &&
+      coSrc.includes('k.indexOf(b+"")===0') && coSrc.includes('String(b)+""+String(wt)'));
+  }
+
+  T("★ جدولُ بنود النموذج يعرض الملاحظة قبل الإرسال",
+    HTML.includes('${esc(item.itemName)}${item.priceLocked?` <span style=\'font-size:10px;color:#92400e;background:#fef3c7;border-radius:4px;padding:1px 5px\'>🔒</span>`:""}${poItemNote(item)?'));
+}
+
 function ticketWhoLabels() {
   H("مَن سجّل البلاغ: الحساب/المشرف/المُبلِّغ (v18.9z)");
 
@@ -4397,6 +4508,7 @@ function financeAuditTests() {
   ticketWhoLabels();
   partialReceiptBackToProc();
   poNotesVisible();
+  deepReviewV18_9ac();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }

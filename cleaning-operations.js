@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9ab";
+const MODULE_BUILD = "v18.9ac";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -323,7 +323,22 @@ async function deleteTask(taskId){
 
 /* ════════════ منطق الاستحقاق والتغطية ════════════ */
 function isDisabled(t){ return !!t.disabled; }
-function doneToday(t){ return !!t.lastExecuted && String(t.lastExecuted).slice(0,10)===_today(); }
+// ══ v18.9ac — M20: يومُ التنفيذ محلّيٌّ لا UTC ══
+// `lastExecuted` طابعٌ زمنيٌّ بـtoISOString (UTC)، و`_today()` تاريخٌ محلّي — وكان
+// يُقارَن أولُ عشرة أحرفٍ من الأول بالثاني. في +٣ ينفَّذ عملٌ الساعةَ ١:٠٠ صباحاً محلّياً
+// فيُخزَّن بتاريخ **اليوم السابق** UTC، فتظهر المهمة «غير منفَّذة» وتُحسَب التغطيةُ خطأً
+// كلَّ يومٍ بين ٠٠:٠٠ و٠٢:٥٩. العلاج في الطرفين: التنفيذ يكتب `lastExecutedDate`
+// محلّياً، والقراءة تُحوّل الطابعَ القديم إلى تاريخٍ محلّي بدل اقتطاعه — فتنتفع
+// السجلات القائمة بلا ترحيل.
+function execDay(t){
+  if(!t) return "";
+  const d = String(t.lastExecutedDate||"").slice(0,10);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  if(!t.lastExecuted) return "";
+  const dt = new Date(t.lastExecuted);
+  return isNaN(dt.getTime()) ? String(t.lastExecuted).slice(0,10) : _ymdL(dt);
+}
+function doneToday(t){ const d=execDay(t); return !!d && d===_today(); }
 // مستحقّة الآن = تاريخ استحقاقها اليوم أو قبله، ولم تُنفَّذ اليوم — ولا شيءَ مستحقٌّ في الإجازة
 function isDue(t){ if(isDisabled(t)||doneToday(t)||_isTodayHoliday()) return false; return _dayDiff(String(t.nextDueDate||"").slice(0,10), _today())<=0; }
 function isOverdue(t){ if(isDisabled(t)||doneToday(t)||_isTodayHoliday()) return false; return _dayDiff(String(t.nextDueDate||"").slice(0,10), _today())<0; }
@@ -463,7 +478,7 @@ async function executeTask(task, checkedItems, note){
       note: String(note||"").slice(0,500)
     };
     await database.collection(logCol()).doc(rec.id).set(rec);
-    const patch = { id:task.id, lastExecuted: now, lastExecutedBy: _userName(), nextDueDate: _advanceDue(_today(), days) };
+    const patch = { id:task.id, lastExecuted: now, lastExecutedDate: _today(), lastExecutedBy: _userName(), nextDueDate: _advanceDue(_today(), days) };   // v18.9ac — M20: اليوم المحلّي صريحاً
     await saveTask(patch);
     _audit("تنفيذ مهمة نظافة", (task.name||"")+" — "+(task.building||"")+" ("+doneCount+"/"+list.length+" بند)");
     return true;
@@ -891,7 +906,7 @@ function _allTableHTML(tasks){
       <td>${_esc(t.freq||"—")}</td>
       <td class="co-num">${list.length}</td>
       <td class="co-num">${t.nextDueDate?_esc(String(t.nextDueDate).slice(0,10)):"—"}</td>
-      <td class="co-num">${t.lastExecuted?_esc(String(t.lastExecuted).slice(0,10)):"—"}</td>
+      <td class="co-num">${execDay(t)?_esc(execDay(t)):"—"}</td>
       <td><span class="ppm-due-badge ${st.badge}">${st.lbl}</span></td>
       <td>${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')}</button>`:""}</td>
     </tr>`;
@@ -944,7 +959,7 @@ function _taskDetailBodyHTML(t, log){
         ${info("المشرف المسؤول", sup||"غير مُسنَد")}
         ${info("العامل المنفِّذ", t.assignee)}
         ${info("الاستحقاق التالي", String(t.nextDueDate||"").slice(0,10))}
-        ${info("آخر تنفيذ", t.lastExecuted?String(t.lastExecuted).slice(0,10)+(t.lastExecutedBy?" — "+t.lastExecutedBy:""):"لم تُنفَّذ بعد")}
+        ${info("آخر تنفيذ", execDay(t)?execDay(t)+(t.lastExecutedBy?" — "+t.lastExecutedBy:""):"لم تُنفَّذ بعد")}
         ${info("وصف", t.desc)}
       </div>
       <div class="co-actions" style="margin-top:12px">

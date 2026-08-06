@@ -189,7 +189,11 @@ function poForProject(projId){
     const nm = String(proj.name||"").trim();
     return all.filter(p=> (p.projectId==="__OTHER__" || p.isCustomProject) && String(p.projectName||"").trim()===nm);
   }
-  return all.filter(p=> p.projectId===projId);
+  // v18.9ac — M9: النواة تعتبر الطلب بلا projectId تابعاً لـ"hail" (_poProjKey)،
+  // وكانت هذه المطابقة صارمة — فطلبٌ قديم بـprojectId:"" يُحسب في اللوحة والمؤشّرات
+  // تحت hail ويختفي من بطاقة المشروع نفسها: رقمان متناقضان لنفس المشروع.
+  // نطابق بالمفتاح المُطبَّع كما تفعل النواة (_poProjMatch).
+  return all.filter(p=> (p.projectId||"hail")===projId);
 }
 // إجمالي الموازنة المخطّطة للمشروع = مجموع البنود العامة المخزّنة
 function budgetTotal(projId){
@@ -369,7 +373,13 @@ async function saveBoq(projId, items){
     items.forEach(it=>{ const k=it.categoryKey; if(k && CAT_NAME[k] && k!=="uncategorized") sums[k]=(sums[k]||0)+_boqLineTotal(it); });
     const existing={}; ((_budgetCache[projId]||{}).categories||[]).forEach(c=>existing[c.key]=Number(c.planned)||0);
     const cats=BUDGET_CATEGORIES.map(cat=>({ key:cat.key, name:cat.name, planned: (cat.key in sums)? sums[cat.key] : (existing[cat.key]||0) }));
-    await saveBudget(projId, cats);
+    // v18.9ac — M7: saveBudget يبتلع خطأه ويرجع false، وكان مُهمَلاً هنا — فتُعرَض
+    // «✅ حُفظت المقايسة» بينما الموازنة لم تُحدَّث، فيخالف تبويبُ المقايسة النظرةَ
+    // العامة بلا أن يعلم أحد. الفشل الجزئي يُعلَن: المقايسة محفوظة والموازنة لا.
+    if(!(await saveBudget(projId, cats))){
+      _toast("⚠ حُفظت المقايسة لكن تعذّر تحديث الموازنة — أعد الحفظ","warn");
+      return false;
+    }
     return true;
   }catch(e){ console.warn("saveBoq",e); _toast("⚠ تعذّر حفظ المقايسة","warn"); return false; }
 }
