@@ -3539,6 +3539,113 @@ function comprehensiveReviewV18_9vl() {
     })());
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   v18.9ae — المشروع القائم على الأداء (المرحلة ١)
+   الحرّاس هنا يحمون **عهداً واحداً**: المشاريع التقليدية لا تتأثر إطلاقاً،
+   والعقد يُقرأ من مصدرٍ واحدٍ لا من تعريفاتٍ محلّيةٍ متفرّقة.
+   ════════════════════════════════════════════════════════════════════ */
+function perfContractPhase1() {
+  H("v18.9ae) العقد القائم على الأداء — المرحلة ١");
+  const PF_PATH = path.resolve(path.dirname(IDX), "performance-contract.js");
+  const PF = fs.existsSync(PF_PATH) ? fs.readFileSync(PF_PATH, "utf8") : "";
+  T("★ ae: وحدة performance-contract.js موجودة", PF.length > 0);
+
+  // ── العَلَم: صامتٌ افتراضياً — أهمّ حارسٍ في هذه المرحلة ──
+  // perfConfig تعود null لأي مشروعٍ بلا perfContract===true، فلا يرث مشروعٌ
+  // تقليديٌّ شاشةً ولا حقلاً. والمقارنة الصارمة تمنع نصّ "false" من إشعال عقد.
+  T("★ ae: perfConfig تُبوّب بالعَلَم وحده وتعود null لغير عقود الأداء",
+    /function perfConfig\(p\)\{[\s\S]{0,300}?proj\.perfContract !== true\) return null;/.test(HTML));
+  T("★ ae: العَلَم يُقارَن صراحةً بـ true (نصُّ \"false\" لا يُشعل عقداً)",
+    /perfContract !== true/.test(HTML) && !/proj\.perfContract\s*\)\s*return/.test(HTML));
+  T("★ ae: isPerfProject تُشتقّ من perfConfig لا من فحصٍ مستقل",
+    /function isPerfProject\(p\)\{ return perfConfig\(p\) !== null; \}/.test(HTML));
+
+  // ── لا تعريفَ محلّياً للعقد في الوحدة (نفس درس poIsClosed) ──
+  T("★ ae: الوحدة تقرأ البوّابة من النواة ولا تعرّفها محلّياً",
+    /typeof isPerfProject==="function" && isPerfProject\(\)/.test(PF) &&
+    !/perfContract\s*===\s*true/.test(PF), "الوحدة تفحص العَلَم بنفسها ⇒ تعريفان يتباعدان");
+
+  // ── الحد الأدنى يرتفع بسنة العقد، ولا يتجاوز ١٠٠٪ ──
+  T("★ ae: الحد الأدنى = أساسُ السنة الأولى + خطوةٌ لكل سنة، بسقف ١",
+    /Math\.min\(1, cfg\.minScoreY1 \+ \(perfContractYear\(now,p\) - 1\) \* PERF_MIN_SCORE_STEP\)/.test(HTML));
+  T("★ ae: ثوابت الحد الأدنى والمهلة معرَّفةٌ في موضعٍ واحد",
+    /const PERF_MIN_SCORE_DEFAULT = 0\.70;/.test(HTML) &&
+    /const PERF_MIN_SCORE_STEP    = 0\.05;/.test(HTML) &&
+    /const PERF_GRACE_MONTHS      = 2;/.test(HTML));
+  T("★ ae: مهلة الشهرين تُقرأ من الثابت لا برقمٍ مسحور",
+    /perfContractMonth\(now, p\) <= PERF_GRACE_MONTHS/.test(HTML));
+
+  // ── سنة/شهر العقد يحترمان يومَ الذكرى (لا قسمةً فجّة على التقويم) ──
+  T("★ ae: سنة العقد تُنقِص سنةً قبل يوم الذكرى",
+    /beforeAnniv = \(d\.getMonth\(\) < s\.getMonth\(\)\)/.test(HTML) && /if\(beforeAnniv\) y -= 1;/.test(HTML));
+  T("★ ae: شهر العقد يُنقِص شهراً قبل يوم الاستحقاق",
+    /if\(d\.getDate\(\) < s\.getDate\(\)\) m -= 1;/.test(HTML));
+
+  // ── الحقول تُقرأ وتُكتب بمولِّدٍ/قارئٍ واحدٍ للنافذتين (لا نسختان تتباعدان) ──
+  T("★ ae: كتلة الحقول مولَّدةٌ مرةً واحدةً وتُستدعى للنافذتين",
+    /function perfFieldsHTML\(prefix, proj\)/.test(HTML) &&
+    /\$\{perfFieldsHTML\("np", null\)\}/.test(HTML) && /\$\{perfFieldsHTML\("ep", proj\)\}/.test(HTML));
+  T("★ ae: الحفظ في النافذتين يمرّ بـ _readPerfFields",
+    (HTML.match(/\.\.\._readPerfFields\("(np|ep)"\)/g) || []).length === 2);
+  T("★ ae: النسبة تُخزَّن كسراً (0–1) لا مئويةً — مصدرٌ واحدٌ لوحدة القياس",
+    /minPct>0 && minPct<=100\) \? minPct\/100 : PERF_MIN_SCORE_DEFAULT/.test(HTML));
+
+  // ── الوحدة: بوّابةُ الصفحة والزرّ ──
+  T("★ ae: زرّ القائمة يُزال لغير عقود الأداء لا يُخفى فقط",
+    /const shouldShow = canView\(\) && _isPerf\(\) && !blocked;/.test(PF) &&
+    /if\(!shouldShow\)\{ if\(existing\) existing\.remove\(\); return; \}/.test(PF));
+  T("★ ae: فتحُ الصفحة مباشرةً في مشروعٍ تقليديٍّ يُحوَّل للوحة",
+    /if\(id===PAGE_ID && !\(canView\(\) && _isPerf\(\)\)\)\{[\s\S]{0,220}?orig\.apply\(this, \["dashboard"\]\)/.test(PF));
+  T("★ ae: تبديلُ المشروع يعيد تقييم البوّابة ويغادر الصفحة إن لم تعُد تنتمي",
+    /curPerf!==lastPerf/.test(PF) && /else \{ try\{ showPage\("dashboard"\); \}catch\(e\)\{\} \}/.test(PF));
+
+  // ── ★ العطل الذي كشفه فحصُ المتصفّح: الإدراج نسبةً إلى nav لا إلى والد المرساة ──
+  // أزرارُ القائمة أكثرُها داخل مجموعاتٍ (#grp-*)، فـ nav.insertBefore بعقدةٍ ليست ابناً
+  // مباشراً يرمي NotFoundError ويُسقط الحقنَ كلَّه صامتاً — الزرّ لا يظهر إطلاقاً.
+  // الفحص السالب يجري على الكود **مجرَّداً من التعليقات**: التعليق الذي يشرح النمط
+  // الخاطئ يذكره حرفياً، فيصطاده الحارسُ ظلماً لو فحص المصدر كما هو.
+  const PF_CODE = PF.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  T("★ ae: زرّ القائمة يُدرَج نسبةً إلى والد المرساة لا إلى جذر القائمة",
+    /anchor\.parentNode\.insertBefore\(btn, anchor\.nextSibling\)/.test(PF_CODE) &&
+    !/nav\.insertBefore\(btn, anchor\.nextSibling\)/.test(PF_CODE),
+    "nav.insertBefore بعقدةٍ ليست ابناً مباشراً ⇒ NotFoundError وحقنٌ ساقطٌ صامت");
+  T("★ ae: الإدراج محاطٌ بحارسٍ يسقط إلى appendChild",
+    /try\{[\s\S]{0,200}?insertBefore\(btn[\s\S]{0,200}?\}catch\(e\)\{[\s\S]{0,80}?nav\.appendChild\(btn\)/.test(PF));
+  T("★ ae: الزرّ يرث صنف sidebar-child حين تكون المرساة ابنَ مجموعة",
+    /anchor\.classList\.contains\("sidebar-child"\) \? " sidebar-child" : ""/.test(PF));
+
+  // ── لا رقمَ كاذباً: المرحلة ١ لا تعرض درجةً محسوبة ──
+  // عرضُ درجةٍ قبل اكتمال حقولها يُنتج رقماً يُحتجّ به في اجتماعٍ ماليٍّ وهو خطأ.
+  T("★ ae: لا تُحسب درجةٌ ولا غرامةٌ فعلية في المرحلة ١",
+    !/monthlyScore|totalScore|computeScore|deviation\s*=/.test(PF),
+    "ظهر حسابُ درجةٍ في المرحلة ١ — الحقول لم تُبنَ بعد");
+
+  // ── النتيجة السنوية تُحسب من الأوزان لا تُكتب (فلا تنحرف عنها) ──
+  T("★ ae: النتيجة السنوية مشتقّةٌ من الأوزان × المستهدفات",
+    /function yearTarget\(yIdx\)\{[\s\S]{0,220}?GROUPS\.reduce\(/.test(PF));
+  T("★ ae: أوزان المجموعات الخمس تجمع ١٠٠٪ بالضبط", (() => {
+    const ws = [...PF.matchAll(/weight:(0\.\d+)/g)].map(m => parseFloat(m[1]));
+    const sum = ws.reduce((a, b) => a + b, 0);
+    return ws.length === 5 && Math.abs(sum - 1) < 1e-9;
+  })(), "الأوزان يجب أن تكون خمساً مجموعُها ١");
+  T("★ ae: النتيجة السنوية للسنة الأولى = ٧٨٫٥٪ (أرقام الاستشاري)", (() => {
+    const groups = [...PF.matchAll(/weight:(0\.\d+),\s*\n\s*targets:\[([^\]]+)\]/g)]
+      .map(m => ({ w: parseFloat(m[1]), t: m[2].split(",").map(Number) }));
+    if (groups.length !== 5) return false;
+    const y1 = groups.reduce((s, g) => s + g.w * g.t[0], 0);
+    return Math.abs(y1 - 0.785) < 1e-9;
+  })());
+
+  // ── بصمة البناء وتسجيل الوحدة في كاشف التقادم ──
+  const pfBuild = (PF.match(/const MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
+  T("★ ae: بصمة performance-contract.js تطابق APP_VERSION",
+    pfBuild === VER, `MODULE_BUILD=${pfBuild}  APP_VERSION=${VER}`);
+  T("★ ae: كاشف التقادم يسجّل الوحدة",
+    /name:"performance-contract\.js", get:function\(\)\{ return window\.performanceContract; \}/.test(HTML));
+  T("★ ae: الوحدة مُحمَّلةٌ بوسم <script> موسومٍ بالإصدار",
+    /<script src="performance-contract\.js\?v=[^"]+"><\/script>/.test(HTML));
+}
+
 function deepReviewV18_9vu() {
   H("28) الفحص العميق — دفعة إصلاحات (v18.9vu)");
 
@@ -4084,11 +4191,11 @@ function deepReviewV18_9ad() {
 function ticketWhoLabels() {
   H("مَن سجّل البلاغ: الحساب/المشرف/المُبلِّغ (v18.9z)");
 
-  T("★ z: حقلُ الشبكة يسمّي معناه «مسجّل البلاغ (الحساب)»",
+  T("★ ae: حقلُ الشبكة يسمّي معناه «مسجّل البلاغ (الحساب)»",
     HTML.includes('["مسجّل البلاغ (الحساب)",esc(t.createdByName||t.createdBy||"—")]'));
-  T("★ z: صفُّ «المُبلِّغ عن العطل» مشروطٌ بوجود reporter (لا صفَّ فارغاً)",
+  T("★ ae: صفُّ «المُبلِّغ عن العطل» مشروطٌ بوجود reporter (لا صفَّ فارغاً)",
     /\.\.\.\(t\.reporter\?\[\["المُبلِّغ عن العطل",esc\(t\.reporter\)\]\]:\[\]\)/.test(HTML));
-  T("★ z: سجلُّ الأحداث يمرّ عبر timelineWho لا esc(ev.by) مباشرةً (تراجع)",
+  T("★ ae: سجلُّ الأحداث يمرّ عبر timelineWho لا esc(ev.by) مباشرةً (تراجع)",
     HTML.includes("const who=timelineWho(t,ev);") &&
     HTML.includes('<div class="dtl-meta">${who} — ${fmtDate(ev.at)}</div>') &&
     !HTML.includes('<div class="dtl-meta">${esc(ev.by)} — ${fmtDate(ev.at)}</div>'));
@@ -4096,19 +4203,19 @@ function ticketWhoLabels() {
   const fsrc = slice("function timelineWho(t,ev){", "\n//  DETAIL");
   let W = null;
   try { W = new Function("esc", fsrc + "\nreturn timelineWho;")(s => String(s)); }
-  catch (e) { T("★ z: timelineWho قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
+  catch (e) { T("★ ae: timelineWho قابلة للاستخراج", false, String(e.message).slice(0, 120)); }
   if (W) {
     const CREATE = { event: "تم تسجيل البلاغ", by: "عبدالله المشعان" };
-    T("★ z: عند اختلاف الحساب عن المشرف يظهر الاثنان (جذر الالتباس)",
+    T("★ ae: عند اختلاف الحساب عن المشرف يظهر الاثنان (جذر الالتباس)",
       W({ createdByName: "ثامر فريح" }, CREATE).includes("ثامر فريح") &&
       W({ createdByName: "ثامر فريح" }, CREATE).includes("(المشرف: عبدالله المشعان)"),
       W({ createdByName: "ثامر فريح" }, CREATE));
-    T("★ z: عند تطابقهما لا يتكرّر الاسم",
+    T("★ ae: عند تطابقهما لا يتكرّر الاسم",
       W({ createdByName: "عبدالله المشعان" }, CREATE) === "عبدالله المشعان");
-    T("★ z: البلاغاتُ القديمة/التجريبية (لا createdByName) تبقى كما كانت",
+    T("★ ae: البلاغاتُ القديمة/التجريبية (لا createdByName) تبقى كما كانت",
       W({}, CREATE) === "عبدالله المشعان" &&
       W({ createdBy: "عبدالله المشعان" }, CREATE) === "عبدالله المشعان");
-    T("★ z: الأحداثُ غيرُ التسجيل لا تُمَسّ (تعيين/إغلاق)",
+    T("★ ae: الأحداثُ غيرُ التسجيل لا تُمَسّ (تعيين/إغلاق)",
       W({ createdByName: "ثامر فريح" }, { event: "تم تعيين الفني: عبد العزيز", by: "النظام" }) === "النظام" &&
       W({ createdByName: "ثامر فريح" }, { event: "تم إغلاق البلاغ", by: "عبد العزيز" }) === "عبد العزيز");
     T("z: حدثٌ بلا by لا يكسر السطر",
@@ -4646,6 +4753,7 @@ function financeAuditTests() {
   poNotesVisible();
   deepReviewV18_9ac();
   deepReviewV18_9ad();
+  perfContractPhase1();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }
