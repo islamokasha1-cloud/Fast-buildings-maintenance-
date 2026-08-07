@@ -92,6 +92,9 @@ async function routeTicketAssignment(before, after) {
       type: "ticket_assigned",
       entityId: String(after.id || techSnap.id),
       transition: `${prevTech || ""}->${newTech}`,
+      // v18.9ad — M14: طابعُ هذه الكتابة بعينها. ثابتٌ لو أُعيد إطلاق المشغّل على
+      // النسخة نفسها، ومختلفٌ لإسنادٍ لاحقٍ ولو تكرّر الانتقالُ نفسه.
+      occurrence: String(after.assignedAt || after.updatedAt || after.lastUpdated || ""),
     },
   });
 

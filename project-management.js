@@ -202,16 +202,23 @@ function budgetTotal(projId){
   return b.categories.reduce((s,c)=> s + (Number(c.planned)||0), 0);
 }
 // المصروف الفعلي (المغلق) + المرتبط (الجاري) للمشروع كله
+// v18.9ad — M8: الطلبُ المستعاض يُحتسب في موازنة المشروع **وفي رصيد الاستعاضة معاً**
+// (`substitute-budget.js` يجمع كل طلبٍ بـ`isSubstitute`). فيظهر «تجاوزُ موازنة» على
+// بنودٍ ليست من العقد أصلاً، ولا يفهم القارئ من أين جاء الرقم. لا نُسقطها من المجموع
+// من طرفٍ واحد — فذلك يغيّر أرقامَ كل مشروعٍ بقرارٍ محاسبيٍّ ليس لنا — بل **نفصلها
+// ونعلنها**: المجموع كما هو، وبجانبه كم منه مموَّلٌ بالاستعاضة. القارئ يرى المصدر.
 function projectRollup(projId){
-  let actual=0, committed=0;
+  let actual=0, committed=0, substActual=0, substCommitted=0;
   poForProject(projId).forEach(p=>{
-    if(poClosed(p)) actual += poActual(p);
-    else if(poWip(p)) committed += poTotal(p);
+    const sub = !!(p && p.isSubstitute);
+    if(poClosed(p)){ actual += poActual(p); if(sub) substActual += poActual(p); }
+    else if(poWip(p)){ committed += poTotal(p); if(sub) substCommitted += poTotal(p); }
   });
   const planned = budgetTotal(projId);
   const remaining = planned - actual - committed;
   const pct = planned>0 ? Math.round(((actual+committed)/planned)*100) : 0;
-  return { planned, actual, committed, remaining, pct };
+  return { planned, actual, committed, remaining, pct,
+           substActual, substCommitted, substTotal: substActual + substCommitted };
 }
 // توزيع الفعلي/المرتبط على بنود الموازنة حسب **نوع كل بند** في الطلب (لا اختيار يدوي):
 // لكل طلب نحسب وزن كل بند موازنة من مجموع تكاليف أصنافه، ثم:
@@ -261,10 +268,8 @@ function projectType(projId){ const b=_budgetCache[projId]; return (b&&b.type) ?
 function needsSchedule(projId){ const t=effType(projId); return t==="construction"||t==="renovation"; }
 async function saveType(projId, type){
   const database=_db(); if(!database){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
-  const u=_user();
   try{
-    await database.doc(budgetDocPath(projId)).set({ type, updatedAt:new Date().toISOString(), updatedBy:(u&&u.name)||(u&&u.email)||"" }, { merge:true });
-    _budgetCache[projId] = Object.assign(_budgetCache[projId]||{categories:[],boq:[]}, { type });
+    await _budgetTx(projId, ()=>({ type }));   // v18.9ad — M6: رابعةُ الكتابات — كشفها الحارس
     _audit("تصنيف نوع مشروع", _projName(projId)+" → "+(PROJECT_TYPES[type]||type));
     return true;
   }catch(e){ console.warn("saveType",e); _toast("⚠ تعذّر حفظ النوع","warn"); return false; }
@@ -279,11 +284,10 @@ function isCleaning(projId){ return effType(projId)==="cleaning"; }
 function cleaningData(projId){ const b=_budgetCache[projId]; return (b&&b.cleaning&&typeof b.cleaning==="object") ? b.cleaning : {}; }
 async function saveCleaning(projId, patch){
   const database=_db(); if(!database){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
-  const u=_user();
-  const cur = Object.assign({}, cleaningData(projId), patch);
   try{
-    await database.doc(budgetDocPath(projId)).set({ cleaning:cur, updatedAt:new Date().toISOString(), updatedBy:(u&&u.name)||(u&&u.email)||"" }, { merge:true });
-    _budgetCache[projId] = Object.assign(_budgetCache[projId]||{categories:[],boq:[]}, { cleaning:cur });
+    // v18.9ad — M6: الأساس هو `cleaning` الطازج من الخادم لا نسخةُ الكاش
+    const w = await _budgetTx(projId, fresh=>({ cleaning: Object.assign({}, fresh.cleaning, patch) }));
+    const cur = (w&&w.cleaning)||patch;
     _audit("تعديل عقد نظافة", _projName(projId)+" — العقد الشهري: "+money(Number(cur.monthlyValue)||0)+" ريال");
     return true;
   }catch(e){ console.warn("saveCleaning",e); _toast("⚠ تعذّر حفظ بيانات العقد","warn"); return false; }
@@ -326,17 +330,44 @@ async function saveSchedule(projId, phases, generatedByAI){
   }catch(e){ console.warn("saveSchedule",e); _toast("⚠ تعذّر حفظ الجدول","warn"); return false; }
 }
 
+/* ══ v18.9ad — M6: كل كتابةٍ على مستند الموازنة ذرّيةٌ ومبنيّةٌ على الطازج ══
+   كانت الثلاثُ (`saveBudget`/`saveBoq`/`saveCleaning`) تكتب `set(…,{merge:true})`
+   بقيمٍ مشتقّةٍ من `_budgetCache` — وهو يُحمَّل مرّةً ولا يُبطَل. و`merge:true` لا
+   يدمج **داخل** المصفوفة بل يستبدلها كاملة. فالسيناريو:
+     أدمن (أ) يعدّل «تشطيبات» = 50,000 ← أدمن (ب) بكاشٍ صباحيّ يحفظ المقايسة
+     بلا تشطيبات ⇒ يُكتب `finishes:0` فوق تعديل (أ) بلا أي إنذار.
+   الآن: معاملةٌ تقرأ المستند **داخلها**، وتُمرِّر الطازجَ للحاسب، فيُبنى الجديد على
+   ما في الخادم لا على ما في الذاكرة. والكاش يُحدَّث بما كُتب فعلاً. */
+async function _budgetTx(projId, build){
+  const database=_db(); if(!database) return null;
+  const ref = database.doc(budgetDocPath(projId));
+  const u=_user();
+  const written = await database.runTransaction(async tx=>{
+    const snap = await tx.get(ref);
+    const cur  = (snap && snap.exists) ? (snap.data()||{}) : {};
+    const fresh = {
+      categories: Array.isArray(cur.categories)?cur.categories:[],
+      boq:        Array.isArray(cur.boq)?cur.boq:[],
+      type:       cur.type||"",
+      cleaning:   (cur.cleaning&&typeof cur.cleaning==="object")?cur.cleaning:{}
+    };
+    const patch = build(fresh) || {};
+    tx.set(ref, Object.assign({}, patch, {
+      updatedAt:new Date().toISOString(), updatedBy:(u&&u.name)||(u&&u.email)||""
+    }), { merge:true });
+    return Object.assign({}, fresh, patch);
+  });
+  if(written) _budgetCache[projId] = Object.assign(_budgetCache[projId]||{categories:[],boq:[],cleaning:{}}, written);
+  return written;
+}
+
 async function saveBudget(projId, categories){
   const database=_db();
   if(!database){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
-  const u=_user();
   try{
-    await database.doc(budgetDocPath(projId)).set({
-      categories,
-      updatedAt: new Date().toISOString(),
-      updatedBy: (u&&u.name)||(u&&u.email)||""
-    }, { merge:true });
-    _budgetCache[projId] = Object.assign(_budgetCache[projId]||{boq:[]}, { categories });
+    // محرّرُ الموازنة يُرسل المصفوفة كاملةً عن قصد — لكن الكتابة تمرّ بمعاملة
+    // فيُحدَّث الكاش بما في الخادم فعلاً ولا يبقى منحرفاً بعدها. (v18.9ad — M6)
+    await _budgetTx(projId, ()=>({ categories }));
     _audit("تعديل موازنة مشروع", _projName(projId)+" — إجمالي: "+money(budgetTotal(projId))+" ريال");
     return true;
   }catch(e){ console.warn("saveBudget",e); _toast("⚠ تعذّر حفظ الموازنة: "+((e&&e.message)||""),"warn"); return false; }
@@ -371,12 +402,19 @@ async function saveBoq(projId, items){
     // مزامنة الموازنة: كل بند عام = مجموع بنود مقايسته؛ البنود بلا مقايسة تبقى بقيمتها اليدوية
     const sums={};
     items.forEach(it=>{ const k=it.categoryKey; if(k && CAT_NAME[k] && k!=="uncategorized") sums[k]=(sums[k]||0)+_boqLineTotal(it); });
-    const existing={}; ((_budgetCache[projId]||{}).categories||[]).forEach(c=>existing[c.key]=Number(c.planned)||0);
-    const cats=BUDGET_CATEGORIES.map(cat=>({ key:cat.key, name:cat.name, planned: (cat.key in sums)? sums[cat.key] : (existing[cat.key]||0) }));
+    // v18.9ad — M6: «البنود بلا مقايسة تبقى بقيمتها اليدوية» — وتلك القيمة تُقرأ من
+    // **الخادم داخل المعاملة** لا من الكاش، وإلا دهس كاشٌ صباحيٌّ تعديلَ زميلٍ للتوّ.
+    const cats = fresh => {
+      const existing={}; (fresh.categories||[]).forEach(c=>existing[c.key]=Number(c.planned)||0);
+      return BUDGET_CATEGORIES.map(cat=>({ key:cat.key, name:cat.name, planned: (cat.key in sums)? sums[cat.key] : (existing[cat.key]||0) }));
+    };
     // v18.9ac — M7: saveBudget يبتلع خطأه ويرجع false، وكان مُهمَلاً هنا — فتُعرَض
     // «✅ حُفظت المقايسة» بينما الموازنة لم تُحدَّث، فيخالف تبويبُ المقايسة النظرةَ
     // العامة بلا أن يعلم أحد. الفشل الجزئي يُعلَن: المقايسة محفوظة والموازنة لا.
-    if(!(await saveBudget(projId, cats))){
+    try{
+      await _budgetTx(projId, fresh=>({ categories: cats(fresh) }));
+    }catch(e2){
+      console.warn("saveBoq/budget",e2);
       _toast("⚠ حُفظت المقايسة لكن تعذّر تحديث الموازنة — أعد الحفظ","warn");
       return false;
     }
@@ -564,6 +602,11 @@ function overviewHTML(){
       ${card("المرتبط (طلبات جارية)", r.committed, "var(--warn)", "")}
       ${card("المتبقّي", r.remaining, r.remaining<0?"var(--danger)":"var(--accent)", "")}
     </div>
+    ${r.substTotal>0?`<div class="pm-typebar" style="border-color:color-mix(in srgb,var(--warn) 40%,var(--border));background:color-mix(in srgb,var(--warn) 8%,var(--surface))">
+      ${_icon('info')} منها <b>${money(r.substTotal)}</b> ريال بطلباتٍ <b>مموَّلةٍ بالاستعاضة</b>
+      (مصروف ${money(r.substActual)} · مرتبط ${money(r.substCommitted)}) — محسوبةٌ هنا <b>وفي رصيد الاستعاضة معاً</b>،
+      وليست من بنود العقد. <span class="pm-hint-inline">اطرحها قبل الحكم بتجاوز الموازنة.</span>
+    </div>`:""}
     <div class="pm-progress-wrap">
       <div class="pm-progress"><div class="pm-progress-fill" style="width:${Math.min(r.pct,100)}%;background:${barColor}"></div></div>
       <div class="pm-progress-lbl">${r.pct}% من الموازنة (مصروف + مرتبط)</div>

@@ -8,11 +8,21 @@ const crypto = require("crypto");
 const { OUTBOX_COLLECTION } = require("./config");
 
 /**
- * معرّف حتمي = sha1(eventType|entityId|transition|recipient).
- * أي إعادة إطلاق لنفس الحدث لنفس المستلم تُنتج نفس المعرّف فيُدمج.
+ * معرّف حتمي = sha1(eventType|entityId|transition|recipient|occurrence).
+ *
+ * v18.9ad — M14: كان المفتاح بلا `occurrence`، فيخلط بين شيئين مختلفين:
+ *   • **إعادةُ إطلاقٍ لنفس الكتابة** (مشغّلات Firestore at-least-once) ⇒ يجب أن تُدمج.
+ *   • **حدثٌ جديدٌ بنفس الانتقال** (أُسند لأحمد ثم لمحمد ثم لأحمد ثانيةً) ⇒ يجب أن يُرسَل.
+ * كان الثاني يُحسب تكراراً فيُسقَط الإشعار بصمت — والفنيُّ لا يعلم أنه أُسند إليه.
+ *
+ * `occurrence` هو طابعُ الكتابة نفسها (مثل `updatedAt` للمستند): **ثابتٌ** عبر إعادة
+ * إطلاق نفس النسخة، و**مختلفٌ** لكل إسنادٍ جديد. فيُحفظ منعُ التكرار ويُستعاد الإشعار.
+ * وغيابُه يُبقي السلوك القديم حرفياً (توافقٌ رجعي).
  */
-function idempotencyId({ eventType, entityId, transition, recipient }) {
-  const raw = [eventType, entityId, transition, recipient].join("|");
+function idempotencyId({ eventType, entityId, transition, recipient, occurrence }) {
+  const parts = [eventType, entityId, transition, recipient];
+  if (occurrence) parts.push(occurrence);
+  const raw = parts.join("|");
   return crypto.createHash("sha1").update(raw).digest("hex");
 }
 
@@ -26,6 +36,7 @@ async function enqueue(db, payload) {
     entityId: payload.event.entityId,
     transition: payload.event.transition,
     recipient: payload.to,
+    occurrence: payload.event.occurrence,   // v18.9ad — M14
   } : payload);
 
   const ref = db.collection(OUTBOX_COLLECTION).doc(id);

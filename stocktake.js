@@ -100,6 +100,26 @@
     return inv.filter(i=>(i.warehouseName||"").trim()===String(wh).trim());
   }
 
+  // ══ v18.9ad — H7: التصنيف والبوّابة والتقرير كلها مقابل الرصيد **الحيّ** ══
+  // كان `_classify` يُستدعى بـ`s.systemQty` — لقطةُ الرصيد لحظةَ **إنشاء** الجرد —
+  // بينما `_apply` يُسوّي مقابل الرصيد الطازج داخل المعاملة. فالبوّابةُ التي ترفع
+  // «الفروقات الكبيرة» للمدير التنفيذي كانت تقيس فرقاً غير الذي يُطبَّق:
+  //   لقطة 100، يُصرف 50 أثناء العدّ (الحيّ 50)، العدّ 98
+  //   ⇒ التصنيف −2 (صغير، يمرّ بلا اعتماد) بينما التسوية الفعلية +48.
+  // والتقرير المخزَّن كان يقول «−2» أيضاً. الآن مصدرٌ واحد: `_baseQty(s)` — الرصيد
+  // الحيّ من `_inventoryItems` (نفس ما ستقرؤه المعاملة)، ويرجع للقطة إن غاب الصنف.
+  function _baseQty(s){
+    if(!s) return 0;
+    try{
+      const inv = (typeof _inventoryItems!=="undefined" && _inventoryItems) ? _inventoryItems : null;
+      if(inv){
+        const hit = inv.find(i=> i && (i.id===s.itemId || i.itemId===s.itemId));
+        if(hit) return _num(hit.currentQty);
+      }
+    }catch(e){}
+    return _num(s.systemQty);
+  }
+
   // تصنيف الفرق: {delta, pct, big}
   function _classify(systemQty, countedQty){
     const sys = _num(systemQty), cnt = _num(countedQty);
@@ -123,7 +143,7 @@
       const has = Object.prototype.hasOwnProperty.call(counts, s.itemId);
       if(!has) return;
       counted++;
-      const c = _classify(s.systemQty, counts[s.itemId]);
+      const c = _classify(_baseQty(s), counts[s.itemId]);   // v18.9ad — H7: الحيّ لا اللقطة
       if(c.delta>0) surplus++; else if(c.delta<0) shortage++; else matched++;
       if(c.big) bigCount++;
       totalDeltaAbs += Math.abs(c.delta);
@@ -270,7 +290,7 @@
     const rows = (t.snapshot||[]).map((s,idx)=>{
       const cVal = Object.prototype.hasOwnProperty.call(_liveCounts(), s.itemId) ? _liveCounts()[s.itemId] : "";
       const hasC = cVal!=="" && cVal!=null;
-      const cls  = hasC ? _classify(s.systemQty, cVal) : null;
+      const cls  = hasC ? _classify(_baseQty(s), cVal) : null;   // v18.9ad — H7
       let vCell = `<span style="color:var(--muted)">—</span>`;
       if(cls){
         if(cls.delta===0) vCell=`<span style="color:#166534;font-weight:700">مطابق</span>`;
@@ -435,7 +455,7 @@
       if(s && cell){
         if(raw===""){ cell.innerHTML=`<span style="color:var(--muted)">—</span>`; }
         else{
-          const c=_classify(s.systemQty, _num(raw));
+          const c=_classify(_baseQty(s), _num(raw));   // v18.9ad — H7
           if(c.delta===0) cell.innerHTML=`<span style="color:#166534;font-weight:700">مطابق</span>`;
           else{
             const sign=c.delta>0?"+":"−", col=c.delta>0?"#166534":"#b91c1c";
@@ -606,9 +626,14 @@
     const now=_now(), by=_me();
     const results = (take.snapshot||[]).map(s=>{
       const has=Object.prototype.hasOwnProperty.call(counts, s.itemId);
-      const counted = has?_countAt(counts, s.itemId):_num(s.systemQty);
-      const c=_classify(s.systemQty, counted);
-      return { itemId:s.itemId, itemName:s.itemName, unit:s.unit, systemQty:_num(s.systemQty), countedQty:counted, delta:has?c.delta:0, big:has?c.big:false };
+      // v18.9ad — H7: الدلتا المسجَّلة هي التي ستُطبَّق (مقابل الحيّ)، واللقطةُ تبقى
+      // موثَّقةً بجانبها — فلا يقول التقرير «−2» بينما كُتبت «+48».
+      const base    = _baseQty(s);
+      const counted = has?_countAt(counts, s.itemId):base;
+      const c=_classify(base, counted);
+      return { itemId:s.itemId, itemName:s.itemName, unit:s.unit,
+               systemQty:_num(s.systemQty), baseQty:base,
+               countedQty:counted, delta:has?c.delta:0, big:has?c.big:false };
     });
 
     let done=0, failed=0, changed=0;
@@ -767,7 +792,7 @@
     const rowsHtml=(t.snapshot||[]).map(s=>{
       const has=Object.prototype.hasOwnProperty.call(counts,s.itemId);
       const cnt=has?_num(counts[s.itemId]):null;
-      const c=has?_classify(s.systemQty,cnt):null;
+      const c=has?_classify(_baseQty(s),cnt):null;   // v18.9ad — H7: الطباعة كالشاشة
       const dTxt=c?(c.delta===0?"مطابق":(c.delta>0?"+":"−")+_fmt(Math.abs(c.delta))+(c.big?" (كبير)":"")):"—";
       const dCol=c?(c.delta===0?"#166534":(c.delta>0?"#166534":"#b91c1c")):"#999";
       return `<tr>

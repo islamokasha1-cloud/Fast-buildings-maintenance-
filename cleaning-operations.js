@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9ac";
+const MODULE_BUILD = "v18.9ad";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -2362,7 +2362,29 @@ function buildClientReportHTML(){
       <div class="rp-bar-p" style="color:${_qcol(m.pct)}">${m.pct}%</div><div class="rp-bar-l">${_esc(m.ym.slice(5))}</div></div>`).join("");
   const weak=tr.dims.slice(0,4).map(d=>`<tr><td>${_esc(d.name)}</td><td class="rp-num">${d.avg} ★</td>
     <td><div class="rp-track"><span style="width:${d.pct}%;background:${_qcol(d.pct)}"></span></div></td><td class="rp-num" style="color:${_qcol(d.pct)}">${d.pct}%</td></tr>`).join("");
-  const covRows=cov.map(b=>`<tr><td>${_esc(b.name)}</td><td class="rp-num">${b.done}/${b.sched}</td>
+  // ══ v18.9ad — M21: التغطية في تقريرٍ شهري تُحسب من سجلّ الشهر ══
+  // كان القسم يرسم `coverageByBuilding()` — **لقطةُ اليوم** — تحت تقريرٍ معنون
+  // «الفترة: <شهر>»، فتصديرُ التقرير يوم جمعةٍ يُظهر «لا مهامَّ لليوم» ويبدو أن
+  // المشروع بلا عمل طوال الشهر. الآن الصفوف من `_monthLog` (تنفيذاتُ الشهر فعلاً)،
+  // ولقطةُ اليوم تبقى معروضةً لكن **موسومةً بيومها** فلا تُقرأ شهريةً.
+  const monthByBld = {};
+  visibleLog().forEach(r=>{
+    const b = (r && r.building) || "—";
+    const e = monthByBld[b] || (monthByBld[b] = { runs:0, days:{} });
+    e.runs++;
+    const d = String((r&&r.date)||"").slice(0,10);
+    if(d) e.days[d]=1;
+  });
+  const monthNames = Object.keys(monthByBld).sort((a,b)=> monthByBld[b].runs - monthByBld[a].runs);
+  const maxRuns = Math.max.apply(null, [1].concat(monthNames.map(b=>monthByBld[b].runs)));
+  const covRows = monthNames.map(b=>{
+    const e = monthByBld[b], days = Object.keys(e.days).length;
+    const w  = Math.round(e.runs / maxRuns * 100);
+    return `<tr><td>${_esc(b)}</td><td class="rp-num">${e.runs}</td>
+      <td><div class="rp-track"><span style="width:${w}%;background:#16a34a"></span></div></td>
+      <td class="rp-num">${days}</td></tr>`;
+  }).join("");
+  const todayCovRows = cov.map(b=>`<tr><td>${_esc(b.name)}</td><td class="rp-num">${b.done}/${b.sched}</td>
     <td><div class="rp-track"><span style="width:${b.pct}%;background:${_qcol(b.pct)}"></span></div></td><td class="rp-num" style="color:${_qcol(b.pct)}">${b.pct}%</td></tr>`).join("");
   const roundRows=monthRounds.map(r=>{ const sc=roundScore(r);
     return `<tr><td class="rp-num">${_esc(String(r.date||"").slice(0,10))}</td><td>${_esc(r.by||"—")}</td>
@@ -2430,9 +2452,13 @@ td{padding:6px 9px;border-bottom:1px solid #eef2f7}.rp-num{font-family:monospace
       <table>${weak||'<tr><td class="rp-empty">—</td></tr>'}</table></div>
   </div>`:`<div class="rp-empty">لا جولاتِ تفتيشٍ مُسجَّلةٌ بعد.</div>`}
 
-  <div class="rp-sec">التغطية حسب المنطقة</div>
-  <table><thead><tr><th>المنطقة / المبنى</th><th>المُنفَّذ</th><th>النسبة</th><th>%</th></tr></thead>
-    <tbody>${covRows||'<tr><td colspan="4" class="rp-empty">لا مهامَّ مجدولةٌ لليوم.</td></tr>'}</tbody></table>
+  <div class="rp-sec">التغطية حسب المنطقة — ${_monthName(ym)}</div>
+  <table><thead><tr><th>المنطقة / المبنى</th><th>تنفيذات الشهر</th><th>الحجم النسبي</th><th>أيام العمل</th></tr></thead>
+    <tbody>${covRows||'<tr><td colspan="4" class="rp-empty">لا تنفيذاتِ مُسجَّلةٌ هذا الشهر.</td></tr>'}</tbody></table>
+
+  <div class="rp-sec">لقطةُ اليوم — ${_esc(today)} (ليست مؤشّراً شهرياً)</div>
+  <table><thead><tr><th>المنطقة / المبنى</th><th>المُنفَّذ اليوم</th><th>النسبة</th><th>%</th></tr></thead>
+    <tbody>${todayCovRows||'<tr><td colspan="4" class="rp-empty">لا مهامَّ مجدولةٌ لليوم (عطلة أو لا استحقاق).</td></tr>'}</tbody></table>
 
   <div class="rp-sec">جولاتُ التفتيش والمخالفات — ${_monthName(ym)}</div>
   <table><thead><tr><th>التاريخ</th><th>المفتِّش</th><th>الدرجة</th><th>المخالفات والملاحظات</th></tr></thead>

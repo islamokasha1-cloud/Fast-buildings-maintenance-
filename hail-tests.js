@@ -3848,10 +3848,15 @@ function deepReviewV18_9ac() {
   const coSrc = fs.existsSync(path.resolve(path.dirname(IDX), "cleaning-operations.js"))
     ? fs.readFileSync(path.resolve(path.dirname(IDX), "cleaning-operations.js"), "utf8") : "";
 
-  // ── M7: saveBoq لا يبتلع فشل saveBudget ──
-  T("★ M7: saveBoq يفحص نتيجة saveBudget ولا يعلن نجاحاً كاذباً",
-    /if\(!\(await saveBudget\(projId, cats\)\)\)\{/.test(pmSrc) &&
-    !/\n\s*await saveBudget\(projId, cats\);\s*\n\s*return true;/.test(pmSrc));
+  // ── M7: saveBoq لا يبتلع فشل تحديث الموازنة ──
+  // v18.9ad: صار المسار `_budgetTx` مباشرةً (M6)، والثابتُ المحروس هو نفسه —
+  // فشلُ تحديث الموازنة يُعلَن ويُرجِع false، ولا يمرّ إلى `return true`.
+  const _sb = pmSrc.indexOf("async function saveBoq(projId, items){");
+  const sbSrc = _sb >= 0 ? pmSrc.slice(_sb, pmSrc.indexOf("\n/* ══", _sb)) : "";
+  T("★ M7: saveBoq لا يعلن نجاحاً إن فشل تحديث الموازنة",
+    !!sbSrc && /catch\(e2\)\{/.test(sbSrc) && sbSrc.includes("return false;") &&
+    sbSrc.indexOf("return false;") < sbSrc.lastIndexOf("return true;"),
+    sbSrc ? "" : "تعذّر اقتطاع saveBoq");
   T("★ M7: الفشل الجزئي مُعلَن للمستخدم (المقايسة حُفظت والموازنة لا)",
     pmSrc.includes("حُفظت المقايسة لكن تعذّر تحديث الموازنة"));
 
@@ -3943,6 +3948,137 @@ function deepReviewV18_9ac() {
 
   T("★ جدولُ بنود النموذج يعرض الملاحظة قبل الإرسال",
     HTML.includes('${esc(item.itemName)}${item.priceLocked?` <span style=\'font-size:10px;color:#92400e;background:#fef3c7;border-radius:4px;padding:1px 5px\'>🔒</span>`:""}${poItemNote(item)?'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   دفعة الفحص العميق الثالثة (v18.9ad) — H7 M6 M8 M14 M21 M22 M23 M24
+   بها يُغلق كلُّ ما كان موسوماً «🔴 مفتوح» في التقرير.
+   ════════════════════════════════════════════════════════════════════ */
+function deepReviewV18_9ad() {
+  H("دفعة الفحص العميق الثالثة — H7/M6/M8/M14/M21/M22/M23/M24");
+
+  const rd = f => { const q = path.resolve(path.dirname(IDX), f); return fs.existsSync(q) ? fs.readFileSync(q, "utf8") : ""; };
+  const stSrc = rd("stocktake.js"), pmSrc = rd("project-management.js"), coSrc = rd("cleaning-operations.js");
+  const paSrc = rd("price-analysis.js"), lcSrc = rd("labor-catalog.js");
+  const obSrc = rd("functions/lib/outbox.js"), fnSrc = rd("functions/index.js");
+
+  // ── H7: البوّابة والتقرير يقيسان مقابل الرصيد الحيّ ──
+  const _bq = stSrc.indexOf("function _baseQty(s){");
+  const bqSrc = _bq >= 0 ? stSrc.slice(_bq, stSrc.indexOf("\n  // تصنيف الفرق", _bq)) : "";
+  T("H7: _baseQty مستخرَجة", !!bqSrc);
+  if (bqSrc) {
+    let BQ = null;
+    try {
+      BQ = new Function("_inventoryItems", "_num", bqSrc + "\nreturn _baseQty;");
+    } catch (e) { T("H7: _baseQty قابلة للتنفيذ", false, String(e.message).slice(0, 120)); }
+    if (BQ) {
+      const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+      const live = BQ([{ id: "i1", currentQty: 50 }], num);
+      T("★ H7: الأساس هو الرصيد الحيّ لا لقطة الإنشاء",
+        live({ itemId: "i1", systemQty: 100 }) === 50, "= " + live({ itemId: "i1", systemQty: 100 }));
+      T("★ H7: صنفٌ غائبٌ عن الرصيد الحيّ يرجع للقطة (لا صفرٌ مفاجئ)",
+        live({ itemId: "zz", systemQty: 100 }) === 100);
+      // العطل الأصلي: لقطة 100، صُرف 50 أثناء العدّ، العدّ 98
+      const _cl = stSrc.indexOf("function _classify(systemQty, countedQty){");
+      const clSrc = stSrc.slice(_cl, stSrc.indexOf("\n  // ملخّص", _cl));
+      let CL = null;
+      try { CL = new Function("_num", "ST_BIG_PCT", "ST_ABS_FLOOR", clSrc + "\nreturn _classify;")(num, 10, 1); } catch (e) { }
+      if (CL) {
+        const base = live({ itemId: "i1", systemQty: 100 });
+        T("★★ H7: الفرق المصنَّف = الفرق المطبَّق (+48) لا فرقُ اللقطة (−2)",
+          CL(base, 98).delta === 48 && CL(100, 98).delta === -2,
+          "حيّ=" + CL(base, 98).delta + " · لقطة=" + CL(100, 98).delta);
+        T("★★ H7: وبذلك يرتفع للاعتماد بدل أن يمرّ صامتاً",
+          CL(base, 98).big === true && CL(100, 98).big === false);
+      }
+    }
+  }
+  T("★ H7: كل مواضع التصنيف تمرّ بـ_baseQty (لا systemQty خام)",
+    (stSrc.match(/_classify\(_baseQty\(s\)/g) || []).length >= 3 &&
+    !/_classify\(s\.systemQty/.test(stSrc));
+  T("★ H7: التقرير المخزَّن يوثّق اللقطة والأساس الحيّ معاً",
+    /systemQty:_num\(s\.systemQty\), baseQty:base/.test(stSrc));
+
+  // ── M6: كتابات الموازنة ذرّية ومبنيّة على الطازج ──
+  T("★ M6: كاتبٌ ذرّيٌّ واحد (_budgetTx) يقرأ المستند داخل المعاملة",
+    /async function _budgetTx\(projId, build\)\{/.test(pmSrc) && /runTransaction\(async tx=>\{/.test(pmSrc));
+  T("★ M6: الكتابات الأربع تمرّ به — لا set مباشرة على مستند الموازنة",
+    (pmSrc.match(/await _budgetTx\(projId,/g) || []).length === 4 &&
+    !/database\.doc\(budgetDocPath\(projId\)\)\.set\(/.test(pmSrc));
+  T("★ M6: saveBoq يبني «البنود اليدوية» من الطازج لا من الكاش (جذر فقدان التحديث)",
+    /const cats = fresh => \{/.test(pmSrc) &&
+    /\(fresh\.categories\|\|\[\]\)\.forEach\(c=>existing\[c\.key\]/.test(pmSrc) &&
+    !/\(\(_budgetCache\[projId\]\|\|\{\}\)\.categories\|\|\[\]\)\.forEach/.test(pmSrc));
+  T("★ M6: saveCleaning يدمج فوق cleaning الطازج",
+    /Object\.assign\(\{\}, fresh\.cleaning, patch\)/.test(pmSrc));
+
+  // ── M8: الاستعاضة مفصولةٌ ومعلَنة ──
+  T("★ M8: الملخّص يفصل المموَّل بالاستعاضة", /substTotal: substActual \+ substCommitted/.test(pmSrc));
+  T("★ M8: المجموع لم يتغيّر (لا قرار محاسبي من طرفٍ واحد)",
+    /if\(poClosed\(p\)\)\{ actual \+= poActual\(p\);/.test(pmSrc) &&
+    /const remaining = planned - actual - committed;/.test(pmSrc));
+  T("★ M8: البطاقة تُعلن المصدر للقارئ", pmSrc.includes("مموَّلةٍ بالاستعاضة"));
+
+  // ── M14: مفتاح التكرار يميّز الحدث الجديد عن إعادة الإطلاق ──
+  const _ik = obSrc.indexOf("function idempotencyId(");
+  const ikSrc = _ik >= 0 ? obSrc.slice(_ik, obSrc.indexOf("\n/**", _ik)) : "";
+  T("M14: idempotencyId مستخرَجة", !!ikSrc);
+  if (ikSrc) {
+    let ID = null;
+    try { ID = new Function("crypto", ikSrc + "\nreturn idempotencyId;")(require("crypto")); } catch (e) { }
+    if (ID) {
+      const base = { eventType: "ticket_assigned", entityId: "TK-1", transition: "أحمد->محمد", recipient: "9665" };
+      T("★★ M14: إعادةُ إطلاقٍ لنفس الكتابة تُدمج (منعُ التكرار محفوظ)",
+        ID(Object.assign({}, base, { occurrence: "T1" })) === ID(Object.assign({}, base, { occurrence: "T1" })));
+      T("★★ M14: إسنادٌ جديدٌ بنفس الانتقال لم يعد يُسقَط بصمت",
+        ID(Object.assign({}, base, { occurrence: "T1" })) !== ID(Object.assign({}, base, { occurrence: "T2" })));
+      T("M14: بلا occurrence يبقى السلوك القديم حرفياً (توافق رجعي)",
+        ID(base) === ID(Object.assign({}, base, { occurrence: "" })));
+    }
+  }
+  T("★ M14: الدالة تُمرَّر occurrence من طابع الإسناد", /occurrence: String\(after\.assignedAt/.test(fnSrc));
+  T("★ M14: العميل يكتب assignedAt عند الإسناد وعند الإنشاء بفني",
+    /t\.assignedAt=now;/.test(HTML) && /assignedAt: tech\?now:null/.test(HTML));
+
+  // ── M21: تقريرٌ شهريٌّ بأرقامٍ شهرية ──
+  T("★ M21: صفوف التغطية من سجلّ الشهر لا لقطةِ اليوم",
+    /const monthByBld = \{\};/.test(coSrc) && /visibleLog\(\)\.forEach\(r=>\{/.test(coSrc) &&
+    coSrc.includes("التغطية حسب المنطقة — ${_monthName(ym)}"));
+  T("★ M21: لقطةُ اليوم تبقى لكن موسومةً بيومها (لا تُقرأ شهرية)",
+    coSrc.includes("لقطةُ اليوم — ${_esc(today)} (ليست مؤشّراً شهرياً)") && /const todayCovRows = cov\.map/.test(coSrc));
+
+  // ── M22: أساسا المقارنة مُسمَّيان ──
+  T("★ M22: رأس عمود التقديري يقول «صافٍ قبل الضريبة»",
+    HTML.includes("سعر الوحدة / الإجمالي — <b>صافٍ قبل الضريبة</b>"));
+  T("★ M22: تذييل الجدول ينبّه لاختلاف الأساس", HTML.includes("التقديري/الكتالوج <b>صافٍ قبل ض.ق.م</b>"));
+
+  // ── M23: صفرُ السعر لم يعد صامتاً ──
+  T("★ M23: إدراج صنفٍ بلا سعر يُنبَّه عليه",
+    /if\(!\(num\(_v\)>0\)\) T\("⚠ «"\+\(it\.name\|\|"البند"\)\+"» بلا سعرٍ في الكتالوج/.test(paSrc));
+  T("M23: الصفر ما زال مسموحاً (تنبيهٌ لا منع)", /_draft\.materials\.push\(\{source:"catalog"/.test(paSrc));
+
+  // ── M24: تعارض التحرير يُرفض ويُشرَح ──
+  [["price-analysis", paSrc], ["labor-catalog", lcSrc]].forEach(([nm, src]) => {
+    T("★ M24: " + nm + " يتحقّق من البصمة داخل معاملة",
+      /function _txUpdateGuarded\(id, data\)\{/.test(src) &&
+      /if\(opened != null && String\(cur\) !== String\(opened\)\) throw new Error\("__CONFLICT__"\);/.test(src) &&
+      !/await db\.collection\(COLLECTION\(\)\)\.doc\(id\)\.update\(data\);/.test(src));
+    T("M24: " + nm + " يلتقط البصمة عند الفتح ويُصفّرها للإنشاء",
+      /_openedStamp = it\.updatedAt \|\| "";/.test(src) && /_openedStamp = null;/.test(src));
+    T("M24: " + nm + " يشرح التعارض للمستخدم لا «خطأ اتصال»",
+      src.includes("عدّل زميلٌ هذا البند بينما كان مفتوحاً لديك") && src.includes("__GONE__"));
+  });
+
+  // ── التقرير: لم يعد فيه بندٌ مفتوح ──
+  const DR_PATH2 = path.resolve(path.dirname(IDX), "docs", "deep-review-2026-08.md");
+  const DR2 = fs.existsSync(DR_PATH2) ? fs.readFileSync(DR_PATH2, "utf8") : "";
+  if (DR2) {
+    ["H7", "M6", "M8", "M14", "M21", "M22", "M23", "M24"].forEach(c =>
+      T("وسمُ " + c + " = مُصلَح v18.9ad", new RegExp("^### " + c + " .*✅ مُصلَح v18\\.9ad", "m").test(DR2)));
+    const stillOpen = DR2.split("\n").filter(l => /^### [CHML]\d{1,2} .*🔴 مفتوح/.test(l));
+    T("★ لم يبقَ بندٌ «مفتوح» غيرَ مؤجَّلٍ بقرار",
+      stillOpen.length === 0, stillOpen.length ? stillOpen.join(" | ").slice(0, 200) : "كلها مُصلَحة أو مؤجَّلة بقرار");
+  }
 }
 
 function ticketWhoLabels() {
@@ -4509,6 +4645,7 @@ function financeAuditTests() {
   partialReceiptBackToProc();
   poNotesVisible();
   deepReviewV18_9ac();
+  deepReviewV18_9ad();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }
