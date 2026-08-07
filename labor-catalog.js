@@ -382,6 +382,25 @@
   }
 
   // ══ فتح مودال الإضافة/التعديل ══
+  /* ══ v18.9ad — M24: تعارضُ التحرير المتزامن لا يُدهَس بصمت ══
+     الكتالوج مجموعةٌ **مشتركة** بين المشاريع، ومحرّران على البند نفسه: الأخيرُ كان
+     يكتب `update(data)` فيدهس عملَ الأول كاملاً — بلا فحصٍ ولا إشعار. الآن نلتقط
+     `updatedAt` لحظةَ فتح المحرّر، ونتحقّق داخل معاملةٍ أنّه لم يتغيّر؛ إن تغيّر
+     رفضنا الكتابة وطلبنا إعادةَ الفتح — فلا يضيع عملُ أحدٍ بلا علمه. */
+  var _openedStamp = null;
+  function _txUpdateGuarded(id, data){
+    var ref = db.collection(COLLECTION()).doc(id);
+    var opened = _openedStamp;
+    return db.runTransaction(function(tx){
+      return tx.get(ref).then(function(snap){
+        if(!snap.exists) throw new Error("__GONE__");
+        var cur = (snap.data()||{}).updatedAt || "";
+        if(opened != null && String(cur) !== String(opened)) throw new Error("__CONFLICT__");
+        tx.update(ref, data);
+      });
+    });
+  }
+
   function openItemModal(id){
     if(!canManage()){ T("⚠ صلاحية المسؤول أو مسؤول المشتريات فقط","warn"); return; }
     buildDOM();
@@ -407,7 +426,9 @@
       document.getElementById("lab-unit").value = it.unit||"";
       document.getElementById("lab-rate").value = it.rate!=null?it.rate:"";
       document.getElementById("lab-scope").value = it.scopeNotes||"";
+      _openedStamp = it.updatedAt || "";   // v18.9ad — M24: بصمةُ النسخة المفتوحة
     } else {
+      _openedStamp = null;   // v18.9ad — M24: إنشاءٌ جديد — لا بصمة تُقارَن
       if(titleEl) titleEl.textContent="➕ إضافة مصنعية جديدة";
       const code = genCode();
       document.getElementById("lab-code").value = code;
@@ -455,7 +476,7 @@
 
     try{
       if(id){
-        await db.collection(COLLECTION()).doc(id).update(data);
+        await _txUpdateGuarded(id, data);   // v18.9ad — M24
         T("✅ تم تحديث المصنعية","success");
       } else {
         // كود ذرّي عند غيابه أو بقائه على النمط التلقائي LAB-### — يمنع التكرار عند التزامن.
@@ -467,6 +488,13 @@
       }
       closeModal("modal-labor-item");
     } catch(e){
+      // v18.9ad — M24: التعارض والحذف رسالتان مفهومتان لا «خطأ في الاتصال»
+      var _m = String((e&&e.message)||"");
+      if(_m.indexOf("__CONFLICT__")>=0){
+        T("⚠ عدّل زميلٌ هذا البند بينما كان مفتوحاً لديك — أغلق النافذة وافتحه من جديد ليُبنى تعديلُك على النسخة الحالية","warn");
+        return;
+      }
+      if(_m.indexOf("__GONE__")>=0){ T("⚠ حُذف هذا البند من الكتالوج أثناء تحريرك","warn"); return; }
       console.error("labor save error", e);
       T("⚠ خطأ في الحفظ — تحقق من الاتصال","warn");
     }

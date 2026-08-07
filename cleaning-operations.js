@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9z";
+const MODULE_BUILD = "v18.9ae";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -323,7 +323,22 @@ async function deleteTask(taskId){
 
 /* ════════════ منطق الاستحقاق والتغطية ════════════ */
 function isDisabled(t){ return !!t.disabled; }
-function doneToday(t){ return !!t.lastExecuted && String(t.lastExecuted).slice(0,10)===_today(); }
+// ══ v18.9ac — M20: يومُ التنفيذ محلّيٌّ لا UTC ══
+// `lastExecuted` طابعٌ زمنيٌّ بـtoISOString (UTC)، و`_today()` تاريخٌ محلّي — وكان
+// يُقارَن أولُ عشرة أحرفٍ من الأول بالثاني. في +٣ ينفَّذ عملٌ الساعةَ ١:٠٠ صباحاً محلّياً
+// فيُخزَّن بتاريخ **اليوم السابق** UTC، فتظهر المهمة «غير منفَّذة» وتُحسَب التغطيةُ خطأً
+// كلَّ يومٍ بين ٠٠:٠٠ و٠٢:٥٩. العلاج في الطرفين: التنفيذ يكتب `lastExecutedDate`
+// محلّياً، والقراءة تُحوّل الطابعَ القديم إلى تاريخٍ محلّي بدل اقتطاعه — فتنتفع
+// السجلات القائمة بلا ترحيل.
+function execDay(t){
+  if(!t) return "";
+  const d = String(t.lastExecutedDate||"").slice(0,10);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  if(!t.lastExecuted) return "";
+  const dt = new Date(t.lastExecuted);
+  return isNaN(dt.getTime()) ? String(t.lastExecuted).slice(0,10) : _ymdL(dt);
+}
+function doneToday(t){ const d=execDay(t); return !!d && d===_today(); }
 // مستحقّة الآن = تاريخ استحقاقها اليوم أو قبله، ولم تُنفَّذ اليوم — ولا شيءَ مستحقٌّ في الإجازة
 function isDue(t){ if(isDisabled(t)||doneToday(t)||_isTodayHoliday()) return false; return _dayDiff(String(t.nextDueDate||"").slice(0,10), _today())<=0; }
 function isOverdue(t){ if(isDisabled(t)||doneToday(t)||_isTodayHoliday()) return false; return _dayDiff(String(t.nextDueDate||"").slice(0,10), _today())<0; }
@@ -463,7 +478,7 @@ async function executeTask(task, checkedItems, note){
       note: String(note||"").slice(0,500)
     };
     await database.collection(logCol()).doc(rec.id).set(rec);
-    const patch = { id:task.id, lastExecuted: now, lastExecutedBy: _userName(), nextDueDate: _advanceDue(_today(), days) };
+    const patch = { id:task.id, lastExecuted: now, lastExecutedDate: _today(), lastExecutedBy: _userName(), nextDueDate: _advanceDue(_today(), days) };   // v18.9ac — M20: اليوم المحلّي صريحاً
     await saveTask(patch);
     _audit("تنفيذ مهمة نظافة", (task.name||"")+" — "+(task.building||"")+" ("+doneCount+"/"+list.length+" بند)");
     return true;
@@ -891,7 +906,7 @@ function _allTableHTML(tasks){
       <td>${_esc(t.freq||"—")}</td>
       <td class="co-num">${list.length}</td>
       <td class="co-num">${t.nextDueDate?_esc(String(t.nextDueDate).slice(0,10)):"—"}</td>
-      <td class="co-num">${t.lastExecuted?_esc(String(t.lastExecuted).slice(0,10)):"—"}</td>
+      <td class="co-num">${execDay(t)?_esc(execDay(t)):"—"}</td>
       <td><span class="ppm-due-badge ${st.badge}">${st.lbl}</span></td>
       <td>${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.editTask('${_esc(t.id)}')">${_svg('edit')}</button>`:""}</td>
     </tr>`;
@@ -944,7 +959,7 @@ function _taskDetailBodyHTML(t, log){
         ${info("المشرف المسؤول", sup||"غير مُسنَد")}
         ${info("العامل المنفِّذ", t.assignee)}
         ${info("الاستحقاق التالي", String(t.nextDueDate||"").slice(0,10))}
-        ${info("آخر تنفيذ", t.lastExecuted?String(t.lastExecuted).slice(0,10)+(t.lastExecutedBy?" — "+t.lastExecutedBy:""):"لم تُنفَّذ بعد")}
+        ${info("آخر تنفيذ", execDay(t)?execDay(t)+(t.lastExecutedBy?" — "+t.lastExecutedBy:""):"لم تُنفَّذ بعد")}
         ${info("وصف", t.desc)}
       </div>
       <div class="co-actions" style="margin-top:12px">
@@ -2347,7 +2362,29 @@ function buildClientReportHTML(){
       <div class="rp-bar-p" style="color:${_qcol(m.pct)}">${m.pct}%</div><div class="rp-bar-l">${_esc(m.ym.slice(5))}</div></div>`).join("");
   const weak=tr.dims.slice(0,4).map(d=>`<tr><td>${_esc(d.name)}</td><td class="rp-num">${d.avg} ★</td>
     <td><div class="rp-track"><span style="width:${d.pct}%;background:${_qcol(d.pct)}"></span></div></td><td class="rp-num" style="color:${_qcol(d.pct)}">${d.pct}%</td></tr>`).join("");
-  const covRows=cov.map(b=>`<tr><td>${_esc(b.name)}</td><td class="rp-num">${b.done}/${b.sched}</td>
+  // ══ v18.9ad — M21: التغطية في تقريرٍ شهري تُحسب من سجلّ الشهر ══
+  // كان القسم يرسم `coverageByBuilding()` — **لقطةُ اليوم** — تحت تقريرٍ معنون
+  // «الفترة: <شهر>»، فتصديرُ التقرير يوم جمعةٍ يُظهر «لا مهامَّ لليوم» ويبدو أن
+  // المشروع بلا عمل طوال الشهر. الآن الصفوف من `_monthLog` (تنفيذاتُ الشهر فعلاً)،
+  // ولقطةُ اليوم تبقى معروضةً لكن **موسومةً بيومها** فلا تُقرأ شهريةً.
+  const monthByBld = {};
+  visibleLog().forEach(r=>{
+    const b = (r && r.building) || "—";
+    const e = monthByBld[b] || (monthByBld[b] = { runs:0, days:{} });
+    e.runs++;
+    const d = String((r&&r.date)||"").slice(0,10);
+    if(d) e.days[d]=1;
+  });
+  const monthNames = Object.keys(monthByBld).sort((a,b)=> monthByBld[b].runs - monthByBld[a].runs);
+  const maxRuns = Math.max.apply(null, [1].concat(monthNames.map(b=>monthByBld[b].runs)));
+  const covRows = monthNames.map(b=>{
+    const e = monthByBld[b], days = Object.keys(e.days).length;
+    const w  = Math.round(e.runs / maxRuns * 100);
+    return `<tr><td>${_esc(b)}</td><td class="rp-num">${e.runs}</td>
+      <td><div class="rp-track"><span style="width:${w}%;background:#16a34a"></span></div></td>
+      <td class="rp-num">${days}</td></tr>`;
+  }).join("");
+  const todayCovRows = cov.map(b=>`<tr><td>${_esc(b.name)}</td><td class="rp-num">${b.done}/${b.sched}</td>
     <td><div class="rp-track"><span style="width:${b.pct}%;background:${_qcol(b.pct)}"></span></div></td><td class="rp-num" style="color:${_qcol(b.pct)}">${b.pct}%</td></tr>`).join("");
   const roundRows=monthRounds.map(r=>{ const sc=roundScore(r);
     return `<tr><td class="rp-num">${_esc(String(r.date||"").slice(0,10))}</td><td>${_esc(r.by||"—")}</td>
@@ -2415,9 +2452,13 @@ td{padding:6px 9px;border-bottom:1px solid #eef2f7}.rp-num{font-family:monospace
       <table>${weak||'<tr><td class="rp-empty">—</td></tr>'}</table></div>
   </div>`:`<div class="rp-empty">لا جولاتِ تفتيشٍ مُسجَّلةٌ بعد.</div>`}
 
-  <div class="rp-sec">التغطية حسب المنطقة</div>
-  <table><thead><tr><th>المنطقة / المبنى</th><th>المُنفَّذ</th><th>النسبة</th><th>%</th></tr></thead>
-    <tbody>${covRows||'<tr><td colspan="4" class="rp-empty">لا مهامَّ مجدولةٌ لليوم.</td></tr>'}</tbody></table>
+  <div class="rp-sec">التغطية حسب المنطقة — ${_monthName(ym)}</div>
+  <table><thead><tr><th>المنطقة / المبنى</th><th>تنفيذات الشهر</th><th>الحجم النسبي</th><th>أيام العمل</th></tr></thead>
+    <tbody>${covRows||'<tr><td colspan="4" class="rp-empty">لا تنفيذاتِ مُسجَّلةٌ هذا الشهر.</td></tr>'}</tbody></table>
+
+  <div class="rp-sec">لقطةُ اليوم — ${_esc(today)} (ليست مؤشّراً شهرياً)</div>
+  <table><thead><tr><th>المنطقة / المبنى</th><th>المُنفَّذ اليوم</th><th>النسبة</th><th>%</th></tr></thead>
+    <tbody>${todayCovRows||'<tr><td colspan="4" class="rp-empty">لا مهامَّ مجدولةٌ لليوم (عطلة أو لا استحقاق).</td></tr>'}</tbody></table>
 
   <div class="rp-sec">جولاتُ التفتيش والمخالفات — ${_monthName(ym)}</div>
   <table><thead><tr><th>التاريخ</th><th>المفتِّش</th><th>الدرجة</th><th>المخالفات والملاحظات</th></tr></thead>
