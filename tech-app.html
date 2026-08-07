@@ -1579,6 +1579,7 @@ function openDetail(id){
   if(t.status!=="مغلق"){
     actions.innerHTML=`
       ${t.status==="مفتوح"?`<button class="btn btn-warn" onclick="closeModal('modal-detail');openInProg('${esc(t.id)}')">🔧 بدء التنفيذ</button>`:""}
+      ${!t.restoredAt?`<button class="btn btn-ghost" style="color:#0a7c59;border-color:#0a7c59" onclick="markRestored('${esc(t.id)}')">🔌 رجعت الخدمة</button>`:""}
       <button class="btn btn-success" onclick="closeModal('modal-detail');openTicketAction('${esc(t.id)}')">📸 إغلاق البلاغ</button>
     `;
   } else {
@@ -1803,6 +1804,24 @@ function openInProg(id){
   openModal("modal-inprog");
 }
 
+/* ★ v18.9af: «رجعت الخدمة» — لحظةُ عودة الأصل للعمل، وقد تسبق الإغلاق الإداري
+   بساعاتٍ أو أيام. العقدُ القائم على الأداء يقيسها مؤشراً مستقلاً («استعادة حالة
+   الأصل بعد الحدث»)، والفنيُّ وحده يعرفها لحظةَ حدوثها — فمكانُها هنا لا في مكتب.
+   تُكتب مرةً واحدة: أولُ عودةٍ هي المقياس. */
+function markRestored(id){
+  const t=tickets.find(x=>x.id===id); if(!t) return;
+  if(t.restoredAt){ toast("ℹ️ مُسجَّلة مسبقاً","warn"); return; }
+  const now=new Date().toISOString();
+  const tl=[...(t.timeline||[]),{event:"عادت الخدمة للعمل",by:currentTech.name,at:now,icon:"🔌"}];
+  if(db){
+    db.collection(COLLECTION).doc(id).update({restoredAt:now,timeline:tl})
+      .then(()=>toast("✅ سُجّلت عودة الخدمة","success"))
+      .catch(()=>toast("⚠ خطأ في التحديث","warn"));
+  }
+  logAudit("تسجيل عودة الخدمة","البلاغ: "+id+" (تطبيق الفنيين)");
+  closeModal("modal-detail");
+}
+
 function doSetInProgress(){
   const id=document.getElementById("inprog-id").value;
   const note=document.getElementById("inprog-note").value.trim();
@@ -1812,8 +1831,15 @@ function doSetInProgress(){
   const tl=[...(t.timeline||[]),
     {event:"بدأ الفني التنفيذ"+(note?" — "+note:""),by:currentTech.name,at:now,icon:"🔧"}];
 
+  /* ★ v18.9af: طابعُ زمن الاستجابة — هنا بالضبط يقع الحدث الحقيقي.
+     كان يُكتب نصّاً في الخط الزمني وحده، فلا يُحسب منه شيء؛ والعقدُ القائم على
+     الأداء يقيس «الاستجابة» مؤشراً مستقلاً عن زمن الإقفال. يُكتب **مرةً واحدة**
+     (أول بدءٍ هو الاستجابة؛ إعادةُ الفتح لا تُعيد كتابته فيُجمَّل الرقم). */
+  const upd={status:"قيد التنفيذ",timeline:tl};
+  if(!t.respondedAt) upd.respondedAt=now;
+
   if(db){
-    db.collection(COLLECTION).doc(id).update({status:"قيد التنفيذ",timeline:tl})
+    db.collection(COLLECTION).doc(id).update(upd)
       .then(()=>toast("✅ تم تحديث الحالة إلى قيد التنفيذ","success"))
       .catch(()=>toast("⚠ خطأ في التحديث","warn"));
   }

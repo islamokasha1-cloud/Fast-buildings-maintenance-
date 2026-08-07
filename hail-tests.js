@@ -3646,6 +3646,86 @@ function perfContractPhase1() {
     /<script src="performance-contract\.js\?v=[^"]+"><\/script>/.test(HTML));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   v18.9af — المرحلة ٢: الحقول التي تُغذّي المؤشرات + الوضع التجريبي
+   العهدُ المحروس: طوابعٌ حقيقيةٌ لا مشتقّةٌ ولا مُصطنَعة · جدولُ الوقائي لا ينزاح
+   ولا يتقدّم مرتين · التجربةُ لا تُخلَط بالالتزام · التقليديُّ لا يتأثر.
+   ════════════════════════════════════════════════════════════════════ */
+function perfContractPhase2() {
+  H("v18.9af) العقد القائم على الأداء — المرحلة ٢");
+  const TECH_PATH = path.resolve(path.dirname(IDX), "tech-app.html");
+  const TECH = fs.existsSync(TECH_PATH) ? fs.readFileSync(TECH_PATH, "utf8") : "";
+  const PF_PATH = path.resolve(path.dirname(IDX), "performance-contract.js");
+  const PF = fs.existsSync(PF_PATH) ? fs.readFileSync(PF_PATH, "utf8") : "";
+
+  // ── جدولةُ الوقائي: مصدرٌ واحدٌ يحفظ المرساة ──
+  T("★ af: ppmNextDue مصدرٌ واحدٌ للتقديم", /function ppmNextDue\(plan, fromISO\)\{/.test(HTML));
+  T("★ af: التقديم من **المرساة** (nextDueDate) لا من اليوم",
+    /let base = new Date\(plan && plan\.nextDueDate \? plan\.nextDueDate : \(fromISO/.test(HTML));
+  T("★ af: لحاقُ الدورات الفائتة بحارسٍ صلبٍ يمنع اللانهاية",
+    /while\(next <= today && guard\+\+ < 400\)/.test(HTML));
+  T("★ af: بلا مُعدِّلات Date في الجدولة (درس v18.9vt)", (() => {
+    const m = HTML.match(/function ppmNextDue\(plan, fromISO\)\{[\s\S]*?\n\}/);
+    return !!m && !/\.setDate\(|\.setHours\(/.test(m[0]);
+  })(), "setDate/setHours داخل ppmNextDue ⇒ خطرُ حلقةٍ لا نهائية");
+  T("★ af: لم يعُد ثمّة تقديمٌ يدويٌّ بـ setDate على خطة الوقائي",
+    !/nextDate\.setDate\(nextDate\.getDate\(\)\+freqDays\)/.test(HTML),
+    "بقي موضعٌ يُقدّم الخطة بطريقته ⇒ انزياحُ الجدول المعتمد");
+  T("★ af: الإغلاق يسجّل الإنجاز ولا يلمس الجدول",
+    /ppmPlans\[planIdx\]\.lastCompletedAt=now;/.test(HTML) &&
+    !/lastCompletedAt=now;[\s\S]{0,120}?nextDueDate=/.test(HTML));
+
+  // ── scheduledFor: يُلتقط قبل التقديم ──
+  T("★ af: البلاغ الوقائي يحمل استحقاقه المخطَّط (المساران معاً)",
+    (HTML.match(/scheduledFor: (plan|p)\.nextDueDate \|\| now/g) || []).length === 2);
+  T("★ af: scheduledFor يسبق تقديمَ الخطة في المسارين", (() => {
+    const iA = HTML.indexOf("scheduledFor: plan.nextDueDate");
+    const jA = HTML.indexOf("ppmPlans[planIdx].nextDueDate=nextISO;");
+    const iB = HTML.indexOf("scheduledFor: p.nextDueDate");
+    const jB = HTML.indexOf("p.nextDueDate  = ppmNextDue(p, now);");
+    return iA > 0 && jA > iA && iB > 0 && jB > iB;
+  })(), "لو قُدّمت الخطة أولاً لحُفظ استحقاقُ الدورة **التالية** بدل الحالية");
+
+  // ── الطوابع: حقيقيةٌ لا مشتقّةٌ ولا مُصطنَعة ──
+  T("★ af: زمنُ الاستجابة يُكتب في تطبيق الفنيين عند بدء التنفيذ",
+    /if\(!t\.respondedAt\) upd\.respondedAt=now;/.test(TECH));
+  T("★ af: يُكتب مرةً واحدة (إعادةُ الفتح لا تُجمّل الرقم)",
+    /if\(!t\.respondedAt\)/.test(TECH) && /if\(t\[field\]\)\{[\s\S]{0,120}?return; \}/.test(HTML));
+  T("★ af: «رجعت الخدمة» فعلٌ مستقلٌّ في تطبيق الفنيين",
+    /function markRestored\(id\)\{/.test(TECH) && /restoredAt:now/.test(TECH));
+  T("★ af: الاستجابة لا تُشتقّ من assignedAt (الإسنادُ مكتبيٌّ لا ميدانيّ)",
+    !/respondedAt\s*=\s*[^;]*assignedAt/.test(HTML) && !/respondedAt\s*=\s*[^;]*assignedAt/.test(TECH));
+  T("★ af: إيقافُ الساعة يوثّق سبباً، والاستئنافُ يُغلق الفترة",
+    /function perfClockToggle\(id\)\{/.test(HTML) && /open\.to=now;/.test(HTML) &&
+    /clockStops=\[\.\.\.stops,\{from:at,to:null,reason/.test(HTML));
+  T("★ af: قارئٌ واحدٌ لحالة الساعة", /function perfClockPaused\(t\)\{/.test(HTML));
+
+  // ── البوّابة: التقليديُّ لا يتأثر ──
+  T("★ af: أزرارُ الطوابع مبوَّبةٌ بـ isPerfProject",
+    /t\.status!=="مغلق"&&isPerfProject\(\)\)\?`/.test(HTML),
+    "الأزرار تظهر في مشروعٍ تقليديّ ⇒ نقضُ عهد المرحلة ١");
+
+  // ── الوضع التجريبي: لا يُخلَط بالالتزام ──
+  T("★ af: علَمُ التجربة يُقرأ من perfConfig بمقارنةٍ صارمة",
+    /trial:\s*proj\.perfTrial === true/.test(HTML));
+  T("★ af: قارئٌ عامٌّ واحدٌ للتجربة", /function isPerfTrial\(p\)\{ const c=perfConfig\(p\); return !!\(c && c\.trial\); \}/.test(HTML));
+  T("★ af: الوحدة تُظهر شريطاً صريحاً وتَسِمُ المبالغ «تدريبيّ»",
+    /pf-note-trial/.test(PF) && /_isTrial\(\)\?' <span class="pf-tag">تدريبيّ/.test(PF) &&
+    /تدريبيّ — لا يُحتسب/.test(PF));
+
+  // ── بطاقةُ التغطية: مقياسُ التقاطٍ لا مقياسُ أداء ──
+  T("★ af: التغطية تُحسب من البلاغات وتستبعد عمليات التوريد/السحب",
+    /function coverage\(\)\{/.test(PF) && /!_isOp\(t\)/.test(PF));
+  T("★ af: التغطية شهريةٌ (نافذةُ الشهر الحالي) لا تراكمية",
+    /const mStart=new Date\(n\.getFullYear\(\), n\.getMonth\(\), 1\);/.test(PF));
+  T("★ af: مقامٌ صفرٌ يُعرَض «—» لا صفراً كاذباً",
+    /const pct=\(a,b\)=> b\? Math\.round\(a\/b\*100\) : null;/.test(PF));
+
+  // ── ما زال: لا درجةَ محسوبة قبل اكتمال الحقول ──
+  T("★ af: لا درجةَ بطاقةٍ محسوبةٌ بعد (المرحلة ٤)",
+    !/monthlyScore|totalScore|computeScore|deviation\s*=/.test(PF));
+}
+
 function deepReviewV18_9vu() {
   H("28) الفحص العميق — دفعة إصلاحات (v18.9vu)");
 
@@ -4754,6 +4834,7 @@ function financeAuditTests() {
   deepReviewV18_9ac();
   deepReviewV18_9ad();
   perfContractPhase1();
+  perfContractPhase2();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }
