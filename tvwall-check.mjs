@@ -92,6 +92,30 @@ await page.evaluate(() => {
   void today;
 });
 
+// ── مشروعُ نظافة: يُقاس بمهامّه لا ببلاغاته (v18.9aj) ──
+await page.evaluate(() => {
+  const d = new Date(); const p = n => String(n).padStart(2, '0');
+  const ymd = dt => dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate());
+  const today = ymd(d);
+  const daysAgo = n => ymd(new Date(d.getFullYear(), d.getMonth(), d.getDate() - n));
+  const ahead = n => ymd(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n));
+  const projs = window.__store[PROJECTS_DOC].projects;
+  projs.push({ id: 'clean1', name: 'أعمال النظافة', desc: 'نظافة المباني', icon: '', type: 'cleaning' });
+  window.__store[PROJECTS_DOC] = { projects: projs };
+  window.__store['meta/clean1_settings'] = { buildings: ['مبنى الإدارة', 'مبنى الخدمات', 'المسجد'] };
+  const T = 'clean1_cleaning_tasks';
+  const mk = (id, name, bld, due, extra) => {
+    window.__store[T + '/' + id] = Object.assign({ id, name, building: bld, workType: 'نظافة الأرضيات',
+      freq: 'يومي', nextDueDate: due, checklist: [] }, extra || {});
+  };
+  mk('K-1', 'تنظيف وتعقيم دورات المياه', 'مبنى الإدارة', daysAgo(3));   // متأخّرة ٣ أيام
+  mk('K-2', 'نظافة الأرضيات',            'مبنى الإدارة', daysAgo(1));   // متأخّرة يوم
+  mk('K-3', 'نظافة الزجاج',              'مبنى الخدمات', today);        // مستحقّة اليوم
+  mk('K-4', 'إدارة النفايات',            'مبنى الخدمات', today, { lastExecutedDate: today, lastExecuted: new Date().toISOString() }); // نُفِّذت اليوم
+  mk('K-5', 'النظافة العميقة',           'المسجد',       ahead(5));     // قادمة
+  mk('K-6', 'مهمة موقوفة',               'المسجد',       daysAgo(9), { disabled: true });
+});
+
 L('\n═══ فحص مركز العمليات ═══');
 await page.fill('#login-user', 'admin'); await page.fill('#login-pass', 'Passw0rd!');
 await page.click('.login-btn');
@@ -108,12 +132,13 @@ check('★ المركز فُتح والبوّابة أُخفيت',
 const cards = await page.evaluate(() => Array.from(document.querySelectorAll('#tvl-grid .tvl-card')).map(c => ({
   cls: c.className, txt: (c.innerText || '').replace(/\s+/g, ' ').trim()
 })));
-check('★ ثلاث بطاقات — واحدةٌ لكل مشروع', cards.length === 3, cards.length + ' بطاقة');
+check('★ أربع بطاقات — واحدةٌ لكل مشروع', cards.length === 4, cards.length + ' بطاقة');
 check('★ الترتيب: الأسوأ أولاً (حائل الحرِج في الصدارة)',
   /crit/.test(cards[0]?.cls || '') && /مشروع حائل/.test(cards[0]?.txt || ''), (cards[0]?.txt || '').slice(0, 60));
-check('★ الرياض «متابعة» والقصيم «مستقر»',
-  /warn/.test(cards[1]?.cls || '') && /ok/.test(cards[2]?.cls || ''),
-  (cards[1]?.txt || '').slice(0, 24) + ' | ' + (cards[2]?.txt || '').slice(0, 24));
+const sev = c => /crit/.test(c.cls) ? 0 : /warn/.test(c.cls) ? 1 : 2;
+check('★ البطاقات مرتّبةٌ الأسوأ أولاً (خطورةٌ لا تتصاعد)',
+  cards.every((c, i) => i === 0 || sev(cards[i - 1]) <= sev(c)),
+  cards.map(c => (c.txt || '').slice(0, 12) + ':' + sev(c)).join(' | '));
 
 const m = await page.evaluate(() => {
   const r = _tvwallCalc('hail');
@@ -134,14 +159,89 @@ await page.screenshot({ path: `${SHOTS}/wall.png`, fullPage: false });
 const subs = await page.evaluate(() => Object.keys(_tvwall.subs).length);
 check('★ مستمعٌ لكل مشروع (٣)', subs === 3, subs + ' مستمع');
 
+/* ═══ مشروع النظافة: مهامٌّ لا بلاغات (v18.9aj) ═══ */
+const cln = await page.evaluate(() => {
+  const m = _tvwallCalc('clean1');
+  const card = Array.from(document.querySelectorAll('#tvl-grid .tvl-card'))
+    .find(c => (c.innerText || '').indexOf('أعمال النظافة') >= 0);
+  return {
+    kind: _tvwall.kind['clean1'], sub: !!_tvwall.taskSubs['clean1'], tickSub: !!_tvwall.subs['clean1'],
+    m: m && { kind: m.kind, due: m.due, overdue: m.overdue, done: m.doneToday, activeN: m.activeN,
+              coverage: m.coverage, health: m.health.key },
+    card: card ? (card.innerText || '').replace(/\s+/g, ' ').trim() : ''
+  };
+});
+check('★ المشروع صُنّف نظافةً واشترك على مهامّه لا على بلاغاته',
+  cln.kind === 'cleaning' && cln.sub === true && cln.tickSub === false, JSON.stringify({k:cln.kind,tasks:cln.sub,tickets:cln.tickSub}));
+// يومُ الجمعة/السبت إجازةٌ في النظافة: لا مهمّةَ مستحقّةً ولا متأخّرة. التوقّعُ يُشتقّ
+// من القاعدة نفسها لا من يومِ تشغيل الفحص — فالفحص يثبت **القاعدة** في كل يوم.
+const HOL = await page.evaluate(() => window.cleaningOps._isWeekend(window.cleaningOps._today()));
+const expDue = HOL ? 0 : 3, expOd = HOL ? 0 : 2;
+check(`★ الأرقام من وحدة النظافة (${HOL ? 'إجازة: لا مستحقّ ولا متأخّر' : '٣ مستحقّة · ٢ متأخّرة'} · ١ نُفِّذت · ٥ نشطة)`,
+  cln.m && cln.m.due === expDue && cln.m.overdue === expOd && cln.m.done === 1 && cln.m.activeN === 5,
+  JSON.stringify(cln.m));
+check('★ التغطية = المنفَّذ ÷ جدول اليوم', cln.m && cln.m.coverage === (HOL ? 100 : 25), (cln.m||{}).coverage + '%');
+check('★ البطاقة تعرض «مهمّة مستحقّة» لا «بلاغ نشط»',
+  cln.card.includes('مهمّة مستحقّة') && !cln.card.includes('بلاغ نشط'), cln.card.slice(0, 80));
+check('★ البطاقة تعرض تغطية اليوم لا إنجاز بلاغات الشهر',
+  cln.card.includes('تغطية اليوم') && !cln.card.includes('إنجاز بلاغات الشهر'));
+const tkTxt = await page.evaluate(() => (document.getElementById('tvl-ticker').textContent || ''));
+check(HOL ? '★ في الإجازة لا مهامَّ في الشريط (ولا صفرٌ يُعرَض كأنه عمل)'
+          : '★ المهامُّ المتأخّرة تظهر في الشريط السفلي باسم مشروعها',
+  HOL ? !tkTxt.includes('تنظيف وتعقيم دورات المياه')
+      : (tkTxt.includes('أعمال النظافة') && tkTxt.includes('تنظيف وتعقيم دورات المياه')));
+check('★ الشريط العلوي يفصل المهام عن البلاغات',
+  await page.evaluate(() => {
+    const t = (document.getElementById('tvl-totals').textContent || '');
+    return t.includes('مهام مستحقّة') && t.includes('مهام متأخّرة') && t.includes('بلاغات نشطة');
+  }));
+
+// لوحةُ مشروع النظافة في التدوير
+await page.evaluate(() => {
+  const i = _tvwall.screens.findIndex(s => s.pid === 'clean1');
+  _tvwallShowScreen(i);
+});
+await page.waitForTimeout(700);
+const cpanel = await page.evaluate(() => ({
+  name: (document.getElementById('tvl-proj-name').textContent || '').trim(),
+  kpis: Array.from(document.querySelectorAll('#tvl-proj-kpis .kl')).map(e => e.textContent.trim()),
+  vals: Array.from(document.querySelectorAll('#tvl-proj-kpis .kv')).map(e => e.textContent.trim()),
+  ringLbl: (document.getElementById('tvl-proj-blbl').textContent || '').trim(),
+  pct: (document.getElementById('tvl-proj-bpct').textContent || '').trim(),
+  foot: ['tvl-proj-l1', 'tvl-proj-l2', 'tvl-proj-l3'].map(id => (document.getElementById(id).textContent || '').trim()),
+  blds: Array.from(document.querySelectorAll('#tvl-proj-blds .tvw-bld')).map(b => (b.innerText || '').replace(/\s+/g, ' ').trim()),
+  totals: (document.getElementById('tvl-totals').textContent || '').replace(/\s+/g, ' ').trim()
+}));
+check('★ لوحةُ النظافة: نبضُ التشغيل بالمهام', cpanel.name === 'أعمال النظافة' &&
+  cpanel.kpis.join('|') === 'متأخّرة عن موعدها|مستحقّة الآن|نُفِّذت اليوم', cpanel.kpis.join(' | '));
+check('★ قيمُ النبض = متأخّرة/مستحقّة/نُفِّذت', cpanel.vals.join() === `${expOd},${expDue},1`, cpanel.vals.join(' | '));
+check('★ حلقةُ الجاهزية على تغطية اليوم (وإجازةٌ يومَ العطلة لا صفرٌ كاذب)',
+  cpanel.ringLbl === 'تغطية اليوم' && cpanel.pct === (HOL ? '—' : '25%'), cpanel.pct);
+check('★ تذييلُ الحلقة بمفردات النظافة',
+  cpanel.foot.join('|') === 'مستحقّة الآن|مهام نشطة|نُفِّذت اليوم', cpanel.foot.join(' | '));
+check('★ حالةُ المباني تَعدّ المهامَّ المستحقّة لا البلاغات',
+  cpanel.blds.length === 3 &&
+  new RegExp('^' + (HOL ? 0 : 2)).test(cpanel.blds[0]) &&
+  new RegExp('^' + (HOL ? 0 : 1)).test(cpanel.blds[1]) && /^0/.test(cpanel.blds[2]),
+  cpanel.blds.join(' | '));
+check('★ شريطُ اللوحة بمقاييس النظافة لا البلاغات',
+  cpanel.totals.includes('جدول اليوم') && cpanel.totals.includes('تغطية اليوم') && !cpanel.totals.includes('بلاغات الشهر'),
+  cpanel.totals.slice(0, 90));
+await page.screenshot({ path: `${SHOTS}/wall-cleaning.png` });
+await page.evaluate(() => _tvwallShowScreen(0));
+await page.waitForTimeout(400);
+
 /* ═══ التدوير التلقائي (v18.9ai) ═══ */
 const rot = await page.evaluate(() => ({
   screens: _tvwall.screens.map(s => s.pid),
   idx: _tvwall.idx, on: _tvwall.rotOn, timer: !!_tvwall.rotTimer,
   dots: document.querySelectorAll('#tvl-rot-dots button').length
 }));
+const cardOrder = await page.evaluate(() => Array.from(document.querySelectorAll('#tvl-grid .tvl-card'))
+  .map(c => (c.getAttribute('onclick') || '').replace(/^.*tvwallOpenProject\('|'\).*$/g, '')));
 check('★ الشاشات: «الكل» ثم لوحةٌ لكل مشروع بترتيب البطاقات',
-  rot.screens.join() === ',hail,riyadh,qassim' && rot.dots === 4, JSON.stringify(rot.screens));
+  rot.screens[0] === null && rot.screens.slice(1).join() === cardOrder.join() && rot.dots === 5,
+  JSON.stringify(rot.screens));
 check('★ التدوير يبدأ تلقائياً من شاشة «الكل»', rot.idx === 0 && rot.on === true && rot.timer === true);
 
 // انتقالٌ يدويٌّ إلى لوحة المشروع الأول (النقطة الثانية) — نفس ما يفعله التدوير
