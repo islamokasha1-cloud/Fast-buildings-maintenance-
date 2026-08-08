@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2495";
+var MODULE_BUILD = "v18.9.2496";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -96,6 +96,29 @@ var ENGAGEMENTS = {
   pay_order: { key:"pay_order", lbl:"أمر دفع",         icon:"banknote", hint:"مبلغٌ واحدٌ يُسدَّد مرةً واحدة" }
 };
 
+/* ── صفةُ الطرف: منشأةٌ أم شخصٌ طبيعيّ ──
+   **محورٌ مستقلٌّ عن «النوع»**: مقاولُ الباطن قد يكون شركةً وقد يكون **شخصاً**
+   نتعاقد معه بهويته لا بسجلٍّ تجاريّ. وثلاثةُ فروقٍ جوهريةٍ تتبع ذلك:
+   (١) **مستندُ الهوية يختلف**: سجلٌّ تجاريٌّ للمنشأة، وهويةٌ وطنيةٌ أو إقامةٌ للفرد —
+       فإلزامُ السجل التجاري على شخصٍ يعني سجلَّ أطرافٍ لا يُستعمَل أو يُملأ بأصفار.
+   (٢) **الفردُ غالباً غيرُ مسجَّلٍ في ضريبة القيمة المضافة** ⇒ وضعُ العقد المقترَح
+       له `none` تلقائياً. هذا هو الرابطُ العمليُّ بين هذه الصفة وأوضاع الضريبة الثلاثة.
+   (٣) **تطابقُ الأسماء ليس تكراراً**: شخصان قد يحملان الاسم نفسَه بمشروعية، بينما
+       اسمُ المنشأة فريدٌ في سجلها. فمفتاحُ التفرّد **رقمُ الهوية** لا الاسم. */
+var ENTITY_TYPES = {
+  establishment: { key:"establishment", lbl:"منشأة (مؤسسة/شركة)", short:"منشأة", icon:"building2", idLbl:"السجل التجاري" },
+  individual:    { key:"individual",    lbl:"شخص (تعاقد بالهوية)", short:"شخص",  icon:"user",      idLbl:"رقم الهوية / الإقامة" }
+};
+function normEntity(t){ return ENTITY_TYPES[t] ? t : "establishment"; }
+
+/* نوعُ هويةِ الشخص — يحدّد التسميةَ المعروضة وحدها؛ الانتهاءُ يُعامَل واحداً. */
+var ID_TYPES = {
+  national: { key:"national", lbl:"هوية وطنية" },
+  iqama:    { key:"iqama",    lbl:"إقامة" },
+  gulf:     { key:"gulf",     lbl:"هوية خليجية" },
+  passport: { key:"passport", lbl:"جواز سفر" }
+};
+
 /* ── أنواعُ الأطراف ── */
 var VENDOR_KINDS = {
   subcontractor: { key:"subcontractor", lbl:"مقاول باطن", icon:"hardHat", color:"var(--warn)" },
@@ -110,16 +133,28 @@ var VENDOR_STATUS = {
 
 /* ── وثائقُ الطرف: النوعُ ثابتٌ والتاريخُ متغيّر ──
    القائمةُ ثابتةٌ عمداً — «أضِف نوعاً» يعني بعد سنةٍ عشرين تهجئةً للسجل التجاري
-   فلا يعمل أيُّ تنبيهٍ على شيء. */
+   فلا يعمل أيُّ تنبيهٍ على شيء.
+
+   `entity` يحصر الوثيقةَ بصفةٍ بعينها: شهادةُ الزكاة والسعودة والتأمينات وثائقُ
+   **منشأةٍ** لا معنى لها لشخص، ورخصةُ العمل وثيقةُ **شخصٍ** لا معنى لها لمنشأة.
+   عرضُ ما لا يُطابق الصفةَ يُنتج سجلاً مليئاً بحقولٍ فارغةٍ لا يقرؤها أحد. */
 var DOC_TYPES = [
-  { key:"cr",        lbl:"السجل التجاري",              short:"س.ت"      },
-  { key:"vat",       lbl:"شهادة ضريبة القيمة المضافة", short:"ض.ق.م"    },
-  { key:"gosi",      lbl:"شهادة التأمينات الاجتماعية", short:"تأمينات"  },
-  { key:"zakat",     lbl:"شهادة الزكاة والدخل",        short:"زكاة"     },
-  { key:"saudization",lbl:"شهادة نطاقات / السعودة",    short:"سعودة"    },
+  { key:"cr",        lbl:"السجل التجاري",              short:"س.ت",     entity:"establishment" },
+  { key:"vat",       lbl:"شهادة ضريبة القيمة المضافة", short:"ض.ق.م",   entity:"establishment" },
+  { key:"gosi",      lbl:"شهادة التأمينات الاجتماعية", short:"تأمينات", entity:"establishment" },
+  { key:"zakat",     lbl:"شهادة الزكاة والدخل",        short:"زكاة",    entity:"establishment" },
+  { key:"saudization",lbl:"شهادة نطاقات / السعودة",    short:"سعودة",   entity:"establishment" },
+  { key:"workPermit",lbl:"رخصة عمل",                   short:"رخصة",    entity:"individual"    },
+  { key:"profCert",  lbl:"شهادة مهنية / رخصة حرفة",    short:"مهنية",   entity:"individual"    },
+  { key:"identity",  lbl:"الهوية / الإقامة",           short:"هوية",    entity:"individual"    },
   { key:"insurance", lbl:"بوليصة تأمين",               short:"تأمين"    },
   { key:"other",     lbl:"مستند آخر",                  short:"مستند"    }
 ];
+/* الوثائقُ المتاحةُ لصفةٍ بعينها: العامّةُ (بلا `entity`) + الخاصةُ بها. */
+function docTypesFor(entityType){
+  var e = normEntity(entityType);
+  return DOC_TYPES.filter(function(d){ return !d.entity || d.entity === e; });
+}
 var DOC_LBL = (function(){ var m={}; DOC_TYPES.forEach(function(d){ m[d.key]=d.lbl; }); return m; })();
 /* الاختصارُ حقلٌ صريحٌ لا قصُّ أولِ كلمة: «شهادة ضريبة…» و«شهادة التأمينات…»
    يبدآن بالكلمة نفسها، فالقصُّ يجعل شارتين مختلفتين تُقرآن «شهادة». */
@@ -335,9 +370,44 @@ function docExpiryState(expiry, today){
   return { state:"ok", days:days };
 }
 
+/* هويةُ الطرف الرسمية — مصدرٌ **واحدٌ** لما يُعرَض ويُبحَث ويُدقَّق، مهما كانت صفتُه.
+   المنشأةُ تُعرَف بسجلها التجاري، والشخصُ بهويته أو إقامته. كلُّ شاشةٍ تقرأ هذه
+   الدالة فلا تُكرَّر شروطُ «إن كان شخصاً» في عشرة مواضع تفترق بعد شهر. */
+function identityOf(vendor){
+  var v = vendor || {}, lg = v.legal || {};
+  if(normEntity(v.entityType) === "individual"){
+    var t = ID_TYPES[lg.idType] ? lg.idType : "national";
+    return { entity:"individual", label:(ID_TYPES[t]||ID_TYPES.national).lbl, idType:t,
+             number:String(lg.idNumber||""), expiry:String(lg.idExpiry||"") };
+  }
+  return { entity:"establishment", label:"السجل التجاري", idType:"cr",
+           number:String(lg.crNumber||""), expiry:String(lg.crExpiry||"") };
+}
+
+/* وضعُ الضريبة المقترَحُ لعقدٍ مع هذا الطرف.
+   الشخصُ غيرُ المسجَّل ⇐ `none`: لا تُضاف ضريبةٌ ولا تُستخرَج من مستحقّه. والاقتراحُ
+   **يُقترَح ولا يُفرَض** — يبقى قابلاً للتغيير على العقد، فقد يكون الفردُ مسجَّلاً. */
+function suggestVatMode(vendor){
+  var v = vendor || {};
+  if(v.taxRegistered === true) return "excl";
+  if(v.taxRegistered === false) return "none";
+  if(normEntity(v.entityType) === "individual") return "none";
+  return ((v.legal||{}).vatNumber) ? "excl" : "none";
+}
+
+/* كلُّ ما له تاريخُ انتهاءٍ عند الطرف — الوثائقُ **وهويتُه الرسمية**.
+   محرّكُ الانتهاء واحدٌ لا اثنان: لو بقيت الهويةُ خارجه لمرّت إقامةٌ منتهيةٌ بلا تنبيه. */
+function allExpiring(vendor){
+  var v = vendor || {};
+  var out = (Array.isArray(v.docs) ? v.docs : []).slice();
+  var id = identityOf(v);
+  if(id.expiry) out.push({ type:(id.entity==="individual" ? "identity" : "cr"), number:id.number, expiry:id.expiry, _identity:true });
+  return out;
+}
+
 /* أسوأُ حالةِ وثيقةٍ لدى طرف — هي حالةُ امتثاله المعروضة. */
 function vendorComplianceState(vendor, today){
-  var docs = (vendor && Array.isArray(vendor.docs)) ? vendor.docs : [];
+  var docs = allExpiring(vendor);
   var worst = "none", expired = 0, soon = 0;
   docs.forEach(function(dc){
     var s = docExpiryState(dc && dc.expiry, today).state;
@@ -353,8 +423,15 @@ function vendorComplianceState(vendor, today){
 function vendorEligibility(vendor, today){
   var v = vendor || {};
   var comp = vendorComplianceState(v, today);
+  var id   = identityOf(v);
   if(v.status === "blacklisted") return { ok:false, block:true,  reason:"الطرف محظور — لا يجوز الإسناد إليه" };
   if(v.status === "suspended")   return { ok:false, block:false, reason:"الطرف موقوف مؤقتاً" };
+  // هويةُ الشخص المنتهيةُ ليست كشهادةٍ متأخّرة: التعاقدُ معه عليها مسؤوليةٌ نظاميةٌ
+  // علينا نحن. تبقى تحذيراً لا منعاً (فلسفةُ المنصة)، لكن بنصٍّ لا يحتمل التأويل.
+  if(id.expiry && docExpiryState(id.expiry, today).state === "expired"){
+    return { ok:false, block:false, reason:id.label+" منتهية — راجعها قبل الإسناد" };
+  }
+  if(!id.number) return { ok:false, block:false, reason:id.label+" غير مسجَّل" };
   if(comp.expired > 0)           return { ok:false, block:false, reason:"لديه "+comp.expired+" وثيقةً منتهية" };
   if(comp.soon > 0)              return { ok:true,  block:false, reason:comp.soon+" وثيقةٌ توشك على الانتهاء" };
   return { ok:true, block:false, reason:"" };
@@ -471,16 +548,45 @@ function normName(s){
     .replace(/[^\u0600-\u06FF0-9a-zA-Z]+/g," ")
     .trim().replace(/\s+/g," ").toLowerCase();
 }
-/* هل الاسمُ مستعملٌ من طرفٍ آخر؟ (يشمل الأسماءَ البديلة) */
-function nameTaken(name, exceptId){
-  var k = normName(name); if(!k) return null;
-  for(var i=0;i<_vendors.length;i++){
-    var v=_vendors[i]; if(v.id===exceptId) continue;
-    if(normName(v.name)===k) return v;
-    var al=Array.isArray(v.aliases)?v.aliases:[];
-    for(var j=0;j<al.length;j++){ if(normName(al[j])===k) return v; }
+/* كشفُ التكرار — **مفتاحُ التفرّد رقمُ الهوية لا الاسم**.
+
+   هذا فرقٌ جوهريٌّ بين المنشأة والشخص: اسمُ المنشأة فريدٌ في سجلها، أمّا شخصان
+   فقد يحملان الاسمَ نفسَه بمشروعيةٍ تامّة. فمنعُ الحفظ لتطابق الاسم يمنع تسجيلَ
+   «محمد أحمد» الثاني — وهو خطأٌ يوقف العمل لا يحميه.
+
+   القاعدة: تطابقُ رقم الهوية ⇒ **تكرارٌ مؤكَّدٌ يُمنَع**. وتطابقُ الاسم وحده ⇒
+   **تنبيهٌ** يُمنَع للمنشأة (اسمُها معرّفُها) ويُحذَّر منه للشخص (قد يكون سميّاً).
+   يُرجَع: { match, byId, block, reason } — و`match=null` يعني لا تكرار. */
+function duplicateOf(draft, exceptId, list){
+  var d = draft || {};
+  var pool = Array.isArray(list) ? list : _vendors;
+  var ent  = normEntity(d.entityType);
+  var num  = String((identityOf(d).number || "")).replace(/\s+/g,"");
+  var k    = normName(d.name);
+
+  for(var i=0;i<pool.length;i++){
+    var v = pool[i]; if(!v || v.id === exceptId) continue;
+    var vnum = String((identityOf(v).number || "")).replace(/\s+/g,"");
+    if(num && vnum && num === vnum){
+      return { match:v, byId:true, block:true,
+               reason:"هذا الرقم مسجَّل بالفعل للطرف "+v.id+" ("+(v.name||"")+")" };
+    }
   }
-  return null;
+  if(!k) return { match:null, byId:false, block:false, reason:"" };
+  for(var j=0;j<pool.length;j++){
+    var u = pool[j]; if(!u || u.id === exceptId) continue;
+    var names = [u.name].concat(Array.isArray(u.aliases)?u.aliases:[]);
+    for(var m=0;m<names.length;m++){
+      if(normName(names[m]) === k){
+        return ent === "individual"
+          ? { match:u, byId:false, block:false,
+              reason:"يوجد شخصٌ بالاسم نفسه ("+u.id+") — تحقّق أنه ليس هو، فالتشابهُ في الأسماء وارد" }
+          : { match:u, byId:false, block:true,
+              reason:"اسم المنشأة مسجَّل بالفعل للطرف "+u.id };
+      }
+    }
+  }
+  return { match:null, byId:false, block:false, reason:"" };
 }
 
 function saveVendor(data, id){
@@ -545,7 +651,7 @@ function uploadVendorDoc(vid, file, key){
    ٦) سجلُّ الأطراف — الواجهة
    ════════════════════════════════════════════════════════════════════ */
 var _page    = "";        // الصفحةُ المعروضة حالياً من هذه الوحدة
-var _vFilter = { q:"", kind:"", status:"" };
+var _vFilter = { q:"", kind:"", entity:"", status:"" };
 var _vOpen   = null;      // معرّفُ الطرف المفتوح (null = القائمة)
 var _vEdit   = null;      // مسوّدةُ التحرير (null = عرض)
 
@@ -584,10 +690,11 @@ function vendorListHTML(){
   var q = normName(_vFilter.q);
   var list = all.filter(function(v){
     if(_vFilter.kind && v.kind !== _vFilter.kind) return false;
+    if(_vFilter.entity && normEntity(v.entityType) !== _vFilter.entity) return false;
     if(_vFilter.status && (v.status||"active") !== _vFilter.status) return false;
     if(q){
       var hay = normName(v.name) + " " + normName((v.aliases||[]).join(" ")) + " " +
-                normName((v.legal||{}).crNumber) + " " + normName((v.legal||{}).vatNumber);
+                normName(identityOf(v).number) + " " + normName((v.legal||{}).vatNumber);
       if(hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -620,6 +727,12 @@ function vendorListHTML(){
       '<option value="">كل الأنواع</option>'+
       Object.keys(VENDOR_KINDS).map(function(k){
         return '<option value="'+k+'"'+(_vFilter.kind===k?' selected':'')+'>'+_esc(VENDOR_KINDS[k].lbl)+'</option>';
+      }).join("")+
+    '</select>'+
+    '<select class="form-input" onchange="contracts.filterVendors(\'entity\',this.value)">'+
+      '<option value="">منشآت وأشخاص</option>'+
+      Object.keys(ENTITY_TYPES).map(function(k){
+        return '<option value="'+k+'"'+(_vFilter.entity===k?' selected':'')+'>'+_esc(ENTITY_TYPES[k].lbl)+'</option>';
       }).join("")+
     '</select>'+
     '<select class="form-input" onchange="contracts.filterVendors(\'status\',this.value)">'+
@@ -655,12 +768,14 @@ function vendorListHTML(){
 
 function vendorTileHTML(v, today){
   var kind = VENDOR_KINDS[v.kind] || VENDOR_KINDS.subcontractor;
+  var ent  = ENTITY_TYPES[normEntity(v.entityType)];
+  var id   = identityOf(v);
   var st   = VENDOR_STATUS[v.status||"active"] || VENDOR_STATUS.active;
   var comp = vendorComplianceState(v, today);
   var rail = comp.expired ? "var(--sla-crit)" : (comp.soon ? "var(--sla-warn)" : "var(--sla-ok)");
   if((v.status||"active") !== "active") rail = "var(--muted)";
 
-  var chips = (Array.isArray(v.docs)?v.docs:[]).slice(0,5).map(function(dc){
+  var chips = allExpiring(v).slice(0,5).map(function(dc){
     var s = docExpiryState(dc.expiry, today);
     return '<span class="ct-doc s-'+s.state+'" title="'+_esc(DOC_LBL[dc.type]||dc.type)+(dc.expiry?(' — ينتهي '+_esc(dc.expiry)):'')+'">'+
       _esc(DOC_SHORT[dc.type]||dc.type||"مستند")+'</span>';
@@ -672,8 +787,9 @@ function vendorTileHTML(v, today){
       '<div class="ct-tile-name">'+_esc(v.name||v.id)+'</div>'+
       '<span class="badge '+st.cls+'">'+_icn(st.icon,"ic-sm")+' '+_esc(st.lbl)+'</span>'+
     '</div>'+
-    '<div class="ct-tile-kind">'+_icn(kind.icon,"ic-sm")+' '+_esc(kind.lbl)+
-      (( v.legal&&v.legal.crNumber)?' <span class="ct-dot">·</span> س.ت <b class="num">'+_esc(v.legal.crNumber)+'</b>':'')+
+    '<div class="ct-tile-kind">'+_icn(ent.icon,"ic-sm")+' '+_esc(ent.short)+
+      ' <span class="ct-dot">·</span> '+_icn(kind.icon,"ic-sm")+' '+_esc(kind.lbl)+
+      (id.number?' <span class="ct-dot">·</span> <b class="num">'+_esc(id.number)+'</b>':'')+
     '</div>'+
     '<div class="ct-docs">'+chips+'</div>'+
   '</div>';
@@ -706,10 +822,20 @@ function vendorCardHTML(id){
       (v.statusReason?' — '+_esc(v.statusReason):'')+'</div>';
   }
 
+  var ent = ENTITY_TYPES[normEntity(v.entityType)];
+  var id  = identityOf(v);
+  var idExpState = id.expiry ? docExpiryState(id.expiry, today).state : "none";
+  var vatSug = VAT_MODES[suggestVatMode(v)];
+
   var info = '<div class="ct-info">'+
+    infoCell("الصفة", _icn(ent.icon,"ic-sm")+" "+_esc(ent.lbl)) +
     infoCell("النوع", _icn(kind.icon,"ic-sm")+" "+_esc(kind.lbl)) +
-    infoCell("السجل التجاري", numOrDash((v.legal||{}).crNumber)) +
-    infoCell("الرقم الضريبي", numOrDash((v.legal||{}).vatNumber)) +
+    infoCell(id.label, numOrDash(id.number) +
+      (id.expiry ? ' <span class="ct-doc s-'+idExpState+'">'+_esc(id.expiry)+'</span>' : "")) +
+    (id.entity === "individual"
+      ? infoCell("الجنسية", _esc((v.legal||{}).nationality||"—"))
+      : infoCell("الرقم الضريبي", numOrDash((v.legal||{}).vatNumber))) +
+    infoCell("وضع الضريبة المقترَح", _esc(vatSug ? vatSug.short : "—")) +
     infoCell("العنوان الوطني", _esc((v.legal||{}).nationalAddress||"—")) +
   '</div>';
 
@@ -723,18 +849,20 @@ function vendorCardHTML(id){
     '<div class="ct-info">'+
       infoCell("الآيبان", '<span class="num">'+_esc(ibanShown)+'</span>') +
       infoCell("البنك", _esc((v.bank||{}).bankName||"—")) +
+      infoCell("اسم صاحب الحساب", _esc((v.bank||{}).holder||"—")) +
     '</div>'+
   '</div>';
 
-  var docs = (Array.isArray(v.docs)?v.docs:[]);
+  var docs = allExpiring(v);
   var docRows = docs.length ? docs.map(function(dc,i){
     var s = docExpiryState(dc.expiry, today);
     var lbl = s.state==="expired" ? ("منتهية منذ "+Math.abs(s.days)+" يوماً")
             : s.state==="soon"    ? ("تنتهي بعد "+s.days+" يوماً")
             : s.state==="ok"      ? ("سارية — "+s.days+" يوماً")
             : "بلا تاريخ انتهاء";
-    return '<tr>'+
-      '<td>'+_esc(DOC_LBL[dc.type]||dc.type||"—")+'</td>'+
+    return '<tr'+(dc._identity?' class="ct-row-id"':'')+'>'+
+      '<td>'+_esc(dc._identity ? id.label : (DOC_LBL[dc.type]||dc.type||"—"))+
+        (dc._identity?' <span class="ct-doc s-none">الهوية الرسمية</span>':'')+'</td>'+
       '<td class="num">'+_esc(dc.number||"—")+'</td>'+
       '<td class="num">'+_esc(dc.expiry||"—")+'</td>'+
       '<td><span class="ct-doc s-'+s.state+'">'+_esc(lbl)+'</span></td>'+
@@ -773,10 +901,19 @@ function vendorEditHTML(v){
   var isNew = !v || !v.id;
   var back = '<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.cancelVendorEdit()">'+_icn("rotateCcw")+' إلغاء</button>';
 
+  var ent = normEntity(d.entityType);
+  // قائمةُ الوثائق تتبع الصفة — ويبقى النوعُ المحفوظ ظاهراً ولو خرج عنها بعد تبديلها،
+  // فلا تُمحى وثيقةٌ سجّلها أحدٌ لمجرّد تغييرِ صفةٍ بالخطأ.
+  var docOpts = docTypesFor(ent);
   var docRows = (d.docs||[]).map(function(dc,i){
+    var opts = docOpts.slice();
+    if(dc.type && !opts.some(function(t){ return t.key===dc.type; })){
+      var keep = DOC_TYPES.filter(function(t){ return t.key===dc.type; })[0];
+      if(keep) opts = opts.concat([keep]);
+    }
     return '<tr>'+
       '<td><select class="form-input" data-f="type" data-i="'+i+'">'+
-        DOC_TYPES.map(function(t){ return '<option value="'+t.key+'"'+(dc.type===t.key?' selected':'')+'>'+_esc(t.lbl)+'</option>'; }).join("")+
+        opts.map(function(t){ return '<option value="'+t.key+'"'+(dc.type===t.key?' selected':'')+'>'+_esc(t.lbl)+'</option>'; }).join("")+
       '</select></td>'+
       '<td><input class="form-input" data-f="number" data-i="'+i+'" value="'+_esc(dc.number||"")+'" placeholder="الرقم"></td>'+
       '<td><input class="form-input" type="date" data-f="expiry" data-i="'+i+'" value="'+_esc(dc.expiry||"")+'"></td>'+
@@ -791,7 +928,12 @@ function vendorEditHTML(v){
         field("الآيبان (IBAN)", '<input class="form-input num" id="ct-f-iban" value="'+_esc((d.bank||{}).iban||"")+'" placeholder="SA…" dir="ltr">') +
         field("اسم البنك", '<input class="form-input" id="ct-f-bank" value="'+_esc((d.bank||{}).bankName||"")+'">') +
       '</div>'+
-      '<div class="ct-note warn" style="margin-top:2px">'+_icn("shield","ic-sm")+' تغيير الآيبان يُقيَّد في سجل التدقيق باسمك وبالقيمة قبل وبعد.</div>'
+      '<div class="ct-form-row">'+
+        field("اسم صاحب الحساب", '<input class="form-input" id="ct-f-holder" value="'+_esc((d.bank||{}).holder||"")+'" placeholder="'+(ent==="individual"?"يجب أن يطابق اسم الشخص في هويته":"كما في خطاب البنك")+'">') +
+        '<div></div>'+
+      '</div>'+
+      '<div class="ct-note warn" style="margin-top:2px">'+_icn("shield","ic-sm")+' تغيير الآيبان يُقيَّد في سجل التدقيق باسمك وبالقيمة قبل وبعد.'+
+        (ent==="individual"?' والحسابُ للشخص يجب أن يكون <b>باسمه</b> — التحويلُ لحساب طرفٍ ثالثٍ يُفقد الإثبات.':'')+'</div>'
     : '<div class="ct-note">'+_icn("lock","ic-sm")+' البيانات البنكية تُعدَّل من المالية أو الأدمن فقط.</div>';
 
   return back +
@@ -799,19 +941,49 @@ function vendorEditHTML(v){
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("briefcase","ic-sm")+' البيانات الأساسية</div>'+
     '<div class="ct-form-row">'+
-      field("اسم الطرف *", '<input class="form-input" id="ct-f-name" value="'+_esc(d.name||"")+'" placeholder="الاسم كما في السجل التجاري">') +
+      field("الصفة *", '<select class="form-input" id="ct-f-entity" onchange="contracts.setEntity(this.value)">'+
+        Object.keys(ENTITY_TYPES).map(function(k){ return '<option value="'+k+'"'+(ent===k?' selected':'')+'>'+_esc(ENTITY_TYPES[k].lbl)+'</option>'; }).join("")+
+      '</select>') +
       field("النوع", '<select class="form-input" id="ct-f-kind">'+
         Object.keys(VENDOR_KINDS).map(function(k){ return '<option value="'+k+'"'+(d.kind===k?' selected':'')+'>'+_esc(VENDOR_KINDS[k].lbl)+'</option>'; }).join("")+
       '</select>') +
     '</div>'+
     '<div class="ct-form-row">'+
-      field("السجل التجاري", '<input class="form-input num" id="ct-f-cr" value="'+_esc((d.legal||{}).crNumber||"")+'" dir="ltr">') +
-      field("الرقم الضريبي", '<input class="form-input num" id="ct-f-vat" value="'+_esc((d.legal||{}).vatNumber||"")+'" dir="ltr">') +
-    '</div>'+
-    '<div class="ct-form-row">'+
-      field("العنوان الوطني", '<input class="form-input" id="ct-f-addr" value="'+_esc((d.legal||{}).nationalAddress||"")+'">') +
+      field(ent==="individual" ? "اسم الشخص *" : "اسم المنشأة *",
+        '<input class="form-input" id="ct-f-name" value="'+_esc(d.name||"")+'" placeholder="'+(ent==="individual"?"الاسم الرباعي كما في الهوية":"الاسم كما في السجل التجاري")+'">') +
       field("أسماء بديلة (تفصلها فاصلة)", '<input class="form-input" id="ct-f-aliases" value="'+_esc((d.aliases||[]).join("، "))+'" placeholder="لربط الأسماء المكتوبة يدوياً سابقاً">') +
     '</div>'+
+    (ent==="individual" ? (
+      '<div class="ct-form-row">'+
+        field("نوع الهوية", '<select class="form-input" id="ct-f-idtype">'+
+          Object.keys(ID_TYPES).map(function(k){ return '<option value="'+k+'"'+(((d.legal||{}).idType||"national")===k?' selected':'')+'>'+_esc(ID_TYPES[k].lbl)+'</option>'; }).join("")+
+        '</select>') +
+        field("رقم الهوية / الإقامة *", '<input class="form-input num" id="ct-f-idnum" value="'+_esc((d.legal||{}).idNumber||"")+'" dir="ltr" inputmode="numeric">') +
+      '</div>'+
+      '<div class="ct-form-row">'+
+        field("تاريخ انتهاء الهوية", '<input class="form-input" type="date" id="ct-f-idexp" value="'+_esc((d.legal||{}).idExpiry||"")+'">') +
+        field("الجنسية", '<input class="form-input" id="ct-f-nat" value="'+_esc((d.legal||{}).nationality||"")+'">') +
+      '</div>'
+    ) : (
+      '<div class="ct-form-row">'+
+        field("السجل التجاري *", '<input class="form-input num" id="ct-f-cr" value="'+_esc((d.legal||{}).crNumber||"")+'" dir="ltr">') +
+        field("تاريخ انتهاء السجل", '<input class="form-input" type="date" id="ct-f-crexp" value="'+_esc((d.legal||{}).crExpiry||"")+'">') +
+      '</div>'+
+      '<div class="ct-form-row">'+
+        field("الرقم الضريبي", '<input class="form-input num" id="ct-f-vat" value="'+_esc((d.legal||{}).vatNumber||"")+'" dir="ltr">') +
+        '<div></div>'+
+      '</div>'
+    ))+
+    '<div class="ct-form-row">'+
+      field("مسجَّل في ضريبة القيمة المضافة؟",
+        '<select class="form-input" id="ct-f-taxreg">'+
+          '<option value=""'+(d.taxRegistered===undefined||d.taxRegistered===null?' selected':'')+'>— يُستنتج من البيانات —</option>'+
+          '<option value="yes"'+(d.taxRegistered===true?' selected':'')+'>نعم — تُضاف ١٥٪ على عقوده</option>'+
+          '<option value="no"'+(d.taxRegistered===false?' selected':'')+'>لا — عقودُه بلا ضريبة</option>'+
+        '</select>') +
+      field("العنوان الوطني", '<input class="form-input" id="ct-f-addr" value="'+_esc((d.legal||{}).nationalAddress||"")+'">') +
+    '</div>'+
+    '<div class="ct-note">'+_icn("receipt","ic-sm")+' وضع الضريبة المقترَح لعقود هذا الطرف: <b>'+_esc((VAT_MODES[suggestVatMode(d)]||{}).short||"")+'</b> — يبقى قابلاً للتغيير على كل عقد.</div>'+
   '</div>'+
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("landmark","ic-sm")+' البيانات البنكية</div>'+ bankBlock +
@@ -851,7 +1023,7 @@ function retry(){ stopSync(); startSync(); paintVendors(); }
 function newVendor(){
   if(!canEdit()) return _toast("⚠ لا صلاحية لإضافة طرف","warn");
   _vOpen = null;
-  _vEdit = { name:"", kind:"subcontractor", legal:{}, bank:{}, docs:[], aliases:[], status:"active" };
+  _vEdit = { name:"", entityType:"establishment", kind:"subcontractor", legal:{}, bank:{}, docs:[], aliases:[], status:"active", taxRegistered:null };
   var el = document.getElementById("page-"+PAGE_VENDORS);
   if(el) el.innerHTML = vendorEditHTML(null);
 }
@@ -859,7 +1031,8 @@ function editVendor(){
   if(!canEdit()) return _toast("⚠ لا صلاحية للتعديل","warn");
   var v = vendorById(_vOpen); if(!v) return;
   _vEdit = {
-    name: v.name||"", kind: v.kind||"subcontractor",
+    name: v.name||"", entityType: normEntity(v.entityType), kind: v.kind||"subcontractor",
+    taxRegistered: (v.taxRegistered===true||v.taxRegistered===false) ? v.taxRegistered : null,
     legal: Object.assign({}, v.legal||{}),
     bank:  Object.assign({}, v.bank||{}),
     docs:  (Array.isArray(v.docs)?v.docs:[]).map(function(d){ return Object.assign({}, d); }),
@@ -874,11 +1047,25 @@ function cancelVendorEdit(){ _vEdit = null; paintVendors(); }
 function syncDraft(){
   if(!_vEdit) return;
   function val(id){ var e=document.getElementById(id); return e ? String(e.value||"").trim() : ""; }
+  function sel(id){ var e=document.getElementById(id); return e ? e.value : null; }
   _vEdit.name = val("ct-f-name");
   var k = document.getElementById("ct-f-kind"); if(k) _vEdit.kind = k.value;
+  var en = sel("ct-f-entity"); if(en!==null) _vEdit.entityType = normEntity(en);
   _vEdit.legal = _vEdit.legal || {};
-  _vEdit.legal.crNumber = val("ct-f-cr");
-  _vEdit.legal.vatNumber = val("ct-f-vat");
+  // حقولُ الصفة الأخرى تبقى محفوظةً كما هي: تبديلُ الصفة ذهاباً وإياباً لا يمحو
+  // سجلاً تجارياً أُدخل قبل قليل، ولا رقمَ هويةٍ أُدخل قبله.
+  if(normEntity(_vEdit.entityType) === "individual"){
+    var it = sel("ct-f-idtype"); if(it!==null) _vEdit.legal.idType = it;
+    if(document.getElementById("ct-f-idnum")) _vEdit.legal.idNumber = val("ct-f-idnum");
+    if(document.getElementById("ct-f-idexp")) _vEdit.legal.idExpiry = val("ct-f-idexp");
+    if(document.getElementById("ct-f-nat"))   _vEdit.legal.nationality = val("ct-f-nat");
+  } else {
+    if(document.getElementById("ct-f-cr"))    _vEdit.legal.crNumber = val("ct-f-cr");
+    if(document.getElementById("ct-f-crexp")) _vEdit.legal.crExpiry = val("ct-f-crexp");
+    if(document.getElementById("ct-f-vat"))   _vEdit.legal.vatNumber = val("ct-f-vat");
+  }
+  var tx = sel("ct-f-taxreg");
+  if(tx !== null) _vEdit.taxRegistered = (tx === "yes") ? true : (tx === "no" ? false : null);
   _vEdit.legal.nationalAddress = val("ct-f-addr");
   var al = val("ct-f-aliases");
   _vEdit.aliases = al ? al.split(/[،,]/).map(function(s){ return s.trim(); }).filter(Boolean) : [];
@@ -886,6 +1073,7 @@ function syncDraft(){
     _vEdit.bank = _vEdit.bank || {};
     _vEdit.bank.iban = val("ct-f-iban");
     _vEdit.bank.bankName = val("ct-f-bank");
+    _vEdit.bank.holder = val("ct-f-holder");
   }
   var tbl = document.getElementById("ct-docs-tbl");
   if(tbl){
@@ -896,7 +1084,9 @@ function syncDraft(){
     });
   }
 }
-function addDoc(){ syncDraft(); if(!_vEdit) return; _vEdit.docs.push({ type:"cr", number:"", expiry:"" }); paintDraft(); }
+/* تبديلُ الصفة يُعيد رسمَ النموذج بحقولها — بعد مزامنةِ ما كُتب، فلا يضيع شيء. */
+function setEntity(v){ syncDraft(); if(!_vEdit) return; _vEdit.entityType = normEntity(v); paintDraft(); }
+function addDoc(){ syncDraft(); if(!_vEdit) return; _vEdit.docs.push({ type:(docTypesFor(_vEdit.entityType)[0]||{key:"other"}).key, number:"", expiry:"" }); paintDraft(); }
 function delDoc(i){ syncDraft(); if(!_vEdit) return; _vEdit.docs.splice(i,1); paintDraft(); }
 function paintDraft(){
   var el = document.getElementById("page-"+PAGE_VENDORS); if(!el) return;
@@ -907,9 +1097,13 @@ function saveVendorEdit(){
   syncDraft();
   if(!_vEdit) return;
   var d = _vEdit;
-  if(!d.name){ _toast("⚠ اسم الطرف مطلوب","warn"); return; }
-  var clash = nameTaken(d.name, _vOpen);
-  if(clash){ _toast("⚠ الاسم مسجَّل بالفعل للطرف "+clash.id,"warn"); return; }
+  var ent = normEntity(d.entityType);
+  if(!d.name){ _toast(ent==="individual" ? "⚠ اسم الشخص مطلوب" : "⚠ اسم المنشأة مطلوب","warn"); return; }
+  var idInfo = identityOf(d);
+  if(!idInfo.number){ _toast("⚠ "+idInfo.label+" مطلوب — به يُعرَف الطرف ويُمنع تكراره","warn"); return; }
+  var dup = duplicateOf(d, _vOpen);
+  if(dup.block){ _toast("⚠ "+dup.reason,"warn"); return; }
+  if(dup.match) _toast("⚠ "+dup.reason,"warn");   // تشابهُ أسماء الأشخاص: تنبيهٌ لا منع
 
   var btn = document.getElementById("ct-save-btn");
   if(btn){ btn.disabled = true; btn.textContent = "جارٍ الحفظ…"; }
@@ -939,7 +1133,8 @@ function saveVendorEdit(){
     });
     return chain.then(function(){
       var payload = {
-        name: d.name, kind: d.kind, aliases: d.aliases,
+        name: d.name, entityType: ent, kind: d.kind, aliases: d.aliases,
+        taxRegistered: (d.taxRegistered===true||d.taxRegistered===false) ? d.taxRegistered : null,
         legal: d.legal || {}, docs: d.docs || [],
         status: d.status || "active"
       };
@@ -1029,6 +1224,7 @@ function injectCSS(){
 ".ct-doc.s-soon{background:var(--sla-warn-bg);color:var(--sla-warn);border-color:var(--sla-warn-bd)}",
 ".ct-doc.s-expired{background:var(--sla-crit-bg);color:var(--sla-crit);border-color:var(--sla-crit-bd)}",
 ".ct-doc.s-none{background:var(--surface2);color:var(--muted);border-color:var(--border)}",
+".ct-row-id td{background:var(--surface2)}",
 /* الأقسام والجداول */
 ".ct-sec{margin-bottom:14px}",
 ".ct-sec-h{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:800;color:var(--primary);margin-bottom:12px;padding-bottom:9px;border-bottom:1px solid var(--border)}",
@@ -1162,6 +1358,7 @@ window.contracts = {
   openVendor: openVendor, backToVendors: backToVendors, filterVendors: filterVendors,
   newVendor: newVendor, editVendor: editVendor, cancelVendorEdit: cancelVendorEdit,
   saveVendorEdit: saveVendorEdit, addDoc: addDoc, delDoc: delDoc, changeStatus: changeStatus,
+  setEntity: setEntity,
   vendors: vendors, vendorById: vendorById,
   // الصلاحيات
   canView: canView, canEdit: canEdit, canBank: canBank, canStatus: canStatus,
@@ -1179,10 +1376,18 @@ window.contracts = {
   _vendorComplianceState: vendorComplianceState,
   _vendorEligibility: vendorEligibility,
   _normName: normName,
+  _identityOf: identityOf,
+  _suggestVatMode: suggestVatMode,
+  _allExpiring: allExpiring,
+  _duplicateOf: duplicateOf,
+  _docTypesFor: docTypesFor,
+  _normEntity: normEntity,
   // الثوابت
   _VAT_RATE: VAT_RATE,
   _VAT_MODES: VAT_MODES,
   _ENGAGEMENTS: ENGAGEMENTS,
+  _ENTITY_TYPES: ENTITY_TYPES,
+  _ID_TYPES: ID_TYPES,
   _VENDOR_KINDS: VENDOR_KINDS,
   _VENDOR_STATUS: VENDOR_STATUS,
   _DOC_TYPES: DOC_TYPES,

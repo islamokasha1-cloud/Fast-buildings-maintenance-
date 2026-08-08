@@ -2,7 +2,7 @@
 // (نفسُ مُحاكي browser-scenarios.mjs — لا يلمس الإنتاج إطلاقاً).
 //   node contracts-check.mjs
 //
-// المرحلة ١: سجلُّ الأطراف — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
+// المرحلة ١: سجلُّ الأطراف — منشآتٍ **وأشخاصاً** (التعاقدُ بالهوية لا بالسجل التجاري) — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
 // و**الرقمُ المرسوم = الرقمُ المحسوب** (شريطُ الأرقام مقابل الدوالّ النقية)، والتطبيعُ
 // العربيُّ في البحث، وشرائطُ الحالة من توكنز SLA، والثيمُ الداكن، والجوّالُ بلا قصّ.
 import { chromium } from 'playwright-core';
@@ -78,8 +78,20 @@ await page.evaluate(() => {
     docs: [{ type: 'cr', number: '1010777888', expiry: '2029-03-10' }]
   };
   window.__store[V + '/VND-0004'] = {
-    name: 'ورشة الحرفي للألوميتال', kind: 'subcontractor', status: 'active',
+    name: 'ورشة الحرفي للألوميتال', entityType: 'establishment', kind: 'subcontractor', status: 'active',
     legal: { crNumber: '1128456' }, docs: []
+  };
+  // ── أشخاصٌ طبيعيّون: التعاقدُ بالهوية/الإقامة، بلا سجلٍّ تجاريٍّ ولا ضريبة ──
+  window.__store[V + '/VND-0005'] = {
+    name: 'محمد أحمد الغامدي', entityType: 'individual', kind: 'subcontractor', status: 'active',
+    legal: { idType: 'national', idNumber: '1045667788', idExpiry: '2029-02-11', nationality: 'سعودي' },
+    bank: { iban: 'SA4420000001234567891234', bankName: 'الراجحي', holder: 'محمد أحمد الغامدي' },
+    docs: [{ type: 'profCert', number: 'PC-77', expiry: '2027-06-01' }]
+  };
+  window.__store[V + '/VND-0006'] = {
+    name: 'راجو كومار', entityType: 'individual', kind: 'subcontractor', status: 'active',
+    legal: { idType: 'iqama', idNumber: '2398112233', idExpiry: '2026-08-20', nationality: 'هندي' },
+    docs: [{ type: 'workPermit', number: 'WP-441', expiry: '2026-08-20' }]
   };
 });
 
@@ -107,7 +119,9 @@ check('صفحة سجل الأطراف صارت النشطة', await page.evaluat
 }));
 
 const listTxt = await page.textContent('#page-vendors').catch(() => '');
-check('الأطراف الأربعة معروضة', ['الأنوار', 'البناء الحديث', 'الإتقان', 'الحرفي'].every(n => listTxt.includes(n)));
+check('الأطراف الستة معروضة (منشآتٌ وأشخاص)',
+  ['الأنوار', 'البناء الحديث', 'الإتقان', 'الحرفي', 'محمد أحمد الغامدي', 'راجو كومار'].every(n => listTxt.includes(n)));
+check('★ الشخصُ يُعرَض برقم هويته لا بسجلٍّ تجاريّ', listTxt.includes('1045667788'));
 const stats = await page.evaluate(() => Array.from(document.querySelectorAll('#page-vendors .ct-stat')).map(e => e.textContent.replace(/\s+/g, ' ').trim()));
 check('شريط الأرقام يعرض العدّ والوثائق', stats.length === 3, stats.join(' | '));
 
@@ -122,6 +136,52 @@ const drawn = await page.evaluate(() => Array.from(document.querySelectorAll('#p
 check('★ الرقم المرسوم = الرقم المحسوب (أطراف/منتهية/توشك)',
   drawn[0] === expected.n && drawn[1] === expected.expired && drawn[2] === expected.soon,
   `مرسوم ${drawn.join('/')} · محسوب ${expected.n}/${expected.expired}/${expected.soon}`);
+
+// ── الشخصُ الطبيعيّ: كلُّ الفروق الثلاثة على الشاشة ──
+await page.evaluate(() => window.contracts.openVendor('VND-0006'));
+await page.waitForTimeout(900);
+const indivTxt = await page.textContent('#page-vendors').catch(() => '');
+check('★ بطاقةُ الشخص تعرض «إقامة» لا «السجل التجاري»',
+  indivTxt.includes('إقامة') && !indivTxt.includes('السجل التجاري'));
+check('★ وتعرض الجنسية بدل الرقم الضريبي',
+  indivTxt.includes('الجنسية') && indivTxt.includes('هندي') && !indivTxt.includes('الرقم الضريبي'));
+check('★ ووضعُ الضريبة المقترَح «بلا ضريبة»', indivTxt.includes('بلا ضريبة'));
+check('★ وإقامتُه الموشكةُ على الانتهاء تُنبَّه', /توشك|تنتهي بعد/.test(indivTxt));
+await page.screenshot({ path: `${SHOTS}/07-individual-card.png`, fullPage: true });
+
+// نموذجُ الشخص: حقولُ الهوية حاضرةٌ وحقولُ المنشأة غائبة
+await page.evaluate(() => window.contracts.editVendor());
+await page.waitForTimeout(800);
+const f = await page.evaluate(() => ({
+  idnum: !!document.getElementById('ct-f-idnum'), idexp: !!document.getElementById('ct-f-idexp'),
+  nat: !!document.getElementById('ct-f-nat'), cr: !!document.getElementById('ct-f-cr'),
+  vat: !!document.getElementById('ct-f-vat'), holder: !!document.getElementById('ct-f-holder')
+}));
+check('★ نموذجُ الشخص: هويةٌ وانتهاءٌ وجنسيةٌ حاضرة، وسجلٌّ ورقمٌ ضريبيٌّ غائبان',
+  f.idnum && f.idexp && f.nat && !f.cr && !f.vat, JSON.stringify(f));
+check('حقلُ «اسم صاحب الحساب» حاضرٌ للشخص', f.holder);
+await page.screenshot({ path: `${SHOTS}/08-individual-edit.png`, fullPage: true });
+
+// تبديلُ الصفة يبدّل الحقول ولا يمحو ما كُتب
+await page.evaluate(() => window.contracts.setEntity('establishment'));
+await page.waitForTimeout(700);
+const g = await page.evaluate(() => ({ cr: !!document.getElementById('ct-f-cr'), idnum: !!document.getElementById('ct-f-idnum') }));
+check('★ تبديلُ الصفة إلى «منشأة» يُظهر السجل التجاري ويُخفي الهوية', g.cr && !g.idnum);
+const kept = await page.evaluate(() => { window.contracts.setEntity('individual'); return null; });
+await page.waitForTimeout(700);
+check('★ والرجوعُ لصفة «شخص» يحتفظ برقم هويته (لا يُمحى بتبديلٍ عابر)',
+  await page.evaluate(() => (document.getElementById('ct-f-idnum') || {}).value === '2398112233'));
+await page.evaluate(() => window.contracts.cancelVendorEdit());
+await page.evaluate(() => window.contracts.backToVendors());
+await page.waitForTimeout(700);
+
+// مرشّحُ الصفة
+await page.evaluate(() => window.contracts.filterVendors('entity', 'individual'));
+await page.waitForTimeout(700);
+check('★ مرشّحُ «شخص» يعرض الشخصين وحدهما',
+  await page.evaluate(() => document.querySelectorAll('#page-vendors .ct-tile').length) === 2);
+await page.evaluate(() => window.contracts.filterVendors('entity', ''));
+await page.waitForTimeout(600);
 
 const rails = await page.evaluate(() => Array.from(document.querySelectorAll('#page-vendors .ct-tile')).map(e => e.style.getPropertyValue('--rail')));
 check('شرائط الحالة مضبوطة على توكنز SLA', rails.every(r => /var\(--sla-|var\(--muted\)/.test(r)), rails.join(' '));

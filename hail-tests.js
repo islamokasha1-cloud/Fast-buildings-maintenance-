@@ -5508,6 +5508,58 @@ function contractsPhase1() {
   T("تطبيعُ الاسم يوحّد الهمزة والتاء المربوطة والياء والمسافات",
     C._normName("مؤسسة  الأنوار") === C._normName("مؤسسه الانوار"));
 
+  /* ════════════════════════════════════════════════════════════
+     التعاقدُ مع شخصٍ طبيعيٍّ لا مع منشأةٍ فقط
+     ثلاثةُ فروقٍ جوهريةٍ يجب أن يحرسها الاختبار: مستندُ الهوية،
+     ووضعُ الضريبة المقترَح، ومفتاحُ التفرّد.
+     ════════════════════════════════════════════════════════════ */
+  const person = { entityType: "individual", name: "محمد أحمد الغامدي", legal: { idType: "iqama", idNumber: "2401234567", idExpiry: "2026-09-10" } };
+  const firm = { entityType: "establishment", name: "مؤسسة الأنوار", legal: { crNumber: "1010234567", vatNumber: "300012" } };
+
+  T("★ هويةُ الشخص تُقرأ من الإقامة/الهوية، وهويةُ المنشأة من السجل التجاري",
+    C._identityOf(person).number === "2401234567" && C._identityOf(person).label === "إقامة" &&
+    C._identityOf(firm).number === "1010234567" && C._identityOf(firm).label === "السجل التجاري");
+  T("صفةٌ مجهولةٌ أو غائبةٌ ترتدّ إلى «منشأة» (توافقُ البيانات القديمة)",
+    C._normEntity(undefined) === "establishment" && C._identityOf({ legal: { crNumber: "9" } }).number === "9");
+
+  T("★ الشخصُ يُقترَح له عقدٌ بلا ضريبة (none) — لا يُستخرَج ١٥٪ من مستحقّ غير مسجَّل",
+    C._suggestVatMode(person) === "none");
+  T("★ المنشأةُ ذات الرقم الضريبيّ يُقترَح لها excl، وبلا رقمٍ ضريبيٍّ none",
+    C._suggestVatMode(firm) === "excl" &&
+    C._suggestVatMode({ entityType: "establishment", legal: { crNumber: "1" } }) === "none");
+  T("★ التصريحُ اليدويُّ يتقدّم على الاستنتاج (شخصٌ مسجَّلٌ ضريبياً ⇐ excl)",
+    C._suggestVatMode({ entityType: "individual", taxRegistered: true }) === "excl");
+
+  T("★ انتهاءُ الهوية داخلَ محرّك الانتهاء نفسِه (لا إقامةٌ تنتهي بلا تنبيه)",
+    C._allExpiring(person).length === 1 && C._allExpiring(person)[0]._identity === true);
+  T("★ إقامةٌ منتهيةٌ تُنبّه بنصٍّ صريحٍ وتبقى تحذيراً لا منعاً",
+    (() => {
+      const e = C._vendorEligibility({ entityType: "individual", name: "س", legal: { idType: "iqama", idNumber: "2", idExpiry: "2026-07-01" } }, today);
+      return e.block === false && e.ok === false && /إقامة منتهية/.test(e.reason);
+    })());
+  T("طرفٌ بلا رقمِ هويةٍ يُنبَّه عليه", /غير مسجَّل/.test(C._vendorEligibility({ entityType: "individual", name: "س", legal: {} }, today).reason));
+
+  /* مفتاحُ التفرّد: رقمُ الهوية لا الاسم — شخصان قد يتشابهان بمشروعية */
+  const pool = [{ id: "VND-0001", ...person }, { id: "VND-0002", ...firm }];
+  const sameName = C._duplicateOf({ entityType: "individual", name: "محمد أحمد الغامدي", legal: { idNumber: "2409999999" } }, null, pool);
+  T("★ سميٌّ برقم هويةٍ مختلف: تنبيهٌ **لا يمنع** (منعُه يوقف تسجيل شخصٍ حقيقيّ)",
+    sameName.match && sameName.byId === false && sameName.block === false);
+  T("★ رقمُ هويةٍ مكرَّرٌ: تكرارٌ مؤكَّدٌ **يُمنَع**",
+    C._duplicateOf({ entityType: "individual", name: "اسمٌ آخر", legal: { idNumber: "2401234567" } }, null, pool).block === true);
+  T("★ اسمُ منشأةٍ مكرَّرٌ يُمنَع (اسمُها معرّفُها في سجلها)",
+    C._duplicateOf({ entityType: "establishment", name: "مؤسسه الانوار", legal: { crNumber: "999" } }, null, pool).block === true);
+  T("طرفٌ يُقارَن بنفسه عند التعديل لا يُعدّ تكراراً",
+    C._duplicateOf({ entityType: "individual", name: "محمد أحمد الغامدي", legal: { idNumber: "2401234567" } }, "VND-0001", pool).match === null);
+
+  /* الوثائقُ تتبع الصفة */
+  const dIndiv = C._docTypesFor("individual").map(d => d.key);
+  const dFirm = C._docTypesFor("establishment").map(d => d.key);
+  T("★ وثائقُ المنشأة لا تُعرَض لشخص (لا زكاةَ ولا سعودةَ ولا سجلّ)",
+    !dIndiv.includes("cr") && !dIndiv.includes("zakat") && !dIndiv.includes("saudization") && !dIndiv.includes("gosi"));
+  T("★ ووثائقُ الشخص لا تُعرَض لمنشأة (لا رخصةَ عملٍ ولا هوية)",
+    !dFirm.includes("workPermit") && !dFirm.includes("identity"));
+  T("والوثائقُ العامّة تظهر للصفتين", dIndiv.includes("insurance") && dFirm.includes("insurance"));
+
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
   const rawHex = (css.match(/#[0-9a-fA-F]{3,8}\b/g) || []);
