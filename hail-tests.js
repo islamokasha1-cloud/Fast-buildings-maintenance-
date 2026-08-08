@@ -4865,6 +4865,104 @@ function financeAuditTests() {
    مستمعون يُفكّون عند الخروج · حسابُ البطاقة صحيح · نافذةٌ مُعلَنة.
    ════════════════════════════════════════════════════════════════════ */
 /* ════════════════════════════════════════════════════════════════════
+   v18.9aj) طابورُ الرفع المؤجَّل — لا رابطَ محلّيٍّ (blob:) في قاعدة البيانات
+   ════════════════════════════════════════════════════════════════════ */
+function photoQueueGuards() {
+  H("v18.9aj) طابور الرفع المؤجَّل + الصورة المتعذّرة");
+
+  const fs2 = require("fs"), path2 = require("path"), vm2 = require("vm");
+  const PQ_PATH = path2.resolve(path2.dirname(IDX), "photo-queue.js");
+  const TECH2 = fs2.existsSync(path2.resolve(path2.dirname(IDX), "tech-app.html"))
+    ? fs2.readFileSync(path2.resolve(path2.dirname(IDX), "tech-app.html"), "utf8") : "";
+  T("★ aj: photo-queue.js موجود", fs2.existsSync(PQ_PATH));
+  if (!fs2.existsSync(PQ_PATH)) return;
+  const pq = fs2.readFileSync(PQ_PATH, "utf8");
+  try { new vm2.Script(pq); T("صياغة photo-queue.js سليمة", true); }
+  catch (e) { T("صياغة photo-queue.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  // ── الحارس الأهمّ: لا موضعَ واحدٌ يحفظ رابطاً محلّياً في قاعدة البيانات ──
+  // المعاينة داخل الجلسة (<img src=...>) مسموحة — التحريمُ على ما يُكتب في Firestore.
+  const persistBlob = [
+    /finalizedUrl=p\.storageUrl\|\|p\.preview/,
+    /storageUrl\|\|pendingEditPhoto\.preview/,
+    /storageUrl\|\|pendingTicketPhoto\.preview/,
+    /const url=p\.storageUrl\|\|p\.preview;/,
+    /map\(p=>p\.storageUrl\|\|p\.preview\)\.filter\(Boolean\)/
+  ];
+  T("★ aj: index.html لا يحفظ رابطاً محلّياً (blob:) في أي مسار",
+    persistBlob.every(re => !re.test(HTML)),
+    (persistBlob.find(re => re.test(HTML)) || "").toString());
+  T("★ aj: tech-app.html لا يحفظ رابطاً محلّياً (blob:) في أي مسار",
+    !TECH2 || persistBlob.every(re => !re.test(TECH2)));
+  T("aj: المعاينة داخل الجلسة ما زالت تعرض الصورة قبل الرفع (لم نكسر التجربة)",
+    /<img src="\$\{safeUrl\(p\.storageUrl\|\|p\.preview\)\}"/.test(HTML));
+
+  // ── الصور الفاشلة تدخل الطابور في كل المسارات الستّة ──
+  T("★ aj: إغلاق البلاغ يُدرج الفاشلة في الطابور ويعدّ ما دخل فعلاً",
+    /_deferred=readyPhotos\.filter\(p=>!p\.storageUrl\)\.filter\(p=>_queuePhoto\(p, id, "photos", "arrayUnion"\)\)/.test(HTML));
+  T("aj: إنشاء البلاغ · تعديل صورته · تعديل صور الإغلاق · الخلفية — كلُّها تُدرج",
+    /_queuePhoto\(pendingTicketPhoto, id, "ticketPhoto", "set"\)/.test(HTML) &&
+    /_queuePhoto\(pendingEditPhoto, t\.id, "ticketPhoto", "set"\)/.test(HTML) &&
+    /editClosingPendingNew\.filter\([^)]*\)\.forEach\(p=>_queuePhoto\(p, t\.id, "photos", "arrayUnion"\)\)/.test(HTML) &&
+    /else _queuePhoto\(p, ticketId, "photos", "arrayUnion"\)/.test(HTML));
+  T("★ aj: تطبيق الفنيين يُدرج أيضاً (الميدانُ أضعفُ شبكةً من المكتب)",
+    !TECH2 || (/_queuePhoto\(p, id, "photos", "arrayUnion"\)/.test(TECH2) && /function _queuePhoto\(/.test(TECH2)));
+  T("★ aj: جسمُ الصورة ومسارُها محفوظان على الكائن (بلا وقودٍ لا رفعَ لاحق)",
+    (HTML.match(/\.blob=blob; \w+\.path=_path;/g) || []).length >= 4 &&
+    (!TECH2 || /photoObj\.blob=blob; photoObj\.path=_path;/.test(TECH2)));
+  T("aj: التنبيه صريحٌ ولا يَعِد بحفظٍ لم يحدث (يُعدّ الداخلُ للطابور فقط)",
+    /_deferred\.length>0/.test(HTML) && /حُفظت على الجهاز وتُرفَع تلقائياً/.test(HTML));
+  T("★ aj: _queuePhoto تُرجع false بلا جسمٍ للصورة (فلا يُعلَن حفظٌ وهميّ)",
+    /if\(!p \|\| !p\.blob \|\| !p\.path \|\| !docId\) return false;/.test(HTML));
+
+  // ── سلوك الوحدة نفسها ──
+  T("★ aj: الإلحاق بـ arrayUnion على الوثيقة الطازجة (لا يمحو صورَ جهازٍ آخر)",
+    /FV\.arrayUnion\(url\)/.test(pq) && !/photos:\s*urls/.test(pq));
+  T("★ aj: set+merge لا update (وثيقةٌ لم تصل بعدُ تُفشل update)",
+    /\.set\(patch, \{ merge:true \}\)/.test(pq) && !/\.update\(patch\)/.test(pq));
+  T("★ aj: الحذفُ من الطابور بعد نجاح الإلحاق لا قبله",
+    /_uploadOne\(item\)[\s\S]{0,80}?\.then\(\(\)=>\{ ok\+\+; return _del\(item\.id\); \}\)/.test(pq));
+  T("★ aj: لا إسقاطَ تلقائيَّ لعنصر — تتوقّف المحاولةُ ويبقى العنصر",
+    /tries\|\|0\) < MAX_TRIES_AUTO/.test(pq) && !/tries[^\n]*>[^\n]*MAX_TRIES_AUTO[^\n]*_del/.test(pq));
+  T("aj: يُعاد المحاولة عند عودة الشبكة وعند العودة للتبويب",
+    /addEventListener\("online"/.test(pq) && /visibilitychange/.test(pq));
+  T("★ aj: المؤقّت يعمل فقط ما دام في الطابور عنصر (لا نبضَ دوريٌّ عبثيّ)",
+    /if\(!n\)\{ if\(_timer\)\{ clearInterval\(_timer\); _timer=null; \} return; \}/.test(pq));
+  T("aj: الإدراج يرفض ما لا يمكن رفعه لاحقاً بدل إيهام المستخدم",
+    /if\(!o\.blob \|\| !o\.storagePath \|\| !o\.collection \|\| !o\.docId \|\| !o\.field\)/.test(pq));
+  T("aj: لا رفعَ ونحن دون اتّصال (توفيرُ محاولاتٍ فاشلة)", /navigator\.onLine === false/.test(pq));
+
+  // ── الوحدة موسومةٌ ومربوطةٌ بالتطبيقين ──
+  const pqBuild = (pq.match(/const MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
+  T("★ aj: بصمة photo-queue.js تطابق APP_VERSION", pqBuild === VER, `build=${pqBuild} APP_VERSION=${VER}`);
+  T("aj: مسجَّلة في كاشف الوحدات القديمة",
+    /\{name:"photo-queue\.js", get:function\(\)\{ return window\.photoQueue; \}\}/.test(HTML));
+  T("★ aj: مُحمَّلةٌ ومُهيّأةٌ في التطبيقين",
+    /<script src="photo-queue\.js\?v=/.test(HTML) && /window\.photoQueue\.configure\(/.test(HTML) &&
+    (!TECH2 || (/<script src="photo-queue\.js\?v=/.test(TECH2) && /window\.photoQueue\.configure\(/.test(TECH2))));
+
+  // ── المربّع الصريح بدل الصورة المكسورة ──
+  T("★ aj: imgBroken تستبدل الصورة المتعذّرة بمربّعٍ صريح",
+    /function imgBroken\(el\)\{/.test(HTML) && /تعذّر تحميل الصورة/.test(HTML) &&
+    /host\.classList\.add\("photo-dead"\)/.test(HTML));
+  T("★ aj: الخانةُ المتعذّرة تُطوى عند الطباعة (لا فراغاتٌ مكسورةٌ للعميل)",
+    /@media print\{\.photo-dead\{display:none!important\}\}/.test(HTML));
+  T("aj: تُستدعى دفاعياً فلا ترمي في نافذة الطباعة المنبثقة",
+    /onerror="window\.imgBroken&&imgBroken\(this\)"/.test(HTML) &&
+    !/onerror="imgBroken\(this\)"/.test(HTML));
+  T("★ aj: كلُّ صور التقرير المصوَّر موصولةٌ بالحارس (بلاغ · إغلاق · نظافة)",
+    (HTML.match(/onerror="window\.imgBroken&&imgBroken\(this\)"/g) || []).length >= 4 &&
+    (!_coSrcAj() || /onerror="window\.imgBroken&&imgBroken\(this\)"/.test(_coSrcAj())));
+  T("aj: الحارس لا يعيد المعالجة مرّتين لنفس الصورة",
+    /if\(!el \|\| el\.dataset\.brokenHandled\) return;/.test(HTML));
+}
+function _coSrcAj() {
+  const fs3 = require("fs"), p3 = require("path");
+  const f = p3.resolve(p3.dirname(IDX), "cleaning-operations.js");
+  return fs3.existsSync(f) ? fs3.readFileSync(f, "utf8") : "";
+}
+
+/* ════════════════════════════════════════════════════════════════════
    ختمُ الإصدار الآليّ — رقمٌ يُشتقّ ولا يُؤلَّف (sync-version.mjs)
    ════════════════════════════════════════════════════════════════════ */
 function versionStampGuards() {
@@ -5218,8 +5316,13 @@ function tvWallGuards() {
     />مركز العمليات — كل المشاريع<\/div>/.test(HTML) &&
     /🛰️<\/span> مركز العمليات</.test(HTML));
   // (سطرُ APP_VERSION يذكر الاسم القديم عمداً — فهو يوثّق إعادةَ التسمية نفسها)
+  // الاستثناء كان يشمل سطرَ APP_VERSION لأن سجلّ التغييرات كان يسكنه. بعد نقل
+  // السجلّ إلى تعليقٍ تاريخيٍّ مجمَّد (ختمُ الإصدار الآليّ) صار الاستثناء عليه —
+  // والمقصدُ واحد: الاسمُ القديم ممنوعٌ في **نصوص الواجهة** لا في سجلٍّ تاريخيّ.
   T("★ ai: لا بقايا لاسم «جدار المشاريع» في نصوص الواجهة",
-    !/جدار المشاريع/.test(HTML.replace(/const APP_VERSION = "[^"]+";[^\n]*/, "")),
+    !/جدار المشاريع/.test(
+      HTML.replace(/\/\* ══ سجلّ الإصدارات التاريخي[\s\S]*?\*\//, "")
+          .replace(/const APP_VERSION = "[^"]+";[^\n]*/, "")),
     "نصٌّ ظاهرٌ بالاسم القديم");
   T("★ ai: علامةُ الرادار حلّت محلّ أيقونة الشاشة في زرّ البوّابة",
     /<circle cx="12" cy="12" r="2\.1" fill="currentColor" stroke="none"\/>/.test(HTML));
@@ -5270,6 +5373,7 @@ function tvWallGuards() {
   perfContractPhase1();
   perfContractPhase2();
   tvWallGuards();
+  photoQueueGuards();
   versionStampGuards();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
