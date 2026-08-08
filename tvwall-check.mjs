@@ -102,7 +102,9 @@ await page.evaluate(() => {
   const projs = window.__store[PROJECTS_DOC].projects;
   projs.push({ id: 'clean1', name: 'أعمال النظافة', desc: 'نظافة المباني', icon: '', type: 'cleaning' });
   window.__store[PROJECTS_DOC] = { projects: projs };
-  window.__store['meta/clean1_settings'] = { buildings: ['مبنى الإدارة', 'مبنى الخدمات', 'المسجد'] };
+  // ١٧ مبنى: خمسةُ صفوفٍ في أربعة أعمدة — الحالةُ التي كانت تُقصّ فيها بطاقةُ المبنى الأخير
+  window.__store['meta/clean1_settings'] = { buildings: ['مبنى الإدارة', 'مبنى الخدمات', 'المسجد'].concat(
+    Array.from({ length: 14 }, (_, i) => 'مبنى ' + (i + 1))) };
   const T = 'clean1_cleaning_tasks';
   const mk = (id, name, bld, due, extra) => {
     window.__store[T + '/' + id] = Object.assign({ id, name, building: bld, workType: 'نظافة الأرضيات',
@@ -220,10 +222,22 @@ check('★ حلقةُ الجاهزية على تغطية اليوم (وإجاز�
 check('★ تذييلُ الحلقة بمفردات النظافة',
   cpanel.foot.join('|') === 'مستحقّة الآن|مهام نشطة|نُفِّذت اليوم', cpanel.foot.join(' | '));
 check('★ حالةُ المباني تَعدّ المهامَّ المستحقّة لا البلاغات',
-  cpanel.blds.length === 3 &&
+  cpanel.blds.length === 17 &&
   new RegExp('^' + (HOL ? 0 : 2)).test(cpanel.blds[0]) &&
   new RegExp('^' + (HOL ? 0 : 1)).test(cpanel.blds[1]) && /^0/.test(cpanel.blds[2]),
   cpanel.blds.join(' | '));
+const bldFit = await page.evaluate(() => {
+  const g = document.getElementById('tvl-proj-blds');
+  const gb = g.getBoundingClientRect();
+  const bad = Array.from(g.querySelectorAll('.tvw-bld')).filter(b => {
+    const r = b.getBoundingClientRect();
+    return r.bottom > gb.bottom + 1 || r.top < gb.top - 1;
+  });
+  return { total: g.querySelectorAll('.tvw-bld').length, bad: bad.length, h: Math.round(gb.height) };
+});
+check('★ لا بطاقةَ مبنًى مقصوصةً خارج شبكتها (١٧ مبنى)',
+  bldFit.total === 17 && bldFit.bad === 0, JSON.stringify(bldFit));
+
 check('★ شريطُ اللوحة بمقاييس النظافة لا البلاغات',
   cpanel.totals.includes('جدول اليوم') && cpanel.totals.includes('تغطية اليوم') && !cpanel.totals.includes('بلاغات الشهر'),
   cpanel.totals.slice(0, 90));
@@ -333,6 +347,13 @@ check('★ بيانات المشروع حُمِّلت (٦ بلاغات لحائ�
 // زرّ القائمة الجانبية داخل التطبيق
 check('★ زرّ المركز ظاهر في القائمة الجانبية داخل المشروع',
   await page.evaluate(() => { const b = document.getElementById('nav-tvwall-btn'); return !!b && b.style.display !== 'none'; }));
+check('★ أيقونةُ المركز svg من مجموعة المنصة (لا إيموجي)',
+  await page.evaluate(() => {
+    const i = document.querySelector('#nav-tvwall-btn .s-icon');
+    const g = document.getElementById('tvwall-btn-ico');
+    return !!i && !!i.querySelector('svg') && !/[\u{1F300}-\u{1FAFF}]/u.test(i.textContent || '')
+        && !!g && !!g.querySelector('svg');
+  }));
 await page.evaluate(() => openTVWall('app'));
 await page.waitForTimeout(1500);
 check('★ المركز يُفتح من داخل التطبيق', await page.isVisible('#tvwall-screen').catch(() => false));
