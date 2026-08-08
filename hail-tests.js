@@ -5316,6 +5316,9 @@ function tvWallGuards() {
       /<span class="s-icon"><\/span> مركز العمليات</.test(HTML) &&
       /var tw=document\.getElementById\('nav-tvwall-btn'\);[\s\S]{0,160}?_svgIcon\('radar'\)/.test(HTML),
       "الزرُّ بلا data-page فلا يلتقطه applyNavIcons — يُضبَط صراحةً");
+    T("★ ak: أيقونةُ زرّ البوّابة لها أبعادٌ صريحة (_svgIcon يُخرج svg بلا أبعاد)",
+      /#tvwall-btn-ico svg\{[^}]*width:2\dpx[^}]*height:2\dpx/.test(HTML),
+      "svg بلا أبعادٍ في حاوية flex ينكمش إلى صفرٍ فيبدو المربّعُ فارغاً");
     T("★ ak: زرُّ البوّابة يقرأ العلامة نفسَها (لا نسخةَ ثانيةً من المسار)",
       /id="tvwall-btn-ico"/.test(HTML) && /_wallIco\.innerHTML = _svgIcon\("radar"\)/.test(HTML) &&
       (HTML.match(/circle cx="12" cy="12" r="2\.1"/g) || []).length === 1);
