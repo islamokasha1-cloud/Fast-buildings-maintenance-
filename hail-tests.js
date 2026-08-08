@@ -4941,8 +4941,8 @@ function tvWallGuards() {
     /_tvwall\.ret="none";\s*\/\/ لا يُعاد إظهار بوّابة المشاريع/.test(HTML));
 
   // ── (٦) حسابُ البطاقة — تنفيذٌ حقيقيٌّ لا قراءة ──
-  const calcSrc = (HTML.match(/function _tvwallCalc\(pid\)\{[\s\S]*?\n\}/) || [])[0];
-  T("★ ag: _tvwallCalc موجودة", !!calcSrc);
+  const calcSrc = (HTML.match(/function _tvwallCalcTickets\(pid\)\{[\s\S]*?\n\}/) || [])[0];
+  T("★ ag: حاسبةُ بلاغات المشروع موجودة", !!calcSrc);
   if (calcSrc && thSrc) {
     const today = new Date().toISOString().slice(0, 10);
     const month = today.slice(0, 7);
@@ -4955,7 +4955,7 @@ function tvWallGuards() {
       { id: "T5", status: "مغلق",        createdAt: prevMonth + "-05T08:00:00.000Z", closedAt: prevMonth + "-06T08:00:00.000Z" }, // شهرٌ سابق
     ];
     const F = new Function("_tvwall", "isOverdue", "tvHealth",
-      calcSrc + "; return _tvwallCalc;")({ data: { p1: rows } }, t => t.id === "T1", new Function(thSrc + "; return tvHealth;")());
+      calcSrc + "; return _tvwallCalcTickets;")({ data: { p1: rows } }, t => t.id === "T1", new Function(thSrc + "; return tvHealth;")());
     const m = F("p1");
     T("★ ag: النشط = غير المؤرشف وغير المغلق", m.openN === 2, "openN=" + m.openN);
     T("★ ag: المؤرشف لا يُحسب نشطاً", m.openN === 2 && rows[3].archived === true);
@@ -4967,10 +4967,10 @@ function tvWallGuards() {
       m.monthN === 4 && m.monthClosed === 1 && m.rate === 25, `monthN=${m.monthN} closed=${m.monthClosed} rate=${m.rate}`);
     T("★ ag: النسبة محصورةٌ ٠–١٠٠ ولا تتجاوز المئة أبداً", m.rate >= 0 && m.rate <= 100);
     T("★ ag: شهرٌ بلا بلاغات ⇒ لا نسبةَ ملفَّقة (null لا صفر)",
-      new Function("_tvwall", "isOverdue", "tvHealth", calcSrc + "; return _tvwallCalc;")
+      new Function("_tvwall", "isOverdue", "tvHealth", calcSrc + "; return _tvwallCalcTickets;")
         ({ data: { p2: [] } }, () => false, new Function(thSrc + "; return tvHealth;")())("p2").rate === null);
     T("★ ag: مشروعٌ لم تصل لقطتُه بعد ⇒ null (حالةُ تحميلٍ لا أصفار)",
-      new Function("_tvwall", "isOverdue", "tvHealth", calcSrc + "; return _tvwallCalc;")
+      new Function("_tvwall", "isOverdue", "tvHealth", calcSrc + "; return _tvwallCalcTickets;")
         ({ data: {} }, () => false, new Function(thSrc + "; return tvHealth;")())("nope") === null);
     T("★ ag: صحّةُ البطاقة من tvHealth (متأخرٌ واحد ⇒ متابعة)", m.health.key === "watch");
   }
@@ -5030,9 +5030,9 @@ function tvWallGuards() {
     T("★ ai: تعيد استعمال مكوّنات لوحة العرض TV (لا نسخةَ ثانيةً من التصميم)",
       /tvw-kpi /.test(wallSrc) && /tvw-bld /.test(wallSrc) &&
       /class="tvw-stage"/.test(HTML.slice(HTML.indexOf('id="tvl-screen-proj"'), HTML.indexOf('id="tvl-screen-proj"') + 3000)));
-    T("★ ai: حلقةُ الجاهزية على إنجاز بلاغات الشهر، وصفرٌ عند غياب البيانات لا كذباً",
-      /const to=C\*\(1-\(m\.rate==null\?0:m\.rate\)\/100\);/.test(wallSrc) &&
-      /setTx\("tvl-proj-bpct",m\.rate==null\?"—":\(m\.rate\+"%"\)\);/.test(wallSrc));
+    T("★ ai: حلقةُ الجاهزية على مقياس المشروع، وصفرٌ عند غياب البيانات لا كذباً",
+      /const to=C\*\(1-\(pct==null\?0:pct\)\/100\);/.test(wallSrc) &&
+      /setTx\("tvl-proj-bpct",pct==null\?"—":\(pct\+"%"\)\);/.test(wallSrc));
     T("★ ai: مبانِي المشروع من مستند إعداداته، وتُشتقّ من البلاغات عند تعذّرها",
       /"meta\/"\+p\.id\+\(IS_DEV\?"_settings_dev":"_settings"\)/.test(wallSrc) &&
       /const blds=\(known&&known\.length\)\?known:fromT;/.test(wallSrc));
@@ -5049,6 +5049,103 @@ function tvWallGuards() {
     T("★ ai: النقاطُ قابلةٌ للنقر ومُسمّاةٌ لقارئ الشاشة",
       /aria-label="\$\{esc\(lbl\)\}"/.test(wallSrc) && /b\.onclick=\(\)=>\{ _tvwallShowScreen\(k\); _tvwallRotRestart\(\); \}/.test(wallSrc));
   }
+  /* ── v18.9aj: مشروعُ النظافة يُقاس بمهامّه لا ببلاغاته ── */
+  {
+    const CO_PATH = path.resolve(path.dirname(IDX), "cleaning-operations.js");
+    const CO = fs.existsSync(CO_PATH) ? fs.readFileSync(CO_PATH, "utf8") : "";
+    // (١) الوحدة تعرّض حساباً لقائمةِ مهامّ مشروعٍ آخر — بلا نسخةٍ ثانية من القواعد
+    T("★ aj: وحدةُ النظافة تعرّض حسابَ لوحة اليوم لقائمةٍ مُمرَّرة",
+      /function statsForTasks\(list\)\{\s*return _inCleanCtx\(\(\)=>boardStats\(/.test(CO) &&
+      /function coverageForTasks\(list\)\{\s*return _inCleanCtx\(\(\)=>coverageByBuilding\(/.test(CO),
+      "نسخُ الحساب في مركز العمليات ⇒ نسختان تنحرفان");
+    T("★ aj: سياقُ النظافة متزامنٌ ويُستعاد في finally (لا تسريبَ سياق)",
+      /function _inCleanCtx\(fn\)\{ const prev=_cleanCtx; _cleanCtx=true; try\{ return fn\(\); \} finally\{ _cleanCtx=prev; \} \}/.test(CO));
+    T("★ aj: قاعدةُ الإجازة تقرأ السياق قبل المشروع المفتوح",
+      /function isCleaningProject\(\)\{\s*if\(_cleanCtx\) return true;/.test(CO),
+      "بدونها: حسابُ مشروعٍ آخر يسأل «هل المشروعُ المفتوح نظافة؟» — سؤالٌ لا معنى له");
+    T("★ aj: كشفُ نوع المشروع من مصدرَيه (السجلّ ثم مستند الموازنة)",
+      /function isCleaningProjectRec\(p\)\{[\s\S]*?p\.type==="cleaning"[\s\S]*?_budget/.test(CO));
+    T("★ aj: مسارُ مجموعة المهام يُشتقّ من الوحدة لا من المركز",
+      /function tasksColOf\(projId\)\{/.test(CO) && /CO\.tasksColOf\(pid\)/.test(HTML));
+    // (٢) المركز: موزِّعٌ بالنوع، وحسابُ النظافة من الوحدة
+    T("★ aj: _tvwallCalc موزِّعٌ بالنوع (نظافة ⇄ صيانة)",
+      /function _tvwallCalc\(pid\)\{\s*if\(_tvwall\.kind\[pid\]==="cleaning"\) return _tvwallCalcClean\(pid\);\s*return _tvwallCalcTickets\(pid\);/.test(HTML));
+    if (wallSrc) {
+      T("★ aj: حسابُ النظافة يُستدعى من الوحدة ولا يُعاد هنا",
+        /const s=CO\.statsForTasks\(list\);/.test(wallSrc) && /CO\.coverageForTasks\(list\)/.test(wallSrc) &&
+        !/nextDueDate/.test(wallSrc), "أيُّ قاعدة استحقاقٍ مكتوبةٍ هنا = مصدرٌ ثانٍ للحقيقة");
+      T("★ aj: صحّةُ مشروع النظافة من tvHealth نفسها (معنى واحدٌ عبر الشاشتين)",
+        /health: tvHealth\(s\.overdue\)/.test(wallSrc));
+      T("★ aj: البطاقة تعرض المهامَّ لا البلاغات في مشروع النظافة",
+        /l:"مستحقّة الآن"/.test(wallSrc) && /l:"نُفِّذت اليوم"/.test(wallSrc) &&
+        /clean\?"مهمّة مستحقّة":"بلاغ نشط"/.test(wallSrc));
+      T("★ aj: شريطُ البطاقة تغطيةُ اليوم للنظافة وإنجازُ الشهر للصيانة",
+        /const barL = clean \? "تغطية اليوم" : "إنجاز بلاغات الشهر";/.test(wallSrc));
+      T("★ aj: الإجازةُ تُعلَن ولا تُعرَض صفراً (٠٪ يومَ الجمعة كذبٌ بصريّ)",
+        /clean&&m\.holiday \? "إجازة"/.test(wallSrc) && /cleanP&&m\.holiday\?"إجازة":m\.health\.word/.test(wallSrc));
+      T("★ aj: مشروعُ النظافة لا يشترك على البلاغات، ويُفكّ مستمعُها عند كشف النوع",
+        /if\(_tvwall\.kind\[p\.id\]==="cleaning"\) return;/.test(HTML) &&
+        /if\(_tvwall\.subs\[p\.id\]\)\{ try\{ _tvwall\.subs\[p\.id\]\(\); \}catch\(e\)\{\} delete _tvwall\.subs\[p\.id\]; \}/.test(wallSrc));
+      T("★ aj: مستمعُ المهام يُركَّب مرةً واحدة (نفس انضباط المركز)",
+        /if\(!db \|\| _tvwall\.taskSubs\[pid\]\) return;/.test(HTML));
+      T("★ aj: الخروج يفكّ مستمعي المهام ويمسح بياناتها",
+        /Object\.keys\(_tvwall\.taskSubs\)\.forEach\(k=>\{ try\{ _tvwall\.taskSubs\[k\]\(\); \}catch\(e\)\{\} \}\);/.test(wallSrc));
+      T("★ aj: الشريطُ العلوي لا يجمع البلاغات والمهام في بلاطةٍ واحدة",
+        /const totOpen=sumOf\(maint,"openN"\)/.test(wallSrc) && /const tskDue=sumOf\(clean,"due"\)/.test(wallSrc) &&
+        /\]:\[\]\)\.concat\(clean\.length\?\[/.test(wallSrc), "رقمٌ بوحدتين لا يعني شيئاً");
+    }
+    // (٣) تنفيذُ حسابِ النظافة فعلاً عبر واجهة الوحدة الحقيقية
+    const cleanSrc = (HTML.match(/function _tvwallCalcClean\(pid\)\{[\s\S]*?\n\}/) || [])[0];
+    T("★ aj: _tvwallCalcClean موجودة", !!cleanSrc);
+    if (cleanSrc && thSrc) {
+      const fakeCO = {
+        statsForTasks: l => ({ total: l.length, done: 1, due: 3, overdue: 2, scheduled: 4, coverage: 25, holiday: false }),
+        splitTasks: l => ({ active: l, due: l.slice(0, 3), overdue: l.slice(0, 2), done: l.slice(3, 4) }),
+        coverageForTasks: () => [{ name: "مبنى أ", pct: 50 }],
+        overdueDaysOf: t => t.late || 0
+      };
+      const tasks = [{ id: "a", name: "تنظيف دورات المياه", building: "مبنى أ", late: 3 },
+                     { id: "b", name: "الأرضيات", building: "مبنى أ", late: 1 },
+                     { id: "c", name: "الزجاج", building: "مبنى ب", late: 0 },
+                     { id: "d", name: "النفايات", building: "مبنى ب", late: 0 }];
+      const F = new Function("_tvwall", "window", "tvHealth",
+        cleanSrc + "; return _tvwallCalcClean;")({ tasks: { c1: tasks }, kind: { c1: "cleaning" } },
+          { cleaningOps: fakeCO }, new Function(thSrc + "; return tvHealth;")());
+      const m = F("c1");
+      T("★ aj: الأرقام تأتي من الوحدة كما هي (لا إعادةَ حساب)",
+        m.due === 3 && m.overdue === 2 && m.doneToday === 1 && m.coverage === 25 && m.activeN === 4,
+        JSON.stringify({ due: m.due, od: m.overdue, done: m.doneToday, cov: m.coverage }));
+      T("★ aj: النوع مُعلَنٌ في النتيجة فتتفرّع الشاشات بلا تخمين", m.kind === "cleaning");
+      T("★ aj: متأخّرتان ⇒ متابعة (نفس عتبات لوحات العرض)", m.health.key === "watch");
+      T("★ aj: المستحقّاتُ مرتّبةٌ الأكثر تأخّراً أولاً",
+        m.dueList[0] && m.dueList[0].id === "a" && m.worst && m.worst.id === "a");
+      T("★ aj: مشروعٌ لم تصل مهامُّه بعد ⇒ null (حالةُ تحميلٍ لا أصفار)",
+        new Function("_tvwall", "window", "tvHealth", cleanSrc + "; return _tvwallCalcClean;")
+          ({ tasks: {}, kind: {} }, { cleaningOps: fakeCO }, new Function(thSrc + "; return tvHealth;")())("nope") === null);
+      T("★ aj: بلا وحدةِ نظافةٍ محمَّلة ⇒ null لا انهيار",
+        new Function("_tvwall", "window", "tvHealth", cleanSrc + "; return _tvwallCalcClean;")
+          ({ tasks: { c1: tasks }, kind: {} }, {}, new Function(thSrc + "; return tvHealth;")())("c1") === null);
+    }
+    // (٤) الأيقونات: رموزُ الإيموجي في المركز استُبدلت بأيقونات المنصة
+    T("★ aj: مساعدُ الأيقونة يستعمل مجموعة _ICON نفسها بحجمٍ صريح",
+      /function _tvi\(name\)\{[\s\S]*?_svgIcon\(name\)/.test(HTML) &&
+      /#tvwall-screen \.tvl-i\{[^}]*width:1\.15em/.test(HTML));
+    if (wallSrc) {
+      // (رسائلُ toast مستثناةٌ عمداً: الإيموجي فيها اصطلاحُ المنصة كلِّها لا زينةَ شاشة)
+      T("★ aj: لا إيموجي في شرائح المركز وبطاقاته وأزراره",
+        !/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(wallSrc.split("\n").filter(l => l.indexOf("toast(") < 0).join("\n")),
+        "رمزٌ يختلف رسمُه بين الأجهزة داخل شاشة عرضٍ موحّدة");
+      T("★ aj: الشرائح تحمل مفاتيح أيقونات لا رموزاً",
+        /\{i:"building2",l:"المشاريع"/.test(wallSrc) && /\{i:"ticket",\s*l:"بلاغات نشطة"/.test(wallSrc));
+    }
+    T("★ aj: أزرارُ التدوير وملء الشاشة والرجوع بأيقونات متّجهة",
+      /id="tvl-rot-btn"[\s\S]{0,400}?<svg viewBox="0 0 24 24"/.test(HTML) &&
+      /function _tvwallFsLabel\(btn, full\)\{/.test(HTML));
+    // (٥) زرّ البوّابة بلا عدّ مشاريع
+    T("★ aj: زرُّ بوّابة المشاريع بلا عدّ مشاريع",
+      !/tvwall-count-badge/.test(HTML) && /كل المشاريع في شاشة واحدة<\/div>/.test(HTML));
+  }
+
   // (٤) التسمية والعلامة الجديدتان — لا بقايا للاسم القديم في الواجهة
   T("★ ai: الاسم الظاهر «مركز العمليات» في الشاشة والزرّين",
     /<h1>مركز العمليات — كل المشاريع<\/h1>/.test(HTML) &&
