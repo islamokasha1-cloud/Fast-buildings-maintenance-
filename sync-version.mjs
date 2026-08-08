@@ -41,7 +41,42 @@ const PLACEHOLDER = "vNEXT";
 /* نمطُ الإصدار المقبول: v18.9.532 (والقديمُ ذو الأحرف v18.9ak يُهاجَر تلقائياً). */
 const VER_RE = "v\\d+\\.\\d+(?:\\.\\d+)?[a-z]*";
 
+/* الاستنساخُ الضحل لا يُفشِل `rev-list` — **يُنجحه برقمٍ أقلّ**. فالـcatch أدناه لا
+   يمسكه، والنتيجة أخطرُ من الفشل: يُختم رقمٌ **أدنى** من المختوم فعلاً، فيتراجع
+   الإصدارُ في ثنتين وعشرين موضعاً دفعةً واحدة — تعود الوحداتُ إلى كاشٍ أقدم ويرى
+   المستخدمُ رقماً ينقص. (وقع هذا فعلاً: بيئةٌ بعمق ١٣٠ ختمت `v18.9.130` بينما
+   العدُّ الحقيقي ٢٤٨٩.) نرفض ولا نُخمّن. */
+function assertFullHistory(){
+  let shallow = "";
+  try{
+    shallow = execSync("git rev-parse --is-shallow-repository",
+      { cwd:REPO, stdio:["ignore","pipe","ignore"] }).toString().trim();
+  }catch(e){ return; }                      // إصدارُ git قديم لا يعرف الخيار — يكفيه حارسُ التراجع
+  if(shallow === "true"){
+    console.error("✗ الاستنساخ ضحل — عدّادُ الـcommits ناقصٌ فالإصدارُ سيتراجع.");
+    console.error("  شغّل:  git fetch --unshallow      (أو fetch-depth: 0 في CI)");
+    process.exit(2);
+  }
+}
+
+/* حارسُ التراجع — يعمل أياً كان السبب (ضحالةٌ · فرعٌ مبتور · قاعدةٌ عُدِّلت).
+   الإصدارُ عهدُه أن **يتزايد**؛ فالنزولُ خطأٌ في الاشتقاق لا نيّةُ مطوّر. */
+function assertNoDowngrade(ver){
+  const cur = readStamps().map(s => s.value.replace(/^v/, ""))
+    .filter(v => /^\d+\.\d+\.\d+$/.test(v));
+  if(!cur.length) return;                   // لا ختمَ سابقاً (أو صيغةٌ قديمة) — لا مرجعَ للمقارنة
+  const num = v => Number(v.split(".")[2]);
+  const top = cur.map(num).sort((a,b)=>b-a)[0];
+  const next = num(ver.replace(/^v/, ""));
+  if(next < top){
+    console.error(`✗ الإصدار المشتقّ ${ver} **أدنى** من المختوم حالياً (v${BASE}.${top}).`);
+    console.error("  تاريخُ git ناقصٌ هنا. شغّل:  git fetch --unshallow");
+    process.exit(2);
+  }
+}
+
 function computeVersion(){
+  assertFullHistory();
   let n;
   try{
     n = execSync("git rev-list --count HEAD", { cwd:REPO, stdio:["ignore","pipe","ignore"] }).toString().trim();
@@ -51,7 +86,9 @@ function computeVersion(){
     process.exit(2);
   }
   if(!/^\d+$/.test(n)){ console.error("✗ عدّاد commits غير صالح: "+n); process.exit(2); }
-  return `v${BASE}.${n}`;
+  const ver = `v${BASE}.${n}`;
+  assertNoDowngrade(ver);
+  return ver;
 }
 
 /* ــ الأهداف ــ
