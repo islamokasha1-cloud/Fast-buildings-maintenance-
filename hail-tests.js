@@ -3059,6 +3059,74 @@ function cleaningOpsTests() {
     T("مُعلَّمٌ أنه من النظافة (يميَّز عند الحاجة)", tk._cleaning === true);
   }
 
+  // ══ v18.9ag — التقرير المصوّر المجمّع: حارسٌ يمنع ارتدادَ حجم الملف ══
+  // الجذر المقيس: ٢١٢ صورة = ٨٥٪ من ملفٍ بـ٢٠٫٤ م.ب. البطاقةُ المجمّعة تقصّ عددَ
+  // الصور لا جودتَها، ولا تحذف صورةً من النظام.
+  T("★ ag: فلتر «شكل تقرير النظافة» يُحقَن (مجمّع | مفصّل)",
+    /co-pr-shape/.test(src) && /value="agg"/.test(src) && /value="full"/.test(src));
+  T("★ ag: الافتراضُ «مجمّع» حتى عند غياب العنصر (الأصغرُ لا يفاجئ أحداً)",
+    /function _prShape\(\)\{[^}]*==="full" \? "full" : "agg"/.test(src));
+  T("ag: «مفصّل» يعيد بطاقةً لكل تنفيذ (السلوك القديم باقٍ)",
+    /_prShape\(\)==="full" \? matched\.map\(_logAsTicket\) : _aggregateLog\(matched\)/.test(src));
+  T("★ ag: النواة تفوّض رسم البطاقة المجمّعة للوحدة مع سقوطٍ آمن",
+    /t\._agg&&window\.cleaningOps&&typeof window\.cleaningOps\._aggCardHTML==="function"/.test(HTML) &&
+    /catch\(e\)\{ console\.warn\("prAggCard",e\); \}/.test(HTML));
+  T("★ ag: العدُّ في الغلاف/الملخّص بالتنفيذات لا بالبطاقات",
+    /const _prUnits=t=>\(Number\(t&&t\._aggRuns\)>0\?Number\(t\._aggRuns\):1\)/.test(HTML) &&
+    /const smTotal=filteredList\.reduce\(\(a,t\)=>a\+_prUnits\(t\),0\)/.test(HTML));
+  T("ag: أيامُ العمل اتّحادٌ لا مجموع (الأيام تتداخل بين المباني)",
+    /smDays=_prIsAgg\?new Set\(\[\]\.concat\.apply/.test(HTML));
+  T("★ ag: عدّاد الحجم قبل الطباعة موجودٌ ومخفيٌّ عن الملف",
+    /_prPhotoCount\*85\/1024\+0\.4/.test(HTML) && /_prSizeBar=`<div class="no-print"/.test(HTML) &&
+    /out\.innerHTML=`\$\{_prSizeBar\}<div id="photo-report-printable">/.test(HTML));
+  if (CO && typeof CO._aggregateLog === "function") {
+    const mkR = (b, w, d, ph, done) => ({ id: "r" + d + b + w, building: b, workType: w, date: d, at: d + "T08:00:00Z",
+      floor: "الدور 1", supervisor: "خالد", by: "أحمد", taskName: "مسح", doneItems: done == null ? 3 : done, totalItems: 4, photos: ph });
+    const recs = [];
+    for (let i = 1; i <= 9; i++) recs.push(mkR("مبنى أ", "أرضيات", "2026-08-0" + i, ["A" + i]));
+    recs.push(mkR("مبنى أ", "زجاج", "2026-08-01", ["Z1", "Z2"]));
+    recs.push(mkR("مبنى ب", "أرضيات", "2026-08-02", ["B1"]));
+    const agg = CO._aggregateLog(recs);
+    T("★ ag: بطاقةٌ لكل (مبنى × نوع عمل) — ١١ تنفيذاً ⟵ ٣ بطاقات",
+      agg.length === 3, "بطاقات=" + agg.length);
+    const a1 = agg.find(x => x.building === "مبنى أ" && x.workType === "أرضيات");
+    T("ag: البطاقة تحمل عددَ التنفيذات وأيامَ العمل والفترة",
+      a1 && a1._aggRuns === 9 && a1._aggDates.length === 9 && a1._aggFrom === "2026-08-01" && a1._aggTo === "2026-08-09",
+      JSON.stringify(a1 && [a1._aggRuns, a1._aggDates.length, a1._aggFrom, a1._aggTo]));
+    T("★ ag: ثلاثُ صورٍ فقط تُعرَض من تسعِ تنفيذات (قصُّ الحجم)",
+      a1 && a1.photos.length === CO._AGG_PHOTOS_PER_CARD && CO._AGG_PHOTOS_PER_CARD === 3, JSON.stringify(a1 && a1.photos));
+    T("★ ag: الصورُ موزّعةٌ على الفترة: أوّلٌ · منتصفٌ · آخِر",
+      a1 && a1.photos[0] === "A1" && a1.photos[1] === "A5" && a1.photos[2] === "A9", JSON.stringify(a1 && a1.photos));
+    T("★ ag: الاختيارُ حتميّ — نفسُ المدخلات ⇒ نفسُ الصور (لا إعادةَ سحب)",
+      JSON.stringify(CO._aggregateLog(recs)) === JSON.stringify(agg));
+    T("★ ag: عددُ الصور الموثَّقة كاملاً محفوظٌ للتصريح (لا حذفَ من النظام)",
+      a1 && a1._aggPhotoCount === 9);
+    const a2 = agg.find(x => x.workType === "زجاج");
+    T("ag: التنفيذُ الواحدُ بصورتين يُكمل من صوره حين لا تكفي التنفيذات",
+      a2 && a2.photos.length === 2 && a2.photos[0] === "Z1" && a2.photos[1] === "Z2", JSON.stringify(a2 && a2.photos));
+    T("ag: المعرّفُ صناعيٌّ (AGG-n) لا اسمُ المبنى — لا يكسر نصَّ onclick",
+      agg.every(x => /^AGG-\d+$/.test(x.id)) && new Set(agg.map(x => x.id)).size === 3);
+    T("ag: تاريخُ كل صورةٍ متاحٌ للشارة عبر _aggDateOf",
+      a1 && a1._aggDateOf["A1"] === "2026-08-01" && a1._aggDateOf["A9"] === "2026-08-09");
+    T("ag: نسبةُ بنود الفحص مجمَّعةٌ على المجموعة", a1 && a1._aggItemsPct === 75, String(a1 && a1._aggItemsPct));
+    T("ag: مُعلَّمةٌ _agg و_cleaning معاً", agg.every(x => x._agg === true && x._cleaning === true));
+    const one = CO._aggPickPhotos([mkR("ب", "و", "2026-08-01", ["X"])], 3);
+    T("ag: تنفيذٌ واحدٌ بصورةٍ واحدة لا ينتج تكراراً", one.length === 1 && one[0].url === "X");
+    T("ag: n=0 يُرجع فراغاً بلا انهيار", CO._aggPickPhotos(recs, 0).length === 0);
+  }
+  if (CO && typeof CO._aggCardHTML === "function" && typeof CO._aggregateLog === "function") {
+    const card = CO._aggCardHTML(CO._aggregateLog([
+      { id: "r1", building: "مبنى أ", workType: "أرضيات", date: "2026-08-01", at: "2026-08-01T08:00:00Z",
+        supervisor: "خالد", doneItems: 4, totalItems: 4, photos: ["A1", "A2", "A3", "A4"] }
+    ])[0]);
+    T("★ ag: البطاقة تُصرّح بعدد الصور المعروضة من الموثَّقة (شفافيةٌ لا إخفاء)",
+      /3 صورة معروضة من 4 صورة موثَّقة/.test(card), card.slice(0, 0));
+    T("ag: البطاقة تستعير أصنافَ النواة فتنطبق أنماطُ الطباعة",
+      /class="pr-card"/.test(card) && /class="pr-photos-grid"/.test(card) && /class="pr-photo-wrap"/.test(card));
+    T("ag: حذفُ البطاقة وحذفُ الصورة الفرديّة يعملان على المجمّعة",
+      /removeFromPhotoReport\('AGG-1'\)/.test(card) && /removePhotoFromCard\('AGG-1','closing',0\)/.test(card));
+  }
+
   // ══ توليد الجدول بالذكاء الاصطناعي: بترُ الردّ لا يُضيّع المهامّ المكتملة ══
   // العربية مكلفةٌ توكنياً، فسقفٌ ضيّق يبتر الردّ ويُفشل تحليل JSON كلّه.
   T("★ سقف التوكنات واسع (2500 كانت تبتر الردّ العربي)", /maxTokens:\s*8000/.test(src) && !/maxTokens:\s*2500/.test(src));
