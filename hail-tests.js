@@ -4962,6 +4962,72 @@ function _coSrcAj() {
   return fs3.existsSync(f) ? fs3.readFileSync(f, "utf8") : "";
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   ختمُ الإصدار الآليّ — رقمٌ يُشتقّ ولا يُؤلَّف (sync-version.mjs)
+   ════════════════════════════════════════════════════════════════════ */
+function versionStampGuards() {
+  H("ختم الإصدار الآليّ (sync-version.mjs)");
+
+  const fsV = require("fs"), pV = require("path"), cpV = require("child_process");
+  const SV = pV.resolve(pV.dirname(IDX), "sync-version.mjs");
+  T("★ sv: sync-version.mjs موجود", fsV.existsSync(SV));
+  if (!fsV.existsSync(SV)) return;
+  const sv = fsV.readFileSync(SV, "utf8");
+
+  // ── الصيغة مشتقّةٌ لا مؤلَّفة: v18.9.532 لا v18.9ak ──
+  T("★ sv: الإصدار بصيغةٍ مشتقّة (رقمٌ يتزايد لا حرفٌ يُخمَّن)",
+    /^v\d+\.\d+\.\d+$/.test(VER), `APP_VERSION=${VER} — شغّل npm run stamp`);
+  T("★ sv: الاشتقاق من عدّاد commits (لا اختيارَ يدويّ)",
+    /git rev-list --count HEAD/.test(sv));
+
+  // ── سطرُ الإصدار قصيرٌ ومعلَّمٌ أنه مولَّد ──
+  const verLine = (HTML.match(/^const APP_VERSION = .*$/m) || [""])[0];
+  T("★ sv: سطرُ APP_VERSION قصيرٌ (كان ١٤٥٧ حرفاً فكان كلُّ فرعين يتعارضان عليه)",
+    verLine.length < 60, `الطول=${verLine.length}`);
+  T("sv: السطر معلَّمٌ «مولَّدٌ آلياً — لا تحرّره يدوياً»",
+    /مولَّدٌ آلياً — لا تحرّره يدوياً[\s\S]{0,120}?const APP_VERSION/.test(HTML));
+
+  // ── package.json يعرض الأمرين ──
+  const pkgPath = pV.resolve(pV.dirname(IDX), "package.json");
+  const pkg = fsV.existsSync(pkgPath) ? JSON.parse(fsV.readFileSync(pkgPath, "utf8")) : {};
+  T("★ sv: npm run stamp و stamp:check معرَّفان",
+    !!(pkg.scripts && pkg.scripts.stamp && pkg.scripts["stamp:check"]),
+    JSON.stringify(pkg.scripts || {}));
+
+  // ── الأهداف مكتشَفةٌ لا معدودة: وحدةٌ جديدة تُختَم بلا تعديل السكربت ──
+  T("★ sv: الأهداف مكتشَفةٌ من الملفات (فنسيانُ وحدةٍ جديدة غيرُ ممكن)",
+    /readdirSync\(REPO\)/.test(sv) && /MODULE_BUILD = "/.test(sv) &&
+    /<script src="\(\?!https\?:\)/.test(sv));
+
+  // ── فصلُ المولِّد عن الثابت: --check لا يلمس git (وإلا أسقط PRs بلا خطأ) ──
+  const checkBlock = (sv.match(/if\(argv\.includes\("--check"\)\)\{[\s\S]*?\n\}/) || [""])[0];
+  T("★ sv: --check لا يستدعي git (Actions تفحص commit دمجٍ فيختلف العدّاد)",
+    !!checkBlock && !/computeVersion\(\)/.test(checkBlock) && !/execSync/.test(checkBlock));
+  T("sv: --check يفحص الاتّساق والصيغة وقيدَ NOTES وغيابَ العلامة",
+    /أختامٌ مختلفة/.test(sv) && /ليست مشتقّةً/.test(sv) &&
+    /لا قيدَ لـ/.test(sv) && /ما زالت فيه علامة/.test(sv));
+
+  // ── العلامة vNEXT: كشفٌ دقيقٌ لا يسقط على ذكرها شرحاً ──
+  T("★ sv: الوثائق تُفحَص بعلامة القيد وحدها لا بأي ذكرٍ للكلمة",
+    /includes\(`\*\*\$\{PLACEHOLDER\} —`\)/.test(sv));
+  T("★ sv: لا علامةَ vNEXT عالقةٌ في ملفات المستخدم (تصل التذييلَ نصّاً حرفياً)",
+    !/vNEXT/.test(HTML), "vNEXT في index.html");
+
+  // ── CI يُشغّل الفحص ──
+  const wf = pV.resolve(pV.dirname(IDX), ".github/workflows/hail-tests.yml");
+  const wfSrc = fsV.existsSync(wf) ? fsV.readFileSync(wf, "utf8") : "";
+  T("★ sv: CI يُشغّل فحصَ الختم قبل الاختبارات",
+    /node sync-version\.mjs --check/.test(wfSrc));
+  T("sv: sync-version.mjs ضمن مسارات تشغيل CI",
+    /- 'sync-version\.mjs'/.test(wfSrc));
+
+  // ── تشغيلٌ فعليّ: الفحصُ يمرّ على الشجرة الحالية ──
+  let ok = true, out = "";
+  try { out = cpV.execSync(`node ${JSON.stringify(SV)} --check`, { cwd: pV.dirname(IDX), stdio: ["ignore","pipe","pipe"] }).toString(); }
+  catch (e) { ok = false; out = String((e.stdout || "") + (e.stderr || "")).slice(0, 200); }
+  T("★ sv: الشجرة الحالية مختومةٌ فعلاً (تشغيلٌ حقيقيٌّ لـ--check)", ok, out.trim().slice(0, 160));
+}
+
 function tvWallGuards() {
   H("v18.9ag+ai) مركز العمليات — العرض الموحّد والتدوير التلقائي");
 
@@ -5250,8 +5316,13 @@ function tvWallGuards() {
     />مركز العمليات — كل المشاريع<\/div>/.test(HTML) &&
     /🛰️<\/span> مركز العمليات</.test(HTML));
   // (سطرُ APP_VERSION يذكر الاسم القديم عمداً — فهو يوثّق إعادةَ التسمية نفسها)
+  // الاستثناء كان يشمل سطرَ APP_VERSION لأن سجلّ التغييرات كان يسكنه. بعد نقل
+  // السجلّ إلى تعليقٍ تاريخيٍّ مجمَّد (ختمُ الإصدار الآليّ) صار الاستثناء عليه —
+  // والمقصدُ واحد: الاسمُ القديم ممنوعٌ في **نصوص الواجهة** لا في سجلٍّ تاريخيّ.
   T("★ ai: لا بقايا لاسم «جدار المشاريع» في نصوص الواجهة",
-    !/جدار المشاريع/.test(HTML.replace(/const APP_VERSION = "[^"]+";[^\n]*/, "")),
+    !/جدار المشاريع/.test(
+      HTML.replace(/\/\* ══ سجلّ الإصدارات التاريخي[\s\S]*?\*\//, "")
+          .replace(/const APP_VERSION = "[^"]+";[^\n]*/, "")),
     "نصٌّ ظاهرٌ بالاسم القديم");
   T("★ ai: علامةُ الرادار حلّت محلّ أيقونة الشاشة في زرّ البوّابة",
     /<circle cx="12" cy="12" r="2\.1" fill="currentColor" stroke="none"\/>/.test(HTML));
@@ -5303,6 +5374,7 @@ function tvWallGuards() {
   perfContractPhase2();
   tvWallGuards();
   photoQueueGuards();
+  versionStampGuards();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }

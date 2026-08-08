@@ -14,7 +14,10 @@ on:
       - 'finance-audit.js'
       - 'hr-payments.js'
       - 'HailNotify.js'
+      - 'photo-queue.js'
       - 'hail-tests.js'
+      - 'sync-version.mjs'
+      - 'tech-app.html'
       - '.github/workflows/hail-tests.yml'
   pull_request:
   workflow_dispatch:
@@ -33,6 +36,12 @@ jobs:
 
       - name: Install jsdom
         run: npm install jsdom --silent --no-save
+
+      # ختمُ الإصدار: فحصُ اتّساقٍ داخليٌّ لا يلمس git — Actions تفحص commit دمجٍ
+      # للـPR فيختلف عدّادُه عمّا كان لدى المطوّر، وربطُ الفحص بالعدّاد يُسقط الـPR
+      # بلا خطأٍ حقيقيّ. المولِّد (npm run stamp) وحده يقرأ git، ومحلّياً فقط.
+      - name: Version stamp check
+        run: node sync-version.mjs --check
 
       - name: Run tests
         run: node hail-tests.js
