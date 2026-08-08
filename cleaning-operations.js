@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9ai";
+const MODULE_BUILD = "v18.9aj";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -2904,7 +2904,7 @@ function _aggCardHTML(t){
   const cols=photos.length>=3?3:(photos.length||1);
   const dateOf=t._aggDateOf||{};
   const fmt=d=>String(d||"").slice(5).replace("-","/");
-  const cells=photos.map((src,i)=>`<div class="pr-photo-wrap" style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f0f4fb;border-radius:4px"><img src="${_u(src)}" onclick="openLightbox('${_u(src)}')" alt="صورة تنفيذ نظافة" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;cursor:pointer;display:block">${dateOf[src]?`<div style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;font-size:8px;padding:1px 4px;border-radius:3px">${_esc(fmt(dateOf[src]))}</div>`:""}<button class="pr-photo-del" onclick="removePhotoFromCard('${_esc(t.id)}','closing',${i})">✕</button></div>`).join("");
+  const cells=photos.map((src,i)=>`<div class="pr-photo-wrap" style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f0f4fb;border-radius:4px"><img src="${_u(src)}" onerror="window.imgBroken&&imgBroken(this)" onclick="openLightbox('${_u(src)}')" alt="صورة تنفيذ نظافة" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;cursor:pointer;display:block">${dateOf[src]?`<div style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;font-size:8px;padding:1px 4px;border-radius:3px">${_esc(fmt(dateOf[src]))}</div>`:""}<button class="pr-photo-del" onclick="removePhotoFromCard('${_esc(t.id)}','closing',${i})">✕</button></div>`).join("");
   const photoArea=photos.length
     ? `<div class="pr-photos-grid" style="display:grid;grid-template-columns:repeat(${cols},1fr);grid-auto-rows:1fr;gap:3px;flex:1;min-height:0;overflow:hidden">${cells}</div>`
     : `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#f8fafc;border-radius:6px;font-size:10px;color:#94a3b8">لا توجد صور</div>`;
