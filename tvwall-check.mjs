@@ -126,6 +126,19 @@ check('الدخول نجح وظهرت بوّابة المشاريع', await page
 check('★ زرّ «مركز العمليات» ظاهر في البوّابة', await page.isVisible('#tvwall-btn-wrap').catch(() => false),
   ((await page.textContent('#tvwall-count-badge').catch(() => '')) || '').trim());
 
+// ليس وجودُ الوسم كافياً: `_svgIcon` بلا أبعادٍ ينكمش إلى صفرٍ في حاوية flex —
+// فالقياسُ الهندسيُّ هو الفحص، **والبوّابةُ ظاهرةٌ الآن** (القياسُ على مخفيٍّ صفرٌ دائماً).
+const gateIco = await page.evaluate(() => {
+  const g = document.getElementById('tvwall-btn-ico');
+  const sv = g && g.querySelector('svg');
+  const r = sv ? sv.getBoundingClientRect() : { width: 0, height: 0 };
+  return { w: Math.round(r.width), h: Math.round(r.height), has: !!sv };
+});
+check('★ أيقونةُ زرّ البوّابة svg مرسومةٌ بأبعادٍ حقيقية',
+  gateIco.has && gateIco.w >= 14 && gateIco.h >= 14, JSON.stringify(gateIco));
+
+await page.screenshot({ path: `${SHOTS}/gate.png` });
+
 await page.click('#tvwall-btn-wrap button');
 await page.waitForTimeout(3000);
 check('★ المركز فُتح والبوّابة أُخفيت',
@@ -347,13 +360,15 @@ check('★ بيانات المشروع حُمِّلت (٦ بلاغات لحائ�
 // زرّ القائمة الجانبية داخل التطبيق
 check('★ زرّ المركز ظاهر في القائمة الجانبية داخل المشروع',
   await page.evaluate(() => { const b = document.getElementById('nav-tvwall-btn'); return !!b && b.style.display !== 'none'; }));
-check('★ أيقونةُ المركز svg من مجموعة المنصة (لا إيموجي)',
-  await page.evaluate(() => {
-    const i = document.querySelector('#nav-tvwall-btn .s-icon');
-    const g = document.getElementById('tvwall-btn-ico');
-    return !!i && !!i.querySelector('svg') && !/[\u{1F300}-\u{1FAFF}]/u.test(i.textContent || '')
-        && !!g && !!g.querySelector('svg');
-  }));
+const navIco = await page.evaluate(() => {
+  const i = document.querySelector('#nav-tvwall-btn .s-icon');
+  const sv = i && i.querySelector('svg');
+  const r = sv ? sv.getBoundingClientRect() : { width: 0, height: 0 };
+  return { w: Math.round(r.width), h: Math.round(r.height),
+           emoji: /[\u{1F300}-\u{1FAFF}]/u.test((i && i.textContent) || '') };
+});
+check('★ أيقونةُ المركز في القائمة svg مرسومةٌ بأبعادٍ حقيقية (لا إيموجي)',
+  !navIco.emoji && navIco.w >= 12 && navIco.h >= 12, JSON.stringify(navIco));
 await page.evaluate(() => openTVWall('app'));
 await page.waitForTimeout(1500);
 check('★ المركز يُفتح من داخل التطبيق', await page.isVisible('#tvwall-screen').catch(() => false));
