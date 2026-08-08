@@ -12,6 +12,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js"></script>
+<!-- طابور الرفع المؤجَّل للصور (مشترك مع النظام الرئيسي) -->
+<script src="photo-queue.js?v=18.9ak"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -811,6 +813,12 @@ function initFirebase(){
     } catch(e){ console.error("AppCheck:",e); }
     db = firebase.firestore();
     storage = firebase.storage();
+    try{
+      if(window.photoQueue){
+        window.photoQueue.configure({ storage:storage, db:db, firebase:firebase, toast:(m,k)=>{ try{ toast(m,k); }catch(e){} } });
+        window.photoQueue.start();
+      }
+    }catch(_pq){ console.warn("photoQueue init:", _pq); }
     firebase.auth().signInAnonymously().catch(e=>console.warn("Auth:",e));
   }catch(e){ console.error("Firebase init:",e); }
 }
@@ -1728,6 +1736,11 @@ function doClose(){
     const ratingVal=parseInt(document.getElementById("close-rating").value||"0");
     const readyPhotos=pendingPhotos.filter(p=>!p.uploading);
     const uploadingPhotos=pendingPhotos.filter(p=>p.uploading);
+    // v18.9aj — الصورةُ التي لم تصل للخادم لا تُحفَظ برابطٍ محلّيّ (blob:) — يموت
+    // مع التبويب فيصير صورةً مكسورةً أبداً. تدخل طابورَ الرفع المؤجَّل بجسمها
+    // الكامل وتلحق بالبلاغ حين تعود الشبكة. الميدانُ هنا أضعفُ شبكةً من المكتب.
+    const _deferred=readyPhotos.filter(p=>!p.storageUrl).filter(p=>_queuePhoto(p, id, "photos", "arrayUnion"));
+    if(_deferred.length) toast("📥 "+_deferred.length+" صورة لم تصل — حُفظت على الجهاز وتُرفَع تلقائياً","warn");
 
     // نفس حقول الإغلاق تماماً كالنظام الرئيسي
     const updatedFields={
@@ -1735,7 +1748,7 @@ function doClose(){
       closedAt:now,
       workDone:work,
       rating:ratingVal,
-      photos:[...( localT.photos||[]),...readyPhotos.map(p=>p.storageUrl||p.preview).filter(Boolean)],
+      photos:[...( localT.photos||[]),...readyPhotos.map(p=>p.storageUrl||null).filter(Boolean)],   // v18.9aj
       timeline:[...(localT.timeline||[]),{event:"تم إغلاق البلاغ",by:currentTech.name,at:now,icon:"✅"}]
     };
 
@@ -1781,8 +1794,9 @@ function finishPhotosInBackground(ticketId, photoObjs, existingPhotos){
 
   photoObjs.forEach(p=>{
     const settle=()=>{
-      const url=p.storageUrl||p.preview;
+      const url=p.storageUrl||null;   // v18.9aj — لا رابطَ محلّيّ في قاعدة البيانات
       if(url&&!urls.includes(url)) urls.push(url);
+      else if(!url) _queuePhoto(p, ticketId, "photos", "arrayUnion");
       remaining--;
       if(remaining===0 && db){
         db.collection(COLLECTION).doc(ticketId).update({photos:urls})
@@ -1880,7 +1894,9 @@ function handlePhotoUpload(e){
       if(!blob){ photoObj.uploading=false; photoObj.error=true; onSettle(); return; }
       if(storage){
         const ts=Date.now();
-        const ref=storage.ref(`tickets/${ticketId}/${ts}.jpg`);
+        const _path=`tickets/${ticketId}/${ts}.jpg`;
+        photoObj.blob=blob; photoObj.path=_path;   // v18.9aj — وقودُ الطابور المؤجَّل
+        const ref=storage.ref(_path);
         let timedOut=false;
         const tid=setTimeout(()=>{
           timedOut=true; photoObj.uploading=false; photoObj.error=true; onSettle();
@@ -1920,6 +1936,19 @@ function renderPhotoPreviews(){
 function removePhoto(i){
   pendingPhotos.splice(i,1);
   renderPhotoPreviews();
+}
+
+/* v18.9aj — إدراجُ صورةٍ تعذّر رفعُها في الطابور المؤجَّل. تُرجع true إن دخلت
+   فعلاً، فلا يُعلَن للفنيّ عن حفظٍ لم يحدث. */
+function _queuePhoto(p, docId, field, mode){
+  try{
+    if(!p || !p.blob || !p.path || !docId) return false;
+    if(!window.photoQueue || typeof window.photoQueue.enqueue!=="function") return false;
+    window.photoQueue.enqueue({ blob:p.blob, storagePath:p.path, collection:COLLECTION,
+      docId:String(docId), field:field, mode:mode, label:String(docId) });
+    p.queued=true;
+    return true;
+  }catch(e){ console.warn("queuePhoto",e); return false; }
 }
 
 function compressImage(file){
