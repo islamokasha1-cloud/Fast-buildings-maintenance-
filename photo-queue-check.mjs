@@ -1,4 +1,4 @@
-// فحصُ تشغيلٍ حقيقيّ في Chromium لطابور الرفع المؤجَّل (v18.9aj) والمربّع الصريح.
+// فحصُ تشغيلٍ حقيقيّ في Chromium لطابور الرفع المؤجَّل (v18.9ak) والمربّع الصريح.
 // يُحاكي فشلَ الرفع فعلاً (Storage يرفض) ثم يتحقّق أن الصورة **لم تُحفَظ كرابطٍ
 // محلّيّ** بل دخلت IndexedDB، وأنها تُرفَع وتُلحَق بالبلاغ عند عودة الخدمة.
 //   node photo-queue-check.mjs
@@ -33,7 +33,7 @@ await page.route('**/*', r => {
 await page.goto('http://pq.test/');
 await page.addScriptTag({ path: path.join(REPO, 'photo-queue.js') });
 
-console.log('\n=== طابور الرفع المؤجَّل (v18.9aj) ===');
+console.log('\n=== طابور الرفع المؤجَّل (v18.9ak) ===');
 check('الوحدة تعرّض window.photoQueue', await page.evaluate(() => !!(window.photoQueue && typeof window.photoQueue.enqueue === 'function')));
 
 const res = await page.evaluate(async () => {

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   photo-queue.js — طابورُ رفعٍ مؤجَّلٌ للصور (v18.9aj)
+   photo-queue.js — طابورُ رفعٍ مؤجَّلٌ للصور (v18.9ak)
 
    ── المشكلة التي يعالجها (عطلٌ صامتٌ كان يُفقد الأدلّة) ──
    كان النظام عند فشل رفع صورةٍ إلى Storage — شبكةٌ ضعيفةٌ داخل المباني، أو مهلةُ
@@ -29,7 +29,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9aj";
+const MODULE_BUILD = "v18.9ak";
 const DB_NAME = "hailPhotoQueue";
 const STORE   = "pending";
 const DB_VER  = 1;

@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9aj";
+const MODULE_BUILD = "v18.9ak";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -148,11 +148,37 @@ function canQuality(){ return canEdit()||_isSupRole(); }
    نتحقّق من الثاني مرّةً واحدة لكل مشروع (مستندٌ صغير) — فلا يختلف التصنيف بين الشاشتين. */
 let _typeCache = {};   // projId → "cleaning" | "other"
 let _typeChecking = {};
+/* ★ v18.9aj — سياقُ حسابٍ لمشروعٍ ليس المفتوح (يستعمله مركز العمليات).
+   دوالُّ الحساب أدناه نقيةٌ على القائمة المُمرَّرة إلا في شيءٍ واحد: قاعدةُ الإجازة
+   (`_isTodayHoliday`) تسأل «هل المشروعُ **المفتوح** مشروعُ نظافة؟» — سؤالٌ لا معنى له
+   حين تكون القائمةُ لمشروعٍ آخر، أو حين لا مشروعَ مفتوحاً أصلاً (بوّابة المشاريع).
+   فبدل نسخِ الحساب هناك — ونسختان تنحرفان حتماً — يُشغَّل الحسابُ نفسه داخل سياقٍ
+   يُعلن أن القائمة لمشروع نظافة. المدى **متزامنٌ تماماً** (بلا await بين الطرفين)
+   فلا تتداخل السياقات، ويُستعاد السابقُ في finally مهما حدث. */
+let _cleanCtx = false;
+function _inCleanCtx(fn){ const prev=_cleanCtx; _cleanCtx=true; try{ return fn(); } finally{ _cleanCtx=prev; } }
 function isCleaningProject(){
+  if(_cleanCtx) return true;
   const p=_proj(); if(!p) return false;
   if(p.type==="cleaning") return true;
   return _typeCache[p.id]==="cleaning";
 }
+/* نوعُ مشروعٍ من سجلّه (لا من المشروع المفتوح) — نفس مصدرَي النوع: سجلّ المشروع
+   ثم مستند الموازنة. مصدرٌ واحدٌ للتصنيف يقرؤه مركز العمليات فلا يتضارب مع الوحدة. */
+function isCleaningProjectRec(p){
+  if(!p || !p.id) return Promise.resolve(false);
+  if(p.type==="cleaning"){ _typeCache[p.id]="cleaning"; return Promise.resolve(true); }
+  if(p.id in _typeCache) return Promise.resolve(_typeCache[p.id]==="cleaning");
+  const database=_db();
+  if(!database){ return Promise.resolve(false); }
+  return database.doc("meta/"+_safeKey(p.id)+"_budget").get()
+    .then(snap=>{ const d=(snap&&snap.exists)?(snap.data()||{}):{};
+      _typeCache[p.id]=(d.type==="cleaning")?"cleaning":"other";
+      return _typeCache[p.id]==="cleaning"; })
+    .catch(()=>false);
+}
+// مجموعةُ مهامّ مشروعٍ بعينه — مركز العمليات يشترك عليها بلا معرفةٍ بمسارات الوحدة
+function tasksColOf(projId){ return projId ? (projId+"_cleaning_tasks"+(_isDev()?"_dev":"")) : ""; }
 function ensureTypeKnown(cb){
   const p=_proj(); if(!p) return;
   if(p.type==="cleaning"){ _typeCache[p.id]="cleaning"; if(cb) cb(); return; }
@@ -3571,7 +3597,22 @@ if(document.readyState==="loading") document.addEventListener("DOMContentLoaded"
 else init();
 
 /* ════════════ الواجهة العامة ════════════ */
+/* ★ v18.9aj — حسابُ لوحة اليوم لقائمةِ مهامّ مشروعٍ آخر (مركز العمليات).
+   نفس boardStats/coverageByBuilding حرفياً — لا حسابَ ثانياً — داخل سياق النظافة. */
+function statsForTasks(list){    return _inCleanCtx(()=>boardStats(Array.isArray(list)?list:[])); }
+function coverageForTasks(list){ return _inCleanCtx(()=>coverageByBuilding(Array.isArray(list)?list:[])); }
+function splitTasks(list){
+  const arr=Array.isArray(list)?list:[];
+  return _inCleanCtx(()=>({
+    active:  arr.filter(t=>!isDisabled(t)),
+    due:     arr.filter(t=>!isDisabled(t) && isDue(t)),
+    overdue: arr.filter(t=>!isDisabled(t) && isOverdue(t)),
+    done:    arr.filter(t=>!isDisabled(t) && doneToday(t))
+  }));
+}
+
 window.cleaningOps = {
+  isCleaningProjectRec, tasksColOf, statsForTasks, coverageForTasks, splitTasks, overdueDaysOf: overdueDays,
   render, setView, setAllMode, setAllFilter, refresh, toggleGen, doGen, genModeChanged, openBldTasks, closeBldTasks, bldBack,
   toggleLaunch, doLaunch, onBuildingRenamed, onSupervisorRenamed,
   addTask, editTask, cancelEdit, saveEdit, removeTask, onBuildingChange,
