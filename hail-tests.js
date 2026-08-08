@@ -4859,6 +4859,143 @@ function financeAuditTests() {
     FA._unitNet({ itemCost: 1150, vat: 150, rcvQty: 0, qty: 0, unitCost: 33 }) === 33);
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   v18.9ag) جدارُ المشاريع — كل لوحات TV في شاشةٍ واحدة
+   الحرّاس: مصدرٌ واحدٌ للتصنيف والصلاحية · عزلٌ تامٌّ عن المشروع المفتوح ·
+   مستمعون يُفكّون عند الخروج · حسابُ البطاقة صحيح · نافذةٌ مُعلَنة.
+   ════════════════════════════════════════════════════════════════════ */
+function tvWallGuards() {
+  H("v18.9ag) جدار المشاريع — العرض الموحّد");
+
+  // ── (١) مصدرٌ واحدٌ للتصنيف: tvHealth تُستخرَج وتُنفَّذ فعلاً ──
+  const thSrc = (HTML.match(/function tvHealth\(overdue\)\{[\s\S]*?\n\}/) || [])[0];
+  T("★ ag: tvHealth موجودة (مصدرٌ واحدٌ لصحّة اللوحة)", !!thSrc);
+  if (thSrc) {
+    const tvHealth = new Function(thSrc + "; return tvHealth;")();
+    T("★ ag: صفر متأخر ⇒ مستقر", tvHealth(0).key === "stable" && tvHealth(0).word === "مستقر");
+    T("★ ag: متأخرٌ واحد ⇒ متابعة", tvHealth(1).key === "watch" && tvHealth(2).key === "watch");
+    T("★ ag: ثلاثةٌ فأكثر ⇒ حرِج", tvHealth(3).key === "crit" && tvHealth(9).key === "crit");
+    T("★ ag: قيمةٌ غائبة/غير رقمية تُعامَل صفراً لا NaN", tvHealth(undefined).key === "stable" && tvHealth("x").key === "stable");
+  }
+  T("★ ag: لوحة المشروع تقرأ tvHealth ولا تكتب عتباتها محلياً",
+    /const _hl=tvHealth\(overdue\)/.test(HTML) && !/if\(overdue>=3\)\{health="crit"/.test(HTML),
+    "عودةُ العتبات داخل renderTVDashboard = تصنيفان مختلفان للمشروع نفسه");
+
+  // ── (٢) مصدرٌ واحدٌ لمشاريع المستخدم: البوّابة والجدار يقرآن نفس الدالة ──
+  const vpSrc = (HTML.match(/function _visibleProjectsFor\(user\)\{[\s\S]*?\n\}/) || [])[0];
+  T("★ ag: _visibleProjectsFor موجودة", !!vpSrc);
+  if (vpSrc) {
+    const mk = list => new Function("_projectsList", vpSrc + "; return _visibleProjectsFor;")(list);
+    const L = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    T("★ ag: الأدمن يرى كل المشاريع", mk(L)({ role: "admin", projects: ["a"] }).length === 3);
+    T("★ ag: قائمة projects تحصر رؤية غير الأدمن",
+      mk(L)({ role: "supervisor", projects: ["b", "c"] }).map(p => p.id).join() === "b,c");
+    T("★ ag: قائمةٌ فارغة ⇒ لا حصر (سلوك البوّابة نفسه)",
+      mk(L)({ role: "supervisor", projects: [] }).length === 3);
+  }
+  T("★ ag: البوّابة تقرأ نفس الدالة (لا فلترةً مكرّرة)",
+    /const visibleProjects = _visibleProjectsFor\(user\);/.test(HTML) &&
+    !/visibleProjects = _projectsList\.filter\(p => user\.projects\.includes/.test(HTML));
+  T("★ ag: الجدار يقرأ نفس الدالة", /_tvwall\.projects=_visibleProjectsFor\(currentUser\)/.test(HTML));
+  T("★ ag: المراقبُ وأدوارُ المشتريات المركزية محجوبون عن الجدار",
+    /function _canSeeTVWall\(user\)\{[\s\S]*?user\.role === "observer"[\s\S]*?_isGlobalOnlyRole\(user\.role\)[\s\S]*?\n\}/.test(HTML));
+  T("★ ag: openTVWall تفحص الصلاحية بنفسها (لا تكتفي بإخفاء الزر)",
+    /async function openTVWall\(from\)\{[\s\S]{0,400}?if\(!_canSeeTVWall\(currentUser\)\)/.test(HTML));
+
+  // ── (٣) عزلٌ تام: الجدار لا يكتب حالة المشروع المفتوح ولا يقرأ بياناته ──
+  // من أول تعليمةٍ بعد تعليق الرأس (فلا يُحسب نصُّ التعليق شيفرةً في الحرّاس أدناه)
+  const wallSrc = slice("const TVWALL_SYNC_LIMIT", "// تنظيف TV intervals عند تغيير الصفحة");
+  T("★ ag: كتلةُ الجدار موجودة في المصدر",
+    !!wallSrc && wallSrc.length > 3000 && HTML.includes("██  v18.9ag — جدارُ المشاريع"));
+  if (wallSrc) {
+    T("★ ag: الجدار لا يُسنِد CURRENT_PROJECT إطلاقاً",
+      !/CURRENT_PROJECT\s*=(?!=)/.test(wallSrc), "إسنادُ المشروع من الجدار = خلطُ بيانات مشروعين");
+    T("★ ag: الجدار لا يقرأ مصفوفة tickets للمشروع المفتوح",
+      !/\btickets\b(?!\s*[:_])/.test(wallSrc.replace(/_tickets/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")),
+      "قراءةُ tickets تخلط بلاغات المشروع المفتوح ببطاقات الجدار");
+    T("★ ag: لكل مشروعٍ مخزنُه الخاص", /_tvwall\.data\[p\.id\]\s*=/.test(wallSrc));
+    T("★ ag: التأخّر من isOverdue وصحّةُ البطاقة من tvHealth (لا تصنيفَ محلي)",
+      /isOverdue\(t\)/.test(wallSrc) && /tvHealth\(odList\.length\)/.test(wallSrc));
+    T("★ ag: فتحُ مشروعٍ من الجدار وآخرُ مفتوحٌ يمرّ بمسار switchProject",
+      /if\(CURRENT_PROJECT\) switchProject\(\);/.test(wallSrc),
+      "الدخولُ المباشر يترك مستمعي المشروع السابق حيّين على مجموعاته");
+    // ── (٤) المستمعون: تركيبٌ مرةً واحدة، ولا فكَّ عند الإغلاق ──
+    T("★ ag: لا يُعاد تركيب مستمعٍ قائم (درس v18.9sz — تراكم targetId)",
+      /if\(_tvwall\.subs\[p\.id\]\) return;/.test(wallSrc));
+    T("★ ag: الإغلاق يوقف الرسم لا المستمع",
+      /function closeTVWall\(\)\{[\s\S]*?\n\}/.test(wallSrc) &&
+      !/function closeTVWall\(\)\{[\s\S]*?_tvwallUnsubAll\(\)[\s\S]*?\n\}/.test(wallSrc));
+    T("★ ag: المستمع يجمع ولا يرسم والشاشةُ مغلقة", /if\(!_tvwall\.open \|\| _tvwall\.renderT\) return;/.test(wallSrc));
+    // ── (٥) النافذة مُعلَنة لا صامتة ──
+    T("★ ag: امتلاءُ النافذة يُعلَن على البطاقة",
+      /_tvwall\.capped\[p\.id\] = snap\.docs\.length >= TVWALL_SYNC_LIMIT;/.test(wallSrc) &&
+      /if\(_tvwall\.capped\[proj\.id\]\)/.test(wallSrc));
+    T("★ ag: فشلُ قراءة مشروعٍ يظهر بطاقةَ خطأٍ لا فراغاً", /tvl-c-err/.test(wallSrc));
+    T("★ ag: معاملات onclick النصية عبر _jsq لا esc (درس v18.9vu-H5)",
+      /tvwallOpenProject\('\$\{_jsq\(proj\.id\)\}'\)/.test(wallSrc));
+  }
+  T("★ ag: تسجيلُ الخروج يفكّ مستمعي الجدار ويمسح بياناته",
+    /function logoutToLogin\(\)\{[\s\S]*?_tvwallUnsubAll\(\);[\s\S]*?currentUser = null;/.test(HTML));
+  T("★ ag: الخروج لا يعيد إظهار بوّابة المشاريع من الجدار",
+    /_tvwall\.ret="none";\s*\/\/ لا يُعاد إظهار بوّابة المشاريع/.test(HTML));
+
+  // ── (٦) حسابُ البطاقة — تنفيذٌ حقيقيٌّ لا قراءة ──
+  const calcSrc = (HTML.match(/function _tvwallCalc\(pid\)\{[\s\S]*?\n\}/) || [])[0];
+  T("★ ag: _tvwallCalc موجودة", !!calcSrc);
+  if (calcSrc && thSrc) {
+    const today = new Date().toISOString().slice(0, 10);
+    const month = today.slice(0, 7);
+    const prevMonth = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() - 1, 1).toISOString().slice(0, 7); })();
+    const rows = [
+      { id: "T1", status: "مفتوح",       createdAt: today + "T08:00:00.000Z" },                                     // نشط + اليوم + متأخر
+      { id: "T2", status: "قيد التنفيذ", createdAt: today + "T09:00:00.000Z" },                                     // نشط + اليوم + قيد التنفيذ
+      { id: "T3", status: "مغلق",        createdAt: today + "T07:00:00.000Z", closedAt: today + "T10:00:00.000Z" }, // أُغلق اليوم
+      { id: "T4", status: "مفتوح",       createdAt: month + "-01T08:00:00.000Z", archived: true },                  // مؤرشف ⇒ خارج النشط
+      { id: "T5", status: "مغلق",        createdAt: prevMonth + "-05T08:00:00.000Z", closedAt: prevMonth + "-06T08:00:00.000Z" }, // شهرٌ سابق
+    ];
+    const F = new Function("_tvwall", "isOverdue", "tvHealth",
+      calcSrc + "; return _tvwallCalc;")({ data: { p1: rows } }, t => t.id === "T1", new Function(thSrc + "; return tvHealth;")());
+    const m = F("p1");
+    T("★ ag: النشط = غير المؤرشف وغير المغلق", m.openN === 2, "openN=" + m.openN);
+    T("★ ag: المؤرشف لا يُحسب نشطاً", m.openN === 2 && rows[3].archived === true);
+    T("★ ag: المتأخر من isOverdue وحدها", m.overdue === 1);
+    T("★ ag: قيد التنفيذ يُعدّ من المفتوحة", m.prog === 1);
+    T("★ ag: بلاغاتُ اليوم = المُنشأة اليوم (بما فيها المغلق اليوم)", m.newToday === 3, "newToday=" + m.newToday);
+    T("★ ag: أُغلقت اليوم = المغلقة بطابع إغلاقٍ اليوم", m.closedToday === 1);
+    T("★ ag: إنجازُ الشهر من بلاغات الشهر وحدها (٤ منها ١ مغلق)",
+      m.monthN === 4 && m.monthClosed === 1 && m.rate === 25, `monthN=${m.monthN} closed=${m.monthClosed} rate=${m.rate}`);
+    T("★ ag: النسبة محصورةٌ ٠–١٠٠ ولا تتجاوز المئة أبداً", m.rate >= 0 && m.rate <= 100);
+    T("★ ag: شهرٌ بلا بلاغات ⇒ لا نسبةَ ملفَّقة (null لا صفر)",
+      new Function("_tvwall", "isOverdue", "tvHealth", calcSrc + "; return _tvwallCalc;")
+        ({ data: { p2: [] } }, () => false, new Function(thSrc + "; return tvHealth;")())("p2").rate === null);
+    T("★ ag: مشروعٌ لم تصل لقطتُه بعد ⇒ null (حالةُ تحميلٍ لا أصفار)",
+      new Function("_tvwall", "isOverdue", "tvHealth", calcSrc + "; return _tvwallCalc;")
+        ({ data: {} }, () => false, new Function(thSrc + "; return tvHealth;")())("nope") === null);
+    T("★ ag: صحّةُ البطاقة من tvHealth (متأخرٌ واحد ⇒ متابعة)", m.health.key === "watch");
+  }
+
+  // ── (٧) الطوابع: Timestamp أو ISO — تُوحَّد عند الدخول ──
+  const isoSrc = (HTML.match(/function _tvwallIso\(v\)\{[\s\S]*?\n\}/) || [])[0];
+  if (isoSrc) {
+    const _iso = new Function(isoSrc + "; return _tvwallIso;")();
+    T("★ ag: طابع Firestore يُوحَّد نصاً ISO",
+      _iso({ toDate: () => new Date("2026-08-08T05:00:00.000Z") }) === "2026-08-08T05:00:00.000Z");
+    T("★ ag: النص يمرّ كما هو، والغياب نصٌّ فارغ (لا كسرَ slice)",
+      _iso("2026-08-08T05:00:00Z") === "2026-08-08T05:00:00Z" && _iso(null) === "" && _iso(undefined) === "");
+  }
+
+  // ── (٨) الواجهة: مدخلان اثنان لا أكثر، وثيمةٌ واحدةٌ مع لوحة المشروع ──
+  T("★ ag: زرُّ الجدار في بوّابة المشاريع", /onclick="openTVWall\('picker'\)"/.test(HTML));
+  T("★ ag: زرُّ الجدار في القائمة الجانبية", /id="nav-tvwall-btn"[\s\S]{0,120}?openTVWall\('app'\)/.test(HTML));
+  T("★ ag: الشاشة تشارك لوحةَ ألوان #page-tv (مصدرٌ واحدٌ للثيمة)",
+    /#page-tv,#tvwall-screen\{/.test(HTML) && /#tvwall-screen\[data-health="crit"\]/.test(HTML));
+  T("★ ag: زرُّ القائمة محجوبٌ عن المراقب ووضع المشتريات المركزية",
+    /body\.role-observer #nav-tvwall-btn,/.test(HTML) && /body\.global-purchases-mode #nav-tvwall-btn,/.test(HTML));
+  T("★ ag: Esc يغلق الجدار بعد الخروج من ملء الشاشة لا قبله",
+    /e\.key==="Escape" && _tvwall\.open && !document\.fullscreenElement/.test(HTML));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -4903,6 +5040,7 @@ function financeAuditTests() {
   deepReviewV18_9ad();
   perfContractPhase1();
   perfContractPhase2();
+  tvWallGuards();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }
