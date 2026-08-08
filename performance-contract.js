@@ -43,7 +43,7 @@
 
 const PAGE_ID      = "performance";
 const VERSION      = "0.1";
-const MODULE_BUILD = "v18.9ae";
+const MODULE_BUILD = "v18.9af";
 
 /* ════════════ خدمات النواة (قراءة بالاسم مع بدائل آمنة) ════════════ */
 function _esc(s){ try{ return (typeof esc==="function") ? esc(s) : String(s==null?"":s); }catch(e){ return String(s==null?"":s); } }
@@ -69,6 +69,9 @@ function _month(){ try{ return (typeof perfContractMonth==="function") ? perfCon
 function _minScore(){ try{ return (typeof perfMinScore==="function") ? perfMinScore() : null; }catch(e){ return null; } }
 function _inGrace(){ try{ return typeof perfInGrace==="function" && perfInGrace(); }catch(e){ return false; } }
 function _graceMonths(){ try{ return (typeof PERF_GRACE_MONTHS!=="undefined") ? PERF_GRACE_MONTHS : 2; }catch(e){ return 2; } }
+function _isTrial(){ try{ return typeof isPerfTrial==="function" && isPerfTrial(); }catch(e){ return false; } }
+function _tickets(){ try{ return (typeof allTickets==="function") ? allTickets() : (typeof tickets!=="undefined" ? tickets : []); }catch(e){ return []; } }
+function _isOp(t){ try{ return typeof isOperationTicket==="function" && isOperationTicket(t); }catch(e){ return false; } }
 
 /* من يرى القسم: كلُّ من يرى المشروع عدا المراقب الخارجي.
    قرارُ الصلاحيات التفصيلي (من يُدخل المخالفات ومن يعتمد الدرجة) يُحسم في المرحلة ٣
@@ -89,7 +92,7 @@ const GROUPS = [
   { no:"٤", key:"preventive", name:"الصيانة الوقائية والروتينية المجدولة", weight:0.30,
     targets:[0.80,0.85,0.90,0.95,1.00], kpis:3,
     source:"من خطط الصيانة الوقائية في المنصة",
-    gap:"ينقص تاريخُ الاستحقاق المخطَّط على البلاغ، واحتسابُ المهمة منفَّذةً عند الإغلاق لا عند الإنشاء" },
+    gap:"✅ المرحلة ٢: البلاغ الوقائي صار يحمل استحقاقه المخطَّط، والجدولُ المعتمد لم يعد ينزاح" },
   { no:"٥", key:"corrective", name:"الصيانة التصحيحية", weight:0.25,
     targets:[0.80,0.85,0.90,0.95,1.00], kpis:4,
     source:"من البلاغات ومحرّك SLA القائم",
@@ -97,7 +100,7 @@ const GROUPS = [
   { no:"٣", key:"response", name:"الاستجابة للأحداث والطوارئ", weight:0.20,
     targets:[0.75,0.80,0.85,0.90,0.95], kpis:6,
     source:"من طوابع البلاغ الزمنية",
-    gap:"ينقص طابعا «وصلتُ للموقع» و«رجعت الخدمة» — اليوم يُقاس زمنُ الإغلاق وحده" },
+    gap:"✅ المرحلة ٢: طابعا «وصلتُ للموقع» و«رجعت الخدمة» يُلتقطان، وإيقافُ الساعة يُوثَّق" },
   { no:"٢", key:"hse", name:"السلامة المهنية والبيئية", weight:0.15,
     targets:[0.80,0.85,0.90,0.95,1.00], kpis:4,
     source:"من سجلّ الحوادث وتصاريح العمل",
@@ -131,6 +134,64 @@ function _money(n){ try{ return Number(n||0).toLocaleString("en-US"); }catch(e){
 /* ════════════════════════════════════════════════════════════
    العرض
    ════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════
+   تغطيةُ البيانات — الرقم الوحيد الصادق في التجربة
+   ────────────────────────────────────────────────────────────
+   في أول شهرٍ لا معنى لـ«درجةِ الأداء»: الحقولُ لم تكن تُملأ، فمؤشرٌ بلا بياناتٍ
+   يُقرأ صفراً — لا لأن الفريق مقصّر بل لأن العادة لم تتشكّل بعد. لذلك تبدأ التجربة
+   بسؤال **«كم مما نحتاجه صرنا نلتقطه؟»** لا بسؤال «كم درجتنا؟».
+   وهذه النسبةُ هي المؤشر الحقيقي لجاهزيتنا للعقد.
+   ════════════════════════════════════════════════════════════ */
+function coverage(){
+  const n=new Date();
+  const mStart=new Date(n.getFullYear(), n.getMonth(), 1);
+  const all=_tickets().filter(t=>t && !_isOp(t) && t.createdAt && new Date(t.createdAt)>=mStart);
+  const corr=all.filter(t=>t.maintType!=="وقائية");
+  const prev=all.filter(t=>t.maintType==="وقائية");
+  const closed=all.filter(t=>t.status==="مغلق");
+  const pct=(a,b)=> b? Math.round(a/b*100) : null;
+  return {
+    monthLabel: n.toLocaleDateString("ar-SA-u-ca-gregory-nu-latn",{year:"numeric",month:"long"}),
+    total: all.length,
+    responded:{ n:all.filter(t=>t.respondedAt).length, d:all.length, pct:pct(all.filter(t=>t.respondedAt).length, all.length) },
+    restored:{  n:closed.filter(t=>t.restoredAt).length, d:closed.length, pct:pct(closed.filter(t=>t.restoredAt).length, closed.length) },
+    scheduled:{ n:prev.filter(t=>t.scheduledFor).length, d:prev.length, pct:pct(prev.filter(t=>t.scheduledFor).length, prev.length) },
+    stops:      all.filter(t=>Array.isArray(t.clockStops) && t.clockStops.length).length,
+    corrective: corr.length
+  };
+}
+
+function coverageHTML(){
+  const c=coverage();
+  const row=(label, o, hint)=>{
+    const has=o.pct!=null;
+    const col=!has?"var(--muted)":(o.pct>=80?"#0a7c59":o.pct>=40?"#d97706":"#b92c2c");
+    return `<div class="pf-cov">
+      <div class="pf-cov-top">
+        <div class="pf-cov-l">${_esc(label)}</div>
+        <div class="pf-cov-v" style="color:${col}">${has?o.pct+"%":"—"}</div>
+      </div>
+      <div class="pf-bar"><div class="pf-bar-fill" style="width:${has?o.pct:0}%;background:${col}"></div></div>
+      <div class="pf-cov-h">${has?`${o.n} من ${o.d}`:"لا بلاغاتٍ في هذا النطاق بعد"} — ${_esc(hint)}</div>
+    </div>`;
+  };
+  return `
+  <div class="card">
+    <div class="card-header"><div class="card-title">${_svg("activity",16)} تغطيةُ البيانات — ${_esc(c.monthLabel)}</div></div>
+    <div class="pf-hint">هذا <b>مقياسُ التقاطِ البيانات لا مقياسُ أداءِ الفريق</b>. في العقد الحقيقي
+      كلُّ بلاغٍ بلا طابعٍ زمنيٍّ يسقط من مؤشره — فالتغطيةُ هي جاهزيتنا للقياس. ابدأ هنا، والدرجةُ تأتي بعدها.</div>
+    <div class="pf-covs">
+      ${row("زمن الاستجابة (وصول الفني)", c.responded, "مؤشر ٣٫١ — وزن ٤٪")}
+      ${row("عودة الخدمة", c.restored, "مؤشر ٣٫٣ — وزن ٤٪")}
+      ${row("الاستحقاق المخطَّط للوقائي", c.scheduled, "مؤشرا ٤٫١ و٤٫٢ — وزن ٢٠٪")}
+    </div>
+    <div class="pf-cov-foot">
+      ${_svg("clipboardCheck",13)} بلاغاتُ الشهر: <b>${c.total}</b> · تصحيحية: <b>${c.corrective}</b>
+      · موثَّقٌ لها إيقافُ ساعة: <b>${c.stops}</b>
+    </div>
+  </div>`;
+}
+
 function render(){
   const el=document.getElementById("page-"+PAGE_ID);
   if(!el) return;
@@ -144,6 +205,7 @@ function render(){
 
   el.innerHTML =
     heroHTML(cfg, y, m, minS, grace) +
+    coverageHTML() +
     scorecardHTML(yIdx) +
     penaltyHTML(cfg) +
     roadmapHTML();
@@ -157,6 +219,12 @@ function heroHTML(cfg, y, m, minS, grace){
     <div class="page-hero-sub">${_esc((_proj()&&_proj().name)||"")} — عقدٌ قائمٌ على الأداء</div>
   </div>
 
+  ${_isTrial() ? `<div class="pf-note pf-note-trial">${_svg("alertTriangle",16)}
+    <div><b>وضعٌ تجريبيّ — قياسٌ بلا غرامات.</b> العقد يعمل هنا للتدريب وبناء البيانات
+    قبل الاستلام: لا خصمَ ولا التزامَ ماليّاً، وكلُّ مبلغٍ معروضٍ <b>تدريبيٌّ للتوضيح</b>.
+    الغرضُ أن تتشكّل العادةُ ويظهر خطُّ الأساس قبل أن يصير المال على المحكّ.</div>
+  </div>` : ""}
+
   ${grace ? `<div class="pf-note pf-note-ok">${_svg("shield",16)}
     <div><b>مهلة الإعفاء سارية</b> — نحن في الشهر ${m} من العقد، ولا تُطبَّق الغرامات قبل
     الشهر ${_graceMonths()+1} (بند ٦٣). هذه نافذةُ الضبط: ما يُبنى الآن يحدّد درجة أول شهرٍ محتسَب.</div>
@@ -164,7 +232,7 @@ function heroHTML(cfg, y, m, minS, grace){
 
   <div class="stats-grid" style="margin-bottom:14px">
     <div class="stat-tile">
-      <div class="st-label">المبلغ الشهري المقطوع</div>
+      <div class="st-label">المبلغ الشهري المقطوع${_isTrial()?' <span class="pf-tag">تدريبيّ</span>':''}</div>
       <div class="st-value">${cfg.monthlyAmount ? _money(cfg.monthlyAmount) : "—"}</div>
       <div class="st-sub">${cfg.monthlyAmount ? "ريال / بلا ضريبة" : "لم يُدخَل بعد"}</div>
     </div>
@@ -233,7 +301,7 @@ function penaltyHTML(cfg){
     </tr>`).join("");
   return `
   <div class="card">
-    <div class="card-header"><div class="card-title">${_svg("alertTriangle",16)} مقياس الغرامة الشهرية</div></div>
+    <div class="card-header"><div class="card-title">${_svg("alertTriangle",16)} مقياس الغرامة الشهرية${_isTrial()?' <span class="pf-tag">تدريبيّ — لا يُحتسب</span>':''}</div></div>
     <div class="pf-hint">الانحراف = الدرجة الشهرية − الحد الأدنى. والغرامة نسبةٌ من المبلغ الشهري المقطوع (بند ٦٣)،
       بسقفٍ تراكميٍّ ٢٠٪ من قيمة العقد (بند ٦٥).</div>
     <div class="pf-tbl-wrap">
@@ -255,7 +323,7 @@ function penaltyHTML(cfg){
 function roadmapHTML(){
   const steps=[
     { n:"١", t:"نوعُ المشروع", d:"عَلَمُ «عقد قائم على الأداء» وإعداداته، وهذا القسم.", done:true },
-    { n:"٢", t:"الحقول التي تُغذّي المؤشرات", d:"«وصلتُ للموقع» · «رجعت الخدمة» · «توقف الساعة» · تاريخُ استحقاق المهمة الوقائية. تفتح ٢٨ درجةً من ١٠٠.", done:false },
+    { n:"٢", t:"الحقول التي تُغذّي المؤشرات", d:"«وصلتُ للموقع» · «رجعت الخدمة» · «توقف الساعة» · تاريخُ استحقاق المهمة الوقائية — والجدولُ المعتمد لم يعد ينزاح. تفتح ٢٨ درجةً من ١٠٠.", done:true },
     { n:"٣", t:"سجلّ عدم المطابقة", d:"استقبالُ المخالفة وربطُها بالمؤشر، وأثرُها المحسوب فوراً، وملفُّ اعتراضٍ بالأدلة. يحمي ٥١٫٥ درجة.", done:false },
     { n:"٤", t:"الدرجة والغرامة الحيّة", d:"الدرجةُ أثناء الشهر · الخصمُ المتوقَّع · عدّادا التكرار والإنذار · «ماذا لو».", done:false },
     { n:"٥", t:"السلامة والتوطين و٩٤٠", d:"سجلُّ الحوادث · تصاريحُ العمل · لوحةُ التوطين · بلاغاتُ ٩٤٠ · سجلُّ التدريب.", done:false }
@@ -319,6 +387,14 @@ function injectCSS(){
   #page-${PAGE_ID} .pf-step-d{font-size:11.5px;color:var(--muted);line-height:1.85;margin-top:3px}
   #page-${PAGE_ID} .pf-badge-ok{font-size:9.5px;font-weight:800;color:#0a7c59;background:color-mix(in srgb,#0a7c59 12%,var(--surface));border:1px solid color-mix(in srgb,#0a7c59 30%,var(--border));border-radius:99px;padding:2px 8px}
   #page-${PAGE_ID} .pf-badge-wait{font-size:9.5px;font-weight:800;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:99px;padding:2px 8px}
+  #page-${PAGE_ID} .pf-note-trial{background:color-mix(in srgb,#d97706 12%,var(--surface));border:1px solid color-mix(in srgb,#d97706 38%,var(--border));color:var(--text)}
+  #page-${PAGE_ID} .pf-tag{font-size:9px;font-weight:800;color:#7a4a06;background:#fef3c7;border:1px solid #fcd34d;border-radius:99px;padding:1px 7px;vertical-align:middle}
+  #page-${PAGE_ID} .pf-covs{display:flex;flex-direction:column;gap:13px}
+  #page-${PAGE_ID} .pf-cov-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px}
+  #page-${PAGE_ID} .pf-cov-l{font-weight:800;font-size:12.5px}
+  #page-${PAGE_ID} .pf-cov-v{font-weight:900;font-size:18px;line-height:1}
+  #page-${PAGE_ID} .pf-cov-h{font-size:10.5px;color:var(--muted);margin-top:5px;line-height:1.8}
+  #page-${PAGE_ID} .pf-cov-foot{font-size:11.5px;color:var(--muted);margin-top:14px;padding-top:11px;border-top:1px solid var(--border);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
   #page-${PAGE_ID} .pf-empty{text-align:center;padding:48px 20px;color:var(--muted)}
   #page-${PAGE_ID} .pf-empty-t{font-weight:800;font-size:15px;margin-bottom:7px;color:var(--text)}
   #page-${PAGE_ID} .pf-empty-s{font-size:12.5px;line-height:1.9}

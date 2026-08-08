@@ -190,6 +190,76 @@ check('إطفاء العَلَم يُخفي الحقول', toggled.hidden === tr
 check('★ القارئ يعيد perfContract=false عند الإطفاء', toggled.read.perfContract === false);
 await page.screenshot({ path: `${SHOTS}/04-edit-modal.png` });
 
+/* ═════════ ٥) المرحلة ٢: الجدولة والطوابع والتجربة ═════════ */
+L('\n=== ٥) جدولةُ الوقائي لا تنزاح ===');
+const sched = await page.evaluate(() => {
+  // خطةٌ شهريةٌ استحقاقُها ١ يناير، تُنفَّذ متأخرةً — يجب أن يبقى الجدول على مرساته
+  const plan = { id:'P1', freq:'شهري', nextDueDate:'2026-01-01T12:00:00.000Z' };
+  const a = ppmNextDue(plan, new Date().toISOString());
+  // خطةٌ متأخّرةٌ جداً: يجب أن تلحق الدورات حتى تتجاوز اليوم لا أن تبقى في الماضي
+  const late = ppmNextDue({ id:'P2', freq:'شهري', nextDueDate:'2020-01-01T12:00:00.000Z' }, null);
+  // خطةٌ بلا استحقاقٍ سابق: تُبنى من التاريخ المُمرَّر
+  const fresh = ppmNextDue({ id:'P3', freq:'أسبوعي' }, '2026-08-01T12:00:00.000Z');
+  const today = new Date(); const t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  // ثباتُ المرساة = الفارقُ بين الاستحقاق الجديد والأصلي **مضاعفٌ تامٌّ للتكرار**.
+  // (السلوكُ القائم: «شهري» = ٣٠ يوماً لا شهراً تقويمياً — لم تُغيَّر دلالتُه هنا.)
+  const DAY = 86400000;
+  const deltaDays = Math.round((new Date(a) - new Date('2026-01-01T12:00:00.000Z')) / DAY);
+  return { a, late, fresh, lateFuture: new Date(late) > t0, deltaDays,
+           anchored: deltaDays > 0 && deltaDays % 30 === 0, freshDay: new Date(fresh).getDate() };
+});
+check('★ الاستحقاق الجديد مضاعفٌ تامٌّ للتكرار من المرساة الأصلية (لا انزياح)',
+  sched.anchored === true, sched.deltaDays + ' يوماً = ' + (sched.deltaDays/30) + ' دورة');
+check('★ خطةٌ متأخّرةٌ سنواتٍ تلحق دوراتها ولا تبقى في الماضي', sched.lateFuture === true, sched.late.slice(0,10));
+check('خطةٌ بلا استحقاقٍ سابق تُبنى من التاريخ المُمرَّر', sched.freshDay === 8, 'يوم ' + sched.freshDay);
+
+L('\n=== ٦) الطوابع الزمنية ===');
+const stamps = await page.evaluate(() => {
+  const now = new Date().toISOString();
+  const t = { id:'TK-PERF', building:'مبنى الإدارة', workType:'كهرباء', desc:'اختبار',
+              priority:'عادي 🟢 (48 ساعة)', status:'مفتوح', createdAt:now, timeline:[] };
+  tickets.push(t);
+  perfStamp('TK-PERF','respondedAt');
+  const first = t.respondedAt;
+  perfStamp('TK-PERF','respondedAt');          // محاولةٌ ثانية — يجب أن تُرفض
+  perfStamp('TK-PERF','restoredAt');
+  const pausedBefore = perfClockPaused(t);
+  t.clockStops = [{ from: now, to: null, reason:'بانتظار موافقة الجهة' }];
+  const pausedAfter = perfClockPaused(t);
+  t.clockStops[0].to = now;
+  const pausedResumed = perfClockPaused(t);
+  return { first, second: t.respondedAt, restored: !!t.restoredAt, pausedBefore, pausedAfter, pausedResumed,
+           tl: (t.timeline||[]).map(e=>e.event) };
+});
+check('★ زمن الاستجابة يُسجَّل', !!stamps.first);
+check('★ لا يُعاد كتابتُه (لا تجميل للرقم)', stamps.first === stamps.second);
+check('عودة الخدمة تُسجَّل مستقلةً', stamps.restored === true);
+check('الخط الزمني يوثّق الفعلين', stamps.tl.includes('وصل الفني للموقع') && stamps.tl.includes('عادت الخدمة للعمل'));
+check('★ قارئُ حالة الساعة: مفتوح ⇒ موقوف، مُغلق ⇒ يعمل',
+  stamps.pausedBefore === false && stamps.pausedAfter === true && stamps.pausedResumed === false);
+
+L('\n=== ٧) الوضع التجريبي ===');
+// أغلِق نافذةَ التعديل من الخطوة السابقة — وإلا حجبت لقطةَ الإثبات
+await page.evaluate(() => { document.getElementById('modal-edit-project')?.remove(); });
+const trial = await page.evaluate(() => {
+  const before = isPerfTrial();
+  CURRENT_PROJECT.perfTrial = true;
+  const after = isPerfTrial();
+  performanceContract.render();
+  const el = document.getElementById('page-performance');
+  const txt = el ? el.textContent.replace(/\s+/g,' ') : '';
+  return { before, after, banner: txt.includes('وضعٌ تجريبيّ — قياسٌ بلا غرامات'),
+           tagged: txt.includes('تدريبيّ'), coverage: txt.includes('تغطيةُ البيانات'),
+           notScore: !txt.includes('درجتك الآن') };
+});
+check('العَلَم مطفأٌ افتراضياً', trial.before === false);
+check('★ تفعيلُه يُشعل الوضع التجريبي', trial.after === true);
+check('★ شريطٌ صريحٌ «قياسٌ بلا غرامات»', trial.banner === true);
+check('★ المبالغ موسومةٌ «تدريبيّ»', trial.tagged === true);
+check('بطاقةُ تغطية البيانات معروضة', trial.coverage === true);
+check('★ ولا درجةَ محسوبةٌ تُعرَض', trial.notScore === true);
+await page.screenshot({ path: `${SHOTS}/05-trial.png`, fullPage: true });
+
 L('\n════════════════════════════════════════');
 if (errors.length) { L('  ⚠️ أخطاء جافاسكربت:'); errors.slice(0, 5).forEach(e => L('     • ' + e)); }
 else L('  ✨ لا أخطاء جافاسكربت');
