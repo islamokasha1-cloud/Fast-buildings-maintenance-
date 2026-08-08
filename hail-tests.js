@@ -4792,12 +4792,12 @@ function financeAuditTests() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   v18.9ag) جدارُ المشاريع — كل لوحات TV في شاشةٍ واحدة
+   v18.9ag) مركزُ العمليات — كل لوحات TV في شاشةٍ واحدة
    الحرّاس: مصدرٌ واحدٌ للتصنيف والصلاحية · عزلٌ تامٌّ عن المشروع المفتوح ·
    مستمعون يُفكّون عند الخروج · حسابُ البطاقة صحيح · نافذةٌ مُعلَنة.
    ════════════════════════════════════════════════════════════════════ */
 function tvWallGuards() {
-  H("v18.9ag) جدار المشاريع — العرض الموحّد");
+  H("v18.9ag+ah) مركز العمليات — العرض الموحّد والتدوير التلقائي");
 
   // ── (١) مصدرٌ واحدٌ للتصنيف: tvHealth تُستخرَج وتُنفَّذ فعلاً ──
   const thSrc = (HTML.match(/function tvHealth\(overdue\)\{[\s\S]*?\n\}/) || [])[0];
@@ -4828,8 +4828,8 @@ function tvWallGuards() {
   T("★ ag: البوّابة تقرأ نفس الدالة (لا فلترةً مكرّرة)",
     /const visibleProjects = _visibleProjectsFor\(user\);/.test(HTML) &&
     !/visibleProjects = _projectsList\.filter\(p => user\.projects\.includes/.test(HTML));
-  T("★ ag: الجدار يقرأ نفس الدالة", /_tvwall\.projects=_visibleProjectsFor\(currentUser\)/.test(HTML));
-  T("★ ag: المراقبُ وأدوارُ المشتريات المركزية محجوبون عن الجدار",
+  T("★ ag: المركز يقرأ نفس الدالة", /_tvwall\.projects=_visibleProjectsFor\(currentUser\)/.test(HTML));
+  T("★ ag: المراقبُ وأدوارُ المشتريات المركزية محجوبون عن المركز",
     /function _canSeeTVWall\(user\)\{[\s\S]*?user\.role === "observer"[\s\S]*?_isGlobalOnlyRole\(user\.role\)[\s\S]*?\n\}/.test(HTML));
   T("★ ag: openTVWall تفحص الصلاحية بنفسها (لا تكتفي بإخفاء الزر)",
     /async function openTVWall\(from\)\{[\s\S]{0,400}?if\(!_canSeeTVWall\(currentUser\)\)/.test(HTML));
@@ -4837,19 +4837,19 @@ function tvWallGuards() {
   // ── (٣) عزلٌ تام: الجدار لا يكتب حالة المشروع المفتوح ولا يقرأ بياناته ──
   // من أول تعليمةٍ بعد تعليق الرأس (فلا يُحسب نصُّ التعليق شيفرةً في الحرّاس أدناه)
   const wallSrc = slice("const TVWALL_SYNC_LIMIT", "// تنظيف TV intervals عند تغيير الصفحة");
-  T("★ ag: كتلةُ الجدار موجودة في المصدر",
-    !!wallSrc && wallSrc.length > 3000 && HTML.includes("██  v18.9ag — جدارُ المشاريع"));
+  T("★ ag: كتلةُ مركز العمليات موجودة في المصدر",
+    !!wallSrc && wallSrc.length > 3000 && HTML.includes("██  v18.9ag — مركزُ العمليات"));
   if (wallSrc) {
-    T("★ ag: الجدار لا يُسنِد CURRENT_PROJECT إطلاقاً",
-      !/CURRENT_PROJECT\s*=(?!=)/.test(wallSrc), "إسنادُ المشروع من الجدار = خلطُ بيانات مشروعين");
-    T("★ ag: الجدار لا يقرأ مصفوفة tickets للمشروع المفتوح",
+    T("★ ag: المركز لا يُسنِد CURRENT_PROJECT إطلاقاً",
+      !/CURRENT_PROJECT\s*=(?!=)/.test(wallSrc), "إسنادُ المشروع من المركز = خلطُ بيانات مشروعين");
+    T("★ ag: المركز لا يقرأ مصفوفة tickets للمشروع المفتوح",
       !/\btickets\b(?!\s*[:_])/.test(wallSrc.replace(/_tickets/g, "")
         .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")),
-      "قراءةُ tickets تخلط بلاغات المشروع المفتوح ببطاقات الجدار");
+      "قراءةُ tickets تخلط بلاغات المشروع المفتوح ببطاقات المركز");
     T("★ ag: لكل مشروعٍ مخزنُه الخاص", /_tvwall\.data\[p\.id\]\s*=/.test(wallSrc));
     T("★ ag: التأخّر من isOverdue وصحّةُ البطاقة من tvHealth (لا تصنيفَ محلي)",
       /isOverdue\(t\)/.test(wallSrc) && /tvHealth\(odList\.length\)/.test(wallSrc));
-    T("★ ag: فتحُ مشروعٍ من الجدار وآخرُ مفتوحٌ يمرّ بمسار switchProject",
+    T("★ ag: فتحُ مشروعٍ من المركز وآخرُ مفتوحٌ يمرّ بمسار switchProject",
       /if\(CURRENT_PROJECT\) switchProject\(\);/.test(wallSrc),
       "الدخولُ المباشر يترك مستمعي المشروع السابق حيّين على مجموعاته");
     // ── (٤) المستمعون: تركيبٌ مرةً واحدة، ولا فكَّ عند الإغلاق ──
@@ -4867,9 +4867,9 @@ function tvWallGuards() {
     T("★ ag: معاملات onclick النصية عبر _jsq لا esc (درس v18.9vu-H5)",
       /tvwallOpenProject\('\$\{_jsq\(proj\.id\)\}'\)/.test(wallSrc));
   }
-  T("★ ag: تسجيلُ الخروج يفكّ مستمعي الجدار ويمسح بياناته",
+  T("★ ag: تسجيلُ الخروج يفكّ مستمعي المركز ويمسح بياناته",
     /function logoutToLogin\(\)\{[\s\S]*?_tvwallUnsubAll\(\);[\s\S]*?currentUser = null;/.test(HTML));
-  T("★ ag: الخروج لا يعيد إظهار بوّابة المشاريع من الجدار",
+  T("★ ag: الخروج لا يعيد إظهار بوّابة المشاريع من المركز",
     /_tvwall\.ret="none";\s*\/\/ لا يُعاد إظهار بوّابة المشاريع/.test(HTML));
 
   // ── (٦) حسابُ البطاقة — تنفيذٌ حقيقيٌّ لا قراءة ──
@@ -4918,14 +4918,80 @@ function tvWallGuards() {
   }
 
   // ── (٨) الواجهة: مدخلان اثنان لا أكثر، وثيمةٌ واحدةٌ مع لوحة المشروع ──
-  T("★ ag: زرُّ الجدار في بوّابة المشاريع", /onclick="openTVWall\('picker'\)"/.test(HTML));
-  T("★ ag: زرُّ الجدار في القائمة الجانبية", /id="nav-tvwall-btn"[\s\S]{0,120}?openTVWall\('app'\)/.test(HTML));
+  T("★ ag: زرُّ المركز في بوّابة المشاريع", /onclick="openTVWall\('picker'\)"/.test(HTML));
+  T("★ ag: زرُّ المركز في القائمة الجانبية", /id="nav-tvwall-btn"[\s\S]{0,120}?openTVWall\('app'\)/.test(HTML));
   T("★ ag: الشاشة تشارك لوحةَ ألوان #page-tv (مصدرٌ واحدٌ للثيمة)",
     /#page-tv,#tvwall-screen\{/.test(HTML) && /#tvwall-screen\[data-health="crit"\]/.test(HTML));
   T("★ ag: زرُّ القائمة محجوبٌ عن المراقب ووضع المشتريات المركزية",
     /body\.role-observer #nav-tvwall-btn,/.test(HTML) && /body\.global-purchases-mode #nav-tvwall-btn,/.test(HTML));
-  T("★ ag: Esc يغلق الجدار بعد الخروج من ملء الشاشة لا قبله",
+  T("★ ag: Esc يغلق المركز بعد الخروج من ملء الشاشة لا قبله",
     /e\.key==="Escape" && _tvwall\.open && !document\.fullscreenElement/.test(HTML));
+
+  /* ── v18.9ah: التدويرُ التلقائي ولوحةُ المشروع داخل المركز ── */
+  // (١) قائمةُ الشاشات: «الكل» + مشروعٌ لكل بطاقة، وتُنفَّذ فعلاً لا تُقرأ
+  const syncSrc = (HTML.match(/function _tvwallSyncScreens\(order\)\{[\s\S]*?\n\}/) || [])[0];
+  T("★ ah: _tvwallSyncScreens موجودة", !!syncSrc);
+  if (syncSrc) {
+    const mk = st => new Function("_tvwall", syncSrc + "; return _tvwallSyncScreens;")(st);
+    const st1 = { projects: [{ id: "a" }, { id: "b" }], screens: [], idx: 0 };
+    mk(st1)(["a", "b"]);
+    T("★ ah: الشاشةُ الأولى «الكل» ثم شاشةٌ لكل مشروع",
+      st1.screens.length === 3 && st1.screens[0].pid === null &&
+      st1.screens.map(s => s.pid).join() === ",a,b", JSON.stringify(st1.screens));
+    // إعادةُ الترتيب أثناء العرض تُبقي المستخدم على المشروع نفسه لا على رقم الشاشة
+    const st2 = { projects: [{ id: "a" }, { id: "b" }], screens: st1.screens.slice(), idx: 2 };
+    mk(st2)(["b", "a"]);
+    T("★ ah: تغيّرُ الترتيب يُبقي المعروضَ على مشروعه (لا قفزةَ شاشة)",
+      st2.screens[st2.idx].pid === "b", "idx=" + st2.idx + " pid=" + st2.screens[st2.idx].pid);
+    const st3 = { projects: [{ id: "a" }], screens: [], idx: 0 };
+    mk(st3)(["a"]);
+    T("★ ah: مشروعٌ واحد ⇒ شاشتان (الكل + لوحته)", st3.screens.length === 2);
+  }
+  if (wallSrc) {
+    T("★ ah: التدويرُ مؤقّتٌ واحدٌ يُعاد ضبطه ولا يتراكم",
+      /function _tvwallRotRestart\(\)\{[\s\S]{0,160}?if\(_tvwall\.rotTimer\)\{ clearInterval\(_tvwall\.rotTimer\); _tvwall\.rotTimer=null; \}/.test(wallSrc));
+    T("★ ah: التدويرُ لا يعمل بشاشةٍ واحدة ولا وهو موقوف",
+      /if\(!_tvwall\.rotOn \|\| _tvwall\.screens\.length<2\) return;/.test(wallSrc));
+    T("★ ah: الإغلاقُ يوقف مؤقّت التدوير", /if\(_tvwall\.rotTimer\)\{ clearInterval\(_tvwall\.rotTimer\); _tvwall\.rotTimer=null; \}/.test(HTML.slice(HTML.indexOf("function closeTVWall"))));
+    T("★ ah: زرٌّ صريحٌ يوقف التدوير ويستأنفه",
+      /function toggleTVWallRotation\(\)\{[\s\S]*?_tvwall\.rotOn=!_tvwall\.rotOn;[\s\S]*?\n\}/.test(wallSrc) &&
+      /id="tvl-rot-btn" onclick="toggleTVWallRotation\(\)"/.test(HTML));
+    // (٢) لوحةُ المشروع: من نافذة المركز لا من tickets، وبنفس مكوّنات لوحة العرض TV
+    T("★ ah: لوحةُ المشروع تُبنى من _tvwallCalc لا من بيانات المشروع المفتوح",
+      /function _tvwallRenderProject\(pid, entering\)\{[\s\S]{0,400}?const m=_tvwallCalc\(pid\)/.test(wallSrc));
+    T("★ ah: تعيد استعمال مكوّنات لوحة العرض TV (لا نسخةَ ثانيةً من التصميم)",
+      /tvw-kpi /.test(wallSrc) && /tvw-bld /.test(wallSrc) &&
+      /class="tvw-stage"/.test(HTML.slice(HTML.indexOf('id="tvl-screen-proj"'), HTML.indexOf('id="tvl-screen-proj"') + 3000)));
+    T("★ ah: حلقةُ الجاهزية على إنجاز بلاغات الشهر، وصفرٌ عند غياب البيانات لا كذباً",
+      /const to=C\*\(1-\(m\.rate==null\?0:m\.rate\)\/100\);/.test(wallSrc) &&
+      /setTx\("tvl-proj-bpct",m\.rate==null\?"—":\(m\.rate\+"%"\)\);/.test(wallSrc));
+    T("★ ah: مبانِي المشروع من مستند إعداداته، وتُشتقّ من البلاغات عند تعذّرها",
+      /"meta\/"\+p\.id\+\(IS_DEV\?"_settings_dev":"_settings"\)/.test(wallSrc) &&
+      /const blds=\(known&&known\.length\)\?known:fromT;/.test(wallSrc));
+    T("★ ah: لا إجماليَّ تراكميٍّ على لوحة المشروع (النافذة مقتطَعة ⇒ الرقم يكذب)",
+      !/إجمالي البلاغات/.test(wallSrc) && /l:"بلاغات الأسبوع"/.test(wallSrc),
+      "إجماليٌّ تراكميٌّ من نافذةٍ محدودة يُقرأ «هذا كل شيء»");
+    T("★ ah: شريطٌ علويٌّ واحدٌ يتبع المعروض (لا شريطان)",
+      /if\(totEl && !\(curS&&curS\.pid\)\) totEl\.innerHTML=_tvwall\.totalsHtml;/.test(HTML) &&
+      (HTML.match(/id="tvl-totals"/g) || []).length === 1);
+    // (٣) نقاطُ التدوير بنيةُ معلومات: لونُ النقطة = صحّةُ مشروعها
+    T("★ ah: نقطةُ كل مشروعٍ تحمل لونَ صحّته",
+      /m\.health\.key==="crit"\?"var\(--red\)":m\.health\.key==="watch"\?"var\(--amber\)":"var\(--green\)"/.test(wallSrc) &&
+      /#tvl-rot-dots button\{background:color-mix/.test(HTML));
+    T("★ ah: النقاطُ قابلةٌ للنقر ومُسمّاةٌ لقارئ الشاشة",
+      /aria-label="\$\{esc\(lbl\)\}"/.test(wallSrc) && /b\.onclick=\(\)=>\{ _tvwallShowScreen\(k\); _tvwallRotRestart\(\); \}/.test(wallSrc));
+  }
+  // (٤) التسمية والعلامة الجديدتان — لا بقايا للاسم القديم في الواجهة
+  T("★ ah: الاسم الظاهر «مركز العمليات» في الشاشة والزرّين",
+    /<h1>مركز العمليات — كل المشاريع<\/h1>/.test(HTML) &&
+    />مركز العمليات — كل المشاريع<\/div>/.test(HTML) &&
+    /🛰️<\/span> مركز العمليات</.test(HTML));
+  // (سطرُ APP_VERSION يذكر الاسم القديم عمداً — فهو يوثّق إعادةَ التسمية نفسها)
+  T("★ ah: لا بقايا لاسم «جدار المشاريع» في نصوص الواجهة",
+    !/جدار المشاريع/.test(HTML.replace(/const APP_VERSION = "[^"]+";[^\n]*/, "")),
+    "نصٌّ ظاهرٌ بالاسم القديم");
+  T("★ ah: علامةُ الرادار حلّت محلّ أيقونة الشاشة في زرّ البوّابة",
+    /<circle cx="12" cy="12" r="2\.1" fill="currentColor" stroke="none"\/>/.test(HTML));
 }
 
 /* ══ التشغيل ══ */
