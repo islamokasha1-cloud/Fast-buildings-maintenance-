@@ -1,4 +1,10 @@
 {
+  "scripts": {
+    "stamp": "node sync-version.mjs",
+    "stamp:check": "node sync-version.mjs --check",
+    "stamp:print": "node sync-version.mjs --print",
+    "test": "node hail-tests.js"
+  },
   "dependencies": {
     "jsdom": "^29.1.1"
   }
