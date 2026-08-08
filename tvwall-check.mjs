@@ -1,4 +1,4 @@
-// فحصُ مركز العمليات (v18.9ag/ah) في متصفّح Chromium حقيقي — Firestore وهميّ في الذاكرة
+// فحصُ مركز العمليات (v18.9ag/ai) في متصفّح Chromium حقيقي — Firestore وهميّ في الذاكرة
 // (نفس مُحاكي browser-scenarios.mjs، مصدرٌ واحد) فلا يلمس الإنتاج إطلاقاً.
 // يزرع ثلاثة مشاريع بحالاتٍ مختلفة ويتحقّق: الأرقام، والترتيب الأسوأ أولاً، والتدويرَ
 // التلقائي ولوحةَ المشروع داخله، وعزلَ المركز عن المشروع المفتوح، وبقاءَ المستمعين.
@@ -134,7 +134,7 @@ await page.screenshot({ path: `${SHOTS}/wall.png`, fullPage: false });
 const subs = await page.evaluate(() => Object.keys(_tvwall.subs).length);
 check('★ مستمعٌ لكل مشروع (٣)', subs === 3, subs + ' مستمع');
 
-/* ═══ التدوير التلقائي (v18.9ah) ═══ */
+/* ═══ التدوير التلقائي (v18.9ai) ═══ */
 const rot = await page.evaluate(() => ({
   screens: _tvwall.screens.map(s => s.pid),
   idx: _tvwall.idx, on: _tvwall.rotOn, timer: !!_tvwall.rotTimer,

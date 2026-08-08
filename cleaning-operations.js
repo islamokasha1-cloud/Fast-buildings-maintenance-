@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9ah";
+const MODULE_BUILD = "v18.9ai";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -2797,30 +2797,191 @@ function _logAsTicket(r){
     _cleaning: true
   };
 }
+/* ════════════ v18.9ag — التقرير المصوّر **المجمّع** لأعمال النظافة ════════════
+   الجذر: جدولُ النظافة يوميّ، فالشهرُ الواحد مئاتُ التنفيذات، وكلُّ تنفيذٍ حتى أربع
+   صور. البطاقةُ لكل تنفيذٍ تُنتج ملفاً هائلاً: قياسُ تقريرٍ حقيقيٍّ مرفقٍ من المالك =
+   ٢١٢ صورةً تشغل ١٧٫٤ من أصل ٢٠٫٤ ميجابايت (**٨٥٪ من الملف**) في ٤١ صفحةً فقط —
+   وتقريرُ نظافةٍ شهريٌّ كاملٌ يتجاوز المئة ميجابايت فلا يُرسَل ولا يُفتَح.
+   والعميلُ لا يطلب أربعمئة بطاقةٍ متطابقة، يطلب **إثباتَ الاستمرارية**.
+
+   فالوضعُ الافتراضي لتقارير النظافة صار **مجمّعاً**: بطاقةٌ واحدةٌ لكل
+   (مبنى × نوع عمل) تحمل عددَ التنفيذات وأيامَ العمل والفترةَ والمشرفَ ونسبةَ بنود
+   الفحص، ومعها **ثلاثُ صورٍ موزّعةٌ على الفترة** (أوّلٌ · منتصفٌ · آخِر).
+
+   الاختيارُ **حتميٌّ بالترتيب الزمني** لا عشوائيّ: نفسُ المدخلات ⇒ نفسُ الصور دائماً،
+   فلا «إعادة سحبٍ» حتى تظهر أجملُ الصور (نفس مبدأ عيّنة الرقابة المالية في §3-أ).
+   ونأخذ **صورةً واحدةً من كل تنفيذٍ أولاً** فيتوزّع الدليلُ على أيامٍ مختلفة، ولا
+   نُكمل من بقيّة صور التنفيذ الواحد إلا إذا لم تكفِ التنفيذاتُ العدد.
+
+   **لا تُحذَف صورةٌ من النظام إطلاقاً** — التغييرُ في العرض وحده، وكلُّ الصور تبقى
+   في سجلّ التنفيذ وفي التخزين. و«مفصّل» يعيد السلوكَ القديم بطاقةً لكل تنفيذ. */
+const AGG_PHOTOS_PER_CARD = 3;
+function _recDate(r){ return String((r&&(r.date||r.at))||"").slice(0,10); }
+
+/* اختيارُ صورِ البطاقة المجمّعة — حتميٌّ وموزَّعٌ على الفترة.
+   الأولويةُ لتغطيةِ أيامٍ مختلفة: قائمةُ «أولى صورةِ كل تنفيذ» مرتَّبةً زمنياً، ثم
+   عيّنةٌ متساويةُ التباعد منها (0 · المنتصف · الأخير عند n=3). فإن قلَّت التنفيذاتُ
+   عن العدد المطلوب أكملنا من بقيّة صور التنفيذات — دليلٌ أكثرُ خيرٌ من فراغ. */
+function _aggPickPhotos(recs, n){
+  n = Math.max(0, Number(n)||0);
+  if(!n || !Array.isArray(recs)) return [];
+  const sorted = recs.slice().sort((a,b)=> String((a&&a.at)||_recDate(a)).localeCompare(String((b&&b.at)||_recDate(b))));
+  const firsts=[], extras=[];
+  sorted.forEach(r=>{
+    const ph=((r&&r.photos)||[]).filter(Boolean);
+    if(!ph.length) return;
+    firsts.push({ url:ph[0], date:_recDate(r) });
+    for(let i=1;i<ph.length;i++) extras.push({ url:ph[i], date:_recDate(r) });
+  });
+  if(firsts.length >= n){
+    if(n===1) return [firsts[0]];
+    const out=[];
+    for(let i=0;i<n;i++) out.push(firsts[Math.round(i*(firsts.length-1)/(n-1))]);
+    return out;
+  }
+  return firsts.concat(extras.slice(0, n-firsts.length));
+}
+
+/* مجموعةُ تنفيذاتٍ ⟵ بطاقةٌ مجمّعةٌ يفهمها التقرير المصوّر (عرضٌ فقط، بلا كتابة).
+   المعرّفُ صناعيٌّ متسلسل (`AGG-1`) لا اسمُ المبنى: الاسمُ يدخل نصَّ `onclick`
+   في النواة، وقد يحمل علامةَ اقتباسٍ تكسر السطر. */
+function _aggAsTicket(g, idx){
+  const days = Object.keys(g.days).sort();
+  const picked = _aggPickPhotos(g.recs, AGG_PHOTOS_PER_CARD);
+  const dateOf = {}; picked.forEach(p=>{ dateOf[p.url]=p.date; });
+  const supNames = Object.keys(g.sups).sort((a,b)=>g.sups[b]-g.sups[a]);
+  const floors = Object.keys(g.floors);
+  const itemsPct = g.items.total ? Math.round(g.items.done/g.items.total*100) : null;
+  const from = days[0]||"", to = days[days.length-1]||"";
+  return {
+    id: "AGG-"+(idx+1),
+    createdAt: from ? from+"T00:00:00" : "", closedAt: to ? to+"T00:00:00" : "",
+    building: g.building, location: floors.slice(0,3).join(" · "),
+    workType: g.workType, maintType: "نظافة دورية",
+    priority: "روتيني 🔵 (صيانة دورية)",
+    supervisor: supNames[0]||"", tech: "",
+    status: "مغلق",
+    desc: g.workType+" — "+g.recs.length+" تنفيذاً على "+days.length+" يوم عمل",
+    workDone: itemsPct==null ? "" : ("اكتمال بنود الفحص "+itemsPct+"٪"),
+    photos: picked.map(p=>p.url), ticketPhoto: "",
+    _cleaning: true, _agg: true,
+    _aggRuns: g.recs.length, _aggDates: days, _aggFrom: from, _aggTo: to,
+    _aggPhotoCount: g.photoCount, _aggItemsPct: itemsPct,
+    _aggSups: supNames, _aggFloors: floors, _aggDateOf: dateOf
+  };
+}
+
+/* التجميع: بطاقةٌ لكل (مبنى × نوع عمل). الترتيبُ بالمبنى ثم بالأكثر تنفيذاً —
+   ترتيبٌ ثابتٌ لا يتغيّر بين تصديرين لنفس البيانات. */
+function _aggregateLog(recs){
+  const order=[], groups={};
+  (Array.isArray(recs)?recs:[]).forEach(r=>{
+    if(!r) return;
+    const b=r.building||"—", w=r.workType||"—", k=b+" "+w;
+    let g=groups[k];
+    if(!g){ g=groups[k]={ building:b, workType:w, recs:[], days:{}, sups:{}, floors:{}, items:{done:0,total:0}, photoCount:0 }; order.push(k); }
+    g.recs.push(r);
+    const d=_recDate(r); if(d) g.days[d]=1;
+    if(r.supervisor) g.sups[r.supervisor]=(g.sups[r.supervisor]||0)+1;
+    if(r.floor) g.floors[r.floor]=1;
+    g.items.done  += Number(r.doneItems)||0;
+    g.items.total += Number(r.totalItems)||0;
+    g.photoCount  += ((r.photos||[]).filter(Boolean)).length;
+  });
+  return order.map(k=>groups[k])
+    .sort((a,b)=> a.building===b.building ? (b.recs.length-a.recs.length) : String(a.building).localeCompare(String(b.building),"ar"))
+    .map(_aggAsTicket);
+}
+
+/* HTML البطاقة المجمّعة — تُستدعى من النواة (`renderPhotoReportOutput`) عند كل رسم،
+   فتُبنى من `t.photos` الحيّة: حذفُ صورةٍ من البطاقة يظهر فوراً بلا حالةٍ مخبّأة.
+   تستعير أصنافَ النواة (`pr-card` · `pr-photos-grid` · `pr-photo-wrap`) فتنطبق
+   عليها أنماطُ الطباعة نفسُها بلا تكرار. */
+function _aggCardHTML(t){
+  const _u = s => { try{ return (typeof safeUrl==="function") ? safeUrl(s) : String(s||""); }catch(e){ return String(s||""); } };
+  const _ic = w => { try{ return (typeof typeIcon==="function") ? typeIcon(w) : ""; }catch(e){ return ""; } };
+  const photos=(Array.isArray(t.photos)?t.photos:[]).filter(Boolean);
+  const cols=photos.length>=3?3:(photos.length||1);
+  const dateOf=t._aggDateOf||{};
+  const fmt=d=>String(d||"").slice(5).replace("-","/");
+  const cells=photos.map((src,i)=>`<div class="pr-photo-wrap" style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f0f4fb;border-radius:4px"><img src="${_u(src)}" onclick="openLightbox('${_u(src)}')" alt="صورة تنفيذ نظافة" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;cursor:pointer;display:block">${dateOf[src]?`<div style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;font-size:8px;padding:1px 4px;border-radius:3px">${_esc(fmt(dateOf[src]))}</div>`:""}<button class="pr-photo-del" onclick="removePhotoFromCard('${_esc(t.id)}','closing',${i})">✕</button></div>`).join("");
+  const photoArea=photos.length
+    ? `<div class="pr-photos-grid" style="display:grid;grid-template-columns:repeat(${cols},1fr);grid-auto-rows:1fr;gap:3px;flex:1;min-height:0;overflow:hidden">${cells}</div>`
+    : `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#f8fafc;border-radius:6px;font-size:10px;color:#94a3b8">لا توجد صور</div>`;
+  const cell=(lbl,val,col)=>`<div style="padding:8px 12px;border-left:1px solid #dde3ed;white-space:nowrap;display:flex;flex-direction:column;gap:2px"><span style="color:#94a3b8;font-size:9px">${lbl}</span><b style="color:${col||"#1b3a6b"};font-size:12px">${val}</b></div>`;
+  const period=(t._aggFrom&&t._aggTo)?(t._aggFrom===t._aggTo?_esc(t._aggFrom):_esc(t._aggFrom)+" ← "+_esc(t._aggTo)):"—";
+  const shown=(Array.isArray(t.photos)?t.photos.length:0), total=Number(t._aggPhotoCount)||0;
+  return `<div class="pr-card" style="border:1.5px solid #dde3ed;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;background:#fff;position:relative">
+      <button class="photo-card-del" onclick="removeFromPhotoReport('${_esc(t.id)}')">🗑 حذف</button>
+      <div style="background:#1b3a6b;color:#fff;padding:7px 12px;flex-shrink:0;display:flex;align-items:center;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div><span style="font-size:13px;font-weight:900">🏢 ${_esc(t.building)}</span>
+          <span style="font-size:10px;opacity:.75;margin-right:8px">${_ic(t.workType)} ${_esc(t.workType)}</span></div>
+          ${t.location?`<div style="font-size:11px;opacity:.92;margin-top:2px">📍 ${_esc(t.location)}</div>`:""}
+        </div>
+        <span style="font-size:11px;background:rgba(255,255,255,.2);padding:2px 8px;border-radius:4px;white-space:nowrap;font-weight:700">${t._aggRuns} تنفيذ</span>
+      </div>
+      <div style="display:flex;align-items:stretch;gap:0;flex-shrink:0;border-bottom:1.5px solid #dde3ed;background:#f0f4fb;font-size:11px;overflow:hidden">
+        ${cell("📅 الفترة", period)}
+        ${cell("🔁 عدد التنفيذات", t._aggRuns, "#0a7c59")}
+        ${cell("🗓 أيام العمل", (t._aggDates||[]).length)}
+        ${cell("👤 المشرف", _esc((t._aggSups||[])[0]||"—"))}
+      </div>
+      <div style="padding:8px 12px;flex-shrink:0;border-bottom:1px solid #e8edf4">
+        <div style="font-size:11px;color:#334155;line-height:1.5">${_esc(t.desc)}</div>
+        ${t.workDone?`<div style="font-size:11px;color:#0a7c59;margin-top:3px;line-height:1.5">✅ ${_esc(t.workDone)}</div>`:""}
+        ${total>shown?`<div style="font-size:10px;color:#94a3b8;margin-top:3px">🖼 ${shown} صورة معروضة من ${total} صورة موثَّقة في النظام</div>`:""}
+      </div>
+      <div style="padding:4px;flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+        ${photoArea}
+      </div>
+    </div>`;
+}
+
 /* فلتر «مصدر التقرير» — يُحقَن في فلاتر التقرير المصوّر لمشاريع النظافة وحدها.
-   الكل | النظافة فقط | البلاغات فقط. */
+   الكل | النظافة فقط | البلاغات فقط. ومعه فلترُ «شكل التقرير»: مجمّع | مفصّل. */
 const PR_SRC_ID="co-pr-source";
+const PR_SHAPE_ID="co-pr-shape";
 function injectPhotoSourceFilter(){
   const wrap=document.querySelector("#page-photo-report .report-filters");
   const existing=document.getElementById(PR_SRC_ID);
   if(!wrap || !isCleaningProject()){
     if(existing && existing.parentElement) existing.parentElement.remove();
+    const dead=document.getElementById(PR_SHAPE_ID);
+    if(dead && dead.parentElement) dead.parentElement.remove();
     return;
   }
-  if(existing) return;
-  const g=document.createElement("div");
-  g.className="form-group"; g.style.marginBottom="0";
-  g.innerHTML='<label class="form-label">مصدر التقرير</label>'+
-    '<select class="form-select" id="'+PR_SRC_ID+'">'+
-      '<option value="">الكل (نظافة + بلاغات)</option>'+
-      '<option value="cleaning">أعمال النظافة فقط</option>'+
-      '<option value="tickets">البلاغات فقط</option>'+
-    '</select>';
-  wrap.insertBefore(g, wrap.firstChild);
-  const sel=g.querySelector("select");
-  if(sel) sel.onchange=()=>{ try{ generatePhotoReport(); }catch(e){} };
+  if(!existing){
+    const g=document.createElement("div");
+    g.className="form-group"; g.style.marginBottom="0";
+    g.innerHTML='<label class="form-label">مصدر التقرير</label>'+
+      '<select class="form-select" id="'+PR_SRC_ID+'">'+
+        '<option value="">الكل (نظافة + بلاغات)</option>'+
+        '<option value="cleaning">أعمال النظافة فقط</option>'+
+        '<option value="tickets">البلاغات فقط</option>'+
+      '</select>';
+    wrap.insertBefore(g, wrap.firstChild);
+    const sel=g.querySelector("select");
+    if(sel) sel.onchange=()=>{ try{ generatePhotoReport(); }catch(e){} };
+  }
+  // شكلُ التقرير — «مجمّع» هو الافتراضي: بطاقةٌ لكل (مبنى × نوع عمل) بثلاث صور،
+  // مقابل بطاقةٍ لكل تنفيذٍ في «مفصّل» (ملفٌّ أضخم بعشرة أضعافٍ تقريباً).
+  if(!document.getElementById(PR_SHAPE_ID)){
+    const g2=document.createElement("div");
+    g2.className="form-group"; g2.style.marginBottom="0";
+    g2.innerHTML='<label class="form-label">شكل تقرير النظافة</label>'+
+      '<select class="form-select" id="'+PR_SHAPE_ID+'">'+
+        '<option value="agg">مجمّع — بطاقة لكل مبنى ونوع عمل (موصى به)</option>'+
+        '<option value="full">مفصّل — بطاقة لكل تنفيذ (ملف أضخم)</option>'+
+      '</select>';
+    wrap.insertBefore(g2, wrap.firstChild);
+    const sel2=g2.querySelector("select");
+    if(sel2) sel2.onchange=()=>{ try{ generatePhotoReport(); }catch(e){} };
+  }
 }
 function _prSource(){ const el=document.getElementById(PR_SRC_ID); return el?el.value:""; }
+// غيابُ العنصر ⇒ «مجمّع»: الافتراضُ الآمن هو الأصغر، فلا يُفاجئ أحدٌ بملفٍّ ضخم.
+function _prShape(){ const el=document.getElementById(PR_SHAPE_ID); return (el&&el.value)==="full" ? "full" : "agg"; }
 
 function hookPhotoReport(){
   if(window._coPhotoHooked || typeof window.generatePhotoReport!=="function") return;
@@ -2834,9 +2995,11 @@ function hookPhotoReport(){
     const g=id=>{ const el=document.getElementById(id); return el?el.value:""; };
     const from=g("pr-from"), to=g("pr-to"), rb=g("pr-building"), rt=g("pr-type"), rs=g("pr-supervisor");
     loadPhotoLog(from, to).then(recs=>{
-      const extra=recs
-        .filter(x=>(!rb||x.building===rb) && (!rt||x.workType===rt) && (!rs||(x.supervisor||"")===rs))
-        .map(_logAsTicket);
+      const matched=recs
+        .filter(x=>(!rb||x.building===rb) && (!rt||x.workType===rt) && (!rs||(x.supervisor||"")===rs));
+      // «مجمّع» (الافتراضي) يطوي مئاتِ التنفيذات في عشرات البطاقات بثلاث صورٍ لكلٍّ؛
+      // «مفصّل» يُبقي بطاقةً لكل تنفيذٍ كما كان. الصورُ كلُّها تبقى في النظام في الحالتين.
+      const extra = _prShape()==="full" ? matched.map(_logAsTicket) : _aggregateLog(matched);
       try{
         if(src==="cleaning"){
           // النظافة وحدها — نستبدل القائمة ولا نضمّها للبلاغات
@@ -3419,6 +3582,7 @@ window.cleaningOps = {
   pickRoundPhoto, delRoundPhoto, goQuality, exportClientReport, printRound,
   mountExec, unmountExec, refreshExec, goOps,
   mountDaily, unmountDaily, refreshDaily, mountKPI, unmountKPI, refreshKPI, seedWorkTypes, relabelPage, injectPhotoSourceFilter,
+  _aggCardHTML: _aggCardHTML,   // تستدعيها النواة لرسم البطاقة المجمّعة
   startSync(){ /* لا مزامنة مستقلة — القراءة بـ .get() عند العرض (انضباط المستمعين) */ },
   version: VERSION,
   build: MODULE_BUILD,
@@ -3426,6 +3590,8 @@ window.cleaningOps = {
   _boardStats: boardStats,
   _coverageByBuilding: coverageByBuilding, _cleaningKPIs: cleaningKPIs, _supOfBuilding: supOfBuilding,
   _logAsTicket: _logAsTicket, _taskSupervisor: taskSupervisor,
+  _aggregateLog: _aggregateLog, _aggPickPhotos: _aggPickPhotos, _aggAsTicket: _aggAsTicket,
+  _AGG_PHOTOS_PER_CARD: AGG_PHOTOS_PER_CARD,
   _supervisorPerf: supervisorPerf, _logSupervisor: logSupervisor,
   _unassignedBuildings: unassignedBuildings,
   _roundScore: roundScore, _qualityTrend: qualityTrend, _QUALITY_STARS: QUALITY_STARS,
