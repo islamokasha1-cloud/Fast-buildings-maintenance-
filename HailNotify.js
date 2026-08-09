@@ -9,7 +9,7 @@
   "use strict";
   if (w.HailNotify) return; // idempotent
 
-  var VERSION = "1.0.0";
+  var VERSION = "1.1.0";
   var STYLE_ID = "hn-style";
   var STACK_ID = "hn-stack";
 
@@ -23,6 +23,7 @@
     colors: {
       ticket: { accent: "#c2560c", tint: "#fdf1e7" },
       po:     { accent: "#0e7490", tint: "#e6f4f6" },
+      hr:     { accent: "#9d174d", tint: "#fce7f3" },
       urgent: { accent: "#c8102e", tint: "#fdecee" }
     }
   };
@@ -30,9 +31,11 @@
   var ICONS = {
     ticket: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
     po:     '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>',
+    // بطاقة هوية — دلالة الإقامات/الرخص/التأشيرات (نفس معنى 🪪 في السايدبار)
+    hr:     '<rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="8.5" cy="10.5" r="2"/><path d="M5 16.5c.6-1.6 1.9-2.5 3.5-2.5s2.9.9 3.5 2.5"/><line x1="15" y1="9" x2="19" y2="9"/><line x1="15" y1="13" x2="19" y2="13"/>',
     urgent: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
   };
-  var KICKERS = { ticket: "بلاغ صيانة", po: "طلب شراء", urgent: "عاجل" };
+  var KICKERS = { ticket: "بلاغ صيانة", po: "طلب شراء", hr: "سداد موارد بشرية", urgent: "عاجل" };
 
   function esc(s) { var el = d.createElement("div"); el.textContent = (s == null ? "" : String(s)); return el.innerHTML; }
 

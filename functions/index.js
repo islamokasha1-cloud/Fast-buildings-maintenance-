@@ -6,6 +6,8 @@
  *   tickets/<...>_tickets (onUpdate/onCreate)  →  notifyRouter  →  wa_outbox
  *   wa_outbox (onCreate)                        →  waSender      →  WhatsApp Cloud API
  *
+ * وبنفس الشكل: `global_purchases` → `poRoute*`، و`global_hr_payments` → `hrpRoute*`.
+ *
  * كل شيء محايد تجاه المزوّد؛ التوكن سرّ يُحقن من Secret Manager (لا في الكود ولا المتصفح).
  */
 const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
@@ -18,6 +20,7 @@ const cfg = require("./lib/config");
 const { enqueue } = require("./lib/outbox");
 const { sendTemplate } = require("./lib/whatsapp");
 const { routePurchase } = require("./lib/purchases");
+const { routeHrPayment } = require("./lib/hr-payments");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -150,6 +153,31 @@ exports.poRouteCreate = onDocumentCreated(
     if (!after.id) after.id = event.params.poId;
     // طلب أُنشئ مباشرة بحالة تحتاج إشعاراً (عادةً pending_pm).
     await routePurchase(null, after, _poDeps());
+  }
+);
+
+/* ═══════════════ مشغّلات سداد أعمال الموارد البشرية ═══════════════ */
+// نفس منطق الشراء: من ينتظر دوره الآن يُنبَّه، وصاحب الطلب عند الرفض/الإعادة/الإغلاق.
+// المجموعة عامّة بلا مشروع، فمشغّلٌ واحدٌ لكلٍّ من التحديث والإنشاء يكفي.
+exports.hrpRouteUpdate = onDocumentUpdated(
+  `${cfg.HR_PAYMENTS_COLLECTION}/{hrpId}`,
+  async (event) => {
+    const before = event.data.before.exists ? event.data.before.data() : null;
+    const after = event.data.after.exists ? event.data.after.data() : null;
+    if (!after) return;
+    if (!after.id) after.id = event.params.hrpId;
+    await routeHrPayment(before, after, _poDeps());
+  }
+);
+
+exports.hrpRouteCreate = onDocumentCreated(
+  `${cfg.HR_PAYMENTS_COLLECTION}/{hrpId}`,
+  async (event) => {
+    const after = event.data && event.data.exists ? event.data.data() : null;
+    if (!after) return;
+    if (!after.id) after.id = event.params.hrpId;
+    // الطلب يُنشأ مباشرةً بحالةٍ تنتظر مسؤولاً (مدير المشاريع/التنفيذي/المالية).
+    await routeHrPayment(null, after, _poDeps());
   }
 );
 

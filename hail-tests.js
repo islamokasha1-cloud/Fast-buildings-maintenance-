@@ -48,6 +48,10 @@ const VER = (HTML.match(/const APP_VERSION = "(v[\d.a-z]+)"/) || [])[1] || "?";
 // ══ أدوات ══
 let PASS = 0, FAIL = 0;
 const FAILURES = [];
+/* فحوصٌ مؤجَّلة: أغلبُ الفحوص متزامنة، لكنّ بعضَ الوحدات (توجيهُ إشعارات الخادم) دوالُّ
+   async تُنفَّذ فعلاً على محاكٍ. تُسجَّل وعودُها هنا ويُنتظر الجميعُ قبل طباعة الحصيلة —
+   فلا يُطبع «نجحت كلها» ونتيجةٌ لم تصل بعد. */
+const _deferred = [];
 function T(name, ok, detail) {
   if (ok) { PASS++; console.log(`  ✅  ${name}${detail ? "\n         └─ " + detail : ""}`); }
   else    { FAIL++; FAILURES.push(name); console.log(`  ❌  ${name}${detail ? "\n         └─ " + detail : ""}`); }
@@ -4836,6 +4840,214 @@ function navIconCoverage() {
   T("★ زرّ قائمة السداد يفتح القائمة لا تفاصيل آخر طلب",
     HTML.includes("hrPayments.list()") && typeof HR.list === "function" &&
     /function list\(\)\{\s*_curId=null;/.test(src));
+
+  hrPaymentNotificationTests(src);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   وصولُ إشعارات سداد الموارد البشرية للمسؤولين — بلّغ المالك: «لا تصل».
+   ثلاث قنوات، كانت الثلاثُ مقطوعةً عن هذه الوحدة:
+   (أ) جرسُ التطبيق — `startNotifSync` لم تكن تُستدعى في الوضع المركزي أصلاً،
+       وأدوارُ الاعتماد (المالية/الموارد البشرية) تدخل منه حصراً.
+   (ب) التنبيهُ اللحظي (HailNotify) — للبلاغات والشراء فقط.
+   (ج) واتساب — لا مشغّل خادميّ للمجموعة إطلاقاً.
+   هذه الحرّاس تمنع ارتدادَ كلٍّ منها.
+   ════════════════════════════════════════════════════════════════════ */
+function hrPaymentNotificationTests(src) {
+  H("وصول إشعارات سداد الموارد البشرية (جرس · توست · واتساب)");
+
+  const rd = f => { const q = path.resolve(path.dirname(IDX), f); return fs.existsSync(q) ? fs.readFileSync(q, "utf8") : ""; };
+
+  /* ── (أ) جرسُ التطبيق يُزامَن في الوضع المركزي أيضاً ── */
+  const _og = HTML.indexOf("async function openGlobalPurchases");
+  const ogSrc = _og >= 0 ? HTML.slice(_og, HTML.indexOf("function exitGlobalPurchases", _og)) : "";
+  T("openGlobalPurchases مستخرَجة", !!ogSrc);
+  T("★★ الجرس يُزامَن في الوضع المركزي (جذر «الإشعارات لا تصل للمسؤولين»)",
+    ogSrc.includes("startNotifSync();"));
+  T("★ ولا يزال يُزامَن عند دخول مشروع (لم نستبدل موضعاً بموضع)",
+    (HTML.match(/^\s*startNotifSync\(\);/gm) || []).length >= 2);
+  T("★ startNotifSync تفكّ مستمعها القديم قبل التركيب (استدعاؤها من مسارين آمن)",
+    /function startNotifSync\(\)\{[\s\S]{0,200}?if\(_notifUnsub\)\{ _notifUnsub\(\); _notifUnsub=null; \}/.test(HTML));
+
+  /* ── (ب) التنبيه اللحظي — لمن دورُه الآن وحده ── */
+  const hnSrc = rd("HailNotify.js");
+  T("HailNotify يعرف نوع «سداد موارد بشرية»",
+    /KICKERS = \{[^}]*hr: "سداد موارد بشرية"/.test(hnSrc) &&
+    /ICONS = \{[\s\S]*?\n\s*hr:\s*'/.test(hnSrc) && /hr:\s*\{ accent:/.test(hnSrc));
+  T("★ لقطةُ المزامنة تمرّ على _liveToast", /_liveToast\(_reqs\);/.test(src));
+  T("★ اللقطة الأولى خط أساس صامت (لا سيلَ تنبيهاتٍ عند كل دخول)",
+    /_hnPrev=cur;\s*\n\s*if\(prev===null\) return;/.test(src));
+  T("★ لا تنبيه إن لم تتغيّر الحالة", /if\(!r \|\| prev\[r\.id\]===r\.status\) return;/.test(src));
+  T("★ من نقل الحالة بنفسه لا يُنبَّه بفعله",
+    /if\(_lastActor\(r\)===_me\(\)\) return;/.test(src));
+  T("★ التنبيه لمن دورُه الآن وحده (نفس منطق عدّاد السايدبار)",
+    /function _awaitsMe\(r\)\{/.test(src) &&
+    /if\(r\.status==="hrp_pending_pm"\)\s*return canPM\(\);/.test(src) &&
+    /if\(r\.status==="hrp_pending_ceo"\)\s*return canCEO\(\);/.test(src) &&
+    /if\(r\.status==="hrp_pending_finance"\) return canFinance\(\);/.test(src));
+  T("النقر على التوست يفتح الطلب", /type:"hr"[\s\S]{0,320}?onClick:function\(\)\{ try\{ open\(r\.id\); \}/.test(src));
+
+  /* ── (ج) الخادم: مشغّلٌ لمجموعة السداد ── */
+  const cfgSrc = rd("functions/lib/config.js");
+  const hrpSrc = rd("functions/lib/hr-payments.js");
+  const fnSrc = rd("functions/index.js");
+  const recSrc = rd("functions/lib/recipients.js");
+  T("وحدة توجيه السداد موجودة على الخادم", !!hrpSrc && /function routeHrPayment\(/.test(hrpSrc));
+  T("★★ مشغّلا Firestore منشوران للمجموعة (إنشاءً وتحديثاً)",
+    /exports\.hrpRouteUpdate = onDocumentUpdated\(\s*`\$\{cfg\.HR_PAYMENTS_COLLECTION\}\/\{hrpId\}`/.test(fnSrc) &&
+    /exports\.hrpRouteCreate = onDocumentCreated\(\s*`\$\{cfg\.HR_PAYMENTS_COLLECTION\}\/\{hrpId\}`/.test(fnSrc) &&
+    /require\("\.\/lib\/hr-payments"\)/.test(fnSrc));
+  T("المجموعة الافتراضية = global_hr_payments (نفس ما تكتبه الواجهة)",
+    /HR_PAYMENTS_COLLECTION =\s*\n?\s*process\.env\.WA_HR_PAYMENTS_COLLECTION \|\| "global_hr_payments"/.test(cfgSrc));
+  T("★ القالب الافتراضي = قالبا الشراء المعتمَدان (تعمل الإشعارات لحظةَ النشر)",
+    /approvalTemplate: process\.env\.WA_HRP_APPROVAL_TEMPLATE \|\| PO\.approvalTemplate/.test(cfgSrc) &&
+    /statusTemplate: process\.env\.WA_HRP_STATUS_TEMPLATE \|\| PO\.statusTemplate/.test(cfgSrc));
+
+  // خريطةُ التوجيه تطابق حالاتِ الوحدة حرفياً — لا رمزَ حالةٍ يفترق بصمت فيسقط الإشعار.
+  const routeKeys = (cfgSrc.match(/^\s{2}(hrp_[a-z_]+): \{ role:/gm) || [])
+    .map(l => l.trim().split(":")[0]);
+  T("★★ كل مرحلةِ انتظارٍ في الوحدة لها مستلمٌ في خريطة الخادم",
+    ["hrp_pending_pm", "hrp_pending_ceo", "hrp_pending_finance"].every(k => routeKeys.includes(k)) &&
+    routeKeys.length === 3, routeKeys.join(" · "));
+  T("★ الأدوار مطابقة لبوّابات الوحدة (مدير المشاريع · التنفيذي · المالية)",
+    /hrp_pending_pm: \{ role: "project_manager"/.test(cfgSrc) &&
+    /hrp_pending_ceo: \{ role: "ceo"/.test(cfgSrc) &&
+    /hrp_pending_finance: \{ role: "finance"/.test(cfgSrc));
+  T("★ صاحب الطلب يُنبَّه بالرفض والإعادة والإغلاق — لا بإلغائه هو",
+    /HRP_NOTIFY_REQUESTER = new Set\(\[\s*"hrp_pm_rejected",\s*"hrp_ceo_rejected",\s*"hrp_finance_returned",\s*"hrp_closed",\s*\]\)/.test(cfgSrc) &&
+    !/HRP_NOTIFY_REQUESTER[\s\S]{0,200}hrp_cancelled/.test(cfgSrc));
+
+  // تسميات نوعية العمل نسختان (واجهة/خادم) — الحارس يمنع انحرافهما.
+  const uiKeys = (src.match(/\{k:"([a-z_]+)",\s*l:/g) || []).map(m => m.match(/k:"([a-z_]+)"/)[1]);
+  const srvKeys = Object.keys(
+    (function () {
+      const m = cfgSrc.match(/const HRP_WORK_TYPES = \{([\s\S]*?)\n\};/);
+      const out = {};
+      if (m) (m[1].match(/^\s{2}([a-z_]+):/gm) || []).forEach(l => { out[l.trim().replace(":", "")] = 1; });
+      return out;
+    })()
+  );
+  T("★ مفاتيح نوعية العمل متطابقة بين الوحدة والخادم",
+    uiKeys.length >= 9 && uiKeys.every(k => srvKeys.includes(k)) && srvKeys.every(k => uiKeys.includes(k)),
+    "واجهة=" + uiKeys.length + " · خادم=" + srvKeys.length);
+
+  // مطابقةُ صاحب الطلب: الوحدة تخزّن الاسمَ المعروض في createdBy واسمَ الدخول في createdByUser.
+  T("★ findRequester تطابق createdByUser أيضاً (وإلّا لم يُعرَف صاحب طلب السداد)",
+    /const ids = \[po\.createdByUser, po\.createdBy\]\.filter\(Boolean\)/.test(recSrc) &&
+    /ids\.includes\(String\(x\.user\)\) \|\| ids\.includes\(String\(x\.name\)\)/.test(recSrc));
+  T("★ المستلمون من meta/users المركزي (المجموعة عامّة بلا مشروع)",
+    /findByRole\(db, route\.role, ""\)/.test(hrpSrc) && /findRequester\(db, after, ""\)/.test(hrpSrc));
+  T("★ منعُ التكرار يحمل طابعَ الكتابة (occurrence) — فالرفضُ المتكرّر يصل ثانيةً",
+    /const occurrence = String\(after\.updatedAt \|\| after\.createdAt \|\| ""\);/.test(hrpSrc) &&
+    (hrpSrc.match(/transition, occurrence \}/g) || []).length === 2);
+  T("★ لا مبالغ في نصّ الرسالة (خصوصية — كقاعدة الشراء)",
+    !/after\.amount/.test(hrpSrc) && !/amount/.test(hrpSrc));
+
+  /* ── التوجيه يُنفَّذ فعلاً على محاكي Firestore ──
+     الفحوص النصّية أعلاه تحرس الشكل؛ هذه تحرس السلوك: من يصله ماذا، ومتى لا يصل أحداً.
+     الوحدة الخادمية نقيّةٌ من firebase-admin (تأخذ db حقناً)، فتُنفَّذ هنا كما هي. */
+  const HRP_MOD = path.resolve(path.dirname(IDX), "functions", "lib", "hr-payments.js");
+  if (!fs.existsSync(HRP_MOD)) { T("وحدة التوجيه قابلة للتحميل", false); return; }
+  const { routeHrPayment } = require(HRP_MOD);
+
+  const _users = [
+    { user: "pm01", name: "مدير المشاريع", role: "project_manager", phone: "0501111111", waOptIn: true },
+    { user: "ceo01", name: "التنفيذي", role: "ceo", phone: "0502222222", waOptIn: true },
+    { user: "fin01", name: "المالية", role: "finance", phone: "0503333333", waOptIn: true },
+    { user: "hr01", name: "مسؤول الموارد", role: "hr_officer", phone: "0504444444", waOptIn: true },
+    { user: "wh01", name: "المستودع", role: "warehouse_manager", phone: "0505555555", waOptIn: true },
+    { user: "ceo02", name: "تنفيذيٌّ بلا موافقة", role: "ceo", phone: "0506666666", waOptIn: false },
+  ];
+  const out = [];
+  const fakeDb = {
+    doc: p => ({ get: async () => ({ exists: p === "meta/users", data: () => ({ users: _users }) }) }),
+    collection: () => ({
+      doc: id => ({
+        create: async d => {
+          if (out.some(x => x.__id === id)) { const e = new Error("already exists"); e.code = 6; throw e; }
+          out.push({ __id: id, ...d });
+        },
+      }),
+    }),
+  };
+  const deps = { db: fakeDb, logger: { info() { }, warn() { }, error() { } }, isEnabled: async () => true };
+  const REQ = {
+    id: "HRP-2608-0007", workType: "residency", title: "تجديد ٤ إقامات", amount: 8400,
+    createdBy: "مسؤول الموارد", createdByUser: "hr01", createdAt: "2026-08-09T07:00:00Z",
+  };
+  const at = (status, updatedAt) => ({ ...REQ, status, updatedAt });
+
+  // تُنفَّذ المسارُ كاملاً تسلسلياً ثم تُفحص اللقطة — الدوالُّ async والفحوصُ متزامنة.
+  const trace = [];
+  const run = (async () => {
+    const step = async (before, after, label) => {
+      const n = out.length;
+      await routeHrPayment(before, after, deps);
+      trace.push({ label, sent: out.slice(n) });
+    };
+    await step(null, at("hrp_pending_pm", "t1"), "create");
+    await step(null, at("hrp_pending_pm", "t1"), "replay");                                  // إعادة إطلاق
+    await step(at("hrp_pending_pm"), at("hrp_pending_ceo", "t2"), "toCeo");
+    await step(at("hrp_pending_ceo"), at("hrp_pending_finance", "t3"), "toFinance");
+    await step(at("hrp_pending_finance"), at("hrp_pending_finance", "t4"), "noStatusChange");
+    await step(at("hrp_pending_finance"), at("hrp_finance_returned", "t5"), "returned");
+    await step(at("hrp_finance_returned"), at("hrp_pending_finance", "t6"), "resent");
+    await step(at("hrp_pending_finance"), at("hrp_finance_returned", "t7"), "returnedAgain");
+    await step(at("hrp_pending_finance"), at("hrp_closed", "t8"), "closed");
+    await step(at("hrp_pending_pm"), at("hrp_cancelled", "t9"), "cancelled");
+    await routeHrPayment(at("hrp_pending_pm"), at("hrp_pending_ceo", "tX"),
+      { ...deps, isEnabled: async () => false });
+    trace.push({ label: "killSwitch", sent: [] });
+  })();
+
+  // التوجيه async — نسجّل فحوصَه في `_deferred` ليُنتظر قبل طباعة الحصيلة.
+  _deferred.push(run.then(() => {
+    const of = l => (trace.find(x => x.label === l) || { sent: [] }).sent;
+    T("★★ الإنشاء يُنبّه مدير المشاريع وحده — على جواله لا في جرسٍ لا يفتحه",
+      of("create").length === 1 && of("create")[0].to === "0501111111",
+      of("create").map(m => m.to).join(",") || "لا شيء");
+    T("★ نصُّ الرسالة: الإجراء · السياق · الرقم · المُقدِّم · بندٌ واحد",
+      JSON.stringify((of("create")[0] || {}).params) ===
+      JSON.stringify(["موافقتك", "الموارد البشرية — إقامات", "HRP-2608-0007", "مسؤول الموارد", "1"]),
+      JSON.stringify((of("create")[0] || {}).params));
+    T("★ زرّ «فتح الطلب» يحمل معرّف HRP", (of("create")[0] || {}).buttonParam === "HRP-2608-0007");
+    T("★ لا مبلغ في الرسالة", !JSON.stringify(of("create")).includes("8400"));
+    T("★★ إعادةُ إطلاق نفس الكتابة لا تُرسل مرتين", of("replay").length === 0);
+    T("★ بعد اعتماد المدير يُنبَّه التنفيذي",
+      of("toCeo").length === 1 && of("toCeo")[0].to === "0502222222" && of("toCeo")[0].params[0] === "اعتمادك");
+    T("★ تنفيذيٌّ بلا waOptIn لا تصله رسالة", !of("toCeo").some(m => m.to === "0506666666"));
+    T("★ ثم تُنبَّه المالية بالسداد",
+      of("toFinance").length === 1 && of("toFinance")[0].to === "0503333333" && of("toFinance")[0].params[0] === "سدادك");
+    T("★ تغيّرُ حقلٍ بلا تغيّر حالة لا يُرسل شيئاً", of("noStatusChange").length === 0);
+    T("★★ الإعادة للتصحيح تصل صاحب الطلب (مطابقةً على createdByUser)",
+      of("returned").length === 1 && of("returned")[0].to === "0504444444" &&
+      of("returned")[0].params[2] === "مُعاد من المالية للتصحيح",
+      JSON.stringify((of("returned")[0] || {}).params));
+    T("★★ إعادةٌ ثانيةٌ بنفس الانتقال تصل ثانيةً (لا تُبتلع كتكرار — M14)",
+      of("returnedAgain").length === 1);
+    T("★ الإغلاق يصل صاحب الطلب وحده",
+      of("closed").length === 1 && of("closed")[0].to === "0504444444" &&
+      of("closed")[0].params[2] === "مغلق — تم السداد");
+    T("★ الإلغاء (فعلُ صاحبه) لا يُشعِر أحداً", of("cancelled").length === 0);
+    T("★ مفتاح القتل العام يوقف إرسال السداد أيضاً", of("killSwitch").length === 0);
+    T("★★ لا تصل بيانات الموارد البشرية للمستودع ولا للمشتريات",
+      !out.some(m => m.to === "0505555555"));
+  }));
+
+  /* ── الرابط العميق: زرّ «فتح الطلب» يوصل لوحدة السداد لا لقائمة المشتريات ── */
+  T("★★ معرّف HRP- يوجّه الرابط العميق لوحدة السداد",
+    /function _isHrpId\(id\)\{ return \/\^HRP-\/i\.test\(String\(id\|\|""\)\); \}/.test(HTML) &&
+    /if\(_isHrpId\(poId\)\) return _openPendingHRP\(\);/.test(HTML) &&
+    /window\.hrPayments\.open\(id\)/.test(HTML));
+  T("★ الرابط يقبل ?hrp= أيضاً", /q\.get\("po"\) \|\| q\.get\("hrp"\)/.test(HTML));
+  T("★ غير المخوَّل لا يُفتح له الطلب من الرابط",
+    /_openPendingHRP[\s\S]{0,400}?hrPayments\.canView\(\)\)\{/.test(HTML));
+  /* ارتدادٌ محتمَل: الرابطُ يصل قبل لقطةِ الوحدة ⇒ `render` يُسقط `_curId` ويعرض القائمة،
+     فيضيع المقصودُ بصمت. الانتظارُ المحدود يفتحه فورَ وصوله ويعلن الفشلَ إن لم يصل. */
+  T("★★ الرابط ينتظر وصولَ لقطة الوحدة ثم يفتح الطلب (بحدٍّ زمنيٍّ صريح)",
+    /if\(window\.hrPayments\.byId && window\.hrPayments\.byId\(id\)\) return _open\(\);/.test(HTML) &&
+    /if\(\+\+_t>40\)\{ clearInterval\(_timer\);/.test(HTML) &&
+    /clearInterval\(_timer\); _open\(\);/.test(HTML));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -6288,6 +6500,8 @@ function contractsPhase1() {
   photoQueueGuards();
   versionStampGuards();
   contractsPhase1();
+  // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
+  await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }

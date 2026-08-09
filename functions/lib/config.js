@@ -95,6 +95,75 @@ const PO_STATUS_LABELS = {
   closed: "مغلق",
 };
 
+/* ═════════════ سداد أعمال الموارد البشرية (global_hr_payments) ═════════════
+   وحدةٌ أُضيفت بعد المرحلة ٣ فبقيت بلا توجيهٍ خادميّ: الإشعار كان يُكتب في جرس
+   التطبيق من متصفّح صاحب الإجراء وحده، فلا يصل المعتمِد على جواله إطلاقاً.
+   التوجيه هنا نسخةُ منطقِ الشراء نفسها — من ينتظر دوره الآن يُنبَّه مرةً واحدة. */
+
+/** مجموعة طلبات السداد (عامة، غير مقسّمة حسب المشروع — كطلبات الشراء). */
+const HR_PAYMENTS_COLLECTION =
+  process.env.WA_HR_PAYMENTS_COLLECTION || "global_hr_payments";
+
+/**
+ * قوالب رسائل السداد.
+ * **الافتراض = قالبا الشراء المعتمَدان** (`po_approval_needed` / `po_status_update`)
+ * — فتعمل الإشعارات لحظةَ النشر بلا انتظار مراجعة Meta لقالبٍ جديد. وبنيةُ القالبين
+ * محايدة: {{2}} خانةُ سياقٍ (نكتب فيها «الموارد البشرية — نوع العمل») و{{5}} عددُ
+ * البنود (طلب السداد بندٌ واحد دائماً). وعند اعتماد قالبين مخصّصين لاحقاً يكفي ضبط
+ * `WA_HRP_APPROVAL_TEMPLATE` / `WA_HRP_STATUS_TEMPLATE` — بلا تعديل كود.
+ */
+const HRP = {
+  approvalTemplate: process.env.WA_HRP_APPROVAL_TEMPLATE || PO.approvalTemplate,
+  statusTemplate: process.env.WA_HRP_STATUS_TEMPLATE || PO.statusTemplate,
+  lang: process.env.WA_HRP_TEMPLATE_LANG || PO.lang,
+};
+
+/**
+ * توجيه: حالة طلب السداد الجديدة → { role, action }.
+ * الرموز مطابقة لـ`HRP_STATUS` في `hr-payments.js` حرفياً (يحرسه فحصٌ في hail-tests).
+ */
+const HRP_ROUTING = {
+  hrp_pending_pm: { role: "project_manager", action: "موافقتك" },
+  hrp_pending_ceo: { role: "ceo", action: "اعتمادك" },
+  hrp_pending_finance: { role: "finance", action: "سدادك" },
+};
+
+/**
+ * حالات يُنبَّه فيها صاحب الطلب (مسؤول الموارد البشرية).
+ * الرفض والإعادة للتصحيح **تنتظر فعلاً منه**، والإغلاق خبرُ اكتمال. أمّا `hrp_cancelled`
+ * فهو فعلُه هو — لا يُشعَر به أحدٌ.
+ */
+const HRP_NOTIFY_REQUESTER = new Set([
+  "hrp_pm_rejected",
+  "hrp_ceo_rejected",
+  "hrp_finance_returned",
+  "hrp_closed",
+]);
+
+/** تسميات الحالة العربية (للرسالة إلى صاحب الطلب). */
+const HRP_STATUS_LABELS = {
+  hrp_pm_rejected: "مرفوض من مدير المشاريع",
+  hrp_ceo_rejected: "مرفوض من المدير التنفيذي",
+  hrp_finance_returned: "مُعاد من المالية للتصحيح",
+  hrp_closed: "مغلق — تم السداد",
+};
+
+/**
+ * تسميات نوعية الأعمال — نسخةٌ من `WORK_TYPES` في `hr-payments.js` (يحرسها فحص
+ * تطابقٍ في hail-tests، فلا تنحرف النسختان بصمت). المفتاح المجهول يعود بنصّه الخام.
+ */
+const HRP_WORK_TYPES = {
+  residency: "إقامات",
+  work_permit: "رخص عمل",
+  visa: "تأشيرات",
+  exit_reentry: "خروج وعودة",
+  sponsor_move: "نقل كفالة",
+  insurance: "تأمين طبي",
+  labor_office: "مكتب العمل / رسوم حكومية",
+  passport: "جوازات / أحوال",
+  other: "أخرى",
+};
+
 module.exports = {
   TICKET_COLLECTIONS,
   TECHNICIANS_COLLECTION,
@@ -109,4 +178,10 @@ module.exports = {
   PO_ROUTING,
   PO_NOTIFY_REQUESTER,
   PO_STATUS_LABELS,
+  HR_PAYMENTS_COLLECTION,
+  HRP,
+  HRP_ROUTING,
+  HRP_NOTIFY_REQUESTER,
+  HRP_STATUS_LABELS,
+  HRP_WORK_TYPES,
 };

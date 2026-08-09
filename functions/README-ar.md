@@ -70,7 +70,17 @@ firebase functions:secrets:set WHATSAPP_TOKEN
 ```bash
 firebase deploy --only functions
 ```
-سيُنشَر: مشغّلات البلاغات (`ticketAssignUpdate_*`, `ticketAssignCreate_*`) + `waSender` + `waRetry`.
+سيُنشَر: مشغّلات البلاغات (`ticketAssignUpdate_*`, `ticketAssignCreate_*`) +
+مشغّلا الشراء (`poRouteUpdate`, `poRouteCreate`) +
+**مشغّلا سداد الموارد البشرية (`hrpRouteUpdate`, `hrpRouteCreate`)** + `waSender` + `waRetry`.
+
+> **سداد الموارد البشرية** (`global_hr_payments`) لا يحتاج متغيّرَ بيئةٍ جديداً: القالبان
+> الافتراضيان هما قالبا الشراء المعتمَدان نفسُهما (`po_approval_needed` / `po_status_update`)،
+> فتعمل الإشعارات فور النشر. ما يلزم هو **إدخال أرقام** المالية والتنفيذي ومدير المشاريع
+> ومسؤول الموارد البشرية مع «تفعيل واتساب» من «إدارة مستخدمي المشتريات» (تُحفظ في
+> `meta/users`). ولتخصيص قالبين لاحقاً:
+> `WA_HRP_APPROVAL_TEMPLATE` · `WA_HRP_STATUS_TEMPLATE` · `WA_HRP_TEMPLATE_LANG`.
+> التفاصيل الكاملة في `docs/whatsapp-notifications-STATUS.md §المرحلة ٥`.
 
 ---
 

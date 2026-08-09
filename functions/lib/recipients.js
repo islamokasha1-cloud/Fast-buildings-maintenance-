@@ -45,14 +45,23 @@ async function findByRole(db, role, projectId) {
   return out;
 }
 
-/** يجد صاحب الطلب (createdBy) إن كان له phone/waOptIn — للإشعار عند الرفض/الإغلاق. */
+/**
+ * يجد صاحب الطلب إن كان له phone/waOptIn — للإشعار عند الرفض/الإغلاق.
+ *
+ * الهوية تُقرأ من `createdByUser` (اسم الدخول) و`createdBy` معاً: طلبات الشراء تخزّن
+ * اسمَ الدخول في `createdBy`، ووحدةُ سداد الموارد البشرية تخزّن الاسمَ المعروض في
+ * `createdBy` واسمَ الدخول في `createdByUser`. مطابقةُ الاثنين معاً تخدم الشكلين بلا
+ * فرعٍ خاصّ — ولو حمل أحدُهما قيمةً فارغة أُسقِط من المطابقة.
+ */
 async function findRequester(db, po, projectId) {
-  const createdBy = po.createdBy || null;
-  if (!createdBy) return null;
+  const ids = [po.createdByUser, po.createdBy].filter(Boolean).map(String);
+  if (!ids.length) return null;
   const docs = projectId ? [`meta/${projectId}_users`, "meta/users"] : ["meta/users"];
   for (const path of docs) {
     const users = await _readUsersDoc(db, path);
-    const u = users.find((x) => x && (x.user === createdBy || x.name === createdBy));
+    const u = users.find(
+      (x) => x && (ids.includes(String(x.user)) || ids.includes(String(x.name)))
+    );
     if (u && u.phone && u.waOptIn === true) {
       return { name: u.name || u.user, phone: u.phone };
     }

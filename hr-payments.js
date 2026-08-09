@@ -56,7 +56,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2516";
+  var MODULE_BUILD = "v18.9.2518";
 
   function COLL(){
     var dev=false;
@@ -246,7 +246,56 @@
       .filter(function(r){ return !_deletedIds[r.id]; })
       .sort(function(a,b){ return String(b.createdAt||"").localeCompare(String(a.createdAt||"")); });
     _loaded=true; _connIssue=false;
+    _liveToast(_reqs);
     _rerenderIfActive();
+  }
+
+  /* ════════ التنبيه اللحظي (HailNotify) ════════
+     جرسُ التطبيق يسجّل الحدث، لكنه لا يقاطع أحداً: المعتمِد الذي لا يفتح الجرس لا يعلم
+     أن طلباً ينتظره. البلاغاتُ وطلباتُ الشراء تُظهر توستاً لحظياً منذ v18.9؛ سدادُ
+     الموارد البشرية كان الوحيد بلا واحد. هنا نظيره — **لمن دورُه الآن وحده**، فلا يتحوّل
+     إلى ضجيجٍ يراه كلُّ من يملك الاطلاع.
+
+     ثلاثة حرّاس: (١) اللقطةُ الأولى خطُّ أساسٍ صامت (لا سيلَ تنبيهاتٍ عند كل دخول)،
+     (٢) الحالةُ لم تتغيّر ⇒ لا تنبيه (لقطاتُ Firestore تتكرّر لأي حقلٍ يتغيّر)،
+     (٣) من نقل الحالة بنفسه لا يُنبَّه بفعله (آخر قيدٍ في الخطّ الزمني بأسمه). */
+  var _hnPrev = null;   // id → الحالة عند آخر لقطة. null = ما قبل خط الأساس.
+
+  // «ينتظرك أنت» — نفس منطق عدّاد السايدبار (pendingForMe) مع إضافة خبر الإغلاق لصاحبه.
+  function _awaitsMe(r){
+    if(!r) return false;
+    if(r.status==="hrp_pending_pm")      return canPM();
+    if(r.status==="hrp_pending_ceo")     return canCEO();
+    if(r.status==="hrp_pending_finance") return canFinance();
+    if(isBouncedStatus(r.status))        return isOwner(r);
+    if(r.status==="hrp_closed")          return isOwner(r);
+    return false;
+  }
+  function _lastActor(r){
+    var tl = r && r.timeline;
+    return (Array.isArray(tl) && tl.length) ? String(tl[tl.length-1].by||"") : "";
+  }
+  function _liveToast(list){
+    var prev=_hnPrev, cur={};
+    list.forEach(function(r){ if(r) cur[r.id]=r.status; });
+    _hnPrev=cur;
+    if(prev===null) return;                                   // (١) خط الأساس
+    if(typeof HailNotify==="undefined" || !HailNotify.push) return;
+    list.forEach(function(r){
+      if(!r || prev[r.id]===r.status) return;                 // (٢) لم تتغيّر
+      if(!_awaitsMe(r)) return;
+      if(_lastActor(r)===_me()) return;                       // (٣) أنت من نقلها
+      try{
+        HailNotify.push({
+          type:"hr",
+          code:r.id,
+          title:statusLabel(r.status),
+          body:[workTypeLabel(r), r.title, (r.createdBy?("مُقدّم الطلب: "+r.createdBy):"")]
+                 .filter(Boolean).join(" · "),
+          onClick:function(){ try{ open(r.id); }catch(e){} }
+        });
+      }catch(e){}
+    });
   }
 
   function startSync(){
