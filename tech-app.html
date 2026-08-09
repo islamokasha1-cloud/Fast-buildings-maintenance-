@@ -13,7 +13,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js"></script>
 <!-- طابور الرفع المؤجَّل للصور (مشترك مع النظام الرئيسي) -->
-<script src="photo-queue.js?v=18.9.2496"></script>
+<script src="photo-queue.js?v=18.9.2497"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -1619,6 +1619,24 @@ async function _resolveAIProxy(){
   return _aiProxyUrl;
 }
 
+// يترجم رسالة خطأ Anthropic الخام (إنجليزية، تصل كما هي عبر الـ Worker) إلى
+// سببٍ عربيٍّ وحلٍّ واضح — نفس منطق `_aiErrAr` في النظام الرئيسي.
+// يعيد "" حين لا مطابقة، فتبقى الرسالة الأصلية كما هي.
+function _aiErrAr(m){
+  m = String(m||"");
+  if(/credit balance is too low|insufficient[ _]?credits?|purchase credits/i.test(m))
+    return "نفد رصيد حساب Anthropic — الصياغة الذكية متوقّفة حتى يشحن المسؤول الرصيد. (النظام سليم؛ اكتب وصف العمل يدوياً)";
+  if(/rate[ _]?limit|HTTP 429/i.test(m))
+    return "تجاوزتَ حدّ الطلبات المسموح — انتظر دقيقةً ثم أعِد المحاولة";
+  if(/overloaded|HTTP 529/i.test(m))
+    return "خوادم الذكاء الاصطناعي مزدحمة الآن — أعِد المحاولة بعد قليل";
+  if(/authentication|invalid x-api-key|HTTP 401/i.test(m))
+    return "مفتاح الذكاء الاصطناعي غير صالح — أبلغ المسؤول";
+  if(/HTTP 403|HTTP 404/i.test(m))
+    return "إعداد خادم الذكاء الاصطناعي غير صحيح — أبلغ المسؤول";
+  return "";
+}
+
 // نداء نصّي مبسّط لـ Claude عبر الـ Worker — يعيد النص أو يرمي خطأً مفهوماً.
 async function _aiText(messages, maxTokens){
   const url = await _resolveAIProxy();
@@ -1687,6 +1705,7 @@ async function aiRewriteWork(){
     let m = (e && e.message) || "خطأ غير معروف";
     if(e && e.name==="AbortError") m="انتهت مهلة الطلب — حاول مجدداً";
     else if(/Failed to fetch|Load failed|NetworkError/.test(m)) m="تعذّر الاتصال بخادم الذكاء الاصطناعي — تحقق من الإنترنت";
+    else { const ar=_aiErrAr(m); if(ar) m=ar; }
     toast("⚠ "+m,"warn");
   }finally{
     if(btn){ btn.disabled=false; btn.style.opacity="1"; btn.innerHTML=orig; }
