@@ -4956,12 +4956,71 @@ function hrPaymentNotificationTests(src) {
     (hrpSrc.match(/transition, occurrence \}/g) || []).length === 2);
   T("★ لا مبالغ في نصّ الرسالة (خصوصية — كقاعدة الشراء)",
     !/after\.amount/.test(hrpSrc) && !/amount/.test(hrpSrc));
+  /* ولا البيانُ المختصر: نصٌّ حرٌّ قد يحمل اسمَ موظّف («تجديد إقامة فلان»)، وقاعدةُ
+     الوحدة أن الإشعارات بلا أسماء موظفين (كما في `_notifyStage`). */
+  T("★★ ولا البيانُ المختصر (قد يحمل اسمَ موظّف — الإشعارات بلا أسماء)",
+    !/\.title/.test(hrpSrc));
+
+  /* شكلُ المتغيّرات يتبع القالب: قالبُ الشراء المستعار ٥ خانات، والمخصّصُ ٤.
+     عددٌ لا يطابق القالبَ ⇒ Meta ترفض الرسالة كلَّها — عطلٌ صامتٌ لا يظهر إلا بعد
+     تبديل `.env`، أي بعد أسابيع من كتابة الكود. لذلك يُنفَّذ الشكلان هنا فعلاً. */
+  const HRP_MOD = path.resolve(path.dirname(IDX), "functions", "lib", "hr-payments.js");
+  if (!fs.existsSync(HRP_MOD)) { T("وحدة التوجيه الخادمية قابلة للتحميل", false); return; }
+  const { approvalParams, statusParams } = require(HRP_MOD);
+  const _sample = { id: "HRP-2608-0009", workType: "visa", createdBy: "مسؤول الموارد",
+    createdByUser: "hr01", title: "تجديد إقامة موظّف" };
+  T("★ على قالب الشراء المستعار: ٥ خانات، {{2}} تعوّض النصَّ الثابت و{{5}} = 1",
+    JSON.stringify(approvalParams(_sample, "سدادك")) ===
+    JSON.stringify(["سدادك", "الموارد البشرية — تأشيرات", "HRP-2608-0009", "مسؤول الموارد", "1"]),
+    JSON.stringify(approvalParams(_sample, "سدادك")));
+  T("★ وتحديثُ الحالة ثلاثُ خاناتٍ في القالبين",
+    statusParams(_sample, "مغلق — تم السداد").length === 3);
+  T("★★ ولا يتسرّب البيانُ المختصر إلى أي خانة",
+    !JSON.stringify(approvalParams(_sample, "سدادك")).includes("تجديد إقامة موظّف") &&
+    !JSON.stringify(statusParams(_sample, "مغلق")).includes("تجديد إقامة موظّف"));
+  T("★ والفرزُ بمطابقة القالب المضبوط لا بعَلَمٍ منفصلٍ يُنسى",
+    /cfg\.HRP\.approvalTemplate === cfg\.PO\.approvalTemplate/.test(hrpSrc) &&
+    /cfg\.HRP\.statusTemplate === cfg\.PO\.statusTemplate/.test(hrpSrc));
+
+  /* والشكلُ الآخر — القالبُ المخصّص — **يُنفَّذ فعلاً** بضبط البيئة وإعادة تحميل الوحدة.
+     هذا هو المسارُ الذي يستيقظ بعد أسابيع (يوم يعتمد Meta القالبَ ويُبدَّل `.env`)، وعطلُه
+     صامتٌ تماماً: عددُ خاناتٍ لا يطابق القالبَ ⇒ Meta ترفض **كلَّ** رسائل السداد بلا أن
+     يتغيّر سطرٌ في الكود. فحصُ نصٍّ لا يمسك ذلك — التنفيذ وحده يمسكه. */
+  {
+    const CFG_MOD = path.resolve(path.dirname(IDX), "functions", "lib", "config.js");
+    const bak = {
+      a: process.env.WA_HRP_APPROVAL_TEMPLATE,
+      s: process.env.WA_HRP_STATUS_TEMPLATE,
+    };
+    process.env.WA_HRP_APPROVAL_TEMPLATE = "hrp_approval_needed";
+    process.env.WA_HRP_STATUS_TEMPLATE = "hrp_status_update";
+    delete require.cache[require.resolve(CFG_MOD)];
+    delete require.cache[require.resolve(HRP_MOD)];
+    const alt = require(HRP_MOD);
+    const ap = alt.approvalParams(_sample, "سدادك");
+    const st = alt.statusParams(_sample, "مغلق — تم السداد");
+    T("★★ على القالب المخصّص: أربعُ خاناتٍ بلا «عدد البنود»",
+      ap.length === 4 && JSON.stringify(ap) ===
+      JSON.stringify(["سدادك", "تأشيرات", "HRP-2608-0009", "مسؤول الموارد"]),
+      JSON.stringify(ap));
+    T("★ و{{2}} = النوعُ وحدَه (نصُّ القالب يقول «موارد بشرية» فلا يُكرَّر)",
+      ap[1] === "تأشيرات" && st[1] === "تأشيرات");
+    T("★ وتحديثُ الحالة يبقى ثلاثَ خانات", st.length === 3);
+    T("★ ولا بيانٌ مختصرٌ هنا أيضاً",
+      !JSON.stringify([ap, st]).includes("تجديد إقامة موظّف"));
+    // أعِد البيئة والكاش كما كانا — بقيةُ الفحوص تتوقّع الافتراضَ (قالبَ الشراء).
+    if (bak.a === undefined) delete process.env.WA_HRP_APPROVAL_TEMPLATE; else process.env.WA_HRP_APPROVAL_TEMPLATE = bak.a;
+    if (bak.s === undefined) delete process.env.WA_HRP_STATUS_TEMPLATE; else process.env.WA_HRP_STATUS_TEMPLATE = bak.s;
+    delete require.cache[require.resolve(CFG_MOD)];
+    delete require.cache[require.resolve(HRP_MOD)];
+    const back = require(HRP_MOD);
+    T("★ واستعادةُ الافتراض بعد الفحص (لا تسرّبَ بيئةٍ لبقية الفحوص)",
+      back.approvalParams(_sample, "سدادك").length === 5);
+  }
 
   /* ── التوجيه يُنفَّذ فعلاً على محاكي Firestore ──
      الفحوص النصّية أعلاه تحرس الشكل؛ هذه تحرس السلوك: من يصله ماذا، ومتى لا يصل أحداً.
      الوحدة الخادمية نقيّةٌ من firebase-admin (تأخذ db حقناً)، فتُنفَّذ هنا كما هي. */
-  const HRP_MOD = path.resolve(path.dirname(IDX), "functions", "lib", "hr-payments.js");
-  if (!fs.existsSync(HRP_MOD)) { T("وحدة التوجيه قابلة للتحميل", false); return; }
   const { routeHrPayment } = require(HRP_MOD);
 
   const _users = [
