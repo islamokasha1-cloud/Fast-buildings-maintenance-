@@ -46,6 +46,52 @@ async function findByRole(db, role, projectId) {
 }
 
 /**
+ * يُرجع مستلمي دورٍ معيّن **أينما سُجّل رقمُهم** — للأحداث التي لا مشروعَ لها
+ * (سداد الموارد البشرية: مجموعةٌ عامّة بلا `projectId`).
+ *
+ * لماذا لا يكفي `meta/users` وحده: الرقمُ يُخزَّن في موضعين حسب الشاشة التي أُدخل منها —
+ * «إدارة مستخدمي المشتريات» تُزامنه مع المركزي `meta/users`، بينما لوحةُ الأدمن **داخل
+ * المشروع** تكتبه في `meta/{projectId}_users` فقط. وتوجيهُ الشراء لا يتأثّر (يقرأ مستندَ
+ * مشروعِ الطلب ثم المركزي)، أمّا حدثٌ بلا مشروعٍ فكان يقرأ المركزيَّ وحده — فمستخدمٌ
+ * تصله رسائلُ الشراء ولا تصله رسائلُ السداد، وهو فرقٌ لا يفسّره شيءٌ للمستخدم.
+ *
+ * الترتيب: المركزيُّ أوّلاً (الحالة السويّة، قراءةٌ واحدة)، ولا نمسح مستندات المشاريع
+ * إلا إن **لم يوجد** مستلمٌ للدور — فلا كلفةَ إضافية في الحالة الغالبة. والمسحُ محدودٌ
+ * بسقفٍ صريح (`MAX_PROJECT_DOCS`) فلا يتحوّل إلى قراءةٍ مفتوحة مع نموّ المشاريع.
+ */
+const MAX_PROJECT_DOCS = 25;
+
+async function findByRoleAnywhere(db, role) {
+  const central = await findByRole(db, role, "");
+  if (central.length) return central;
+
+  let projects = [];
+  try {
+    const snap = await db.doc("meta/projects").get();
+    if (snap.exists && Array.isArray(snap.data().projects)) projects = snap.data().projects;
+  } catch (_) {
+    return central; // تعذّرت قراءة المشاريع ⇒ المركزيُّ هو كلُّ ما لدينا
+  }
+
+  const seen = new Set();
+  const out = [];
+  for (const p of projects.slice(0, MAX_PROJECT_DOCS)) {
+    const pid = p && (p.id || p.projectId);
+    if (!pid) continue;
+    const users = await _readUsersDoc(db, `meta/${pid}_users`);
+    for (const u of users) {
+      if (!u || u.role !== role) continue;
+      if (!u.phone || u.waOptIn !== true) continue;
+      const key = String(u.phone).replace(/[^\d]/g, "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ name: u.name || u.user || role, phone: u.phone });
+    }
+  }
+  return out;
+}
+
+/**
  * يجد صاحب الطلب إن كان له phone/waOptIn — للإشعار عند الرفض/الإغلاق.
  *
  * الهوية تُقرأ من `createdByUser` (اسم الدخول) و`createdBy` معاً: طلبات الشراء تخزّن
@@ -69,4 +115,32 @@ async function findRequester(db, po, projectId) {
   return null;
 }
 
-module.exports = { findByRole, findRequester };
+/** نظير `findByRoleAnywhere` لصاحب الطلب — لحدثٍ بلا مشروع. نفس المنطق ونفس السقف. */
+async function findRequesterAnywhere(db, po) {
+  const central = await findRequester(db, po, "");
+  if (central) return central;
+
+  let projects = [];
+  try {
+    const snap = await db.doc("meta/projects").get();
+    if (snap.exists && Array.isArray(snap.data().projects)) projects = snap.data().projects;
+  } catch (_) {
+    return null;
+  }
+  const ids = [po.createdByUser, po.createdBy].filter(Boolean).map(String);
+  if (!ids.length) return null;
+  // نقرأ مستندَ كل مشروعٍ مباشرةً — لا عبر findRequester، فهي تُعيد قراءة المركزيِّ
+  // الذي فُحص للتوّ مع كل دورة.
+  for (const p of projects.slice(0, MAX_PROJECT_DOCS)) {
+    const pid = p && (p.id || p.projectId);
+    if (!pid) continue;
+    const users = await _readUsersDoc(db, `meta/${pid}_users`);
+    const u = users.find(
+      (x) => x && (ids.includes(String(x.user)) || ids.includes(String(x.name)))
+    );
+    if (u && u.phone && u.waOptIn === true) return { name: u.name || u.user, phone: u.phone };
+  }
+  return null;
+}
+
+module.exports = { findByRole, findRequester, findByRoleAnywhere, findRequesterAnywhere };

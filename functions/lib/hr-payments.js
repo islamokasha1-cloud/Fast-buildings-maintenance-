@@ -13,7 +13,7 @@
  */
 const cfg = require("./config");
 const { enqueue } = require("./outbox");
-const { findByRole, findRequester } = require("./recipients");
+const { findByRoleAnywhere, findRequesterAnywhere } = require("./recipients");
 
 /** تسمية نوعية العمل — «أخرى» تعرض النصّ الحرّ الذي كتبه مسؤول الموارد البشرية. */
 function workTypeLabel(r) {
@@ -57,8 +57,10 @@ async function routeHrPayment(before, after, { db, logger, isEnabled }) {
   // (١) إشعار المسؤول الذي دوره الآن.
   const route = cfg.HRP_ROUTING[newStatus];
   if (route) {
-    // المجموعة عامّة بلا مشروع — المستلمون من `meta/users` المركزي وحده.
-    const recipients = await findByRole(db, route.role, "");
+    // المجموعة عامّة بلا مشروع ⇒ المركزيُّ `meta/users` أوّلاً، وإن خلا من الدور فمستنداتُ
+    // المشاريع (رقمٌ أُدخل من لوحة الأدمن داخل مشروعٍ يعيش هناك وحده) — وإلّا كان
+    // المستخدمُ نفسه تصله رسائلُ الشراء ولا تصله رسائلُ السداد.
+    const recipients = await findByRoleAnywhere(db, route.role);
     if (!recipients.length) {
       logger.info(`wa(hrp): لا مستلم للدور ${route.role} (طلب ${id}) — تخطّي`);
     }
@@ -79,7 +81,7 @@ async function routeHrPayment(before, after, { db, logger, isEnabled }) {
 
   // (٢) إشعار صاحب الطلب عند الرفض/الإعادة/الإغلاق.
   if (cfg.HRP_NOTIFY_REQUESTER.has(newStatus)) {
-    const requester = await findRequester(db, after, "");
+    const requester = await findRequesterAnywhere(db, after);
     if (requester) {
       const label = cfg.HRP_STATUS_LABELS[newStatus] || newStatus;
       const { queued } = await enqueue(db, {
