@@ -3,7 +3,8 @@
 //   node contracts-check.mjs
 //
 // المرحلة ١: سجلُّ الأطراف — منشآتٍ **وأشخاصاً** (التعاقدُ بالهوية لا بالسجل التجاري)
-// المرحلة ٢: طلبُ التعاقد من المقايسة · دورةُ الاعتماد بأربع بوّابات · أمرُ الدفع دون العتبة — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
+// المرحلة ٢: طلبُ التعاقد من المقايسة · دورةُ الاعتماد بأربع بوّابات · أمرُ الدفع دون العتبة
+// المرحلة ٣: التحويلُ لعقدٍ ساري بمعاملةٍ واحدة (بحارس عدم التكرار) · بطاقةُ العقد وانتقالاتُه — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
 // و**الرقمُ المرسوم = الرقمُ المحسوب** (شريطُ الأرقام مقابل الدوالّ النقية)، والتطبيعُ
 // العربيُّ في البحث، وشرائطُ الحالة من توكنز SLA، والثيمُ الداكن، والجوّالُ بلا قصّ.
 import { chromium } from 'playwright-core';
@@ -311,6 +312,13 @@ await page.waitForTimeout(500);
 await page.screenshot({ path: `${SHOTS}/09b-request-form-bottom.png` });
 await page.evaluate(() => { const a = document.querySelector('.main-area'); if (a) a.scrollTop = 0; });
 
+// شروطٌ تجاريةٌ حقيقيةٌ تُملأ في النموذج — لتُتابَع حتى الإفراج عن المحتجز في العقد
+await page.fill('#ct-r-adv', '10');
+await page.fill('#ct-r-advrec', '20');
+await page.fill('#ct-r-ret', '5');
+await page.fill('#ct-r-pencap', '10');
+await page.waitForTimeout(400);
+
 await page.evaluate(() => window.contracts.submitRequest());
 await page.waitForTimeout(2000);
 const reqId = await page.evaluate(() => (window.contracts.requests()[0] || {}).id || '');
@@ -440,6 +448,129 @@ await page.waitForTimeout(600);
 const ov2 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 check('★ صفحةُ الطلبات بلا تمريرٍ أفقيٍّ على الجوال', ov2 <= 1, 'زيادة ' + ov2 + 'px');
 await page.screenshot({ path: `${SHOTS}/14-requests-mobile.png`, fullPage: true });
+
+
+/* ═════════ المرحلة ٣: العقد ═════════ */
+console.log('\n=== المرحلة ٣: التحويلُ لعقدٍ ساري وبطاقتُه ===');
+await page.setViewportSize({ width: 1440, height: 980 });
+await page.evaluate((id) => window.contracts.openReq(id), reqId);
+await page.waitForTimeout(1000);
+check('★ زرُّ «إنشاء العقد» ظاهرٌ على الطلب المعتمَد',
+  /إنشاء العقد/.test((await page.textContent('#page-contract-requests')) || ''));
+
+const conv = await page.evaluate(async (id) => {
+  const cid = await window.contracts._convert(id);
+  const r = window.contracts.requestById(id);
+  const c = window.contracts.contractById(cid);
+  return { cid, reqStatus: r.status, reqLink: r.contractId,
+           ctr: c ? { req: c.requestId, st: c.status, val: c.value, adv: c.advance.amount, ret: c.retention.pct } : null };
+}, reqId);
+check('★ التحويلُ أنشأ عقداً سارياً ووسم الطلبَ «تم إنشاء العقد» في معاملةٍ واحدة',
+  conv.ctr && conv.ctr.st === 'ctr_active' && conv.reqStatus === 'crq_converted' && conv.reqLink === conv.cid,
+  JSON.stringify(conv));
+check('★ والعقدُ يحمل معرّفَ طلبه (سلسلةُ التوقيع قابلةٌ للتتبّع)', conv.ctr.req === reqId);
+check('★ وورث القيمةَ المعتمَدة كما هي', conv.ctr.val === 33600);
+check('★ والشروطُ التجارية انتقلت من الطلب، والمقدَّمُ اشتُقّ (١٠٪ من 33,600)',
+  conv.ctr.ret === 5 && conv.ctr.adv === 3360, JSON.stringify({ ret: conv.ctr.ret, adv: conv.ctr.adv }));
+
+// حارسُ عدم التكرار: ضغطةٌ ثانيةٌ لا تُنشئ عقداً ثانياً
+const twice = await page.evaluate(async (id) => {
+  const before = window.contracts.contractsList().length;
+  const again = await window.contracts._convert(id);
+  return { again, before, after: window.contracts.contractsList().length };
+}, reqId);
+check('★ ضغطةٌ ثانيةٌ تُرجع العقدَ نفسَه ولا تُنشئ ثانياً',
+  twice.again === conv.cid && twice.after === twice.before, JSON.stringify(twice));
+
+// طلبٌ غير معتمَدٍ لا يُنتج عقداً
+const notApproved = await page.evaluate(async (id) => {
+  try { await window.contracts._convert(id); return 'مرّ من طلبٍ غير معتمَد'; }
+  catch (e) { return e.message; }
+}, payStages.id);
+check('★ طلبٌ غير معتمَدٍ لا يُنشأ منه عقد', /ليس معتمَداً/.test(notApproved), notApproved);
+
+// بطاقةُ العقد وتبويباتُها
+await page.evaluate(() => showPage('contracts-list'));
+await page.waitForTimeout(1300);
+check('صفحةُ العقود صارت النشطة', await page.evaluate(() => {
+  const p = document.getElementById('page-contracts-list'); return !!p && p.classList.contains('active');
+}));
+const ctrStats = await page.evaluate(() => Array.from(document.querySelectorAll('#page-contracts-list .ct-stat .v')).map(e => e.textContent.trim()));
+const ctrCalc = await page.evaluate(() => {
+  const l = window.contracts.contractsList().filter(c => c.status === 'ctr_active');
+  return { n: l.length, v: l.reduce((s, c) => s + window.contracts._contractValue(c), 0) };
+});
+check('★ شريطُ العقود: الرقمُ المرسوم = المحسوب',
+  Number(ctrStats[0]) === ctrCalc.n && ctrStats[1].replace(/,/g, '') === String(ctrCalc.v),
+  'مرسوم ' + ctrStats.join('/') + ' · محسوب ' + ctrCalc.n + '/' + ctrCalc.v);
+await page.screenshot({ path: `${SHOTS}/17-contracts-list.png` });
+
+await page.evaluate((cid) => window.contracts.openCtr(cid), conv.cid);
+await page.waitForTimeout(1000);
+const ovTxt = await page.textContent('#page-contracts-list') || '';
+check('بطاقةُ العقد تعرض القيمةَ والمقدَّمَ والمحتجز',
+  /قيمة العقد النافذة/.test(ovTxt) && /دفعة مقدمة/.test(ovTxt) && /محتجز الضمان/.test(ovTxt));
+check('★ وتعرض «بلا ربط — اختياريّ» لبندِ موازنةٍ فارغ أو البندَ إن رُبِط',
+  /بند الموازنة/.test(ovTxt));
+await page.screenshot({ path: `${SHOTS}/18-contract-card.png` });
+
+await page.evaluate(() => window.contracts.ctrTab('lines'));
+await page.waitForTimeout(700);
+check('تبويبُ البنود يعرض بنودَ العقد بإجماليها',
+  /بنود العقد/.test((await page.textContent('#page-contracts-list')) || ''));
+await page.evaluate(() => window.contracts.ctrTab('extracts'));
+await page.waitForTimeout(600);
+check('تبويبُ المستخلصات يشرح أنه المرحلةُ القادمة',
+  /المرحلة القادمة/.test((await page.textContent('#page-contracts-list')) || ''));
+await page.evaluate(() => window.contracts.ctrTab('log'));
+await page.waitForTimeout(600);
+check('تبويبُ السجل يعرض قيدَ الإنشاء',
+  /إنشاء العقد من الطلب/.test((await page.textContent('#page-contracts-list')) || ''));
+await page.evaluate(() => window.contracts.ctrTab('overview'));
+await page.waitForTimeout(500);
+
+// انتقالاتُ الحالة في طبقة البيانات
+const trans = await page.evaluate(async (cid) => {
+  const out = [];
+  await window.contracts._transit(cid, 'suspend', 'توقّف الموقع');
+  out.push(window.contracts.contractById(cid).status);
+  await window.contracts._transit(cid, 'resume', '');
+  out.push(window.contracts.contractById(cid).status);
+  await window.contracts._transit(cid, 'complete', '');
+  out.push(window.contracts.contractById(cid).status);
+  await window.contracts._transit(cid, 'close', '');
+  const c = window.contracts.contractById(cid);
+  out.push(c.status);
+  return { out, released: c.retention.released };
+}, conv.cid);
+check('★ دورةُ الحالة: ساري ⇄ موقوف ⇒ منتهٍ ⇒ مقفل',
+  trans.out.join(' → ') === 'ctr_suspended → ctr_active → ctr_completed → ctr_closed', trans.out.join(' → '));
+check('★ والإقفالُ أفرج عن المحتجز بقيمةٍ محسوبة (٥٪ من 33,600)', trans.released === 1680, String(trans.released));
+
+const afterClose = await page.evaluate(async (cid) => {
+  try { await window.contracts._transit(cid, 'suspend', 'x'); return 'مرّ على عقدٍ مقفل'; }
+  catch (e) { return e.message; }
+}, conv.cid);
+check('★ ولا إجراءَ بعد الإقفال', /لا يجوز/.test(afterClose), afterClose);
+
+const wrongRole = await page.evaluate(async (cid) => {
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  let m; try { await window.contracts._transit(cid, 'close', ''); m = 'مرّ بدورٍ لا يملكه'; } catch (e) { m = e.message; }
+  currentUser.role = real; return m;
+}, conv.cid);
+check('★ ودورٌ لا يملك الانتقال يُرفض في طبقة البيانات', /لا يجوز|لدورك/.test(wrongRole), wrongRole);
+
+await page.evaluate(() => window.contracts.backToCtrs());
+await page.waitForTimeout(700);
+await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
+await page.waitForTimeout(600);
+await page.screenshot({ path: `${SHOTS}/19-contracts-dark.png` });
+await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'light'); });
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(600);
+const ov3 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+check('★ صفحةُ العقود بلا تمريرٍ أفقيٍّ على الجوال', ov3 <= 1, 'زيادة ' + ov3 + 'px');
+await page.screenshot({ path: `${SHOTS}/20-contracts-mobile.png` });
 
 check('لا أخطاء جافاسكربت طوال الرحلة', errors.length === 0, errors.slice(0, 2).join(' | '));
 
