@@ -375,10 +375,59 @@ const wrongGate = await page.evaluate(async (id) => {
 }, payStages.id);
 check('★ دورٌ لا يملك البوّابة يُرفض في طبقة البيانات', /ليست لدورك/.test(wrongGate), wrongGate);
 
+/* ── مشروعٌ يدويٌّ بلا موازنة: الربطُ اختياريٌّ فعلاً ── */
+await page.evaluate(() => window.contracts.newRequest());
+await page.waitForTimeout(1200);
+await page.evaluate(() => window.contracts.setReqProject('__NEW_MANUAL__'));
+await page.waitForTimeout(1200);
+const manualForm = await page.evaluate(() => ({
+  nameField: !!document.getElementById('ct-r-mproj'),
+  catField: !!document.getElementById('ct-r-cat'),
+  txt: (document.getElementById('page-contract-requests') || {}).textContent || ''
+}));
+check('★ «مشروع يدويّ جديد» يكشف حقلَ الاسم الحرّ', manualForm.nameField);
+check('★ مشروعٌ بلا موازنة: تُعلَن اختياريةُ الربط ولا يُعرَض منتقي بند الموازنة',
+  /الربطُ بالموازنة اختياريّ/.test(manualForm.txt) && manualForm.catField === false);
+check('★ ولا يُعرَض جدولُ مقايسةٍ فارغ', !/بنود المقايسة/.test(manualForm.txt));
+await page.screenshot({ path: `${SHOTS}/15-manual-project.png` });
+
+// إرسالُ عقدٍ لمشروعٍ يدويٍّ بلا أيّ ربطٍ بالموازنة — **بالنموذج نفسِه** لا بحقنِ حالة
+await page.fill('#ct-r-mproj', 'استراحة الشمال');
+await page.fill('#ct-r-title', 'سور الاستراحة');
+await page.evaluate(() => window.contracts.setReqVendor('VND-0005'));
+await page.waitForTimeout(700);
+await page.evaluate(() => window.contracts.addFreeLine());
+await page.waitForTimeout(700);
+await page.fill('#ct-r-lines [data-lf="desc"]', 'بناء سور');
+await page.fill('#ct-r-lines [data-lf="unit"]', 'م.ط');
+await page.fill('#ct-r-lines [data-lf="qty"]', '60');
+await page.fill('#ct-r-lines [data-lf="unitPrice"]', '180');
+await page.waitForTimeout(500);
+await page.evaluate(() => window.contracts.submitRequest());
+await page.waitForTimeout(2000);
+const manualId = await page.evaluate(() => (window.contracts.requests()[0] || {}).id);
+const manualDoc = await page.evaluate((id) => {
+  const r = window.contracts.requestById(id) || {};
+  return { pid: r.projectId, flag: r.isCustomProject, pname: r.projectName,
+           cat: r.budgetCategoryKey, val: r.value, sel: r.projectSel === undefined };
+}, manualId);
+check('★ العقدُ اليدويُّ خُزِّن بالشكل القياسيّ (__OTHER__ + العلَم + الاسم)',
+  manualDoc.pid === '__OTHER__' && manualDoc.flag === true && manualDoc.pname === 'استراحة الشمال',
+  JSON.stringify(manualDoc));
+check('★ ومرّ بلا بندِ موازنةٍ إطلاقاً — الربطُ اختياريّ حقاً',
+  manualDoc.cat === '' && manualDoc.val === 10800);
+check('ومعرّفُ العرض الداخليّ لم يُخزَّن على الوثيقة', manualDoc.sel === true);
+
+await page.evaluate(() => window.contracts.openReq(window.contracts.requests()[0].id));
+await page.waitForTimeout(900);
+check('بطاقةُ الطلب توسم المشروعَ «يدويّ»',
+  /يدويّ/.test((await page.textContent('#page-contract-requests')) || ''));
+await page.screenshot({ path: `${SHOTS}/16-manual-request-card.png` });
+
 await page.evaluate(() => window.contracts.backToReqs());
 await page.waitForTimeout(900);
-check('القائمةُ تعرض الطلبين وشريطَ «بانتظار دورك»',
-  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 2);
+check('القائمةُ تعرض الطلبات وشريطَ «بانتظار دورك»',
+  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 3);
 await page.screenshot({ path: `${SHOTS}/12-requests-list.png`, fullPage: true });
 
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });

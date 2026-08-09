@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2500";
+var MODULE_BUILD = "v18.9.2501";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -306,6 +306,64 @@ function crqRevalidate(req){
     r.financeApprovedAt = null; r.financeApprovedBy = null; r.financeApprovedKey = null;
   }
   return r;
+}
+
+/* ════ المشروعُ اليدويُّ والربطُ بالموازنة ════
+
+   ليس لكلّ مشروعٍ موازنة: المشروعُ **المُدخَل يدوياً** (اسمٌ يُكتب على الطلب بلا سجلٍّ
+   في `_projectsList`) قد لا تكون له مقايسةٌ ولا بنودُ موازنةٍ إطلاقاً. فالربطُ
+   بالموازنة **اختياريٌّ لا شرط**: عقدٌ بلا بندِ موازنةٍ عقدٌ صحيحٌ تامّ، وكلُّ ما
+   يفقده أنه لا يظهر في مقارنة «المخطَّط مقابل المتعاقَد عليه».
+
+   وشكلُ المشروع على الوثيقة هو **الشكلُ القياسيُّ نفسُه** الذي فرضه `v18.9sz` على
+   طلبات الشراء وطلبات التسعير: `projectId:"__OTHER__"` + `isCustomProject:true` +
+   `projectName`. ومعرّفُ `__MPN__:` معرّفُ عرضٍ داخليٌّ لا يُخزَّن — تخزينُه كان
+   سيُنتج مشروعاً ثالثاً لا تعرفه أيُّ شاشةٍ أخرى. */
+var MANUAL_ID = "__OTHER__";
+function pmManualPrefix(){
+  try{ var pm=window.projectMgmt; if(pm && pm._MANUAL_PREFIX) return pm._MANUAL_PREFIX; }catch(e){}
+  return "__MPN__:";
+}
+/* مفتاحُ الاختيار في القائمة ⇐ الشكلُ القياسيُّ المخزَّن. دالةٌ نقيةٌ تُختبَر وحدها. */
+function normalizeProjectRef(selected, manualName, prefix){
+  var pfx = prefix || "__MPN__:";
+  var sel = String(selected||"");
+  if(sel === "__NEW_MANUAL__" || sel === MANUAL_ID){
+    var nm = String(manualName||"").trim();
+    return { projectId: MANUAL_ID, isCustomProject: true, projectName: nm };
+  }
+  if(sel.indexOf(pfx) === 0){
+    return { projectId: MANUAL_ID, isCustomProject: true, projectName: sel.slice(pfx.length) };
+  }
+  return { projectId: sel, isCustomProject: false, projectName: "" };
+}
+/* اسمُ مشروعِ الوثيقة المعروض — يدويّاً من `projectName`، ورسمياً من القائمة.
+   نفسُ منطق `poProjectDisplayName` في النواة، فلا يختلف الاسمُ بين شاشتين. */
+function docProjectName(doc, projects){
+  var d = doc || {};
+  if(d.isCustomProject === true || d.projectId === MANUAL_ID) return String(d.projectName||"مشروع يدويّ");
+  var list = projects || [];
+  for(var i=0;i<list.length;i++){ if(list[i].id === d.projectId) return list[i].name || d.projectId; }
+  return d.projectId || "—";
+}
+/* مفتاحُ تجميعٍ يميّز كلَّ مشروعٍ يدويٍّ عن غيره (اصطلاحُ `__CUSTOM__:` في النواة). */
+function docProjectKey(doc){
+  var d = doc || {};
+  if(d.isCustomProject === true || d.projectId === MANUAL_ID) return "__CUSTOM__:"+String(d.projectName||"");
+  return String(d.projectId||"");
+}
+
+/* حالةُ ربط الطلب بالموازنة — ثلاثُ حالاتٍ لا اثنتان، ولكلٍّ رسالتُها:
+   `linked`     — بندٌ مختارٌ وللمشروع موازنةٌ فيه ⇒ تُقارَن القيمةُ بالمخطَّط
+   `no_budget`  — لا موازنةَ للمشروع أصلاً (يدويٌّ غالباً) ⇒ **لا لومَ ولا تحذير**
+   `unlinked`   — للمشروع موازنةٌ والمستخدمُ اختار ألّا يربط ⇒ إشارةٌ محايدة
+   ولا حالةَ رابعةَ اسمُها «خطأ»: الربطُ اختياريٌّ في كلّ الأحوال. */
+function budgetLinkState(categoryKey, budget){
+  var cats = (budget && Array.isArray(budget.categories)) ? budget.categories : [];
+  var hasBudget = cats.some(function(c){ return (Number(c && c.planned)||0) > 0; });
+  if(!hasBudget) return "no_budget";
+  if(!categoryKey) return "unlinked";
+  return "linked";
 }
 
 /* قيمةُ الطلب من بنوده — بالإجمالي شامل الضريبة (فالسقوفُ والمقارناتُ كلُّها عليه). */
@@ -1415,13 +1473,27 @@ var _boqCache = {};      // projId → بنودُ المقايسة (تُقرأ �
 var _budCache = {};      // projId → موازنةُ المشروع
 
 function _pm(){ try{ return window.projectMgmt || null; }catch(e){ return null; } }
+/* المسجّلةُ + اليدويةُ معاً — من `projectMgmt._allProjects` لا بقائمةٍ منسوخة،
+   فالمشروعُ اليدويُّ الذي تعرفه إدارةُ المشاريع يعرفه طلبُ التعاقد. */
 function _projects(){
   try{
+    var pm=window.projectMgmt;
+    if(pm && typeof pm._allProjects==="function"){
+      return pm._allProjects().map(function(p){ return { id:p.id, name:p.name||p.id, manual:!!p.manual }; });
+    }
+  }catch(e){}
+  try{
     var l = Array.isArray(window._projectsList) ? window._projectsList : [];
-    return l.map(function(p){ return { id:p.id, name:p.name||p.id }; });
+    return l.map(function(p){ return { id:p.id, name:p.name||p.id, manual:false }; });
   }catch(e){ return []; }
 }
-function _projName(id){ var p=_projects().filter(function(x){ return x.id===id; })[0]; return p?p.name:(id||"—"); }
+function _projName(doc){ return docProjectName(doc, _projects()); }
+/* مفتاحُ تحميل المقايسة/الموازنة: اليدويُّ بمعرّفه الاصطناعيّ كما تخزّنه إدارةُ المشاريع. */
+function _projLoadKey(doc){
+  var d=doc||{};
+  if(d.isCustomProject===true || d.projectId===MANUAL_ID) return pmManualPrefix()+String(d.projectName||"");
+  return d.projectId||"";
+}
 
 function loadBoqFor(projId){
   if(_boqCache[projId]) return Promise.resolve(_boqCache[projId]);
@@ -1495,7 +1567,7 @@ function reqListHTML(){
     else if(_rFilter.status && r.status!==_rFilter.status) return false;
     if(_rFilter.engagement && r.engagement!==_rFilter.engagement) return false;
     if(q){
-      var hay=normName(r.id)+" "+normName(r.vendorName)+" "+normName(r.title)+" "+normName(_projName(r.projectId));
+      var hay=normName(r.id)+" "+normName(r.vendorName)+" "+normName(r.title)+" "+normName(_projName(r));
       if(hay.indexOf(q)===-1) return false;
     }
     return true;
@@ -1565,7 +1637,7 @@ function reqTileHTML(r){
     '</div>'+
     '<div class="ct-tile-kind">'+_icn(eng.icon,"ic-sm")+' '+_esc(eng.lbl)+
       ' <span class="ct-dot">·</span> <span class="num">'+_esc(r.id)+'</span>'+
-      ' <span class="ct-dot">·</span> '+_esc(_projName(r.projectId))+'</div>'+
+      ' <span class="ct-dot">·</span> '+_esc(_projName(r))+'</div>'+
     '<div class="ct-tile-foot">'+
       '<div class="ct-money"><span class="num">'+money(r.value)+'</span> <small>ر.س</small></div>'+
       '<div class="ct-tile-who">'+_esc(r.vendorName||"—")+(owner?' <span class="ct-dot">·</span> عند '+_esc(owner.lbl):'')+'</div>'+
@@ -1581,20 +1653,31 @@ function newRequest(){
   var projs=_projects();
   _rOpen=null;
   _rDraft = {
-    engagement:"contract", projectId:(projs[0]||{}).id||"", title:"", scope:"",
-    vendorId:"", vendorName:"", vatMode:"incl", budgetCategoryKey:"subcontractor",
+    engagement:"contract", projectSel:(projs[0]||{}).id||"__NEW_MANUAL__", projectName:"",
+    title:"", scope:"",
+    vendorId:"", vendorName:"", vatMode:"incl", budgetCategoryKey:"",
     lines:[], candidates:[], rationale:"", durationDays:0, startDate:"",
     advance:{pct:0,recoveryPct:0}, retention:{pct:0,releaseOn:"completion"},
     penalty:{perDayPct:0,capPct:0}, warranty:{months:0}, value:0
   };
   paintReqs();
-  if(_rDraft.projectId) loadProjectData(_rDraft.projectId);
+  loadProjectData(_draftLoadKey());
+}
+/* مفتاحُ تحميلِ بيانات مشروع المسوّدة (المقايسة/الموازنة). */
+function _draftLoadKey(){
+  if(!_rDraft) return "";
+  var ref = normalizeProjectRef(_rDraft.projectSel, _rDraft.projectName, pmManualPrefix());
+  return _projLoadKey(ref);
 }
 function loadProjectData(projId){
-  if(!projId) return;
+  if(!projId){ if(_rDraft) paintReqs(); return; }
   Promise.all([loadBoqFor(projId), loadBudgetFor(projId)]).then(function(){ if(_rDraft) paintReqs(); });
 }
-function setReqProject(projId){ syncReqDraft(); if(!_rDraft) return; _rDraft.projectId=projId; _rDraft.lines=[]; paintReqs(); loadProjectData(projId); }
+function setReqProject(sel){
+  syncReqDraft(); if(!_rDraft) return;
+  _rDraft.projectSel=sel; _rDraft.lines=[]; _rDraft.budgetCategoryKey="";
+  paintReqs(); loadProjectData(_draftLoadKey());
+}
 function setEngagement(v){ syncReqDraft(); if(!_rDraft) return; _rDraft.engagement=v; paintReqs(); }
 function setReqVendor(vid){
   syncReqDraft(); if(!_rDraft) return;
@@ -1605,7 +1688,7 @@ function setReqVendor(vid){
 }
 function toggleBoqLine(i){
   syncReqDraft(); if(!_rDraft) return;
-  var items=_boqCache[_rDraft.projectId]||[];
+  var items=_boqCache[_draftLoadKey()]||[];
   var it=items[i]; if(!it) return;
   var key=it.id||("boq_"+i);
   var at=_rDraft.lines.findIndex(function(l){ return l.boqLineId===key; });
@@ -1632,6 +1715,7 @@ function syncReqDraft(){
   if(document.getElementById("ct-r-scope")) d.scope=v("ct-r-scope");
   if(document.getElementById("ct-r-vat"))   d.vatMode=normVatMode(v("ct-r-vat"));
   if(document.getElementById("ct-r-cat"))   d.budgetCategoryKey=v("ct-r-cat");
+  if(document.getElementById("ct-r-mproj")) d.projectName=v("ct-r-mproj");
   if(document.getElementById("ct-r-dur"))   d.durationDays=n("ct-r-dur");
   if(document.getElementById("ct-r-start")) d.startDate=v("ct-r-start");
   if(document.getElementById("ct-r-rationale")) d.rationale=v("ct-r-rationale");
@@ -1656,7 +1740,13 @@ function syncReqDraft(){
 
 function reqFormHTML(){
   var d=_rDraft, projs=_projects();
-  var items=_boqCache[d.projectId]||[];
+  var pref=pmManualPrefix();
+  var ref=normalizeProjectRef(d.projectSel, d.projectName, pref);
+  var loadKey=_projLoadKey(ref);
+  var items=_boqCache[loadKey]||[];
+  var bud=_budCache[loadKey]||null;
+  var isManual=ref.isCustomProject;
+  var linkState=budgetLinkState(d.budgetCategoryKey, bud);
   var tot=linesTotal(d.lines, d.vatMode);
   var payTh=payOrderThreshold(), ceoTh=ceoThreshold();
   var payOk=payOrderAllowed(tot.total, payTh);
@@ -1711,8 +1801,8 @@ function reqFormHTML(){
   var budWarn="";
   var byCat={};
   d.lines.forEach(function(l){ var k=l.budgetCategoryKey||"uncategorized"; byCat[k]=(byCat[k]||0)+lineTotal(l.qty,l.unitPrice,d.vatMode).total; });
-  Object.keys(byCat).forEach(function(k){
-    var planned=budgetPlanned(d.projectId,k);
+  if(linkState !== "no_budget") Object.keys(byCat).forEach(function(k){
+    var planned=budgetPlanned(loadKey,k);
     if(planned!=null && byCat[k]>planned){
       budWarn += '<div class="ct-note warn">'+_icn("alertTriangle","ic-sm")+' بند «'+_esc(catName(k))+'»: الطلب '+money0(byCat[k])+
         ' ر.س والموازنة المخطّطة '+money0(planned)+' ر.س — تجاوزٌ يُسجَّل ولا يمنع الإرسال.</div>';
@@ -1770,20 +1860,26 @@ function reqFormHTML(){
     '<div class="ct-sec-h">'+_icn("clipboardList","ic-sm")+' الأساسيات</div>'+
     '<div class="ct-form-row">'+
       field("المشروع", '<select class="form-input" onchange="contracts.setReqProject(this.value)">'+
-        projs.map(function(p){ return '<option value="'+_esc(p.id)+'"'+(d.projectId===p.id?' selected':'')+'>'+_esc(p.name)+'</option>'; }).join("")+
+        projs.map(function(p){ return '<option value="'+_esc(p.id)+'"'+(d.projectSel===p.id?' selected':'')+'>'+_esc(p.name)+(p.manual?" — يدويّ":"")+'</option>'; }).join("")+
+        '<option value="__NEW_MANUAL__"'+(d.projectSel==="__NEW_MANUAL__"?' selected':'')+'>— مشروع يدويّ جديد —</option>'+
       '</select>')+
       field("عنوان العمل *", '<input class="form-input" id="ct-r-title" value="'+_esc(d.title)+'" placeholder="مثال: محارة وبياض الدور الأول">')+
     '</div>'+
+    (d.projectSel==="__NEW_MANUAL__" ? '<div class="ct-form-row">'+
+      field("اسم المشروع اليدويّ *", '<input class="form-input" id="ct-r-mproj" value="'+_esc(d.projectName||"")+'" placeholder="اسمٌ يُكتب باليد — بلا سجلٍّ في قائمة المشاريع">')+
+      '<div></div>'+
+    '</div>' : '')+
     '<div class="ct-form-row">'+
       field("الطرف *", '<select class="form-input" onchange="contracts.setReqVendor(this.value)">'+vendorOptions(d.vendorId)+'</select>')+
       field("وضع الضريبة", vatSel)+
     '</div>'+
+    budgetLinkHTML(linkState, d.budgetCategoryKey) +
     eligNote +
     '<div class="ct-picks">'+engCards+'</div>'+
   '</div>'+
-  (isPay ? '' :
+  (isPay || !items.length ? '' :
   '<div class="card ct-sec">'+
-    '<div class="ct-sec-h">'+_icn("book","ic-sm")+' بنود المقايسة — '+_esc(_projName(d.projectId))+
+    '<div class="ct-sec-h">'+_icn("book","ic-sm")+' بنود المقايسة — '+_esc(_projName(ref))+
       '<span class="ct-sec-lock">اختَر ما تُسنِده، فيرث الطلبُ كميتَه وبندَ موازنته</span></div>'+
     '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+
       '<th></th><th>البند</th><th>بند الموازنة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th>'+
@@ -1814,6 +1910,30 @@ function reqFormHTML(){
   '</div>';
 }
 
+/* الربطُ بالموازنة **اختياريّ** — والشاشةُ تقول ذلك صراحةً بدل أن تتركه لغزاً:
+   مشروعٌ بلا موازنة لا يُلام ولا يُحذَّر، ومشروعٌ له موازنةٌ والمستخدمُ لم يربط
+   يرى إشارةً محايدةً تشرح ما يفوته فقط. */
+function budgetLinkHTML(state, catKey){
+  var pm=_pm(), cats=[];
+  try{ if(pm && pm._BUDGET_CATEGORIES) cats=pm._BUDGET_CATEGORIES; }catch(e){}
+  if(state === "no_budget"){
+    return '<div class="ct-note">'+_icn("landmark","ic-sm")+
+      ' لا موازنةَ لهذا المشروع — <b>الربطُ بالموازنة اختياريّ</b>، والعقدُ صحيحٌ تامٌّ بدونه.</div>';
+  }
+  var sel='<select class="form-input" id="ct-r-cat" onchange="contracts.recalc(true)">'+
+    '<option value=""'+(!catKey?' selected':'')+'>— بلا ربطٍ بالموازنة (اختياريّ) —</option>'+
+    cats.map(function(c){ return '<option value="'+_esc(c.key)+'"'+(catKey===c.key?' selected':'')+'>'+_esc(c.name)+'</option>'; }).join("")+
+  '</select>';
+  return '<div class="ct-form-row">'+
+    field("بند الموازنة (اختياريّ)", sel)+
+    '<div class="ct-field"><span class="ct-field-l">&nbsp;</span>'+
+      '<div class="ct-note" style="margin:0">'+_icn(state==="linked"?"checkCircle":"alertCircle","ic-sm")+' '+
+        (state==="linked" ? "مربوطٌ — تُقارَن قيمةُ الطلب بالمخطَّط لهذا البند."
+                          : "غيرُ مربوط — يمرّ الطلبُ عادياً، ولا يظهر في مقارنة المخطَّط بالمتعاقَد عليه.")+
+      '</div></div>'+
+  '</div>';
+}
+
 function totalsHTML(t, mode){
   var m=VAT_MODES[normVatMode(mode)];
   return '<div class="ct-tl"><span class="l">الأساس</span><span class="v num">'+money(t.base)+'</span></div>'+
@@ -1840,6 +1960,10 @@ function submitRequest(){
   syncReqDraft();
   var d=_rDraft; if(!d) return;
   if(!d.title){ _toast("⚠ عنوان العمل مطلوب","warn"); return; }
+  var pref=pmManualPrefix();
+  var ref=normalizeProjectRef(d.projectSel, d.projectName, pref);
+  if(!ref.isCustomProject && !ref.projectId){ _toast("⚠ اختر المشروع","warn"); return; }
+  if(ref.isCustomProject && !ref.projectName){ _toast("⚠ اكتب اسم المشروع اليدويّ","warn"); return; }
   if(!d.vendorId){ _toast("⚠ اختر الطرف المتعاقَد معه","warn"); return; }
   if(!d.lines.length){ _toast("⚠ أضِف بنداً واحداً على الأقل","warn"); return; }
   var v=vendorById(d.vendorId);
@@ -1851,7 +1975,10 @@ function submitRequest(){
     _toast("⚠ أمر الدفع لا يجوز عند "+money0(payOrderThreshold())+" ر.س فأكثر — حوّله إلى عقد","warn"); return;
   }
   var btn=document.getElementById("ct-r-send"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الإرسال…"; }
-  createRequest(d).then(function(id){
+  // الشكلُ القياسيُّ للمشروع يُثبَّت هنا مرةً واحدة — ولا يُخزَّن معرّفُ العرض الداخليّ
+  var payload=Object.assign({}, d, ref);
+  delete payload.projectSel;
+  createRequest(payload).then(function(id){
     _rDraft=null; _rOpen=id; paintReqs();
     _toast("✅ أُرسل الطلب "+id,"success");
   }).catch(function(e){
@@ -1884,7 +2011,7 @@ function reqCardHTML(id){
   var t=linesTotal(r.lines||[], r.vatMode);
   var info='<div class="ct-info">'+
     infoCell("الطرف", _esc(r.vendorName||"—"))+
-    infoCell("المشروع", _esc(_projName(r.projectId)))+
+    infoCell("المشروع", _esc(_projName(r))+(r.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':""))+
     infoCell("نوع الارتباط", _icn(eng.icon,"ic-sm")+" "+_esc(eng.lbl))+
     infoCell("وضع الضريبة", _esc((VAT_MODES[normVatMode(r.vatMode)]||{}).short||"—"))+
     infoCell("مدة التنفيذ", r.durationDays?(money0(r.durationDays)+" يوماً"):"—")+
@@ -2290,6 +2417,10 @@ window.contracts = {
   _crqGateOwner: crqGateOwner,
   _crqIsFinal: crqIsFinal,
   _crqIsBounced: crqIsBounced,
+  _normalizeProjectRef: normalizeProjectRef,
+  _docProjectName: docProjectName,
+  _docProjectKey: docProjectKey,
+  _budgetLinkState: budgetLinkState,
   // الثوابت
   _VAT_RATE: VAT_RATE,
   _VAT_MODES: VAT_MODES,

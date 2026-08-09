@@ -1608,6 +1608,8 @@ window.projectMgmt = {
      (`_safeKey` ومعها بادئةُ المشروع اليدويّ) قاعدةٌ واحدة، ونسختان منها تنحرفان
      فيقرأ طلبُ التعاقد مقايسةَ مشروعٍ غيرِ الذي تكتبه إدارةُ المشاريع. */
   _safeKey: _safeKey,
+  _allProjects: allProjects,          // المسجّلة + اليدوية بلا تكرار — مصدرٌ واحد
+  _MANUAL_PREFIX: MANUAL_PREFIX,
   _boqDocPath: boqDocPath,
   _budgetDocPath: budgetDocPath,
   _loadBoq: loadBoq,

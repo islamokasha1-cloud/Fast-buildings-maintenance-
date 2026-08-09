@@ -5677,12 +5677,54 @@ function contractsPhase1() {
   T("★ الطرفُ المحظور يمنع الإرسال، والوثيقةُ المنتهية تحذّر فقط",
     /if\(elig && elig\.block\)\{ _toast/.test(src));
 
+  /* ════════════════════════════════════════════════════════════
+     الربطُ بالموازنة **اختياريّ** — والمشروعُ قد يكون يدوياً بلا موازنة
+     ════════════════════════════════════════════════════════════ */
+  const PFX = "__MPN__:";
+  T("★ المشروعُ اليدويُّ يُخزَّن بالشكل القياسيّ (__OTHER__ + العلَم + الاسم) لا بمعرّف العرض",
+    (() => { const r = C._normalizeProjectRef("__MPN__:فيلا الأمير", "", PFX);
+      return r.projectId === "__OTHER__" && r.isCustomProject === true && r.projectName === "فيلا الأمير"; })());
+  T("ومشروعٌ يدويٌّ **جديد** يُكتب اسمُه حرّاً ويأخذ الشكل نفسَه",
+    (() => { const r = C._normalizeProjectRef("__NEW_MANUAL__", "استراحة الشمال", PFX);
+      return r.projectId === "__OTHER__" && r.isCustomProject === true && r.projectName === "استراحة الشمال"; })());
+  T("والمشروعُ المسجَّل يبقى بمعرّفه بلا علَمٍ يدويّ",
+    (() => { const r = C._normalizeProjectRef("hail", "", PFX);
+      return r.projectId === "hail" && r.isCustomProject === false; })());
+  T("★ اسمُ المشروع المعروض يتبع اصطلاح النواة (يدوياً من projectName لا من المعرّف)",
+    C._docProjectName({ projectId: "__OTHER__", isCustomProject: true, projectName: "فيلا الأمير" }, []) === "فيلا الأمير" &&
+    C._docProjectName({ projectId: "hail" }, [{ id: "hail", name: "مشروع حائل" }]) === "مشروع حائل");
+  T("★ كلُّ مشروعٍ يدويٍّ مفتاحٌ مستقلٌّ (لا ينطوون في خيارٍ واحد)",
+    C._docProjectKey({ isCustomProject: true, projectName: "أ" }) !== C._docProjectKey({ isCustomProject: true, projectName: "ب" }));
+
+  T("★ مشروعٌ بلا موازنةٍ ⇒ no_budget — لا لومَ ولا تحذير",
+    C._budgetLinkState("", { categories: [] }) === "no_budget" &&
+    C._budgetLinkState("plaster", { categories: [{ key: "plaster", planned: 0 }] }) === "no_budget");
+  T("★ موازنةٌ موجودةٌ وبلا ربطٍ ⇒ unlinked (إشارةٌ محايدة لا خطأ)",
+    C._budgetLinkState("", { categories: [{ key: "plaster", planned: 100 }] }) === "unlinked");
+  T("ومربوطٌ ⇒ linked فتُقارَن القيمةُ بالمخطَّط",
+    C._budgetLinkState("plaster", { categories: [{ key: "plaster", planned: 100 }] }) === "linked");
+  T("موازنةٌ غائبةٌ تماماً (null) لا تُسقط الحساب", C._budgetLinkState("plaster", null) === "no_budget");
+
+  T("★ بندُ الموازنة اختياريٌّ في النموذج (خيارُ «بلا ربط» أوّلُ الخيارات)",
+    /بلا ربطٍ بالموازنة \(اختياريّ\)/.test(src) && /budgetCategoryKey:""/.test(src));
+  T("★ تحذيرُ التجاوز لا يعمل إطلاقاً على مشروعٍ بلا موازنة",
+    /if\(linkState !== "no_budget"\) Object\.keys\(byCat\)/.test(src));
+  T("★ قسمُ المقايسة يختفي لمشروعٍ بلا مقايسة بدل جدولٍ فارغ",
+    /isPay \|\| !items\.length \? '' :/.test(src));
+  T("★ الإرسالُ يُلزم باسم المشروع اليدويّ ولا يقبل فراغاً",
+    /ref\.isCustomProject && !ref\.projectName\) \{? ?_toast/.test(src) || /if\(ref\.isCustomProject && !ref\.projectName\)/.test(src));
+  T("★ معرّفُ العرض الداخليّ لا يُخزَّن على الوثيقة", /delete payload\.projectSel/.test(src));
+  T("قائمةُ المشاريع موحّدةٌ من projectMgmt._allProjects (مسجّلة + يدوية)",
+    /pm\._allProjects/.test(src));
+
   /* المقايسة والموازنة تُقرآن من إدارة المشاريع لا بمسارٍ منسوخ */
   T("★ مسارُ المقايسة/الموازنة يُقرأ من projectMgmt ولا يُنسَخ مفتاحُ المشروع",
     /pm\._loadBoq/.test(src) && /pm\._loadBudget/.test(src) && !/function _safeKey/.test(src));
   const PMSRC = (() => { const p2 = path.resolve(path.dirname(IDX), "project-management.js"); return fs.existsSync(p2) ? fs.readFileSync(p2, "utf8") : ""; })();
   T("وإدارةُ المشاريع تعرّض الجسر (_loadBoq/_loadBudget/_safeKey)",
     /_loadBoq:\s*loadBoq/.test(PMSRC) && /_loadBudget:\s*loadBudget/.test(PMSRC) && /_safeKey:\s*_safeKey/.test(PMSRC));
+  T("وتعرّض قائمةَ المشاريع الموحّدة (_allProjects) فلا تُنسَخ قاعدةُ دمج اليدويّ",
+    /_allProjects:\s*allProjects/.test(PMSRC) && /_MANUAL_PREFIX:\s*MANUAL_PREFIX/.test(PMSRC));
 
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
