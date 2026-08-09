@@ -6439,6 +6439,61 @@ function contractsPhase1() {
       /uncC\.pending\|\|uncC\.contracted\|\|uncC\.spent/.test(PMSRC5));
   }
 
+  /* ════════════════════════════════════════════════════════════
+     المرحلة ٦ — قواعدُ Firestore: الحارسُ على الخادم
+
+     الفحصُ الحقيقيُّ للقواعد يجري على محاكٍ (`rules-check.mjs`) — لأن قاعدةً
+     أمنيةً لا تُختبَر بقراءة سطرها. وما هنا **حرّاسُ اتّساقٍ**: يمنعون أن تُضاف
+     مجموعةٌ أو انتقالُ حالةٍ في الوحدة فتبقى القواعدُ متخلّفةً عنها بصمت.
+     ════════════════════════════════════════════════════════════ */
+  {
+    const rulesPath = path.resolve(path.dirname(IDX), "firestore.rules");
+    const RUL = fs.existsSync(rulesPath) ? fs.readFileSync(rulesPath, "utf8") : "";
+    T("ملفُّ قواعد Firestore موجود", RUL.length > 0);
+
+    /* ★ الحارسُ الأهمّ: القاعدةُ العامة تسمح لكلّ دورٍ بالكتابة في كلّ شيء، وقواعدُ
+       Firestore تُقيَّم بـ«أو» — فما لم تُستثنَ مجموعاتُ التعاقدات منها، كلُّ القفل
+       أعلاه زينةٌ لا أثرَ لها. */
+    T("★★ القاعدةُ العامة تستثني مجموعاتِ التعاقدات (وإلا فالقفلُ بلا أثر)",
+      /allow write:[^\n]*!ctrLocked\(document\[0\]\)/.test(RUL));
+
+    // كلُّ مجموعةٍ تكتب فيها الوحدة يجب أن تكون مقفلةً — القائمةُ تُشتقّ من الوحدة
+    const lockedBlock = (RUL.match(/function ctrLocked\(coll\)\s*\{[\s\S]*?\}/) || [""])[0];
+    const usedColls = [...new Set((src.match(/return _dev\(\) \? "(global_[a-z_]+)_dev"\s*:\s*"(global_[a-z_]+)"/g) || [])
+      .map(x => (x.match(/:\s*"(global_[a-z_]+)"/) || [])[1]).filter(Boolean))];
+    const notLocked = usedColls.filter(c => !lockedBlock.includes("'" + c + "'"));
+    T("★ كلُّ مجموعةٍ تكتب فيها وحدةُ التعاقدات مقفلةٌ في القواعد",
+      usedColls.length >= 4 && notLocked.length === 0, notLocked.join(" "));
+    const notLockedDev = usedColls.filter(c => !lockedBlock.includes("'" + c + "_dev'"));
+    T("★ ونسختُها التجريبيةُ (_dev) مقفلةٌ أيضاً — وإلا فبابٌ خلفيٌّ مفتوح",
+      notLockedDev.length === 0, notLockedDev.join(" "));
+
+    // كلُّ انتقالِ حالةٍ في الوحدة له نظيرُه في القواعد
+    const transitBlock = (RUL.match(/function ctrTransitOk\([\s\S]*?\n    \}/) || [""])[0];
+    const missingTo = Object.keys(C._CTR_TRANSITIONS)
+      .map(k => C._CTR_TRANSITIONS[k].to)
+      .filter(to => !transitBlock.includes("'" + to + "'"));
+    T("★ كلُّ حالةٍ ينتقل إليها العقدُ في الوحدة مذكورةٌ في قواعد الخادم",
+      missingTo.length === 0, missingTo.join(" "));
+
+    /* ★★ الفخُّ الذي كاد يُسقط كلَّ سدادٍ أخيرٍ في المنصة: `CTR_TRANSITIONS.complete`
+       لمدير المشاريع، لكنّ **سدادَ المستخلص الختاميّ يُنهي العقد في معاملة المالية
+       نفسِها**. قاعدةٌ تنسخ الجدولَ حرفياً ترفض تلك الكتابة فيسقط آخرُ مستخلصٍ من
+       كلّ عقد. الحارسُ يُثبّت الاستثناءَ لئلّا يُحذَف بحسن نيّةٍ عند «تنظيف» القواعد. */
+    T("★★ والماليةُ مأذونٌ لها بالإنهاء الفنّيّ — لأنّ المستخلصَ الختاميَّ يفعلها في معاملتها",
+      /to == 'ctr_completed'[\s\S]{0,120}'finance'/.test(transitBlock));
+    T("★ ولا حذفَ للعقود ولا للطلبات ولا للمستخلصات من العميل",
+      (RUL.match(/allow delete: if false;/g) || []).length >= 6);
+    T("★ والآيبانُ لا يتغيّر إلا بيد المالية أو الأدمن",
+      /ibanOf\(request\.resource\.data\) == ibanOf\(resource\.data\) \|\| anyRole\(\['finance','admin'\]\)/.test(RUL));
+
+    // الفحصُ الحقيقيُّ مربوطٌ بـCI — وإلا فقواعدُ الأمان الوحيدةُ بلا حارسٍ آليّ
+    const wfR = fs.readFileSync(path.resolve(path.dirname(IDX), ".github/workflows/hail-tests.yml"), "utf8");
+    T("★ وفحصُ القواعد على محاكٍ حقيقيٍّ مربوطٌ بـCI",
+      /rules-check\.mjs/.test(wfR) && /setup-java/.test(wfR) &&
+      /firestore\.rules/.test(wfR) && fs.existsSync(path.resolve(path.dirname(IDX), "rules-check.mjs")));
+  }
+
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
   const rawHex = (css.match(/#[0-9a-fA-F]{3,8}\b/g) || []);

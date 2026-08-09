@@ -16,11 +16,35 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
+    function role()          { return request.auth.token.role; }
+    function isAdmin()       { return hasRole() && role() == 'admin'; }
+    function anyRole(list)   { return hasRole() && role() in list; }
+    // الحقولُ التي لا يجوز أن يمسّها التعديل — تُقارَن بفارق الوثيقتين لا حقلاً حقلاً
+    function unchanged(keys) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
+    }
 
-    // ═══════════ القاعدة العامة (النظام الرئيسي) — بدون تغيير ═══════════
+    /* ═══════════ مجموعاتُ التعاقدات المقفلة (المرحلة ٦) ═══════════
+       القاعدةُ العامة أدناه تسمح لأيّ دورٍ غيرِ الزائر بالكتابة في كلّ شيء. ولأنّ
+       قواعدَ Firestore تُقيَّم بـ«أو» — يكفي تطابقُ قاعدةٍ واحدةٍ للسماح — فإضافةُ
+       قواعدَ صارمةٍ لهذه المجموعات **لا تقيّد شيئاً** ما لم تُستثنَ من العامة أوّلاً.
+       فهذه القائمةُ هي الاستثناء، وكلُّ مجموعةٍ فيها يحكمها بلوكُها وحدَه. */
+    function ctrLocked(coll) {
+      return coll in [
+        'global_vendors',            'global_vendors_dev',
+        'global_contract_requests',  'global_contract_requests_dev',
+        'global_contracts',          'global_contracts_dev',
+        'global_contract_extracts',  'global_contract_extracts_dev'
+      ];
+    }
+
+    // ═══════════ القاعدة العامة (النظام الرئيسي) ═══════════
+    // القراءةُ كما كانت لكلّ ذي دور. **والقصدُ من إبقائها مفتوحةً هنا مقصود**:
+    // تقييدُ القراءة يجعل جدولَ الموازنة يعرض أصفاراً صامتةً لمن لا يملكها بدل رفضٍ
+    // ظاهر — ورقمٌ خاطئٌ أسوأُ من بابٍ مغلق. تضييقُ القراءة خطوةٌ مستقلّةٌ لاحقة.
     match /{document=**} {
       allow read:  if hasRole();
-      allow write: if hasRole() && !isViewer();
+      allow write: if hasRole() && !isViewer() && !ctrLocked(document[0]);
     }
 
     // ═══════════ إضافات تطبيق الفنيين (مصادقة مجهولة، مرحلة اختبار) ═══════════
@@ -73,6 +97,158 @@ service cloud.firestore {
     }
     match /audit_log_dev/{doc} {
       allow read, write: if hasRole();
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       التعاقدات — الحارسُ على الخادم  (المرحلة ٦)
+
+       كلُّ قيدٍ في `contracts.js` مكتوبٌ في المتصفّح: يمنع الخطأ ولا يمنع التعمّد.
+       مَن يفتح أدوات المطوّر يكتب في القاعدة مباشرةً متجاوزاً كلَّ بوّابةِ اعتماد.
+       فهذه القواعدُ تنقل **الأهمَّ** من تلك القيود إلى مكانٍ لا يملك المستخدمُ
+       تعديلَه. وهي متعمَّدةُ التركيز: تحرس **مَن يحرّك الحالة** و**ما لا يُمَسّ**،
+       ولا تعيد حسابَ الأرقام (رياضةُ المستخلص تبقى في الوحدة — قاعدةٌ تحاول محاكاةَ
+       سُلَّمٍ ثمانيٍّ ستتفرّع عنه بصمتٍ عند أوّل تعديل).
+       ═══════════════════════════════════════════════════════════════ */
+
+    // ── سجلُّ الأطراف: الآيبان ناقلُ الاحتيال الأوّل، فله حارسُه ──
+    function ibanOf(d) { return d.get(['bank','iban'], ''); }
+    function vendorCreateOk() {
+      return anyRole(['procurement_officer','finance','admin'])
+        && (ibanOf(request.resource.data) == '' || anyRole(['finance','admin']));
+    }
+    function vendorUpdateOk() {
+      return anyRole(['procurement_officer','finance','admin'])
+        && (ibanOf(request.resource.data) == ibanOf(resource.data) || anyRole(['finance','admin']));
+    }
+    match /global_vendors/{id} {
+      allow read:   if hasRole();
+      allow create: if vendorCreateOk();
+      allow update: if vendorUpdateOk();
+      allow delete: if isAdmin();
+    }
+    match /global_vendors_dev/{id} {
+      allow read:   if hasRole();
+      allow create: if vendorCreateOk();
+      allow update: if vendorUpdateOk();
+      allow delete: if isAdmin();
+    }
+
+    // ── طلباتُ التعاقد: البوّابةُ الحاليةُ هي مَن يملك تحريكَها ──
+    // `crq_approved` ليست بوّابةَ اعتماد، لكنّها البابُ إلى إنشاء العقد — وهو
+    // للمشتريات وحدَها، فتُعامَل معاملةَ البوّابة.
+    function crqGate(st) {
+      return st == 'crq_pending_pm'      ? ['project_manager','admin']
+           : st == 'crq_pending_proc'    ? ['procurement_officer','admin']
+           : st == 'crq_pending_finance' ? ['finance','admin']
+           : st == 'crq_pending_ceo'     ? ['ceo','admin']
+           : st == 'crq_pending_pay'     ? ['finance','admin']
+           : st == 'crq_approved'        ? ['procurement_officer','admin']
+           : ['admin'];
+    }
+    // `crqNextStage` بلا اعتمادٍ سابقٍ تُرجع البوّابةَ الأولى دائماً — فالطلبُ يولد
+    // عندها بالضبط، لا عند أيّ بوّابةٍ لاحقةٍ يختارها المُنشئ
+    function crqCreateOk() {
+      return anyRole(['project_manager','admin'])
+        && request.resource.data.status == 'crq_pending_pm';
+    }
+    function crqUpdateOk() {
+      return anyRole(['project_manager','procurement_officer','finance','ceo','admin'])
+        // الحالةُ النهائيةُ نهائية — لا تُفتح بعد إغلاقها
+        && !(resource.data.status in ['crq_converted','crq_paid','crq_cancelled'])
+        // قيمةُ الطلب وبنودُه وطرفُه لا تتغيّر بعد الإرسال: وإلا وقّع المعتمِدُ على
+        // رقمٍ وسُدِّد غيرُه
+        && unchanged(['createdAt','createdByUser','value','vendorId','engagement','projectId','lines'])
+        && ( request.resource.data.status == resource.data.status
+             || request.resource.data.status == 'crq_cancelled'
+             || anyRole(crqGate(resource.data.status)) );
+    }
+    match /global_contract_requests/{id} {
+      allow read:   if hasRole();
+      allow create: if crqCreateOk();
+      allow update: if crqUpdateOk();
+      allow delete: if false;
+    }
+    match /global_contract_requests_dev/{id} {
+      allow read:   if hasRole();
+      allow create: if crqCreateOk();
+      allow update: if crqUpdateOk();
+      allow delete: if false;
+    }
+
+    // ── العقود: جدولُ الانتقالات نفسُه الذي يحرس الأزرار ──
+    function ctrTransitOk(from, to) {
+      return (from == 'ctr_pending_signature' && to == 'ctr_active'
+              && anyRole(['procurement_officer','project_manager','admin']))
+          || (from == 'ctr_active'    && to == 'ctr_suspended' && anyRole(['project_manager','admin']))
+          || (from == 'ctr_suspended' && to == 'ctr_active'    && anyRole(['project_manager','admin']))
+          // الإنهاءُ الفنّيُّ بيد مدير المشروع — **وبيد المالية أيضاً**، لأنّ سدادَ
+          // المستخلص الختاميّ يُنهي العقد في المعاملة نفسِها. قاعدةٌ تُغفل هذا
+          // تُسقط السدادَ الأخير من كلّ عقدٍ في المنصة.
+          || (from == 'ctr_active'    && to == 'ctr_completed' && anyRole(['project_manager','finance','admin']))
+          || (from == 'ctr_completed' && to == 'ctr_closed'    && anyRole(['finance','admin']))
+          || (to == 'ctr_terminated'
+              && from in ['ctr_pending_signature','ctr_active','ctr_suspended'] && isAdmin());
+    }
+    function ctrCreateOk() {
+      return anyRole(['procurement_officer','admin'])
+        // لا عقدَ يولد سارياً — يولد بانتظار توقيع الطرف
+        && request.resource.data.status == 'ctr_pending_signature';
+    }
+    function ctrUpdateOk() {
+      return anyRole(['project_manager','procurement_officer','finance','ceo','admin'])
+        && !(resource.data.status in ['ctr_closed','ctr_terminated'])
+        && unchanged(['createdAt','requestId','vendorId','value','lines'])
+        && ( request.resource.data.status == resource.data.status
+             || ctrTransitOk(resource.data.status, request.resource.data.status) );
+    }
+    match /global_contracts/{id} {
+      allow read:   if hasRole();
+      allow create: if ctrCreateOk();
+      allow update: if ctrUpdateOk();
+      allow delete: if false;
+    }
+    match /global_contracts_dev/{id} {
+      allow read:   if hasRole();
+      allow create: if ctrCreateOk();
+      allow update: if ctrUpdateOk();
+      allow delete: if false;
+    }
+
+    // ── المستخلصات: بوّابةٌ لكلّ حالة، والسدادُ لا يُسجَّل بلا إيصال ──
+    function extGate(st) {
+      return st == 'ext_pending_pm'      ? ['project_manager','admin']
+           : st == 'ext_pending_ceo'     ? ['ceo','admin']
+           : st == 'ext_pending_finance' ? ['finance','admin']
+           : ['admin'];
+    }
+    function extCreateOk() {
+      return anyRole(['project_manager','admin'])
+        && request.resource.data.contractId is string
+        && request.resource.data.contractId != ''
+        && request.resource.data.status == 'ext_pending_pm';
+    }
+    function extUpdateOk() {
+      return anyRole(['project_manager','ceo','finance','admin'])
+        && !(resource.data.status in ['ext_paid','ext_cancelled'])
+        // المستخلصُ لا يُنقل إلى عقدٍ آخر بعد إنشائه
+        && unchanged(['createdAt','contractId'])
+        && ( request.resource.data.status == resource.data.status
+             || anyRole(extGate(resource.data.status)) )
+        && ( request.resource.data.status != 'ext_paid'
+             || ( anyRole(['finance','admin'])
+                  && request.resource.data.get(['payment','receiptUrl'], '') != '' ) );
+    }
+    match /global_contract_extracts/{id} {
+      allow read:   if hasRole();
+      allow create: if extCreateOk();
+      allow update: if extUpdateOk();
+      allow delete: if false;
+    }
+    match /global_contract_extracts_dev/{id} {
+      allow read:   if hasRole();
+      allow create: if extCreateOk();
+      allow update: if extUpdateOk();
+      allow delete: if false;
     }
   }
 }

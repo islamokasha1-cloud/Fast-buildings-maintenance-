@@ -3,9 +3,15 @@
     "stamp": "node sync-version.mjs",
     "stamp:check": "node sync-version.mjs --check",
     "stamp:print": "node sync-version.mjs --print",
-    "test": "node hail-tests.js"
+    "test": "node hail-tests.js",
+    "rules:check": "firebase emulators:exec --only firestore --project hail-rules-check \"node rules-check.mjs\""
   },
   "dependencies": {
     "jsdom": "^29.1.1"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "firebase": "^12.17.1",
+    "firebase-tools": "^15.26.0"
   }
 }
