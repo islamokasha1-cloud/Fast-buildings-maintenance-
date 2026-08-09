@@ -225,10 +225,17 @@ function projectRollup(projId){
 //   • المغلق: نوزّع التكلفة الفعلية (الفاتورة) على البنود بنسبة أوزان الأصناف.
 //   • الجاري: نوزّع تكلفة كل صنف على بند موازنته مباشرةً.
 // طلبٌ بلا أصناف (قديم جداً) يرجع لـ budgetCategoryKey إن وُجد، وإلا «غير مصنّف».
+/* حارسُ منع الازدواج المحاسبي (v18.9 — وحدة التعاقدات): طلبُ شراءٍ يحمل `contractId`
+   جزءٌ من عقدٍ يُحسب في خانتَي «متعاقَدٌ عليه»/«مصروف» التعاقدية أصلاً — فعدُّه هنا
+   أيضاً يُنتج رقمين لعملٍ واحد. القاعدةُ تُقرأ من وحدة التعاقدات ولا تُنسَخ. */
+function _poUnderContract(p){
+  try{ if(window.contracts && typeof window.contracts.poIsUnderContract==="function") return window.contracts.poIsUnderContract(p); }catch(e){}
+  return !!(p && p.contractId);
+}
 function rollupByCategory(projId){
   const m={};
   const ensure=k=>{ if(!m[k]) m[k]={actual:0, committed:0}; return m[k]; };
-  poForProject(projId).forEach(p=>{
+  poForProject(projId).filter(p=>!_poUnderContract(p)).forEach(p=>{
     const items = Array.isArray(p.items) ? p.items.filter(Boolean) : [];
     if(items.length){
       const perCat={}; let tot=0;
@@ -682,9 +689,18 @@ async function saveCleaningEdit(){
 function editCleaning(){ _cleaningEditing=true; renderTabBody(); }
 function cancelCleaningEdit(){ _cleaningEditing=false; renderTabBody(); }
 
+function _ctrRollup(projId){
+  try{
+    if(window.contracts && typeof window.contracts.rollupForProject==="function")
+      return window.contracts.rollupForProject(projId);
+  }catch(e){ console.warn("pm/_ctrRollup",e); }
+  return { byCat:{}, total:{pending:0,contracted:0,spent:0} };
+}
 function budgetHTML(){
   const b=_budgetCache[_curId]||{categories:[]};
   const byCat=rollupByCategory(_curId);
+  const ctr=_ctrRollup(_curId);
+  const ctrOf=k=>ctr.byCat[k]||{pending:0,contracted:0,spent:0};
   // خريطة البند العام → المخطّط المخزّن
   const plannedOf={};
   (b.categories||[]).forEach(c=> plannedOf[c.key]=Number(c.planned)||0);
@@ -692,8 +708,9 @@ function budgetHTML(){
   const rowsCats = BUDGET_CATEGORIES.map(cat=>{
     const planned = plannedOf[cat.key]||0;
     const cr = byCat[cat.key]||{actual:0,committed:0};
-    const spent = cr.actual, committed=cr.committed;
-    const remaining = planned - spent - committed;
+    const cc = ctrOf(cat.key);
+    const spent = cr.actual + cc.spent, committed=cr.committed;
+    const remaining = planned - spent - committed - cc.contracted - cc.pending;
     const val = _editing
       ? `<input type="number" min="0" class="form-input pm-inp-w" data-cat="${cat.key}" value="${planned||''}" placeholder="0">`
       : money(planned);
@@ -701,6 +718,8 @@ function budgetHTML(){
       <tr>
         <td class="pm-td-name">${_esc(cat.name)}</td>
         <td class="pm-num">${val}</td>
+        <td class="pm-num pm-dim">${cc.pending?money(cc.pending):"—"}</td>
+        <td class="pm-num pm-ctr">${cc.contracted?money(cc.contracted):"—"}</td>
         <td class="pm-num">${money(spent)}</td>
         <td class="pm-num pm-dim">${money(committed)}</td>
         <td class="pm-num" style="color:${remaining<0?'var(--danger)':'inherit'}">${money(remaining)}</td>
@@ -708,19 +727,24 @@ function budgetHTML(){
   }).join("");
 
   // صف «غير مصنّف» يظهر فقط إن وُجد صرفٌ/ارتباط غير مصنّف (طلبات قديمة بلا بند)
-  const unc = byCat["uncategorized"];
-  const rowUnc = (unc && (unc.actual||unc.committed)) ? `
+  const unc = byCat["uncategorized"] || {actual:0,committed:0};
+  const uncC = ctrOf("uncategorized");
+  const rowUnc = (unc.actual||unc.committed||uncC.pending||uncC.contracted||uncC.spent) ? `
       <tr class="pm-tr-unc">
-        <td class="pm-td-name">${UNCATEGORIZED.name} <span class="pm-hint-inline">طلبات بلا بند</span></td>
+        <td class="pm-td-name">${UNCATEGORIZED.name} <span class="pm-hint-inline">بلا بند موازنة</span></td>
         <td class="pm-num">—</td>
-        <td class="pm-num">${money(unc.actual)}</td>
+        <td class="pm-num pm-dim">${ctrOf("uncategorized").pending?money(ctrOf("uncategorized").pending):"—"}</td>
+        <td class="pm-num pm-ctr">${ctrOf("uncategorized").contracted?money(ctrOf("uncategorized").contracted):"—"}</td>
+        <td class="pm-num">${money(unc.actual + ctrOf("uncategorized").spent)}</td>
         <td class="pm-num pm-dim">${money(unc.committed)}</td>
         <td class="pm-num">—</td>
       </tr>` : "";
 
   const totPlanned = BUDGET_CATEGORIES.reduce((s,c)=>s+(plannedOf[c.key]||0),0);
-  const totActual  = Object.values(byCat).reduce((s,c)=>s+c.actual,0);
+  const totActual  = Object.values(byCat).reduce((s,c)=>s+c.actual,0) + ctr.total.spent;
   const totCommit  = Object.values(byCat).reduce((s,c)=>s+c.committed,0);
+  const totPend    = ctr.total.pending, totCtr = ctr.total.contracted;
+  const totRemain  = totPlanned - totActual - totCommit - totCtr - totPend;
 
   const editBtns = _canEdit()
     ? (_editing
@@ -734,19 +758,28 @@ function budgetHTML(){
     <div class="pm-table-wrap">
     <table class="pm-table">
       <thead><tr>
-        <th>البند العام</th><th>الموازنة</th><th>المصروف (مغلق)</th><th>المرتبط (جارٍ)</th><th>المتبقّي</th>
+        <th>البند العام</th><th>الموازنة</th><th>قيدَ الاعتماد</th><th>متعاقَدٌ عليه</th>
+        <th>المصروف</th><th>المرتبط (شراء جارٍ)</th><th>المتبقّي</th>
       </tr></thead>
       <tbody>${rowsCats}${rowUnc}</tbody>
       <tfoot><tr>
         <td class="pm-td-name">الإجمالي</td>
         <td class="pm-num">${money(totPlanned)}</td>
+        <td class="pm-num pm-dim">${totPend?money(totPend):"—"}</td>
+        <td class="pm-num pm-ctr">${totCtr?money(totCtr):"—"}</td>
         <td class="pm-num">${money(totActual)}</td>
         <td class="pm-num pm-dim">${money(totCommit)}</td>
-        <td class="pm-num" style="color:${(totPlanned-totActual-totCommit)<0?'var(--danger)':'inherit'}">${money(totPlanned-totActual-totCommit)}</td>
+        <td class="pm-num" style="color:${totRemain<0?'var(--danger)':'inherit'}">${money(totRemain)}</td>
       </tr></tfoot>
     </table>
     </div>
-    <div class="pm-hint">المصروف والمرتبط يُحسبان من طلبات الشراء المربوطة بالمشروع، وتُوزَّع على البنود حسب «بند الموازنة» المختار في طلب الشراء. الطلبات القديمة أو التي بلا بند تظهر تحت «غير مصنّف».</div>`;
+    <div class="pm-hint">
+      <b>قيدَ الاعتماد</b>: طلباتُ تعاقدٍ لم تُعتمد بعد — التزامٌ محتمَل يُرى <b>قبل</b> توقيعه.
+      <b>متعاقَدٌ عليه</b>: قيمةُ العقود القائمة ناقصَ ما استُخلِص منها (فلا يُحسب المبلغُ مرّتين).
+      <b>المصروف</b>: طلباتُ الشراء المغلقة + المستخلصاتُ وأوامرُ الدفع المسدَّدة.
+      <b>المرتبط</b>: طلباتُ شراءٍ جارية. وطلبُ الشراء المرتبطُ بعقدٍ يُستبعَد من الشراء لأنه محسوبٌ في عقده.
+      والتوزيعُ على البنود حسب «بند الموازنة»؛ وما بلا بندٍ يظهر تحت «غير مصنّف» — والربطُ اختياريّ.
+    </div>`;
 }
 
 function editBudget(){ _editing=true; renderTabBody(); }
@@ -1442,6 +1475,7 @@ function injectCSS(){
 .pm-table tbody tr:last-child td{border-bottom:none}
 .pm-table tfoot td{font-weight:800;background:var(--surface2);color:var(--text)}
 .pm-td-name{font-weight:700;color:var(--text)}
+.pm-ctr{color:var(--info);font-weight:800}
 .pm-num{direction:ltr;text-align:right;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--text)}
 .pm-dim{color:var(--muted)}
 .pm-tr-unc td{background:var(--surface2)}

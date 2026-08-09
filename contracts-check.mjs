@@ -6,7 +6,8 @@
 // المرحلة ٢: طلبُ التعاقد من المقايسة · دورةُ الاعتماد بأربع بوّابات · أمرُ الدفع دون العتبة
 // المرحلة ٣: التحويلُ لعقدٍ ساري بمعاملةٍ واحدة (بحارس عدم التكرار) · بطاقةُ العقد وانتقالاتُه
 // المرحلة ٤: المستخلصُ التراكميُّ بحرّاسه الثلاثة · سُلَّمُ الخصومات · الاعتمادُ والسدادُ بإيصال
-// الوثيقةُ التعاقدية: شروطٌ نصّيةٌ منسوخةٌ ومتولّدة · حالةُ توقيعٍ قبل السريان · مخرَجٌ ورقيّ — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
+// الوثيقةُ التعاقدية: شروطٌ نصّيةٌ منسوخةٌ ومتولّدة · حالةُ توقيعٍ قبل السريان · مخرَجٌ ورقيّ
+// المرحلة ٥: خانتا «قيدَ الاعتماد» و«متعاقَدٌ عليه» في موازنة المشروع · منعُ الازدواج — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
 // و**الرقمُ المرسوم = الرقمُ المحسوب** (شريطُ الأرقام مقابل الدوالّ النقية)، والتطبيعُ
 // العربيُّ في البحث، وشرائطُ الحالة من توكنز SLA، والثيمُ الداكن، والجوّالُ بلا قصّ.
 import { chromium } from 'playwright-core';
@@ -762,6 +763,68 @@ await page.waitForTimeout(600);
 const ov3 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 check('★ صفحةُ العقود بلا تمريرٍ أفقيٍّ على الجوال', ov3 <= 1, 'زيادة ' + ov3 + 'px');
 await page.screenshot({ path: `${SHOTS}/20-contracts-mobile.png` });
+
+
+/* ═════════ المرحلة ٥: الربطُ بالموازنة ═════════ */
+console.log('\n=== المرحلة ٥: خانتا «قيدَ الاعتماد» و«متعاقَدٌ عليه» ===');
+await page.setViewportSize({ width: 1440, height: 980 });
+
+const roll = await page.evaluate(() => window.contracts.rollupForProject('hail'));
+check('★ التجميعُ التعاقديُّ يقرأ مشروعَ hail', !!roll && !!roll.total, JSON.stringify(roll.total));
+
+await page.evaluate(() => showPage('projects'));
+await page.waitForTimeout(1600);
+await page.evaluate(() => window.projectMgmt.open('hail'));
+await page.waitForTimeout(1400);
+await page.evaluate(() => window.projectMgmt.tab('budget'));
+await page.waitForTimeout(1800);
+
+const head = await page.evaluate(() => Array.from(document.querySelectorAll('#page-projects .pm-table thead th')).map(e => e.textContent.trim()));
+check('★ جدولُ الموازنة صار سبعةَ أعمدة بخانتَي التعاقد',
+  head.length === 7 && head.includes('قيدَ الاعتماد') && head.includes('متعاقَدٌ عليه'), head.join(' | '));
+
+const foot = await page.evaluate(() => Array.from(document.querySelectorAll('#page-projects .pm-table tfoot td')).map(e => e.textContent.trim()));
+const num = (s2) => Number(String(s2).replace(/[^0-9.-]/g, '')) || 0;
+check('★ الرقمُ المرسوم في «قيدَ الاعتماد» = المحسوب',
+  num(foot[2]) === Math.round(roll.total.pending), 'مرسوم ' + foot[2] + ' · محسوب ' + roll.total.pending);
+check('★ والرقمُ المرسوم في «متعاقَدٌ عليه» = المحسوب',
+  num(foot[3]) === Math.round(roll.total.contracted), 'مرسوم ' + foot[3] + ' · محسوب ' + roll.total.contracted);
+check('★ والمصروفُ يشمل المسدَّدَ تعاقدياً',
+  num(foot[4]) >= Math.round(roll.total.spent), 'مرسوم ' + foot[4] + ' · تعاقديّ ' + roll.total.spent);
+check('★ والمتبقّي يخصم الأربعة معاً',
+  num(foot[6]) === num(foot[1]) - num(foot[2]) - num(foot[3]) - num(foot[4]) - num(foot[5]),
+  foot.join(' | '));
+await page.screenshot({ path: `${SHOTS}/25-budget-columns.png` });
+
+// حارسُ منع الازدواج: طلبُ شراءٍ بعقدٍ يُستبعَد من مصروف الشراء
+// لا نعتمد على طلبٍ قائمٍ في البذرة (قد لا يوجد أصلاً) — نزرع طلبَنا ثم نزيله.
+const dbl = await page.evaluate(() => {
+  const sum = () => Object.values(window.projectMgmt._rollupByCategory('hail'))
+    .reduce((s, c) => s + c.actual + c.committed, 0);
+  const base = sum();
+  const po = { id: 'PO-CTRDBL', projectId: 'hail', status: 'proc_executing',
+               items: [{ itemType: 'مواد بناء', itemCost: 5000, qty: 1 }] };
+  purchases.push(po);
+  const withPo = sum();                     // الطلبُ الحرُّ يُحسب
+  po.contractId = 'CTR-X';
+  const underContract = sum();              // وبعد ربطه بعقدٍ يسقط
+  purchases = purchases.filter(p => p.id !== 'PO-CTRDBL');
+  return { base, withPo, underContract };
+});
+check('★ طلبُ شراءٍ حرٍّ يُحسب في مصروف الشراء',
+  dbl.withPo > dbl.base, JSON.stringify(dbl));
+check('★ طلبُ شراءٍ مرتبطٌ بعقدٍ يُستبعَد من مصروف الشراء (لا رقمان لعملٍ واحد)',
+  Math.abs(dbl.underContract - dbl.base) < 0.01, JSON.stringify(dbl));
+
+await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
+await page.waitForTimeout(600);
+await page.screenshot({ path: `${SHOTS}/26-budget-dark.png` });
+await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'light'); });
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(600);
+const ov5 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+check('★ وجدولُ الموازنة بلا تمريرٍ أفقيٍّ للصفحة على الجوال', ov5 <= 1, 'زيادة ' + ov5 + 'px');
+await page.screenshot({ path: `${SHOTS}/27-budget-mobile.png` });
 
 check('لا أخطاء جافاسكربت طوال الرحلة', errors.length === 0, errors.slice(0, 2).join(' | '));
 

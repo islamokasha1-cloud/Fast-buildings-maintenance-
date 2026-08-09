@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2510";
+var MODULE_BUILD = "v18.9.2512";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -755,6 +755,108 @@ function extGateOwner(s){ return EXT_GATES[s] || null; }
 function extCanAct(status, role){ var g=EXT_GATES[status]; return !!g && g.roles.indexOf(role)!==-1; }
 var EXT_FINAL = ["ext_paid","ext_cancelled"];
 function extIsFinal(s){ return EXT_FINAL.indexOf(s)!==-1; }
+
+/* ════ الربطُ بالموازنة ════   [المرحلة ٥]
+
+   الموازنةُ اليوم ثلاثيةٌ (مصروف / مرتبط / متبقٍّ) من طلبات الشراء وحدَها. والتعاقدُ
+   يضيف حالتين حقيقيتين قبل الصرف، فتصير خمساً:
+
+     الموازنة │ قيدَ الاعتماد │ متعاقَدٌ عليه │ مصروف │ المتبقّي
+
+   • **قيدَ الاعتماد** — طلبُ تعاقدٍ لم يُعتمد بعد: التزامٌ **محتمَل**. وهو الفائدةُ
+     المباشرةُ من فصل الطلب عن العقد: يُرى الالتزامُ **قبل** توقيعه، وهي اللحظةُ
+     الوحيدةُ التي يبقى المنعُ فيها بلا كلفة.
+   • **متعاقَدٌ عليه** — قيمةُ العقد **ناقصَ ما استُخلِص منه**؛ وإلا حُسب المبلغُ مرّتين.
+
+   وقاعدةُ **منع الازدواج المحاسبي** (تُكتب في `NOTES §3` ويحرسها اختبار):
+   مصروفُ التعاقدات من **المستخلصات المسدَّدة وأوامر الدفع المسدَّدة فقط**، وطلبُ شراءٍ
+   يحمل `contractId` **يُستبعَد** من مصروف الشراء لأنه جزءٌ من عقدٍ محسوبٍ أصلاً. */
+
+/* مفتاحُ مشروعٍ من معرّف إدارة المشاريع (مسجَّلٌ أو يدويٌّ بالبادئة) — إلى اصطلاح
+   `__CUSTOM__:` الذي تجمّع به النواة. مصدرٌ واحدٌ فلا ينحرف التجميع بين شاشتين. */
+function projectKeyOfPm(pmId, prefix){
+  var pfx = prefix || "__MPN__:";
+  var s = String(pmId||"");
+  if(s.indexOf(pfx) === 0) return "__CUSTOM__:" + s.slice(pfx.length);
+  return s;
+}
+
+/* هل هذا الطلبُ قيدَ الاعتماد فعلاً؟ لا نهائيٌّ ولا مرتدٌّ لمُنشئه. */
+function reqIsPending(r){
+  var s = (r||{}).status;
+  return !!s && !crqIsFinal(s) && !crqIsBounced(s) && s !== "crq_draft";
+}
+/* العقدُ يُعدّ التزاماً قائماً ما دام لم يُقفَل أو يُفسَخ — ويشمل «بانتظار التوقيع»:
+   الطلبُ اعتُمد والمالُ التزم، وإن لم تُوقَّع الورقةُ بعد. */
+function ctrIsCommitted(c){
+  var s=(c||{}).status;
+  return s==="ctr_pending_signature" || s==="ctr_active" || s==="ctr_suspended" || s==="ctr_completed";
+}
+
+/* تجميعُ التعاقدات لمشروعٍ واحد — بندَ موازنةٍ بندَ موازنة، وإجمالياً.
+   دالةٌ نقيةٌ تأخذ القوائمَ فتُختبَر بلا Firestore. */
+function contractRollup(projectKey, requests, contracts, extracts){
+  var out = { byCat:{}, total:{ pending:0, contracted:0, spent:0 } };
+  function bucket(k){
+    var key = k || "uncategorized";
+    if(!out.byCat[key]) out.byCat[key] = { pending:0, contracted:0, spent:0 };
+    return out.byCat[key];
+  }
+
+  // (١) قيدَ الاعتماد — من طلبات التعاقد غير المنتهية
+  (Array.isArray(requests)?requests:[]).forEach(function(r){
+    if(docProjectKey(r) !== projectKey) return;
+    if(!reqIsPending(r)) return;
+    var v = r2(r.value);
+    bucket(r.budgetCategoryKey).pending += v;
+    out.total.pending += v;
+  });
+
+  // (٢) متعاقَدٌ عليه = قيمةُ العقد − المستخلَصُ منه (بلا ازدواج)، و(٣) المصروفُ من المسدَّد
+  // **المالُ المدفوعُ مصروفٌ أبداً** مهما صارت حالةُ العقد: العقدُ المُقفَل أو المفسوخ
+  // يسقط عنه *الالتزامُ المتبقّي* فقط، أمّا ما خرج من الخزينة فلا يعود. لذلك يُحسَب
+  // `spent` خارجَ حارسِ `ctrIsCommitted`، و`contracted` وحدَه بداخله.
+  (Array.isArray(contracts)?contracts:[]).forEach(function(c){
+    if(docProjectKey(c) !== projectKey) return;
+    var b = bucket(c.budgetCategoryKey);
+    var val = contractValue(c);
+    var paid = 0;
+    (Array.isArray(extracts)?extracts:[]).forEach(function(e){
+      if(e && e.contractId===c.id && e.status==="ext_paid") paid += r2((e.payment||{}).amount);
+    });
+    paid = r2(paid);
+    b.spent += paid; out.total.spent += paid;
+    if(!ctrIsCommitted(c)) return;              // انتهى العقد ⇒ لا التزامَ متبقّياً
+    var remaining = r2(Math.max(0, val - paid));
+    b.contracted += remaining; out.total.contracted += remaining;
+  });
+
+  // (٤) أوامرُ الدفع المسدَّدة — مصروفٌ تعاقديٌّ لا عقدَ له
+  (Array.isArray(requests)?requests:[]).forEach(function(r){
+    if(docProjectKey(r) !== projectKey) return;
+    if(r.status !== "crq_paid") return;
+    var v = r2((r.payment||{}).amount != null ? r.payment.amount : r.value);
+    bucket(r.budgetCategoryKey).spent += v;
+    out.total.spent += v;
+  });
+
+  Object.keys(out.byCat).forEach(function(k){
+    var b=out.byCat[k]; b.pending=r2(b.pending); b.contracted=r2(b.contracted); b.spent=r2(b.spent);
+  });
+  out.total.pending=r2(out.total.pending); out.total.contracted=r2(out.total.contracted); out.total.spent=r2(out.total.spent);
+  return out;
+}
+
+/* **حارسُ منع الازدواج**: طلبُ شراءٍ يحمل `contractId` جزءٌ من عقدٍ محسوبٍ أصلاً،
+   فيُستبعَد من مصروف الشراء. تقرؤها `project-management` فلا تُنسَخ القاعدة. */
+function poIsUnderContract(p){ return !!(p && p.contractId); }
+
+/* الغلافُ الذي تستدعيه `project-management`: يضمن تشغيلَ المستمعين ثم يجمّع. */
+function rollupForProject(pmProjectId){
+  startReqSync(); startCtrSync(); startExtSync();
+  return contractRollup(projectKeyOfPm(pmProjectId, pmManualPrefix()), _reqs, _ctrs, _exts);
+}
+function contractsLoaded(){ return _rLoaded && _cLoaded && _eLoaded; }
 
 /* حالةُ وثيقةِ طرفٍ من تاريخ انتهائها: `none` بلا تاريخ · `ok` · `soon` · `expired`.
    `today` مُمرَّرٌ لا مقروءٌ من الساعة — فالدالةُ نقيةٌ وقابلةٌ للفحص. */
@@ -3930,6 +4032,14 @@ window.contracts = {
   _docProjectName: docProjectName,
   _docProjectKey: docProjectKey,
   _budgetLinkState: budgetLinkState,
+  // الربط بالموازنة [المرحلة ٥]
+  rollupForProject: rollupForProject,
+  contractsLoaded: contractsLoaded,
+  poIsUnderContract: poIsUnderContract,
+  _contractRollup: contractRollup,
+  _projectKeyOfPm: projectKeyOfPm,
+  _reqIsPending: reqIsPending,
+  _ctrIsCommitted: ctrIsCommitted,
   _contractFromRequest: contractFromRequest,
   _advanceAmountOf: advanceAmountOf,
   _ctrCanTransit: ctrCanTransit,
