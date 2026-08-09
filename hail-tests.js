@@ -4935,8 +4935,22 @@ function hrPaymentNotificationTests(src) {
   T("★ findRequester تطابق createdByUser أيضاً (وإلّا لم يُعرَف صاحب طلب السداد)",
     /const ids = \[po\.createdByUser, po\.createdBy\]\.filter\(Boolean\)/.test(recSrc) &&
     /ids\.includes\(String\(x\.user\)\) \|\| ids\.includes\(String\(x\.name\)\)/.test(recSrc));
-  T("★ المستلمون من meta/users المركزي (المجموعة عامّة بلا مشروع)",
-    /findByRole\(db, route\.role, ""\)/.test(hrpSrc) && /findRequester\(db, after, ""\)/.test(hrpSrc));
+  /* الرقمُ يُخزَّن في موضعين حسب الشاشة: «إدارة مستخدمي المشتريات» تُزامن المركزيَّ،
+     ولوحةُ الأدمن داخل المشروع كانت تكتب في مستند المشروع وحده. توجيهُ الشراء يقرأ
+     الاثنين فلا يتأثّر، وحدثُ السداد بلا مشروعٍ فمرجعُه المركزي ⇒ كان مستخدمٌ بعينه
+     تصله رسائلُ الشراء ولا تصله رسائلُ السداد. الحارسان يمنعان عودةَ الفرق. */
+  T("★★ المستلمون: المركزيُّ أوّلاً ثم مستنداتُ المشاريع (لا رقمَ يضيع بحسب شاشة إدخاله)",
+    /findByRoleAnywhere\(db, route\.role\)/.test(hrpSrc) &&
+    /findRequesterAnywhere\(db, after\)/.test(hrpSrc) &&
+    /async function findByRoleAnywhere\(db, role\)/.test(recSrc) &&
+    /async function findRequesterAnywhere\(db, po\)/.test(recSrc));
+  T("★ ولا تُمسح مستنداتُ المشاريع إلا عند خلوّ المركزيّ، وبسقفٍ صريح",
+    /const central = await findByRole\(db, role, ""\);\s*\n\s*if \(central\.length\) return central;/.test(recSrc) &&
+    /const MAX_PROJECT_DOCS = 25;/.test(recSrc) &&
+    (recSrc.match(/projects\.slice\(0, MAX_PROJECT_DOCS\)/g) || []).length === 2);
+  T("★★ ولوحةُ الأدمن داخل المشروع تُزامن الرقمَ مركزياً كشاشة المشتريات",
+    /async function adminSaveUserWa[\s\S]{0,1400}?await _upsertUserCentral\(u\)/.test(HTML) &&
+    /async function puSaveUserWa[\s\S]{0,1400}?await _upsertUserCentral\(u\)/.test(HTML));
   T("★ منعُ التكرار يحمل طابعَ الكتابة (occurrence) — فالرفضُ المتكرّر يصل ثانيةً",
     /const occurrence = String\(after\.updatedAt \|\| after\.createdAt \|\| ""\);/.test(hrpSrc) &&
     (hrpSrc.match(/transition, occurrence \}/g) || []).length === 2);
@@ -5033,6 +5047,36 @@ function hrPaymentNotificationTests(src) {
     T("★★ لا تصل بيانات الموارد البشرية للمستودع ولا للمشتريات",
       !out.some(m => m.to === "0505555555"));
   }));
+
+  /* السيناريو الثاني: **لا مستخدمين في المركزي إطلاقاً** — الأرقام كلُّها أُدخلت من لوحة
+     الأدمن داخل مشروع. هذه هي الحالة التي كانت تُسقط رسائلَ السداد صامتةً. */
+  const out2 = [];
+  const projDb = {
+    doc: p => ({
+      get: async () => {
+        if (p === "meta/projects") return { exists: true, data: () => ({ projects: [{ id: "hail" }, { id: "bathroom001" }] }) };
+        if (p === "meta/bathroom001_users") return { exists: true, data: () => ({ users: _users }) };
+        return { exists: false, data: () => ({}) };   // المركزيُّ غائبٌ تماماً
+      },
+    }),
+    collection: () => ({
+      doc: id => ({
+        create: async d => {
+          if (out2.some(x => x.__id === id)) { const e = new Error("already exists"); e.code = 6; throw e; }
+          out2.push({ __id: id, ...d });
+        },
+      }),
+    }),
+  };
+  _deferred.push((async () => {
+    const d2 = { ...deps, db: projDb };
+    await routeHrPayment(null, at("hrp_pending_finance", "p1"), d2);
+    T("★★ رقمٌ أُدخل من لوحة المشروع (المركزيُّ خالٍ) تصله رسالةُ السداد أيضاً",
+      out2.length === 1 && out2[0].to === "0503333333", out2.map(m => m.to).join(",") || "لا شيء");
+    await routeHrPayment(at("hrp_pending_finance"), at("hrp_finance_returned", "p2"), d2);
+    T("★ وصاحبُ الطلب كذلك يُوجَد في مستند المشروع",
+      out2.length === 2 && out2[1].to === "0504444444", out2.map(m => m.to).join(","));
+  })());
 
   /* ── الرابط العميق: زرّ «فتح الطلب» يوصل لوحدة السداد لا لقائمة المشتريات ── */
   T("★★ معرّف HRP- يوجّه الرابط العميق لوحدة السداد",
