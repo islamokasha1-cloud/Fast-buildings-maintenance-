@@ -5612,6 +5612,120 @@ function contractsPhase1() {
     !dFirm.includes("workPermit") && !dFirm.includes("identity"));
   T("والوثائقُ العامّة تظهر للصفتين", dIndiv.includes("insurance") && dFirm.includes("insurance"));
 
+  /* ════════════════════════════════════════════════════════════
+     المرحلة ٢ — طلبُ التعاقد ودورتُه وأمرُ الدفع
+     ════════════════════════════════════════════════════════════ */
+  T("الصفحتان تُركَّبان ذاتياً (سجل الأطراف + طلبات التعاقد)",
+    /PAGE_REQS\s*=\s*"contract-requests"/.test(src) && /\[PAGE_VENDORS, PAGE_REQS\]\.forEach/.test(src));
+  T("مجموعتها الجانبية تحمل زرّي الصفحتين",
+    /nav-contract-reqs-btn/.test(src) && /nav-vendors-btn/.test(src));
+
+  /* البصمتان: كلُّ معتمِدٍ يوقّع على ما يخصّه وحده */
+  const withKeys = (r) => { const o = { ...r }; o.procApprovedKey = C._crqProcKey(o); o.financeApprovedKey = C._crqFinanceKey(o); return o; };
+  const baseReq = withKeys({ vendorId: "V1", value: 100, vatMode: "incl", engagement: "contract", retention: { pct: 5 }, procApprovedAt: "x", financeApprovedAt: "y" });
+  T("بصمةُ المشتريات لا تتأثّر بترتيب المرشّحين (ترتيبٌ حتميّ)",
+    C._crqProcKey({ vendorId: "V1", candidates: [{ vendorId: "A", amount: 5 }, { vendorId: "B", amount: 9 }] }) ===
+    C._crqProcKey({ vendorId: "V1", candidates: [{ vendorId: "B", amount: 9 }, { vendorId: "A", amount: 5 }] }));
+  T("طلبٌ بلا تعديلٍ يحتفظ باعتماديه",
+    !!C._crqRevalidate(baseReq).procApprovedAt && !!C._crqRevalidate(baseReq).financeApprovedAt);
+  T("★ تغييرُ شرطٍ تجاريٍّ يُسقط اعتماد المالية **وحدَه** ويُعيد الطلب لبوّابتها",
+    (() => { const v = C._crqRevalidate({ ...baseReq, retention: { pct: 10 } }); return !v.financeApprovedAt && !!v.procApprovedAt; })());
+  T("★ تغييرُ الطرف يُسقط اعتماد المشتريات **وحدَه** (هي مَن يفحص التنافس والأهلية)",
+    (() => { const v = C._crqRevalidate({ ...baseReq, vendorId: "V2" }); return !v.procApprovedAt && !!v.financeApprovedAt; })());
+  T("تغييرُ وضع الضريبة يُسقط اعتماد المالية (القيمةُ الفعلية تتغيّر)",
+    !C._crqRevalidate({ ...baseReq, vatMode: "excl" }).financeApprovedAt);
+
+  /* قيمةُ الطلب من بنوده لا من حقلٍ يكتبه المُنشئ */
+  T("★ قيمةُ الطلب تُحسب من البنود بوضعها الضريبيّ لا من حقلٍ حرّ",
+    C._crqValueOf({ value: 999999, vatMode: "excl", lines: [{ qty: 10, unitPrice: 100 }] }) === 1150);
+  T("طلبٌ بلا بنودٍ يرجع لقيمته المخزَّنة (توافقُ الأنماط القديمة)",
+    C._crqValueOf({ value: 500, lines: [] }) === 500);
+
+  /* البوّابات وأصحابُها */
+  T("★ كلُّ بوّابةٍ لدورها وحدَه — ولا يعتمد مسؤولُ المشتريات بوّابةَ المالية",
+    C._crqCanAct("crq_pending_proc", "procurement_officer") === true &&
+    C._crqCanAct("crq_pending_finance", "procurement_officer") === false &&
+    C._crqCanAct("crq_pending_finance", "finance") === true);
+  T("الأدمن يملك كلَّ البوّابات",
+    ["crq_pending_pm", "crq_pending_proc", "crq_pending_finance", "crq_pending_ceo", "crq_pending_pay"]
+      .every(k => C._crqCanAct(k, "admin")));
+  T("★ حالةٌ نهائيةٌ لا بوّابةَ لها (لا إجراء بعد الإغلاق)",
+    !C._crqCanAct("crq_approved", "admin") && !C._crqCanAct("crq_paid", "admin") && !C._crqCanAct("crq_converted", "admin"));
+  T("المشاهدُ بلا دورٍ لا يعتمد شيئاً",
+    !C._crqCanAct("crq_pending_pm", "viewer") && !C._crqCanAct("crq_pending_ceo", "observer"));
+  T("سدادُ أمر الدفع بوّابةُ المالية", (C._crqGateOwner("crq_pending_pay") || {}).lbl === "المالية — السداد");
+  T("الحالاتُ النهائيةُ والمرتدّة مصنَّفةٌ صحيحاً",
+    C._crqIsFinal("crq_paid") && C._crqIsFinal("crq_converted") && C._crqIsFinal("crq_cancelled") &&
+    !C._crqIsFinal("crq_approved") && C._crqIsBounced("crq_finance_returned"));
+
+  /* حرّاسُ الكتابة: معاملاتٌ وإيصالٌ وصلاحيات */
+  T("★ كلُّ إجراءٍ على الطلب معاملةٌ تقرأ الوثيقة الطازجة",
+    /function actOnRequest[\s\S]{0,400}runTransaction/.test(src) && /function payRequest[\s\S]{0,400}runTransaction/.test(src));
+  T("★ الإجراءُ يُرفض إن لم تكن البوّابةُ لدور المستخدم (لا على الزرّ وحده)",
+    /if\(!crqCanAct\(st, role\)\) throw/.test(src));
+  T("★ سببُ الرفض إلزاميٌّ في طبقة البيانات لا في الشاشة فقط",
+    /action === "reject"[\s\S]{0,80}if\(!note\) throw/.test(src));
+  T("★ السدادُ يُرفض بلا إيصال — ولا يُسجَّل سدادٌ بلا إثبات",
+    /!payload\.receiptUrl\) return Promise\.reject/.test(src) &&
+    /if\(!att \|\| !att\.url\) throw new Error/.test(src));
+  T("★ السدادُ للمالية فقط، ومن حالة الانتظار فقط",
+    /r\.status !== "crq_pending_pay"/.test(src) && /\["finance","admin"\]\.indexOf\(role\) === -1/.test(src));
+  T("الحالةُ تُشتقّ من crqNextStage لا تُكتب يدوياً",
+    /doc\.status = crqNextStage\(doc, ceoThreshold\(\)\)/.test(src) && /r\.status = crqNextStage\(r, th\)/.test(src));
+  T("★ الإرسالُ يمنع أمرَ دفعٍ فوق العتبة (حارسٌ في الشاشة فوق حارس الدالّة)",
+    /payOrderAllowed\(total,\s*payOrderThreshold\(\)\)/.test(src));
+  T("★ الطرفُ المحظور يمنع الإرسال، والوثيقةُ المنتهية تحذّر فقط",
+    /if\(elig && elig\.block\)\{ _toast/.test(src));
+
+  /* ════════════════════════════════════════════════════════════
+     الربطُ بالموازنة **اختياريّ** — والمشروعُ قد يكون يدوياً بلا موازنة
+     ════════════════════════════════════════════════════════════ */
+  const PFX = "__MPN__:";
+  T("★ المشروعُ اليدويُّ يُخزَّن بالشكل القياسيّ (__OTHER__ + العلَم + الاسم) لا بمعرّف العرض",
+    (() => { const r = C._normalizeProjectRef("__MPN__:فيلا الأمير", "", PFX);
+      return r.projectId === "__OTHER__" && r.isCustomProject === true && r.projectName === "فيلا الأمير"; })());
+  T("ومشروعٌ يدويٌّ **جديد** يُكتب اسمُه حرّاً ويأخذ الشكل نفسَه",
+    (() => { const r = C._normalizeProjectRef("__NEW_MANUAL__", "استراحة الشمال", PFX);
+      return r.projectId === "__OTHER__" && r.isCustomProject === true && r.projectName === "استراحة الشمال"; })());
+  T("والمشروعُ المسجَّل يبقى بمعرّفه بلا علَمٍ يدويّ",
+    (() => { const r = C._normalizeProjectRef("hail", "", PFX);
+      return r.projectId === "hail" && r.isCustomProject === false; })());
+  T("★ اسمُ المشروع المعروض يتبع اصطلاح النواة (يدوياً من projectName لا من المعرّف)",
+    C._docProjectName({ projectId: "__OTHER__", isCustomProject: true, projectName: "فيلا الأمير" }, []) === "فيلا الأمير" &&
+    C._docProjectName({ projectId: "hail" }, [{ id: "hail", name: "مشروع حائل" }]) === "مشروع حائل");
+  T("★ كلُّ مشروعٍ يدويٍّ مفتاحٌ مستقلٌّ (لا ينطوون في خيارٍ واحد)",
+    C._docProjectKey({ isCustomProject: true, projectName: "أ" }) !== C._docProjectKey({ isCustomProject: true, projectName: "ب" }));
+
+  T("★ مشروعٌ بلا موازنةٍ ⇒ no_budget — لا لومَ ولا تحذير",
+    C._budgetLinkState("", { categories: [] }) === "no_budget" &&
+    C._budgetLinkState("plaster", { categories: [{ key: "plaster", planned: 0 }] }) === "no_budget");
+  T("★ موازنةٌ موجودةٌ وبلا ربطٍ ⇒ unlinked (إشارةٌ محايدة لا خطأ)",
+    C._budgetLinkState("", { categories: [{ key: "plaster", planned: 100 }] }) === "unlinked");
+  T("ومربوطٌ ⇒ linked فتُقارَن القيمةُ بالمخطَّط",
+    C._budgetLinkState("plaster", { categories: [{ key: "plaster", planned: 100 }] }) === "linked");
+  T("موازنةٌ غائبةٌ تماماً (null) لا تُسقط الحساب", C._budgetLinkState("plaster", null) === "no_budget");
+
+  T("★ بندُ الموازنة اختياريٌّ في النموذج (خيارُ «بلا ربط» أوّلُ الخيارات)",
+    /بلا ربطٍ بالموازنة \(اختياريّ\)/.test(src) && /budgetCategoryKey:""/.test(src));
+  T("★ تحذيرُ التجاوز لا يعمل إطلاقاً على مشروعٍ بلا موازنة",
+    /if\(linkState !== "no_budget"\) Object\.keys\(byCat\)/.test(src));
+  T("★ قسمُ المقايسة يختفي لمشروعٍ بلا مقايسة بدل جدولٍ فارغ",
+    /isPay \|\| !items\.length \? '' :/.test(src));
+  T("★ الإرسالُ يُلزم باسم المشروع اليدويّ ولا يقبل فراغاً",
+    /ref\.isCustomProject && !ref\.projectName\) \{? ?_toast/.test(src) || /if\(ref\.isCustomProject && !ref\.projectName\)/.test(src));
+  T("★ معرّفُ العرض الداخليّ لا يُخزَّن على الوثيقة", /delete payload\.projectSel/.test(src));
+  T("قائمةُ المشاريع موحّدةٌ من projectMgmt._allProjects (مسجّلة + يدوية)",
+    /pm\._allProjects/.test(src));
+
+  /* المقايسة والموازنة تُقرآن من إدارة المشاريع لا بمسارٍ منسوخ */
+  T("★ مسارُ المقايسة/الموازنة يُقرأ من projectMgmt ولا يُنسَخ مفتاحُ المشروع",
+    /pm\._loadBoq/.test(src) && /pm\._loadBudget/.test(src) && !/function _safeKey/.test(src));
+  const PMSRC = (() => { const p2 = path.resolve(path.dirname(IDX), "project-management.js"); return fs.existsSync(p2) ? fs.readFileSync(p2, "utf8") : ""; })();
+  T("وإدارةُ المشاريع تعرّض الجسر (_loadBoq/_loadBudget/_safeKey)",
+    /_loadBoq:\s*loadBoq/.test(PMSRC) && /_loadBudget:\s*loadBudget/.test(PMSRC) && /_safeKey:\s*_safeKey/.test(PMSRC));
+  T("وتعرّض قائمةَ المشاريع الموحّدة (_allProjects) فلا تُنسَخ قاعدةُ دمج اليدويّ",
+    /_allProjects:\s*allProjects/.test(PMSRC) && /_MANUAL_PREFIX:\s*MANUAL_PREFIX/.test(PMSRC));
+
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
   const rawHex = (css.match(/#[0-9a-fA-F]{3,8}\b/g) || []);

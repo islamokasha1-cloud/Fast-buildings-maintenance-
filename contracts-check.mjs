@@ -2,7 +2,8 @@
 // (نفسُ مُحاكي browser-scenarios.mjs — لا يلمس الإنتاج إطلاقاً).
 //   node contracts-check.mjs
 //
-// المرحلة ١: سجلُّ الأطراف — منشآتٍ **وأشخاصاً** (التعاقدُ بالهوية لا بالسجل التجاري) — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
+// المرحلة ١: سجلُّ الأطراف — منشآتٍ **وأشخاصاً** (التعاقدُ بالهوية لا بالسجل التجاري)
+// المرحلة ٢: طلبُ التعاقد من المقايسة · دورةُ الاعتماد بأربع بوّابات · أمرُ الدفع دون العتبة — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
 // و**الرقمُ المرسوم = الرقمُ المحسوب** (شريطُ الأرقام مقابل الدوالّ النقية)، والتطبيعُ
 // العربيُّ في البحث، وشرائطُ الحالة من توكنز SLA، والثيمُ الداكن، والجوّالُ بلا قصّ.
 import { chromium } from 'playwright-core';
@@ -226,6 +227,219 @@ await page.waitForTimeout(600);
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 check('★ لا تمرير أفقي على الجوال', overflow <= 1, 'زيادة ' + overflow + 'px');
 await page.screenshot({ path: `${SHOTS}/06-vendors-mobile.png`, fullPage: true });
+
+
+/* ═════════ المرحلة ٢: طلبُ التعاقد ودورتُه ═════════ */
+console.log('\n=== المرحلة ٢: طلبُ التعاقد ودورةُ الاعتماد ===');
+await page.setViewportSize({ width: 1440, height: 980 });
+
+// مقايسةٌ وموازنةٌ للمشروع المزروع
+await page.evaluate(() => {
+  window.__store['meta/hail_boq'] = { items: [
+    { id: 'b1', desc: 'محارة داخلية', categoryKey: 'plaster',       unit: 'م٢', qty: 1200, unitPrice: 28 },
+    { id: 'b2', desc: 'دهانات',       categoryKey: 'finishes',      unit: 'م٢', qty: 1200, unitPrice: 19 },
+    { id: 'b3', desc: 'سيراميك',      categoryKey: 'finishes',      unit: 'م٢', qty: 400,  unitPrice: 95 }
+  ]};
+  window.__store['meta/hail_budget'] = { categories: [
+    { key: 'plaster',  name: 'محارة/بياض', planned: 18000 },
+    { key: 'finishes', name: 'تشطيبات',    planned: 90000 }
+  ]};
+});
+
+await page.click('#nav-contract-reqs-btn');
+await page.waitForTimeout(1500);
+check('صفحة طلبات التعاقد صارت النشطة', await page.evaluate(() => {
+  const p = document.getElementById('page-contract-requests'); return !!p && p.classList.contains('active');
+}));
+check('الشاشةُ الفارغةُ تدعو للإنشاء', ((await page.textContent('#page-contract-requests')) || '').includes('لا طلبات تعاقد بعد'));
+
+await page.click('button:has-text("طلب تعاقد جديد")');
+await page.waitForTimeout(1500);
+check('نموذجُ الطلب فُتح ببنود المقايسة',
+  ((await page.textContent('#page-contract-requests')) || '').includes('محارة داخلية'));
+
+// اختيارُ بندٍ من المقايسة ⇒ يرث كميتَه وسعرَه
+await page.evaluate(() => { window.contracts.toggleBoqLine(0); });
+await page.waitForTimeout(700);
+const inherited = await page.evaluate(() => {
+  const d = window.contracts._draft(); return d ? { n: d.lines.length, qty: d.lines[0].qty, up: d.lines[0].unitPrice, cat: d.lines[0].budgetCategoryKey } : null;
+});
+check('★ البندُ المختار ورث الكميةَ وسعرَ الوحدة وبندَ الموازنة',
+  inherited && inherited.n === 1 && inherited.qty === 1200 && inherited.up === 28 && inherited.cat === 'plaster',
+  JSON.stringify(inherited));
+
+// الطرفُ شخصٌ ⇒ الضريبةُ تُقترَح none تلقائياً
+await page.evaluate(() => { window.contracts.setReqVendor('VND-0005'); });
+await page.waitForTimeout(700);
+check('★ اختيارُ شخصٍ يضبط وضعَ الضريبة على «بلا ضريبة» تلقائياً',
+  await page.evaluate(() => window.contracts._draft().vatMode === 'none'));
+
+// الإجمالي المرسوم = المحسوب
+const totals = await page.evaluate(() => {
+  const d = window.contracts._draft();
+  const calc = window.contracts._linesTotal(d.lines, d.vatMode);
+  const drawn = Array.from(document.querySelectorAll('#ct-r-total .ct-tl .v')).map(e => e.textContent.trim());
+  return { calc, drawn };
+});
+check('★ الإجمالي المرسوم = المحسوب (بلا ضريبة ⇒ الأساس = الإجمالي)',
+  totals.calc.total === 33600 && totals.calc.vat === 0 && totals.drawn[2].replace(/,/g, '') === '33600.00',
+  JSON.stringify(totals.drawn));
+
+// تحذيرُ تجاوز الموازنة (18,000 مخطّطة مقابل 33,600)
+check('★ تجاوزُ بند الموازنة يُحذَّر منه ولا يمنع',
+  ((await page.textContent('#page-contract-requests')) || '').includes('تجاوزٌ يُسجَّل ولا يمنع'));
+
+// أمرُ الدفع مقفلٌ فوق العتبة
+check('★ أمرُ الدفع مقفلٌ فوق ٣٠٠٠ بنصٍّ يشرح السبب',
+  await page.evaluate(() => {
+    const off = document.querySelector('#page-contract-requests .ct-pick.off');
+    return !!off && off.textContent.includes('لا يجوز فوق');
+  }));
+
+// إشعارُ بوّابة التنفيذي
+check('القيمةُ فوق سقف التنفيذي تُعلَن مسبقاً',
+  ((await page.textContent('#page-contract-requests')) || '').includes('سيمرّ الطلب عليه'));
+
+await page.fill('#ct-r-title', 'محارة وبياض الدور الأول');
+// الصفحةُ تُمرَّر داخل `.main-area` لا في نافذة المتصفّح، فـfullPage لا يلتقط ما تحتها.
+const secs = await page.evaluate(() => Array.from(document.querySelectorAll('#page-contract-requests .ct-sec-h')).map(e => e.textContent.trim().split(' ')[0]));
+check('★ أقسامُ النموذج الخمسة مرسومة (الشروطُ التجارية والمرشّحون تحت الطيّة)',
+  secs.length === 5 && secs.includes('الشروط') && secs.includes('المرشّحون'), secs.join(' · '));
+await page.screenshot({ path: `${SHOTS}/09-request-form-top.png` });
+await page.evaluate(() => { const a = document.querySelector('.main-area'); if (a) a.scrollTop = a.scrollHeight; });
+await page.waitForTimeout(500);
+await page.screenshot({ path: `${SHOTS}/09b-request-form-bottom.png` });
+await page.evaluate(() => { const a = document.querySelector('.main-area'); if (a) a.scrollTop = 0; });
+
+await page.evaluate(() => window.contracts.submitRequest());
+await page.waitForTimeout(2000);
+const reqId = await page.evaluate(() => (window.contracts.requests()[0] || {}).id || '');
+check('★ أُنشئ الطلب وبدأ عند مدير المشاريع',
+  await page.evaluate(() => (window.contracts.requests()[0] || {}).status === 'crq_pending_pm'), reqId);
+check('السجلُّ الزمنيُّ سجّل الإنشاء',
+  await page.evaluate(() => ((window.contracts.requests()[0] || {}).timeline || []).length === 1));
+await page.screenshot({ path: `${SHOTS}/10-request-card.png`, fullPage: true });
+
+// دورةُ الاعتماد الكاملة — أربعُ بوّابات (المستخدمُ أدمن فيملكها كلَّها)
+const stages = [];
+for (let i = 0; i < 4; i++) {
+  const st = await page.evaluate(async (id) => {
+    await window.contracts._act(id, 'approve', 'موافق');
+    return (window.contracts.requestById(id) || {}).status;
+  }, reqId);
+  stages.push(st);
+}
+check('★ الطلبُ عبَر البوّابات الأربع بالترتيب ⇐ معتمَد',
+  stages.join(' → ') === 'crq_pending_proc → crq_pending_finance → crq_pending_ceo → crq_approved',
+  stages.join(' → '));
+await page.waitForTimeout(800);
+await page.evaluate(() => window.contracts.openReq(window.contracts.requests()[0].id));
+await page.waitForTimeout(800);
+check('بطاقةُ الطلب تعرض «جاهزٌ لإنشاء العقد»',
+  ((await page.textContent('#page-contract-requests')) || '').includes('جاهزٌ لإنشاء العقد'));
+await page.screenshot({ path: `${SHOTS}/11-request-approved.png`, fullPage: true });
+
+// أمرُ دفعٍ صغير: يتخطّى المشتريات والمالية ⇒ سدادٌ مباشرةً بعد مدير المشاريع
+const payStages = await page.evaluate(async () => {
+  const d = {
+    engagement: 'pay_order', projectId: 'hail', title: 'ترميم بابٍ واحد', vendorId: 'VND-0006',
+    vendorName: 'راجو كومار', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'x', desc: 'ترميم باب', unit: 'عدد', qty: 1, unitPrice: 1500 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  };
+  const id = await window.contracts._create(d);
+  const out = [window.contracts.requestById(id).status];
+  await window.contracts._act(id, 'approve', '');
+  out.push(window.contracts.requestById(id).status);
+  return { id, out };
+});
+check('★ أمرُ دفعٍ بـ١٥٠٠: مدير المشاريع ⇐ سدادُ المالية مباشرةً (بلا مشتريات ولا اعتمادِ مالية)',
+  payStages.out.join(' → ') === 'crq_pending_pm → crq_pending_pay', payStages.out.join(' → '));
+
+// السدادُ يُرفض بلا إيصال
+const noReceipt = await page.evaluate(async (id) => {
+  try { await window.contracts._pay(id, { amount: 1500 }); return 'مرّ بلا إيصال'; }
+  catch (e) { return e.message; }
+}, payStages.id);
+check('★ السدادُ يُرفض بلا إيصال', /إيصال/.test(noReceipt), noReceipt);
+
+// وبوّابةٌ ليست لدورك تُرفض في طبقة البيانات لا على الزرّ
+const wrongGate = await page.evaluate(async (id) => {
+  const real = currentUser.role;
+  currentUser.role = 'warehouse_manager';
+  let msg;
+  try { await window.contracts._act(id, 'approve', ''); msg = 'مرّ بدورٍ لا يملكها'; }
+  catch (e) { msg = e.message; }
+  currentUser.role = real;
+  return msg;
+}, payStages.id);
+check('★ دورٌ لا يملك البوّابة يُرفض في طبقة البيانات', /ليست لدورك/.test(wrongGate), wrongGate);
+
+/* ── مشروعٌ يدويٌّ بلا موازنة: الربطُ اختياريٌّ فعلاً ── */
+await page.evaluate(() => window.contracts.newRequest());
+await page.waitForTimeout(1200);
+await page.evaluate(() => window.contracts.setReqProject('__NEW_MANUAL__'));
+await page.waitForTimeout(1200);
+const manualForm = await page.evaluate(() => ({
+  nameField: !!document.getElementById('ct-r-mproj'),
+  catField: !!document.getElementById('ct-r-cat'),
+  txt: (document.getElementById('page-contract-requests') || {}).textContent || ''
+}));
+check('★ «مشروع يدويّ جديد» يكشف حقلَ الاسم الحرّ', manualForm.nameField);
+check('★ مشروعٌ بلا موازنة: تُعلَن اختياريةُ الربط ولا يُعرَض منتقي بند الموازنة',
+  /الربطُ بالموازنة اختياريّ/.test(manualForm.txt) && manualForm.catField === false);
+check('★ ولا يُعرَض جدولُ مقايسةٍ فارغ', !/بنود المقايسة/.test(manualForm.txt));
+await page.screenshot({ path: `${SHOTS}/15-manual-project.png` });
+
+// إرسالُ عقدٍ لمشروعٍ يدويٍّ بلا أيّ ربطٍ بالموازنة — **بالنموذج نفسِه** لا بحقنِ حالة
+await page.fill('#ct-r-mproj', 'استراحة الشمال');
+await page.fill('#ct-r-title', 'سور الاستراحة');
+await page.evaluate(() => window.contracts.setReqVendor('VND-0005'));
+await page.waitForTimeout(700);
+await page.evaluate(() => window.contracts.addFreeLine());
+await page.waitForTimeout(700);
+await page.fill('#ct-r-lines [data-lf="desc"]', 'بناء سور');
+await page.fill('#ct-r-lines [data-lf="unit"]', 'م.ط');
+await page.fill('#ct-r-lines [data-lf="qty"]', '60');
+await page.fill('#ct-r-lines [data-lf="unitPrice"]', '180');
+await page.waitForTimeout(500);
+await page.evaluate(() => window.contracts.submitRequest());
+await page.waitForTimeout(2000);
+const manualId = await page.evaluate(() => (window.contracts.requests()[0] || {}).id);
+const manualDoc = await page.evaluate((id) => {
+  const r = window.contracts.requestById(id) || {};
+  return { pid: r.projectId, flag: r.isCustomProject, pname: r.projectName,
+           cat: r.budgetCategoryKey, val: r.value, sel: r.projectSel === undefined };
+}, manualId);
+check('★ العقدُ اليدويُّ خُزِّن بالشكل القياسيّ (__OTHER__ + العلَم + الاسم)',
+  manualDoc.pid === '__OTHER__' && manualDoc.flag === true && manualDoc.pname === 'استراحة الشمال',
+  JSON.stringify(manualDoc));
+check('★ ومرّ بلا بندِ موازنةٍ إطلاقاً — الربطُ اختياريّ حقاً',
+  manualDoc.cat === '' && manualDoc.val === 10800);
+check('ومعرّفُ العرض الداخليّ لم يُخزَّن على الوثيقة', manualDoc.sel === true);
+
+await page.evaluate(() => window.contracts.openReq(window.contracts.requests()[0].id));
+await page.waitForTimeout(900);
+check('بطاقةُ الطلب توسم المشروعَ «يدويّ»',
+  /يدويّ/.test((await page.textContent('#page-contract-requests')) || ''));
+await page.screenshot({ path: `${SHOTS}/16-manual-request-card.png` });
+
+await page.evaluate(() => window.contracts.backToReqs());
+await page.waitForTimeout(900);
+check('القائمةُ تعرض الطلبات وشريطَ «بانتظار دورك»',
+  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 3);
+await page.screenshot({ path: `${SHOTS}/12-requests-list.png`, fullPage: true });
+
+await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
+await page.waitForTimeout(600);
+await page.screenshot({ path: `${SHOTS}/13-requests-dark.png`, fullPage: true });
+await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'light'); });
+
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(600);
+const ov2 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+check('★ صفحةُ الطلبات بلا تمريرٍ أفقيٍّ على الجوال', ov2 <= 1, 'زيادة ' + ov2 + 'px');
+await page.screenshot({ path: `${SHOTS}/14-requests-mobile.png`, fullPage: true });
 
 check('لا أخطاء جافاسكربت طوال الرحلة', errors.length === 0, errors.slice(0, 2).join(' | '));
 
