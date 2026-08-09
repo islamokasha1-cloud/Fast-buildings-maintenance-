@@ -6606,6 +6606,13 @@ function contractsPhase1() {
     T("★ وفحصُ القواعد على محاكٍ حقيقيٍّ مربوطٌ بـCI",
       /rules-check\.mjs/.test(wfR) && /setup-java/.test(wfR) &&
       /firestore\.rules/.test(wfR) && fs.existsSync(path.resolve(path.dirname(IDX), "rules-check.mjs")));
+    /* firebase-tools يرفض Java دون 21 صراحةً، وسقط الفحصُ في CI على 17 —
+       فالرقمُ ليس تفصيلاً تنسيقياً بل شرطُ تشغيل. */
+    {
+      const jv = (wfR.match(/java-version:\s*'(\d+)'/) || [])[1];
+      T("★ ونسخةُ Java في CI ≥ 21 (firebase-tools يرفض ما دونها)",
+        Number(jv) >= 21, "java-version " + jv);
+    }
   }
 
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */

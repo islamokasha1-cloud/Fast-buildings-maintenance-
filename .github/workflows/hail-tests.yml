@@ -61,11 +61,13 @@ jobs:
         with:
           node-version: '20'
 
-      # محاكي Firestore يعمل على الـJVM — بلا Java لا فحصَ للقواعد أصلاً
+      # محاكي Firestore يعمل على الـJVM — بلا Java لا فحصَ للقواعد أصلاً.
+      # و**21 حدٌّ أدنى لا اختيار**: firebase-tools يرفض ما دونها صراحةً
+      # («no longer supports Java version before 21»).
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Install emulator and test SDK
         run: npm install firebase-tools @firebase/rules-unit-testing firebase --silent --no-save
