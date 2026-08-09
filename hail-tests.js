@@ -928,6 +928,120 @@ function vendorSummary() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   14ج) توحيد أسماء المورّدين (v18.9.2514) — المورّد الواحد يُكتَب بصيغٍ متعدّدة
+        («عالم الرتاج» · «شركة عالم الرتاج» · «شركة عالم الرتاج للتجارة») فينقسم
+        إنفاقُه صفوفاً في المؤشّرات والتقارير. الحارسُ يُثبت أمرين متلازمين:
+        (١) المرادفُ المعتمد **يدمج** الصيغ فعلاً في صفٍّ واحدٍ بمجموعٍ صحيح،
+        (٢) وبلا اعتمادٍ **لا يُدمَج شيء** — فلا كيانان مختلفان يُخلطان آلياً.
+   ════════════════════════════════════════════════════════════════════ */
+function vendorNameUnify() {
+  H("14ج) توحيد أسماء المورّدين (جدول مرادفات صريح)");
+  const a = HTML.indexOf("function VENDOR_ALIASES_DOC(){");
+  const b = HTML.indexOf("async function loadVendorAliases(");
+  if (a < 0 || b <= a) { T("كتلةُ توحيد أسماء المورّدين موجودة في index.html", false, "لم تُعثر"); return; }
+  const src = HTML.slice(a, b);
+  let V;
+  try {
+    V = new Function("IS_DEV", src +
+      "\nreturn { vendorMatchKey, vendorFuzzyKey, vendorCanonical, vendorCanonParts, _poVendorFilterName," +
+      "\n         setAliases:m=>{ _vendorAliases=m; }, getAliases:()=>_vendorAliases };")(false);
+  } catch (e) { T("تُبنى دوالّ التوحيد وتُنفَّذ", false, String(e.message).slice(0, 140)); return; }
+  T("تُبنى دوالّ التوحيد وتُنفَّذ", typeof V.vendorCanonical === "function");
+  if (typeof V.vendorCanonical !== "function") return;
+
+  const V1 = "عالم الرتاج", V2 = "شركة عالم الرتاج", V3 = "شركة عالم الرتاج للتجارة";
+
+  // ── (١) مفتاحُ المطابقة: تطبيعٌ حرفيٌّ محافظ لا يحذف كلمة ──
+  T("مفتاحُ المطابقة يوحّد الهمزة والتاء المربوطة والياء والمسافات",
+    V.vendorMatchKey("مؤسّسة   الرِتاجِ") === V.vendorMatchKey("موسسه الرتاج"));
+  T("★ ولا يحذف كلمةً: صيغتان تختلفان بكلمةٍ تبقيان مفتاحَين مختلفَين",
+    V.vendorMatchKey(V2) !== V.vendorMatchKey(V3));
+
+  // ── (٢) بلا اعتمادٍ لا دمج — الحارسُ الأهمّ (كيانان قد يتشابه اسماهما) ──
+  V.setAliases({});
+  T("★ بلا جدول مرادفات: كلُّ صيغةٍ تبقى باسمها (لا دمجَ آليّ)",
+    V.vendorCanonical(V1) === V1 && V.vendorCanonical(V2) === V2 && V.vendorCanonical(V3) === V3);
+  const split = V.vendorCanonParts([{ vendor: V1, cost: 3486 }, { vendor: V2, cost: 5605 }, { vendor: V3, cost: 3674 }]);
+  T("★ وثلاثُ صيغٍ تبقى ثلاثةَ صفوفٍ منفصلة", split.length === 3);
+
+  // ── (٣) بالاعتماد: الصيغ تُدمَج في صفٍّ واحدٍ بمجموعٍ صحيح ──
+  const AL = {}; AL[V.vendorMatchKey(V1)] = V2; AL[V.vendorMatchKey(V3)] = V2;
+  V.setAliases(AL);
+  T("الاسمُ المعتمد يُرجَع لكل صيغةٍ مدموجة",
+    V.vendorCanonical(V1) === V2 && V.vendorCanonical(V3) === V2 && V.vendorCanonical(V2) === V2);
+  const merged = V.vendorCanonParts([{ vendor: V1, cost: 3486 }, { vendor: V2, cost: 5605 }, { vendor: V3, cost: 3674 }]);
+  T("★ الصيغُ الثلاث تُدمَج في صفٍّ واحد",
+    merged.length === 1 && merged[0].vendor === V2);
+  T("★ ومجموعُ الإنفاق محفوظٌ بلا ضياع (3486+5605+3674)",
+    merged.length === 1 && merged[0].cost === 12765);
+  T("فلترُ التقارير يقرأ الاسم المعتمد في الطرفين",
+    V._poVendorFilterName(V1) === V2 && V._poVendorFilterName(V3) === V2);
+  T("الاسمُ الخالي يبقى خالياً (لا «غير محدد» ملفَّقة في الفلتر)",
+    V._poVendorFilterName("") === "" && V.vendorCanonical(null) === "");
+  T("مورّدٌ خارج الجدول لا يتأثّر", V.vendorCanonical("مؤسسة غشمة السبيعي") === "مؤسسة غشمة السبيعي");
+
+  // ── (٤) مفتاحُ الترشيح: يقارب الصيغَ لاقتراحها وحده ──
+  V.setAliases({});
+  T("مفتاحُ الترشيح يُسقط الصيغَ القانونية فتتقارب الصيغ الثلاث",
+    V.vendorFuzzyKey(V1) === V.vendorFuzzyKey(V2) && V.vendorFuzzyKey(V2) === V.vendorFuzzyKey(V3));
+  T("★ لكنّه لا يُقارب مورّدَين مختلفَين",
+    V.vendorFuzzyKey("شركة جونسون كونترولز العربية المحدودة") !== V.vendorFuzzyKey(V2));
+
+  // ── (٥) العناقيدُ المقترَحة تُبنى من الأسماء الواردة فعلاً ──
+  const ca = HTML.indexOf("function _vmClusters(names){");
+  if (ca > 0) {
+    const cend = HTML.indexOf("\nfunction _vmActiveGroups(", ca);
+    let clusters = null;
+    try {
+      clusters = new Function("vendorFuzzyKey", HTML.slice(ca, cend) + "\nreturn _vmClusters;")(V.vendorFuzzyKey);
+    } catch (e) { T("تُبنى _vmClusters وتُنفَّذ", false, String(e.message).slice(0, 140)); }
+    if (clusters) {
+      T("تُبنى _vmClusters وتُنفَّذ", typeof clusters === "function");
+      const OTHER = "مؤسسة غشمة ناصر فايز السبيعي لاجهزة السلامة";
+      const names = {};
+      names[V1] = { name: V1, count: 2, spend: 3486 };
+      names[V2] = { name: V2, count: 3, spend: 5605 };
+      names[V3] = { name: V3, count: 2, spend: 3674 };
+      names[OTHER] = { name: OTHER, count: 4, spend: 7475 };
+      const out = clusters(names);
+      const big = out.find(c => c.names.some(e => e.name === V2));
+      T("★ الصيغُ الثلاث تُرشَّح عنقوداً واحداً", !!big && big.names.length === 3);
+      T("★ وترشيحُها «تطابقٌ قويّ» (نفس مفتاح الترشيح)", !!big && big.strong === true);
+      T("★ ومورّدٌ لا صلةَ له لا يدخل أيَّ عنقود",
+        !out.some(c => c.names.some(e => e.name.indexOf("غشمة") !== -1)));
+      const solo = clusters({ [V2]: { name: V2, count: 1, spend: 10 } });
+      T("اسمٌ واحدٌ لا يُنتج عنقوداً", solo.length === 0);
+    }
+  } else T("_vmClusters موجودة في index.html", false, "لم تُعثر");
+
+  // ── (٦) حرّاسُ الوصل: كلُّ موضع تجميعٍ يمرّ بالاسم المعتمد ──
+  T("★ poVendorBreakdown تمرّر كلَّ مخرجاتها بجدول المرادفات",
+    /const _canon = arr =>/.test(HTML) &&
+    HTML.includes("if(anyi) return _canon(") &&
+    HTML.includes("return _canon(Object.keys(m).map(") &&
+    HTML.includes("return _canon([{ vendor:v, cost: closed ? poActualCost(p) : 0 }]);"));
+  T("★ مؤشّراتُ الأداء تقرأ الاسم المعتمد (_kpiVendorOf)",
+    /_kpiVendorOf\(p\)\{[\s\S]{0,1200}?typeof vendorCanonical==="function"\) v = vendorCanonical\(v\)/.test(HTML));
+  T("★ فلترُ التقارير يقارن بالاسم المعتمد في الطرفين (شاشة وPDF)",
+    (HTML.match(/if\(rVendor&&_poVendorFilterName\(p\.vendor\)!==rVendor\) return false;/g) || []).length === 2 &&
+    !HTML.includes('if(rVendor&&(p.vendor||"")!==rVendor) return false;'));
+  T("قائمةُ فلتر الموردين تُبنى بالاسم المعتمد فلا تتكرّر الصيغ",
+    HTML.includes("purchases.map(p=>_poVendorFilterName(p.vendor))"));
+  T("الجدولُ يُحمَّل عند الإقلاع في المسارين (النظام والمشتريات المركزية)",
+    (HTML.match(/loadVendorAliases\(\)\.catch\(e=>/g) || []).length === 2);
+  T("الجدولُ في مستندٍ مستقلٍّ بنسخة تطوير", /global_vendor_aliases_dev/.test(HTML));
+  T("★ الدمجُ لا يمسّ الطلبات (لا كتابةَ دفعةٍ في أداة التوحيد)",
+    !/async function doMergeVendors\([\s\S]{0,3000}?db\.batch\(\)/.test(HTML));
+  T("★ والتراجعُ متاحٌ ويُعيد الصيغَ لأسمائها", /async function undoMergeVendors\(canon\)\{/.test(HTML));
+  T("والقرارُ يُسجَّل في سجل التدقيق (اعتماداً وتراجعاً)",
+    /logAudit\("توحيد أسماء مورّد"/.test(HTML) && /logAudit\("تراجع عن توحيد أسماء مورّد"/.test(HTML));
+  T("★ ولا سلاسلَ مرادفات: تبعيّاتُ الصيغة المدموجة تُحوَّل للاسم النهائي",
+    /Object\.keys\(next\)\.forEach\(k=>\{ if\(others\.indexOf\(next\[k\]\)!==-1\) next\[k\]=canon; \}\);/.test(HTML));
+  T("الأداةُ للمسؤول وحدَه (فتحاً وتنفيذاً وتراجعاً)",
+    (HTML.match(/currentUser\.role!=="admin"\)\{ toast\("⚠ صلاحية المسؤول فقط","warn"\); return; \}/g) || []).length >= 3);
+}
+
+/* ════════════════════════════════════════════════════════════════════
    14ب) التكلفة الفعلية والكمية المستلمة = حالة البنود النهائية لا جمع السندات
         (v18.9tk) — الطلب العالق على بند ناقص يُعاد تدقيقه مراراً، فجمع
         grnDocs[].invoicedTotal/totalRcv يتضخّم؛ المصدر الصحيح: البنود النهائية.
@@ -6076,6 +6190,7 @@ function contractsPhase1() {
   writeRaceRoot();
   stocktakeTests();
   vendorSummary();
+  vendorNameUnify();
   actualCostFromItems();
   financialInvariants();
   manualProjectCosts();
