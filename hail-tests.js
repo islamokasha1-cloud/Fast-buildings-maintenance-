@@ -5983,6 +5983,73 @@ function contractsPhase1() {
     C._DEFAULT_CLAUSES.some(x => /نظامي/.test(x.body)) &&
     C._DEFAULT_CLAUSES.some(x => /نزاع/.test(x.body)));
 
+  /* ════════════════════════════════════════════════════════════
+     المرحلة ٥ — الربطُ بالموازنة ومنعُ الازدواج المحاسبي
+     ════════════════════════════════════════════════════════════ */
+  const RQ5 = [
+    { id: "R1", projectId: "hail", budgetCategoryKey: "plaster", status: "crq_pending_finance", value: 20000 },
+    { id: "R2", projectId: "hail", budgetCategoryKey: "plaster", status: "crq_converted", value: 33600 },
+    { id: "R3", projectId: "hail", budgetCategoryKey: "labor", status: "crq_paid", value: 1500, payment: { amount: 1500 } },
+    { id: "R4", projectId: "hail", budgetCategoryKey: "plaster", status: "crq_pm_rejected", value: 9999 },
+    { id: "R5", projectId: "__OTHER__", isCustomProject: true, projectName: "استراحة", budgetCategoryKey: "", status: "crq_pending_pm", value: 5000 }
+  ];
+  const CS5 = [{ id: "C1", projectId: "hail", budgetCategoryKey: "plaster", status: "ctr_active", value: 33600 }];
+  const EX5 = [{ id: "E1", contractId: "C1", status: "ext_paid", payment: { amount: 10600 } }];
+  const R5 = C._contractRollup("hail", RQ5, CS5, EX5);
+
+  T("★ «قيدَ الاعتماد» من الطلبات غير المنتهية وحدَها", R5.byCat.plaster.pending === 20000);
+  T("★ ولا يدخله المحوَّلُ ولا المرتدُّ ولا المسدَّد",
+    !C._reqIsPending({ status: "crq_converted" }) && !C._reqIsPending({ status: "crq_pm_rejected" }) &&
+    !C._reqIsPending({ status: "crq_paid" }) && !C._reqIsPending({ status: "crq_draft" }));
+  T("★ «متعاقَدٌ عليه» = قيمةُ العقد − المستخلَصُ منه (33,600 − 10,600)",
+    R5.byCat.plaster.contracted === 23000, String(R5.byCat.plaster.contracted));
+  T("★ والمصروفُ التعاقديُّ من المسدَّد فقط: مستخلصٌ 10,600 + أمرُ دفعٍ 1,500",
+    R5.byCat.plaster.spent === 10600 && R5.byCat.labor.spent === 1500 && R5.total.spent === 12100);
+  T("★ ولا يُحسب المبلغُ مرّتين — الإجماليُّ متعاقَدٌ 23,000 لا 33,600",
+    R5.total.contracted === 23000 && R5.total.pending === 20000);
+  T("عقدٌ مقفلٌ أو مفسوخٌ ليس التزاماً قائماً",
+    !C._ctrIsCommitted({ status: "ctr_closed" }) && !C._ctrIsCommitted({ status: "ctr_terminated" }));
+  /* ★ ارتدادٌ حقيقيّ رُصد في فحص المتصفّح: كان `spent` داخلَ حارس `ctrIsCommitted`،
+     فما إن يُقفَل العقدُ حتى تختفي مستخلصاتُه المسدَّدة من المصروف — والمالُ خرج فعلاً. */
+  {
+    const CLOSED5 = [{ id: "C1", projectId: "hail", budgetCategoryKey: "plaster", status: "ctr_closed", value: 33600 }];
+    const RC = C._contractRollup("hail", RQ5, CLOSED5, EX5);
+    T("★ والمالُ المدفوعُ يبقى مصروفاً بعد إقفال العقد (لا يتبخّر من الموازنة)",
+      RC.byCat.plaster.spent === 10600, String(RC.byCat.plaster.spent));
+    T("★ لكنَّ التزامَه المتبقّي يسقط — لا يُحجز مالٌ لعقدٍ انتهى",
+      RC.byCat.plaster.contracted === 0 && RC.total.contracted === 0);
+  }
+  T("★ و«بانتظار التوقيع» التزامٌ قائم (الطلبُ اعتُمد والمالُ التزم)",
+    C._ctrIsCommitted({ status: "ctr_pending_signature" }));
+  T("★ والمشروعُ اليدويُّ يُجمَّع بمفتاحه المستقلّ لا ينطوي في غيره",
+    C._contractRollup("__CUSTOM__:استراحة", RQ5, CS5, EX5).total.pending === 5000 &&
+    C._contractRollup("hail", RQ5, CS5, EX5).total.pending === 20000);
+  T("وطلبٌ بلا بندِ موازنةٍ يقع تحت «غير مصنّف» (الربطُ اختياريّ)",
+    (C._contractRollup("__CUSTOM__:استراحة", RQ5, CS5, EX5).byCat.uncategorized || {}).pending === 5000);
+  T("★ مفتاحُ مشروع إدارة المشاريع يُحوَّل لاصطلاح النواة",
+    C._projectKeyOfPm("hail", "__MPN__:") === "hail" &&
+    C._projectKeyOfPm("__MPN__:استراحة", "__MPN__:") === "__CUSTOM__:استراحة");
+
+  /* ★ حارسُ منع الازدواج المحاسبي */
+  T("★ طلبُ شراءٍ يحمل contractId يُعدُّ جزءاً من عقده",
+    C.poIsUnderContract({ contractId: "C1" }) === true && C.poIsUnderContract({}) === false);
+  {
+    const PMSRC5 = (() => { const p3 = path.resolve(path.dirname(IDX), "project-management.js"); return fs.existsSync(p3) ? fs.readFileSync(p3, "utf8") : ""; })();
+    T("★ وإدارةُ المشاريع **تستبعده** من مصروف الشراء (وإلا رقمان لعملٍ واحد)",
+      /poForProject\(projId\)\.filter\(p=>!_poUnderContract\(p\)\)/.test(PMSRC5));
+    T("★ والقاعدةُ تُقرأ من وحدة التعاقدات ولا تُنسَخ",
+      /window\.contracts\.poIsUnderContract/.test(PMSRC5));
+    T("★ وجدولُ الموازنة صار سبعةَ أعمدة بخانتَي التعاقد",
+      /<th>قيدَ الاعتماد<\/th><th>متعاقَدٌ عليه<\/th>/.test(PMSRC5));
+    T("★ والمتبقّي يخصم الأربعة (مصروف + مرتبط + متعاقَد + قيدَ اعتماد)",
+      /const totRemain\s*=\s*totPlanned - totActual - totCommit - totCtr - totPend/.test(PMSRC5) &&
+      /planned - spent - committed - cc\.contracted - cc\.pending/.test(PMSRC5));
+    T("والمصروفُ يجمع الشراءَ المغلقَ والمسدَّدَ تعاقدياً",
+      /const spent = cr\.actual \+ cc\.spent/.test(PMSRC5));
+    T("★ وصفُّ «غير مصنّف» يظهر لتعاقدٍ بلا بندٍ أيضاً (لا يختفي المال)",
+      /uncC\.pending\|\|uncC\.contracted\|\|uncC\.spent/.test(PMSRC5));
+  }
+
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
   const rawHex = (css.match(/#[0-9a-fA-F]{3,8}\b/g) || []);
