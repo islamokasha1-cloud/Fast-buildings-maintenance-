@@ -73,6 +73,7 @@ function VENDORS_COL(){   return _dev() ? "global_vendors_dev"            : "glo
 function REQUESTS_COL(){  return _dev() ? "global_contract_requests_dev"  : "global_contract_requests"; }
 function CONTRACTS_COL(){ return _dev() ? "global_contracts_dev"          : "global_contracts"; }
 function EXTRACTS_COL(){  return _dev() ? "global_contract_extracts_dev"  : "global_contract_extracts"; }
+function CHANGES_COL(){   return _dev() ? "global_contract_changes_dev"   : "global_contract_changes"; }
 function VENDOR_META(){   return _dev() ? "meta/global_vendors_counter_dev" : "meta/global_vendors_counter"; }
 
 /* ── الضريبة ──
@@ -579,6 +580,153 @@ function contractLineQty(contract, lineId){
   return r2(q);
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   ٤-ج) أوامرُ التغيير  [المرحلة ٧]
+
+   العقدُ وُقّع على مبلغ. ثمّ زاد العملُ أو نقص. وأمامنا ثلاثةُ طرق، اثنتان منها
+   تُفسدان السجلّ:
+     • تعديلُ رقم العقد الأصليّ ⇒ تضيع الحقيقة: لا أحدَ يعرف بعد شهرٍ أنّ العقد
+       بدأ بـ١٠٠ وصار ١١٥ ولا لماذا. (وقواعدُ الخادم تمنعه أصلاً.)
+     • عقدٌ ثانٍ لعملٍ هو امتدادُ الأوّل ⇒ رقمان لالتزامٍ واحد.
+     • **أمرُ تغييرٍ**: مستندٌ مستقلٌّ يمرّ بدورة اعتماد، وحين يُعتمَد **يُضاف إلى
+       العقد ولا يستبدله**. `value` يبقى الأصليَّ أبداً، و`contractValue` تجمعه مع
+       أوامر التغيير المعتمدة. فالتاريخُ محفوظٌ والرقمُ الحاليُّ صحيح.
+
+   وهذا ما كانت المنظومةُ تنتظره: `contractValue` و`contractLineQty` تجمعان أوامرَ
+   التغيير منذ المرحلة ١، ورسالةُ حارس المستخلص تقول «يلزم أمرُ تغييرٍ معتمَد» —
+   وكان البابُ الذي تشير إليه غيرَ مبنيّ. هذه المرحلةُ تبنيه.
+   ════════════════════════════════════════════════════════════════════ */
+
+var CHG_STATUS = {
+  chg_pending_pm:      "بانتظار اعتماد مدير المشاريع",
+  chg_pending_proc:    "بانتظار اعتماد المشتريات",
+  chg_pending_finance: "بانتظار اعتماد المالية",
+  chg_pending_ceo:     "بانتظار اعتماد المدير التنفيذي",
+  chg_approved:        "معتمد — جاهزٌ للتطبيق على العقد",
+  chg_applied:         "مطبَّق على العقد",
+  chg_rejected:        "مرفوض",
+  chg_cancelled:       "ملغى"
+};
+var CHG_FINAL = ["chg_applied","chg_rejected","chg_cancelled"];
+var CHG_GATES = {
+  chg_pending_pm:      { roles:["project_manager","admin"],     lbl:"مدير المشاريع" },
+  chg_pending_proc:    { roles:["procurement_officer","admin"], lbl:"المشتريات" },
+  chg_pending_finance: { roles:["finance","admin"],             lbl:"المالية" },
+  chg_pending_ceo:     { roles:["ceo","admin"],                 lbl:"المدير التنفيذي" }
+};
+function chgGateOwner(status){ return CHG_GATES[status] || null; }
+function chgCanAct(status, role){
+  var g = CHG_GATES[status];
+  return !!g && g.roles.indexOf(role) !== -1;
+}
+function chgIsFinal(s){ return CHG_FINAL.indexOf(s) !== -1; }
+
+/* قيمةُ أمر التغيير = مجموعُ بنوده بوضع ضريبةِ **العقد** نفسِه — لا وضعٍ خاصٍّ به.
+   عقدٌ بلا ضريبةٍ لا يصير بعضُه خاضعاً لها بأمرِ تغيير. والكميةُ السالبةُ خفضٌ:
+   الرقمُ يخرج سالباً فيطرح من قيمة العقد بلا فرعٍ ثانٍ في الحساب. */
+function chgAmountOf(chg, vatMode){
+  return linesTotal((chg||{}).lines, vatMode).total;
+}
+
+/* البوّابةُ التالية — أربعُ بوّاباتٍ كطلب التعاقد، والعتبةُ تُقاس بـ**القيمة
+   المطلقة**: خفضُ العقد ٥٠ ألفاً قرارٌ بثقل رفعِه ٥٠ ألفاً، ولا يجوز أن يمرّ
+   خفضٌ كبيرٌ من تحت العتبة لأن إشارتَه سالبة. */
+function chgNextStage(chg, ceoThreshold){
+  var g = chg || {};
+  if(!g.pmApprovedAt)      return "chg_pending_pm";
+  if(!g.procApprovedAt)    return "chg_pending_proc";
+  if(!g.financeApprovedAt) return "chg_pending_finance";
+  var amt = Math.abs(Number(g.amount)); if(!isFinite(amt)) amt = 0;
+  var th  = Number(ceoThreshold); if(!isFinite(th)) th = 0;
+  var ceoOk = !!g.ceoApprovedAt && amt <= (Number(g.ceoApprovedAmount)||0) + 0.01;
+  if(th > 0 && amt >= th && !ceoOk) return "chg_pending_ceo";
+  return "chg_approved";
+}
+
+/* أثرُ الأمر على العقد — يُعرَض قبل الاعتماد فيرى المعتمِدُ ما سيوقّع عليه:
+   القيمةُ قبل/بعد، والمدةُ قبل/بعد. رقمٌ محسوبٌ لا مخزَّن. */
+function chgEffect(contract, chg){
+  var c = contract || {}, g = chg || {};
+  var baseValue = contractValue(c);
+  var delta = r2(Number(g.amount)||0);
+  var baseDays = Number(c.durationDays)||0;
+  var addDays  = Number(g.durationDaysDelta)||0;
+  return {
+    baseValue: baseValue, delta: delta, newValue: r2(baseValue + delta),
+    baseDays: baseDays, addDays: addDays, newDays: baseDays + addDays,
+    pct: baseValue > 0 ? r2(delta / baseValue * 100) : 0
+  };
+}
+
+/* خلاصةُ أوامر التغيير المطبَّقة على عقد — للعرض والطباعة:
+   «الأصليّ ١٠٠,٠٠٠ + تغييرات ١٥,٠٠٠ = الحاليّ ١١٥,٠٠٠» */
+function contractChangeTotals(contract){
+  var c = contract || {};
+  var base = Number(c.value); if(!isFinite(base)) base = 0;
+  var added = 0, deducted = 0, count = 0, days = 0;
+  (Array.isArray(c.changeOrders)?c.changeOrders:[]).forEach(function(co){
+    if(!co || co.status !== "approved") return;
+    var a = Number(co.amount); if(!isFinite(a)) a = 0;
+    if(a >= 0) added += a; else deducted += a;
+    days += Number(co.durationDaysDelta)||0;
+    count++;
+  });
+  return { base:r2(base), added:r2(added), deducted:r2(deducted),
+           net:r2(added+deducted), effective:r2(base+added+deducted),
+           count:count, daysAdded:days };
+}
+
+/* حارسُ أمر التغيير — ثلاثةُ منوعٍ لا واحد:
+   (١) بلا أثرٍ لا معنى له: لا مالَ ولا مدّة.
+   (٢) **الخفضُ لا ينزل تحت المنفَّذ**: بندٌ اعتُمد منه ٤٠ وحدةً لا تُخفَّض كميتُه
+       إلى ٣٠ — العملُ نُفِّذ وشُهد به، وخفضُه يجعل المستخلصَ التالي مستحيلاً وما
+       سبق باطلاً بأثرٍ رجعيّ.
+   (٣) **ولا تنزل قيمةُ العقد تحت ما سُدِّد فعلاً** — مالٌ خرج لا يُلغى بمستند. */
+function chgGuard(chg, contract, extracts){
+  var g = chg || {}, c = contract || {};
+  var lines = Array.isArray(g.lines) ? g.lines : [];
+  var out = { ok:true, empty:false, under:[], belowPaid:null };
+  var delta = r2(Number(g.amount)||0), days = Number(g.durationDaysDelta)||0;
+  if(!lines.length || (delta === 0 && days === 0)){ out.empty = true; out.ok = false; return out; }
+
+  var done = prevCumByLine(extracts, c, null);
+  lines.forEach(function(ln){
+    var q = Number(ln && ln.qty); if(!isFinite(q) || q >= 0) return;   // الزيادةُ لا تُحرَس
+    var id = ln.id;
+    var after = r2(contractLineQty(c, id) + q);
+    var executed = Number(done[id])||0;
+    if(after < executed - 1e-9) out.under.push({ lineId:id, desc:ln.desc||"", after:after, executed:executed });
+  });
+
+  var paid = 0;
+  (Array.isArray(extracts)?extracts:[]).forEach(function(e){
+    if(e && e.contractId===c.id && e.status==="ext_paid") paid += r2((e.payment||{}).amount);
+  });
+  var newValue = r2(contractValue(c) + delta);
+  if(newValue < r2(paid) - 1e-9) out.belowPaid = { newValue:newValue, paid:r2(paid) };
+
+  out.ok = !out.under.length && !out.belowPaid;
+  return out;
+}
+
+/* أمرُ تغييرٍ واحدٌ مفتوحٌ في المرة لكلّ عقد — كحارس «مستخلصٌ مفتوحٌ واحد».
+   أمران معلّقان يعتمدهما اثنان في اللحظة نفسِها فيطبَّقان على قيمتين مختلفتين. */
+var CHG_OPEN = ["chg_pending_pm","chg_pending_proc","chg_pending_finance","chg_pending_ceo","chg_approved"];
+function openChangeOf(changes, contractId){
+  var list = Array.isArray(changes) ? changes : [];
+  for(var i=0;i<list.length;i++){
+    var g=list[i];
+    if(g && g.contractId===contractId && CHG_OPEN.indexOf(g.status)!==-1) return g;
+  }
+  return null;
+}
+
+/* أمرُ التغيير لا يُنشأ إلا على عقدٍ حيٍّ — لا على مقفلٍ ولا مفسوخٍ ولا بلا توقيع. */
+var CHG_CONTRACT_OK = ["ctr_active","ctr_suspended"];
+function chgContractEligible(contract){
+  return CHG_CONTRACT_OK.indexOf((contract||{}).status) !== -1;
+}
+
 /* سُلَّمُ حساب المستخلص — ثماني خطواتٍ بترتيبٍ محسوم، تُرجَع **مفصَّلةً** لا
    صافياً وحده، فتعرضها الشاشةُ والتقريرُ والـPDF من مصدرٍ واحد.
 
@@ -795,7 +943,7 @@ function ctrIsCommitted(c){
 
 /* تجميعُ التعاقدات لمشروعٍ واحد — بندَ موازنةٍ بندَ موازنة، وإجمالياً.
    دالةٌ نقيةٌ تأخذ القوائمَ فتُختبَر بلا Firestore. */
-function contractRollup(projectKey, requests, contracts, extracts){
+function contractRollup(projectKey, requests, contracts, extracts, changes){
   var out = { byCat:{}, total:{ pending:0, contracted:0, spent:0 } };
   function bucket(k){
     var key = k || "uncategorized";
@@ -831,6 +979,17 @@ function contractRollup(projectKey, requests, contracts, extracts){
     b.contracted += remaining; out.total.contracted += remaining;
   });
 
+  // (٣-ب) أوامرُ التغيير المعلّقة — التزامٌ **قيدَ الاعتماد** لا متعاقَدٌ عليه بعد.
+  // المطبَّقُ منها داخلٌ أصلاً في `contractValue` أعلاه، فعدُّه هنا يُكرّره.
+  // والخفضُ المعلّق يدخل بإشارته السالبة: فينقص المتوقَّعُ لا يزيد.
+  (Array.isArray(changes)?changes:[]).forEach(function(g){
+    if(docProjectKey(g) !== projectKey) return;
+    if(CHG_OPEN.indexOf((g||{}).status) === -1) return;
+    var v = r2(g.amount);
+    bucket(g.budgetCategoryKey).pending += v;
+    out.total.pending += v;
+  });
+
   // (٤) أوامرُ الدفع المسدَّدة — مصروفٌ تعاقديٌّ لا عقدَ له
   (Array.isArray(requests)?requests:[]).forEach(function(r){
     if(docProjectKey(r) !== projectKey) return;
@@ -853,10 +1012,10 @@ function poIsUnderContract(p){ return !!(p && p.contractId); }
 
 /* الغلافُ الذي تستدعيه `project-management`: يضمن تشغيلَ المستمعين ثم يجمّع. */
 function rollupForProject(pmProjectId){
-  startReqSync(); startCtrSync(); startExtSync();
-  return contractRollup(projectKeyOfPm(pmProjectId, pmManualPrefix()), _reqs, _ctrs, _exts);
+  startReqSync(); startCtrSync(); startExtSync(); startChgSync();
+  return contractRollup(projectKeyOfPm(pmProjectId, pmManualPrefix()), _reqs, _ctrs, _exts, _chgs);
 }
-function contractsLoaded(){ return _rLoaded && _cLoaded && _eLoaded; }
+function contractsLoaded(){ return _rLoaded && _cLoaded && _eLoaded && _gLoaded; }
 
 /* حالةُ وثيقةِ طرفٍ من تاريخ انتهائها: `none` بلا تاريخ · `ok` · `soon` · `expired`.
    `today` مُمرَّرٌ لا مقروءٌ من الساعة — فالدالةُ نقيةٌ وقابلةٌ للفحص. */
@@ -1669,6 +1828,202 @@ function payExtract(id, payload){
     _audit("سداد مستخلص", id+" — "+money(res.ext.payment.amount)+" ر.س");
     return res.ext;
   });
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   ٥-هـ) أوامرُ التغيير — طبقةُ البيانات  [المرحلة ٧]
+   ════════════════════════════════════════════════════════════════════ */
+var _chgs = [];
+var _gUnsub = null, _gLoaded = false;
+
+function changesList(){ return _chgs.slice(); }
+function changeById(id){ for(var i=0;i<_chgs.length;i++){ if(_chgs[i].id===id) return _chgs[i]; } return null; }
+function changesFor(cid){ return _chgs.filter(function(g){ return g.contractId===cid; }); }
+
+function startChgSync(){
+  if(_gUnsub) return;
+  var database=_db(); if(!database) return;
+  try{
+    _gUnsub = database.collection(CHANGES_COL()).onSnapshot(function(snap){
+      var out=[]; snap.forEach(function(d){ var o=d.data()||{}; o.id=d.id; out.push(o); });
+      out.sort(function(a,b){ return String(a.createdAt||"").localeCompare(String(b.createdAt||"")); });
+      _chgs=out; _gLoaded=true;
+      if(_page===PAGE_CTRS) paintCtrs();
+    }, function(err){ console.warn("contracts/changes sync", err); _gLoaded=true; });
+  }catch(e){ console.warn("contracts/startChgSync", e); }
+}
+function stopChgSync(){ if(_gUnsub){ try{ _gUnsub(); }catch(e){} _gUnsub=null; } _chgs=[]; _gLoaded=false; }
+
+function genChgId(){
+  var now=new Date();
+  var yr=String(now.getFullYear()).slice(-2), mon=String(now.getMonth()+1).padStart(2,"0");
+  var fallback="CHG-"+yr+mon+"-"+Date.now().toString(36).slice(-5).toUpperCase();
+  var database=_db(); if(!database) return Promise.resolve(fallback);
+  var ref=database.doc(_dev()?"meta/global_contract_changes_counter_dev":"meta/global_contract_changes_counter");
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      var c=(s.exists && Number((s.data()||{}).counter))||0; c++;
+      t.set(ref,{counter:c,updatedAt:_now()},{merge:true}); return c;
+    });
+  }).then(function(c){ return "CHG-"+yr+mon+"-"+String(c).padStart(4,"0"); })
+    .catch(function(e){ console.warn("contracts/genChgId",e); return fallback; });
+}
+
+/* الإنشاء — لمدير المشروع أو الأدمن، وعلى عقدٍ حيٍّ وحدَه، وبأمرٍ مفتوحٍ واحد. */
+function createChange(contract, draft){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال بقاعدة البيانات"));
+  if(["project_manager","admin"].indexOf(_role()) === -1) return Promise.reject(new Error("أمرُ التغيير لمدير المشروع أو الأدمن"));
+  if(!chgContractEligible(contract)) return Promise.reject(new Error("أمرُ التغيير لا يُنشأ إلا على عقدٍ ساري أو موقوف"));
+  var open = openChangeOf(_chgs, contract.id);
+  if(open) return Promise.reject(new Error("يوجد أمرُ تغييرٍ مفتوحٌ ("+open.id+") — أنهِه أولاً"));
+  var doc = Object.assign({}, draft);
+  doc.contractId = contract.id;
+  doc.amount = chgAmountOf(doc, contract.vatMode);
+  var g = chgGuard(doc, contract, _exts);
+  if(!g.ok) return Promise.reject(new Error(_chgGuardMsg(g)));
+  if(!doc.reason) return Promise.reject(new Error("سببُ التغيير إلزاميّ — أمرٌ بلا سببٍ لا يُعتمَد"));
+
+  return genChgId().then(function(id){
+    // شكلُ المشروع وبندُ الموازنة يُورَثان من العقد — فيدخل الأمرُ تجميعَ الموازنة
+    // بالمفتاح نفسِه ولا يقع في «غير مصنّف» بلا سبب
+    doc.projectId = contract.projectId || "";
+    doc.isCustomProject = contract.isCustomProject === true;
+    doc.projectName = contract.projectName || "";
+    doc.budgetCategoryKey = contract.budgetCategoryKey || "";
+    doc.vendorId = contract.vendorId || ""; doc.vendorName = contract.vendorName || "";
+    doc.createdAt=_now(); doc.createdBy=_me(); doc.createdByUser=_meUser();
+    doc.status = chgNextStage(doc, ceoThreshold());
+    _pushTimeline(doc, "إنشاء أمر التغيير", "created",
+      (doc.amount>=0?"زيادة ":"خفض ")+money(Math.abs(doc.amount))+" ر.س");
+    return database.collection(CHANGES_COL()).doc(id).set(doc).then(function(){
+      doc.id=id; _chgs.push(doc);
+      _audit("إنشاء أمر تغيير", id+" — "+contract.id+" — "+money(doc.amount)+" ر.س");
+      _notify("أمرُ تغييرٍ جديد "+id, (contract.vendorName||"")+" — "+money(doc.amount)+" ر.س", id);
+      return id;
+    });
+  });
+}
+
+/* اعتمادٌ أو رفضٌ — معاملةٌ تقرأ الوثيقةَ الطازجة كبقية البوّابات. */
+function actOnChange(id, action, note){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  var ref=database.collection(CHANGES_COL()).doc(id), role=_role(), th=ceoThreshold();
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("أمر التغيير غير موجود");
+      var g=s.data()||{}; g.id=id;
+      if(chgIsFinal(g.status)) throw new Error("أمر التغيير في حالةٍ نهائية");
+      if(!chgCanAct(g.status, role)) throw new Error("هذه البوّابة ليست لدورك");
+      if(action==="approve"){
+        if(g.status==="chg_pending_pm"){ g.pmApprovedAt=_now(); g.pmApprovedBy=_me(); }
+        else if(g.status==="chg_pending_proc"){ g.procApprovedAt=_now(); g.procApprovedBy=_me(); }
+        else if(g.status==="chg_pending_finance"){ g.financeApprovedAt=_now(); g.financeApprovedBy=_me(); }
+        else if(g.status==="chg_pending_ceo"){ g.ceoApprovedAt=_now(); g.ceoApprovedBy=_me(); g.ceoApprovedAmount=r2(Math.abs(Number(g.amount)||0)); }
+        _pushTimeline(g, "اعتماد — "+(chgGateOwner(g.status)||{}).lbl, "approved", note);
+        g.status = chgNextStage(g, th);
+      } else if(action==="reject"){
+        if(!note) throw new Error("سبب الرفض إلزامي");
+        g.status="chg_rejected";
+        _pushTimeline(g, "رفض أمر التغيير", "rejected", note);
+      } else throw new Error("إجراء غير معروف");
+      g.updatedAt=_now(); g.updatedBy=_me();
+      var out=Object.assign({},g); delete out.id;
+      t.set(ref, out, { merge:true });
+      return g;
+    });
+  }).then(function(g){
+    var i=_chgs.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _chgs[i]=g;
+    _audit("إجراء على أمر تغيير", id+" ⇐ "+(CHG_STATUS[g.status]||g.status));
+    return g;
+  });
+}
+
+/* **التطبيقُ على العقد** — الخطوةُ التي تجعل الأمرَ واقعاً، وهي للمشتريات كإنشاء
+   العقد نفسِه. تكتب في معاملةٍ واحدة: بندٌ جديدٌ في `contract.changeOrders` وختمُ
+   الأمرِ «مطبَّقاً». و`value` **لا يُمَسّ** — التاريخُ يبقى: الأصليُّ + التغييرات.
+   والنقرةُ المكرّرةُ لا تُطبّقه مرّتين: وجودُ معرّفه في المصفوفة يُنهي العملية. */
+function applyChange(id){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  if(["procurement_officer","admin"].indexOf(_role()) === -1) return Promise.reject(new Error("تطبيقُ أمر التغيير للمشتريات أو الأدمن"));
+  var gRef=database.collection(CHANGES_COL()).doc(id);
+  return database.runTransaction(function(t){
+    return t.get(gRef).then(function(s){
+      if(!s.exists) throw new Error("أمر التغيير غير موجود");
+      var g=s.data()||{}; g.id=id;
+      if(g.status==="chg_applied") return { already:true };
+      if(g.status!=="chg_approved") throw new Error("أمر التغيير ليس معتمَداً — لا يُطبَّق");
+      var cRef=database.collection(CONTRACTS_COL()).doc(g.contractId);
+      return t.get(cRef).then(function(cs){
+        if(!cs.exists) throw new Error("العقد غير موجود");
+        var c=cs.data()||{}; c.id=g.contractId;
+        if(!chgContractEligible(c)) throw new Error("العقدُ لم يعد ساريّاً — لا يُطبَّق عليه تغيير");
+        var arr = Array.isArray(c.changeOrders) ? c.changeOrders.slice() : [];
+        if(arr.some(function(co){ return co && co.id===id; })) return { already:true };
+        // حارسُ الخفض يُعاد على الوثيقة الطازجة — بين الاعتماد والتطبيق قد يكون
+        // مستخلصٌ اعتُمد فصار الخفضُ ينزل تحت المنفَّذ
+        var fresh = chgGuard(g, c, _exts);
+        if(!fresh.ok) throw new Error(_chgGuardMsg(fresh));
+        arr.push({ id:id, amount:r2(Number(g.amount)||0), lines:(Array.isArray(g.lines)?g.lines:[]),
+                   durationDaysDelta:Number(g.durationDaysDelta)||0, reason:g.reason||"",
+                   status:"approved", at:_now(), by:_me() });
+        var newDays = (Number(c.durationDays)||0) + (Number(g.durationDaysDelta)||0);
+        var cPatch = { changeOrders:arr, durationDays:newDays, updatedAt:_now(), updatedBy:_me() };
+        c.changeOrders = arr; c.durationDays = newDays;
+        _pushTimeline(c, "تطبيق أمر التغيير "+id, "change", (g.amount>=0?"+":"")+money(g.amount)+" ر.س");
+        cPatch.timeline = c.timeline;
+        g.status="chg_applied"; g.appliedAt=_now(); g.appliedBy=_me();
+        _pushTimeline(g, "التطبيق على العقد", "applied", "قيمةُ العقد صارت "+money(contractValue(c))+" ر.س");
+        g.updatedAt=_now(); g.updatedBy=_me();
+        var gOut=Object.assign({},g); delete gOut.id;
+        t.set(gRef, gOut, { merge:true });
+        t.set(cRef, cPatch, { merge:true });
+        return { already:false, chg:g, contract:c };
+      });
+    });
+  }).then(function(res){
+    if(res.already) return id;
+    var gi=_chgs.findIndex(function(x){ return x.id===id; });
+    if(gi>=0) _chgs[gi]=res.chg;
+    var c=contractById(res.contract.id);
+    if(c){ c.changeOrders=res.contract.changeOrders; c.durationDays=res.contract.durationDays; c.timeline=res.contract.timeline; }
+    _audit("تطبيق أمر تغيير", id+" — قيمةُ العقد "+money(contractValue(res.contract))+" ر.س");
+    return id;
+  });
+}
+
+function cancelChange(id, reason){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  var ref=database.collection(CHANGES_COL()).doc(id), me=_meUser(), role=_role();
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("أمر التغيير غير موجود");
+      var g=s.data()||{}; g.id=id;
+      if(chgIsFinal(g.status)) throw new Error("أمر التغيير في حالةٍ نهائية");
+      if(role!=="admin" && g.createdByUser!==me) throw new Error("الإلغاء لمُنشئ الأمر أو الأدمن");
+      g.status="chg_cancelled";
+      _pushTimeline(g, "إلغاء أمر التغيير", "cancelled", reason||"");
+      g.updatedAt=_now(); g.updatedBy=_me();
+      var out=Object.assign({},g); delete out.id;
+      t.set(ref,out,{merge:true});
+      return g;
+    });
+  }).then(function(g){
+    var i=_chgs.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _chgs[i]=g;
+    _audit("إلغاء أمر تغيير", id+(reason?(" — "+reason):""));
+    return g;
+  });
+}
+
+function _chgGuardMsg(g){
+  if(g.empty) return "أمرُ التغيير بلا أثر — أضِف بنداً بقيمةٍ أو مدّةً";
+  if(g.under && g.under.length){
+    var u=g.under[0];
+    return "الخفضُ ينزل بـ«"+(u.desc||u.lineId)+"» إلى "+money0(u.after)+" وقد نُفِّذ منه "+money0(u.executed)+" — لا يُخفَّض تحت المنفَّذ";
+  }
+  if(g.belowPaid) return "القيمةُ بعد التغيير ("+money0(g.belowPaid.newValue)+") أقلُّ ممّا سُدِّد فعلاً ("+money0(g.belowPaid.paid)+")";
+  return "أمرُ التغيير غير صالح";
 }
 
 function _guardMsg(g){
@@ -2936,7 +3291,7 @@ function renderCtrs(){
   ensurePages();
   var el=document.getElementById("page-"+PAGE_CTRS); if(!el) return;
   if(!canView()){ el.innerHTML='<div class="card" style="text-align:center;padding:34px 18px"><div style="color:var(--muted);font-size:13px">'+_icn("lock")+' هذا القسم غير متاح لدورك.</div></div>'; return; }
-  startSync(); startReqSync(); startCtrSync(); startExtSync();
+  startSync(); startReqSync(); startCtrSync(); startExtSync(); startChgSync();
   paintCtrs();
 }
 function paintCtrs(){
@@ -3028,7 +3383,8 @@ function ctrCardHTML(id){
 
   var tabs='<div class="ct-tabs">'+
     [["overview","نظرة عامة","clipboardList"],["lines","بنود الأعمال","layers"],
-     ["clauses","شروط العقد","fileText"],["extracts","المستخلصات","banknote"],["log","السجل","scrollText"]]
+     ["clauses","شروط العقد","fileText"],["changes","أوامر التغيير","repeat"],
+     ["extracts","المستخلصات","banknote"],["log","السجل","scrollText"]]
     .map(function(t){
       return '<button class="ct-tab'+(_cTab===t[0]?" on":"")+'" onclick="contracts.ctrTab(\''+t[0]+'\')">'+_icn(t[2],"ic-sm")+' '+t[1]+'</button>';
     }).join("")+'</div>';
@@ -3049,6 +3405,7 @@ function ctrCardHTML(id){
 function ctrTabBody(c){
   if(_cTab==="lines")    return ctrLinesHTML(c);
   if(_cTab==="clauses")  return ctrClausesHTML(c);
+  if(_cTab==="changes")  return ctrChangesHTML(c);
   if(_cTab==="extracts") return ctrExtractsHTML(c);
   if(_cTab==="log")      return ctrLogHTML(c);
   return ctrOverviewHTML(c);
@@ -3067,7 +3424,17 @@ function ctrOverviewHTML(c){
     ? _esc(catName(c.budgetCategoryKey))
     : '<span style="color:var(--muted)">بلا ربط — اختياريّ</span>';
 
-  return '<div class="card ct-sec">'+
+  /* عقدٌ عليه أوامرُ تغييرٍ مطبَّقةٌ يعرض **المعادلة** لا الرقمَ الحاليَّ وحدَه:
+     مَن يقرأ «١١٥,٠٠٠» بلا تفسيرٍ يظنّه رقمَ التوقيع، وهو ليس كذلك. */
+  var ch = contractChangeTotals(c);
+  var chNote = ch.count
+    ? '<div class="ct-note">'+_icn("repeat","ic-sm")+' القيمةُ الحالية = الأصليّ '+money(ch.base)+
+      (ch.added?' + زيادات '+money(ch.added):'')+(ch.deducted?' − خفوضات '+money(Math.abs(ch.deducted)):'')+
+      ' = <b>'+money(ch.effective)+'</b> ر.س — بـ'+money0(ch.count)+' أمرِ تغييرٍ معتمَد'+
+      (ch.daysAdded?' وتمديدٍ '+money0(ch.daysAdded)+' يوماً':'')+'</div>'
+    : "";
+
+  return chNote+'<div class="card ct-sec">'+
     '<div class="ct-money-row">'+
       '<div class="ct-tl big"><span class="l">قيمة العقد النافذة</span><span class="v num">'+money(v)+'</span></div>'+
       '<div class="ct-tl"><span class="l">الأساس</span><span class="v num">'+money(t.base)+'</span></div>'+
@@ -3313,13 +3680,309 @@ function ctrLogHTML(c){
     '<div class="ct-timeline">'+tl+'</div></div>';
 }
 
+/* ════════════ تبويبُ أوامر التغيير  [المرحلة ٧] ════════════ */
+var _chgDraft = null;   // مسوّدةُ أمر التغيير الجاري إعدادُه
+var _chgOpen  = null;   // أمرُ التغيير المفتوح (null = القائمة)
+
+function ctrChangesHTML(c){
+  if(_chgDraft) return chgFormHTML(c);
+  if(_chgOpen)  return chgCardHTML(c, _chgOpen);
+
+  var list = changesFor(c.id);
+  var open = openChangeOf(_chgs, c.id);
+  var canMake = ["project_manager","admin"].indexOf(_role())!==-1 && chgContractEligible(c) && !open;
+  var t = contractChangeTotals(c);
+
+  var head='<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("repeat","ic-sm")+' أوامر التغيير'+
+      (canMake?'<button class="btn btn-primary btn-sm" style="margin-inline-start:auto" onclick="contracts.newChange()">'+_icn("plus","ic-sm")+' أمر تغيير جديد</button>':'')+
+    '</div>'+
+    // **المعادلةُ ظاهرةٌ لا مخفيّة**: القارئُ يرى من أين جاء الرقمُ الحاليّ
+    '<div class="ct-money-row">'+
+      '<div class="ct-tl"><span class="l">قيمة العقد الأصلية</span><span class="v num">'+money(t.base)+'</span></div>'+
+      '<div class="ct-tl"><span class="l">زيادات معتمَدة</span><span class="v num">'+(t.added?"+"+money(t.added):"—")+'</span></div>'+
+      '<div class="ct-tl"><span class="l">خفوضات معتمَدة</span><span class="v num">'+(t.deducted?money(t.deducted):"—")+'</span></div>'+
+      '<div class="ct-tl big"><span class="l">القيمة الحالية</span><span class="v num">'+money(t.effective)+'</span></div>'+
+    '</div>'+
+    (t.daysAdded?'<div class="ct-note" style="margin-top:12px">'+_icn("timer","ic-sm")+' مدةُ العقد مُدَّت '+money0(t.daysAdded)+' يوماً بأوامر التغيير — وغرامةُ التأخير تُحتسب على المدة بعد التمديد.</div>':'')+
+    (open?'<div class="ct-note warn" style="margin-top:12px">'+_icn("alertCircle","ic-sm")+' أمرُ تغييرٍ مفتوحٌ ('+_esc(open.id)+') — لا يُنشأ ثانٍ قبل إنهائه، وإلّا اعتُمد أمران على قيمتين مختلفتين.</div>':'')+
+    (!chgContractEligible(c)?'<div class="ct-note" style="margin-top:12px">'+_icn("lock","ic-sm")+' أمرُ التغيير لا يُنشأ إلا على عقدٍ ساري أو موقوف.</div>':'')+
+  '</div>';
+
+  var rows = list.length ? list.map(function(g){
+    var owner=chgGateOwner(g.status);
+    var amt=Number(g.amount)||0;
+    return '<tr class="fa-click" style="cursor:pointer" onclick="contracts.openChg(\''+_jq(g.id)+'\')">'+
+      '<td><span class="num">'+_esc(g.id)+'</span></td>'+
+      '<td>'+_esc(g.reason||"—")+'</td>'+
+      '<td class="num">'+(amt>=0?"+":"")+money(amt)+'</td>'+
+      '<td class="num">'+(g.durationDaysDelta?money0(g.durationDaysDelta)+" يوماً":"—")+'</td>'+
+      '<td>'+chgBadge(g.status)+(owner&&!chgIsFinal(g.status)?' <span style="font-size:10px;color:var(--muted)">عند '+_esc(owner.lbl)+'</span>':'')+'</td>'+
+    '</tr>';
+  }).join("") : '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:18px">لا أوامر تغيير.</td></tr>';
+
+  return head+'<div class="card ct-sec">'+
+    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+
+      '<th>الرقم</th><th>السبب</th><th>أثر القيمة</th><th>تمديد المدة</th><th>الحالة</th>'+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+
+function chgBadge(st){
+  var cls = st==="chg_applied" ? "s-ok" : (st==="chg_rejected"||st==="chg_cancelled" ? "s-none" : (st==="chg_approved" ? "s-ok" : "s-warn"));
+  return '<span class="ct-doc '+cls+'">'+_esc(CHG_STATUS[st]||st)+'</span>';
+}
+
+/* نموذجُ أمر التغيير — صفٌّ لكلّ بندٍ قائمٍ يُدخَل فيه **فارقُ الكمية** (± )، وبنودٌ
+   جديدةٌ تُضاف تحت. والأثرُ يُحسب لحظةَ الكتابة فيرى المُنشئُ ما سيوقّع عليه غيرُه. */
+function chgFormHTML(c){
+  var d=_chgDraft;
+  var done=prevCumByLine(_exts, c, null);
+  d.amount = chgAmountOf(d, c.vatMode);
+  var eff=chgEffect(c, d), g=chgGuard(d, c, _exts);
+
+  var exist=(c.lines||[]).map(function(ln,i){
+    var cur=contractLineQty(c, ln.id);
+    var delta=_chgDeltaOf(d, ln.id);
+    var executed=Number(done[ln.id])||0;
+    var after=r2(cur+delta);
+    var bad=delta<0 && after<executed-1e-9;
+    return '<tr'+(bad?' class="ct-bad"':'')+'>'+
+      '<td>'+_esc(ln.desc||"—")+'</td>'+
+      '<td class="num">'+money0(cur)+' '+_esc(ln.unit||"")+'</td>'+
+      '<td class="num">'+money0(executed)+'</td>'+
+      '<td><input class="form-input num" data-cf="qty" data-line="'+_esc(ln.id)+'" data-price="'+_esc(ln.unitPrice)+'" data-desc="'+_esc(ln.desc||"")+'" data-unit="'+_esc(ln.unit||"")+'" type="number" step="any" value="'+_esc(delta||"")+'" placeholder="0" style="min-width:90px" oninput="contracts.chgRecalc()"></td>'+
+      '<td class="num">'+money0(after)+'</td>'+
+      '<td class="num">'+money(lineTotal(delta, ln.unitPrice, c.vatMode).total)+'</td>'+
+    '</tr>';
+  }).join("") || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:14px">لا بنودَ في العقد.</td></tr>';
+
+  var news=(d.newLines||[]).map(function(l,i){
+    return '<tr>'+
+      '<td><input class="form-input" data-nf="desc" data-i="'+i+'" value="'+_esc(l.desc||"")+'" oninput="contracts.chgRecalc()" placeholder="وصف العمل"></td>'+
+      '<td><input class="form-input" data-nf="unit" data-i="'+i+'" value="'+_esc(l.unit||"")+'" oninput="contracts.chgRecalc()" placeholder="م٢"></td>'+
+      '<td><input class="form-input num" data-nf="qty" data-i="'+i+'" type="number" step="any" value="'+_esc(l.qty||"")+'" oninput="contracts.chgRecalc()"></td>'+
+      '<td><input class="form-input num" data-nf="unitPrice" data-i="'+i+'" type="number" step="any" value="'+_esc(l.unitPrice||"")+'" oninput="contracts.chgRecalc()"></td>'+
+      '<td class="num">'+money(lineTotal(l.qty,l.unitPrice,c.vatMode).total)+'</td>'+
+      '<td><button class="btn btn-ghost btn-sm" onclick="contracts.chgDelNew('+i+')">'+_icn("trash","ic-sm")+'</button></td>'+
+    '</tr>';
+  }).join("") || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:14px">لا بنودَ جديدة.</td></tr>';
+
+  var warn='<div id="ct-g-warn">'+(g.ok||g.empty ? "" : '<div class="ct-note crit">'+_icn("alertTriangle","ic-sm")+' '+_esc(_chgGuardMsg(g))+'</div>')+'</div>';
+
+  return '<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.cancelChgDraft()">'+_icn("rotateCcw")+' إلغاء</button>'+
+  '<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("repeat","ic-sm")+' أمرُ تغييرٍ على '+_esc(c.id)+
+      '<span class="ct-sec-lock">أدخِل <b>فارقَ</b> الكمية لا الكميةَ الجديدة — بالسالب للخفض</span></div>'+
+    '<div class="ct-table-wrap"><table class="ct-table" id="ct-g-lines"><thead><tr>'+
+      '<th>البند</th><th>كمية العقد</th><th>المنفَّذ</th><th>فارق الكمية (±)</th><th>الكمية بعد</th><th>أثر القيمة</th>'+
+    '</tr></thead><tbody>'+exist+'</tbody></table></div>'+
+  '</div>'+
+  '<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("plus","ic-sm")+' بنودٌ جديدة'+
+      '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.chgAddNew()">'+_icn("plus","ic-sm")+' إضافة بند</button></div>'+
+    '<div class="ct-table-wrap"><table class="ct-table" id="ct-g-new"><thead><tr>'+
+      '<th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th><th></th>'+
+    '</tr></thead><tbody>'+news+'</tbody></table></div>'+
+    '<div class="ct-note">'+_icn("alertCircle","ic-sm")+' وضعُ الضريبة يُورَث من العقد ('+_esc((VAT_MODES[normVatMode(c.vatMode)]||{}).short||"—")+') — عقدٌ بلا ضريبةٍ لا يصير بعضُه خاضعاً لها بأمرِ تغيير.</div>'+
+  '</div>'+
+  '<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("pieChart","ic-sm")+' الأثر على العقد</div>'+
+    '<div id="ct-g-eff">'+chgEffectHTML(eff)+'</div>'+
+    '<div class="ct-form-row" style="margin-top:12px">'+
+      field("تمديد المدة (أيام)", '<input class="form-input num" id="ct-g-days" type="number" step="1" value="'+_esc(d.durationDaysDelta||0)+'" oninput="contracts.chgRecalc()">')+
+      field("سبب التغيير <b>(إلزاميّ)</b>", '<input class="form-input" id="ct-g-reason" value="'+_esc(d.reason||"")+'" placeholder="مثال: توسعةُ نطاق الدهان للدور الثاني بطلب المالك" oninput="contracts.chgRecalc()">')+
+    '</div>'+
+    warn+
+  '</div>'+
+  '<div class="ct-save-bar">'+
+    '<button class="btn btn-ghost btn-sm" onclick="contracts.cancelChgDraft()">إلغاء</button>'+
+    '<button class="btn btn-success btn-sm" id="ct-g-send"'+((g.ok&&d.reason)?'':' disabled')+' onclick="contracts.submitChange()">'+_icn("send","ic-sm")+' إرسال للاعتماد</button>'+
+  '</div>';
+}
+
+function chgEffectHTML(eff){
+  var sign = eff.delta>=0 ? "+" : "";
+  return '<div class="ct-money-row">'+
+    '<div class="ct-tl"><span class="l">القيمة قبل</span><span class="v num">'+money(eff.baseValue)+'</span></div>'+
+    '<div class="ct-tl"><span class="l">أثر التغيير</span><span class="v num">'+sign+money(eff.delta)+'</span></div>'+
+    '<div class="ct-tl big"><span class="l">القيمة بعد</span><span class="v num">'+money(eff.newValue)+'</span></div>'+
+    '<div class="ct-tl"><span class="l">نسبة التغيير</span><span class="v num">'+sign+eff.pct+'%</span></div>'+
+    '<div class="ct-tl"><span class="l">المدة بعد</span><span class="v num">'+money0(eff.newDays)+' يوماً</span></div>'+
+  '</div>';
+}
+
+function _chgDeltaOf(d, lineId){
+  var out=0;
+  (Array.isArray(d.lines)?d.lines:[]).forEach(function(l){ if(l && l.id===lineId) out += Number(l.qty)||0; });
+  return out;
+}
+
+/* قراءةُ النموذج من الشاشة — مصدرُ الحقيقة هو الحقول لا الذاكرة (درسُ المستخلص) */
+function syncChgDraft(){
+  var d=_chgDraft; if(!d) return;
+  var lines=[];
+  Array.prototype.forEach.call(document.querySelectorAll('#ct-g-lines input[data-cf="qty"]'), function(inp){
+    var q=Number(inp.value); if(!isFinite(q) || q===0) return;
+    lines.push({ id:inp.getAttribute("data-line"), desc:inp.getAttribute("data-desc")||"",
+                 unit:inp.getAttribute("data-unit")||"", qty:q,
+                 unitPrice:Number(inp.getAttribute("data-price"))||0 });
+  });
+  (d.newLines||[]).forEach(function(l,i){
+    var q=document.querySelector('#ct-g-new input[data-nf="qty"][data-i="'+i+'"]');
+    var p=document.querySelector('#ct-g-new input[data-nf="unitPrice"][data-i="'+i+'"]');
+    var de=document.querySelector('#ct-g-new input[data-nf="desc"][data-i="'+i+'"]');
+    var un=document.querySelector('#ct-g-new input[data-nf="unit"][data-i="'+i+'"]');
+    if(de) l.desc=de.value; if(un) l.unit=un.value;
+    if(q) l.qty=Number(q.value)||0; if(p) l.unitPrice=Number(p.value)||0;
+    if(l.desc && l.qty) lines.push({ id:l.id, desc:l.desc, unit:l.unit||"", qty:l.qty, unitPrice:l.unitPrice||0 });
+  });
+  d.lines=lines;
+  var days=document.getElementById("ct-g-days"); if(days) d.durationDaysDelta=Number(days.value)||0;
+  var rs=document.getElementById("ct-g-reason"); if(rs) d.reason=rs.value.trim();
+}
+
+/* إعادةُ الحساب الحيّة — الأثرُ والتحذيرُ وزرُّ الإرسال تتحرّك مع الإدخال، فلا يبقى
+   زرٌّ معطَّلٌ بلا سببٍ ظاهرٍ على الشاشة (درسُ المستخلص نفسُه). */
+function chgRecalc(){
+  var c=contractById(_cOpen); if(!c || !_chgDraft) return;
+  syncChgDraft();
+  _chgDraft.amount = chgAmountOf(_chgDraft, c.vatMode);
+  var eff=chgEffect(c,_chgDraft), g=chgGuard(_chgDraft, c, _exts);
+  var e=document.getElementById("ct-g-eff"); if(e) e.innerHTML=chgEffectHTML(eff);
+  var w=document.getElementById("ct-g-warn");
+  if(w) w.innerHTML = (g.ok||g.empty) ? "" : '<div class="ct-note crit">'+_icn("alertTriangle","ic-sm")+' '+_esc(_chgGuardMsg(g))+'</div>';
+  var done=prevCumByLine(_exts, c, null);
+  Array.prototype.forEach.call(document.querySelectorAll('#ct-g-lines input[data-cf="qty"]'), function(inp){
+    var id=inp.getAttribute("data-line"), delta=Number(inp.value)||0;
+    var after=r2(contractLineQty(c,id)+delta), executed=Number(done[id])||0;
+    var tr=inp.closest("tr"); if(!tr) return;
+    var tds=tr.querySelectorAll("td");
+    if(tds[4]) tds[4].textContent=money0(after);
+    if(tds[5]) tds[5].textContent=money(lineTotal(delta, Number(inp.getAttribute("data-price"))||0, c.vatMode).total);
+    tr.classList.toggle("ct-bad", delta<0 && after<executed-1e-9);
+  });
+  var btn=document.getElementById("ct-g-send");
+  if(btn) btn.disabled = !(g.ok && _chgDraft.reason);
+}
+
+function newChange(){
+  var c=contractById(_cOpen); if(!c) return;
+  if(["project_manager","admin"].indexOf(_role())===-1) return _toast("⚠ أمرُ التغيير لمدير المشروع أو الأدمن","warn");
+  if(!chgContractEligible(c)) return _toast("⚠ أمرُ التغيير لا يُنشأ إلا على عقدٍ ساري أو موقوف","warn");
+  var open=openChangeOf(_chgs, c.id);
+  if(open) return _toast("⚠ يوجد أمرُ تغييرٍ مفتوحٌ ("+open.id+")","warn");
+  _chgDraft={ lines:[], newLines:[], durationDaysDelta:0, reason:"", amount:0 };
+  _chgOpen=null; paintCtrs();
+}
+function cancelChgDraft(){ _chgDraft=null; paintCtrs(); }
+function chgAddNew(){
+  if(!_chgDraft) return; syncChgDraft();
+  _chgDraft.newLines=(_chgDraft.newLines||[]).concat([{ id:"NEW-"+Date.now().toString(36).slice(-5).toUpperCase(), desc:"", unit:"", qty:0, unitPrice:0 }]);
+  paintCtrs();
+}
+function chgDelNew(i){
+  if(!_chgDraft) return; syncChgDraft();
+  _chgDraft.newLines=(_chgDraft.newLines||[]).filter(function(_,k){ return k!==i; });
+  paintCtrs();
+}
+function submitChange(){
+  var c=contractById(_cOpen); if(!c || !_chgDraft) return;
+  syncChgDraft();
+  if(!_chgDraft.reason) return _toast("⚠ سببُ التغيير إلزاميّ","warn");
+  var btn=document.getElementById("ct-g-send"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الإرسال…"; }
+  createChange(c, _chgDraft).then(function(id){
+    _chgDraft=null; _chgOpen=id; paintCtrs(); _toast("✅ أُرسل أمرُ التغيير "+id,"success");
+  }).catch(function(e){
+    console.warn("contracts/submitChange",e);
+    if(btn){ btn.disabled=false; btn.innerHTML=_icn("send","ic-sm")+" إرسال للاعتماد"; }
+    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإرسال"),"warn");
+  });
+}
+function openChg(id){ _chgOpen=id; _chgDraft=null; paintCtrs(); }
+function backToChgs(){ _chgOpen=null; paintCtrs(); }
+
+function chgCardHTML(c, id){
+  var g=changeById(id);
+  if(!g) return '<div class="card">تعذّر العثور على أمر التغيير.</div>';
+  var owner=chgGateOwner(g.status), mine=chgCanAct(g.status,_role());
+  var eff=chgEffect(c, g);
+  var tools="";
+  if(mine){
+    tools='<button class="btn btn-success btn-sm" onclick="contracts.chgAct(\'approve\')">'+_icn("checkCircle","ic-sm")+' اعتماد</button> '+
+          '<button class="btn btn-ghost btn-sm" onclick="contracts.chgAct(\'reject\')">'+_icn("xCircle","ic-sm")+' رفض</button> ';
+  }
+  if(g.status==="chg_approved" && ["procurement_officer","admin"].indexOf(_role())!==-1){
+    tools+='<button class="btn btn-primary btn-sm" onclick="contracts.doApplyChange()">'+_icn("repeat","ic-sm")+' التطبيق على العقد</button> ';
+  }
+  if(!chgIsFinal(g.status) && (_role()==="admin" || g.createdByUser===_meUser())){
+    tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.doCancelChange()">'+_icn("ban","ic-sm")+' إلغاء</button>';
+  }
+  var rows=(g.lines||[]).map(function(l){
+    return '<tr><td>'+_esc(l.desc||"—")+'</td><td>'+_esc(l.unit||"")+'</td>'+
+      '<td class="num">'+((Number(l.qty)||0)>=0?"+":"")+money0(l.qty)+'</td>'+
+      '<td class="num">'+money(l.unitPrice)+'</td>'+
+      '<td class="num">'+money(lineTotal(l.qty,l.unitPrice,c.vatMode).total)+'</td></tr>';
+  }).join("") || '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
+  var tl=(g.timeline||[]).map(function(x){
+    return '<div class="ct-tl-row"><span class="d"></span><div><div class="t">'+_esc(x.event)+'</div>'+
+      '<div class="m">'+_esc(x.by||"")+' · '+_esc(String(x.at||"").slice(0,16).replace("T"," "))+(x.note?' — '+_esc(x.note):'')+'</div></div></div>';
+  }).join("") || '<div style="color:var(--muted);font-size:12px">—</div>';
+
+  // الأمرُ المطبَّقُ يعرض أثرَه كما وقع، لا كما لو طُبِّق الآن على قيمةٍ صارت أكبر
+  var applied = g.status==="chg_applied";
+  var effBox = applied
+    ? '<div class="ct-note">'+_icn("checkCircle","ic-sm")+' طُبِّق على العقد في '+_esc(String(g.appliedAt||"").slice(0,10))+' · '+_esc(g.appliedBy||"")+
+      ' — قيمةُ العقد الحالية '+money(contractValue(c))+' ر.س</div>'
+    : chgEffectHTML(eff);
+
+  return '<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.backToChgs()">'+_icn("rotateCcw")+' كل أوامر التغيير</button>'+
+  '<div class="ct-head"><div><h2 class="ct-title">'+_icn("repeat")+' '+_esc(g.id)+'</h2>'+
+    '<div class="ct-sub">'+chgBadge(g.status)+(owner&&!chgIsFinal(g.status)?' <span class="ct-id">بانتظار '+_esc(owner.lbl)+'</span>':'')+'</div></div>'+
+    '<div class="ct-actions">'+tools+'</div></div>'+
+  '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("pieChart","ic-sm")+' الأثر على العقد</div>'+effBox+
+    '<div class="ct-note" style="margin-top:12px">'+_icn("fileText","ic-sm")+' <b>السبب:</b> '+_esc(g.reason||"—")+'</div>'+
+    (g.durationDaysDelta?'<div class="ct-note">'+_icn("timer","ic-sm")+' تمديدُ المدة '+money0(g.durationDaysDelta)+' يوماً</div>':'')+
+  '</div>'+
+  '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' بنود التغيير</div>'+
+    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr><th>الوصف</th><th>الوحدة</th><th>فارق الكمية</th><th>سعر الوحدة</th><th>أثر القيمة</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div></div>'+
+  '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' السجل</div>'+
+    '<div class="ct-timeline">'+tl+'</div></div>';
+}
+
+function chgAct(action){
+  var id=_chgOpen; if(!id) return;
+  var run=function(note){
+    actOnChange(id, action, note).then(function(g){
+      paintCtrs(); _toast("✅ "+(CHG_STATUS[g.status]||g.status),"success");
+    }).catch(function(e){ _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإجراء"),"warn"); });
+  };
+  if(action==="reject"){
+    var r=prompt("سبب الرفض (إلزاميّ):"); if(!r) return;
+    run(r);
+  } else run("");
+}
+function doApplyChange(){
+  var id=_chgOpen; if(!id) return;
+  applyChange(id).then(function(){
+    paintCtrs(); _toast("✅ طُبِّق أمرُ التغيير على العقد","success");
+  }).catch(function(e){ _toast("⚠ "+(e&&e.message?e.message:"تعذّر التطبيق"),"warn"); });
+}
+function doCancelChange(){
+  var id=_chgOpen; if(!id) return;
+  var r=prompt("سبب الإلغاء (اختياريّ):");
+  if(r===null) return;
+  cancelChange(id, r).then(function(){ paintCtrs(); _toast("✅ أُلغي أمرُ التغيير","success"); })
+    .catch(function(e){ _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإلغاء"),"warn"); });
+}
+
 function filterCtrs(k,v){
   _cFilter[k]=v||""; paintCtrs();
   if(k==="q"){ var i=document.getElementById("ct-c-q"); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length,i.value.length); }catch(e){} } }
 }
-function openCtr(id){ _cOpen=id; _cTab="overview"; _extDraft=null; _extOpen=null; _clEdit=null; paintCtrs(); }
+function openCtr(id){ _cOpen=id; _cTab="overview"; _extDraft=null; _extOpen=null; _clEdit=null; _chgDraft=null; _chgOpen=null; paintCtrs(); }
 function backToCtrs(){ _cOpen=null; paintCtrs(); }
-function ctrTab(t){ _cTab=t; _extDraft=null; _extOpen=null; _clEdit=null; paintCtrs(); }
+function ctrTab(t){ _cTab=t; _extDraft=null; _extOpen=null; _clEdit=null; _chgDraft=null; _chgOpen=null; paintCtrs(); }
 function openReqFromCtr(reqId){ try{ showPage(PAGE_REQS); }catch(e){} openReq(reqId); }
 function openCtrFromReq(cid){ try{ showPage(PAGE_CTRS); }catch(e){} openCtr(cid); }
 
@@ -3994,6 +4657,20 @@ window.contracts = {
   extractsList: extractsList, extractById: extractById, extractsFor: extractsFor,
   _createExt: createExtract, _actExt: actOnExtract, _payExt: payExtract, _extCalc: extCalc,
   _extDraftOf: function(){ return _extDraft; },
+  // أوامرُ التغيير [المرحلة ٧]
+  startChgSync: startChgSync, stopChgSync: stopChgSync,
+  newChange: newChange, cancelChgDraft: cancelChgDraft, submitChange: submitChange,
+  chgRecalc: chgRecalc, chgAddNew: chgAddNew, chgDelNew: chgDelNew,
+  openChg: openChg, backToChgs: backToChgs, chgAct: chgAct,
+  doApplyChange: doApplyChange, doCancelChange: doCancelChange,
+  changesList: changesList, changeById: changeById, changesFor: changesFor,
+  _createChg: createChange, _actChg: actOnChange, _applyChg: applyChange, _cancelChg: cancelChange,
+  _chgDraftOf: function(){ return _chgDraft; },
+  _chgAmountOf: chgAmountOf, _chgNextStage: chgNextStage, _chgEffect: chgEffect,
+  _chgGuard: chgGuard, _chgCanAct: chgCanAct, _chgIsFinal: chgIsFinal,
+  _contractChangeTotals: contractChangeTotals, _openChangeOf: openChangeOf,
+  _chgContractEligible: chgContractEligible, _contractLineQty: contractLineQty,
+  _CHG_STATUS: CHG_STATUS, _CHG_GATES: CHG_GATES, _CHG_OPEN: CHG_OPEN,
   // مقابضُ طبقة البيانات — مكشوفةٌ لفحص المتصفّح ليختبر القواعد نفسَها التي
   // تحرسها الشاشة، لا نسخةً منها: الرفضُ يجب أن يقع في البيانات لا على الزرّ.
   _create: createRequest, _act: actOnRequest, _pay: payRequest, _cancel: cancelRequest,

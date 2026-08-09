@@ -195,6 +195,42 @@ await check("والاستئنافُ يمرّ", assertSucceeds(updateDoc(doc(PM, 
 await check("★ والأدمن يُنشئ طرفاً بآيبانٍ مباشرةً (لا يُعطَّل المسؤولُ عن النظام)",
   assertSucceeds(setDoc(doc(ADMIN, `${V}/VA`), { name: "ط", bank: { iban: "SA7777" } })));
 
+/* ═════════ ٦) أوامرُ التغيير ═════════ */
+head("٦) أوامرُ التغيير — البابُ الوحيدُ لتغيير قيمة العقد");
+const G = "global_contract_changes";
+const CHG = { status: "chg_pending_pm", contractId: "C2", amount: 15000, reason: "توسعةُ النطاق",
+              lines: [{ id: "L1", qty: 5, unitPrice: 3000 }], durationDaysDelta: 10, createdAt: "2026-04-01" };
+await seed(`${G}/G1`, CHG);
+await check("مديرُ المشاريع يُنشئ أمرَ تغيير",
+  assertSucceeds(setDoc(doc(PM, `${G}/GN`), CHG)));
+await check("★ ولا يُنشئه بلا سبب (أمرٌ بلا سببٍ لا يُعتمَد)",
+  assertFails(setDoc(doc(PM, `${G}/GX`), Object.assign({}, CHG, { reason: "" }))));
+await check("★ ولا يُنشئه معتمَداً سلفاً",
+  assertFails(setDoc(doc(PM, `${G}/GY`), Object.assign({}, CHG, { status: "chg_approved" }))));
+await check("★ والمالية لا تعتمد ما هو على بوّابة مدير المشاريع",
+  assertFails(updateDoc(doc(FIN, `${G}/G1`), { status: "chg_pending_proc" })));
+await check("ومديرُ المشاريع يعتمد فينتقل",
+  assertSucceeds(updateDoc(doc(PM, `${G}/G1`), { status: "chg_pending_proc" })));
+await check("★★ وقيمةُ الأمر لا تتغيّر بعد الإرسال (وإلا اعتُمد رقمٌ وطُبِّق غيرُه)",
+  assertFails(updateDoc(doc(PROC, `${G}/G1`), { amount: 400000 })));
+await check("★ ولا تتبدّل بنودُه", assertFails(updateDoc(doc(PROC, `${G}/G1`), { lines: [{ id: "L1", qty: 99 }] })));
+await check("★ ولا يُنقل الأمرُ إلى عقدٍ آخر",
+  assertFails(updateDoc(doc(PROC, `${G}/G1`), { contractId: "C-OTHER" })));
+
+// التطبيقُ على العقد: `value` مجمَّد، والإضافةُ في `changeOrders` وللمشتريات وحدَها
+await seed(`${C}/CG`, Object.assign({}, CTR, { status: "ctr_active", changeOrders: [] }));
+await check("★★ وقيمةُ العقد الأصليةُ تبقى مجمَّدةً حتى مع أمرِ تغييرٍ معتمَد",
+  assertFails(updateDoc(doc(PROC, `${C}/CG`), { value: 115000 })));
+await check("★★ والمشترياتُ تُطبّق الأمرَ بالإضافة إلى changeOrders (التاريخُ يبقى)",
+  assertSucceeds(updateDoc(doc(PROC, `${C}/CG`), {
+    changeOrders: [{ id: "G1", amount: 15000, status: "approved" }], durationDays: 70
+  })));
+await check("★ ودورٌ غيرُ المشتريات لا يمسّ أوامرَ تغيير العقد",
+  assertFails(updateDoc(doc(FIN, `${C}/CG`), { changeOrders: [{ id: "GX", amount: 999999, status: "approved" }] })));
+await check("★ والماليةُ ما زالت تُنهي العقد فنّياً (لم نكسر مسارَ المستخلص الختاميّ)",
+  assertSucceeds(updateDoc(doc(FIN, `${C}/CG`), { status: "ctr_completed" })));
+await check("ولا يُحذف أمرُ تغييرٍ من العميل", assertFails(deleteDoc(doc(ADMIN, `${G}/G1`))));
+
 await env.cleanup();
 console.log(results.join("\n"));
 console.log("\n" + "═".repeat(58));

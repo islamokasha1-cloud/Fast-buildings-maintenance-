@@ -34,7 +34,8 @@ service cloud.firestore {
         'global_vendors',            'global_vendors_dev',
         'global_contract_requests',  'global_contract_requests_dev',
         'global_contracts',          'global_contracts_dev',
-        'global_contract_extracts',  'global_contract_extracts_dev'
+        'global_contract_extracts',  'global_contract_extracts_dev',
+        'global_contract_changes',   'global_contract_changes_dev'
       ];
     }
 
@@ -198,6 +199,9 @@ service cloud.firestore {
       return anyRole(['project_manager','procurement_officer','finance','ceo','admin'])
         && !(resource.data.status in ['ctr_closed','ctr_terminated'])
         && unchanged(['createdAt','requestId','vendorId','value','lines'])
+        // `value` مجمَّدٌ أبداً: أوامرُ التغيير **تُضاف** في `changeOrders` ولا
+        // تستبدله — فالتاريخُ يبقى والقيمةُ الحالية تُحسب. وتطبيقُ الأمر للمشتريات.
+        && (unchanged(['changeOrders']) || anyRole(['procurement_officer','admin']))
         && ( request.resource.data.status == resource.data.status
              || ctrTransitOk(resource.data.status, request.resource.data.status) );
     }
@@ -248,6 +252,47 @@ service cloud.firestore {
       allow read:   if hasRole();
       allow create: if extCreateOk();
       allow update: if extUpdateOk();
+      allow delete: if false;
+    }
+
+    // ── أوامرُ التغيير: أربعُ بوّاباتٍ، والتطبيقُ على العقد للمشتريات ──
+    function chgGate(st) {
+      return st == 'chg_pending_pm'      ? ['project_manager','admin']
+           : st == 'chg_pending_proc'    ? ['procurement_officer','admin']
+           : st == 'chg_pending_finance' ? ['finance','admin']
+           : st == 'chg_pending_ceo'     ? ['ceo','admin']
+           // `chg_approved` بابُ التطبيق على العقد — للمشتريات كإنشاء العقد نفسِه
+           : st == 'chg_approved'        ? ['procurement_officer','admin']
+           : ['admin'];
+    }
+    function chgCreateOk() {
+      return anyRole(['project_manager','admin'])
+        && request.resource.data.contractId is string
+        && request.resource.data.contractId != ''
+        // أمرٌ بلا سببٍ لا يُعتمَد — والسببُ جزءُ المستند لا تعليقٌ عليه
+        && request.resource.data.reason is string
+        && request.resource.data.reason != ''
+        && request.resource.data.status == 'chg_pending_pm';
+    }
+    function chgUpdateOk() {
+      return anyRole(['project_manager','procurement_officer','finance','ceo','admin'])
+        && !(resource.data.status in ['chg_applied','chg_rejected','chg_cancelled'])
+        // أثرُ الأمر وبنودُه لا تتغيّر بعد الإرسال: وإلا اعتُمد رقمٌ وطُبِّق غيرُه
+        && unchanged(['createdAt','createdByUser','contractId','amount','lines','durationDaysDelta'])
+        && ( request.resource.data.status == resource.data.status
+             || request.resource.data.status == 'chg_cancelled'
+             || anyRole(chgGate(resource.data.status)) );
+    }
+    match /global_contract_changes/{id} {
+      allow read:   if hasRole();
+      allow create: if chgCreateOk();
+      allow update: if chgUpdateOk();
+      allow delete: if false;
+    }
+    match /global_contract_changes_dev/{id} {
+      allow read:   if hasRole();
+      allow create: if chgCreateOk();
+      allow update: if chgUpdateOk();
       allow delete: if false;
     }
   }
