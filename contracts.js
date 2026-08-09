@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2503";
+var MODULE_BUILD = "v18.9.2505";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -66,6 +66,7 @@ var MODULE_BUILD = "v18.9.2503";
 
 var PAGE_VENDORS = "vendors";
 var PAGE_REQS    = "contract-requests";
+var PAGE_CTRS    = "contracts-list";
 
 function _dev(){ try{ return typeof IS_DEV!=="undefined" && IS_DEV; }catch(e){ return false; } }
 function VENDORS_COL(){   return _dev() ? "global_vendors_dev"            : "global_vendors"; }
@@ -390,6 +391,71 @@ function crqCanAct(status, role){
 }
 function crqIsFinal(s){ return CRQ_FINAL.indexOf(s) !== -1; }
 function crqIsBounced(s){ return CRQ_BOUNCED.indexOf(s) !== -1; }
+
+/* ════ بناءُ العقد من الطلب — دالةٌ نقيةٌ لا معاملة ════   [المرحلة ٣]
+
+   الفصلُ مقصود: **البناءُ نقيٌّ** فيُختبَر وحدَه بلا Firestore، و**المعاملةُ تنقله**
+   فتحرس الذرّية وعدمَ التكرار. خلطُهما يعني منطقَ تحويلٍ لا يُفحَص إلا بمتصفّح.
+
+   والعقدُ **يرث ولا يُعيد الإدخال**: كلُّ ما اعتمده الموقّعون الأربعة ينتقل كما هو —
+   الطرفُ والبنودُ والقيمةُ ووضعُ الضريبة والشروطُ التجارية — فلا يظهر في العقد رقمٌ
+   لم يره معتمِد. ويُثبَّت `requestId` في الاتجاه المقابل: أوّلُ ما يسأل عنه المدقّق
+   بعد سنةٍ هو «مَن وافق على هذا؟»، والجوابُ على بُعد نقرة. */
+function contractFromRequest(req, contractId, now, by){
+  var r = req || {};
+  var lines = (Array.isArray(r.lines) ? r.lines : []).map(function(l){
+    return { id:l.id, boqLineId:(l.boqLineId||null), desc:l.desc||"", unit:l.unit||"",
+             qty:Number(l.qty)||0, unitPrice:Number(l.unitPrice)||0,
+             budgetCategoryKey:l.budgetCategoryKey||"" };
+  });
+  return {
+    requestId: r.id || "",
+    vendorId: r.vendorId || "", vendorName: r.vendorName || "",
+    // شكلُ المشروع القياسيّ يُنقَل كما هو — لا يُعاد اشتقاقُه فينحرف
+    projectId: r.projectId || "", isCustomProject: r.isCustomProject === true,
+    projectName: r.projectName || "",
+    budgetCategoryKey: r.budgetCategoryKey || "",   // قد يكون فارغاً — الربطُ اختياريّ
+    title: r.title || "", scope: r.scope || "",
+    type: r.engagement === "pay_order" ? "pay_order" : "works_order",
+    lines: lines,
+    value: crqValueOf(r), vatMode: normVatMode(r.vatMode),
+    startDate: r.startDate || "", durationDays: Number(r.durationDays)||0,
+    advance:   Object.assign({ pct:0, recoveryPct:0, amount:0, recovered:0 }, r.advance||{}),
+    retention: Object.assign({ pct:0, releaseOn:"completion", released:0 }, r.retention||{}),
+    penalty:   Object.assign({ perDayPct:0, capPct:0 }, r.penalty||{}),
+    warranty:  Object.assign({ months:0 }, r.warranty||{}),
+    guarantees: [], changeOrders: [],
+    status: "ctr_active",
+    timeline: [{ event:"إنشاء العقد من الطلب "+(r.id||""), code:"created", by:by||"", at:now||"", note:"" }],
+    createdAt: now||"", createdBy: by||"", id: contractId||""
+  };
+}
+/* مبلغُ الدفعة المقدمة يُشتقّ من نسبتها على قيمة العقد — رقمٌ محسوبٌ لا مُدخَل. */
+function advanceAmountOf(contract){
+  var c = contract || {}, pct = Number((c.advance||{}).pct);
+  if(!isFinite(pct) || pct <= 0) return 0;
+  return r2(contractValue(c) * pct / 100);
+}
+
+/* حالاتُ العقد: مَن يملك الانتقال، وأيُّها نهائيّ. */
+var CTR_FINAL = ["ctr_closed","ctr_terminated"];
+var CTR_TRANSITIONS = {
+  suspend:   { from:["ctr_active"],    to:"ctr_suspended", roles:["project_manager","admin"], lbl:"إيقاف مؤقت",  needsReason:true  },
+  resume:    { from:["ctr_suspended"], to:"ctr_active",    roles:["project_manager","admin"], lbl:"استئناف",     needsReason:false },
+  complete:  { from:["ctr_active"],    to:"ctr_completed", roles:["project_manager","admin"], lbl:"إنهاء فنّيّ", needsReason:false },
+  close:     { from:["ctr_completed"], to:"ctr_closed",    roles:["finance","admin"],         lbl:"إقفال نهائيّ", needsReason:false },
+  terminate: { from:["ctr_active","ctr_suspended"], to:"ctr_terminated", roles:["admin"],     lbl:"فسخ",         needsReason:true  }
+};
+function ctrIsFinal(s){ return CTR_FINAL.indexOf(s) !== -1; }
+/* هل يجوز هذا الانتقالُ من هذه الحالة لهذا الدور؟ مصدرٌ واحدٌ تقرأه الأزرارُ
+   **والمعاملةُ معاً** — فلا يمرّ انتقالٌ لأن زرّاً ظهر بالخطأ. */
+function ctrCanTransit(action, status, role){
+  var t = CTR_TRANSITIONS[action];
+  return !!t && t.from.indexOf(status) !== -1 && t.roles.indexOf(role) !== -1;
+}
+function ctrActionsFor(status, role){
+  return Object.keys(CTR_TRANSITIONS).filter(function(a){ return ctrCanTransit(a, status, role); });
+}
 
 /* قيمةُ العقد النافذة = الأصليةُ + المعتمَدُ من أوامر التغيير. لا شيءَ غيرُ ذلك. */
 function contractValue(contract){
@@ -932,6 +998,121 @@ function cancelRequest(id, reason){
     if(i>=0) _reqs[i]=r;
     _audit("إلغاء طلب تعاقد", id+(reason?(" — "+reason):""));
     return r;
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   ٥-ج) العقود — طبقةُ البيانات  [المرحلة ٣]
+   ════════════════════════════════════════════════════════════════════ */
+var _ctrs = [];
+var _cUnsub = null, _cLoaded = false, _cError = "";
+
+function contractsList(){ return _ctrs.slice(); }
+function contractById(id){ for(var i=0;i<_ctrs.length;i++){ if(_ctrs[i].id===id) return _ctrs[i]; } return null; }
+function contractForRequest(reqId){ for(var i=0;i<_ctrs.length;i++){ if(_ctrs[i].requestId===reqId) return _ctrs[i]; } return null; }
+
+function startCtrSync(){
+  if(_cUnsub) return;
+  var database=_db(); if(!database) return;
+  try{
+    _cUnsub = database.collection(CONTRACTS_COL()).onSnapshot(function(snap){
+      var out=[]; snap.forEach(function(d){ var o=d.data()||{}; o.id=d.id; out.push(o); });
+      out.sort(function(a,b){ return String(b.createdAt||"").localeCompare(String(a.createdAt||"")); });
+      _ctrs=out; _cLoaded=true; _cError="";
+      if(_page===PAGE_CTRS) paintCtrs();
+      if(_page===PAGE_REQS) paintReqs();     // بطاقةُ الطلب تعرض رابطَ عقده
+    }, function(err){
+      console.warn("contracts/contracts sync", err);
+      _cError="تعذّر الاتصال بالعقود — تحقّق من الشبكة ثم أعِد المحاولة.";
+      _cLoaded=true; if(_page===PAGE_CTRS) paintCtrs();
+    });
+  }catch(e){ console.warn("contracts/startCtrSync", e); }
+}
+function stopCtrSync(){ if(_cUnsub){ try{ _cUnsub(); }catch(e){} _cUnsub=null; } _ctrs=[]; _cLoaded=false; }
+
+function genCtrId(){
+  var now=new Date();
+  var yr=String(now.getFullYear()).slice(-2), mon=String(now.getMonth()+1).padStart(2,"0");
+  var fallback="CTR-"+yr+mon+"-"+Date.now().toString(36).slice(-5).toUpperCase();
+  var database=_db(); if(!database) return Promise.resolve(fallback);
+  var ref=database.doc(_dev()?"meta/global_contracts_counter_dev":"meta/global_contracts_counter");
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      var c=(s.exists && Number((s.data()||{}).counter))||0; c++;
+      t.set(ref,{counter:c,updatedAt:_now()},{merge:true}); return c;
+    });
+  }).then(function(c){ return "CTR-"+yr+mon+"-"+String(c).padStart(4,"0"); })
+    .catch(function(e){ console.warn("contracts/genCtrId",e); return fallback; });
+}
+
+/* التحويلُ إلى عقد — **معاملةٌ واحدةٌ ذرّية** تكتب العقدَ وتوسم الطلبَ معاً.
+
+   حارسُ التكرار داخلَ المعاملة لا قبلها: القراءةُ المسبقةُ تسمح لضغطتين متزامنتين
+   بالمرور معاً فينشأ عقدان لطلبٍ واحد. وحين يكون الطلبُ محوَّلاً سلفاً **لا نرمي
+   خطأً غامضاً** بل نُرجع معرّفَ عقده — فالضغطةُ الثانية غالباً نقرةٌ مكرّرة، والمستخدمُ
+   يريد أن يرى عقده لا رسالةَ فشل. */
+function convertToContract(reqId){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال بقاعدة البيانات"));
+  var role=_role();
+  if(["procurement_officer","admin"].indexOf(role) === -1) return Promise.reject(new Error("إنشاء العقد للمشتريات أو الأدمن"));
+  var reqRef = database.collection(REQUESTS_COL()).doc(reqId);
+  return genCtrId().then(function(newId){
+    return database.runTransaction(function(t){
+      return t.get(reqRef).then(function(s){
+        if(!s.exists) throw new Error("الطلب غير موجود");
+        var r=s.data()||{}; r.id=reqId;
+        if(r.status === "crq_converted" && r.contractId){
+          return { id:r.contractId, already:true };   // نقرةٌ مكرّرة — لا عقدَ ثانٍ
+        }
+        if(r.status !== "crq_approved") throw new Error("الطلب ليس معتمَداً — لا يُنشأ منه عقد");
+        var at=_now(), by=_me();
+        var ctr = contractFromRequest(r, newId, at, by);
+        ctr.advance.amount = advanceAmountOf(ctr);
+        var out = Object.assign({}, ctr); delete out.id;
+        t.set(database.collection(CONTRACTS_COL()).doc(newId), out);
+        r.status="crq_converted"; r.contractId=newId; r.updatedAt=at; r.updatedBy=by;
+        _pushTimeline(r, "إنشاء العقد "+newId, "converted", "");
+        var rOut=Object.assign({}, r); delete rOut.id;
+        t.set(reqRef, rOut, { merge:true });
+        return { id:newId, already:false, contract:Object.assign({id:newId}, ctr), request:r };
+      });
+    });
+  }).then(function(res){
+    if(res.already) return res.id;
+    // تحديثُ الذاكرة المحلية بنتيجة المعاملة فوراً (درسُ finance-audit)
+    if(res.contract){ var ci=_ctrs.findIndex(function(x){ return x.id===res.id; }); if(ci<0) _ctrs.unshift(res.contract); }
+    if(res.request){ var ri=_reqs.findIndex(function(x){ return x.id===reqId; }); if(ri>=0) _reqs[ri]=res.request; }
+    _audit("إنشاء عقد من طلب تعاقد", res.id+" ← "+reqId);
+    _notify("عقدٌ جديد "+res.id, (res.contract&&res.contract.vendorName)||"", res.id);
+    return res.id;
+  });
+}
+
+/* انتقالُ حالةِ العقد — القاعدةُ نفسُها التي تحرس الأزرار تحرس المعاملة. */
+function transitContract(id, action, reason){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  var role=_role(), t=CTR_TRANSITIONS[action];
+  if(!t) return Promise.reject(new Error("إجراء غير معروف"));
+  if(t.needsReason && !reason) return Promise.reject(new Error("السبب إلزامي"));
+  var ref=database.collection(CONTRACTS_COL()).doc(id);
+  return database.runTransaction(function(tx){
+    return tx.get(ref).then(function(s){
+      if(!s.exists) throw new Error("العقد غير موجود");
+      var c=s.data()||{}; c.id=id;
+      if(!ctrCanTransit(action, c.status, role)) throw new Error("لا يجوز هذا الإجراء على حالة العقد الحالية أو ليس لدورك");
+      c.status=t.to;
+      if(action==="close") c.retention = Object.assign({}, c.retention||{}, { released: r2(contractValue(c) * (Number((c.retention||{}).pct)||0) / 100) });
+      _pushTimeline(c, t.lbl, action, reason||"");
+      c.updatedAt=_now(); c.updatedBy=_me();
+      var out=Object.assign({},c); delete out.id;
+      tx.set(ref, out, { merge:true });
+      return c;
+    });
+  }).then(function(c){
+    var i=_ctrs.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _ctrs[i]=c;
+    _audit("تغيير حالة عقد", id+" ⇐ "+(CTR_STATUS[c.status]||c.status)+(reason?(" — "+reason):""));
+    return c;
   });
 }
 
@@ -1998,6 +2179,12 @@ function reqCardHTML(id){
   var back='<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.backToReqs()">'+_icn("rotateCcw")+' كل الطلبات</button>';
 
   var tools="";
+  if(r.status==="crq_approved" && ["procurement_officer","admin"].indexOf(_role())!==-1){
+    tools+='<button class="btn btn-primary btn-sm" onclick="contracts.makeContract()">'+_icn("briefcase","ic-sm")+' إنشاء العقد</button> ';
+  }
+  if(r.status==="crq_converted" && r.contractId){
+    tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.openCtrFromReq(\''+_jq(r.contractId)+'\')">'+_icn("briefcase","ic-sm")+' العقد '+_esc(r.contractId)+'</button> ';
+  }
   if(mine && r.status==="crq_pending_pay"){
     tools+='<button class="btn btn-success btn-sm" onclick="contracts.openPay()">'+_icn("banknote","ic-sm")+' تسجيل السداد</button> ';
   } else if(mine){
@@ -2156,13 +2343,272 @@ function doPay(){
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   ٧-ج) العقود — الواجهة  [المرحلة ٣]
+   ════════════════════════════════════════════════════════════════════ */
+var _cFilter = { q:"", status:"" };
+var _cOpen   = null;
+var _cTab    = "overview";
+
+var _CTR_RAIL = {
+  ctr_active:"var(--accent)", ctr_suspended:"var(--warn)", ctr_completed:"var(--info)",
+  ctr_closed:"var(--muted)", ctr_terminated:"var(--danger)"
+};
+var _CTR_BADGE = {
+  ctr_active:{cls:"b-po-closed",icon:"checkCircle"}, ctr_suspended:{cls:"b-po-approval",icon:"alertTriangle"},
+  ctr_completed:{cls:"b-po-approval",icon:"hourglass"}, ctr_closed:{cls:"b-po-cancelled",icon:"lock"},
+  ctr_terminated:{cls:"b-po-rejected",icon:"ban"}
+};
+function ctrBadge(s){
+  var m=_CTR_BADGE[s]||{cls:"",icon:"alertCircle"};
+  return '<span class="badge '+m.cls+'">'+_icn(m.icon,"ic-sm")+' '+_esc(CTR_STATUS[s]||s)+'</span>';
+}
+
+function renderCtrs(){
+  ensurePages();
+  var el=document.getElementById("page-"+PAGE_CTRS); if(!el) return;
+  if(!canView()){ el.innerHTML='<div class="card" style="text-align:center;padding:34px 18px"><div style="color:var(--muted);font-size:13px">'+_icn("lock")+' هذا القسم غير متاح لدورك.</div></div>'; return; }
+  startSync(); startReqSync(); startCtrSync();
+  paintCtrs();
+}
+function paintCtrs(){
+  var el=document.getElementById("page-"+PAGE_CTRS); if(!el) return;
+  el.innerHTML = _cOpen ? ctrCardHTML(_cOpen) : ctrListHTML();
+}
+
+function ctrListHTML(){
+  var all=_ctrs.slice(), q=normName(_cFilter.q);
+  var list=all.filter(function(c){
+    if(_cFilter.status && c.status!==_cFilter.status) return false;
+    if(q){
+      var hay=normName(c.id)+" "+normName(c.vendorName)+" "+normName(c.title)+" "+normName(_projName(c));
+      if(hay.indexOf(q)===-1) return false;
+    }
+    return true;
+  });
+  var live=all.filter(function(c){ return c.status==="ctr_active"; });
+  var liveVal=live.reduce(function(s,c){ return s+contractValue(c); },0);
+  var susp=all.filter(function(c){ return c.status==="ctr_suspended"; }).length;
+
+  var head=headHTML("العقود","الالتزاماتُ النافذة — قيمتُها ومدّتُها ومستخلصاتُها.","", "briefcase");
+  var strip='<div class="ct-strip">'+
+    '<div class="ct-stat"><span class="l">عقودٌ سارية</span><span class="v">'+live.length+'</span></div>'+
+    '<div class="ct-stat"><span class="l">قيمتُها (ر.س)</span><span class="v">'+money0(liveVal)+'</span></div>'+
+    '<div class="ct-stat'+(susp?' warn':'')+'"><span class="l">موقوفة</span><span class="v">'+susp+'</span></div>'+
+    '<div class="ct-stat"><span class="l">الإجمالي</span><span class="v">'+all.length+'</span></div>'+
+  '</div>';
+
+  var filters='<div class="ct-filters">'+
+    '<input class="form-input ct-search" id="ct-c-q" placeholder="ابحث برقم العقد أو الطرف أو المشروع" value="'+_esc(_cFilter.q)+'" oninput="contracts.filterCtrs(\'q\',this.value)">'+
+    '<select class="form-input" onchange="contracts.filterCtrs(\'status\',this.value)">'+
+      '<option value="">كل الحالات</option>'+
+      Object.keys(CTR_STATUS).map(function(k){ return '<option value="'+k+'"'+(_cFilter.status===k?' selected':'')+'>'+_esc(CTR_STATUS[k])+'</option>'; }).join("")+
+    '</select><div></div>'+
+  '</div>';
+
+  var body;
+  if(_cError){
+    body='<div class="card" style="text-align:center;padding:30px 18px"><div style="color:var(--danger);font-size:13px;font-weight:700">'+_icn("alertTriangle")+' '+_esc(_cError)+'</div></div>';
+  } else if(!_cLoaded){
+    body='<div class="card" style="text-align:center;padding:30px 18px;color:var(--muted);font-size:13px">جارٍ التحميل…</div>';
+  } else if(!all.length){
+    body='<div class="card ct-empty">'+
+      '<div class="ct-empty-ic">'+_svg("briefcase")+'</div>'+
+      '<div class="ct-empty-t">لا عقود بعد</div>'+
+      '<div class="ct-empty-s">العقدُ يُولَد من طلبِ تعاقدٍ معتمَد — اعتمِد طلباً ثم اضغط «إنشاء العقد» من بطاقته.</div>'+
+      '<button class="btn btn-ghost btn-sm" style="margin-top:14px" onclick="showPage(\'contract-requests\')">'+_icn("fileText","ic-sm")+' طلبات التعاقد</button>'+
+    '</div>';
+  } else if(!list.length){
+    body='<div class="card" style="text-align:center;padding:26px 18px;color:var(--muted);font-size:13px">لا نتائج تطابق البحث.</div>';
+  } else {
+    body='<div class="ct-grid">'+list.map(ctrTileHTML).join("")+'</div>';
+  }
+  return head+strip+filters+body;
+}
+
+function ctrTileHTML(c){
+  var v=contractValue(c);
+  return '<div class="ct-tile" style="--rail:'+(_CTR_RAIL[c.status]||"var(--muted)")+'" onclick="contracts.openCtr(\''+_jq(c.id)+'\')">'+
+    '<div class="ct-tile-top">'+
+      '<div class="ct-tile-name">'+_esc(c.title||c.id)+'</div>'+ctrBadge(c.status)+
+    '</div>'+
+    '<div class="ct-tile-kind"><span class="num">'+_esc(c.id)+'</span>'+
+      ' <span class="ct-dot">·</span> '+_esc(_projName(c))+
+      (c.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':'')+'</div>'+
+    '<div class="ct-tile-foot">'+
+      '<div class="ct-money"><span class="num">'+money(v)+'</span> <small>ر.س</small></div>'+
+      '<div class="ct-tile-who">'+_esc(c.vendorName||"—")+'</div>'+
+    '</div>'+
+  '</div>';
+}
+
+function ctrCardHTML(id){
+  var c=contractById(id);
+  if(!c) return headHTML("العقود","","", "briefcase")+'<div class="card">تعذّر العثور على العقد.</div>';
+  var role=_role();
+  var back='<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.backToCtrs()">'+_icn("rotateCcw")+' كل العقود</button>';
+  var acts=ctrActionsFor(c.status, role);
+  var tools=acts.map(function(a){
+    var t=CTR_TRANSITIONS[a];
+    var cls = (a==="terminate") ? "btn-ghost" : (a==="resume"||a==="close" ? "btn-success" : "btn-ghost");
+    return '<button class="btn '+cls+' btn-sm" onclick="contracts.transit(\''+a+'\')">'+_esc(t.lbl)+'</button>';
+  }).join(" ");
+
+  var tabs='<div class="ct-tabs">'+
+    [["overview","نظرة عامة","clipboardList"],["lines","البنود","layers"],
+     ["extracts","المستخلصات","banknote"],["log","السجل","scrollText"]]
+    .map(function(t){
+      return '<button class="ct-tab'+(_cTab===t[0]?" on":"")+'" onclick="contracts.ctrTab(\''+t[0]+'\')">'+_icn(t[2],"ic-sm")+' '+t[1]+'</button>';
+    }).join("")+'</div>';
+
+  return back +
+    headHTML(c.title||c.id, ctrBadge(c.status)+' <span class="ct-id num">'+_esc(c.id)+'</span>', tools, "briefcase") +
+    tabs + ctrTabBody(c);
+}
+
+function ctrTabBody(c){
+  if(_cTab==="lines")    return ctrLinesHTML(c);
+  if(_cTab==="extracts") return ctrExtractsHTML(c);
+  if(_cTab==="log")      return ctrLogHTML(c);
+  return ctrOverviewHTML(c);
+}
+
+function ctrOverviewHTML(c){
+  var v=contractValue(c), t=linesTotal(c.lines||[], c.vatMode);
+  var adv=advanceAmountOf(c);
+  var ret=r2(v * (Number((c.retention||{}).pct)||0) / 100);
+  var req=requestById(c.requestId);
+  var link = c.requestId
+    ? '<button class="btn btn-ghost btn-sm" onclick="contracts.openReqFromCtr(\''+_jq(c.requestId)+'\')">'+_icn("fileText","ic-sm")+' الطلب '+_esc(c.requestId)+(req?'':' (غير محمَّل)')+'</button>'
+    : '<span style="color:var(--muted);font-size:12px">—</span>';
+
+  var budgetCell = c.budgetCategoryKey
+    ? _esc(catName(c.budgetCategoryKey))
+    : '<span style="color:var(--muted)">بلا ربط — اختياريّ</span>';
+
+  return '<div class="card ct-sec">'+
+    '<div class="ct-money-row">'+
+      '<div class="ct-tl big"><span class="l">قيمة العقد النافذة</span><span class="v num">'+money(v)+'</span></div>'+
+      '<div class="ct-tl"><span class="l">الأساس</span><span class="v num">'+money(t.base)+'</span></div>'+
+      '<div class="ct-tl"><span class="l">ض.ق.م</span><span class="v num">'+money(t.vat)+'</span></div>'+
+      '<div class="ct-tl"><span class="l">دفعة مقدمة</span><span class="v num">'+money(adv)+'</span></div>'+
+      '<div class="ct-tl"><span class="l">محتجز الضمان</span><span class="v num">'+money(ret)+'</span></div>'+
+    '</div>'+
+  '</div>'+
+  '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("clipboardList","ic-sm")+' بيانات العقد</div>'+
+    '<div class="ct-info">'+
+      infoCell("الطرف", _esc(c.vendorName||"—"))+
+      infoCell("المشروع", _esc(_projName(c))+(c.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':""))+
+      infoCell("بند الموازنة", budgetCell)+
+      infoCell("وضع الضريبة", _esc((VAT_MODES[normVatMode(c.vatMode)]||{}).short||"—"))+
+      infoCell("تاريخ البدء", _esc(c.startDate||"—"))+
+      infoCell("مدة التنفيذ", c.durationDays?(money0(c.durationDays)+" يوماً"):"—")+
+      infoCell("مدة الضمان", ((c.warranty||{}).months||0)+" شهراً")+
+      infoCell("الطلب المصدر", link)+
+    '</div>'+
+    (c.scope?'<div class="ct-note" style="margin-top:12px">'+_esc(c.scope)+'</div>':'')+
+  '</div>'+
+  '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("shield","ic-sm")+' الشروط التجارية</div>'+
+    '<div class="ct-info">'+
+      infoCell("الدفعة المقدمة", ((c.advance||{}).pct||0)+"٪ — تُستردّ "+((c.advance||{}).recoveryPct||0)+"٪ من كل مستخلص")+
+      infoCell("محتجز الضمان", ((c.retention||{}).pct||0)+"٪ — يُفرَج "+(((c.retention||{}).releaseOn)==="warranty_end"?"بعد انتهاء الضمان":"عند الاستلام الابتدائي"))+
+      infoCell("غرامة التأخير", ((c.penalty||{}).perDayPct||0)+"٪ يومياً — سقف "+((c.penalty||{}).capPct||0)+"٪")+
+      infoCell("المُفرَج من المحتجز", money((c.retention||{}).released||0)+" ر.س")+
+    '</div>'+
+  '</div>';
+}
+
+function ctrLinesHTML(c){
+  var rows=(c.lines||[]).map(function(l){
+    var lt=lineTotal(l.qty,l.unitPrice,c.vatMode);
+    return '<tr><td>'+_esc(l.desc||"—")+(l.boqLineId?'':' <span class="ct-doc s-soon">خارج المقايسة</span>')+'</td>'+
+      '<td>'+_esc(l.unit||"")+'</td><td class="num">'+money0(contractLineQty(c,l.id))+'</td>'+
+      '<td class="num">'+money(l.unitPrice)+'</td><td class="num">'+money(lt.total)+'</td></tr>';
+  }).join("") || '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
+  var t=linesTotal(c.lines||[], c.vatMode);
+  return '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' بنود العقد'+
+      '<span class="ct-sec-lock">الكميةُ تشمل أوامرَ التغيير المعتمدة</span></div>'+
+    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+
+      '<th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table></div>'+
+    '<div class="ct-total">'+totalsHTML(t, c.vatMode)+'</div>'+
+  '</div>';
+}
+
+function ctrExtractsHTML(c){
+  return '<div class="card ct-empty">'+
+    '<div class="ct-empty-ic">'+_svg("banknote")+'</div>'+
+    '<div class="ct-empty-t">المستخلصات — المرحلة القادمة</div>'+
+    '<div class="ct-empty-s">سيُبنى هنا المستخلصُ التراكميُّ بسُلَّم خصوماته: محتجزُ الضمان · استردادُ المقدَّم · غرامةُ التأخير · الموادُّ المصروفة · عدمُ المطابقة. ودالّةُ الحساب <b>مكتوبةٌ ومُختبَرةٌ بالفعل</b> في هذه المرحلة.</div>'+
+  '</div>';
+}
+
+function ctrLogHTML(c){
+  var tl=(c.timeline||[]).map(function(e){
+    return '<div class="ct-tl-row"><span class="d"></span><div><div class="t">'+_esc(e.event)+'</div>'+
+      '<div class="m">'+_esc(e.by||"")+' · '+_esc(String(e.at||"").slice(0,16).replace("T"," "))+
+      (e.note?' — '+_esc(e.note):'')+'</div></div></div>';
+  }).join("") || '<div style="color:var(--muted);font-size:12px">—</div>';
+  return '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' السجل الزمني</div>'+
+    '<div class="ct-timeline">'+tl+'</div></div>';
+}
+
+function filterCtrs(k,v){
+  _cFilter[k]=v||""; paintCtrs();
+  if(k==="q"){ var i=document.getElementById("ct-c-q"); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length,i.value.length); }catch(e){} } }
+}
+function openCtr(id){ _cOpen=id; _cTab="overview"; paintCtrs(); }
+function backToCtrs(){ _cOpen=null; paintCtrs(); }
+function ctrTab(t){ _cTab=t; paintCtrs(); }
+function openReqFromCtr(reqId){ try{ showPage(PAGE_REQS); }catch(e){} openReq(reqId); }
+function openCtrFromReq(cid){ try{ showPage(PAGE_CTRS); }catch(e){} openCtr(cid); }
+
+function transit(action){
+  var c=contractById(_cOpen); if(!c) return;
+  var t=CTR_TRANSITIONS[action]; if(!t) return;
+  Promise.resolve(_confirm({ title:t.lbl, msg:'«'+(c.title||c.id)+'» — '+t.lbl+'؟' })).then(function(ok){
+    if(!ok) return;
+    var reason="";
+    if(t.needsReason){
+      reason=(window.prompt("السبب (إلزامي):")||"").trim();
+      if(!reason){ _toast("⚠ السبب إلزامي","warn"); return; }
+    }
+    return transitContract(_cOpen, action, reason).then(function(){
+      paintCtrs(); _toast("✅ "+t.lbl,"success");
+    });
+  }).catch(function(e){
+    console.warn("contracts/transit",e);
+    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإجراء"),"warn");
+  });
+}
+
+/* زرُّ «إنشاء العقد» على بطاقة الطلب المعتمَد. */
+function makeContract(){
+  var r=requestById(_rOpen); if(!r) return;
+  Promise.resolve(_confirm({
+    title:"إنشاء العقد",
+    msg:'سيُنشأ عقدٌ سارٍ من «'+(r.title||r.id)+'» بقيمة '+money(r.value)+' ر.س، ويُقفل الطلب.'
+  })).then(function(ok){
+    if(!ok) return;
+    return convertToContract(_rOpen).then(function(cid){
+      paintReqs();
+      _toast("✅ أُنشئ العقد "+cid,"success");
+      try{ showPage(PAGE_CTRS); }catch(e){}
+      openCtr(cid);
+    });
+  }).catch(function(e){
+    console.warn("contracts/makeContract",e);
+    _toast("⚠ "+(e&&e.message?e.message:"تعذّر إنشاء العقد"),"warn");
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════════
    ٨) التركيبُ الذاتيّ — صفحة + مجموعةُ قائمةٍ جانبية + لفُّ showPage
    ════════════════════════════════════════════════════════════════════ */
 function ensurePages(){
   injectCSS();
   var anyPage = document.querySelector(".page");
   var host = anyPage ? anyPage.parentElement : document.body;
-  [PAGE_VENDORS, PAGE_REQS].forEach(function(id){
+  [PAGE_VENDORS, PAGE_REQS, PAGE_CTRS].forEach(function(id){
     if(document.getElementById("page-"+id)) return;
     var div = document.createElement("div");
     div.className = "page"; div.id = "page-"+id;
@@ -2177,7 +2623,7 @@ function injectCSS(){
      النمطُ الثيمين معاً بلا صيانةٍ منفصلة. والأرقامُ كلُّها مونوسبيس بـ
      tabular-nums و direction:ltr كما في كل شاشات المنصة. */
   st.textContent = [
-"#page-"+PAGE_VENDORS+",#page-"+PAGE_REQS+"{direction:rtl}",
+"#page-"+PAGE_VENDORS+",#page-"+PAGE_REQS+",#page-"+PAGE_CTRS+"{direction:rtl}",
 ".ct-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}",
 ".ct-title{font-size:19px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary);margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
 ".ct-sub{font-size:12px;color:var(--muted);margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
@@ -2235,6 +2681,13 @@ function injectCSS(){
 ".ct-tl-row .d{width:9px;height:9px;border-radius:50%;background:var(--primary);flex-shrink:0;margin-top:5px}",
 ".ct-tl-row .t{font-size:12.5px;font-weight:800;color:var(--text)}",
 ".ct-tl-row .m{font-size:11px;color:var(--muted);font-weight:600;margin-top:2px}",
+/* ── بطاقة العقد ── */
+".ct-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:2px}",
+".ct-tab{background:none;border:none;border-bottom:2px solid transparent;padding:8px 13px;font-size:12.5px;font-weight:800;color:var(--muted);cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;transition:color .15s,border-color .15s}",
+".ct-tab:hover{color:var(--text)}",
+".ct-tab.on{color:var(--primary);border-bottom-color:var(--primary)}",
+".ct-money-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px}",
+".ct-money-row .ct-tl{align-items:flex-start}",
 
 /* الأقسام والجداول */
 ".ct-sec{margin-bottom:14px}",
@@ -2297,6 +2750,7 @@ function injectSidebarGroup(){
   grp.style.maxHeight = "0";
 
   [{ id:"nav-contract-reqs-btn", page:PAGE_REQS,    icon:"fileText", lbl:"طلبات التعاقد" },
+   { id:"nav-contracts-btn",     page:PAGE_CTRS,    icon:"briefcase",lbl:"العقود" },
    { id:"nav-vendors-btn",       page:PAGE_VENDORS, icon:"hardHat",  lbl:"سجل الأطراف" }].forEach(function(b){
     var btn = document.createElement("button");
     btn.className = "sidebar-nav-btn sidebar-child";
@@ -2318,7 +2772,7 @@ function injectSidebarGroup(){
 function hookShowPage(){
   if(window._ctHooked || typeof window.showPage !== "function") return;
   var orig = window.showPage;
-  var OURS = [PAGE_VENDORS, PAGE_REQS];
+  var OURS = [PAGE_VENDORS, PAGE_REQS, PAGE_CTRS];
   window.showPage = function(id){
     if(OURS.indexOf(id) !== -1 && !canView()){
       _toast("🔒 هذا القسم غير متاح لدورك","warn");
@@ -2337,7 +2791,7 @@ function hookShowPage(){
       }catch(e){}
       document.querySelectorAll(".sidebar-nav-btn").forEach(function(b){ b.classList.toggle("active", b.dataset.page === id); });
       _page = id;
-      if(id === PAGE_VENDORS) render(); else renderReqs();
+      if(id === PAGE_VENDORS) render(); else if(id === PAGE_CTRS) renderCtrs(); else renderReqs();
     } else if(OURS.indexOf(_page) !== -1){ _page = ""; }
   };
   window._ctHooked = true;
@@ -2383,6 +2837,13 @@ window.contracts = {
   filterReqs: filterReqs, openReq: openReq, backToReqs: backToReqs,
   act: act, doCancel: doCancel, openPay: openPay, closePay: closePay, doPay: doPay,
   requests: requests, requestById: requestById,
+  // العقود [المرحلة ٣]
+  renderCtrs: renderCtrs, startCtrSync: startCtrSync, stopCtrSync: stopCtrSync,
+  filterCtrs: filterCtrs, openCtr: openCtr, backToCtrs: backToCtrs, ctrTab: ctrTab,
+  transit: transit, makeContract: makeContract,
+  openReqFromCtr: openReqFromCtr, openCtrFromReq: openCtrFromReq,
+  contractsList: contractsList, contractById: contractById, contractForRequest: contractForRequest,
+  _convert: convertToContract, _transit: transitContract,
   // مقابضُ طبقة البيانات — مكشوفةٌ لفحص المتصفّح ليختبر القواعد نفسَها التي
   // تحرسها الشاشة، لا نسخةً منها: الرفضُ يجب أن يقع في البيانات لا على الزرّ.
   _create: createRequest, _act: actOnRequest, _pay: payRequest, _cancel: cancelRequest,
@@ -2421,6 +2882,12 @@ window.contracts = {
   _docProjectName: docProjectName,
   _docProjectKey: docProjectKey,
   _budgetLinkState: budgetLinkState,
+  _contractFromRequest: contractFromRequest,
+  _advanceAmountOf: advanceAmountOf,
+  _ctrCanTransit: ctrCanTransit,
+  _ctrActionsFor: ctrActionsFor,
+  _ctrIsFinal: ctrIsFinal,
+  _CTR_TRANSITIONS: CTR_TRANSITIONS,
   // الثوابت
   _VAT_RATE: VAT_RATE,
   _VAT_MODES: VAT_MODES,

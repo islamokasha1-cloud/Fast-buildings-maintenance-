@@ -5615,8 +5615,8 @@ function contractsPhase1() {
   /* ════════════════════════════════════════════════════════════
      المرحلة ٢ — طلبُ التعاقد ودورتُه وأمرُ الدفع
      ════════════════════════════════════════════════════════════ */
-  T("الصفحتان تُركَّبان ذاتياً (سجل الأطراف + طلبات التعاقد)",
-    /PAGE_REQS\s*=\s*"contract-requests"/.test(src) && /\[PAGE_VENDORS, PAGE_REQS\]\.forEach/.test(src));
+  T("الصفحاتُ تُركَّب ذاتياً (سجل الأطراف + طلبات التعاقد + العقود)",
+    /PAGE_REQS\s*=\s*"contract-requests"/.test(src) && /\[PAGE_VENDORS, PAGE_REQS, PAGE_CTRS\]\.forEach/.test(src));
   T("مجموعتها الجانبية تحمل زرّي الصفحتين",
     /nav-contract-reqs-btn/.test(src) && /nav-vendors-btn/.test(src));
 
@@ -5725,6 +5725,88 @@ function contractsPhase1() {
     /_loadBoq:\s*loadBoq/.test(PMSRC) && /_loadBudget:\s*loadBudget/.test(PMSRC) && /_safeKey:\s*_safeKey/.test(PMSRC));
   T("وتعرّض قائمةَ المشاريع الموحّدة (_allProjects) فلا تُنسَخ قاعدةُ دمج اليدويّ",
     /_allProjects:\s*allProjects/.test(PMSRC) && /_MANUAL_PREFIX:\s*MANUAL_PREFIX/.test(PMSRC));
+
+  /* ════════════════════════════════════════════════════════════
+     المرحلة ٣ — العقد: التحويلُ بمعاملة وبطاقةُ العقد
+     ════════════════════════════════════════════════════════════ */
+  const REQ3 = {
+    id: "CRQ-1", vendorId: "V1", vendorName: "مؤسسة الأنوار",
+    projectId: "__OTHER__", isCustomProject: true, projectName: "استراحة الشمال",
+    budgetCategoryKey: "", title: "سور", engagement: "contract", vatMode: "excl",
+    lines: [{ id: "L1", boqLineId: "b1", desc: "بناء سور", unit: "م.ط", qty: 60, unitPrice: 180 }],
+    advance: { pct: 10, recoveryPct: 20 }, retention: { pct: 5, releaseOn: "completion" },
+    penalty: { perDayPct: 0.1, capPct: 10 }, warranty: { months: 12 }
+  };
+  const CTR3 = C._contractFromRequest(REQ3, "CTR-1", "2026-08-09T10:00:00Z", "المسؤول");
+
+  T("★ بناءُ العقد **دالةٌ نقيةٌ** تُفحَص بلا Firestore", typeof C._contractFromRequest === "function");
+  T("★ العقدُ يرث القيمةَ المحسوبةَ من البنود لا رقماً حرّاً", CTR3.value === 12420);
+  T("★ ويرث شكلَ المشروع القياسيَّ كما هو (لا يُعاد اشتقاقُه فينحرف)",
+    CTR3.projectId === "__OTHER__" && CTR3.isCustomProject === true && CTR3.projectName === "استراحة الشمال");
+  T("★ وبندُ الموازنة الفارغُ يبقى فارغاً — الربطُ اختياريٌّ في العقد أيضاً",
+    CTR3.budgetCategoryKey === "");
+  T("★ ويحمل requestId فسلسلةُ التوقيع قابلةٌ للتتبّع من العقد", CTR3.requestId === "CRQ-1");
+  T("★ والعقدُ ينشأ **سارياً لا مسودةً** (وُلد من طلبٍ معتمَد)", CTR3.status === "ctr_active");
+  T("الشروطُ التجارية تنتقل كاملةً بقيمها",
+    CTR3.retention.pct === 5 && CTR3.advance.recoveryPct === 20 && CTR3.penalty.capPct === 10 && CTR3.warranty.months === 12);
+  T("والسجلُّ الزمنيُّ يبدأ بقيد الإنشاء", (CTR3.timeline || []).length === 1 && CTR3.timeline[0].code === "created");
+  T("أمرُ الدفع يُنشئ عقداً من نوعه لا أمرَ إسناد",
+    C._contractFromRequest({ engagement: "pay_order", lines: [] }, "X", "", "").type === "pay_order");
+  T("★ مبلغُ الدفعة المقدمة **يُشتقّ** من نسبتها على قيمة العقد",
+    C._advanceAmountOf(CTR3) === 1242 && C._advanceAmountOf({ value: 1000, advance: {} }) === 0);
+
+  /* حارسُ التكرار داخلَ المعاملة لا قبلها */
+  T("★ التحويلُ معاملةٌ واحدةٌ تكتب العقدَ وتوسم الطلبَ معاً",
+    /function convertToContract[\s\S]{0,900}runTransaction[\s\S]{0,1400}t\.set\(reqRef/.test(src));
+  T("★ حارسُ عدم التكرار **داخل** المعاملة، ويُرجع معرّفَ العقد القائم لا خطأً غامضاً",
+    /r\.status === "crq_converted" && r\.contractId\)\{\s*\n\s*return \{ id:r\.contractId, already:true \}/.test(src));
+  T("★ ولا يُنشأ عقدٌ من طلبٍ غير معتمَد",
+    /r\.status !== "crq_approved"\) throw new Error/.test(src));
+  T("★ وإنشاءُ العقد للمشتريات أو الأدمن فقط — يُفحَص في طبقة البيانات",
+    /\["procurement_officer","admin"\]\.indexOf\(role\) === -1\) return Promise\.reject/.test(src));
+
+  /* انتقالاتُ حالة العقد */
+  T("★ الإيقافُ من «ساري» فقط، والاستئنافُ من «موقوف» فقط",
+    C._ctrCanTransit("suspend", "ctr_active", "project_manager") &&
+    !C._ctrCanTransit("suspend", "ctr_suspended", "project_manager") &&
+    C._ctrCanTransit("resume", "ctr_suspended", "admin"));
+  T("★ الإقفالُ النهائيُّ للمالية لا للمشتريات",
+    C._ctrCanTransit("close", "ctr_completed", "finance") &&
+    !C._ctrCanTransit("close", "ctr_completed", "procurement_officer"));
+  T("★ الفسخُ للأدمن وحدَه", C._ctrCanTransit("terminate", "ctr_active", "admin") &&
+    !C._ctrCanTransit("terminate", "ctr_active", "project_manager"));
+  T("★ لا إجراءَ على عقدٍ مقفلٍ أو مفسوخ",
+    C._ctrActionsFor("ctr_closed", "admin").length === 0 && C._ctrActionsFor("ctr_terminated", "admin").length === 0);
+  T("الحالاتُ النهائيةُ مصنَّفةٌ صحيحاً", C._ctrIsFinal("ctr_closed") && C._ctrIsFinal("ctr_terminated") && !C._ctrIsFinal("ctr_active"));
+  T("★ القاعدةُ نفسُها تحرس المعاملة لا الأزرارَ وحدها",
+    /if\(!ctrCanTransit\(action, c\.status, role\)\) throw/.test(src));
+  T("★ الإقفالُ يُفرِج عن المحتجز بقيمةٍ محسوبةٍ لا مُدخَلة",
+    /if\(action==="close"\) c\.retention = Object\.assign\([\s\S]{0,120}released: r2\(contractValue\(c\)/.test(src));
+  T("والسببُ إلزاميٌّ للإيقاف والفسخ في طبقة البيانات",
+    /if\(t\.needsReason && !reason\) return Promise\.reject/.test(src));
+
+  /* الصفحةُ الثالثة وزرُّ التحويل */
+  T("صفحةُ العقود مركَّبةٌ ذاتياً ولها زرُّ قائمة",
+    /PAGE_CTRS\s*=\s*"contracts-list"/.test(src) && /nav-contracts-btn/.test(src) &&
+    /\[PAGE_VENDORS, PAGE_REQS, PAGE_CTRS\]\.forEach/.test(src));
+  T("★ زرُّ «إنشاء العقد» يظهر على الطلب المعتمَد وللمشتريات/الأدمن فقط",
+    /r\.status==="crq_approved" && \["procurement_officer","admin"\]\.indexOf\(_role\(\)\)!==-1/.test(src));
+  T("والطلبُ المحوَّل يعرض رابطَ عقده في الاتجاه المقابل",
+    /r\.status==="crq_converted" && r\.contractId/.test(src));
+
+  /* ★ حارسُ الأيقونات: اسمٌ غيرُ موجودٍ في مجموعة المنصة يرسم فراغاً صامتاً */
+  {
+    const iconBlock = (HTML.match(/^const _ICON = \{([\s\S]*?)^\};/m) || [])[1] || "";
+    const known = new Set((iconBlock.match(/^  ([a-zA-Z0-9]+):/gm) || []).map(x => x.trim().replace(":", "")));
+    const used = new Set([
+      ...(src.match(/_icn\("([a-zA-Z0-9]+)"/g) || []).map(x => x.slice(6, -1)),
+      ...(src.match(/_svg\("([a-zA-Z0-9]+)"/g) || []).map(x => x.slice(6, -1)),
+      ...(src.match(/icon:"([a-zA-Z0-9]+)"/g) || []).map(x => x.slice(6, -1))
+    ]);
+    const missing = [...used].filter(n => !known.has(n));
+    T("★ كلُّ أيقونةٍ تستعملها الوحدة موجودةٌ في مجموعة المنصة (وإلا رُسم فراغٌ صامت)",
+      known.size > 0 && missing.length === 0, missing.join(" "));
+  }
 
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
