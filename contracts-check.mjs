@@ -5,7 +5,8 @@
 // المرحلة ١: سجلُّ الأطراف — منشآتٍ **وأشخاصاً** (التعاقدُ بالهوية لا بالسجل التجاري)
 // المرحلة ٢: طلبُ التعاقد من المقايسة · دورةُ الاعتماد بأربع بوّابات · أمرُ الدفع دون العتبة
 // المرحلة ٣: التحويلُ لعقدٍ ساري بمعاملةٍ واحدة (بحارس عدم التكرار) · بطاقةُ العقد وانتقالاتُه
-// المرحلة ٤: المستخلصُ التراكميُّ بحرّاسه الثلاثة · سُلَّمُ الخصومات · الاعتمادُ والسدادُ بإيصال — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
+// المرحلة ٤: المستخلصُ التراكميُّ بحرّاسه الثلاثة · سُلَّمُ الخصومات · الاعتمادُ والسدادُ بإيصال
+// الوثيقةُ التعاقدية: شروطٌ نصّيةٌ منسوخةٌ ومتولّدة · حالةُ توقيعٍ قبل السريان · مخرَجٌ ورقيّ — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
 // و**الرقمُ المرسوم = الرقمُ المحسوب** (شريطُ الأرقام مقابل الدوالّ النقية)، والتطبيعُ
 // العربيُّ في البحث، وشرائطُ الحالة من توكنز SLA، والثيمُ الداكن، والجوّالُ بلا قصّ.
 import { chromium } from 'playwright-core';
@@ -317,7 +318,9 @@ await page.evaluate(() => { const a = document.querySelector('.main-area'); if (
 await page.fill('#ct-r-adv', '10');
 await page.fill('#ct-r-advrec', '20');
 await page.fill('#ct-r-ret', '5');
+await page.fill('#ct-r-pen', '0.1');
 await page.fill('#ct-r-pencap', '10');
+await page.fill('#ct-r-warr', '12');
 await page.waitForTimeout(400);
 
 await page.evaluate(() => window.contracts.submitRequest());
@@ -466,8 +469,8 @@ const conv = await page.evaluate(async (id) => {
   return { cid, reqStatus: r.status, reqLink: r.contractId,
            ctr: c ? { req: c.requestId, st: c.status, val: c.value, adv: c.advance.amount, ret: c.retention.pct } : null };
 }, reqId);
-check('★ التحويلُ أنشأ عقداً سارياً ووسم الطلبَ «تم إنشاء العقد» في معاملةٍ واحدة',
-  conv.ctr && conv.ctr.st === 'ctr_active' && conv.reqStatus === 'crq_converted' && conv.reqLink === conv.cid,
+check('★ التحويلُ أنشأ العقدَ **بانتظار التوقيع** ووسم الطلبَ في معاملةٍ واحدة',
+  conv.ctr && conv.ctr.st === 'ctr_pending_signature' && conv.reqStatus === 'crq_converted' && conv.reqLink === conv.cid,
   JSON.stringify(conv));
 check('★ والعقدُ يحمل معرّفَ طلبه (سلسلةُ التوقيع قابلةٌ للتتبّع)', conv.ctr.req === reqId);
 check('★ وورث القيمةَ المعتمَدة كما هي', conv.ctr.val === 33600);
@@ -508,6 +511,69 @@ await page.screenshot({ path: `${SHOTS}/17-contracts-list.png` });
 
 await page.evaluate((cid) => window.contracts.openCtr(cid), conv.cid);
 await page.waitForTimeout(1000);
+
+/* ── الوثيقةُ التعاقدية: شروطٌ وتوقيعٌ وطباعة ── */
+const preSign = await page.textContent('#page-contracts-list') || '';
+check('★ بطاقةُ العقد تُعلن أنه **لم يسرِ بعد** وتشرح الخطوة',
+  /لم يسرِ بعد/.test(preSign) && /سجّل التوقيع/.test(preSign));
+check('★ وزرّا «طباعة العقد» و«تسجيل التوقيع» ظاهران',
+  /طباعة العقد/.test(preSign) && /تسجيل التوقيع/.test(preSign));
+
+// المستخلصُ ممنوعٌ قبل التوقيع
+const beforeSign = await page.evaluate(async (cid) => {
+  const c = window.contracts.contractById(cid);
+  try { await window.contracts._createExt(c, { lines: [{ lineId: c.lines[0].id, cumQty: 10, unitPrice: c.lines[0].unitPrice }] }); return 'مرّ مستخلصٌ على عقدٍ غير موقَّع'; }
+  catch (e) { return e.message; }
+}, conv.cid);
+check('★ ولا مستخلصَ على عقدٍ لم يوقَّع', /عقدٍ ساري/.test(beforeSign), beforeSign);
+
+// الشروط: منسوخةٌ + متولّدةٌ من الأرقام
+await page.evaluate(() => window.contracts.ctrTab('clauses'));
+await page.waitForTimeout(900);
+const clTxt = await page.textContent('#page-contracts-list') || '';
+check('★ تبويبُ الشروط يعرض البنودَ القانونيةَ المنسوخة',
+  /نطاق العمل/.test(clTxt) && /السلامة/.test(clTxt) && /فض النزاع/.test(clTxt));
+check('★ والشرطُ الجزائيُّ نصّاً يطابق رقمَ العقد (٥٪ محتجز · غرامةٌ بسقفها)',
+  /غرامة التأخير/.test(clTxt) && /محتجز الضمان/.test(clTxt) && /5٪/.test(clTxt));
+check('والشروطُ الماليةُ مُعلَّمةٌ أنها تتولّد من الأرقام', /يتولّد من الأرقام/.test(clTxt));
+await page.screenshot({ path: `${SHOTS}/23-contract-clauses.png` });
+
+// المخرَجُ الورقيّ — يُلتقط بمقاطعة فتح النافذة
+const printed = await page.evaluate((cid) => {
+  let captured = '';
+  const realOpen = window.open;
+  window.open = function () { return { document: { write(h) { captured = h; }, close() { } }, focus() { }, print() { }, close() { } }; };
+  window.contracts.printContract(cid);
+  window.open = realOpen;
+  return captured;
+}, conv.cid);
+check('★ الطباعةُ تُنتج وثيقةً كاملة', printed.length > 2000 && /<title>عقد /.test(printed));
+check('★ وفيها أطرافُ العقد والطرفُ الثاني **بهويته**',
+  /الطرف الأول/.test(printed) && /الطرف الثاني/.test(printed) && /1045667788/.test(printed));
+check('★ وجدولُ بنود الأعمال وشروطُ العقد وحقولُ التوقيع',
+  /جدول بنود الأعمال/.test(printed) && /شروط العقد/.test(printed) && /الاسم \/ التوقيع \/ الختم/.test(printed));
+check('★ ونصُّ الغرامة المطبوع يحمل النسبةَ والسقف',
+  /غرامة تأخير قدرها 0\.1٪/.test(printed) && /بحد أقصى 10٪/.test(printed));
+check('وقيمةُ العقد وإجماليُّه في جدول الملخّص', /قيمة العقد/.test(printed) && /33,600\.00/.test(printed));
+fs.writeFileSync(`${SHOTS}/contract-print.html`, printed);
+
+// تسجيلُ التوقيع ⇒ العقد ساري
+const signRes = await page.evaluate(async (cid) => {
+  const noDoc = await window.contracts._sign(cid, {}).then(() => 'مرّ بلا نسخة', e => e.message);
+  await window.contracts._sign(cid, { url: 'https://example.test/signed.pdf', name: 'العقد الموقّع' });
+  const c = window.contracts.contractById(cid);
+  return { noDoc, st: c.status, docs: (c.signedDocs || []).length, at: !!c.signedAt };
+}, conv.cid);
+check('★ التوقيعُ يُرفض بلا نسخةٍ موقّعة', /إلزامية/.test(signRes.noDoc), signRes.noDoc);
+check('★ ورفعُ النسخة الموقّعة جعل العقد **سارياً**',
+  signRes.st === 'ctr_active' && signRes.docs === 1 && signRes.at, JSON.stringify(signRes));
+await page.evaluate(() => window.contracts.ctrTab('overview'));
+await page.waitForTimeout(800);
+check('والبطاقةُ صارت تعرض توقيعَه ومرفقَه',
+  /وُقِّع في/.test((await page.textContent('#page-contracts-list')) || ''));
+
+await page.evaluate(() => window.contracts.ctrTab('overview'));
+await page.waitForTimeout(600);
 const ovTxt = await page.textContent('#page-contracts-list') || '';
 check('بطاقةُ العقد تعرض القيمةَ والمقدَّمَ والمحتجز',
   /قيمة العقد النافذة/.test(ovTxt) && /دفعة مقدمة/.test(ovTxt) && /محتجز الضمان/.test(ovTxt));

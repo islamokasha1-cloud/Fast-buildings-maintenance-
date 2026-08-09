@@ -5746,7 +5746,8 @@ function contractsPhase1() {
   T("★ وبندُ الموازنة الفارغُ يبقى فارغاً — الربطُ اختياريٌّ في العقد أيضاً",
     CTR3.budgetCategoryKey === "");
   T("★ ويحمل requestId فسلسلةُ التوقيع قابلةٌ للتتبّع من العقد", CTR3.requestId === "CRQ-1");
-  T("★ والعقدُ ينشأ **سارياً لا مسودةً** (وُلد من طلبٍ معتمَد)", CTR3.status === "ctr_active");
+  T("★ والعقدُ ينشأ **بانتظار التوقيع** — لا مسودةً ولا سارياً (يُغيَّر في §الوثيقة التعاقدية)",
+    CTR3.status === "ctr_pending_signature");
   T("الشروطُ التجارية تنتقل كاملةً بقيمها",
     CTR3.retention.pct === 5 && CTR3.advance.recoveryPct === 20 && CTR3.penalty.capPct === 10 && CTR3.warranty.months === 12);
   T("والسجلُّ الزمنيُّ يبدأ بقيد الإنشاء", (CTR3.timeline || []).length === 1 && CTR3.timeline[0].code === "created");
@@ -5889,6 +5890,82 @@ function contractsPhase1() {
     /function ladderHTML\(calc, c\)/.test(src) && /ladderHTML\(extNet\(_extDraft,c,ctx\), c\)/.test(src));
   T("قيمةُ المواد تُدخَل يدوياً مع شرحِ السبب (المخزون بلا تسعيرة)",
     /الكميات بلا تكلفة/.test(src));
+
+  /* ════════════════════════════════════════════════════════════
+     الوثيقةُ التعاقدية — شروطٌ نصّية · حالةُ توقيع · مخرَجٌ ورقيّ
+     ════════════════════════════════════════════════════════════ */
+  const CT5 = { id: "CTR-1", value: 100000, vatMode: "excl", lines: [{ id: "L1", qty: 1000, unitPrice: 100 }],
+    advance: { pct: 10, recoveryPct: 20 }, retention: { pct: 5, releaseOn: "completion" },
+    penalty: { perDayPct: 0.1, capPct: 10 }, warranty: { months: 12 } };
+  const FIN = C._financialClauses(CT5);
+  const finBy = (t) => (FIN.find(x => x.title === t) || {}).body || "";
+
+  T("★ العقدُ ينشأ **بانتظار التوقيع** لا سارياً (قرارُ المالك: لا مالَ على عقدٍ غير موقَّع)",
+    C._contractFromRequest({ lines: [] }, "C1", "t", "u").status === "ctr_pending_signature");
+  T("★ ويحمل **نسخةً مجمَّدةً** من الشروط لا إشارةً لقالبٍ يتغيّر",
+    C._contractFromRequest({ lines: [] }, "C1", "t", "u").clauses.length === C._DEFAULT_CLAUSES.length);
+  T("والقوالبُ المُمرَّرةُ تُنسَخ بدل الافتراضية",
+    C._contractFromRequest({ lines: [] }, "C1", "t", "u", [{ key: "k", category: "general", title: "أ", body: "ب" }]).clauses.length === 1);
+  T("★ ونسخُ الشروط **قيمٌ لا مراجع** — تعديلُ المصدر بعدها لا يمسّ العقد",
+    (() => { const src2 = [{ key: "k", category: "general", title: "أ", body: "ب" }];
+      const b = C._contractFromRequest({ lines: [] }, "C1", "t", "u", src2);
+      src2[0].body = "تغيّر"; return b.clauses[0].body === "ب"; })());
+
+  /* الشروطُ الماليةُ تتولّد من الأرقام فلا تتناقض مع الحساب */
+  T("★ نصُّ الشرط الجزائيّ **يتولّد من الرقم** فلا يخالف ما يخصمه المستخلص",
+    /0\.1٪/.test(finBy("غرامة التأخير")) && /10٪/.test(finBy("غرامة التأخير")) && /10,000\.00/.test(finBy("غرامة التأخير")));
+  T("ونصُّ المحتجز يذكر النسبةَ وموعدَ الإفراج",
+    /5٪/.test(finBy("محتجز الضمان")) && /الاستلام الابتدائي/.test(finBy("محتجز الضمان")));
+  T("ونصُّ المقدَّم يذكر مبلغَه المشتقَّ ونسبةَ استرداده",
+    /10,000\.00/.test(finBy("الدفعة المقدمة")) && /20٪/.test(finBy("الدفعة المقدمة")));
+  T("ونصُّ القيمة يذكر وضعَ الضريبة صراحةً", /ضريبة/.test(finBy("قيمة العقد")));
+  T("★ وشرطٌ بلا رقمٍ لا يُطبَع نصُّه (لا محتجزَ صفريٌّ في العقد)",
+    C._financialClauses({ value: 100, advance: {}, retention: { pct: 0 }, penalty: {}, warranty: {} })
+      .every(x => x.title !== "محتجز الضمان" && x.title !== "غرامة التأخير"));
+  T("★ والشروطُ الماليةُ **لا تُخزَّن** — تُشتقّ عند العرض فتبقى مطابقةً للأرقام",
+    !/clauses:.*financialClauses/.test(src) && /function financialClauses/.test(src));
+  T("والشروطُ تُعرَض مجمَّعةً بتصنيفها بترتيبٍ ثابت",
+    C._allClausesOf(CT5).every(g => Object.keys(C._CLAUSE_CATS).includes(g.category)));
+
+  /* دورةُ التوقيع */
+  T("★ «تسجيل التوقيع» ينقل من «بانتظار التوقيع» إلى «ساري» فقط",
+    C._ctrCanTransit("sign", "ctr_pending_signature", "procurement_officer") &&
+    !C._ctrCanTransit("sign", "ctr_active", "admin"));
+  T("★ ولا إيقافَ ولا إنهاءَ لعقدٍ لم يوقَّع بعد",
+    !C._ctrCanTransit("suspend", "ctr_pending_signature", "admin") &&
+    !C._ctrCanTransit("complete", "ctr_pending_signature", "admin"));
+  T("لكنّ الفسخَ ممكنٌ قبل التوقيع (عقدٌ لم يُوقَّع يُلغى)",
+    C._ctrCanTransit("terminate", "ctr_pending_signature", "admin"));
+  T("★ والنسخةُ الموقّعةُ **إلزامية** — لا يسري عقدٌ بضغطةٍ بلا إثبات",
+    /function signContract[\s\S]{0,220}!att \|\| !att\.url\) return Promise\.reject/.test(src));
+  T("★ والتوقيعُ يُفحَص في المعاملة أيضاً لا على الزرّ",
+    /c\.status!=="ctr_pending_signature"\) throw new Error\("العقد ليس بانتظار التوقيع"\)/.test(src));
+  T("★ والمستخلصُ ممنوعٌ قبل السريان (الحارسُ القائم يغطّيه تلقائياً)",
+    /contract\.status !== "ctr_active"\) return Promise\.reject/.test(src));
+
+  /* المخرَجُ الورقيّ */
+  T("★ الطباعةُ تستعمل `_openPrintWindow` القائمة في النواة (ومعها معالجةُ iOS)",
+    /typeof _openPrintWindow === "function"\) _openPrintWindow\(html\)/.test(src));
+  T("★ والمطبوعُ يُعرِّف الطرفَ الثاني **بهويته** من `identityOf` لا بشرطٍ محلّيّ",
+    /var v=vendorById\(c\.vendorId\), idn=v\?identityOf\(v\):null/.test(src) && /الطرف الثاني/.test(src));
+  T("★ وفيه حقولُ توقيعِ الطرفين", /class="sign"/.test(src) && /الاسم \/ التوقيع \/ الختم/.test(src));
+  T("ويحمل جدولَ بنود الأعمال وشروطَ العقد معاً",
+    /جدول بنود الأعمال/.test(src) && /<h2>شروط العقد<\/h2>/.test(src));
+  T("★ وكلُّ نصٍّ يمرّ بـ`_esc` (المطبوعُ يُبنى بسلاسل)",
+    !/\+c\.vendorName\+/.test(src) && !/\+x\.body\+/.test(src));
+
+  /* قوالبُ الشروط */
+  T("★ القوالبُ للأدمن وحدَه", /if\(_role\(\)!=="admin"\) return Promise\.reject\(new Error\("قوالب الشروط للأدمن فقط"\)\)/.test(src));
+  T("★ وتحريرُ شروط عقدٍ يمسّ نسختَه وحدَها لا القالب",
+    /function saveContractClauses[\s\S]{0,600}c\.clauses=clauses/.test(src) && !/saveContractClauses[\s\S]{0,600}CLAUSE_DOC/.test(src));
+  T("ولا تُعدَّل شروطُ عقدٍ منتهٍ أو مفسوخ",
+    /c\.status!=="ctr_pending_signature" && c\.status!=="ctr_active"\) throw/.test(src));
+  T("قوالبُ افتراضيةٌ تعمل من أوّل يوم", C._DEFAULT_CLAUSES.length >= 8 &&
+    C._DEFAULT_CLAUSES.every(x => x.key && x.category && x.title && x.body));
+  T("★ وتغطّي السلامةَ ونظاميةَ العمالة وفضَّ النزاع",
+    C._DEFAULT_CLAUSES.some(x => x.category === "safety") &&
+    C._DEFAULT_CLAUSES.some(x => /نظامي/.test(x.body)) &&
+    C._DEFAULT_CLAUSES.some(x => /نزاع/.test(x.body)));
 
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
