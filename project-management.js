@@ -1602,6 +1602,18 @@ window.projectMgmt = {
   // مكشوفة لفحوص hail-tests (دوال نقية)
   _projectRollup: projectRollup,
   _rollupByCategory: rollupByCategory,
-  _BUDGET_CATEGORIES: BUDGET_CATEGORIES
+  _BUDGET_CATEGORIES: BUDGET_CATEGORIES,
+  /* جسرُ المقايسة والموازنة للوحدات الأخرى (v18.9 — وحدة التعاقدات).
+     تُقرأ المساراتُ والمحمِّلاتُ من هنا **ولا تُنسَخ**: قاعدةُ اشتقاق مفتاح المشروع
+     (`_safeKey` ومعها بادئةُ المشروع اليدويّ) قاعدةٌ واحدة، ونسختان منها تنحرفان
+     فيقرأ طلبُ التعاقد مقايسةَ مشروعٍ غيرِ الذي تكتبه إدارةُ المشاريع. */
+  _safeKey: _safeKey,
+  _boqDocPath: boqDocPath,
+  _budgetDocPath: budgetDocPath,
+  _loadBoq: loadBoq,
+  _loadBudget: loadBudget,
+  _budgetTotal: budgetTotal,
+  _catForItemType: _catForItemType,
+  _CAT_NAME: CAT_NAME
 };
 })();
