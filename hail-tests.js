@@ -41,6 +41,7 @@ const LC_PATH  = [path.resolve(path.dirname(IDX), "labor-catalog.js")].find(p =>
 const ST_PATH  = [path.resolve(path.dirname(IDX), "stocktake.js")].find(p => fs.existsSync(p));
 const FA_PATH  = [path.resolve(path.dirname(IDX), "finance-audit.js")].find(p => fs.existsSync(p));
 const HRP_PATH = [path.resolve(path.dirname(IDX), "hr-payments.js")].find(p => fs.existsSync(p));
+const CTR_PATH = [path.resolve(path.dirname(IDX), "contracts.js")].find(p => fs.existsSync(p));
 
 const VER = (HTML.match(/const APP_VERSION = "(v[\d.a-z]+)"/) || [])[1] || "?";
 
@@ -5409,6 +5410,219 @@ function tvWallGuards() {
     /<circle cx="12" cy="12" r="2\.1" fill="currentColor" stroke="none"\/>/.test(HTML));
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   وحدة التعاقدات (contracts.js) — المرحلة ١
+   حرّاسٌ على الدوالّ النقية وحدها: هي مصدرُ الحقيقة الحسابيّ، وكلُّ شاشةٍ
+   تُبنى فوقها لاحقاً تقرؤها ولا تعيد حسابها.
+   ══════════════════════════════════════════════════════════════════ */
+function contractsPhase1() {
+  H("وحدة التعاقدات — المرحلة ١ (contracts.js)");
+  if (!CTR_PATH) { T("contracts.js موجود", false); return; }
+  const src = fs.readFileSync(CTR_PATH, "utf8");
+  const vm = require("vm");
+  try { new vm.Script(src); T("صياغة contracts.js سليمة", true); }
+  catch (e) { T("صياغة contracts.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  // ── نقطة الربط الوحيدة في index.html ──
+  T("الوسم موجود في index.html", /<script src="contracts\.js\?v=/.test(HTML));
+
+  const ctrBuild = (src.match(/var MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
+  T("★ MODULE_BUILD يطابق APP_VERSION (يُرفَعان معاً)",
+    ctrBuild === VER, `MODULE_BUILD=${ctrBuild}  APP_VERSION=${VER}`);
+
+  /* ── العزل عن مسار المشتريات ──
+     القرارُ المحوريّ: أمرُ الإسناد ليس طلبَ شراء. أيُّ لمسٍ لـ global_purchases
+     أو للمخزون يعني تسرّبَ أرقام التعاقد إلى مؤشّرات التوريد — وهو الخطأُ الذي
+     عُزلت لأجله hr-payments أصلاً. */
+  T("★ لا تكتب ولا تقرأ مجموعة المشتريات (global_purchases)",
+    !/["']global_purchases/.test(src) && !/PURCHASES_COLLECTION\s*\(/.test(src));
+  T("★ لا تستدعي savePurchase ولا تلمس مصفوفة purchases",
+    !/\bsavePurchase\s*\(/.test(src) && !/\bpurchases\s*\.(find|filter|map|push)\b/.test(src));
+  T("★ لا تلمس المخزون ولا البند المستعاض",
+    !/_inventoryItems|substituteBudget|substituteAccountId/.test(src));
+  T("مجموعاتها الخاصة معرّفة مع نسخ التطوير",
+    /global_vendors_dev/.test(src) && /global_contract_requests_dev/.test(src) &&
+    /global_contracts_dev/.test(src) && /global_contract_extracts_dev/.test(src));
+
+  /* ── السقوف: واحدٌ مقروءٌ من النواة، وواحدٌ من وثيقة الإعدادات نفسها ── */
+  T("★ سقف التنفيذي يُقرأ من CEO_APPROVAL_THRESHOLD الموحّد لا رقماً مكتوباً",
+    /CEO_APPROVAL_THRESHOLD/.test(src));
+  T("★ عتبة أمر الدفع تُقرأ من وثيقة إعدادات المشتريات نفسها (بلا وثيقة ثانية)",
+    /global_purchase_config/.test(src) && /contractPayOrderThreshold/.test(src));
+
+  /* ── الأمان: معاملات onclick عبر _jq لا esc (درس v18.9vu-H5) ── */
+  T("★ معاملات onclick النصية تمرّ عبر _jq لا esc",
+    /function _jq\(/.test(src) && !/onclick="[^"]*\(\\'\s*\+\s*_esc\(/.test(src));
+
+  // ── تحميلُ الوحدة في سياقٍ بلا مستند: الدوالُّ النقية يجب أن تعمل وحدها ──
+  const sandbox = { window: {}, console, document: undefined };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); }
+  catch (e) { T("★ تُحمَّل بلا DOM (الدوال النقية قابلة للفحص)", false, String(e.message).slice(0, 120)); return; }
+  T("★ تُحمَّل بلا DOM (الدوال النقية قابلة للفحص)", true);
+
+  const C = sandbox.window.contracts;
+  T("تعرّض window.contracts ودوالَّها النقية",
+    C && typeof C._vatSplit === "function" && typeof C._crqNextStage === "function" &&
+    typeof C._extNet === "function" && typeof C._payOrderAllowed === "function");
+  if (!C || typeof C._crqNextStage !== "function") return;
+
+  /* ════ الضريبة: ثلاثةُ أوضاعٍ لا وضعان ════ */
+  const ex = C._vatSplit(100, "excl"), inc = C._vatSplit(115, "incl"), non = C._vatSplit(100, "none");
+  T("ض.ق.م — excl: 100 ⇐ أساس 100 وضريبة 15 وإجمالي 115",
+    ex.base === 100 && ex.vat === 15 && ex.total === 115);
+  T("ض.ق.م — incl: 115 ⇐ أساس 100 وضريبة 15",
+    inc.base === 100 && inc.vat === 15 && inc.total === 115);
+  T("★ ض.ق.م — none: بلا ضريبة إطلاقاً (لا يُستخرَج ١٥٪ وهميّ من غير المسجَّل)",
+    non.base === 100 && non.vat === 0 && non.total === 100);
+  T("وضعٌ مجهول يرتدّ إلى incl (لا ضريبةَ تُخترَع ولا تضيع)",
+    C._vatSplit(115, "zzz").vat === 15);
+
+  /* ════ التقريبُ على الوحدة لا على السطر — اصطلاحُ المنصة ════
+     10.10 × 3 بوضع excl: على الوحدة 11.62×3 = 34.86، وعلى السطر 34.845 ⇐ 34.85. */
+  T("★ ض.ق.م تُقرَّب على سعر الوحدة ثم تُضرب في الكمية (34.86 لا 34.85)",
+    C._lineTotal(3, 10.10, "excl").total === 34.86,
+    `الناتج=${C._lineTotal(3, 10.10, "excl").total}`);
+  T("بندٌ بوضع none لا ضريبة له مهما كانت الكمية",
+    C._lineTotal(7, 33.33, "none").vat === 0);
+
+  /* ════ عتبةُ أمر الدفع: تسمح دونها وتمنع فوقها ════ */
+  const PT = 3000;
+  T("★ أمر الدفع مسموحٌ دون العتبة (2999 < 3000)", C._payOrderAllowed(2999, PT) === true);
+  T("★ أمر الدفع ممنوعٌ عند العتبة وفوقها (بابٌ خلفيٌّ للعقود لولا ذلك)",
+    C._payOrderAllowed(3000, PT) === false && C._payOrderAllowed(50000, PT) === false);
+  T("مبلغٌ صفريٌّ أو سالبٌ لا يفتح مسارَ أمر الدفع",
+    C._payOrderAllowed(0, PT) === false && C._payOrderAllowed(-5, PT) === false);
+
+  /* ════ التوجيه: دالةٌ واحدةٌ للعقد ولأمر الدفع ════ */
+  const TH = 2000;
+  const ns = (r) => C._crqNextStage(r, TH);
+  const big = { engagement: "contract", value: 50000 };
+  T("طلبُ التعاقد يبدأ عند مدير المشاريع", ns(big) === "crq_pending_pm");
+  T("ثم المشتريات", ns({ ...big, pmApprovedAt: "x" }) === "crq_pending_proc");
+  T("ثم المالية", ns({ ...big, pmApprovedAt: "x", procApprovedAt: "x" }) === "crq_pending_finance");
+  T("ثم التنفيذي فوق السقف",
+    ns({ ...big, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x" }) === "crq_pending_ceo");
+  T("واعتمادٌ مطابقٌ يُنهي الطلب معتمَداً",
+    ns({ ...big, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x", ceoApprovedAt: "x", ceoApprovedAmount: 50000 }) === "crq_approved");
+  T("★ اعتماد التنفيذي يسقط إن رُفعت القيمة فوق ما اعتمده",
+    ns({ ...big, value: 60000, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x", ceoApprovedAt: "x", ceoApprovedAmount: 50000 }) === "crq_pending_ceo");
+  T("طلبٌ تحت السقف يُعتمد بلا التنفيذي",
+    ns({ engagement: "contract", value: 1500, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x" }) === "crq_approved");
+  T("★ أمر الدفع يتخطّى المشتريات واعتمادَ المالية ⇐ السداد مباشرةً بعد مدير المشاريع",
+    ns({ engagement: "pay_order", value: 1500, pmApprovedAt: "x" }) === "crq_pending_pay");
+  T("★ لكنه لا يتخطّى بوّابة التنفيذي — السقف سقفُ المال لا سقفُ نوع الورقة",
+    ns({ engagement: "pay_order", value: 2500, pmApprovedAt: "x" }) === "crq_pending_ceo");
+  T("★ البوّابة تُحسب من القيمة لا من علَمٍ يختاره المُنشئ",
+    ns({ engagement: "contract", value: 50000, needsCeo: false, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x" }) === "crq_pending_ceo");
+
+  /* ════ قيمةُ العقد النافذة ════ */
+  T("★ قيمة العقد = الأصلية + أوامرِ التغيير المعتمدة وحدها",
+    C._contractValue({ value: 100000, changeOrders: [{ amount: 5000, status: "approved" }, { amount: 9000, status: "crq_pending_pm" }] }) === 105000);
+  T("كميةُ البند تشمل ما أضافته أوامرُ التغيير المعتمدة",
+    C._contractLineQty({ lines: [{ id: "a", qty: 100 }], changeOrders: [{ status: "approved", lines: [{ id: "a", qty: 20 }] }] }, "a") === 120);
+
+  /* ════ سُلَّمُ المستخلص ════ */
+  const ctr = { value: 100000, vatMode: "excl", retention: { pct: 5 }, advance: { amount: 10000, recoveryPct: 20, recovered: 0 }, penalty: { capPct: 10 } };
+  const ext = { lines: [{ cumQty: 1000, unitPrice: 30 }] };
+  const n1 = C._extNet(ext, ctr, { prevGross: 0, materialsIssued: 2000 });
+  T("★ سُلَّم المستخلص: 30,000 ⇐ ض 4,500 · محتجز 1,500 · مقدَّم 6,000 · مواد 2,000 ⇐ صافي 25,000",
+    n1.period === 30000 && n1.vat === 4500 && n1.retention === 1500 &&
+    n1.advanceRecovery === 6000 && n1.materials === 2000 && n1.net === 25000,
+    `net=${n1.net}`);
+  const n2 = C._extNet({ lines: [{ cumQty: 1000, unitPrice: 30 }] }, ctr, { prevGross: 20000 });
+  T("★ المستخلص تراكميٌّ: منفَّذٌ 30,000 وسبق 20,000 ⇐ أعمالُ الفترة 10,000",
+    n2.period === 10000, `period=${n2.period}`);
+  T("★ عقدٌ بلا ضريبة: لا ض.ق.م في المستخلص إطلاقاً",
+    C._extNet(ext, { ...ctr, vatMode: "none" }, { prevGross: 0 }).vat === 0);
+  T("★ غرامةُ التأخير لا تتجاوز سقفها من قيمة العقد (10٪ ⇐ 10,000)",
+    C._extNet(ext, ctr, { prevGross: 0, penaltyAmount: 99999 }).penalty === 10000);
+  T("★ استردادُ المقدَّم لا يتجاوز ما تبقّى منه (بقي 1,000 ⇐ يُخصَم 1,000)",
+    C._extNet(ext, { ...ctr, advance: { amount: 10000, recoveryPct: 20, recovered: 9000 } }, { prevGross: 0 }).advanceRecovery === 1000);
+  T("المحتجزُ يُحسب على العمل لا على ضريبته",
+    C._extNet(ext, ctr, { prevGross: 0 }).retention === 1500);
+  T("الصافي = الفترةُ بضريبتها ناقصَ مجموعِ الخصومات (لا حسابَ ثانٍ)",
+    n1.net === Math.round((n1.withVat - n1.deductions) * 100) / 100);
+
+  /* ════ سريانُ الوثائق ════ */
+  const today = new Date("2026-08-08T00:00:00Z");
+  T("وثيقةٌ منتهيةٌ تُصنَّف expired", C._docExpiryState("2026-08-01", today).state === "expired");
+  T("وثيقةٌ تنتهي خلال 30 يوماً تُصنَّف soon", C._docExpiryState("2026-08-20", today).state === "soon");
+  T("وثيقةٌ بعيدةٌ تُصنَّف ok", C._docExpiryState("2027-08-20", today).state === "ok");
+  T("بلا تاريخٍ لا تُصنَّف منتهيةً زوراً", C._docExpiryState("", today).state === "none");
+  T("★ حالةُ امتثالِ الطرف = أسوأُ وثائقه",
+    C._vendorComplianceState({ docs: [{ expiry: "2027-01-01" }, { expiry: "2026-08-01" }] }, today).state === "expired");
+  T("★ المحظورُ وحده يمنع الإسناد؛ الوثيقةُ المنتهية تُحذّر ولا تمنع",
+    C._vendorEligibility({ status: "blacklisted" }, today).block === true &&
+    C._vendorEligibility({ status: "active", docs: [{ expiry: "2026-08-01" }] }, today).block === false);
+
+  /* ════ تطبيعُ الأسماء العربية (للربط بالنصّ الحرّ التاريخيّ) ════ */
+  T("تطبيعُ الاسم يوحّد الهمزة والتاء المربوطة والياء والمسافات",
+    C._normName("مؤسسة  الأنوار") === C._normName("مؤسسه الانوار"));
+
+  /* ════════════════════════════════════════════════════════════
+     التعاقدُ مع شخصٍ طبيعيٍّ لا مع منشأةٍ فقط
+     ثلاثةُ فروقٍ جوهريةٍ يجب أن يحرسها الاختبار: مستندُ الهوية،
+     ووضعُ الضريبة المقترَح، ومفتاحُ التفرّد.
+     ════════════════════════════════════════════════════════════ */
+  const person = { entityType: "individual", name: "محمد أحمد الغامدي", legal: { idType: "iqama", idNumber: "2401234567", idExpiry: "2026-09-10" } };
+  const firm = { entityType: "establishment", name: "مؤسسة الأنوار", legal: { crNumber: "1010234567", vatNumber: "300012" } };
+
+  T("★ هويةُ الشخص تُقرأ من الإقامة/الهوية، وهويةُ المنشأة من السجل التجاري",
+    C._identityOf(person).number === "2401234567" && C._identityOf(person).label === "إقامة" &&
+    C._identityOf(firm).number === "1010234567" && C._identityOf(firm).label === "السجل التجاري");
+  T("صفةٌ مجهولةٌ أو غائبةٌ ترتدّ إلى «منشأة» (توافقُ البيانات القديمة)",
+    C._normEntity(undefined) === "establishment" && C._identityOf({ legal: { crNumber: "9" } }).number === "9");
+
+  T("★ الشخصُ يُقترَح له عقدٌ بلا ضريبة (none) — لا يُستخرَج ١٥٪ من مستحقّ غير مسجَّل",
+    C._suggestVatMode(person) === "none");
+  T("★ المنشأةُ ذات الرقم الضريبيّ يُقترَح لها excl، وبلا رقمٍ ضريبيٍّ none",
+    C._suggestVatMode(firm) === "excl" &&
+    C._suggestVatMode({ entityType: "establishment", legal: { crNumber: "1" } }) === "none");
+  T("★ التصريحُ اليدويُّ يتقدّم على الاستنتاج (شخصٌ مسجَّلٌ ضريبياً ⇐ excl)",
+    C._suggestVatMode({ entityType: "individual", taxRegistered: true }) === "excl");
+
+  T("★ انتهاءُ الهوية داخلَ محرّك الانتهاء نفسِه (لا إقامةٌ تنتهي بلا تنبيه)",
+    C._allExpiring(person).length === 1 && C._allExpiring(person)[0]._identity === true);
+  T("★ إقامةٌ منتهيةٌ تُنبّه بنصٍّ صريحٍ وتبقى تحذيراً لا منعاً",
+    (() => {
+      const e = C._vendorEligibility({ entityType: "individual", name: "س", legal: { idType: "iqama", idNumber: "2", idExpiry: "2026-07-01" } }, today);
+      return e.block === false && e.ok === false && /إقامة منتهية/.test(e.reason);
+    })());
+  T("طرفٌ بلا رقمِ هويةٍ يُنبَّه عليه", /غير مسجَّل/.test(C._vendorEligibility({ entityType: "individual", name: "س", legal: {} }, today).reason));
+
+  /* مفتاحُ التفرّد: رقمُ الهوية لا الاسم — شخصان قد يتشابهان بمشروعية */
+  const pool = [{ id: "VND-0001", ...person }, { id: "VND-0002", ...firm }];
+  const sameName = C._duplicateOf({ entityType: "individual", name: "محمد أحمد الغامدي", legal: { idNumber: "2409999999" } }, null, pool);
+  T("★ سميٌّ برقم هويةٍ مختلف: تنبيهٌ **لا يمنع** (منعُه يوقف تسجيل شخصٍ حقيقيّ)",
+    sameName.match && sameName.byId === false && sameName.block === false);
+  T("★ رقمُ هويةٍ مكرَّرٌ: تكرارٌ مؤكَّدٌ **يُمنَع**",
+    C._duplicateOf({ entityType: "individual", name: "اسمٌ آخر", legal: { idNumber: "2401234567" } }, null, pool).block === true);
+  T("★ اسمُ منشأةٍ مكرَّرٌ يُمنَع (اسمُها معرّفُها في سجلها)",
+    C._duplicateOf({ entityType: "establishment", name: "مؤسسه الانوار", legal: { crNumber: "999" } }, null, pool).block === true);
+  T("طرفٌ يُقارَن بنفسه عند التعديل لا يُعدّ تكراراً",
+    C._duplicateOf({ entityType: "individual", name: "محمد أحمد الغامدي", legal: { idNumber: "2401234567" } }, "VND-0001", pool).match === null);
+
+  /* الوثائقُ تتبع الصفة */
+  const dIndiv = C._docTypesFor("individual").map(d => d.key);
+  const dFirm = C._docTypesFor("establishment").map(d => d.key);
+  T("★ وثائقُ المنشأة لا تُعرَض لشخص (لا زكاةَ ولا سعودةَ ولا سجلّ)",
+    !dIndiv.includes("cr") && !dIndiv.includes("zakat") && !dIndiv.includes("saudization") && !dIndiv.includes("gosi"));
+  T("★ ووثائقُ الشخص لا تُعرَض لمنشأة (لا رخصةَ عملٍ ولا هوية)",
+    !dFirm.includes("workPermit") && !dFirm.includes("identity"));
+  T("والوثائقُ العامّة تظهر للصفتين", dIndiv.includes("insurance") && dFirm.includes("insurance"));
+
+  /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
+  const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
+  const rawHex = (css.match(/#[0-9a-fA-F]{3,8}\b/g) || []);
+  T("★ نمطُ الوحدة بلا ألوانٍ صريحة — توكنز المنصة وحدها (يتبع الثيمين تلقائياً)",
+    rawHex.length === 0, rawHex.join(" "));
+  T("الأرقامُ مونوسبيس بـ tabular-nums و direction:ltr كبقية شاشات المنصة",
+    /font-variant-numeric:tabular-nums/.test(css) && /direction:ltr/.test(css));
+  T("الحركةُ تحترم تفضيل تقليلها", /prefers-reduced-motion/.test(css));
+  T("الشبكةُ تنهار لعمودٍ واحدٍ على الجوال", /@media\(max-width:760px\)/.test(css));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -5457,6 +5671,7 @@ function tvWallGuards() {
   aiErrorMessagesGuards();
   photoQueueGuards();
   versionStampGuards();
+  contractsPhase1();
   console.log("\n" + "═".repeat(64));
   if (FAIL === 0) console.log(`✅ ${PASS}/${PASS} — كل الفحوص نجحت  (${VER})`);
   else { console.log(`❌ ${FAIL} فشلت من ${PASS + FAIL}  (${VER})\n`); FAILURES.forEach(f => console.log("   • " + f)); }
