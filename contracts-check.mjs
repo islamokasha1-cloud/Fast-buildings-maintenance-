@@ -597,6 +597,129 @@ check('تبويبُ السجل يعرض قيدَ الإنشاء',
 await page.evaluate(() => window.contracts.ctrTab('overview'));
 await page.waitForTimeout(500);
 
+/* ═════════ المرحلة ٧: أوامرُ التغيير ═════════
+   تُدار هنا **قبل** المستخلصات: العقدُ ساري، فنرفع كميةَ بندٍ بأمرِ تغييرٍ يمرّ
+   بدورته كاملةً، ثم نتحقّق أن قيمةَ العقد وكميةَ البند تحرّكتا فعلاً. */
+console.log('\n=== المرحلة ٧: أوامرُ التغيير ===');
+await page.evaluate(() => window.contracts.ctrTab('changes'));
+await page.waitForTimeout(900);
+const chgTab = await page.textContent('#page-contracts-list') || '';
+check('★ تبويبُ أوامر التغيير يعرض معادلةَ القيمة لا الرقمَ وحدَه',
+  /قيمة العقد الأصلية/.test(chgTab) && /القيمة الحالية/.test(chgTab), '');
+check('وزرُّ الإنشاء ظاهرٌ على عقدٍ ساري', /أمر تغيير جديد/.test(chgTab));
+await page.screenshot({ path: `${SHOTS}/28-changes-empty.png` });
+
+// النموذجُ يُملأ من الشاشة لا بالذاكرة — فيمرّ بـsyncChgDraft كما يفعل المستخدم
+await page.evaluate(() => window.contracts.newChange());
+await page.waitForTimeout(1000);
+check('★ النموذجُ يطلب فارقَ الكمية لا الكميةَ الجديدة',
+  /فارق الكمية/.test((await page.textContent('#page-contracts-list')) || ''));
+
+const before = await page.evaluate((cid) => {
+  const c = window.contracts.contractById(cid);
+  return { value: window.contracts._contractValue(c), qty: window.contracts._contractLineQty(c, c.lines[0].id),
+           days: c.durationDays, lineId: c.lines[0].id, price: c.lines[0].unitPrice };
+}, conv.cid);
+
+await page.fill('#ct-g-lines input[data-cf="qty"]', '20');
+await page.fill('#ct-g-days', '15');
+await page.dispatchEvent('#ct-g-days', 'input');
+await page.waitForTimeout(400);
+const effTxt = await page.textContent('#ct-g-eff') || '';
+check('★ والأثرُ يُحسب لحظةَ الكتابة (القيمةُ قبل/بعد)',
+  /القيمة قبل/.test(effTxt) && /القيمة بعد/.test(effTxt), effTxt.replace(/\s+/g, ' ').slice(0, 90));
+const blockedNoReason = await page.evaluate(() => document.getElementById('ct-g-send').disabled);
+check('★★ والإرسالُ معطَّلٌ ما لم يُكتب السبب (أمرٌ بلا سببٍ لا يُعتمَد)', blockedNoReason === true);
+
+await page.fill('#ct-g-reason', 'توسعةُ نطاق الدهان بطلب المالك');
+await page.dispatchEvent('#ct-g-reason', 'input');
+await page.waitForTimeout(400);
+check('وكتابةُ السبب تُعيد تفعيلَ الإرسال',
+  await page.evaluate(() => document.getElementById('ct-g-send').disabled) === false);
+await page.screenshot({ path: `${SHOTS}/29-change-form.png` });
+
+await page.evaluate(() => window.contracts.submitChange());
+await page.waitForTimeout(1200);
+const chgNew = await page.evaluate((cid) => {
+  const g = window.contracts.changesFor(cid)[0];
+  return g ? { id: g.id, st: g.status, amt: g.amount, days: g.durationDaysDelta, reason: g.reason } : null;
+}, conv.cid);
+check('★ أُنشئ أمرُ التغيير وبدأ عند مدير المشاريع',
+  !!chgNew && chgNew.st === 'chg_pending_pm' && chgNew.amt > 0, JSON.stringify(chgNew));
+
+const secondChg = await page.evaluate(async (cid) => {
+  const c = window.contracts.contractById(cid);
+  try { await window.contracts._createChg(c, { lines: [{ id: c.lines[0].id, qty: 1, unitPrice: 1 }], reason: 'x' }); return 'مرّ أمرٌ ثانٍ'; }
+  catch (e) { return e.message; }
+}, conv.cid);
+check('★ ولا أمرَ ثانياً قبل إنهاء المفتوح', /مفتوح/.test(secondChg), secondChg);
+
+// الدورةُ كاملةً بأدوارها — كلُّ بوّابةٍ بدورها لا بدورٍ واحدٍ يمرّ الكلّ
+const chgCycle = await page.evaluate(async (gid) => {
+  const out = [];
+  const real = currentUser.role;
+  const wrong = await window.contracts._actChg(gid, 'approve', '').then(() => null, e => null);
+  currentUser.role = 'finance';
+  const notMine = await window.contracts._actChg(gid, 'approve', '').then(() => 'مرّ بدورٍ لا يملك البوّابة', e => e.message);
+  currentUser.role = real;
+  for (let i = 0; i < 4; i++) {
+    const g = window.contracts.changeById(gid);
+    if (g.status === 'chg_approved') break;
+    const owner = { chg_pending_pm: 'project_manager', chg_pending_proc: 'procurement_officer',
+                    chg_pending_finance: 'finance', chg_pending_ceo: 'ceo' }[g.status];
+    currentUser.role = owner;
+    await window.contracts._actChg(gid, 'approve', '');
+    out.push(window.contracts.changeById(gid).status);
+  }
+  currentUser.role = real;
+  return { out, notMine, st: window.contracts.changeById(gid).status };
+}, chgNew.id);
+check('★★ ودورٌ لا يملك البوّابة يُرفض في طبقة البيانات', /لدورك/.test(chgCycle.notMine), chgCycle.notMine);
+check('★ ومرّ الأمرُ ببوّاباته حتى صار معتمَداً',
+  chgCycle.st === 'chg_approved', chgCycle.out.join(' → '));
+
+const applyWrong = await page.evaluate(async (gid) => {
+  const real = currentUser.role; currentUser.role = 'project_manager';
+  let m; try { await window.contracts._applyChg(gid); m = 'طُبِّق بدورٍ لا يملكه'; } catch (e) { m = e.message; }
+  currentUser.role = real; return m;
+}, chgNew.id);
+check('★ والتطبيقُ على العقد للمشتريات وحدَها', /مشتريات/.test(applyWrong), applyWrong);
+
+const applied = await page.evaluate(async (a) => {
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  await window.contracts._applyChg(a.gid);
+  await window.contracts._applyChg(a.gid);          // نقرةٌ مكرّرة — يجب ألّا تُطبَّق مرّتين
+  currentUser.role = real;
+  const c = window.contracts.contractById(a.cid);
+  return { value: window.contracts._contractValue(c), base: c.value, qty: window.contracts._contractLineQty(c, a.lineId),
+           days: c.durationDays, n: (c.changeOrders || []).length, gst: window.contracts.changeById(a.gid).status };
+}, { gid: chgNew.id, cid: conv.cid, lineId: before.lineId });
+check('★★ التطبيقُ رفع قيمةَ العقد **بلا أن يمسّ القيمةَ الأصلية** (التاريخُ باقٍ)',
+  applied.base === before.value && applied.value === before.value + chgNew.amt,
+  JSON.stringify({ base: applied.base, now: applied.value, was: before.value }));
+check('★★ ورفع كميةَ البند — فصار المستخلصُ الممنوعُ ممكناً',
+  applied.qty === before.qty + 20, `${before.qty} ⇐ ${applied.qty}`);
+check('★ ومدّد مدةَ العقد', applied.days === before.days + 15, `${before.days} ⇐ ${applied.days}`);
+check('★★ والنقرةُ المكرّرةُ لم تُطبّقه مرّتين', applied.n === 1, 'عدد أوامر العقد ' + applied.n);
+check('وخُتم الأمرُ «مطبَّقاً»', applied.gst === 'chg_applied', applied.gst);
+
+await page.evaluate(() => window.contracts.ctrTab('overview'));
+await page.waitForTimeout(800);
+check('★ وبطاقةُ العقد تشرح المعادلةَ للقارئ',
+  /القيمةُ الحالية = الأصليّ/.test((await page.textContent('#page-contracts-list')) || ''));
+await page.screenshot({ path: `${SHOTS}/30-change-applied.png` });
+
+// الحارسُ الحقيقيّ: خفضٌ ينزل تحت المنفَّذ يُرفض
+const deepCut = await page.evaluate(async (a) => {
+  const c = window.contracts.contractById(a.cid);
+  const g = window.contracts._chgGuard({ lines: [{ id: a.lineId, qty: -9999 }], amount: -9999 }, c, window.contracts.extractsList());
+  return { ok: g.ok, belowPaid: !!g.belowPaid, under: g.under.length };
+}, { cid: conv.cid, lineId: before.lineId });
+check('★ وخفضٌ يمحو العقدَ يُرفض في الدالّة النقيّة', deepCut.ok === false, JSON.stringify(deepCut));
+
+await page.evaluate(() => window.contracts.ctrTab('overview'));
+await page.waitForTimeout(500);
+
 /* ═════════ المرحلة ٤: المستخلصات ═════════ */
 console.log('\n=== المرحلة ٤: المستخلصُ التراكميُّ وسُلَّمُ خصوماته ===');
 await page.evaluate(() => window.contracts.ctrTab('extracts'));
@@ -631,12 +754,20 @@ const ladder = await page.evaluate(() => {
   return { calc, drawn, enabled: !(document.getElementById('ct-e-send') || {}).disabled };
 });
 check('★ كميةٌ سليمةٌ تُعيد تفعيل الإرسال', ladder.enabled === true);
+// النسبةُ تُقاس بالكمية المتعاقَد عليها **بعد أوامر التغيير** — فلا تُثبَّت في
+// الفحص برقمٍ حرفيّ: أمرُ تغييرٍ يرفع الكميةَ يخفض النسبةَ بحقّ.
 const rowLive = await page.evaluate(() => {
   const tds = document.querySelectorAll('#ct-e-lines tbody tr td');
-  return { pct: tds[4].textContent.trim(), val: tds[5].textContent.trim() };
+  const d = window.contracts._extDraftOf();
+  const c = window.contracts.contractById(d.contractId);
+  const l = d.lines[0];
+  const max = window.contracts._contractLineQty(c, l.lineId);
+  return { pct: tds[4].textContent.trim(), val: tds[5].textContent.trim(),
+           wantPct: Math.round((Number(l.cumQty) || 0) / max * 100) + '%',
+           wantVal: (Math.round(window.contracts._vatSplit(l.unitPrice, c.vatMode).base * (Number(l.cumQty) || 0) * 100) / 100).toFixed(2) };
 });
-check('★ وخلايا «%» و«القيمة» تُحدَّث مع الإدخال لا عند إعادة الرسم',
-  rowLive.pct === '50%' && rowLive.val.replace(/,/g, '') === '16800.00', JSON.stringify(rowLive));
+check('★ وخلايا «%» و«القيمة» تُحدَّث مع الإدخال لا عند إعادة الرسم (المرسوم = المحسوب)',
+  rowLive.pct === rowLive.wantPct && rowLive.val.replace(/,/g, '') === rowLive.wantVal, JSON.stringify(rowLive));
 const netDrawn = (ladder.drawn.find(r => r[0].includes('صافي')) || [])[1] || '';
 check('★ سُلَّمُ الخصومات: الرقمُ المرسوم = المحسوب',
   netDrawn.replace(/,/g, '') === ladder.calc.net.toFixed(2),
@@ -733,11 +864,14 @@ const trans = await page.evaluate(async (cid) => {
   await window.contracts._transit(cid, 'close', '');
   const c = window.contracts.contractById(cid);
   out.push(c.status);
-  return { out, released: c.retention.released };
+  // المحتجزُ نسبةٌ من **القيمة النافذة** — أي بعد أوامر التغيير المعتمَدة
+  return { out, released: c.retention.released,
+           want: Math.round(window.contracts._contractValue(c) * c.retention.pct / 100 * 100) / 100 };
 }, conv.cid);
 check('★ دورةُ الحالة تكتمل: منتهٍ فنّياً (بالختاميّ) ⇒ مقفل',
   trans.out.join(' → ') === 'ctr_completed → ctr_closed', trans.out.join(' → '));
-check('★ والإقفالُ أفرج عن المحتجز بقيمةٍ محسوبة (٥٪ من 33,600)', trans.released === 1680, String(trans.released));
+check('★ والإقفالُ أفرج عن المحتجز بقيمةٍ محسوبة من **القيمة النافذة** (بعد أوامر التغيير)',
+  trans.released === trans.want && trans.released > 0, 'مرسوم ' + trans.released + ' · محسوب ' + trans.want);
 
 const afterClose = await page.evaluate(async (cid) => {
   try { await window.contracts._transit(cid, 'suspend', 'x'); return 'مرّ على عقدٍ مقفل'; }

@@ -6439,6 +6439,182 @@ function contractsPhase1() {
       /uncC\.pending\|\|uncC\.contracted\|\|uncC\.spent/.test(PMSRC5));
   }
 
+  /* ════════════════════════════════════════════════════════════
+     المرحلة ٧ — أوامرُ التغيير: البابُ الوحيدُ لتغيير قيمة العقد
+     ════════════════════════════════════════════════════════════ */
+  {
+    const CTR7 = { id:"C7", value:100000, vatMode:"none", durationDays:60,
+      lines:[{ id:"L1", desc:"دهان", unit:"م٢", qty:100, unitPrice:500 }],
+      status:"ctr_active", changeOrders:[] };
+
+    // (١) القيمةُ تُضاف ولا تستبدَل — التاريخُ محفوظ
+    const CTR7b = Object.assign({}, CTR7, { changeOrders:[
+      { id:"G1", amount:15000, status:"approved", lines:[{ id:"L1", qty:30 }], durationDaysDelta:10 }] });
+    T("★★ أمرُ التغيير يُضاف إلى العقد ولا يستبدل قيمتَه (القيمةُ الأصليةُ تبقى ١٠٠,٠٠٠)",
+      CTR7b.value === 100000 && C._contractValue(CTR7b) === 115000);
+    const tot = C._contractChangeTotals(CTR7b);
+    T("★ والخلاصةُ تعرض المعادلةَ لا الرقمَ وحدَه",
+      tot.base === 100000 && tot.added === 15000 && tot.effective === 115000 && tot.count === 1);
+    T("★ وكميةُ البند ترتفع بأمر التغيير — فيصير المستخلصُ الممنوعُ ممكناً",
+      C._contractLineQty(CTR7, "L1") === 100 && C._contractLineQty(CTR7b, "L1") === 130);
+    T("وأمرٌ غيرُ معتمَدٍ لا يُحسب في شيء",
+      C._contractValue(Object.assign({}, CTR7, { changeOrders:[{ id:"G9", amount:99999, status:"chg_pending_pm" }] })) === 100000);
+
+    // (٢) القيمةُ بوضع ضريبةِ العقد نفسِه
+    T("★ قيمةُ الأمر تُحسب بوضع ضريبةِ العقد لا بوضعٍ خاصٍّ به",
+      C._chgAmountOf({ lines:[{ qty:2, unitPrice:100 }] }, "none") === 200 &&
+      C._chgAmountOf({ lines:[{ qty:2, unitPrice:100 }] }, "excl") === 230);
+    T("★ والكميةُ السالبةُ خفضٌ بلا فرعٍ ثانٍ في الحساب",
+      C._chgAmountOf({ lines:[{ qty:-2, unitPrice:100 }] }, "none") === -200);
+
+    // (٣) البوّابات — والعتبةُ بالقيمة المطلقة
+    T("أمرُ التغيير يبدأ عند مدير المشاريع", C._chgNextStage({}, 2000) === "chg_pending_pm");
+    T("ثم المشتريات فالمالية",
+      C._chgNextStage({ pmApprovedAt:"x" }, 2000) === "chg_pending_proc" &&
+      C._chgNextStage({ pmApprovedAt:"x", procApprovedAt:"x" }, 2000) === "chg_pending_finance");
+    const past = { pmApprovedAt:"x", procApprovedAt:"x", financeApprovedAt:"x" };
+    T("★★ والخفضُ الكبيرُ يمرّ على التنفيذيّ كالزيادة (العتبةُ بالقيمة المطلقة)",
+      C._chgNextStage(Object.assign({ amount:-50000 }, past), 2000) === "chg_pending_ceo" &&
+      C._chgNextStage(Object.assign({ amount: 50000 }, past), 2000) === "chg_pending_ceo");
+    T("ودون العتبة يصير معتمَداً بلا التنفيذيّ",
+      C._chgNextStage(Object.assign({ amount:1500 }, past), 2000) === "chg_approved");
+    T("★ واعتمادُ التنفيذيِّ يسقط إن كبُر المبلغُ عمّا رآه",
+      C._chgNextStage(Object.assign({ amount:9000, ceoApprovedAt:"x", ceoApprovedAmount:5000 }, past), 2000) === "chg_pending_ceo" &&
+      C._chgNextStage(Object.assign({ amount:5000, ceoApprovedAt:"x", ceoApprovedAmount:5000 }, past), 2000) === "chg_approved");
+
+    // (٤) الحرّاس
+    const EX7 = [{ id:"E1", contractId:"C7", status:"ext_paid", payment:{ amount:40000 },
+                   lines:[{ lineId:"L1", cumQty:80 }] }];
+    T("★★ الخفضُ لا ينزل بالبند تحت المنفَّذ (٨٠ نُفِّذت — لا تُخفَّض الكميةُ إلى ٧٠)",
+      C._chgGuard({ lines:[{ id:"L1", qty:-30 }], amount:-15000 }, CTR7, EX7).ok === false);
+    T("والخفضُ إلى حدّ المنفَّذ بالضبط يجوز",
+      C._chgGuard({ lines:[{ id:"L1", qty:-20 }], amount:-10000 }, CTR7, EX7).ok === true);
+    T("★★ ولا تنزل قيمةُ العقد تحت ما سُدِّد فعلاً (مالٌ خرج لا يُلغى بمستند)",
+      C._chgGuard({ lines:[{ id:"L1", qty:-1 }], amount:-70000 }, CTR7, EX7).belowPaid !== null);
+    T("★ وأمرٌ بلا أثرٍ لا معنى له", C._chgGuard({ lines:[], amount:0 }, CTR7, EX7).empty === true);
+    T("والزيادةُ لا تُحرَس بحدّ المنفَّذ أصلاً",
+      C._chgGuard({ lines:[{ id:"L1", qty:50 }], amount:25000 }, CTR7, EX7).ok === true);
+
+    // (٥) أمرٌ مفتوحٌ واحدٌ في المرة، وعلى عقدٍ حيٍّ وحدَه
+    const CH7 = [{ id:"G1", contractId:"C7", status:"chg_pending_proc" }];
+    T("★ أمرُ تغييرٍ مفتوحٌ واحدٌ لكلّ عقد (وإلا اعتُمد أمران على قيمتين مختلفتين)",
+      (C._openChangeOf(CH7, "C7")||{}).id === "G1" &&
+      C._openChangeOf([{ id:"G2", contractId:"C7", status:"chg_applied" }], "C7") === null);
+    T("★ ولا أمرَ إلا على عقدٍ ساري أو موقوف",
+      C._chgContractEligible({ status:"ctr_active" }) && C._chgContractEligible({ status:"ctr_suspended" }) &&
+      !C._chgContractEligible({ status:"ctr_pending_signature" }) &&
+      !C._chgContractEligible({ status:"ctr_closed" }) && !C._chgContractEligible({ status:"ctr_terminated" }));
+
+    // (٦) الأثرُ المعروض قبل الاعتماد
+    const eff = C._chgEffect(CTR7, { amount:15000, durationDaysDelta:10 });
+    T("★ والأثرُ يُعرَض قبل الاعتماد: القيمةُ والمدةُ قبل/بعد",
+      eff.baseValue === 100000 && eff.newValue === 115000 && eff.newDays === 70 && eff.pct === 15);
+
+    // (٧) الدورةُ نفسُها في طبقة البيانات لا في الأزرار وحدَها
+    T("★ التطبيقُ على العقد للمشتريات — والرفضُ في طبقة البيانات",
+      /function applyChange[\s\S]{0,300}\["procurement_officer","admin"\]\.indexOf\(_role\(\)\) === -1/.test(src));
+    T("★★ والتطبيقُ لا يمسّ `value` — يُلحق بـ`changeOrders` فيبقى التاريخ",
+      /function applyChange[\s\S]{0,2200}cPatch = \{ changeOrders:arr/.test(src) &&
+      !/function applyChange[\s\S]{0,2600}cPatch\.value/.test(src));
+    T("★ ونقرةٌ مكرّرةٌ لا تُطبّقه مرّتين",
+      /arr\.some\(function\(co\)\{ return co && co\.id===id; \}\)\) return \{ already:true \}/.test(src));
+    T("★ والحارسُ يُعاد على الوثيقة الطازجة وقتَ التطبيق لا وقتَ الإنشاء فقط",
+      /var fresh = chgGuard\(g, c, _exts\);[\s\S]{0,120}if\(!fresh\.ok\) throw/.test(src));
+    T("والتمديدُ يُطبَّق على مدة العقد فتتحرّك غرامةُ التأخير معه",
+      /var newDays = \(Number\(c\.durationDays\)\|\|0\) \+ \(Number\(g\.durationDaysDelta\)\|\|0\)/.test(src));
+
+    // (٨) الموازنة: المعلَّقُ قيدَ اعتماد، والمطبَّقُ داخلٌ في قيمة العقد
+    const RQ7 = [];
+    const CS7 = [{ id:"C7", projectId:"hail", budgetCategoryKey:"plaster", status:"ctr_active",
+                   value:100000, changeOrders:[{ id:"G0", amount:15000, status:"approved" }] }];
+    const CG7 = [{ id:"G1", projectId:"hail", budgetCategoryKey:"plaster", status:"chg_pending_proc", amount:20000 },
+                 { id:"G2", projectId:"hail", budgetCategoryKey:"plaster", status:"chg_applied",  amount:15000 },
+                 { id:"G3", projectId:"hail", budgetCategoryKey:"plaster", status:"chg_rejected", amount:99999 }];
+    const R7 = C._contractRollup("hail", RQ7, CS7, [], CG7);
+    T("★★ أمرُ التغيير المعلَّقُ يظهر «قيدَ الاعتماد» لا «متعاقَداً عليه»",
+      R7.byCat.plaster.pending === 20000, String(R7.byCat.plaster.pending));
+    T("★★ والمطبَّقُ لا يُحسب مرّتين — داخلٌ أصلاً في قيمة العقد",
+      R7.byCat.plaster.contracted === 115000, String(R7.byCat.plaster.contracted));
+    T("والمرفوضُ لا أثرَ له", R7.total.pending === 20000);
+    const CGneg = [{ id:"G4", projectId:"hail", budgetCategoryKey:"plaster", status:"chg_pending_pm", amount:-10000 }];
+    T("★ والخفضُ المعلَّقُ ينقص المتوقَّعَ لا يزيده",
+      C._contractRollup("hail", RQ7, CS7, [], CGneg).byCat.plaster.pending === -10000);
+
+    // (٩) الواجهة
+    T("★ تبويبُ أوامر التغيير في بطاقة العقد",
+      /\["changes","أوامر التغيير","repeat"\]/.test(src) && /if\(_cTab==="changes"\)\s+return ctrChangesHTML/.test(src));
+    T("★ والنموذجُ يطلب **فارقَ** الكمية لا الكميةَ الجديدة (أوّلُ ما يُربك المُدخِل)",
+      /أدخِل <b>فارقَ<\/b> الكمية لا الكميةَ الجديدة/.test(src));
+    T("★ والأثرُ والتحذيرُ وزرُّ الإرسال تتحرّك مع الإدخال لا عند إعادة الرسم",
+      /function chgRecalc\(\)[\s\S]{0,900}ct-g-eff[\s\S]{0,900}ct-g-warn[\s\S]{0,900}btn\.disabled/.test(src));
+    T("★ وبطاقةُ العقد تعرض المعادلةَ لا الرقمَ الحاليَّ وحدَه",
+      /القيمةُ الحالية = الأصليّ/.test(src));
+    T("وسببُ التغيير إلزاميٌّ في طبقة البيانات لا في الشاشة وحدَها",
+      /if\(!doc\.reason\) return Promise\.reject/.test(src));
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     المرحلة ٦ — قواعدُ Firestore: الحارسُ على الخادم
+
+     الفحصُ الحقيقيُّ للقواعد يجري على محاكٍ (`rules-check.mjs`) — لأن قاعدةً
+     أمنيةً لا تُختبَر بقراءة سطرها. وما هنا **حرّاسُ اتّساقٍ**: يمنعون أن تُضاف
+     مجموعةٌ أو انتقالُ حالةٍ في الوحدة فتبقى القواعدُ متخلّفةً عنها بصمت.
+     ════════════════════════════════════════════════════════════ */
+  {
+    const rulesPath = path.resolve(path.dirname(IDX), "firestore.rules");
+    const RUL = fs.existsSync(rulesPath) ? fs.readFileSync(rulesPath, "utf8") : "";
+    T("ملفُّ قواعد Firestore موجود", RUL.length > 0);
+
+    /* ★ الحارسُ الأهمّ: القاعدةُ العامة تسمح لكلّ دورٍ بالكتابة في كلّ شيء، وقواعدُ
+       Firestore تُقيَّم بـ«أو» — فما لم تُستثنَ مجموعاتُ التعاقدات منها، كلُّ القفل
+       أعلاه زينةٌ لا أثرَ لها. */
+    T("★★ القاعدةُ العامة تستثني مجموعاتِ التعاقدات (وإلا فالقفلُ بلا أثر)",
+      /allow write:[^\n]*!ctrLocked\(document\[0\]\)/.test(RUL));
+
+    // كلُّ مجموعةٍ تكتب فيها الوحدة يجب أن تكون مقفلةً — القائمةُ تُشتقّ من الوحدة
+    const lockedBlock = (RUL.match(/function ctrLocked\(coll\)\s*\{[\s\S]*?\}/) || [""])[0];
+    const usedColls = [...new Set((src.match(/return _dev\(\) \? "(global_[a-z_]+)_dev"\s*:\s*"(global_[a-z_]+)"/g) || [])
+      .map(x => (x.match(/:\s*"(global_[a-z_]+)"/) || [])[1]).filter(Boolean))];
+    const notLocked = usedColls.filter(c => !lockedBlock.includes("'" + c + "'"));
+    T("★ كلُّ مجموعةٍ تكتب فيها وحدةُ التعاقدات مقفلةٌ في القواعد",
+      usedColls.length >= 4 && notLocked.length === 0, notLocked.join(" "));
+    const notLockedDev = usedColls.filter(c => !lockedBlock.includes("'" + c + "_dev'"));
+    T("★ ونسختُها التجريبيةُ (_dev) مقفلةٌ أيضاً — وإلا فبابٌ خلفيٌّ مفتوح",
+      notLockedDev.length === 0, notLockedDev.join(" "));
+
+    // كلُّ انتقالِ حالةٍ في الوحدة له نظيرُه في القواعد
+    const transitBlock = (RUL.match(/function ctrTransitOk\([\s\S]*?\n    \}/) || [""])[0];
+    const missingTo = Object.keys(C._CTR_TRANSITIONS)
+      .map(k => C._CTR_TRANSITIONS[k].to)
+      .filter(to => !transitBlock.includes("'" + to + "'"));
+    T("★ كلُّ حالةٍ ينتقل إليها العقدُ في الوحدة مذكورةٌ في قواعد الخادم",
+      missingTo.length === 0, missingTo.join(" "));
+
+    /* ★★ الفخُّ الذي كاد يُسقط كلَّ سدادٍ أخيرٍ في المنصة: `CTR_TRANSITIONS.complete`
+       لمدير المشاريع، لكنّ **سدادَ المستخلص الختاميّ يُنهي العقد في معاملة المالية
+       نفسِها**. قاعدةٌ تنسخ الجدولَ حرفياً ترفض تلك الكتابة فيسقط آخرُ مستخلصٍ من
+       كلّ عقد. الحارسُ يُثبّت الاستثناءَ لئلّا يُحذَف بحسن نيّةٍ عند «تنظيف» القواعد. */
+    T("★★ والماليةُ مأذونٌ لها بالإنهاء الفنّيّ — لأنّ المستخلصَ الختاميَّ يفعلها في معاملتها",
+      /to == 'ctr_completed'[\s\S]{0,120}'finance'/.test(transitBlock));
+    T("★ ولا حذفَ للعقود ولا للطلبات ولا للمستخلصات من العميل",
+      (RUL.match(/allow delete: if false;/g) || []).length >= 6);
+    T("★ والآيبانُ لا يتغيّر إلا بيد المالية أو الأدمن",
+      /ibanOf\(request\.resource\.data\) == ibanOf\(resource\.data\) \|\| anyRole\(\['finance','admin'\]\)/.test(RUL));
+
+    // الفحصُ الحقيقيُّ مربوطٌ بـCI — وإلا فقواعدُ الأمان الوحيدةُ بلا حارسٍ آليّ
+    const wfR = fs.readFileSync(path.resolve(path.dirname(IDX), ".github/workflows/hail-tests.yml"), "utf8");
+    T("★ وفحصُ القواعد على محاكٍ حقيقيٍّ مربوطٌ بـCI",
+      /rules-check\.mjs/.test(wfR) && /setup-java/.test(wfR) &&
+      /firestore\.rules/.test(wfR) && fs.existsSync(path.resolve(path.dirname(IDX), "rules-check.mjs")));
+    /* firebase-tools يرفض Java دون 21 صراحةً، وسقط الفحصُ في CI على 17 —
+       فالرقمُ ليس تفصيلاً تنسيقياً بل شرطُ تشغيل. */
+    {
+      const jv = (wfR.match(/java-version:\s*'(\d+)'/) || [])[1];
+      T("★ ونسخةُ Java في CI ≥ 21 (firebase-tools يرفض ما دونها)",
+        Number(jv) >= 21, "java-version " + jv);
+    }
+  }
+
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
   const rawHex = (css.match(/#[0-9a-fA-F]{3,8}\b/g) || []);

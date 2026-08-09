@@ -19,6 +19,8 @@ on:
       - 'photo-queue.js'
       - 'hail-tests.js'
       - 'sync-version.mjs'
+      - 'firestore.rules'
+      - 'rules-check.mjs'
       - 'tech-app.html'
       - '.github/workflows/hail-tests.yml'
   pull_request:
@@ -47,3 +49,30 @@ jobs:
 
       - name: Run tests
         run: node hail-tests.js
+
+  rules:
+    name: Firestore security rules (emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # محاكي Firestore يعمل على الـJVM — بلا Java لا فحصَ للقواعد أصلاً.
+      # و**21 حدٌّ أدنى لا اختيار**: firebase-tools يرفض ما دونها صراحةً
+      # («no longer supports Java version before 21»).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install emulator and test SDK
+        run: npm install firebase-tools @firebase/rules-unit-testing firebase --silent --no-save
+
+      # القاعدةُ الأمنيةُ لا تُختبَر بقراءة سطرها: تُقيَّم بـ«أو» عبر كل البلوكات
+      # المتطابقة. فالفحصُ الوحيدُ المعتبَر هو الكتابةُ بدورٍ معيّن على محاكٍ حقيقيّ.
+      - name: Rules check
+        run: npx firebase-tools emulators:exec --only firestore --project hail-rules-check "node rules-check.mjs"
