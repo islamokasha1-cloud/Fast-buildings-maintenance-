@@ -4978,6 +4978,25 @@ function hrPaymentNotificationTests(src) {
   T("★★ ولا يتسرّب البيانُ المختصر إلى أي خانة",
     !JSON.stringify(approvalParams(_sample, "سدادك")).includes("تجديد إقامة موظّف") &&
     !JSON.stringify(statusParams(_sample, "مغلق")).includes("تجديد إقامة موظّف"));
+
+  /* ولا النصُّ الحرُّ في «أخرى» — وهو **البيانُ المختصرُ باسمٍ آخر**: خانةٌ يكتبها
+     المستخدمُ بحرّيةٍ فتحمل اسمَ موظّفٍ بالسهولة نفسِها. وكانت `workTypeLabel` الخادميةُ
+     تُرجعه حرفياً في {{2}}، فالقاعدةُ محروسةٌ في بابٍ ومفتوحةٌ في بابٍ آخرَ يؤدّي إلى
+     الجوّال نفسِه — ورُصد بتنفيذ الدالّتين لا بقراءتهما. والفرقُ ليس في السرّية بل في
+     المدى: داخلَ النظام قارئُه صاحبُ صلاحية، والرسالةُ تخرج وتبقى في سجلّ محادثةٍ. */
+  {
+    const _free = { id: "HRP-2608-0010", workType: "other",
+      workTypeOther: "تجديد إقامة فلان الفلاني", createdBy: "مسؤول الموارد", createdByUser: "hr01" };
+    const _both = JSON.stringify(approvalParams(_free, "سدادك")) + JSON.stringify(statusParams(_free, "مغلق"));
+    T("★★ ولا النصُّ الحرُّ في «أخرى» يخرج في الرسالة — «أخرى» تبقى «أخرى»",
+      !_both.includes("فلان") && _both.includes("أخرى"), _both);
+    T("★ ولا خانةَ تفرغ بذلك (Meta ترفض الفارغة)",
+      approvalParams(_free, "سدادك").every(p => String(p).trim().length > 0) &&
+      statusParams(_free, "مغلق").every(p => String(p).trim().length > 0));
+    /* وداخلَ النظام يبقى النصُّ كاملاً — الوحدةُ في المتصفّح لم تُمسّ. */
+    T("★ والوحدةُ في المتصفّح ما زالت تعرضه كاملاً (لا تعميمَ القيد على العرض الداخلي)",
+      /if\(req\.workType==="other"\) return \(req\.workTypeOther\|\|""\)\.trim\(\) \|\| w\.l;/.test(src));
+  }
   T("★ والفرزُ بمطابقة القالب المضبوط لا بعَلَمٍ منفصلٍ يُنسى",
     /cfg\.HRP\.approvalTemplate === cfg\.PO\.approvalTemplate/.test(hrpSrc) &&
     /cfg\.HRP\.statusTemplate === cfg\.PO\.statusTemplate/.test(hrpSrc));
@@ -6729,6 +6748,66 @@ function contractsPhase1() {
   T("الشبكةُ تنهار لعمودٍ واحدٍ على الجوال", /@media\(max-width:760px\)/.test(css));
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   فحوصُ المتصفّح لا تحمل قنابلَ موقوتة — لا يومَ محفوراً في توقُّعٍ زمنيّ
+   ═══════════════════════════════════════════════════════════════════════
+   **الجذر.** حالةُ الوثيقة (سارية · توشك · منتهية) واستحقاقُ الخطة دوالُّ في «اليوم».
+   ففحصٌ يحفر تاريخاً في قالبه ثم يقارنه بتوقُّعٍ محفورٍ يمرّ اليومَ ويسقط بعد أسابيع
+   **لأن الزمنَ تقدّم لا لأن الكودَ ارتدّ** — وذلك أسوأُ من لا فحص: إشارةٌ حمراءُ كاذبةٌ
+   تُستهلَك ثقةُ القارئ فيها، وقد تُدفَن تحتها إشارةٌ صادقة. وقعت الحالتان فعلاً:
+     • `perf-contract-check`: «خطةٌ بلا استحقاقٍ سابق» توقُّعُها محفورٌ «يوم ٨» على
+       مرساةِ ١ أغسطس — سقط الفحصُ من نفسه يومَ تجاوز التاريخُ الحقيقيُّ ذلك اليوم.
+     • `contracts-check`: إقامةُ الطرف السادس محفورةٌ بـ٢٠٢٦-٠٨-٢٠، وفحصُ «الموشكةُ
+       على الانتهاء تُنبَّه» كان يصير «منتهية» بعد ذلك اليوم (أُثبت بمحاكاته: ١٢٦/١٢٧).
+   **القاعدة:** المرساةُ تُحسَب من `Date.now()` بإزاحةٍ مسمّاة، والتوقُّعُ يُحسَب بنفس
+   قواعد الدالّة لا يُحفَر رقماً. وهذان الحارسان يُسقطان أيَّ ارتدادٍ إلى الحفر. */
+function browserCheckTimeBombs() {
+  H("فحوصُ المتصفّح: بلا تاريخٍ محفورٍ في توقُّعٍ زمنيّ");
+
+  const fsB = require("fs"), pB = require("path");
+  // نسختان: بلا `g` للاختبار وبها للجمع — فـ`test` على تعبيرٍ عامٍّ يحرّك `lastIndex`
+  // فيصير الفحصُ الثاني رهنَ موضعِ الأوّل (مرورٌ كاذبٌ يتناوب مع سقوطٍ كاذب).
+  const DATE_LIT = /['"]20\d\d-[01]\d-[0-3]\d/;     // تاريخٌ محفورٌ بصيغة ISO
+  const DATE_ALL = /['"]20\d\d-[01]\d-[0-3]\d/g;
+
+  // ── (١) جدولةُ الوقائي: المرساةُ محسوبةٌ والتوقُّعُ محسوب ──
+  const PC = pB.resolve(pB.dirname(IDX), "perf-contract-check.mjs");
+  T("★ tb: perf-contract-check.mjs موجود", fsB.existsSync(PC));
+  if (fsB.existsSync(PC)) {
+    const pc = fsB.readFileSync(PC, "utf8");
+    /* الكتلةُ المقصودةُ هي الخطةُ الطازجةُ وحدَها — تنتهي عند `const today`. ومرساةُ
+       P1/P2 المحفورةُ في الماضي **ليست قنبلة**: حلقةُ اللحاق تُقدّمها إلى ما بعد اليوم
+       أبداً، فالتوقُّعُ (مضاعفُ التكرار · مستقبليّ) لا يتغيّر بتقدّم الزمن. */
+    const a = pc.indexOf("خطةٌ بلا استحقاقٍ سابق");
+    const block = a >= 0 ? pc.slice(a, pc.indexOf("const today =", a)) : "";
+    T("tb: كتلةُ «خطةٌ بلا استحقاقٍ سابق» مستخرَجة", !!block);
+    T("★★ tb: مرساةُ الخطة الطازجة محسوبةٌ من الآن لا محفورةً بيوم",
+      /Date\.now\(\)\s*\+/.test(block) && !DATE_LIT.test(block),
+      (block.match(DATE_ALL) || []).join(" "));
+    T("★ tb: والتوقُّعُ يُحسَب بنفس قاعدة الدالّة (لا رقمَ يومٍ محفور)",
+      /freshWant/.test(block) && /getDate\(\)\s*\+\s*7/.test(block) && !/freshDay\s*===\s*\d/.test(pc));
+  }
+
+  // ── (٢) وثائقُ الأطراف: كلُّ تاريخِ انتهاءٍ إزاحةٌ عن اليوم ──
+  const CC = pB.resolve(pB.dirname(IDX), "contracts-check.mjs");
+  T("★ tb: contracts-check.mjs موجود", fsB.existsSync(CC));
+  if (fsB.existsSync(CC)) {
+    const cc = fsB.readFileSync(CC, "utf8");
+    T("★★ tb: بلا تاريخٍ محفورٍ في قالب الأطراف — الانتهاءُ إزاحةٌ عن اليوم",
+      /_dayOff\s*=\s*n\s*=>/.test(cc) && (cc.match(DATE_ALL) || []).length === 0,
+      (cc.match(DATE_ALL) || []).join(" "));
+    // والإقامةُ الموشكةُ يجب أن تبقى **داخل** نافذة DOC_SOON_DAYS، وإلّا صار الفحصُ
+    // يقيس «منتهية» باسم «توشك» — وهو مرورٌ كاذبٌ لا ارتدادٌ ظاهر.
+    const ctrSrc = CTR_PATH ? fsB.readFileSync(CTR_PATH, "utf8") : "";
+    const soonDays = Number((ctrSrc.match(/DOC_SOON_DAYS\s*=\s*(\d+)/) || [])[1]);
+    const offs = (cc.match(/_dayOff\(\s*(-?\d+)\s*\)/g) || [])
+      .map(s => Number((s.match(/-?\d+/) || [0])[0]));
+    T("★ tb: إزاحةُ «الموشكة» داخل نافذة DOC_SOON_DAYS فعلاً",
+      soonDays > 0 && offs.some(o => o > 0 && o <= soonDays), "DOC_SOON_DAYS=" + soonDays + " · إزاحات: " + offs.join(","));
+    T("★ tb: وثيقةٌ منتهيةٌ حاضرةٌ في القالب (إزاحةٌ سالبة)", offs.some(o => o < 0));
+  }
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -6779,6 +6858,7 @@ function contractsPhase1() {
   photoQueueGuards();
   versionStampGuards();
   contractsPhase1();
+  browserCheckTimeBombs();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));

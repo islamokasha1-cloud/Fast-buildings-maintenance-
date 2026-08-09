@@ -198,20 +198,28 @@ const sched = await page.evaluate(() => {
   const a = ppmNextDue(plan, new Date().toISOString());
   // خطةٌ متأخّرةٌ جداً: يجب أن تلحق الدورات حتى تتجاوز اليوم لا أن تبقى في الماضي
   const late = ppmNextDue({ id:'P2', freq:'شهري', nextDueDate:'2020-01-01T12:00:00.000Z' }, null);
-  // خطةٌ بلا استحقاقٍ سابق: تُبنى من التاريخ المُمرَّر
-  const fresh = ppmNextDue({ id:'P3', freq:'أسبوعي' }, '2026-08-01T12:00:00.000Z');
+  const DAY = 86400000;
+  // خطةٌ بلا استحقاقٍ سابق: تُبنى من **التاريخ المُمرَّر** لا من اليوم. والمرساةُ في
+  // المستقبل قصداً: بتاريخٍ ماضٍ يلحق الجدولُ دوراتَه فتُطمَس الخاصيةُ المقصودة، ثم
+  // يصير التوقّعُ رهنَ يومِ التشغيل. (وهو ما وقع فعلاً: كان التوقّعُ محفوراً «يوم ٨»
+  // على مرساةِ ١ أغسطس، فسقط الفحصُ من نفسه يومَ تجاوزه التاريخُ الحقيقي.)
+  const anchor = new Date(Date.now() + 60*DAY);
+  const fresh = ppmNextDue({ id:'P3', freq:'أسبوعي' }, anchor.toISOString());
+  const freshWant = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate()+7, 12, 0, 0);
   const today = new Date(); const t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   // ثباتُ المرساة = الفارقُ بين الاستحقاق الجديد والأصلي **مضاعفٌ تامٌّ للتكرار**.
   // (السلوكُ القائم: «شهري» = ٣٠ يوماً لا شهراً تقويمياً — لم تُغيَّر دلالتُه هنا.)
-  const DAY = 86400000;
   const deltaDays = Math.round((new Date(a) - new Date('2026-01-01T12:00:00.000Z')) / DAY);
   return { a, late, fresh, lateFuture: new Date(late) > t0, deltaDays,
-           anchored: deltaDays > 0 && deltaDays % 30 === 0, freshDay: new Date(fresh).getDate() };
+           anchored: deltaDays > 0 && deltaDays % 30 === 0,
+           freshOk: new Date(fresh).getTime() === freshWant.getTime(),
+           freshSeen: fresh.slice(0,10), freshWant: freshWant.toISOString().slice(0,10) };
 });
 check('★ الاستحقاق الجديد مضاعفٌ تامٌّ للتكرار من المرساة الأصلية (لا انزياح)',
   sched.anchored === true, sched.deltaDays + ' يوماً = ' + (sched.deltaDays/30) + ' دورة');
 check('★ خطةٌ متأخّرةٌ سنواتٍ تلحق دوراتها ولا تبقى في الماضي', sched.lateFuture === true, sched.late.slice(0,10));
-check('خطةٌ بلا استحقاقٍ سابق تُبنى من التاريخ المُمرَّر', sched.freshDay === 8, 'يوم ' + sched.freshDay);
+check('★ خطةٌ بلا استحقاقٍ سابق تُبنى من التاريخ المُمرَّر (توقُّعٌ محسوبٌ لا محفور)',
+  sched.freshOk === true, 'مرسوم ' + sched.freshSeen + ' · متوقَّع ' + sched.freshWant);
 
 L('\n=== ٦) الطوابع الزمنية ===');
 const stamps = await page.evaluate(() => {
