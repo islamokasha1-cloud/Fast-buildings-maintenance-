@@ -5746,7 +5746,8 @@ function contractsPhase1() {
   T("★ وبندُ الموازنة الفارغُ يبقى فارغاً — الربطُ اختياريٌّ في العقد أيضاً",
     CTR3.budgetCategoryKey === "");
   T("★ ويحمل requestId فسلسلةُ التوقيع قابلةٌ للتتبّع من العقد", CTR3.requestId === "CRQ-1");
-  T("★ والعقدُ ينشأ **سارياً لا مسودةً** (وُلد من طلبٍ معتمَد)", CTR3.status === "ctr_active");
+  T("★ والعقدُ ينشأ **بانتظار التوقيع** — لا مسودةً ولا سارياً (يُغيَّر في §الوثيقة التعاقدية)",
+    CTR3.status === "ctr_pending_signature");
   T("الشروطُ التجارية تنتقل كاملةً بقيمها",
     CTR3.retention.pct === 5 && CTR3.advance.recoveryPct === 20 && CTR3.penalty.capPct === 10 && CTR3.warranty.months === 12);
   T("والسجلُّ الزمنيُّ يبدأ بقيد الإنشاء", (CTR3.timeline || []).length === 1 && CTR3.timeline[0].code === "created");
@@ -5807,6 +5808,164 @@ function contractsPhase1() {
     T("★ كلُّ أيقونةٍ تستعملها الوحدة موجودةٌ في مجموعة المنصة (وإلا رُسم فراغٌ صامت)",
       known.size > 0 && missing.length === 0, missing.join(" "));
   }
+
+  /* ════════════════════════════════════════════════════════════
+     المرحلة ٤ — المستخلصاتُ التراكمية وسُلَّم الخصومات والسداد
+     ════════════════════════════════════════════════════════════ */
+  const CT4 = {
+    id: "CTR-1", vatMode: "excl", value: 100000, lines: [{ id: "L1", qty: 1000, unitPrice: 100 }],
+    retention: { pct: 5 }, advance: { amount: 10000, recoveryPct: 20, recovered: 0 },
+    penalty: { perDayPct: 0.1, capPct: 10 }, startDate: "2026-01-01", durationDays: 30
+  };
+  const E_PAID = { id: "E1", contractId: "CTR-1", status: "ext_paid", lines: [{ lineId: "L1", cumQty: 300, unitPrice: 100 }] };
+
+  T("★ «المستخلَص سابقاً» **يُحسب** من المعتمدة/المسدَّدة ولا يُخزَّن",
+    C._prevGrossOf([E_PAID], CT4, null) === 30000);
+  T("ويُستثنى المستخلصُ نفسُه عند إعادة حسابه", C._prevGrossOf([E_PAID], CT4, "E1") === 0);
+  T("★ ولا يدخل فيه مستخلصٌ مرفوضٌ أو مسودة",
+    C._prevGrossOf([{ ...E_PAID, status: "ext_pm_rejected" }], CT4, null) === 0 &&
+    C._prevGrossOf([{ ...E_PAID, status: "ext_draft" }], CT4, null) === 0);
+  T("ولا مستخلصُ عقدٍ آخر", C._prevGrossOf([{ ...E_PAID, contractId: "CTR-9" }], CT4, null) === 0);
+
+  /* الحارسُ المانعُ الوحيد */
+  T("★ التراكميُّ فوق كمية العقد **يُمنَع** (تجاوزُه خطأٌ لا اجتهاد)",
+    C._extCumGuard({ lines: [{ lineId: "L1", cumQty: 1200, desc: "x" }] }, CT4, []).ok === false);
+  T("★ ويُمنَع التراجعُ عمّا اعتُمد سابقاً (يُنتج فترةً سالبةً لا تُسدَّد)",
+    C._extCumGuard({ lines: [{ lineId: "L1", cumQty: 200, desc: "x" }] }, CT4, [E_PAID]).ok === false);
+  T("وكميةٌ سليمةٌ بينهما تمرّ",
+    C._extCumGuard({ lines: [{ lineId: "L1", cumQty: 600, desc: "x" }] }, CT4, [E_PAID]).ok === true);
+  T("★ وأمرُ التغيير المعتمد يرفع السقف فيمرّ ما كان ممنوعاً",
+    C._extCumGuard({ lines: [{ lineId: "L1", cumQty: 1200, desc: "x" }] },
+      { ...CT4, changeOrders: [{ status: "approved", lines: [{ id: "L1", qty: 300 }] }] }, []).ok === true);
+
+  /* حارسُ المستخلص المفتوح الواحد */
+  T("★ مستخلصٌ مفتوحٌ واحدٌ لكلّ عقد (وإلا تصارع رقمان على «المستخلَص سابقاً»)",
+    (C._openExtractOf([{ id: "E2", contractId: "CTR-1", status: "ext_pending_pm" }], "CTR-1") || {}).id === "E2");
+  T("والمسدَّدُ لا يُعدّ مفتوحاً", C._openExtractOf([E_PAID], "CTR-1") === null);
+  T("★ ويُفحَص في طبقة البيانات لا في الشاشة فقط",
+    /var open = openExtractOf\(_exts, contract\.id\);\s*\n\s*if\(open\) return Promise\.reject/.test(src));
+
+  /* دورةٌ أقصرُ عمداً */
+  T("★ دورةُ المستخلص: مدير المشاريع ⇐ [التنفيذي فوق السقف] ⇐ سداد المالية",
+    C._extNextStage({}, 50000, 2000) === "ext_pending_pm" &&
+    C._extNextStage({ pmApprovedAt: "x" }, 50000, 2000) === "ext_pending_ceo" &&
+    C._extNextStage({ pmApprovedAt: "x", ceoApprovedAt: "x", ceoApprovedAmount: 50000 }, 50000, 2000) === "ext_pending_finance" &&
+    C._extNextStage({ pmApprovedAt: "x" }, 1500, 2000) === "ext_pending_finance");
+  T("★ وبوّابةُ التنفيذي تُحسب على **الصافي** لا على المنجَز",
+    C._extNextStage({ pmApprovedAt: "x" }, 1900, 2000) === "ext_pending_finance");
+  T("★ واعتمادُ التنفيذي يسقط إن ارتفع الصافي فوق ما اعتمده",
+    C._extNextStage({ pmApprovedAt: "x", ceoApprovedAt: "x", ceoApprovedAmount: 50000 }, 60000, 2000) === "ext_pending_ceo");
+  T("بوّاباتُ المستخلص لأدوارها وحدَها",
+    C._extCanAct("ext_pending_finance", "finance") && !C._extCanAct("ext_pending_finance", "project_manager") &&
+    C._extCanAct("ext_pending_pm", "project_manager") && !C._extCanAct("ext_paid", "admin"));
+  T("والمسدَّدُ حالةٌ نهائية", C._extIsFinal("ext_paid") && !C._extIsFinal("ext_pending_finance"));
+
+  /* الغرامةُ تُقترَح ولا تُفرَض */
+  T("★ أيامُ التأخّر تُحتسب من مدة العقد", C._lateDaysOf(CT4, new Date("2026-03-01")) === 29);
+  T("ولا تأخّرَ قبل الاستحقاق", C._lateDaysOf(CT4, new Date("2026-01-15")) === 0);
+  T("★ والغرامةُ المقترَحة لا تتجاوز سقفها (١٠٪ ⇐ 10,000)",
+    C._suggestedPenalty(CT4, 500) === 10000 && C._suggestedPenalty(CT4, 29) === 2900);
+  T("★ لكنها **تُقترَح ولا تُفرَض** — المبلغُ حقلٌ يدويٌّ في المستخلص",
+    /id="ct-e-pen"/.test(src) && /onclick="contracts\.applyPenalty\(\)"/.test(src));
+
+  /* حرّاسُ الكتابة */
+  T("★ المستخلصُ لا يُنشأ إلا على عقدٍ ساري", /contract\.status !== "ctr_active"\) return Promise\.reject/.test(src));
+  T("★ ولا تُقبل فترةٌ سالبة", /calc\.period < 0\) return Promise\.reject/.test(src));
+  T("★ والسدادُ يُرفض بلا إيصال وللمالية فقط",
+    /function payExtract[\s\S]{0,300}!payload\.receiptUrl\) return Promise\.reject/.test(src) &&
+    /function payExtract[\s\S]{0,400}\["finance","admin"\]\.indexOf\(role\) === -1\) return Promise\.reject/.test(src));
+  T("★ والمبلغُ المسدَّد **صافي السلّم** لا رقمٌ يُدخله المستخدم",
+    /e\.payment=\{ amount:r2\(calc\.net\)/.test(src) && !/id="ct-ep-amt"/.test(src));
+  T("★ ولقطةُ السلّم تُحفَظ وقت السداد فلا يُعاد حسابُها بعد تغيّر شيء",
+    /e\.settled=calc;/.test(src));
+  T("★ واستهلاكُ الدفعة المقدمة يُراكَم على العقد في المعاملة نفسِها",
+    /adv\.recovered = r2\(\(Number\(adv\.recovered\)\|\|0\) \+ calc\.advanceRecovery\)/.test(src));
+  T("★ والمستخلصُ الختاميُّ يُنهي العقد فنّياً في المعاملة نفسِها",
+    /if\(e\.isFinal && fresh\.status==="ctr_active"\)\{\s*\n\s*cPatch\.status="ctr_completed"/.test(src));
+  T("سدادُ المستخلص معاملةٌ تقرأ العقدَ الطازجَ أيضاً (استهلاكُ المقدَّم يُكتب عليه)",
+    /function payExtract[\s\S]*?t\.get\(cRef\)[\s\S]*?t\.set\(cRef, cPatch/.test(src));
+
+  /* سُلَّمُ الحساب مصدرٌ واحد */
+  T("★ السلّمُ يُرسَم من `extNet` وحدَها — لا حسابَ في الترميز",
+    /function ladderHTML\(calc, c\)/.test(src) && /ladderHTML\(extNet\(_extDraft,c,ctx\), c\)/.test(src));
+  T("قيمةُ المواد تُدخَل يدوياً مع شرحِ السبب (المخزون بلا تسعيرة)",
+    /الكميات بلا تكلفة/.test(src));
+
+  /* ════════════════════════════════════════════════════════════
+     الوثيقةُ التعاقدية — شروطٌ نصّية · حالةُ توقيع · مخرَجٌ ورقيّ
+     ════════════════════════════════════════════════════════════ */
+  const CT5 = { id: "CTR-1", value: 100000, vatMode: "excl", lines: [{ id: "L1", qty: 1000, unitPrice: 100 }],
+    advance: { pct: 10, recoveryPct: 20 }, retention: { pct: 5, releaseOn: "completion" },
+    penalty: { perDayPct: 0.1, capPct: 10 }, warranty: { months: 12 } };
+  const FIN = C._financialClauses(CT5);
+  const finBy = (t) => (FIN.find(x => x.title === t) || {}).body || "";
+
+  T("★ العقدُ ينشأ **بانتظار التوقيع** لا سارياً (قرارُ المالك: لا مالَ على عقدٍ غير موقَّع)",
+    C._contractFromRequest({ lines: [] }, "C1", "t", "u").status === "ctr_pending_signature");
+  T("★ ويحمل **نسخةً مجمَّدةً** من الشروط لا إشارةً لقالبٍ يتغيّر",
+    C._contractFromRequest({ lines: [] }, "C1", "t", "u").clauses.length === C._DEFAULT_CLAUSES.length);
+  T("والقوالبُ المُمرَّرةُ تُنسَخ بدل الافتراضية",
+    C._contractFromRequest({ lines: [] }, "C1", "t", "u", [{ key: "k", category: "general", title: "أ", body: "ب" }]).clauses.length === 1);
+  T("★ ونسخُ الشروط **قيمٌ لا مراجع** — تعديلُ المصدر بعدها لا يمسّ العقد",
+    (() => { const src2 = [{ key: "k", category: "general", title: "أ", body: "ب" }];
+      const b = C._contractFromRequest({ lines: [] }, "C1", "t", "u", src2);
+      src2[0].body = "تغيّر"; return b.clauses[0].body === "ب"; })());
+
+  /* الشروطُ الماليةُ تتولّد من الأرقام فلا تتناقض مع الحساب */
+  T("★ نصُّ الشرط الجزائيّ **يتولّد من الرقم** فلا يخالف ما يخصمه المستخلص",
+    /0\.1٪/.test(finBy("غرامة التأخير")) && /10٪/.test(finBy("غرامة التأخير")) && /10,000\.00/.test(finBy("غرامة التأخير")));
+  T("ونصُّ المحتجز يذكر النسبةَ وموعدَ الإفراج",
+    /5٪/.test(finBy("محتجز الضمان")) && /الاستلام الابتدائي/.test(finBy("محتجز الضمان")));
+  T("ونصُّ المقدَّم يذكر مبلغَه المشتقَّ ونسبةَ استرداده",
+    /10,000\.00/.test(finBy("الدفعة المقدمة")) && /20٪/.test(finBy("الدفعة المقدمة")));
+  T("ونصُّ القيمة يذكر وضعَ الضريبة صراحةً", /ضريبة/.test(finBy("قيمة العقد")));
+  T("★ وشرطٌ بلا رقمٍ لا يُطبَع نصُّه (لا محتجزَ صفريٌّ في العقد)",
+    C._financialClauses({ value: 100, advance: {}, retention: { pct: 0 }, penalty: {}, warranty: {} })
+      .every(x => x.title !== "محتجز الضمان" && x.title !== "غرامة التأخير"));
+  T("★ والشروطُ الماليةُ **لا تُخزَّن** — تُشتقّ عند العرض فتبقى مطابقةً للأرقام",
+    !/clauses:.*financialClauses/.test(src) && /function financialClauses/.test(src));
+  T("والشروطُ تُعرَض مجمَّعةً بتصنيفها بترتيبٍ ثابت",
+    C._allClausesOf(CT5).every(g => Object.keys(C._CLAUSE_CATS).includes(g.category)));
+
+  /* دورةُ التوقيع */
+  T("★ «تسجيل التوقيع» ينقل من «بانتظار التوقيع» إلى «ساري» فقط",
+    C._ctrCanTransit("sign", "ctr_pending_signature", "procurement_officer") &&
+    !C._ctrCanTransit("sign", "ctr_active", "admin"));
+  T("★ ولا إيقافَ ولا إنهاءَ لعقدٍ لم يوقَّع بعد",
+    !C._ctrCanTransit("suspend", "ctr_pending_signature", "admin") &&
+    !C._ctrCanTransit("complete", "ctr_pending_signature", "admin"));
+  T("لكنّ الفسخَ ممكنٌ قبل التوقيع (عقدٌ لم يُوقَّع يُلغى)",
+    C._ctrCanTransit("terminate", "ctr_pending_signature", "admin"));
+  T("★ والنسخةُ الموقّعةُ **إلزامية** — لا يسري عقدٌ بضغطةٍ بلا إثبات",
+    /function signContract[\s\S]{0,220}!att \|\| !att\.url\) return Promise\.reject/.test(src));
+  T("★ والتوقيعُ يُفحَص في المعاملة أيضاً لا على الزرّ",
+    /c\.status!=="ctr_pending_signature"\) throw new Error\("العقد ليس بانتظار التوقيع"\)/.test(src));
+  T("★ والمستخلصُ ممنوعٌ قبل السريان (الحارسُ القائم يغطّيه تلقائياً)",
+    /contract\.status !== "ctr_active"\) return Promise\.reject/.test(src));
+
+  /* المخرَجُ الورقيّ */
+  T("★ الطباعةُ تستعمل `_openPrintWindow` القائمة في النواة (ومعها معالجةُ iOS)",
+    /typeof _openPrintWindow === "function"\) _openPrintWindow\(html\)/.test(src));
+  T("★ والمطبوعُ يُعرِّف الطرفَ الثاني **بهويته** من `identityOf` لا بشرطٍ محلّيّ",
+    /var v=vendorById\(c\.vendorId\), idn=v\?identityOf\(v\):null/.test(src) && /الطرف الثاني/.test(src));
+  T("★ وفيه حقولُ توقيعِ الطرفين", /class="sign"/.test(src) && /الاسم \/ التوقيع \/ الختم/.test(src));
+  T("ويحمل جدولَ بنود الأعمال وشروطَ العقد معاً",
+    /جدول بنود الأعمال/.test(src) && /<h2>شروط العقد<\/h2>/.test(src));
+  T("★ وكلُّ نصٍّ يمرّ بـ`_esc` (المطبوعُ يُبنى بسلاسل)",
+    !/\+c\.vendorName\+/.test(src) && !/\+x\.body\+/.test(src));
+
+  /* قوالبُ الشروط */
+  T("★ القوالبُ للأدمن وحدَه", /if\(_role\(\)!=="admin"\) return Promise\.reject\(new Error\("قوالب الشروط للأدمن فقط"\)\)/.test(src));
+  T("★ وتحريرُ شروط عقدٍ يمسّ نسختَه وحدَها لا القالب",
+    /function saveContractClauses[\s\S]{0,600}c\.clauses=clauses/.test(src) && !/saveContractClauses[\s\S]{0,600}CLAUSE_DOC/.test(src));
+  T("ولا تُعدَّل شروطُ عقدٍ منتهٍ أو مفسوخ",
+    /c\.status!=="ctr_pending_signature" && c\.status!=="ctr_active"\) throw/.test(src));
+  T("قوالبُ افتراضيةٌ تعمل من أوّل يوم", C._DEFAULT_CLAUSES.length >= 8 &&
+    C._DEFAULT_CLAUSES.every(x => x.key && x.category && x.title && x.body));
+  T("★ وتغطّي السلامةَ ونظاميةَ العمالة وفضَّ النزاع",
+    C._DEFAULT_CLAUSES.some(x => x.category === "safety") &&
+    C._DEFAULT_CLAUSES.some(x => /نظامي/.test(x.body)) &&
+    C._DEFAULT_CLAUSES.some(x => /نزاع/.test(x.body)));
 
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";

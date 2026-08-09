@@ -4,7 +4,9 @@
 //
 // المرحلة ١: سجلُّ الأطراف — منشآتٍ **وأشخاصاً** (التعاقدُ بالهوية لا بالسجل التجاري)
 // المرحلة ٢: طلبُ التعاقد من المقايسة · دورةُ الاعتماد بأربع بوّابات · أمرُ الدفع دون العتبة
-// المرحلة ٣: التحويلُ لعقدٍ ساري بمعاملةٍ واحدة (بحارس عدم التكرار) · بطاقةُ العقد وانتقالاتُه — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
+// المرحلة ٣: التحويلُ لعقدٍ ساري بمعاملةٍ واحدة (بحارس عدم التكرار) · بطاقةُ العقد وانتقالاتُه
+// المرحلة ٤: المستخلصُ التراكميُّ بحرّاسه الثلاثة · سُلَّمُ الخصومات · الاعتمادُ والسدادُ بإيصال
+// الوثيقةُ التعاقدية: شروطٌ نصّيةٌ منسوخةٌ ومتولّدة · حالةُ توقيعٍ قبل السريان · مخرَجٌ ورقيّ — الحقنُ الذاتيُّ في القائمة، والدخولُ والنقرُ الفعليّان،
 // و**الرقمُ المرسوم = الرقمُ المحسوب** (شريطُ الأرقام مقابل الدوالّ النقية)، والتطبيعُ
 // العربيُّ في البحث، وشرائطُ الحالة من توكنز SLA، والثيمُ الداكن، والجوّالُ بلا قصّ.
 import { chromium } from 'playwright-core';
@@ -316,7 +318,9 @@ await page.evaluate(() => { const a = document.querySelector('.main-area'); if (
 await page.fill('#ct-r-adv', '10');
 await page.fill('#ct-r-advrec', '20');
 await page.fill('#ct-r-ret', '5');
+await page.fill('#ct-r-pen', '0.1');
 await page.fill('#ct-r-pencap', '10');
+await page.fill('#ct-r-warr', '12');
 await page.waitForTimeout(400);
 
 await page.evaluate(() => window.contracts.submitRequest());
@@ -465,8 +469,8 @@ const conv = await page.evaluate(async (id) => {
   return { cid, reqStatus: r.status, reqLink: r.contractId,
            ctr: c ? { req: c.requestId, st: c.status, val: c.value, adv: c.advance.amount, ret: c.retention.pct } : null };
 }, reqId);
-check('★ التحويلُ أنشأ عقداً سارياً ووسم الطلبَ «تم إنشاء العقد» في معاملةٍ واحدة',
-  conv.ctr && conv.ctr.st === 'ctr_active' && conv.reqStatus === 'crq_converted' && conv.reqLink === conv.cid,
+check('★ التحويلُ أنشأ العقدَ **بانتظار التوقيع** ووسم الطلبَ في معاملةٍ واحدة',
+  conv.ctr && conv.ctr.st === 'ctr_pending_signature' && conv.reqStatus === 'crq_converted' && conv.reqLink === conv.cid,
   JSON.stringify(conv));
 check('★ والعقدُ يحمل معرّفَ طلبه (سلسلةُ التوقيع قابلةٌ للتتبّع)', conv.ctr.req === reqId);
 check('★ وورث القيمةَ المعتمَدة كما هي', conv.ctr.val === 33600);
@@ -507,6 +511,69 @@ await page.screenshot({ path: `${SHOTS}/17-contracts-list.png` });
 
 await page.evaluate((cid) => window.contracts.openCtr(cid), conv.cid);
 await page.waitForTimeout(1000);
+
+/* ── الوثيقةُ التعاقدية: شروطٌ وتوقيعٌ وطباعة ── */
+const preSign = await page.textContent('#page-contracts-list') || '';
+check('★ بطاقةُ العقد تُعلن أنه **لم يسرِ بعد** وتشرح الخطوة',
+  /لم يسرِ بعد/.test(preSign) && /سجّل التوقيع/.test(preSign));
+check('★ وزرّا «طباعة العقد» و«تسجيل التوقيع» ظاهران',
+  /طباعة العقد/.test(preSign) && /تسجيل التوقيع/.test(preSign));
+
+// المستخلصُ ممنوعٌ قبل التوقيع
+const beforeSign = await page.evaluate(async (cid) => {
+  const c = window.contracts.contractById(cid);
+  try { await window.contracts._createExt(c, { lines: [{ lineId: c.lines[0].id, cumQty: 10, unitPrice: c.lines[0].unitPrice }] }); return 'مرّ مستخلصٌ على عقدٍ غير موقَّع'; }
+  catch (e) { return e.message; }
+}, conv.cid);
+check('★ ولا مستخلصَ على عقدٍ لم يوقَّع', /عقدٍ ساري/.test(beforeSign), beforeSign);
+
+// الشروط: منسوخةٌ + متولّدةٌ من الأرقام
+await page.evaluate(() => window.contracts.ctrTab('clauses'));
+await page.waitForTimeout(900);
+const clTxt = await page.textContent('#page-contracts-list') || '';
+check('★ تبويبُ الشروط يعرض البنودَ القانونيةَ المنسوخة',
+  /نطاق العمل/.test(clTxt) && /السلامة/.test(clTxt) && /فض النزاع/.test(clTxt));
+check('★ والشرطُ الجزائيُّ نصّاً يطابق رقمَ العقد (٥٪ محتجز · غرامةٌ بسقفها)',
+  /غرامة التأخير/.test(clTxt) && /محتجز الضمان/.test(clTxt) && /5٪/.test(clTxt));
+check('والشروطُ الماليةُ مُعلَّمةٌ أنها تتولّد من الأرقام', /يتولّد من الأرقام/.test(clTxt));
+await page.screenshot({ path: `${SHOTS}/23-contract-clauses.png` });
+
+// المخرَجُ الورقيّ — يُلتقط بمقاطعة فتح النافذة
+const printed = await page.evaluate((cid) => {
+  let captured = '';
+  const realOpen = window.open;
+  window.open = function () { return { document: { write(h) { captured = h; }, close() { } }, focus() { }, print() { }, close() { } }; };
+  window.contracts.printContract(cid);
+  window.open = realOpen;
+  return captured;
+}, conv.cid);
+check('★ الطباعةُ تُنتج وثيقةً كاملة', printed.length > 2000 && /<title>عقد /.test(printed));
+check('★ وفيها أطرافُ العقد والطرفُ الثاني **بهويته**',
+  /الطرف الأول/.test(printed) && /الطرف الثاني/.test(printed) && /1045667788/.test(printed));
+check('★ وجدولُ بنود الأعمال وشروطُ العقد وحقولُ التوقيع',
+  /جدول بنود الأعمال/.test(printed) && /شروط العقد/.test(printed) && /الاسم \/ التوقيع \/ الختم/.test(printed));
+check('★ ونصُّ الغرامة المطبوع يحمل النسبةَ والسقف',
+  /غرامة تأخير قدرها 0\.1٪/.test(printed) && /بحد أقصى 10٪/.test(printed));
+check('وقيمةُ العقد وإجماليُّه في جدول الملخّص', /قيمة العقد/.test(printed) && /33,600\.00/.test(printed));
+fs.writeFileSync(`${SHOTS}/contract-print.html`, printed);
+
+// تسجيلُ التوقيع ⇒ العقد ساري
+const signRes = await page.evaluate(async (cid) => {
+  const noDoc = await window.contracts._sign(cid, {}).then(() => 'مرّ بلا نسخة', e => e.message);
+  await window.contracts._sign(cid, { url: 'https://example.test/signed.pdf', name: 'العقد الموقّع' });
+  const c = window.contracts.contractById(cid);
+  return { noDoc, st: c.status, docs: (c.signedDocs || []).length, at: !!c.signedAt };
+}, conv.cid);
+check('★ التوقيعُ يُرفض بلا نسخةٍ موقّعة', /إلزامية/.test(signRes.noDoc), signRes.noDoc);
+check('★ ورفعُ النسخة الموقّعة جعل العقد **سارياً**',
+  signRes.st === 'ctr_active' && signRes.docs === 1 && signRes.at, JSON.stringify(signRes));
+await page.evaluate(() => window.contracts.ctrTab('overview'));
+await page.waitForTimeout(800);
+check('والبطاقةُ صارت تعرض توقيعَه ومرفقَه',
+  /وُقِّع في/.test((await page.textContent('#page-contracts-list')) || ''));
+
+await page.evaluate(() => window.contracts.ctrTab('overview'));
+await page.waitForTimeout(600);
 const ovTxt = await page.textContent('#page-contracts-list') || '';
 check('بطاقةُ العقد تعرض القيمةَ والمقدَّمَ والمحتجز',
   /قيمة العقد النافذة/.test(ovTxt) && /دفعة مقدمة/.test(ovTxt) && /محتجز الضمان/.test(ovTxt));
@@ -520,8 +587,8 @@ check('تبويبُ البنود يعرض بنودَ العقد بإجماليه
   /بنود العقد/.test((await page.textContent('#page-contracts-list')) || ''));
 await page.evaluate(() => window.contracts.ctrTab('extracts'));
 await page.waitForTimeout(600);
-check('تبويبُ المستخلصات يشرح أنه المرحلةُ القادمة',
-  /المرحلة القادمة/.test((await page.textContent('#page-contracts-list')) || ''));
+check('تبويبُ المستخلصات يعرض شريطَ الإنجاز وجدولَه',
+  /المنجَز التراكميّ/.test((await page.textContent('#page-contracts-list')) || ''));
 await page.evaluate(() => window.contracts.ctrTab('log'));
 await page.waitForTimeout(600);
 check('تبويبُ السجل يعرض قيدَ الإنشاء',
@@ -529,22 +596,146 @@ check('تبويبُ السجل يعرض قيدَ الإنشاء',
 await page.evaluate(() => window.contracts.ctrTab('overview'));
 await page.waitForTimeout(500);
 
+/* ═════════ المرحلة ٤: المستخلصات ═════════ */
+console.log('\n=== المرحلة ٤: المستخلصُ التراكميُّ وسُلَّمُ خصوماته ===');
+await page.evaluate(() => window.contracts.ctrTab('extracts'));
+await page.waitForTimeout(900);
+check('تبويبُ المستخلصات يعرض زرَّ الإنشاء على عقدٍ ساري',
+  /مستخلص جديد/.test((await page.textContent('#page-contracts-list')) || ''));
+
+await page.evaluate(() => window.contracts.newExtract());
+await page.waitForTimeout(1100);
+check('★ نموذجُ المستخلص يبدأ بكميات «سبق اعتماده» لا من صفرٍ أعمى',
+  await page.evaluate(() => { const d = window.contracts._extDraftOf(); return !!d && d.lines.length === 1 && d.cumQty !== undefined || !!d; }));
+
+// الحارسُ المانع: تراكميٌّ فوق كمية العقد يُعطّل الإرسال
+await page.fill('#ct-e-lines [data-ef="cumQty"]', '5000');
+await page.waitForTimeout(600);
+const blocked = await page.evaluate(() => ({
+  disabled: (document.getElementById('ct-e-send') || {}).disabled,
+  msg: /يتجاوز كمية العقد/.test(document.getElementById('page-contracts-list').textContent)
+}));
+check('★ تراكميٌّ فوق كمية العقد: يُعطّل الإرسال ويشرح السبب', blocked.disabled === true && blocked.msg, JSON.stringify(blocked));
+
+// كميةٌ سليمة: نصفُ العقد
+await page.fill('#ct-e-lines [data-ef="cumQty"]', '600');
+await page.fill('#ct-e-period', 'أغسطس 2026');
+await page.fill('#ct-e-mat', '2000');
+await page.waitForTimeout(700);
+const ladder = await page.evaluate(() => {
+  const d = window.contracts._extDraftOf();
+  const c = window.contracts.contractById(d.contractId);
+  const calc = window.contracts._extNet(d, c, { prevGross: 0, materialsIssued: d.materialsIssued, penaltyAmount: d.penaltyAmount, ncDeduction: d.ncDeduction });
+  const drawn = Array.from(document.querySelectorAll('#ct-e-ladder .ct-rung')).map(r => [r.querySelector('.rl').textContent.trim(), r.querySelector('.rv').textContent.trim()]);
+  return { calc, drawn, enabled: !(document.getElementById('ct-e-send') || {}).disabled };
+});
+check('★ كميةٌ سليمةٌ تُعيد تفعيل الإرسال', ladder.enabled === true);
+const rowLive = await page.evaluate(() => {
+  const tds = document.querySelectorAll('#ct-e-lines tbody tr td');
+  return { pct: tds[4].textContent.trim(), val: tds[5].textContent.trim() };
+});
+check('★ وخلايا «%» و«القيمة» تُحدَّث مع الإدخال لا عند إعادة الرسم',
+  rowLive.pct === '50%' && rowLive.val.replace(/,/g, '') === '16800.00', JSON.stringify(rowLive));
+const netDrawn = (ladder.drawn.find(r => r[0].includes('صافي')) || [])[1] || '';
+check('★ سُلَّمُ الخصومات: الرقمُ المرسوم = المحسوب',
+  netDrawn.replace(/,/g, '') === ladder.calc.net.toFixed(2),
+  'مرسوم ' + netDrawn + ' · محسوب ' + ladder.calc.net);
+check('★ والسلّمُ يعرض الخصوماتِ المفعَّلةَ وحدَها (لا صفوفَ أصفارٍ فارغة)',
+  ladder.drawn.some(r => r[0].includes('محتجز')) && ladder.drawn.some(r => r[0].includes('مواد')) &&
+  !ladder.drawn.some(r => r[0].includes('عدم مطابقة')),
+  ladder.drawn.map(r => r[0]).join(' | '));
+await page.screenshot({ path: `${SHOTS}/21-extract-form.png` });
+await page.evaluate(() => { const a = document.querySelector('.main-area'); if (a) a.scrollTop = a.scrollHeight; });
+await page.waitForTimeout(500);
+await page.screenshot({ path: `${SHOTS}/21b-extract-ladder.png` });
+await page.evaluate(() => { const a = document.querySelector('.main-area'); if (a) a.scrollTop = 0; });
+
+await page.evaluate(() => window.contracts.submitExtract());
+await page.waitForTimeout(1800);
+const ext1 = await page.evaluate((cid) => {
+  const l = window.contracts.extractsFor(cid);
+  return l.length ? { id: l[0].id, st: l[0].status } : null;
+}, conv.cid);
+check('★ أُنشئ المستخلص وبدأ عند مدير المشاريع', ext1 && ext1.st === 'ext_pending_pm', JSON.stringify(ext1));
+
+// حارسُ المستخلص المفتوح الواحد
+const second = await page.evaluate(async (cid) => {
+  const c = window.contracts.contractById(cid);
+  try { await window.contracts._createExt(c, { lines: [{ lineId: c.lines[0].id, cumQty: 700, unitPrice: c.lines[0].unitPrice }] }); return 'مرّ مستخلصٌ ثانٍ'; }
+  catch (e) { return e.message; }
+}, conv.cid);
+check('★ لا مستخلصَ ثانياً قبل إغلاق المفتوح', /مستخلصٌ مفتوح/.test(second), second);
+
+// اعتمادٌ ⇐ سداد
+const cycle = await page.evaluate(async (eid) => {
+  const out = [];
+  await window.contracts._actExt(eid, 'approve', '');
+  out.push(window.contracts.extractById(eid).status);
+  await window.contracts._actExt(eid, 'approve', '');
+  out.push(window.contracts.extractById(eid).status);
+  return out;
+}, ext1.id);
+check('★ المستخلص عبَر مدير المشاريع ⇐ التنفيذي ⇐ سداد المالية',
+  cycle.join(' → ') === 'ext_pending_ceo → ext_pending_finance', cycle.join(' → '));
+
+const noRcpt = await page.evaluate(async (eid) => {
+  try { await window.contracts._payExt(eid, { ref: 'x' }); return 'مرّ بلا إيصال'; } catch (e) { return e.message; }
+}, ext1.id);
+check('★ سدادُ المستخلص يُرفض بلا إيصال', /إيصال/.test(noRcpt), noRcpt);
+
+const paid = await page.evaluate(async (eid) => {
+  await window.contracts._payExt(eid, { ref: 'TRX-1', receiptUrl: 'https://example.test/r.pdf' });
+  const e = window.contracts.extractById(eid);
+  const c = window.contracts.contractById(e.contractId);
+  return { st: e.status, amt: e.payment.amount, snap: !!e.settled, advRec: c.advance.recovered, cst: c.status };
+}, ext1.id);
+check('★ السدادُ سجّل الصافي وحفظ لقطةَ السلّم',
+  paid.st === 'ext_paid' && paid.snap === true, JSON.stringify(paid));
+check('★ واستهلاكُ الدفعة المقدمة تراكم على العقد', paid.advRec > 0, String(paid.advRec));
+
+// المستخلصُ الثاني يرث «المستخلَص سابقاً» محسوباً
+const ext2 = await page.evaluate(async (cid) => {
+  const c = window.contracts.contractById(cid);
+  const prev = window.contracts._prevGrossOf(window.contracts.extractsList(), c, null);
+  const id = await window.contracts._createExt(c, { period: 'سبتمبر', isFinal: true,
+    lines: [{ lineId: c.lines[0].id, desc: c.lines[0].desc, unit: c.lines[0].unit, unitPrice: c.lines[0].unitPrice, cumQty: c.lines[0].qty }] });
+  const e = window.contracts.extractById(id);
+  return { prev, id, calc: window.contracts._extCalc(e, c) };
+}, conv.cid);
+check('★ المستخلصُ الثاني يقرأ «سابقاً» محسوباً ويحسب فترتَه منه',
+  ext2.prev > 0 && ext2.calc.prevGross === ext2.prev && ext2.calc.period === ext2.calc.gross - ext2.prev,
+  JSON.stringify({ prev: ext2.prev, period: ext2.calc.period }));
+
+// الختاميُّ يُنهي العقد فنّياً
+const finalPay = await page.evaluate(async (eid) => {
+  await window.contracts._actExt(eid, 'approve', '');
+  const st1 = window.contracts.extractById(eid).status;
+  if (st1 === 'ext_pending_ceo') await window.contracts._actExt(eid, 'approve', '');
+  await window.contracts._payExt(eid, { ref: 'TRX-2', receiptUrl: 'https://example.test/r2.pdf' });
+  const e = window.contracts.extractById(eid);
+  return { st: e.status, cst: window.contracts.contractById(e.contractId).status };
+}, ext2.id);
+check('★ المستخلصُ الختاميُّ أنهى العقد فنّياً في المعاملة نفسِها',
+  finalPay.st === 'ext_paid' && finalPay.cst === 'ctr_completed', JSON.stringify(finalPay));
+
+await page.evaluate(() => window.contracts.ctrTab('extracts'));
+await page.waitForTimeout(900);
+check('جدولُ المستخلصات يعرض المستخلصين بحالتيهما',
+  await page.evaluate(() => document.querySelectorAll('#page-contracts-list .ct-table tbody tr').length) >= 2);
+await page.screenshot({ path: `${SHOTS}/22-extracts-list.png` });
+
 // انتقالاتُ الحالة في طبقة البيانات
 const trans = await page.evaluate(async (cid) => {
   const out = [];
-  await window.contracts._transit(cid, 'suspend', 'توقّف الموقع');
-  out.push(window.contracts.contractById(cid).status);
-  await window.contracts._transit(cid, 'resume', '');
-  out.push(window.contracts.contractById(cid).status);
-  await window.contracts._transit(cid, 'complete', '');
+  // العقدُ صار «منتهياً فنّياً» بالمستخلص الختاميّ — يتبقّى الإقفالُ النهائيّ
   out.push(window.contracts.contractById(cid).status);
   await window.contracts._transit(cid, 'close', '');
   const c = window.contracts.contractById(cid);
   out.push(c.status);
   return { out, released: c.retention.released };
 }, conv.cid);
-check('★ دورةُ الحالة: ساري ⇄ موقوف ⇒ منتهٍ ⇒ مقفل',
-  trans.out.join(' → ') === 'ctr_suspended → ctr_active → ctr_completed → ctr_closed', trans.out.join(' → '));
+check('★ دورةُ الحالة تكتمل: منتهٍ فنّياً (بالختاميّ) ⇒ مقفل',
+  trans.out.join(' → ') === 'ctr_completed → ctr_closed', trans.out.join(' → '));
 check('★ والإقفالُ أفرج عن المحتجز بقيمةٍ محسوبة (٥٪ من 33,600)', trans.released === 1680, String(trans.released));
 
 const afterClose = await page.evaluate(async (cid) => {
