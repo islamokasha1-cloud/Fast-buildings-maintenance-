@@ -5039,6 +5039,58 @@ function versionStampGuards() {
   T("★ sv: الشجرة الحالية مختومةٌ فعلاً (تشغيلٌ حقيقيٌّ لـ--check)", ok, out.trim().slice(0, 160));
 }
 
+function aiErrorMessagesGuards() {
+  H("رسائل أخطاء الذكاء الاصطناعي — سببٌ عربيٌّ لا نصٌّ إنجليزيّ خام");
+
+  // ── الدالّتان تُستخرجان وتُنفَّذان فعلاً (لا قراءةَ نصٍّ) ──
+  const arSrc  = (HTML.match(/function _aiErrAr\(m\)\{[\s\S]*?\n\}/) || [])[0];
+  const errSrc = (HTML.match(/function _msgErr\(e\)\{[\s\S]*?\n\}/) || [])[0];
+  T("★ ai-err: _aiErrAr و_msgErr موجودتان في index.html", !!arSrc && !!errSrc);
+  if (!arSrc || !errSrc) return;
+  const _msgErr = new Function(arSrc + "\n" + errSrc + "; return _msgErr;")();
+
+  const CRED = "Your credit balance is too low to access the Anthropic API. " +
+               "Please go to Plans & Billing to upgrade or purchase credits.";
+  const ar = m => _msgErr(new Error(m));
+  const noLatin = s => !/[A-Za-z]{4,}/.test(s.replace(/console\.anthropic\.com|Plans & Billing|Anthropic|Proxy/g, ""));
+
+  // الحالة التي شُوهدت فعلاً في الميدان: توست عربيّ يحمل جملةً إنجليزيةً كاملة
+  T("★ ai-err: «نفاد الرصيد» يُترجَم إلى سببٍ وحلٍّ بالعربية",
+    /رصيد/.test(ar(CRED)) && /console\.anthropic\.com/.test(ar(CRED)), ar(CRED));
+  T("★ ai-err: رسالة الرصيد لا تُسرِّب الجملة الإنجليزية الخام",
+    !/credit balance/i.test(ar(CRED)) && noLatin(ar(CRED)), ar(CRED));
+  T("★ ai-err: الرسالة تنفي عطلَ النظام صراحةً (فلا يُبلَّغ عن خللٍ وهميّ)",
+    /النظام سليم/.test(ar(CRED)));
+
+  T("ai-err: تجاوز حدّ الطلبات (429) بالعربية",
+    /حدّ الطلبات/.test(ar("HTTP 429")) && /حدّ الطلبات/.test(ar("rate_limit_error: too many requests")));
+  T("ai-err: ازدحام الخوادم (529) بالعربية",
+    /مزدحمة/.test(ar("HTTP 529")) && /مزدحمة/.test(ar("Overloaded")));
+  T("ai-err: مفتاحٌ غير صالح (401) يوجّه لإعدادات الذكاء الاصطناعي",
+    /مفتاح/.test(ar("HTTP 401")) && /مفتاح/.test(ar("authentication_error: invalid x-api-key")));
+
+  // ── لا ابتلاعَ للرسائل الأخرى: ما لا يُطابَق يبقى كما هو ──
+  T("★ ai-err: خطأٌ غير معروف يبقى نصّه كما هو (لا ابتلاعَ للتشخيص)",
+    ar("Some brand new upstream error") === "Some brand new upstream error");
+  T("ai-err: مهلة الطلب والشبكة يحتفظان برسالتيهما السابقتين",
+    /مهلة/.test(_msgErr(Object.assign(new Error("x"), { name: "AbortError" }))) &&
+    /تعذّر الاتصال/.test(ar("Failed to fetch")));
+
+  // ── تطبيق الفنّي يشترك في نفس المعالجة (نفس العطل ظهر فيه) ──
+  const taPath = require("path").resolve(require("path").dirname(IDX), "tech-app.html");
+  const ta = require("fs").existsSync(taPath) ? require("fs").readFileSync(taPath, "utf8") : "";
+  const taSrc = (ta.match(/function _aiErrAr\(m\)\{[\s\S]*?\n\}/) || [])[0];
+  T("★ ai-err: tech-app.html يحمل _aiErrAr ويستدعيها في مسار الفشل",
+    !!taSrc && /const ar=_aiErrAr\(m\); if\(ar\) m=ar;/.test(ta));
+  if (taSrc) {
+    const taAr = new Function(taSrc + "; return _aiErrAr;")();
+    T("★ ai-err: صياغة الفنّي — نفاد الرصيد يظهر بالعربية لا بالإنجليزية",
+      /رصيد/.test(taAr(CRED)) && !/credit balance/i.test(taAr(CRED)), taAr(CRED));
+    T("ai-err: تطبيق الفنّي لا يوجّه الفنّيّ لصفحة فوترةٍ لا يملكها",
+      !/console\.anthropic\.com/.test(taAr(CRED)) && /المسؤول/.test(taAr(CRED)), taAr(CRED));
+  }
+}
+
 function tvWallGuards() {
   H("v18.9ag+ai) مركز العمليات — العرض الموحّد والتدوير التلقائي");
 
@@ -5402,6 +5454,7 @@ function tvWallGuards() {
   perfContractPhase1();
   perfContractPhase2();
   tvWallGuards();
+  aiErrorMessagesGuards();
   photoQueueGuards();
   versionStampGuards();
   console.log("\n" + "═".repeat(64));
