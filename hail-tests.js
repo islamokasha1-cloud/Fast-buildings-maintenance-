@@ -943,7 +943,7 @@ function vendorNameUnify() {
   let V;
   try {
     V = new Function("IS_DEV", src +
-      "\nreturn { vendorMatchKey, vendorFuzzyKey, vendorCanonical, vendorCanonParts, _poVendorFilterName," +
+      "\nreturn { vendorMatchKey, vendorFuzzyKey, vendorCanonical, vendorCanonParts, _poVendorFilterName, vendorSplitNames," +
       "\n         setAliases:m=>{ _vendorAliases=m; }, getAliases:()=>_vendorAliases };")(false);
   } catch (e) { T("تُبنى دوالّ التوحيد وتُنفَّذ", false, String(e.message).slice(0, 140)); return; }
   T("تُبنى دوالّ التوحيد وتُنفَّذ", typeof V.vendorCanonical === "function");
@@ -988,12 +988,13 @@ function vendorNameUnify() {
     V.vendorFuzzyKey("شركة جونسون كونترولز العربية المحدودة") !== V.vendorFuzzyKey(V2));
 
   // ── (٥) العناقيدُ المقترَحة تُبنى من الأسماء الواردة فعلاً ──
-  const ca = HTML.indexOf("function _vmClusters(names){");
+  const ca = HTML.indexOf("function _vmLev1(a,b){");
   if (ca > 0) {
     const cend = HTML.indexOf("\nfunction _vmActiveGroups(", ca);
     let clusters = null;
     try {
-      clusters = new Function("vendorFuzzyKey", HTML.slice(ca, cend) + "\nreturn _vmClusters;")(V.vendorFuzzyKey);
+      clusters = new Function("vendorFuzzyKey", "vendorCanonical",
+        HTML.slice(ca, cend) + "\nreturn _vmClusters;")(V.vendorFuzzyKey, V.vendorCanonical);
     } catch (e) { T("تُبنى _vmClusters وتُنفَّذ", false, String(e.message).slice(0, 140)); }
     if (clusters) {
       T("تُبنى _vmClusters وتُنفَّذ", typeof clusters === "function");
@@ -1039,6 +1040,68 @@ function vendorNameUnify() {
     /Object\.keys\(next\)\.forEach\(k=>\{ if\(others\.indexOf\(next\[k\]\)!==-1\) next\[k\]=canon; \}\);/.test(HTML));
   T("الأداةُ للمسؤول وحدَه (فتحاً وتنفيذاً وتراجعاً)",
     (HTML.match(/currentUser\.role!=="admin"\)\{ toast\("⚠ صلاحية المسؤول فقط","warn"\); return; \}/g) || []).length >= 3);
+
+  /* ── (٧) v18.9.2516: ثلاثةُ أعطالٍ بلّغ عنها المالك في أوّل استعمالٍ حقيقيّ ── */
+
+  // (أ) «الرتاج» و«الريتاج» — ياءٌ واحدةٌ فرّقت مورّداً واحداً إلى عنقودَين
+  const la = HTML.indexOf("function _vmLev1(a,b){");
+  const lend = HTML.indexOf("\nfunction _vmActiveGroups(", la);
+  let CL = null;
+  if (la > 0) {
+    try {
+      CL = new Function("vendorFuzzyKey", "vendorCanonical", HTML.slice(la, lend) +
+        "\nreturn { _vmLev1, _vmTokNear, _vmRelate, _vmClusters };")(V.vendorFuzzyKey, V.vendorCanonical);
+    } catch (e) { T("تُبنى دوالّ التقارب وتُنفَّذ", false, String(e.message).slice(0, 140)); }
+  }
+  if (CL) {
+    T("مسافةُ التحرير ≤١ تُكتشَف (حذف/إضافة/إبدال)",
+      CL._vmLev1("الرتاج", "الريتاج") && CL._vmLev1("سنابل", "سنابك") && CL._vmLev1("الاتقان", "الاتقا"));
+    T("★ وفارقُ حرفين لا يُعدّ تقارباً", !CL._vmLev1("الرتاج", "الرياض") && !CL._vmLev1("نماء", "بناء"));
+    T("★ والكلماتُ القصيرة لا تتقارب بحرف (يقلب معناها)", !CL._vmTokNear("عام", "عالم"));
+    V.setAliases({});
+    const R1 = "شركة عالم الريتاج", R2 = "عالم الريتاج", R3 = "شركة عالم الرتاج للتجارة", R4 = "شركة عالم الرتاج";
+    const nm2 = {};
+    [[R1, 5605], [R2, 3486], [R3, 3674], [R4, 2842]].forEach(([n, sp]) => { nm2[n] = { name: n, count: 1, spend: sp }; });
+    nm2["مؤسسة سنابل الاتقان"] = { name: "مؤسسة سنابل الاتقان", count: 1, spend: 900 };
+    const out2 = CL._vmClusters(nm2);
+    const big2 = out2.find(c => c.names.some(e => e.name === R1));
+    T("★ «الرتاج» و«الريتاج» في عنقودٍ واحد (الصيغُ الأربع معاً)",
+      !!big2 && big2.names.length === 4, big2 ? big2.names.map(e => e.name).join(" | ") : "—");
+    T("★ ومورّدٌ آخر لا ينضمّ إليها", !!big2 && !big2.names.some(e => e.name.indexOf("سنابل") !== -1));
+    // العنقودُ المكتملُ توحيدُه يسقط من القائمة (وإلا عُرض بلا فائدةٍ بعد اعتماده)
+    const AL2 = {}; [R2, R3, R4].forEach(n => { AL2[V.vendorMatchKey(n)] = R1; });
+    V.setAliases(AL2);
+    T("★ العنقودُ بعد توحيده لا يُعرَض ثانيةً",
+      !CL._vmClusters(nm2).some(c => c.names.some(e => e.name === R1)));
+    V.setAliases({});
+  }
+
+  // (ب) الاسمُ المركّب «أ + ب» — طلبٌ بمورّدَين
+  T("الاسمُ المركّب يُفكَّك إلى مورّديه",
+    V.vendorSplitNames("مؤسسة الوانك للتجارة + شركة فهد العمودي").length === 2 &&
+    V.vendorSplitNames("مورّد واحد").length === 1);
+  V.setAliases({ [V.vendorMatchKey("عالم الرتاج")]: "شركة عالم الريتاج" });
+  T("★ التوحيدُ يُطبَّق داخل الاسم المركّب على كل جزء",
+    V.vendorCanonical("عالم الرتاج + مؤسسة سنابل") === "شركة عالم الريتاج + مؤسسة سنابل");
+  T("★ وجزآن يؤولان لاسمٍ واحدٍ يصيران اسماً واحداً (لا تكرار)",
+    V.vendorCanonical("عالم الرتاج + شركة عالم الريتاج") === "شركة عالم الريتاج");
+  T("والاسمُ المفرد لا يتأثّر بمنطق التركيب",
+    V.vendorCanonical("مؤسسة سنابل") === "مؤسسة سنابل");
+  V.setAliases({});
+  T("جامعُ الأسماء يفكّك المركّب قبل العَدّ",
+    /const parts = vendorSplitNames\(raw\);/.test(HTML) && /if\(parts\.length>1\)/.test(HTML));
+
+  // (ج) «توحيد» لا يفعل شيئاً — تصادمُ الاسم كان يمحو الدالّة من النطاق العام
+  T("★ حالةُ العناقيد لا تُسنَد إلى اسم الدالّة (تصادمٌ يمحوها)",
+    !/window\._vmClusters\s*=/.test(HTML) && /let _vmLastClusters = \[\];/.test(HTML));
+  T("★ والتوحيدُ يقرأ المحدَّد فعلاً بمربّعات الاختيار",
+    /document\.querySelectorAll\('\.vm-pick\[data-scope="'\+scope\+'"\]'\)/.test(HTML) &&
+    /if\(picked\.length<2\)/.test(HTML));
+  T("★ والاسمُ المعتمد يجب أن يكون من المحدَّد",
+    /if\(!canon \|\| picked\.indexOf\(canon\)===-1\)/.test(HTML));
+  T("★ ودمجٌ يدويٌّ متاحٌ لأي اسمَين خارج الترشيح الآليّ",
+    /دمجٌ يدويّ — اختر أيَّ أسماءٍ ووحِّدها/.test(HTML) && /id="vm-search"/.test(HTML) &&
+    /_vmAllNames\.map\(e=>row\(e,"all",false\)\)/.test(HTML) && /function _vmFilterAll\(q\)\{/.test(HTML));
 }
 
 /* ════════════════════════════════════════════════════════════════════
