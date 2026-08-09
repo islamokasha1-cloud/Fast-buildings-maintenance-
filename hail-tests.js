@@ -5033,6 +5033,22 @@ function versionStampGuards() {
   T("sv: sync-version.mjs ضمن مسارات تشغيل CI",
     /- 'sync-version\.mjs'/.test(wfSrc));
 
+  /* ★ حارسٌ عامّ: **كلُّ وحدةٍ يفحصها hail-tests يجب أن تكون في مرشّح مسارات CI**.
+     تعليقُ الملف نفسِه يحذّر: «أي إغفال يعني أن push مباشراً له لا يُشغّل CI».
+     وقد وقع فعلاً — `contracts.js` بقيت خارج القائمة عبر أربعة PRs. الحارسُ يشتقّ
+     القائمةَ المطلوبة من **الوحدات الموجودة فعلاً** لا من قائمةٍ مكتوبةٍ ثانية. */
+  {
+    const dirV = pV.dirname(IDX);
+    const declared = new Set((wfSrc.match(/^\s*-\s*'([^']+)'/gm) || [])
+      .map(x => x.replace(/^\s*-\s*'/, "").replace(/'$/, "")));
+    // الوحداتُ التي تُحقَن في التطبيق (لها وسمُ <script> في index.html) — هي ما يفحصه hail-tests
+    const injected = (HTML.match(/<script src="([a-z0-9-]+\.js)\?v=/gi) || [])
+      .map(x => (x.match(/"([a-z0-9-]+\.js)\?/i) || [])[1]).filter(Boolean);
+    const missing = [...new Set(injected)].filter(f => !declared.has(f) && fsV.existsSync(pV.join(dirV, f)));
+    T("★ كلُّ وحدةٍ محقونةٍ في التطبيق مُدرَجةٌ في مسارات CI (وإلا لم يفحصها push مباشر)",
+      missing.length === 0, missing.join(" "));
+  }
+
   // ── تشغيلٌ فعليّ: الفحصُ يمرّ على الشجرة الحالية ──
   let ok = true, out = "";
   try { out = cpV.execSync(`node ${JSON.stringify(SV)} --check`, { cwd: pV.dirname(IDX), stdio: ["ignore","pipe","pipe"] }).toString(); }
