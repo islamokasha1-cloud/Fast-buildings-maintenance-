@@ -64,23 +64,31 @@ check('الوحدة حُمِّلت وعرَّضت window.contracts', await page.
 await page.evaluate(() => {
   window.__store[PROJECTS_DOC] = { projects: [{ id: 'hail', name: 'مشروع حائل', desc: 'صيانة مبانٍ', icon: '' }] };
   const V = 'global_vendors';
+  /* ══ تواريخُ الوثائق **نسبيةٌ لليوم** لا محفورة ══
+     حالةُ الوثيقة (سارية · توشك · منتهية) دالّةٌ في «اليوم»، فتاريخٌ محفورٌ في القالب
+     يجعل الفحصَ يمرّ اليوم ويسقط بعد أسبوعين لأن الإقامةَ انتهت **في الواقع** لا لأن
+     الكودَ ارتدّ — وذلك ليس فحصاً بل قنبلةٌ موقوتة. (وقع مثلُها في
+     `perf-contract-check`: توقُّعٌ محفورٌ بيومٍ ثابتٍ أسقط الفحصَ من نفسه.)
+     الإزاحاتُ مقصودةٌ بأسمائها: سالبٌ = منتهية · ≤٣٠ = توشك (DOC_SOON_DAYS) · أكبرُ = سارية. */
+  const _dayOff = n => new Date(Date.now() + n*86400000).toISOString().slice(0, 10);
   window.__store[V + '/VND-0001'] = {
     name: 'مؤسسة الأنوار للمقاولات', kind: 'subcontractor', status: 'active',
     legal: { crNumber: '1010234567', vatNumber: '300012345600003', nationalAddress: 'حائل — حي النقرة' },
     bank: { iban: 'SA0380000000608010167519', bankName: 'الأهلي' },
-    docs: [{ type: 'cr', number: '1010234567', expiry: '2027-05-01' }, { type: 'vat', number: '3000123456', expiry: '2027-01-15' },
-           { type: 'gosi', number: 'G-99', expiry: '2026-08-25' }],
+    docs: [{ type: 'cr', number: '1010234567', expiry: _dayOff(265) }, { type: 'vat', number: '3000123456', expiry: _dayOff(160) },
+           { type: 'gosi', number: 'G-99', expiry: _dayOff(16) }], // ⇐ توشك
     contacts: [{ name: 'خالد العتيبي', role: 'مدير المشاريع', phone: '0555000111' }]
   };
   window.__store[V + '/VND-0002'] = {
     name: 'شركة البناء الحديث', kind: 'both', status: 'active',
     legal: { crNumber: '4030998877' },
-    docs: [{ type: 'cr', number: '4030998877', expiry: '2026-07-01' }, { type: 'zakat', number: 'Z-12', expiry: '2028-01-01' }]
+    docs: [{ type: 'cr', number: '4030998877', expiry: _dayOff(-39) }, // ⇐ منتهية
+           { type: 'zakat', number: 'Z-12', expiry: _dayOff(510) }]
   };
   window.__store[V + '/VND-0003'] = {
     name: 'مؤسسة الإتقان للتوريدات', kind: 'supplier', status: 'suspended', statusReason: 'تأخّر متكرّر في التوريد',
     legal: { crNumber: '1010777888' },
-    docs: [{ type: 'cr', number: '1010777888', expiry: '2029-03-10' }]
+    docs: [{ type: 'cr', number: '1010777888', expiry: _dayOff(940) }]
   };
   window.__store[V + '/VND-0004'] = {
     name: 'ورشة الحرفي للألوميتال', entityType: 'establishment', kind: 'subcontractor', status: 'active',
@@ -89,14 +97,15 @@ await page.evaluate(() => {
   // ── أشخاصٌ طبيعيّون: التعاقدُ بالهوية/الإقامة، بلا سجلٍّ تجاريٍّ ولا ضريبة ──
   window.__store[V + '/VND-0005'] = {
     name: 'محمد أحمد الغامدي', entityType: 'individual', kind: 'subcontractor', status: 'active',
-    legal: { idType: 'national', idNumber: '1045667788', idExpiry: '2029-02-11', nationality: 'سعودي' },
+    legal: { idType: 'national', idNumber: '1045667788', idExpiry: _dayOff(915), nationality: 'سعودي' },
     bank: { iban: 'SA4420000001234567891234', bankName: 'الراجحي', holder: 'محمد أحمد الغامدي' },
-    docs: [{ type: 'profCert', number: 'PC-77', expiry: '2027-06-01' }]
+    docs: [{ type: 'profCert', number: 'PC-77', expiry: _dayOff(295) }]
   };
   window.__store[V + '/VND-0006'] = {
     name: 'راجو كومار', entityType: 'individual', kind: 'subcontractor', status: 'active',
-    legal: { idType: 'iqama', idNumber: '2398112233', idExpiry: '2026-08-20', nationality: 'هندي' },
-    docs: [{ type: 'workPermit', number: 'WP-441', expiry: '2026-08-20' }]
+    // إقامةٌ **توشك** (١١ يوماً) — هي مادّةُ فحص «وإقامتُه الموشكةُ على الانتهاء تُنبَّه»
+    legal: { idType: 'iqama', idNumber: '2398112233', idExpiry: _dayOff(11), nationality: 'هندي' },
+    docs: [{ type: 'workPermit', number: 'WP-441', expiry: _dayOff(11) }]
   };
 });
 
