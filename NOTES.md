@@ -269,7 +269,8 @@
   **الاختبارات.** `node hail-tests.js` ✅ · `node ui-walkthrough.mjs` ✅ ·
   `node po-lifecycle-check.mjs` ✅ — ولا خطأ جافاسكربت واحد في الجولة المسجَّلة كلّها
   (١٥ فصلاً على ٤٠ صفحة). المخرَج: `dist-video/promo.mp4` — 1920×1080 · 30 إطاراً/ث ·
-  ‏٣:٣٩ دقيقة. المتطلّبات: `npm install --no-save playwright-core ffmpeg-static`
+  ‏٣:٣٩ دقيقة — ومعه `promo-720.mp4` نسخةً خفيفةً (~١٢ م.ب) لأنّ الأصليّةَ (~٤٢ م.ب)
+  تتجاوز حدَّ المرفقات في واتساب والبريد. المتطلّبات: `npm install --no-save playwright-core ffmpeg-static`
   (ffmpeg المرفق مع Playwright يدعم VP8/WebM فقط، فالترميزُ إلى H.264 يحتاج الثاني).
   **`dist-video/` مُستثنى من git** — الفيديو مُخرَجٌ يُعاد توليدُه بأمرٍ واحد، لا أصلٌ يُخزَّن.
 

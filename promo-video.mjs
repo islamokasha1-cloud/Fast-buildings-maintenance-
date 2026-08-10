@@ -10,7 +10,7 @@
 //   node promo-video.mjs --probe    → لقطاتٌ فقط بلا تسجيل (تكرارٌ سريع أثناء الضبط)
 //
 // المتطلّبات:  npm install --no-save playwright-core ffmpeg-static
-// المخرجات:    dist-video/promo.mp4  ·  dist-video/shots/*.png
+// المخرجات:    dist-video/promo.mp4 (1920×1080) · promo-720.mp4 (نسخةُ مشاركة) · shots/*.png
 //
 // لا يلمس الإنتاج إطلاقاً: كل نداءٍ خارجيٍّ مُجهَض، وFirestore في الذاكرة.
 
@@ -730,6 +730,13 @@ if (!PROBE && vpath && fs.existsSync(vpath)) {
       const d = spawnSync(ff, ['-i', mp4], { encoding: 'utf8' });
       const dur = (/Duration: (\d+:\d+:\d+\.\d+)/.exec(d.stderr || '') || [, '؟'])[1];
       L(`  ✅ الفيديو: ${mp4}  ·  ${mb} م.ب  ·  المدّة ${dur}`);
+      // نسخةٌ خفيفةٌ للمشاركة: الأصليّةُ ~٤٢ م.ب تتجاوز حدَّ المرفقات في واتساب والبريد.
+      const lite = path.join(OUT, 'promo-720.mp4');
+      const r2 = spawnSync(ff, ['-y', '-i', webm, '-vf', 'fps=30,scale=1280:720:flags=lanczos',
+        '-c:v', 'libx264', '-preset', 'slow', '-crf', '26', '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart', lite], { stdio: ['ignore', 'ignore', 'pipe'] });
+      if (r2.status === 0 && fs.existsSync(lite))
+        L(`  ✅ نسخةُ المشاركة: ${lite}  ·  ${(fs.statSync(lite).size / 1048576).toFixed(1)} م.ب  ·  1280×720`);
     } else {
       L('  ❌ فشل الترميز — يبقى WebM: ' + webm);
       L(String(r.stderr || '').split('\n').slice(-6).join('\n'));
