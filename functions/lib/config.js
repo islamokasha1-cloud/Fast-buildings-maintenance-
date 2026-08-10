@@ -45,6 +45,19 @@ const MAX_ATTEMPTS = parseInt(process.env.WA_MAX_ATTEMPTS || "3", 10);
 const PURCHASES_COLLECTION = process.env.WA_PURCHASES_COLLECTION || "global_purchases";
 
 /** الرابط الأساسي لفتح الطلب مباشرة في النظام (deep link في زر القالب). */
+/**
+ * **الدورُ الاحتياطيّ** — إليه تذهب الرسالةُ حين لا يُوجد لدورٍ مستلمٌ واحد.
+ *
+ * الجذر: `wa(chg): لا مستلم للدور project_manager — تخطّي` سطرٌ في سجلٍّ لا يقرؤه أحد،
+ * **والإشعارُ يضيع بصمت**. ومَن ينتظره الاعتمادُ لا يعلم أنّ شيئاً انتظره أصلاً.
+ * وطلبُ المالك صريح: «مديرُ المشاريع هو نفسُه الأدمن» — فالأدمن يملك كلَّ بوّابةٍ
+ * في المنصة أصلاً (كلُّ `roles` في `contracts.js` تشمله)، والناقصُ أن تصله رسائلُها.
+ *
+ * **يُستعمَل عند الفراغ فقط، لا كمستلمٍ إضافيّ** — وإلّا صار الأدمن يتلقّى نسخةً من
+ * كلّ رسالةٍ في المنصة فيتوقّف عن قراءتها. اضبطه `""` لتعطيله كليّاً.
+ */
+const ROLE_FALLBACK = (process.env.WA_ROLE_FALLBACK ?? "admin").trim();
+
 const APP_BASE_URL =
   process.env.WA_APP_BASE_URL ||
   "https://islamokasha1-cloud.github.io/Fast-buildings-maintenance-/";
@@ -281,6 +294,7 @@ const CTR_CONTEXT_SHORT = {
 };
 
 module.exports = {
+  ROLE_FALLBACK,
   TICKET_COLLECTIONS,
   TECHNICIANS_COLLECTION,
   OUTBOX_COLLECTION,
