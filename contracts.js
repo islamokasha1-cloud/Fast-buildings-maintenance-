@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2537";
+var MODULE_BUILD = "v18.9.2540";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -3898,6 +3898,60 @@ function renderMyTasks(){
     '</div></div>';
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   فتحُ مستندٍ برابطٍ عميق (زرُّ «فتح المستند» في رسالة واتساب)  [المرحلة ٩]
+
+   الرسالةُ تحمل معرّفاً (`CRQ-…`/`CTR-…`/`EXT-…`/`CHG-…`) وزرّاً يفتح التطبيق به.
+   وموجِّهُ الروابط في النواة كان يعرف `HRP-` وحدَها ويعتبر كلَّ ما عداه **طلبَ شراء** —
+   فرسالةُ مستخلصٍ تنتهي بـ«تعذّر إيجاد الطلب»: زرٌّ يَعِد ولا يفي، وهو أسوأُ من زرٍّ
+   غائبٍ لأنّ المستخدم يظنّ العطلَ في بياناته.
+
+   والبادئةُ هي ما يوجّه لا اسمُ المتغيّر في الرابط (درسُ `HRP-` نفسُه) — فتعمل مع
+   القالب المستعار (`?po=`) والمخصّص معاً بلا تغيير.
+
+   والانتظارُ ضروريّ: المستمعُ قد لا تصل لقطتُه لحظةَ الدخول، فنفتح الصفحةَ فوراً
+   (فيرى المستخدمُ مكانَه لا شاشةً غريبة) ثمّ نفتح المستندَ فور وصوله — **بحدٍّ زمنيٍّ
+   صريحٍ** لا انتظارَ أبديٍّ لمعرّفٍ خاطئٍ أو مستندٍ حُذف. */
+function ctrIdKind(id){
+  var v = String(id||"").toUpperCase();
+  if(/^CRQ-/.test(v)) return "req";
+  if(/^CTR-/.test(v)) return "ctr";
+  if(/^EXT-/.test(v)) return "ext";
+  if(/^CHG-/.test(v)) return "chg";
+  return "";
+}
+function ctrOwnsId(id){ return ctrIdKind(id) !== ""; }
+
+function openById(id){
+  var kind = ctrIdKind(id);
+  if(!kind) return false;
+  if(!canView()){ _toast("⚠ لا تملك صلاحية الاطلاع على التعاقدات","warn"); return true; }
+  startSync(); startReqSync(); startCtrSync(); startExtSync(); startChgSync();
+
+  var finders = {
+    req: function(){ return requestById(id); },
+    ctr: function(){ return contractById(id); },
+    ext: function(){ return extractById(id); },
+    chg: function(){ return changeById(id); }
+  };
+  var openers = {
+    req: function(){ openReqFrom(id); },
+    ctr: function(){ openCtrFrom(id); },
+    ext: function(){ var e=extractById(id); openExtFrom(id, e && e.contractId); },
+    chg: function(){ var g=changeById(id); openChgFrom(id, g && g.contractId); }
+  };
+  // انقل المستخدمَ لمكانه فوراً ولو لم تصل البيانات بعد
+  try{ showPage(kind==="req" ? PAGE_REQS : PAGE_CTRS); }catch(e){}
+  if(finders[kind]()){ openers[kind](); return true; }
+
+  var tries = 0;
+  var timer = setInterval(function(){
+    if(++tries > 40){ clearInterval(timer); _toast("⚠ تعذّر إيجاد المستند "+id,"warn"); return; }
+    if(finders[kind]()){ clearInterval(timer); openers[kind](); }
+  }, 500);   // حتى ٢٠ ثانية
+  return true;
+}
+
 function openReqFrom(id){ try{ showPage(PAGE_REQS); }catch(e){} openReq(id); }
 function openCtrFrom(id){ try{ showPage(PAGE_CTRS); }catch(e){} openCtr(id); }
 function openExtFrom(id, cid){ try{ showPage(PAGE_CTRS); }catch(e){} openCtr(cid||""); _cTab="extracts"; _extOpen=id; paintCtrs(); }
@@ -4935,6 +4989,8 @@ window.contracts = {
   _create: createRequest, _act: actOnRequest, _pay: payRequest, _cancel: cancelRequest,
   _draft: function(){ return _rDraft; },
   // الصلاحيات
+  // الرابطُ العميق من رسالة واتساب [المرحلة ٩]
+  openById: openById, ownsId: ctrOwnsId, _idKind: ctrIdKind,
   canView: canView, canEdit: canEdit, canBank: canBank, canStatus: canStatus, canCreateReq: canCreateReq,
   // الدوالُّ النقية — مكشوفةٌ لفحوص hail-tests
   _r2: r2,
