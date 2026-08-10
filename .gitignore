@@ -1,4 +1,5 @@
 node_modules/
+dist-video/
 .temp-execution-*.js
 firebase-debug.log
 firestore-debug.log
