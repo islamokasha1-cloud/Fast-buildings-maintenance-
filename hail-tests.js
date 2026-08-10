@@ -4942,10 +4942,10 @@ function hrPaymentNotificationTests(src) {
   T("★★ المستلمون: المركزيُّ أوّلاً ثم مستنداتُ المشاريع (لا رقمَ يضيع بحسب شاشة إدخاله)",
     /findByRoleAnywhere\(db, route\.role\)/.test(hrpSrc) &&
     /findRequesterAnywhere\(db, after\)/.test(hrpSrc) &&
-    /async function findByRoleAnywhere\(db, role\)/.test(recSrc) &&
+    /async function findByRoleAnywhere\(db, role, _noFallback\)/.test(recSrc) &&
     /async function findRequesterAnywhere\(db, po\)/.test(recSrc));
   T("★ ولا تُمسح مستنداتُ المشاريع إلا عند خلوّ المركزيّ، وبسقفٍ صريح",
-    /const central = await findByRole\(db, role, ""\);\s*\n\s*if \(central\.length\) return central;/.test(recSrc) &&
+    /const central = await findByRole\(db, role, "", true\);\s*\n\s*if \(central\.length\) return central;/.test(recSrc) &&
     /const MAX_PROJECT_DOCS = 25;/.test(recSrc) &&
     (recSrc.match(/projects\.slice\(0, MAX_PROJECT_DOCS\)/g) || []).length === 2);
   T("★★ ولوحةُ الأدمن داخل المشروع تُزامن الرقمَ مركزياً كشاشة المشتريات",
@@ -6831,6 +6831,21 @@ function contractsPhase1() {
         /CTR_CONTEXT_SHORT = \{[\s\S]{0,200}extract: "مستخلص"/.test(cfgC) &&
         /usingPoApprovalTemplate\(\) \? KINDS\[kind\]\.context : KINDS\[kind\]\.contextShort/.test(ctrSrv));
     }
+
+    /* ★★ الدورُ الاحتياطيّ — «مديرُ المشاريع هو نفسُه الأدمن» (طلبُ المالك).
+       السلوكُ نفسُه يُنفَّذ في `wa-routing-check.mjs` (فحصٌ غيرُ متزامنٍ لا يسعه هذا
+       المُشغّل المتزامن) — وهنا حرّاسُ الاتّساق التي تمنع تفكيكَ القاعدة. */
+    T("★★ الدورُ الاحتياطيُّ مضبوطٌ على الأدمن ويُعطَّل بقيمةٍ فارغة",
+      /ROLE_FALLBACK = \(process\.env\.WA_ROLE_FALLBACK \?\? "admin"\)/.test(cfgC));
+    T("★★ ويُستعمَل **عند الفراغ فقط** لا كمستلمٍ إضافيّ",
+      /if \(!out\.length && !_noFallback && ROLE_FALLBACK && ROLE_FALLBACK !== role\)/.test(rdF("functions/lib/recipients.js")));
+    T("★ ويُستنفَد الدورُ الحقيقيُّ في كلّ المواضع قبل الارتداد",
+      /const central = await findByRole\(db, role, "", true\);/.test(rdF("functions/lib/recipients.js")));
+    T("★ ولا يرتدّ الدورُ الاحتياطيُّ على نفسه (حلقةٌ لا نهائية)",
+      /ROLE_FALLBACK !== role/.test(rdF("functions/lib/recipients.js")));
+    T("★★ وطبقةُ التوجيه الخادمية لها فحصٌ **ينفّذها** لا يقرؤها",
+      fs.existsSync(path.resolve(path.dirname(IDX), "wa-routing-check.mjs")) &&
+      /wa-routing-check\.mjs/.test(rdF(".github/workflows/hail-tests.yml")));
 
     /* ── زرُّ «فتح المستند» في الرسالة ── */
     T("★★ موجِّهُ الروابط يعرف بادئاتِ التعاقدات (وإلا فزرٌّ يَعِد ولا يفي)",

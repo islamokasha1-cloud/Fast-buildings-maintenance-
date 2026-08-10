@@ -21,6 +21,8 @@ on:
       - 'sync-version.mjs'
       - 'firestore.rules'
       - 'rules-check.mjs'
+      - 'wa-routing-check.mjs'
+      - 'functions/**'
       - 'tech-app.html'
       - '.github/workflows/hail-tests.yml'
   pull_request:
@@ -49,6 +51,12 @@ jobs:
 
       - name: Run tests
         run: node hail-tests.js
+
+      # طبقةُ التوجيه الخادمية — تنفيذاً لا مطابقةَ نصوص. لا شبكةَ ولا متصفّحَ ولا
+      # Java، فتُشغَّل هنا مع بقية الفحوص. وأخطاؤها صامتةٌ بطبعها: مستلمٌ لا يُوجَد
+      # أو خانةٌ زائدة — لا يظهر منها شيءٌ في النظام، والرسالةُ لا تصل فحسب.
+      - name: WhatsApp routing check
+        run: node wa-routing-check.mjs
 
   rules:
     name: Firestore security rules (emulator)

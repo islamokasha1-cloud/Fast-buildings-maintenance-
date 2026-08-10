@@ -6,6 +6,8 @@
  * المستخدمين. نقرأ مستند مشروع الطلب + المستند المركزي، ندمج، ونُرشّح حسب الدور.
  */
 
+const { ROLE_FALLBACK } = require("./config");
+
 /** يقرأ مصفوفة users من مستند meta واحد بأمان. */
 async function _readUsersDoc(db, path) {
   try {
@@ -25,7 +27,7 @@ async function _readUsersDoc(db, path) {
  * @param {string} role     الدور المطلوب (مثل "procurement_officer").
  * @param {string} projectId  معرّف مشروع الطلب (قد يكون فارغاً).
  */
-async function findByRole(db, role, projectId) {
+async function findByRole(db, role, projectId, _noFallback) {
   const docs = ["meta/users"]; // المركزي (الأدوار العامة: مشتريات/مستودع/مالية/تنفيذي)
   if (projectId) docs.unshift(`meta/${projectId}_users`); // مستخدمو المشروع (مدير المشروع)
 
@@ -41,6 +43,10 @@ async function findByRole(db, role, projectId) {
       seen.add(key);
       out.push({ name: u.name || u.user || role, phone: u.phone });
     }
+  }
+  // لا مستلمَ لهذا الدور ⇒ الدورُ الاحتياطيّ. **عند الفراغ فقط** — لا نسخةً إضافية.
+  if (!out.length && !_noFallback && ROLE_FALLBACK && ROLE_FALLBACK !== role) {
+    return findByRole(db, ROLE_FALLBACK, projectId, true);
   }
   return out;
 }
@@ -61,8 +67,10 @@ async function findByRole(db, role, projectId) {
  */
 const MAX_PROJECT_DOCS = 25;
 
-async function findByRoleAnywhere(db, role) {
-  const central = await findByRole(db, role, "");
+async function findByRoleAnywhere(db, role, _noFallback) {
+  // `true` هنا مقصود: نستنفد الدورَ الحقيقيَّ في **كلّ** المواضع قبل الارتداد —
+  // وإلّا ارتدّ إلى الأدمن بينما رقمُ صاحب الدور مسجَّلٌ في مستند مشروع.
+  const central = await findByRole(db, role, "", true);
   if (central.length) return central;
 
   let projects = [];
@@ -87,6 +95,9 @@ async function findByRoleAnywhere(db, role) {
       seen.add(key);
       out.push({ name: u.name || u.user || role, phone: u.phone });
     }
+  }
+  if (!out.length && !_noFallback && ROLE_FALLBACK && ROLE_FALLBACK !== role) {
+    return findByRoleAnywhere(db, ROLE_FALLBACK, true);
   }
   return out;
 }
