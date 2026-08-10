@@ -170,10 +170,15 @@ const HRP_WORK_TYPES = {
    صاحب الإجراء وحده. فمَن ينتظره اعتمادُ مستخلصٍ أو أمرِ تغييرٍ لا يعلم به إن لم
    يفتح النظام. هذا التوجيهُ يسدّ الفجوة بمنطق `purchases.js` نفسِه.
 
-   **ثلاثُ مجموعاتٍ لا أربع:** الطلبُ والمستخلصُ وأمرُ التغيير — لأنّ لكلٍّ منها
-   **بوّاباتِ انتظارٍ** يقف عندها شخصٌ بعينه. أمّا `global_contracts` فانتقالاتُها
-   (توقيع · إيقاف · إقفال · فسخ) يفعلها صاحبُها وهو أمام الشاشة، فلا أحدَ ينتظرها
-   في جواله — وإشعارٌ بلا منتظِرٍ ضجيجٌ يُدرَّب الناسُ على تجاهله. */
+   **القاعدةُ: لا إشعارَ بلا منتظِر.** فانتقالاتُ العقد التي يفعلها صاحبُها وهو أمام
+   الشاشة (إيقاف · استئناف · إقفال · فسخ) لا تُشعِر أحداً — وإشعارٌ بلا منتظِرٍ ضجيجٌ
+   يُدرَّب الناسُ على تجاهله.
+
+   **واستثناءٌ واحدٌ مُعلَّل: `ctr_pending_signature`.** العقدُ يولد عندها **بانتظار
+   فعلٍ من غير مَن أنشأه**: أن يُطبَع ويُوقَّع مع الطرف ثمّ تُرفع نسختُه. وهو انتظارٌ
+   حقيقيٌّ يحجز المال ويمنع كلَّ مستخلص — وكان يظهر في بطاقة «بانتظار إجراءك» بلا
+   رسالةٍ تُنبّه صاحبَه. فالمجموعاتُ **أربعٌ**، وحالةُ العقد المُشعِرةُ **واحدةٌ لا غير**
+   (يحرسه فحصٌ يعدّ مفاتيحَ الخريطة). */
 
 const CONTRACT_REQUESTS_COLLECTION =
   process.env.WA_CONTRACT_REQUESTS_COLLECTION || "global_contract_requests";
@@ -181,6 +186,8 @@ const CONTRACT_EXTRACTS_COLLECTION =
   process.env.WA_CONTRACT_EXTRACTS_COLLECTION || "global_contract_extracts";
 const CONTRACT_CHANGES_COLLECTION =
   process.env.WA_CONTRACT_CHANGES_COLLECTION || "global_contract_changes";
+const CONTRACTS_COLLECTION =
+  process.env.WA_CONTRACTS_COLLECTION || "global_contracts";
 
 /** قوالبُ التعاقدات — تستعير قالبَي الشراء المعتمَدَين حتى يُعتمَد مخصّصٌ (درسُ HRP). */
 const CTR = {
@@ -225,6 +232,19 @@ const EXT_STATUS_LABELS = {
   ext_paid: "مسدَّد",
 };
 
+/**
+ * توجيهُ العقد — **حالةٌ واحدةٌ فقط**: بانتظار التوقيع.
+ * والمستلمُ **المشتريات**: هي من أنشأت العقد وتملك علاقةَ الطرف، وعليها طباعتُه
+ * وتوقيعُه ورفعُ نسخته. (يجوز الفعلُ لمدير المشروع والأدمن أيضاً — لكنّ الرسالةَ
+ * تذهب لصاحب المسؤولية لا لكلّ من يملك الزرّ، وإلّا صار الإشعارُ جماعياً بلا صاحب.)
+ */
+const CTR_STATUS_ROUTING = {
+  ctr_pending_signature: { role: "procurement_officer", action: "تسجيل توقيع الطرف" },
+};
+/** لا إشعارَ لصاحب العقد: مُنشئُه هو المستلمُ نفسُه — فلا يُخبَر بفعل نفسه. */
+const CTR_NOTIFY_OWNER = new Set([]);
+const CTR_STATUS_LABELS = {};
+
 /** توجيهُ أمر التغيير — مطابقٌ لـ`CHG_GATES`. */
 const CHG_ROUTING = {
   chg_pending_pm: { role: "project_manager", action: "موافقتك" },
@@ -242,6 +262,7 @@ const CHG_STATUS_LABELS = {
 /** خانةُ السياق ({{2}} في قالب الشراء المستعار) — تميّز مستندَ التعاقدات عن طلب الشراء. */
 const CTR_CONTEXT = {
   request: "تعاقد",
+  contract: "عقد",
   extract: "مستخلص عقد",
   change: "أمر تغيير عقد",
 };
@@ -254,6 +275,7 @@ const CTR_CONTEXT = {
  */
 const CTR_CONTEXT_SHORT = {
   request: "طلب تعاقد",
+  contract: "عقد",
   extract: "مستخلص",
   change: "أمر تغيير",
 };
@@ -275,6 +297,10 @@ module.exports = {
   CONTRACT_REQUESTS_COLLECTION,
   CONTRACT_EXTRACTS_COLLECTION,
   CONTRACT_CHANGES_COLLECTION,
+  CONTRACTS_COLLECTION,
+  CTR_STATUS_ROUTING,
+  CTR_NOTIFY_OWNER,
+  CTR_STATUS_LABELS,
   CTR,
   CRQ_ROUTING,
   CRQ_NOTIFY_REQUESTER,

@@ -6844,9 +6844,28 @@ function contractsPhase1() {
 
     T("★ ولا مبالغَ في متن الرسالة (قاعدةُ الشراء والموارد البشرية نفسُها)",
       !/params: \[[\s\S]{0,200}(value|amount)/.test(ctrSrv));
-    T("★ وحالاتُ العقد نفسُها **لا** تُشعِر — لا منتظِرَ لها في جواله",
-      /ثلاثُ مجموعاتٍ لا أربع/.test(cfgC) &&
-      !/global_contracts"/.test(cfgC.replace(/global_contracts_/g, "")));
+    /* ★★ القاعدةُ «لا إشعارَ بلا منتظِر» تبقى — والاستثناءُ **واحدٌ مُعلَّل**:
+       العقدُ بانتظار التوقيع ينتظر فعلاً من **غير** مَن أنشأه (طباعةٌ وتوقيعٌ ورفعُ
+       نسخة)، ويحجز المالَ ويمنع كلَّ مستخلصٍ حتى يقع. الحارسُ يمنع تمدّدَ الاستثناء:
+       مفتاحٌ واحدٌ لا أكثر في خريطة حالات العقد. */
+    {
+      const m = cfgC.match(/const CTR_STATUS_ROUTING = \{([\s\S]*?)\n\};/);
+      const keys = m ? (m[1].match(/^\s{2}([a-z_]+):/gm) || []).map(x => x.trim().replace(":", "")) : [];
+      T("★★ حالةُ العقد المُشعِرةُ واحدةٌ لا غير: بانتظار التوقيع",
+        keys.length === 1 && keys[0] === "ctr_pending_signature", keys.join(" · "));
+      T("★ والمستلمُ صاحبُ المسؤولية لا كلُّ من يملك الزرّ",
+        /ctr_pending_signature: \{ role: "procurement_officer"/.test(cfgC));
+      T("★ ولا يُشعَر مُنشئُ العقد بفعل نفسه",
+        /CTR_NOTIFY_OWNER = new Set\(\[\]\)/.test(cfgC));
+      T("★ ولا تُشعِر بقيةُ الانتقالات (إيقاف · استئناف · إقفال · فسخ)",
+        !/ctr_suspended:|ctr_active:|ctr_closed:|ctr_terminated:/.test(m ? m[1] : ""));
+      T("★★ ومشغّلُ العقد منشورٌ مع الثلاثة (وإلا بقيت الحالةُ بلا رسالة)",
+        /kind: "contract", coll: cfg\.CONTRACTS_COLLECTION/.test(fnC) &&
+        /WA_CONTRACTS_COLLECTION \|\| "global_contracts"/.test(cfgC));
+      T("★ والبطاقةُ والرسالةُ صارتا متّسقتين — ما يظهر انتظاراً يصل صاحبَه",
+        /myPendingItems[\s\S]{0,900}ctr_pending_signature/.test(src) &&
+        keys.indexOf("ctr_pending_signature") !== -1);
+    }
   }
 
   /* ════════════════════════════════════════════════════════════

@@ -189,6 +189,8 @@ const CTR_SOURCES = [
   { key: "crq", kind: "request", coll: cfg.CONTRACT_REQUESTS_COLLECTION },
   { key: "ext", kind: "extract", coll: cfg.CONTRACT_EXTRACTS_COLLECTION },
   { key: "chg", kind: "change", coll: cfg.CONTRACT_CHANGES_COLLECTION },
+  // العقدُ نفسُه — حالةٌ واحدةٌ تُشعِر: بانتظار التوقيع (انتظارٌ حقيقيٌّ له صاحب)
+  { key: "ctr", kind: "contract", coll: cfg.CONTRACTS_COLLECTION },
 ];
 for (const src of CTR_SOURCES) {
   exports[`${src.key}RouteUpdate`] = onDocumentUpdated(
