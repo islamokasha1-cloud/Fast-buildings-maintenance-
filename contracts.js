@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2540";
+var MODULE_BUILD = "v18.9.2541";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -578,6 +578,80 @@ function contractLineQty(contract, lineId){
     (Array.isArray(co.lines)?co.lines:[]).forEach(function(ln){ if(ln && ln.id===lineId){ var v=Number(ln.qty); if(isFinite(v)) q += v; } });
   });
   return r2(q);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   ٤-ب-٢) أداءُ الطرف — وقائعُ لا تقدير  [المرحلة ١٠]
+
+   السؤالُ الذي تجيبه: **هل نتعاقد معه ثانيةً؟** واليومَ يُتّخذ القرارُ بالذاكرة —
+   ومَن يتذكّر أنّ هذا المقاولَ تأخّر أربعين يوماً في عقدٍ قبل سنة؟
+
+   **ولا درجةَ مخترَعةً ولا نجوم.** إعطاءُ «٤٫٢ من ٥» من عقدين يوهم بدقّةٍ لا تحتملها
+   البيانات، ويُخفي خلف رقمٍ واحدٍ وقائعَ متعارضة. نعرض **الوقائعَ كما هي**، ومعها
+   **إشاراتٌ مسمّاةٌ** لكلٍّ سببُها الظاهر — فالقارئُ يزن بنفسه ويعرف من أين جاء الحكم.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* تأخّرُ عقدٍ منتهٍ يُقاس بتاريخ إقفاله لا باليوم — وإلا صار كلُّ عقدٍ قديمٍ «متأخّراً»
+   بمرور الزمن. والعقدُ الجاري يُقاس باليوم فعلاً: تأخّرُه ما زال يتراكم. */
+function ctrLateDays(contract, today){
+  var c = contract || {};
+  var asOf = ctrIsFinal(c.status) || c.status==="ctr_completed"
+    ? String(c.updatedAt||"").slice(0,10) || today
+    : today;
+  return lateDaysOf(c, asOf || today);
+}
+
+/* بطاقةُ أداءِ طرفٍ — تُبنى من القوائم فتُختبَر بلا Firestore. */
+function vendorScorecard(vendorId, contracts, extracts, changes, today){
+  var out = {
+    contracts:0, active:0, done:0, terminated:0,
+    value:0, paid:0, remaining:0,
+    lateContracts:0, lateDaysMax:0, lateDaysSum:0,
+    extracts:0, extBounced:0,
+    changes:0, changeNet:0,
+    flags:[]
+  };
+  var mine = (Array.isArray(contracts)?contracts:[]).filter(function(c){ return c && c.vendorId===vendorId; });
+  var ids = {};
+  mine.forEach(function(c){
+    ids[c.id] = 1;
+    out.contracts++;
+    if(c.status==="ctr_active" || c.status==="ctr_suspended" || c.status==="ctr_pending_signature") out.active++;
+    else if(c.status==="ctr_completed" || c.status==="ctr_closed") out.done++;
+    else if(c.status==="ctr_terminated") out.terminated++;
+    out.value += contractValue(c);
+    var late = ctrLateDays(c, today);
+    if(late > 0){ out.lateContracts++; out.lateDaysSum += late; if(late > out.lateDaysMax) out.lateDaysMax = late; }
+    // أثرُ أوامر التغيير المطبَّقة يُقرأ من العقد نفسِه (لا من المجموعة) — فيبقى صحيحاً
+    // ولو لم تكن قائمةُ الأوامر محمَّلة
+    var t = contractChangeTotals(c);
+    out.changeNet += t.net;
+  });
+  (Array.isArray(extracts)?extracts:[]).forEach(function(e){
+    if(!e || !ids[e.contractId]) return;
+    out.extracts++;
+    if(e.status==="ext_paid") out.paid += r2((e.payment||{}).amount);
+    if(e.status==="ext_pm_rejected" || e.status==="ext_returned") out.extBounced++;
+  });
+  (Array.isArray(changes)?changes:[]).forEach(function(g){
+    if(!g || !ids[g.contractId]) return;
+    if(g.status==="chg_applied") out.changes++;
+  });
+  out.value = r2(out.value); out.paid = r2(out.paid);
+  out.remaining = r2(Math.max(0, out.value - out.paid));
+  out.changeNet = r2(out.changeNet);
+  out.lateDaysAvg = out.lateContracts ? Math.round(out.lateDaysSum / out.lateContracts) : 0;
+
+  /* الإشاراتُ — كلٌّ بسببها الظاهر، ولا إشارةَ بلا واقعةٍ تُريها. */
+  if(out.terminated > 0) out.flags.push({ key:"terminated", sev:"crit",
+    lbl:"فُسخ معه "+money0(out.terminated)+" عقد" });
+  if(out.lateContracts > 0) out.flags.push({ key:"late", sev: out.lateDaysMax>=30?"crit":"warn",
+    lbl:"تأخّر في "+money0(out.lateContracts)+" من "+money0(out.contracts)+" — أقصاه "+money0(out.lateDaysMax)+" يوماً" });
+  if(out.extBounced > 0) out.flags.push({ key:"bounced", sev:"warn",
+    lbl:money0(out.extBounced)+" مستخلصاً أُعيد أو رُفض" });
+  if(out.changes > 0) out.flags.push({ key:"changes", sev:"info",
+    lbl:money0(out.changes)+" أمرَ تغييرٍ مطبَّق — أثرُها الصافي "+(out.changeNet>=0?"+":"")+money(out.changeNet) });
+  return out;
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -2191,6 +2265,46 @@ function vendorTileHTML(v, today){
   '</div>';
 }
 
+/* قسمُ الأداء في بطاقة الطرف — يظهر فقط إن كان له تاريخٌ يُقرأ.
+   طرفٌ بلا عقودٍ لا يُعرض له صفرٌ في خمس خانات: صفرٌ يوهم بحكمٍ ولا حكمَ بلا واقعة. */
+function vendorPerfHTML(v){
+  startCtrSync(); startExtSync(); startChgSync();
+  var sc = vendorScorecard(v.id, _ctrs, _exts, _chgs, _today());
+  if(!sc.contracts){
+    return '<div class="card ct-sec">'+
+      '<div class="ct-sec-h">'+_icn("trendingUp","ic-sm")+' الأداء</div>'+
+      '<div class="ct-note">'+_icn("alertCircle","ic-sm")+' لا عقودَ معه بعد — لا أداءَ يُقاس. تظهر الأرقامُ بعد أوّل عقد.</div>'+
+    '</div>';
+  }
+  var flags = sc.flags.length
+    ? sc.flags.map(function(f){
+        var cls = f.sev==="crit" ? "crit" : (f.sev==="warn" ? "warn" : "");
+        return '<div class="ct-note '+cls+'">'+_icn(f.sev==="info"?"alertCircle":"alertTriangle","ic-sm")+' '+_esc(f.lbl)+'</div>';
+      }).join("")
+    : '<div class="ct-note">'+_icn("checkCircle","ic-sm")+' لا ملاحظاتِ تأخّرٍ ولا فسخٍ ولا مستخلصاتٍ مُعادة.</div>';
+
+  return '<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("trendingUp","ic-sm")+' الأداء'+
+      '<span class="ct-sec-lock">وقائعُ من عقوده — بلا درجةٍ ولا نجوم</span></div>'+
+    '<div class="ct-money-row">'+
+      '<div class="ct-tl"><span class="l">عقود</span><span class="v num">'+money0(sc.contracts)+'</span></div>'+
+      '<div class="ct-tl"><span class="l">سارية</span><span class="v num">'+money0(sc.active)+'</span></div>'+
+      '<div class="ct-tl"><span class="l">منتهية</span><span class="v num">'+money0(sc.done)+'</span></div>'+
+      '<div class="ct-tl big"><span class="l">قيمة التعاقدات</span><span class="v num">'+money(sc.value)+'</span></div>'+
+      '<div class="ct-tl"><span class="l">المسدَّد له</span><span class="v num">'+money(sc.paid)+'</span></div>'+
+    '</div>'+
+    '<div class="ct-money-row" style="margin-top:10px">'+
+      '<div class="ct-tl"><span class="l">عقودٌ تأخّرت</span><span class="v num">'+money0(sc.lateContracts)+'</span></div>'+
+      '<div class="ct-tl"><span class="l">أقصى تأخّر</span><span class="v num">'+money0(sc.lateDaysMax)+' يوماً</span></div>'+
+      '<div class="ct-tl"><span class="l">متوسّط التأخّر</span><span class="v num">'+money0(sc.lateDaysAvg)+' يوماً</span></div>'+
+      '<div class="ct-tl"><span class="l">مستخلصات</span><span class="v num">'+money0(sc.extracts)+'</span></div>'+
+      '<div class="ct-tl"><span class="l">أوامر تغيير</span><span class="v num">'+money0(sc.changes)+'</span></div>'+
+    '</div>'+
+    flags+
+    '<div class="ct-note">'+_icn("alertCircle","ic-sm")+' <b>لا درجةَ إجمالية عمداً:</b> رقمٌ واحدٌ من عقدين يوهم بدقّةٍ لا تحتملها البيانات ويُخفي وقائعَ متعارضة. الوقائعُ أعلاه، والحكمُ لك.</div>'+
+  '</div>';
+}
+
 function vendorCardHTML(id){
   var v = vendorById(id);
   if(!v) return headHTML("سجل الأطراف","",'',"hardHat")+'<div class="card">تعذّر العثور على الطرف.</div>';
@@ -2283,7 +2397,7 @@ function vendorCardHTML(id){
 
   return back +
     headHTML(v.name||v.id, '<span class="badge '+st.cls+'">'+_icn(st.icon,"ic-sm")+' '+_esc(st.lbl)+'</span> <span class="ct-id num">'+_esc(v.id)+'</span>', tools, (VENDOR_KINDS[v.kind]||VENDOR_KINDS.subcontractor).icon) +
-    warn + '<div class="card ct-sec">'+info+'</div>' + bank + docsSec + contactsSec;
+    warn + '<div class="card ct-sec">'+info+'</div>' + bank + vendorPerfHTML(v) + docsSec + contactsSec;
 }
 
 function infoCell(label, valueHtml){
@@ -3292,7 +3406,7 @@ function renderCtrs(){
   var el=document.getElementById("page-"+PAGE_CTRS); if(!el) return;
   if(!canView()){ el.innerHTML='<div class="card" style="text-align:center;padding:34px 18px"><div style="color:var(--muted);font-size:13px">'+_icn("lock")+' هذا القسم غير متاح لدورك.</div></div>'; return; }
   startSync(); startReqSync(); startCtrSync(); startExtSync(); startChgSync();
-  hookMyTasks();
+  hookMyTasks(); hookDash();
   paintCtrs();
 }
 function paintCtrs(){
@@ -3814,6 +3928,96 @@ function unlinkPO(poId){
    نلفّ `renderPOMyTasks` بدل تعديلها (نمطُ `hookShowPage` نفسُه)، فلا تطلب الوحدةُ
    من `index.html` إلا وسمَ <script> واحداً كما هي منذ المرحلة ١.
    ════════════════════════════════════════════════════════════════════ */
+
+/* ════════════════════════════════════════════════════════════════════
+   ٥-ح) التعاقداتُ في لوحة المعلومات  [المرحلة ١١]
+
+   الوحدةُ تظهر في صفحتها وفي الموازنة و«بانتظار إجراءك» — وتغيب عن الشاشة التي
+   يفتحها المالكُ أوّلَ الصباح. فلا يعرف منها: كم عقداً سارياً، وكم مالاً ما زال
+   ملتزَماً به، وكم مستخلصاً ينتظر السداد، وكم عقداً تجاوز مدّته.
+   تُلَفُّ `renderDashboardPurchaseSummary` كما لُفَّت بطاقةُ المهامّ — بلا تعديلٍ
+   في `index.html`.
+   ════════════════════════════════════════════════════════════════════ */
+var DASH_ID = "ct-dash-card";
+
+/* ملخّصُ لوحة المعلومات — دالّةٌ نقيةٌ تأخذ القوائم. */
+function dashSummary(contracts, extracts, today){
+  var out = { active:0, value:0, remaining:0, awaitingPay:0, awaitingPayAmt:0,
+              pendingSign:0, late:0, lateMax:0 };
+  var live = {};
+  (Array.isArray(contracts)?contracts:[]).forEach(function(c){
+    if(!c) return;
+    if(c.status==="ctr_pending_signature") out.pendingSign++;
+    if(!ctrIsCommitted(c)) return;
+    live[c.id] = 1;
+    out.active++;
+    out.value += contractValue(c);
+    var late = ctrLateDays(c, today);
+    if(late > 0){ out.late++; if(late > out.lateMax) out.lateMax = late; }
+  });
+  var paid = {};
+  (Array.isArray(extracts)?extracts:[]).forEach(function(e){
+    if(!e || !live[e.contractId]) return;
+    if(e.status==="ext_paid") paid[e.contractId] = r2((paid[e.contractId]||0) + r2((e.payment||{}).amount));
+    if(e.status==="ext_pending_finance"){ out.awaitingPay++; out.awaitingPayAmt += r2((e.settled||{}).net); }
+  });
+  (Array.isArray(contracts)?contracts:[]).forEach(function(c){
+    if(!c || !live[c.id]) return;
+    out.remaining += Math.max(0, contractValue(c) - (paid[c.id]||0));
+  });
+  out.value=r2(out.value); out.remaining=r2(out.remaining); out.awaitingPayAmt=r2(out.awaitingPayAmt);
+  return out;
+}
+
+function renderDashCard(){
+  var host = document.getElementById(DASH_ID);
+  if(!host){
+    var anchor = document.getElementById("dash-purchase-summary-card");
+    if(!anchor || !anchor.parentNode) return;
+    host = document.createElement("div");
+    host.id = DASH_ID;
+    anchor.parentNode.insertBefore(host, anchor.nextSibling);
+  }
+  if(!canView()){ host.style.display="none"; host.innerHTML=""; return; }
+  startCtrSync(); startExtSync();
+  var d = dashSummary(_ctrs, _exts, _today());
+  if(!d.active && !d.pendingSign){ host.style.display="none"; host.innerHTML=""; return; }
+
+  var tile = function(l, v, cls){
+    return '<div class="ct-tl'+(cls?" "+cls:"")+'"><span class="l">'+l+'</span><span class="v num">'+v+'</span></div>';
+  };
+  host.style.display="";
+  host.innerHTML =
+    '<div class="card" style="margin-bottom:16px"><div class="card-body">'+
+      '<div class="ct-mt-h" style="color:var(--primary)">'+_icn("briefcase","ic-sm")+' التعاقدات'+
+        '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.openCtrsPage()">'+_icn("briefcase","ic-sm")+' الصفحة</button></div>'+
+      '<div class="ct-money-row">'+
+        tile("عقود سارية", money0(d.active), "big")+
+        tile("قيمتها", money(d.value))+
+        tile("ملتزَمٌ به متبقٍّ", money(d.remaining))+
+        tile("مستخلصات بانتظار السداد", money0(d.awaitingPay))+
+        (d.awaitingPayAmt ? tile("قيمتها", money(d.awaitingPayAmt)) : "")+
+      '</div>'+
+      (d.pendingSign ? '<div class="ct-note warn" style="margin-top:10px">'+_icn("alertTriangle","ic-sm")+' '+money0(d.pendingSign)+' عقداً <b>بانتظار التوقيع</b> — لا تُقبل عليها مستخلصات.</div>' : "")+
+      (d.late ? '<div class="ct-note crit">'+_icn("timer","ic-sm")+' '+money0(d.late)+' عقداً تجاوز مدّتَه — أقصاه '+money0(d.lateMax)+' يوماً.</div>' : "")+
+    '</div></div>';
+}
+function openCtrsPage(){ try{ showPage(PAGE_CTRS); }catch(e){} }
+
+function hookDash(){
+  try{
+    if(window.__ctDashHooked) return;
+    if(typeof window.renderDashboardPurchaseSummary !== "function") return;
+    var orig = window.renderDashboardPurchaseSummary;
+    window.renderDashboardPurchaseSummary = function(){
+      var r;
+      try{ r = orig.apply(this, arguments); }catch(e){ console.warn("contracts/hookDash orig", e); }
+      try{ renderDashCard(); }catch(e){ console.warn("contracts/renderDashCard", e); }
+      return r;
+    };
+    window.__ctDashHooked = true;
+  }catch(e){ console.warn("contracts/hookDash", e); }
+}
 
 var MYTASK_ID = "ct-my-tasks-card";
 
@@ -4903,10 +5107,15 @@ function init(){
   ensurePages();
   injectSidebarGroup();
   hookShowPage();
+  /* اللفّان يُركَّبان **عند الإقلاع** لا عند فتح صفحتنا: بطاقتا «بانتظار إجراءك» ولوحةِ
+     المعلومات تظهران في شاشاتِ النواة، ومَن لا يفتح صفحةَ التعاقدات أبداً هو أوّلُ من
+     يحتاجهما. (كانتا مربوطتين بـ`renderCtrs` — فلا تظهران إلا بعد زيارةٍ واحدةٍ على الأقلّ.) */
+  hookMyTasks();
+  hookDash();
   loadConfig();
   // القائمةُ الجانبية قد يُعاد بناؤها بعد الدخول أو تبديل المستخدم — أعِد الحقن
   try{
-    var obs = new MutationObserver(function(){ injectSidebarGroup(); hookShowPage(); });
+    var obs = new MutationObserver(function(){ injectSidebarGroup(); hookShowPage(); hookMyTasks(); hookDash(); });
     obs.observe(document.body, { childList:true, subtree:true });
   }catch(e){}
 }
@@ -4977,6 +5186,9 @@ window.contracts = {
   openReqFrom: openReqFrom, openCtrFrom: openCtrFrom,
   openExtFrom: openExtFrom, openChgFrom: openChgFrom,
   renderMyTasks: renderMyTasks, hookMyTasks: hookMyTasks,
+  // الأداء ولوحة المعلومات [المرحلتان ١٠ و١١]
+  renderDashCard: renderDashCard, hookDash: hookDash, openCtrsPage: openCtrsPage,
+  _vendorScorecard: vendorScorecard, _dashSummary: dashSummary, _ctrLateDays: ctrLateDays,
   _linkPurchase: linkPurchase, _poCandidatesFor: poCandidatesFor,
   _poLinkedTo: poLinkedTo, _myPendingItems: myPendingItems,
   _chgAmountOf: chgAmountOf, _chgNextStage: chgNextStage, _chgEffect: chgEffect,
