@@ -54,6 +54,14 @@ const KINDS = {
  */
 function context(kind, doc) {
   const base = KINDS[kind].context;
+  /* **اسمُ المشروع اليدويّ نصٌّ حرٌّ** يكتبه مقدّمُ الطلب بيده — و«استراحة فلان» اسمُ
+     مشروعٍ طبيعيٌّ تماماً. فهو البابُ نفسُه الذي أُغلق في «أخرى» بوحدة الموارد البشرية
+     (v18.9.2534): خانةٌ حرّةٌ تحمل اسمَ شخصٍ إلى رسالةٍ تخرج إلى جوّالٍ وتمرّ بخوادم
+     Meta وتبقى في سجلّ المحادثة. أمّا مشاريعُ القائمة المسجّلة فأسماؤها من قائمةٍ
+     مغلقةٍ يديرها المالك — لا نصَّ حرّاً فيها. */
+  if (doc && (doc.isCustomProject === true || doc.projectId === "__OTHER__")) {
+    return `${base} — مشروع يدويّ`;
+  }
   const proj = String((doc && (doc.projectName || doc.projectId)) || "").trim();
   return proj ? `${base} — ${proj}` : base;
 }
