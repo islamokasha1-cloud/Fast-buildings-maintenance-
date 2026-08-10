@@ -6800,6 +6800,48 @@ function contractsPhase1() {
       /مشروع يدويّ/.test(ctrSrv));
     T("★ وأسماءُ المشاريع المسجّلة تمرّ (قائمةٌ مغلقةٌ لا نصٌّ حرّ)",
       /doc\.projectName \|\| doc\.projectId/.test(ctrSrv));
+    /* ★★ فحصٌ **تنفيذيّ** لا نصّيّ: يضبط البيئةَ على القالب المخصّص ويعيد تحميل الوحدة
+       ويتحقّق من الشكل الرباعيّ ثمّ يستعيد الافتراض. مسارٌ يستيقظ بعد أسابيع (يومَ
+       يعتمد Meta القالب) لا يُترك بلا فحصٍ ينفّذه — وعطلُه صامتٌ تماماً: عددُ خاناتٍ
+       لا يطابق القالبَ ⇒ Meta ترفض **كلَّ** رسائل التعاقدات بلا تغيّرِ سطرٍ في النظام. */
+    {
+      const cfgP = path.resolve(path.dirname(IDX), "functions/lib/config.js");
+      const ctrP = path.resolve(path.dirname(IDX), "functions/lib/contracts.js");
+      const fresh = () => { delete require.cache[cfgP]; delete require.cache[ctrP]; return require(ctrP); };
+      const prev = process.env.WA_CTR_APPROVAL_TEMPLATE;
+      let borrowed = [], custom = [];
+      try {
+        delete process.env.WA_CTR_APPROVAL_TEMPLATE;
+        borrowed = fresh().approvalParams("اعتمادك", "مستخلص عقد — hail", "EXT-1", "أحمد");
+        process.env.WA_CTR_APPROVAL_TEMPLATE = "ctr_approval_needed";
+        custom = fresh().approvalParams("اعتمادك", "مستخلص — hail", "EXT-1", "أحمد");
+      } finally {
+        if (prev === undefined) delete process.env.WA_CTR_APPROVAL_TEMPLATE;
+        else process.env.WA_CTR_APPROVAL_TEMPLATE = prev;
+        fresh();
+      }
+      T("★★ شكلُ الخانات يتبع القالبَ المضبوط: ٥ للمستعار و٤ للمخصّص",
+        borrowed.length === 5 && custom.length === 4,
+        "مستعار=" + borrowed.length + " · مخصّص=" + custom.length);
+      T("★ والخانةُ الخامسة «عدد البنود» = 1 في المستعار وحدَه",
+        borrowed[4] === "1" && custom[4] === undefined);
+      T("★ والفرزُ بمطابقة اسم القالب لا بعَلَمٍ منفصلٍ يُنسى",
+        /cfg\.CTR\.approvalTemplate === cfg\.PO\.approvalTemplate/.test(ctrSrv));
+      T("★ والسياقُ المختصرُ للمخصّص وحدَه (لا حشوَ «عقد» مع نصٍّ ثابتٍ يقوله)",
+        /CTR_CONTEXT_SHORT = \{[\s\S]{0,200}extract: "مستخلص"/.test(cfgC) &&
+        /usingPoApprovalTemplate\(\) \? KINDS\[kind\]\.context : KINDS\[kind\]\.contextShort/.test(ctrSrv));
+    }
+
+    /* ── زرُّ «فتح المستند» في الرسالة ── */
+    T("★★ موجِّهُ الروابط يعرف بادئاتِ التعاقدات (وإلا فزرٌّ يَعِد ولا يفي)",
+      /function _isCtrId\(id\)/.test(HTML) && /_isCtrId\(poId\)\) return _openPendingCTR\(\)/.test(HTML));
+    T("★ والقرارُ للوحدة نفسِها فلا تُنسَخ قائمةُ البادئات في موضعين",
+      /window\.contracts\.ownsId\(id\)/.test(HTML) && /function ctrIdKind\(id\)/.test(src));
+    T("★ والوحدةُ تنتظر مزامنتَها بحدٍّ زمنيٍّ صريحٍ لا انتظاراً أبدياً",
+      /function openById\(id\)[\s\S]{0,1200}tries > 40[\s\S]{0,160}تعذّر إيجاد المستند/.test(src));
+    T("★ والرابطُ لا يفتح لمن لا يملك الصلاحية",
+      /function openById[\s\S]{0,300}if\(!canView\(\)\)/.test(src));
+
     T("★ ولا مبالغَ في متن الرسالة (قاعدةُ الشراء والموارد البشرية نفسُها)",
       !/params: \[[\s\S]{0,200}(value|amount)/.test(ctrSrv));
     T("★ وحالاتُ العقد نفسُها **لا** تُشعِر — لا منتظِرَ لها في جواله",

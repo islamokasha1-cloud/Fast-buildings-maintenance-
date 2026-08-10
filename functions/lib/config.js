@@ -246,6 +246,18 @@ const CTR_CONTEXT = {
   change: "أمر تغيير عقد",
 };
 
+/**
+ * السياقُ المختصر — للقالب **المخصّص** وحدَه.
+ * نصُّه الثابتُ يقول «مستند تعاقدات» أصلاً، فتكرارُ كلمة «عقد» في الخانة حشوٌ يُطيل
+ * الرسالةَ بلا معنى. (نفسُ منطق الموارد البشرية: المستعارُ يعوّض النصَّ الثابت،
+ * والمخصّصُ لا يحتاج تعويضاً.)
+ */
+const CTR_CONTEXT_SHORT = {
+  request: "طلب تعاقد",
+  extract: "مستخلص",
+  change: "أمر تغيير",
+};
+
 module.exports = {
   TICKET_COLLECTIONS,
   TECHNICIANS_COLLECTION,
@@ -274,6 +286,7 @@ module.exports = {
   CHG_NOTIFY_REQUESTER,
   CHG_STATUS_LABELS,
   CTR_CONTEXT,
+  CTR_CONTEXT_SHORT,
   HR_PAYMENTS_COLLECTION,
   HRP,
   HRP_ROUTING,
