@@ -5958,13 +5958,28 @@ function contractsPhase1() {
     ctrBuild === VER, `MODULE_BUILD=${ctrBuild}  APP_VERSION=${VER}`);
 
   /* ── العزل عن مسار المشتريات ──
-     القرارُ المحوريّ: أمرُ الإسناد ليس طلبَ شراء. أيُّ لمسٍ لـ global_purchases
-     أو للمخزون يعني تسرّبَ أرقام التعاقد إلى مؤشّرات التوريد — وهو الخطأُ الذي
-     عُزلت لأجله hr-payments أصلاً. */
-  T("★ لا تكتب ولا تقرأ مجموعة المشتريات (global_purchases)",
-    !/["']global_purchases/.test(src) && !/PURCHASES_COLLECTION\s*\(/.test(src));
-  T("★ لا تستدعي savePurchase ولا تلمس مصفوفة purchases",
-    !/\bsavePurchase\s*\(/.test(src) && !/\bpurchases\s*\.(find|filter|map|push)\b/.test(src));
+     القرارُ المحوريّ يبقى: **أمرُ الإسناد ليس طلبَ شراء**. لكنّ المرحلة ٨ فتحت ثقباً
+     واحداً مقصوداً: كتابةُ `contractId` على طلبِ شراءٍ قائم. وهذا **عكسُ التسريب** —
+     به يُستبعَد الطلبُ من مصروف الشراء فلا يُحسب المالُ مرّتين؛ وبدونه كان الحارسُ
+     الذي بنته المرحلةُ ٥ باباً بلا مفتاح.
+     فالعهدُ يُضيَّق ولا يُلغى: **حقلُ الربط وحدَه**، ولا إنشاءَ طلبٍ ولا تحريكَ حالته
+     ولا مساسَ بمبالغه. وهذه الحرّاسُ تُثبّت الحدَّ الجديد بدقّة. */
+  T("★★ لا تكتب في مجموعة المشتريات إلا **حقلَ الربط** (contractId) لا غير",
+    (function () {
+      const writes = src.match(/collection\(PURCH_COL\(\)\)[\s\S]{0,400}?\{ merge:true \}/g) || [];
+      if (writes.length !== 1) return false;
+      const w = writes[0];
+      const fields = (w.match(/([A-Za-z_]+)\s*:/g) || []).map(x => x.replace(/\s*:$/, ""));
+      const allowed = new Set(["contractId", "updatedAt", "updatedBy", "merge"]);
+      return fields.every(f => allowed.has(f));
+    })());
+  T("★ ولا تُنشئ طلبَ شراءٍ ولا تحرّك حالتَه ولا تمسّ مبالغه",
+    !/\bsavePurchase\s*\(/.test(src) &&
+    !/PURCH_COL\(\)\)\.add\(/.test(src) &&
+    !/status\s*:\s*["'](pending_pm|pm_approved|proc_executing|closed)/.test(src) &&
+    !/estCost\s*:|actualCost\s*:/.test(src));
+  T("★ وقراءةُ الطلبات من مصفوفة النواة بلا مستمعٍ ثانٍ للمجموعة نفسِها",
+    /function allPurchases\(\)/.test(src) && !/PURCH_COL\(\)\)\.onSnapshot/.test(src));
   T("★ لا تلمس المخزون ولا البند المستعاض",
     !/_inventoryItems|substituteBudget|substituteAccountId/.test(src));
   T("مجموعاتها الخاصة معرّفة مع نسخ التطوير",
@@ -6676,6 +6691,123 @@ function contractsPhase1() {
   }
 
   /* ════════════════════════════════════════════════════════════
+     المرحلة ٨ — فجواتُ الربط الثلاث: طلبُ الشراء · «بانتظار إجراءك» · واتساب
+     ════════════════════════════════════════════════════════════ */
+  {
+    /* ── (أ) ربطُ طلب الشراء بعقد: البابُ الذي كان الحارسُ ينتظره ── */
+    T("★★ الوحدةُ تكتب `contractId` على طلب الشراء (الحارسُ لم يعد باباً بلا مفتاح)",
+      /function linkPurchase\(poId, contractId\)/.test(src) &&
+      /collection\(PURCH_COL\(\)\)\.doc\(poId\)\.set\(/.test(src) &&
+      /contractId:contractId/.test(src));
+    T("★ والربطُ لدورٍ مخوَّلٍ وحدَه",
+      /function linkPurchase[\s\S]{0,400}\["procurement_officer","project_manager","admin"\]\.indexOf\(_role\(\)\) === -1/.test(src));
+    T("★★ ولا يُسرَق طلبٌ مرتبطٌ بعقدٍ آخر (لا ينتقل المال بين عقدين بنقرة)",
+      /po\.contractId && po\.contractId !== contractId\)\s*\n?\s*return Promise\.reject/.test(src));
+    T("★ والمرشَّحون من **مشروع العقد نفسِه** بلا محذوفٍ ولا مرتبطٍ بغيره",
+      /function poCandidatesFor[\s\S]{0,500}p\.status === "deleted"[\s\S]{0,300}docProjectKey/.test(src));
+    T("★ وقيمةُ الطلب وحالتُه تُقرآن من النواة لا يُعاد حسابُهما",
+      /function _poAmount[\s\S]{0,300}poActualCost[\s\S]{0,200}getPOTotal/.test(src) &&
+      /function _poStatusLbl[\s\S]{0,160}poStatusLabel/.test(src));
+    T("★ ومجموعةُ الشراء تتبع وضعَ التطوير كبقية المجموعات",
+      /function PURCH_COL\(\)\{ return _dev\(\) \? "global_purchases_dev" : "global_purchases"; \}/.test(src));
+    T("تبويبُ «طلبات الشراء» في بطاقة العقد",
+      /\["purchases","طلبات الشراء","cart"\]/.test(src) &&
+      /if\(_cTab==="purchases"\)\s+return ctrPurchasesHTML/.test(src));
+    T("★ والتبويبُ يشرح **لماذا** الربط (وإلا بدا حقلاً بلا معنى)",
+      /تُحسب في الموازنة[\s\S]{0,80}مرّتين/.test(src));
+    /* الوجهُ الآخر: طلبُ الشراء نفسُه يعلن أنه جزءٌ من عقد */
+    T("★★ وتفاصيلُ طلب الشراء تعلن ارتباطَه بعقدٍ واستبعادَه من مصروف الشراء",
+      /function _poContractBanner\(p\)/.test(HTML) &&
+      /_poContractBanner\(p\);/.test(HTML) &&
+      /مستبعَدٌ من مصروف الشراء في الموازنة/.test(HTML));
+    T("★ والشارةُ تُحقن ديناميكياً فلا يكسر الشاشةَ غيابُ الوحدة",
+      /function _poContractBanner[\s\S]{0,700}window\.contracts && window\.contracts\.contractById/.test(HTML));
+
+    /* ── (ب) «بانتظار إجراءك»: التعاقداتُ في المكان الذي يفتحه المعتمِد ── */
+    T("★★ بطاقةُ «بانتظار إجراءك» للتعاقدات موجودة",
+      /function renderMyTasks\(\)/.test(src) && /التعاقدات بانتظار إجراءك/.test(src));
+    T("★★ وتُبنى من **البوّابات نفسِها** التي تحرس الأزرار لا من قائمةٍ ثانية",
+      /function myPendingItems\(role\)[\s\S]{0,1400}crqCanAct\(r\.status, role\)/.test(src) &&
+      /myPendingItems[\s\S]{0,1600}extCanAct\(e\.status, role\)/.test(src) &&
+      /myPendingItems[\s\S]{0,2000}chgCanAct\(g\.status, role\)/.test(src));
+    T("★ وتشمل العقدَ المنتظِرَ توقيعاً (عملٌ حقيقيٌّ ينتظر صاحبَه)",
+      /myPendingItems[\s\S]{0,900}ctrCanTransit\("sign","ctr_pending_signature",role\)/.test(src));
+    T("★ ولا تعرض منتهياً", /myPendingItems[\s\S]{0,1400}!crqIsFinal\(r\.status\)/.test(src) &&
+      /myPendingItems[\s\S]{0,1700}!extIsFinal\(e\.status\)/.test(src));
+    T("★ ولا شيءَ للأدوار العارضة",
+      /function myPendingItems[\s\S]{0,200}role==="viewer" \|\| role==="observer"\) return out/.test(src));
+    T("★ والأقدمُ أوّلاً — ما نام أطولَ يُرى أوّلاً",
+      /out\.sort\(function\(a,b\)\{ return String\(a\.at\|\|""\)\.localeCompare\(String\(b\.at\|\|""\)\); \}\)/.test(src));
+    T("★★ واللفُّ يستدعي الأصلَ ولا يستبدله (بطاقةُ المشتريات تبقى كما هي)",
+      /function hookMyTasks[\s\S]{0,600}var orig = window\.renderPOMyTasks;[\s\S]{0,300}orig\.apply\(this, arguments\)/.test(src));
+    T("★ واللفُّ مرّةً واحدةً مهما أُعيد الرسم", /window\.__ctMyTasksHooked/.test(src));
+    T("والوحدةُ لا تطلب من index.html إلا وسمَ script (بلا حاويةٍ ثابتة)",
+      !/id="ct-my-tasks-card"/.test(HTML) && /MYTASK_ID = "ct-my-tasks-card"/.test(src));
+
+    /* ── (ج) واتساب: الوحدةُ الثالثةُ لا تتكرّر فيها فجوةُ الموارد البشرية ── */
+    const rdF = f => { const q = path.resolve(path.dirname(IDX), f); return fs.existsSync(q) ? fs.readFileSync(q, "utf8") : ""; };
+    const cfgC = rdF("functions/lib/config.js");
+    const ctrSrv = rdF("functions/lib/contracts.js");
+    const fnC = rdF("functions/index.js");
+    T("★★ وحدةُ توجيه التعاقدات موجودةٌ على الخادم",
+      !!ctrSrv && /function routeContractDoc\(kind, before, after/.test(ctrSrv));
+    T("★★ ومشغّلاتُ Firestore منشورةٌ للمجموعات الثلاث (إنشاءً وتحديثاً)",
+      /CTR_SOURCES = \[/.test(fnC) &&
+      /\$\{src\.coll\}\/\{docId\}/.test(fnC) &&
+      /RouteUpdate`\] = onDocumentUpdated/.test(fnC) &&
+      /RouteCreate`\] = onDocumentCreated/.test(fnC) &&
+      /require\("\.\/lib\/contracts"\)/.test(fnC));
+    T("★ والمجموعاتُ الافتراضيةُ = ما تكتبه الواجهةُ بالضبط",
+      /WA_CONTRACT_REQUESTS_COLLECTION \|\| "global_contract_requests"/.test(cfgC) &&
+      /WA_CONTRACT_EXTRACTS_COLLECTION \|\| "global_contract_extracts"/.test(cfgC) &&
+      /WA_CONTRACT_CHANGES_COLLECTION \|\| "global_contract_changes"/.test(cfgC));
+    T("★ والقالبُ الافتراضيُّ قالبا الشراء المعتمَدان (تعمل لحظةَ النشر — درسُ HRP)",
+      /approvalTemplate: process\.env\.WA_CTR_APPROVAL_TEMPLATE \|\| PO\.approvalTemplate/.test(cfgC));
+
+    /* ★★ الحارسُ الحقيقيّ: خريطةُ الخادم تُشتقّ مطابقتُها من **بوّابات الوحدة نفسِها**،
+       فبوّابةٌ تُضاف في `contracts.js` بلا مستلمٍ على الخادم تُسقط الاختبارات. */
+    const gatesOf = (name) => {
+      const m = src.match(new RegExp("var " + name + " = \\{([\\s\\S]*?)\\n\\};"));
+      return m ? (m[1].match(/^\s{2}([a-z_]+):/gm) || []).map(x => x.trim().replace(":", "")) : [];
+    };
+    const routeOf = (name) => {
+      const m = cfgC.match(new RegExp("const " + name + " = \\{([\\s\\S]*?)\\n\\};"));
+      return m ? (m[1].match(/^\s{2}([a-z_]+):/gm) || []).map(x => x.trim().replace(":", "")) : [];
+    };
+    const pairs = [["GATE_ROLES", "CRQ_ROUTING"], ["EXT_GATES", "EXT_ROUTING"], ["CHG_GATES", "CHG_ROUTING"]];
+    const missing = [];
+    pairs.forEach(([g, r]) => {
+      const gk = gatesOf(g), rk = routeOf(r);
+      gk.forEach(k => { if (!rk.includes(k)) missing.push(g + "." + k); });
+    });
+    T("★★ كلُّ بوّابةِ انتظارٍ في الوحدة لها مستلمٌ في خريطة الخادم",
+      gatesOf("GATE_ROLES").length >= 5 && gatesOf("EXT_GATES").length === 3 &&
+      gatesOf("CHG_GATES").length === 4 && missing.length === 0, missing.join(" · "));
+    T("★ والأدوارُ مطابقةٌ لبوّابات الوحدة",
+      /crq_pending_finance: \{ role: "finance"/.test(cfgC) &&
+      /ext_pending_ceo: \{ role: "ceo"/.test(cfgC) &&
+      /chg_pending_pm: \{ role: "project_manager"/.test(cfgC));
+    T("★ وخانةُ السياق تُميّز المستندَ عن طلب الشراء (وإلا بحثت المالية في الشاشة الخطأ)",
+      /CTR_CONTEXT = \{[\s\S]{0,220}extract: "مستخلص عقد"/.test(cfgC) &&
+      /function context\(kind, doc\)/.test(ctrSrv));
+    T("★ والبحثُ عن المستلم لا يتقيّد بمشروع (مجموعاتُ التعاقدات عامة)",
+      /findByRoleAnywhere/.test(ctrSrv) && !/[^A-Za-z]findByRole\(/.test(ctrSrv));
+    /* ★★ البابُ نفسُه الذي أُغلق في «أخرى» بالموارد البشرية (v18.9.2534): اسمُ المشروع
+       **اليدويّ** نصٌّ حرٌّ يكتبه مقدّمُ الطلب — و«استراحة فلان» اسمُ مشروعٍ طبيعيّ.
+       مشاريعُ القائمة المسجّلة أسماؤها من قائمةٍ مغلقة، فلا تُمنَع. */
+    T("★★ ولا يخرج اسمُ مشروعٍ **يدويٍّ** (نصٌّ حرٌّ قد يحمل اسمَ شخص) إلى الرسالة",
+      /isCustomProject === true \|\| doc\.projectId === "__OTHER__"/.test(ctrSrv) &&
+      /مشروع يدويّ/.test(ctrSrv));
+    T("★ وأسماءُ المشاريع المسجّلة تمرّ (قائمةٌ مغلقةٌ لا نصٌّ حرّ)",
+      /doc\.projectName \|\| doc\.projectId/.test(ctrSrv));
+    T("★ ولا مبالغَ في متن الرسالة (قاعدةُ الشراء والموارد البشرية نفسُها)",
+      !/params: \[[\s\S]{0,200}(value|amount)/.test(ctrSrv));
+    T("★ وحالاتُ العقد نفسُها **لا** تُشعِر — لا منتظِرَ لها في جواله",
+      /ثلاثُ مجموعاتٍ لا أربع/.test(cfgC) &&
+      !/global_contracts"/.test(cfgC.replace(/global_contracts_/g, "")));
+  }
+
+  /* ════════════════════════════════════════════════════════════
      المرحلة ٦ — قواعدُ Firestore: الحارسُ على الخادم
 
      الفحصُ الحقيقيُّ للقواعد يجري على محاكٍ (`rules-check.mjs`) — لأن قاعدةً
@@ -6695,8 +6827,12 @@ function contractsPhase1() {
 
     // كلُّ مجموعةٍ تكتب فيها الوحدة يجب أن تكون مقفلةً — القائمةُ تُشتقّ من الوحدة
     const lockedBlock = (RUL.match(/function ctrLocked\(coll\)\s*\{[\s\S]*?\}/) || [""])[0];
+    /* `global_purchases` تُستثنى: ليست من بيانات الوحدة بل من بيانات النظام، وتبقى
+       عمداً تحت القاعدة العامة. الوحدةُ تكتب فيها **حقلَ ربطٍ واحداً** يحرسه عهدُ
+       العزل أعلاه — وقفلُها هنا كان سيقفل مسارَ المشتريات كلَّه بلا قصد. */
     const usedColls = [...new Set((src.match(/return _dev\(\) \? "(global_[a-z_]+)_dev"\s*:\s*"(global_[a-z_]+)"/g) || [])
-      .map(x => (x.match(/:\s*"(global_[a-z_]+)"/) || [])[1]).filter(Boolean))];
+      .map(x => (x.match(/:\s*"(global_[a-z_]+)"/) || [])[1]).filter(Boolean))]
+      .filter(c => c !== "global_purchases");
     const notLocked = usedColls.filter(c => !lockedBlock.includes("'" + c + "'"));
     T("★ كلُّ مجموعةٍ تكتب فيها وحدةُ التعاقدات مقفلةٌ في القواعد",
       usedColls.length >= 4 && notLocked.length === 0, notLocked.join(" "));
