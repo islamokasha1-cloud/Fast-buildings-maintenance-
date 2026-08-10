@@ -21,6 +21,7 @@ const { enqueue } = require("./lib/outbox");
 const { sendTemplate } = require("./lib/whatsapp");
 const { routePurchase } = require("./lib/purchases");
 const { routeHrPayment } = require("./lib/hr-payments");
+const { routeContractDoc } = require("./lib/contracts");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -180,6 +181,36 @@ exports.hrpRouteCreate = onDocumentCreated(
     await routeHrPayment(null, after, _poDeps());
   }
 );
+
+/* ═══════════ التعاقدات (طلب · مستخلص · أمر تغيير) ═══════════
+   ثلاثُ مجموعاتٍ بمنطقٍ واحد — تُبنى محفّزاتُها في حلقةٍ فلا يُنسى تحديثُ إحداها
+   حين يتغيّر المنطق (كما نُسيت الوحدةُ كلُّها عن طبقة الإشعارات أوّلَ مرّة). */
+const CTR_SOURCES = [
+  { key: "crq", kind: "request", coll: cfg.CONTRACT_REQUESTS_COLLECTION },
+  { key: "ext", kind: "extract", coll: cfg.CONTRACT_EXTRACTS_COLLECTION },
+  { key: "chg", kind: "change", coll: cfg.CONTRACT_CHANGES_COLLECTION },
+];
+for (const src of CTR_SOURCES) {
+  exports[`${src.key}RouteUpdate`] = onDocumentUpdated(
+    `${src.coll}/{docId}`,
+    async (event) => {
+      const before = event.data.before.data();
+      const after = event.data.after.data();
+      if (!after) return;
+      if (!after.id) after.id = event.params.docId;
+      await routeContractDoc(src.kind, before, after, _poDeps());
+    }
+  );
+  exports[`${src.key}RouteCreate`] = onDocumentCreated(
+    `${src.coll}/{docId}`,
+    async (event) => {
+      const after = event.data.data();
+      if (!after) return;
+      if (!after.id) after.id = event.params.docId;
+      await routeContractDoc(src.kind, null, after, _poDeps());
+    }
+  );
+}
 
 /* ═══════════════════════ المُرسِل (waSender) ═══════════════════════ */
 exports.waSender = onDocumentCreated(

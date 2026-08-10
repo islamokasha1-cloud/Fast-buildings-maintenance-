@@ -164,6 +164,88 @@ const HRP_WORK_TYPES = {
   other: "أخرى",
 };
 
+/* ═════════════ التعاقدات مع مقاولي الباطن والموردين ═════════════
+   الوحدةُ الثالثةُ التي تُبنى بعد طبقة الإشعارات — فتقع في الفخّ نفسِه الذي وقعت فيه
+   الموارد البشرية: `_notify` في `contracts.js` تكتب في **جرس التطبيق** من متصفّح
+   صاحب الإجراء وحده. فمَن ينتظره اعتمادُ مستخلصٍ أو أمرِ تغييرٍ لا يعلم به إن لم
+   يفتح النظام. هذا التوجيهُ يسدّ الفجوة بمنطق `purchases.js` نفسِه.
+
+   **ثلاثُ مجموعاتٍ لا أربع:** الطلبُ والمستخلصُ وأمرُ التغيير — لأنّ لكلٍّ منها
+   **بوّاباتِ انتظارٍ** يقف عندها شخصٌ بعينه. أمّا `global_contracts` فانتقالاتُها
+   (توقيع · إيقاف · إقفال · فسخ) يفعلها صاحبُها وهو أمام الشاشة، فلا أحدَ ينتظرها
+   في جواله — وإشعارٌ بلا منتظِرٍ ضجيجٌ يُدرَّب الناسُ على تجاهله. */
+
+const CONTRACT_REQUESTS_COLLECTION =
+  process.env.WA_CONTRACT_REQUESTS_COLLECTION || "global_contract_requests";
+const CONTRACT_EXTRACTS_COLLECTION =
+  process.env.WA_CONTRACT_EXTRACTS_COLLECTION || "global_contract_extracts";
+const CONTRACT_CHANGES_COLLECTION =
+  process.env.WA_CONTRACT_CHANGES_COLLECTION || "global_contract_changes";
+
+/** قوالبُ التعاقدات — تستعير قالبَي الشراء المعتمَدَين حتى يُعتمَد مخصّصٌ (درسُ HRP). */
+const CTR = {
+  approvalTemplate: process.env.WA_CTR_APPROVAL_TEMPLATE || PO.approvalTemplate,
+  statusTemplate: process.env.WA_CTR_STATUS_TEMPLATE || PO.statusTemplate,
+  lang: process.env.WA_CTR_TEMPLATE_LANG || PO.lang,
+};
+
+/** توجيهُ طلب التعاقد — الرموزُ مطابقةٌ لـ`GATE_ROLES` في `contracts.js` (يحرسه فحص). */
+const CRQ_ROUTING = {
+  crq_pending_pm: { role: "project_manager", action: "موافقتك" },
+  crq_pending_proc: { role: "procurement_officer", action: "اعتمادك" },
+  crq_pending_finance: { role: "finance", action: "اعتمادك" },
+  crq_pending_ceo: { role: "ceo", action: "اعتمادك" },
+  crq_pending_pay: { role: "finance", action: "سدادك" },
+  // ليست بوّابةَ اعتماد، لكنّها بابُ إنشاء العقد — وهو عملٌ ينتظر المشتريات فعلاً
+  crq_approved: { role: "procurement_officer", action: "إنشاء العقد" },
+};
+const CRQ_NOTIFY_REQUESTER = new Set([
+  "crq_pm_rejected", "crq_proc_returned", "crq_finance_returned",
+  "crq_ceo_rejected", "crq_paid", "crq_converted",
+]);
+const CRQ_STATUS_LABELS = {
+  crq_pm_rejected: "مرفوض من مدير المشاريع",
+  crq_proc_returned: "مُعاد من المشتريات للتصحيح",
+  crq_finance_returned: "مُعاد من المالية للتصحيح",
+  crq_ceo_rejected: "مرفوض من المدير التنفيذي",
+  crq_paid: "مسدَّد — مغلق",
+  crq_converted: "أُنشئ منه العقد",
+};
+
+/** توجيهُ المستخلص — مطابقٌ لـ`EXT_GATES`. */
+const EXT_ROUTING = {
+  ext_pending_pm: { role: "project_manager", action: "اعتمادك" },
+  ext_pending_ceo: { role: "ceo", action: "اعتمادك" },
+  ext_pending_finance: { role: "finance", action: "سدادك" },
+};
+const EXT_NOTIFY_REQUESTER = new Set(["ext_pm_rejected", "ext_returned", "ext_paid"]);
+const EXT_STATUS_LABELS = {
+  ext_pm_rejected: "مرفوض من مدير المشاريع",
+  ext_returned: "مُعاد للتصحيح",
+  ext_paid: "مسدَّد",
+};
+
+/** توجيهُ أمر التغيير — مطابقٌ لـ`CHG_GATES`. */
+const CHG_ROUTING = {
+  chg_pending_pm: { role: "project_manager", action: "موافقتك" },
+  chg_pending_proc: { role: "procurement_officer", action: "اعتمادك" },
+  chg_pending_finance: { role: "finance", action: "اعتمادك" },
+  chg_pending_ceo: { role: "ceo", action: "اعتمادك" },
+  chg_approved: { role: "procurement_officer", action: "تطبيقه على العقد" },
+};
+const CHG_NOTIFY_REQUESTER = new Set(["chg_rejected", "chg_applied"]);
+const CHG_STATUS_LABELS = {
+  chg_rejected: "مرفوض",
+  chg_applied: "مطبَّق على العقد",
+};
+
+/** خانةُ السياق ({{2}} في قالب الشراء المستعار) — تميّز مستندَ التعاقدات عن طلب الشراء. */
+const CTR_CONTEXT = {
+  request: "تعاقد",
+  extract: "مستخلص عقد",
+  change: "أمر تغيير عقد",
+};
+
 module.exports = {
   TICKET_COLLECTIONS,
   TECHNICIANS_COLLECTION,
@@ -178,6 +260,20 @@ module.exports = {
   PO_ROUTING,
   PO_NOTIFY_REQUESTER,
   PO_STATUS_LABELS,
+  CONTRACT_REQUESTS_COLLECTION,
+  CONTRACT_EXTRACTS_COLLECTION,
+  CONTRACT_CHANGES_COLLECTION,
+  CTR,
+  CRQ_ROUTING,
+  CRQ_NOTIFY_REQUESTER,
+  CRQ_STATUS_LABELS,
+  EXT_ROUTING,
+  EXT_NOTIFY_REQUESTER,
+  EXT_STATUS_LABELS,
+  CHG_ROUTING,
+  CHG_NOTIFY_REQUESTER,
+  CHG_STATUS_LABELS,
+  CTR_CONTEXT,
   HR_PAYMENTS_COLLECTION,
   HRP,
   HRP_ROUTING,

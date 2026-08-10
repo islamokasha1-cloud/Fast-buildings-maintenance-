@@ -26423,10 +26423,34 @@ function renderPriceChangeNotes(p){
     </div>`;
 }
 
+/* شارةُ «هذا الطلب جزءٌ من عقد» أعلى تفاصيل الطلب. تُحقن ولا تُخزَّن في الـHTML
+   الثابت: الوحدةُ قد تكون غائبةً (ملفٌّ خارجيّ) فلا تكسر الشاشةَ غيابُها. */
+function _poContractBanner(p){
+  const body = document.getElementById("po-detail-body");
+  const host = body && body.parentNode; if(!host) return;
+  let el = document.getElementById("po-contract-banner");
+  const cid = p && p.contractId;
+  if(!cid){ if(el) el.remove(); return; }
+  if(!el){
+    el = document.createElement("div"); el.id = "po-contract-banner";
+    el.style.cssText = "margin:0 0 10px;padding:9px 12px;border-radius:10px;border:1px solid var(--info);background:color-mix(in srgb, var(--info) 8%, var(--surface));font-size:12.5px;font-weight:700";
+    host.insertBefore(el, body);
+  }
+  let name = "";
+  try{ const c = window.contracts && window.contracts.contractById(cid); if(c) name = c.title || c.vendorName || ""; }catch(e){}
+  el.innerHTML = _ic("briefcase","ic-sm") + ' هذا الطلب جزءٌ من العقد <b class="num">' + esc(cid) + '</b>'
+    + (name ? ' — ' + esc(name) : '')
+    + ' <span style="font-weight:600;color:var(--muted)">· مستبعَدٌ من مصروف الشراء في الموازنة (محسوبٌ في العقد)</span>';
+}
+
 function openPurchaseDetail(poId){
   const p = purchases.find(x=>x.id===poId);
   if(!p) return;
   document.getElementById("po-detail-title").textContent=`طلب الشراء — ${p.id}`;
+  /* v18.9 — وحدة التعاقدات: طلبٌ مرتبطٌ بعقدٍ **مستبعَدٌ من مصروف الشراء** في
+     الموازنة (يُحسب في العقد). مَن يقرأ الطلبَ يجب أن يعرف ذلك، وإلا بحث عن ماله
+     في خانةٍ لن يجده فيها. الربطُ يُدار من بطاقة العقد ← تبويب «طلبات الشراء». */
+  _poContractBanner(p);
   const body = document.getElementById("po-detail-body");
   // ══ v18.9mo: سجل الأحداث بنمط dtl الموحّد (نفس تفاصيل البلاغ) ══
   const timeline = (p.timeline||[]).map(tl=>{

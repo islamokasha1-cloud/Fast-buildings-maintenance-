@@ -3292,6 +3292,7 @@ function renderCtrs(){
   var el=document.getElementById("page-"+PAGE_CTRS); if(!el) return;
   if(!canView()){ el.innerHTML='<div class="card" style="text-align:center;padding:34px 18px"><div style="color:var(--muted);font-size:13px">'+_icn("lock")+' هذا القسم غير متاح لدورك.</div></div>'; return; }
   startSync(); startReqSync(); startCtrSync(); startExtSync(); startChgSync();
+  hookMyTasks();
   paintCtrs();
 }
 function paintCtrs(){
@@ -3384,7 +3385,8 @@ function ctrCardHTML(id){
   var tabs='<div class="ct-tabs">'+
     [["overview","نظرة عامة","clipboardList"],["lines","بنود الأعمال","layers"],
      ["clauses","شروط العقد","fileText"],["changes","أوامر التغيير","repeat"],
-     ["extracts","المستخلصات","banknote"],["log","السجل","scrollText"]]
+     ["extracts","المستخلصات","banknote"],["purchases","طلبات الشراء","cart"],
+     ["log","السجل","scrollText"]]
     .map(function(t){
       return '<button class="ct-tab'+(_cTab===t[0]?" on":"")+'" onclick="contracts.ctrTab(\''+t[0]+'\')">'+_icn(t[2],"ic-sm")+' '+t[1]+'</button>';
     }).join("")+'</div>';
@@ -3407,6 +3409,7 @@ function ctrTabBody(c){
   if(_cTab==="clauses")  return ctrClausesHTML(c);
   if(_cTab==="changes")  return ctrChangesHTML(c);
   if(_cTab==="extracts") return ctrExtractsHTML(c);
+  if(_cTab==="purchases") return ctrPurchasesHTML(c);
   if(_cTab==="log")      return ctrLogHTML(c);
   return ctrOverviewHTML(c);
 }
@@ -3668,6 +3671,252 @@ function extCardHTML(c, id){
     '<div class="ct-table-wrap"><table class="ct-table"><thead><tr><th>البند</th><th>كمية العقد</th><th>المنفَّذ تراكمياً</th><th>سعر الوحدة</th></tr></thead>'+
     '<tbody>'+lineRows+'</tbody></table></div></div>'+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' السجل</div><div class="ct-timeline">'+tl+'</div></div>';
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   ٥-و) ربطُ طلبات الشراء بالعقد  [المرحلة ٨]
+
+   المرحلةُ ٥ بنَت حارسَ منع الازدواج: طلبُ شراءٍ يحمل `contractId` محسوبٌ أصلاً في
+   خانتَي «متعاقَدٌ عليه»/«المصروف» التعاقديّتين، فيُستبعَد من مصروف الشراء. لكنّ
+   **لا شاشةَ كانت تكتب ذلك الحقل** — فبقي الحارسُ باباً بلا مفتاح، والموادُّ التي
+   تُشترى لعقدٍ عبر طلبِ شراءٍ تُحسب مرّتين في الموازنة.
+
+   والربطُ يُدار **من جهة العقد** لا من طلب الشراء: هناك يعرف القارئُ ما يربط وبماذا،
+   وهناك يظهر أثرُه فوراً في أرقام العقد. وطلبُ الشراء يعرض شارةً تقول إنه مرتبط.
+   ════════════════════════════════════════════════════════════════════ */
+
+function PURCH_COL(){ return _dev() ? "global_purchases_dev" : "global_purchases"; }
+
+/* قائمةُ طلبات الشراء من نواة التطبيق — بلا نسخِ مستمعٍ ثانٍ للمجموعة نفسِها. */
+function allPurchases(){
+  try{ if(typeof purchases !== "undefined" && Array.isArray(purchases)) return purchases; }catch(e){}
+  try{ if(Array.isArray(window.purchases)) return window.purchases; }catch(e){}
+  return [];
+}
+
+/* طلباتُ الشراء المرشَّحةُ للربط بعقد: **مشروعُ العقد نفسُه**، غيرُ محذوفة، وغيرُ
+   مرتبطةٍ بعقدٍ آخر. مطابقةُ المشروع بمفتاحٍ واحدٍ (`docProjectKey`) يشمل اليدويّ. */
+function poCandidatesFor(contract){
+  var c = contract || {}, key = docProjectKey(c);
+  return allPurchases().filter(function(p){
+    if(!p || p.status === "deleted") return false;
+    if(p.contractId && p.contractId !== c.id) return false;
+    return docProjectKey({ projectId:(p.projectId||"hail"), isCustomProject:p.isCustomProject,
+                           projectName:p.projectName }) === key;
+  });
+}
+function poLinkedTo(contractId){
+  return allPurchases().filter(function(p){ return p && p.contractId === contractId; });
+}
+
+/* الربطُ والفكّ — كتابةُ حقلٍ واحدٍ على طلب الشراء، وتحديثُ الذاكرة المحلية فوراً
+   (درسُ finance-audit) فلا ينتظر القارئُ دورةَ مستمع. */
+function linkPurchase(poId, contractId){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  if(["procurement_officer","project_manager","admin"].indexOf(_role()) === -1)
+    return Promise.reject(new Error("ربطُ طلب الشراء بعقدٍ للمشتريات أو مدير المشروع أو الأدمن"));
+  var c = contractId ? contractById(contractId) : null;
+  if(contractId && !c) return Promise.reject(new Error("العقد غير محمَّل"));
+  var po = null;
+  allPurchases().forEach(function(p){ if(p && p.id===poId) po = p; });
+  if(!po) return Promise.reject(new Error("طلب الشراء غير موجود"));
+  if(contractId && po.contractId && po.contractId !== contractId)
+    return Promise.reject(new Error("الطلب مرتبطٌ بعقدٍ آخر ("+po.contractId+") — فُكَّه أولاً"));
+  var patch = contractId ? { contractId:contractId } : { contractId:null };
+  return database.collection(PURCH_COL()).doc(poId).set(
+    Object.assign({}, patch, { updatedAt:_now(), updatedBy:_me() }), { merge:true }
+  ).then(function(){
+    if(contractId) po.contractId = contractId; else delete po.contractId;
+    _audit(contractId ? "ربط طلب شراء بعقد" : "فكّ ربط طلب شراء",
+           poId + (contractId ? (" ⇐ "+contractId) : ""));
+    return poId;
+  });
+}
+
+function ctrPurchasesHTML(c){
+  var linked = poLinkedTo(c.id);
+  var cands  = poCandidatesFor(c).filter(function(p){ return p.contractId !== c.id; });
+  var can    = ["procurement_officer","project_manager","admin"].indexOf(_role()) !== -1;
+  var total  = linked.reduce(function(s,p){ return s + _poAmount(p); }, 0);
+
+  var rows = linked.length ? linked.map(function(p){
+    return '<tr>'+
+      '<td><span class="num">'+_esc(p.id)+'</span></td>'+
+      '<td>'+_esc(_poStatusLbl(p))+'</td>'+
+      '<td class="num">'+money(_poAmount(p))+'</td>'+
+      '<td>'+(can?'<button class="btn btn-ghost btn-sm" onclick="contracts.unlinkPO(\''+_jq(p.id)+'\')">'+_icn("xCircle","ic-sm")+' فكّ الربط</button>':'—')+'</td>'+
+    '</tr>';
+  }).join("") : '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:16px">لا طلباتِ شراءٍ مرتبطة.</td></tr>';
+
+  var picker = can && cands.length
+    ? '<div class="ct-form-row" style="margin-top:12px">'+
+        field("اربط طلبَ شراءٍ من مشروع العقد",
+          '<select class="form-input" id="ct-po-pick">'+
+          '<option value="">— اختر طلباً —</option>'+
+          cands.map(function(p){
+            return '<option value="'+_esc(p.id)+'">'+_esc(p.id)+' · '+_esc(_poStatusLbl(p))+' · '+money0(_poAmount(p))+' ر.س</option>';
+          }).join("")+'</select>')+
+        '<div style="display:flex;align-items:flex-end"><button class="btn btn-primary btn-sm" onclick="contracts.linkPO()">'+_icn("link","ic-sm")+' ربط</button></div>'+
+      '</div>'
+    : (can ? '<div class="ct-note" style="margin-top:12px">'+_icn("alertCircle","ic-sm")+' لا طلباتِ شراءٍ حرّةً في مشروع هذا العقد.</div>' : "");
+
+  return '<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("cart","ic-sm")+' طلبات الشراء المرتبطة'+
+      '<span class="ct-sec-lock">تُحسب في العقد فتُستبعَد من مصروف الشراء</span></div>'+
+    '<div class="ct-note">'+_icn("alertTriangle","ic-sm")+' <b>لماذا الربط؟</b> موادُّ تُشترى لهذا العقد بطلبِ شراءٍ تُحسب في الموازنة '+
+      '<b>مرّتين</b> — مرّةً في «متعاقَدٌ عليه» ومرّةً في «مصروف الشراء». والربطُ يُسقطها من الثانية فيبقى رقمٌ واحدٌ لعملٍ واحد.</div>'+
+    (linked.length ? '<div class="ct-money-row" style="margin-top:12px">'+
+      '<div class="ct-tl"><span class="l">عدد الطلبات</span><span class="v num">'+linked.length+'</span></div>'+
+      '<div class="ct-tl big"><span class="l">قيمتها</span><span class="v num">'+money(total)+'</span></div>'+
+    '</div>' : "")+
+    '<div class="ct-table-wrap" style="margin-top:12px"><table class="ct-table"><thead><tr>'+
+      '<th>الطلب</th><th>الحالة</th><th>القيمة</th><th></th>'+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    picker+
+  '</div>';
+}
+
+/* قيمةُ طلب الشراء وحالتُه **تُقرآن من النواة** لا يُعاد حسابُهما هنا:
+   الفعليُّ للمغلَق والتقديريُّ للجاري — نفسُ ما تعرضه شاشةُ المشتريات. */
+function _poAmount(p){
+  try{ if(typeof poIsClosed==="function" && poIsClosed(p) && typeof poActualCost==="function"){
+    var a = poActualCost(p); if(a != null && isFinite(a)) return r2(a);
+  } }catch(e){}
+  try{ if(typeof getPOTotal==="function") return r2(getPOTotal(p)); }catch(e){}
+  return r2(p && p.estCost);
+}
+function _poStatusLbl(p){
+  try{ if(typeof poStatusLabel==="function") return poStatusLabel(p && p.status); }catch(e){}
+  return String((p&&p.status)||"—");
+}
+
+function linkPO(){
+  var sel=document.getElementById("ct-po-pick"); if(!sel || !sel.value) return _toast("⚠ اختر طلباً","warn");
+  var cid=_cOpen; if(!cid) return;
+  linkPurchase(sel.value, cid).then(function(id){
+    paintCtrs(); _toast("✅ رُبط الطلب "+id+" بالعقد","success");
+  }).catch(function(e){ _toast("⚠ "+(e&&e.message?e.message:"تعذّر الربط"),"warn"); });
+}
+function unlinkPO(poId){
+  linkPurchase(poId, null).then(function(id){
+    paintCtrs(); _toast("✅ فُكَّ ربط الطلب "+id,"success");
+  }).catch(function(e){ _toast("⚠ "+(e&&e.message?e.message:"تعذّر الفكّ"),"warn"); });
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   ٥-ز) «بانتظار إجراءك» — التعاقداتُ في المكان الذي يفتحه المعتمِد  [المرحلة ٨]
+
+   لوحةُ المشتريات تعرض بطاقةَ «بانتظار إجراءك» لطلبات الشراء. ووحدةُ التعاقدات
+   كانت غائبةً عنها تماماً: فمديرُ المشاريع الذي ينتظره مستخلص، والماليةُ التي
+   ينتظرها سداد — عليهم أن **يتذكّروا** فتحَ الشاشة. والاعتمادُ على الذاكرة هو ما
+   يجعل الطلباتِ تنام أسابيع.
+
+   نلفّ `renderPOMyTasks` بدل تعديلها (نمطُ `hookShowPage` نفسُه)، فلا تطلب الوحدةُ
+   من `index.html` إلا وسمَ <script> واحداً كما هي منذ المرحلة ١.
+   ════════════════════════════════════════════════════════════════════ */
+
+var MYTASK_ID = "ct-my-tasks-card";
+
+/* ما ينتظر دورَ المستخدم الآن — من **البوّابات نفسِها** التي تحرس الأزرار، لا من
+   قائمةٍ ثانيةٍ تنحرف عنها. أربعةُ مصادر: طلبٌ · عقدٌ بانتظار توقيع · مستخلص · أمرُ تغيير. */
+function myPendingItems(role){
+  var out = [];
+  if(!role || role==="viewer" || role==="observer") return out;
+  _reqs.forEach(function(r){
+    if(r && !crqIsFinal(r.status) && crqCanAct(r.status, role))
+      out.push({ kind:"req", id:r.id, lbl:"طلب تعاقد", title:r.title||r.vendorName||"", value:r2(r.value),
+                 gate:(crqGateOwner(r.status)||{}).lbl||"", at:r.updatedAt||r.createdAt||"" });
+  });
+  _ctrs.forEach(function(c){
+    if(c && c.status==="ctr_pending_signature" && ctrCanTransit("sign","ctr_pending_signature",role))
+      out.push({ kind:"ctr", id:c.id, lbl:"عقد بانتظار التوقيع", title:c.title||c.vendorName||"",
+                 value:contractValue(c), gate:"تسجيل التوقيع", at:c.updatedAt||c.createdAt||"" });
+  });
+  _exts.forEach(function(e){
+    if(e && !extIsFinal(e.status) && extCanAct(e.status, role)){
+      var c=contractById(e.contractId);
+      out.push({ kind:"ext", id:e.id, lbl:"مستخلص", title:(c&&(c.title||c.vendorName))||e.contractId||"",
+                 value:r2((e.settled||{}).net), gate:(extGateOwner(e.status)||{}).lbl||"",
+                 at:e.updatedAt||e.createdAt||"", ctr:e.contractId });
+    }
+  });
+  _chgs.forEach(function(g){
+    if(g && !chgIsFinal(g.status) && chgCanAct(g.status, role)){
+      var c2=contractById(g.contractId);
+      out.push({ kind:"chg", id:g.id, lbl:"أمر تغيير", title:(c2&&(c2.title||c2.vendorName))||g.contractId||"",
+                 value:r2(g.amount), gate:(chgGateOwner(g.status)||{}).lbl||"",
+                 at:g.updatedAt||g.createdAt||"", ctr:g.contractId });
+    }
+  });
+  // الأقدمُ أولاً — كبطاقة المشتريات: ما نام أطول يُرى أولاً
+  out.sort(function(a,b){ return String(a.at||"").localeCompare(String(b.at||"")); });
+  return out;
+}
+
+function _daysSince(iso){
+  if(!iso) return null;
+  var t = new Date(String(iso)).getTime();
+  if(!isFinite(t)) return null;
+  return Math.max(0, Math.floor((Date.now()-t)/86400000));
+}
+
+function renderMyTasks(){
+  var host = document.getElementById(MYTASK_ID);
+  if(!host){
+    var anchor = document.getElementById("po-my-tasks-card");
+    if(!anchor || !anchor.parentNode) return;
+    host = document.createElement("div");
+    host.id = MYTASK_ID; host.style.margin = "0 0 12px";
+    anchor.parentNode.insertBefore(host, anchor.nextSibling);
+  }
+  if(!canView()){ host.style.display="none"; host.innerHTML=""; return; }
+  startReqSync(); startCtrSync(); startExtSync(); startChgSync();
+  var items = myPendingItems(_role());
+  if(!items.length){ host.style.display="none"; host.innerHTML=""; return; }
+
+  var open = { req:"openReqFrom", ctr:"openCtrFrom", ext:"openExtFrom", chg:"openChgFrom" };
+  var rows = items.map(function(it){
+    var d = _daysSince(it.at);
+    var stale = d != null && d >= 3;
+    return '<tr>'+
+      '<td style="white-space:nowrap"><a href="javascript:void(0)" onclick="contracts.'+open[it.kind]+'(\''+_jq(it.id)+'\''+(it.ctr?(",\'"+_jq(it.ctr)+"\'"):"")+')" class="ct-link num">'+_esc(it.id)+'</a></td>'+
+      '<td>'+_esc(it.lbl)+'</td>'+
+      '<td>'+_esc(it.title||"—")+'</td>'+
+      '<td class="num">'+(it.value?money0(it.value):"—")+'</td>'+
+      '<td style="text-align:center'+(stale?';color:var(--sla-crit);font-weight:800':'')+'">'+(d==null?"—":(d+" يوم"+(stale?" ⚠":"")))+'</td>'+
+    '</tr>';
+  }).join("");
+
+  host.style.display="";
+  host.innerHTML =
+    '<div class="card ct-mytasks"><div class="card-body">'+
+      '<div class="ct-mt-h">'+_icn("hourglass","ic-sm")+' التعاقدات بانتظار إجراءك'+
+        '<span class="ct-mt-badge">'+items.length+'</span></div>'+
+      '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+
+        '<th>المستند</th><th>النوع</th><th>الجهة</th><th>القيمة</th><th>منذ</th>'+
+      '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '</div></div>';
+}
+
+function openReqFrom(id){ try{ showPage(PAGE_REQS); }catch(e){} openReq(id); }
+function openCtrFrom(id){ try{ showPage(PAGE_CTRS); }catch(e){} openCtr(id); }
+function openExtFrom(id, cid){ try{ showPage(PAGE_CTRS); }catch(e){} openCtr(cid||""); _cTab="extracts"; _extOpen=id; paintCtrs(); }
+function openChgFrom(id, cid){ try{ showPage(PAGE_CTRS); }catch(e){} openCtr(cid||""); _cTab="changes"; _chgOpen=id; paintCtrs(); }
+
+/* لفُّ بطاقة المشتريات — تُرسَم بطاقتُنا بعدها مباشرةً، ومرةً واحدةً لكلّ رسم. */
+function hookMyTasks(){
+  try{
+    if(window.__ctMyTasksHooked) return;
+    if(typeof window.renderPOMyTasks !== "function") return;
+    var orig = window.renderPOMyTasks;
+    window.renderPOMyTasks = function(){
+      var r;
+      try{ r = orig.apply(this, arguments); }catch(e){ console.warn("contracts/hookMyTasks orig", e); }
+      try{ renderMyTasks(); }catch(e){ console.warn("contracts/renderMyTasks", e); }
+      return r;
+    };
+    window.__ctMyTasksHooked = true;
+  }catch(e){ console.warn("contracts/hookMyTasks", e); }
 }
 
 function ctrLogHTML(c){
@@ -4456,6 +4705,9 @@ function injectCSS(){
 ".ct-tl-row .t{font-size:12.5px;font-weight:800;color:var(--text)}",
 ".ct-tl-row .m{font-size:11px;color:var(--muted);font-weight:600;margin-top:2px}",
 /* ── بطاقة العقد ── */
+".ct-mytasks{border:1.5px solid var(--warn)}",
+".ct-mt-h{display:flex;align-items:center;gap:8px;font-weight:900;font-size:14px;color:var(--warn);margin-bottom:10px}",
+".ct-mt-badge{font-size:11px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1px 9px;font-weight:800;color:var(--text)}",
 ".ct-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:2px}",
 ".ct-tab{background:none;border:none;border-bottom:2px solid transparent;padding:8px 13px;font-size:12.5px;font-weight:800;color:var(--muted);cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;transition:color .15s,border-color .15s}",
 ".ct-tab:hover{color:var(--text)}",
@@ -4666,6 +4918,13 @@ window.contracts = {
   changesList: changesList, changeById: changeById, changesFor: changesFor,
   _createChg: createChange, _actChg: actOnChange, _applyChg: applyChange, _cancelChg: cancelChange,
   _chgDraftOf: function(){ return _chgDraft; },
+  // ربطُ طلبات الشراء و«بانتظار إجراءك» [المرحلة ٨]
+  linkPO: linkPO, unlinkPO: unlinkPO,
+  openReqFrom: openReqFrom, openCtrFrom: openCtrFrom,
+  openExtFrom: openExtFrom, openChgFrom: openChgFrom,
+  renderMyTasks: renderMyTasks, hookMyTasks: hookMyTasks,
+  _linkPurchase: linkPurchase, _poCandidatesFor: poCandidatesFor,
+  _poLinkedTo: poLinkedTo, _myPendingItems: myPendingItems,
   _chgAmountOf: chgAmountOf, _chgNextStage: chgNextStage, _chgEffect: chgEffect,
   _chgGuard: chgGuard, _chgCanAct: chgCanAct, _chgIsFinal: chgIsFinal,
   _contractChangeTotals: contractChangeTotals, _openChangeOf: openChangeOf,

@@ -959,6 +959,98 @@ check('★ طلبُ شراءٍ حرٍّ يُحسب في مصروف الشراء'
 check('★ طلبُ شراءٍ مرتبطٌ بعقدٍ يُستبعَد من مصروف الشراء (لا رقمان لعملٍ واحد)',
   Math.abs(dbl.underContract - dbl.base) < 0.01, JSON.stringify(dbl));
 
+/* ═════════ المرحلة ٨: ربطُ طلب الشراء و«بانتظار إجراءك» ═════════ */
+console.log('\n=== المرحلة ٨: فجواتُ الربط ===');
+await page.evaluate(() => showPage('contracts-list'));
+await page.waitForTimeout(1200);
+await page.evaluate((cid) => window.contracts.openCtr(cid), conv.cid);
+await page.waitForTimeout(900);
+await page.evaluate(() => window.contracts.ctrTab('purchases'));
+await page.waitForTimeout(900);
+const poTab = await page.textContent('#page-contracts-list') || '';
+check('★ تبويبُ «طلبات الشراء» يشرح سببَ الربط لا يعرض حقلاً بلا معنى',
+  /طلبات الشراء المرتبطة/.test(poTab) && /مرّتين/.test(poTab));
+
+// نزرع طلبَ شراءٍ في مشروع العقد ثم نربطه من الشاشة
+const linkRes = await page.evaluate(async (cid) => {
+  const c = window.contracts.contractById(cid);
+  purchases.push({ id: 'PO-LINK-1', projectId: c.projectId || 'hail', status: 'proc_executing',
+                   items: [{ itemType: 'مواد بناء', itemCost: 7000, qty: 1 }], estCost: 7000 });
+  const cands = window.contracts._poCandidatesFor(c).map(p => p.id);
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  await window.contracts._linkPurchase('PO-LINK-1', cid);
+  currentUser.role = real;
+  const po = purchases.find(p => p.id === 'PO-LINK-1');
+  return { cands, contractId: po.contractId, linked: window.contracts._poLinkedTo(cid).map(p => p.id) };
+}, conv.cid);
+check('★ المرشَّحون يشملون طلبَ مشروع العقد', linkRes.cands.includes('PO-LINK-1'), linkRes.cands.join(','));
+check('★★ والربطُ كتب contractId على طلب الشراء فعلاً',
+  linkRes.contractId === conv.cid && linkRes.linked.includes('PO-LINK-1'), JSON.stringify(linkRes));
+
+const dblAfter = await page.evaluate(() => {
+  const sum = () => Object.values(window.projectMgmt._rollupByCategory('hail'))
+    .reduce((s, c) => s + c.actual + c.committed, 0);
+  const withLink = sum();
+  const po = purchases.find(p => p.id === 'PO-LINK-1');
+  delete po.contractId;
+  const without = sum();
+  po.contractId = 'x';
+  return { withLink, without };
+});
+check('★★ والطلبُ المرتبطُ سقط من مصروف الشراء (الحارسُ صار له مفتاح)',
+  dblAfter.withLink < dblAfter.without, JSON.stringify(dblAfter));
+
+const stealing = await page.evaluate(async () => {
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  let m; try { await window.contracts._linkPurchase('PO-LINK-1', 'CTR-OTHER'); m = 'سُرق الطلب'; }
+  catch (e) { m = e.message; }
+  currentUser.role = real; return m;
+});
+check('★ ولا يُسرَق طلبٌ مرتبطٌ بعقدٍ آخر', /مرتبط|غير محمَّل/.test(stealing), stealing);
+
+const wrongRoleLink = await page.evaluate(async (cid) => {
+  const real = currentUser.role; currentUser.role = 'warehouse_manager';
+  let m; try { await window.contracts._linkPurchase('PO-LINK-1', cid); m = 'مرّ بدورٍ لا يملكه'; }
+  catch (e) { m = e.message; }
+  currentUser.role = real; return m;
+}, conv.cid);
+check('★ والربطُ لدورٍ مخوَّلٍ وحدَه', /صلاحية|المشتريات|مدير/.test(wrongRoleLink), wrongRoleLink);
+
+await page.screenshot({ path: `${SHOTS}/31-po-link.png` });
+
+// شارةُ العقد في تفاصيل طلب الشراء
+const banner = await page.evaluate(() => {
+  const host = document.getElementById('po-detail-body');
+  if (!host) return { skipped: true };
+  openPurchaseDetail('PO-LINK-1');
+  const el = document.getElementById('po-contract-banner');
+  return { text: el ? el.textContent.replace(/\s+/g, ' ').trim() : '' };
+});
+check('★★ وتفاصيلُ طلب الشراء تعلن أنه جزءٌ من عقدٍ ومستبعَدٌ من مصروف الشراء',
+  banner.skipped ? true : (/جزءٌ من العقد/.test(banner.text) && /مستبعَد/.test(banner.text)),
+  banner.text || 'skipped');
+
+// «بانتظار إجراءك»
+const myTasks = await page.evaluate(() => {
+  const real = currentUser.role;
+  const out = {};
+  currentUser.role = 'finance';
+  out.finance = window.contracts._myPendingItems('finance').map(i => i.kind + ':' + i.id);
+  out.viewer = window.contracts._myPendingItems('viewer').length;
+  out.pm = window.contracts._myPendingItems('project_manager').map(i => i.kind);
+  currentUser.role = real;
+  return out;
+});
+check('★ «بانتظار إجراءك» لا يعرض شيئاً للأدوار العارضة', myTasks.viewer === 0);
+check('★★ ويُبنى من البوّابات نفسِها (لكلّ دورٍ ما ينتظره وحدَه)',
+  JSON.stringify(myTasks.finance) !== JSON.stringify(myTasks.pm), JSON.stringify(myTasks));
+
+const hooked = await page.evaluate(() => {
+  window.contracts.hookMyTasks();
+  return { hooked: !!window.__ctMyTasksHooked, stillFn: typeof window.renderPOMyTasks === 'function' };
+});
+check('★ ولفُّ بطاقة المشتريات تمّ بلا استبدالها', hooked.hooked && hooked.stillFn, JSON.stringify(hooked));
+
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
 await page.waitForTimeout(600);
 await page.screenshot({ path: `${SHOTS}/26-budget-dark.png` });
