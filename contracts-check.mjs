@@ -1051,6 +1051,56 @@ const hooked = await page.evaluate(() => {
 });
 check('★ ولفُّ بطاقة المشتريات تمّ بلا استبدالها', hooked.hooked && hooked.stillFn, JSON.stringify(hooked));
 
+/* ═════════ المرحلتان ١٠ و١١: أداءُ الطرف ولوحةُ المعلومات ═════════ */
+console.log('\n=== المرحلتان ١٠ و١١: الأداء واللوحة ===');
+await page.evaluate(() => showPage('vendors'));
+await page.waitForTimeout(1200);
+const vId = await page.evaluate(() => {
+  const v = window.contracts.vendors().find(x => window.contracts.contractsList().some(c => c.vendorId === x.id));
+  if (v) window.contracts.openVendor(v.id);
+  return v ? v.id : null;
+});
+await page.waitForTimeout(1000);
+const perf = await page.textContent('#page-vendors') || '';
+check('★ بطاقةُ الطرف تعرض قسمَ الأداء لمن له عقود',
+  !!vId && /الأداء/.test(perf) && /قيمة التعاقدات/.test(perf), vId || 'لا طرفَ بعقود');
+check('★★ وبلا درجةٍ ولا نجوم — والقسمُ يشرح لماذا',
+  /لا درجةَ إجمالية عمداً/.test(perf) && !/★★★|من ٥|\/5/.test(perf));
+check('★ والرقمُ المرسوم = المحسوب', await page.evaluate((id) => {
+  const sc = window.contracts._vendorScorecard(id, window.contracts.contractsList(),
+    window.contracts.extractsList(), window.contracts.changesList(), new Date().toISOString().slice(0,10));
+  const txt = document.getElementById('page-vendors').textContent.replace(/[\u066b,]/g, '');
+  return txt.includes(String(sc.contracts));
+}, vId) === true);
+await page.screenshot({ path: `${SHOTS}/32-vendor-perf.png` });
+
+// لوحة المعلومات — البطاقةُ تُحقن باللفّ
+const dash = await page.evaluate(() => {
+  const anchor = document.getElementById('dash-purchase-summary-card');
+  if (!anchor) return { skipped: true };
+  window.contracts.hookDash();
+  if (typeof window.renderDashboardPurchaseSummary === 'function') window.renderDashboardPurchaseSummary();
+  const el = document.getElementById('ct-dash-card');
+  return { hooked: !!window.__ctDashHooked, exists: !!el,
+           txt: el ? el.textContent.replace(/\s+/g, ' ').trim().slice(0, 120) : '',
+           stillFn: typeof window.renderDashboardPurchaseSummary === 'function' };
+});
+check('★★ بطاقةُ التعاقدات تُحقن في لوحة المعلومات باللفّ بلا تعديل النواة',
+  dash.skipped ? true : (dash.hooked && dash.exists && dash.stillFn), JSON.stringify(dash));
+/* البطاقةُ تختفي عمداً حين لا عقودَ ساريةً ولا منتظِرةَ توقيع — وفي هذه المرحلة من
+   الرحلة صار العقدُ مقفلاً. فلا نفترض ظهورَها: **نقيس تطابقَ المرسوم مع المحسوب**. */
+const dashMatch = await page.evaluate(() => {
+  const d = window.contracts._dashSummary(window.contracts.contractsList(),
+              window.contracts.extractsList(), new Date().toISOString().slice(0,10));
+  const el = document.getElementById('ct-dash-card');
+  const shown = !!(el && el.innerHTML.trim());
+  return { shown, should: !!(d.active || d.pendingSign), active: d.active, pend: d.pendingSign,
+           hasLbl: shown ? /عقود سارية/.test(el.textContent) : true };
+});
+check('★★ ظهورُ البطاقة = وجودُ ما يُعرَض (تختفي عمداً حين لا عقدَ سارياً ولا منتظِرَ توقيع)',
+  dash.skipped ? true : (dashMatch.shown === dashMatch.should && dashMatch.hasLbl),
+  JSON.stringify(dashMatch));
+
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
 await page.waitForTimeout(600);
 await page.screenshot({ path: `${SHOTS}/26-budget-dark.png` });

@@ -6850,6 +6850,77 @@ function contractsPhase1() {
   }
 
   /* ════════════════════════════════════════════════════════════
+     المرحلتان ١٠ و١١ — أداءُ الطرف، والتعاقداتُ في لوحة المعلومات
+     ════════════════════════════════════════════════════════════ */
+  {
+    const TODAY = "2026-08-10";
+    const CS10 = [
+      { id:"C1", vendorId:"V1", status:"ctr_closed",     value:100000, startDate:"2026-01-01", durationDays:30, updatedAt:"2026-03-05", changeOrders:[{id:"G1",amount:5000,status:"approved"}] },
+      { id:"C2", vendorId:"V1", status:"ctr_active",     value:50000,  startDate:"2026-08-01", durationDays:60 },
+      { id:"C3", vendorId:"V1", status:"ctr_terminated", value:20000 },
+      { id:"C9", vendorId:"V2", status:"ctr_active",     value:9000 }
+    ];
+    const EX10 = [
+      { id:"E1", contractId:"C1", status:"ext_paid", payment:{amount:60000} },
+      { id:"E2", contractId:"C1", status:"ext_returned" },
+      { id:"E3", contractId:"C9", status:"ext_paid", payment:{amount:1000} }
+    ];
+    const CG10 = [{ id:"G1", contractId:"C1", status:"chg_applied" }];
+    const sc = C._vendorScorecard("V1", CS10, EX10, CG10, TODAY);
+
+    T("★ بطاقةُ الأداء تعدّ عقودَ الطرف وحدَه", sc.contracts === 3, String(sc.contracts));
+    T("★ وتفرزها سارياً ومنتهياً ومفسوخاً",
+      sc.active === 1 && sc.done === 1 && sc.terminated === 1);
+    T("★ والقيمةُ تشمل أوامرَ التغيير المطبَّقة (105,000 + 50,000 + 20,000)",
+      sc.value === 175000, String(sc.value));
+    T("★ والمسدَّدُ من مستخلصات عقوده وحدَها (لا مستخلصِ طرفٍ آخر)",
+      sc.paid === 60000, String(sc.paid));
+    T("★★ وتأخّرُ عقدٍ منتهٍ يُقاس **بتاريخ إقفاله** لا باليوم",
+      C._ctrLateDays({ status:"ctr_closed", startDate:"2026-01-01", durationDays:30, updatedAt:"2026-03-05" }, TODAY) ===
+      C._ctrLateDays({ status:"ctr_closed", startDate:"2026-01-01", durationDays:30, updatedAt:"2026-03-05" }, "2026-12-31"));
+    T("★ وإلا صار كلُّ عقدٍ قديمٍ «متأخّراً» بمرور الزمن",
+      C._ctrLateDays({ status:"ctr_active", startDate:"2026-01-01", durationDays:30 }, "2026-12-31") >
+      C._ctrLateDays({ status:"ctr_active", startDate:"2026-01-01", durationDays:30 }, TODAY));
+    T("★ والمستخلصُ المُعادُ يُعدّ ملاحظةً", sc.extBounced === 1);
+
+    /* ★★ القرارُ المميّز: لا درجةَ مخترَعة */
+    T("★★ لا درجةَ إجماليةً ولا نجوم — وقائعُ وإشاراتٌ مسمّاةٌ فقط",
+      sc.score === undefined && sc.rating === undefined && sc.stars === undefined &&
+      Array.isArray(sc.flags));
+    T("★ ولكلّ إشارةٍ سببُها الظاهرُ في نصّها",
+      sc.flags.length >= 3 && sc.flags.every(f => f.key && f.sev && /\d/.test(f.lbl)));
+    T("★ والفسخُ إشارةٌ حرجة", sc.flags.some(f => f.key === "terminated" && f.sev === "crit"));
+    T("★ وطرفٌ بلا عقودٍ لا تُخترَع له أرقام",
+      C._vendorScorecard("V-NONE", CS10, EX10, CG10, TODAY).contracts === 0 &&
+      C._vendorScorecard("V-NONE", CS10, EX10, CG10, TODAY).flags.length === 0);
+    T("★ وبطاقتُه تقول ذلك صراحةً لا تعرض أصفاراً",
+      /لا عقودَ معه بعد — لا أداءَ يُقاس/.test(src));
+    T("★ والقسمُ يشرح لماذا لا درجةَ فيه", /لا درجةَ إجمالية عمداً/.test(src));
+
+    /* ── لوحة المعلومات ── */
+    const d = C._dashSummary(CS10, EX10, TODAY);
+    T("★ ملخّصُ اللوحة يعدّ السارياتِ وحدَها (لا المقفلَ ولا المفسوخ)",
+      d.active === 2, String(d.active));
+    T("★ و«الملتزَمُ به المتبقّي» = قيمةُ السارية − ما سُدِّد منها",
+      d.remaining === 50000 + 8000, String(d.remaining));
+    T("★ ويرصد المستخلصاتِ المنتظِرةَ للسداد",
+      C._dashSummary(CS10, EX10.concat([{ id:"E4", contractId:"C2", status:"ext_pending_finance", settled:{net:7000} }]), TODAY).awaitingPay === 1);
+    T("★ ويرصد العقودَ بانتظار التوقيع",
+      C._dashSummary(CS10.concat([{ id:"CX", vendorId:"V1", status:"ctr_pending_signature", value:1 }]), EX10, TODAY).pendingSign === 1);
+    T("★ ويرصد المتأخّرَ عن مدّته", d.late >= 0 && typeof d.lateMax === "number");
+
+    /* ★★ اللفُّ عند الإقلاع لا عند فتح صفحتنا */
+    T("★★ اللفّان يُركَّبان عند الإقلاع (وإلا لم تظهر البطاقتان لمن لا يفتح صفحةَ التعاقدات)",
+      /function init\(\)[\s\S]{0,900}hookMyTasks\(\);[\s\S]{0,40}hookDash\(\);/.test(src));
+    T("★ ويُعادان مع مراقب الـDOM (النواةُ تعيد بناءَ الشاشات بعد الدخول)",
+      /MutationObserver\(function\(\)\{ injectSidebarGroup\(\); hookShowPage\(\); hookMyTasks\(\); hookDash\(\); \}\)/.test(src));
+    T("★ وبطاقةُ اللوحة تُحقن بجوار ملخّص المشتريات بلا تعديل index.html",
+      /getElementById\("dash-purchase-summary-card"\)/.test(src) && !/id="ct-dash-card"/.test(HTML));
+    T("★ ولا تظهر لمن لا يملك الاطلاع، ولا حين لا عقودَ أصلاً",
+      /function renderDashCard[\s\S]{0,700}if\(!canView\(\)\)[\s\S]{0,300}!d\.active && !d\.pendingSign/.test(src));
+  }
+
+  /* ════════════════════════════════════════════════════════════
      المرحلة ٦ — قواعدُ Firestore: الحارسُ على الخادم
 
      الفحصُ الحقيقيُّ للقواعد يجري على محاكٍ (`rules-check.mjs`) — لأن قاعدةً
