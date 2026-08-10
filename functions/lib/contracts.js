@@ -40,6 +40,14 @@ const KINDS = {
     contextShort: cfg.CTR_CONTEXT_SHORT.extract,
     tag: "ext",
   },
+  contract: {
+    routing: cfg.CTR_STATUS_ROUTING,
+    notifyRequester: cfg.CTR_NOTIFY_OWNER,
+    labels: cfg.CTR_STATUS_LABELS,
+    context: cfg.CTR_CONTEXT.contract,
+    contextShort: cfg.CTR_CONTEXT_SHORT.contract,
+    tag: "ctr",
+  },
   change: {
     routing: cfg.CHG_ROUTING,
     notifyRequester: cfg.CHG_NOTIFY_REQUESTER,
