@@ -6412,6 +6412,39 @@ function contractsPhase1() {
       /function backToReqs\(\)\{ _rOpen=null; _rDraft=null; _lnEdit=null;/.test(src));
   }
 
+  /* ════ حذفُ عقدٍ لم يُوقَّع بعد — للأدمن ════   (طلبُ المالك: عقدٌ أُنشئ تجربةً)
+     العقدُ سجلٌّ ماليٌّ لا يُمحى — إلا في نافذةٍ واحدة: ما بين إنشائه وتوقيعِ الطرف.
+     وفيها **لا أبناءَ له بالبناء**: المستخلصُ وأمرُ التغيير لا يُنشآن إلا على عقدٍ
+     سارٍ — فالحالةُ وحدَها ضمانةٌ كافيةٌ على الخادم. وحذفُه **يُحرِّر طلبَه**، وإلا
+     بقي الطلبُ يشير إلى عقدٍ غيرِ موجود. */
+  {
+    const RULY = (function () {
+      const q = path.resolve(path.dirname(IDX), "firestore.rules");
+      return fs.existsSync(q) ? fs.readFileSync(q, "utf8") : "";
+    })();
+    T("★★ الحذفُ للأدمن وحدَه وبسببٍ إلزاميّ",
+      /function deleteContract\(id, reason\)[\s\S]{0,400}_role\(\) !== "admin"[\s\S]{0,200}!reason\) return Promise\.reject/.test(src));
+    T("★★ ولا يُحذف إلا ما لم يُوقَّع — والساري يُفسَخ ولا يُمحى",
+      /function deleteContract[\s\S]{0,1600}c\.status !== "ctr_pending_signature"[\s\S]{0,160}الساري يُفسَخ ولا يُمحى/.test(src));
+    T("★★ وحزامٌ ثانٍ: لا حذفَ لعقدٍ له مستخلصاتٌ أو أوامرُ تغيير (بياناتٌ قديمة)",
+      /function deleteContract[\s\S]{0,600}extractsFor\(id\)\.length[\s\S]{0,200}changesFor\(id\)\.length/.test(src));
+    T("★★ وحذفُه يُحرِّر طلبَه في **المعاملة نفسِها** (لا طلبٌ يشير إلى عقدٍ محذوف)",
+      /function deleteContract[\s\S]{0,2400}r\.status="crq_approved"; r\.contractId="";/.test(src) &&
+      /function deleteContract[\s\S]{0,2500}_pushTimeline\(r, "أُلغي التحويل — حُذف العقد "/.test(src));
+    T("★ والمرآةُ تُنظَّف والبطاقةُ تُغلق ويُسجَّل الحذفُ في التدقيق",
+      /function deleteContract[\s\S]{0,3000}_ctrs\.splice\(i,1\)[\s\S]{0,200}if\(_cOpen===id\) _cOpen=null;[\s\S]{0,300}_audit\("حذف عقد لم يُوقَّع"/.test(src));
+    T("★ والزرُّ لا يظهر إلا للأدمن على عقدٍ لم يُوقَّع",
+      /c\.status==="ctr_pending_signature" && role==="admin"[\s\S]{0,200}contracts\.doDeleteCtr\(\)/.test(src));
+    T("★ والتأكيدُ يقول ما سيقع للطلب قبل وقوعه",
+      /function doDeleteCtr\(\)[\s\S]{0,600}وسيعود طلبُه[\s\S]{0,400}لا يمكن استرجاعه/.test(src));
+    T("★★ وقاعدةُ الخادم تقول القاعدةَ نفسَها (أدمن + لم يُوقَّع)",
+      /function ctrDeleteOk\(\) \{[\s\S]{0,200}isAdmin\(\) && resource\.data\.status == 'ctr_pending_signature'/.test(RULY) &&
+      (RULY.match(/allow delete: if ctrDeleteOk\(\);/g) || []).length === 2);
+    T("★ والمستخلصُ وأمرُ التغيير لا يُنشآن إلا على سارٍ — وعليه تقوم الضمانة",
+      /contract\.status !== "ctr_active"\) return Promise\.reject\(new Error\("المستخلص لا يُنشأ إلا على عقدٍ ساري/.test(src) &&
+      /CHG_CONTRACT_OK = \["ctr_active","ctr_suspended"\]/.test(src));
+  }
+
   /* ════ الصياغةُ الهندسيةُ لبنود الأعمال بالذكاء الاصطناعي ════   (طلبُ المالك)
      **الحدُّ الذي يحرسه هذا البلوك: الذكاءُ يصوغ الكلماتِ لا الأرقام.** الكميةُ
      وسعرُ الوحدة مالٌ يقرّره الإنسان، وإدخالُ نموذجٍ لغويٍّ عليهما بابُ خطأٍ صامتٍ
@@ -6449,8 +6482,11 @@ function contractsPhase1() {
 
     T("★★ والنداءُ نفسُه لا يُرسل سعراً ولا إجمالياً (ما لا يلزم لا يُرسَل)",
       (function () {
+        // المطابقةُ على الحقول لا على رقمٍ مجرّد — المعرّفُ عشوائيٌّ قد يحوي رقمَ السعر
         const p = C._aiLinesPrompt("العمل: محارة", L);
-        return !/28/.test(p) && !/unitPrice/.test(p) && !/الإجمالي/.test(p) && /الكمية: 100/.test(p);
+        const body = (p.split("البنود:")[1] || "").trim();
+        return /الكمية: 100/.test(body) && !/سعر|unitPrice|الإجمالي|ر\.س/.test(body) &&
+               /^\d+\) \[id:[^\]]+\] الوصف: .+ · الوحدة: .+ · الكمية: \d+$/m.test(body);
       })());
     T("★ والتعليماتُ تمنع اختراعَ مواصفةٍ وذكرَ الأسعار",
       /لا تخترع/.test(C._aiLinesPrompt("x", L)) && /لا تذكر أسعاراً/.test(C._aiLinesPrompt("x", L)));
@@ -7475,8 +7511,12 @@ function contractsPhase1() {
        بطلب المالك: الأدمن يحذف طلباً **ملغى** (ورقةٌ ماتت قبل أن تُنتج أثراً).
        الحارسُ يُثبّت الحدَّين معاً: بقيةُ المجموعات مقفلةٌ بـ`if false`، والبابُ
        المفتوحُ مشروطٌ بالأدمن **وبالحالة الملغاة** لا بأحدهما. */
-    T("★ ولا حذفَ للعقود ولا للمستخلصات ولا لأوامر التغيير من العميل",
-      (RUL.match(/allow delete: if false;/g) || []).length >= 6);
+    /* المقفلُ بلا بابٍ إطلاقاً بعد أن فُتح للطلب الملغى وللعقد غير الموقَّع:
+       **المستخلصاتُ وأوامرُ التغيير** (٤ مواضع: إنتاجٌ وتجريبيّ لكلٍّ منهما).
+       والعددُ محسوبٌ لا «على الأقلّ» — فبابٌ جديدٌ يُفتح بلا قصدٍ يُسقط الفحص. */
+    T("★ ولا حذفَ للمستخلصات ولا لأوامر التغيير من العميل إطلاقاً",
+      (RUL.match(/allow delete: if false;/g) || []).length === 4,
+      "المواضع: " + (RUL.match(/allow delete: if false;/g) || []).length);
     T("★★ وحذفُ طلب التعاقد مشروطٌ بالأدمن **وبالحالة الملغاة** معاً",
       /function crqDeleteOk\(\) \{[\s\S]{0,200}isAdmin\(\) && resource\.data\.status == 'crq_cancelled'/.test(RUL) &&
       (RUL.match(/allow delete: if crqDeleteOk\(\);/g) || []).length === 2);

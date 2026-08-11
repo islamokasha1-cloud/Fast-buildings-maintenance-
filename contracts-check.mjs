@@ -364,9 +364,14 @@ check('★★ الاقتراحُ يُعرَض للمراجعة ولا يُطبَ
 check('★★ واللوحةُ تعرض «قبل/بعد» وتُعلن أن الأرقام لا تُمَسّ',
   /الوصف الحالي/.test(aiPanel.txt) && /محارة أسمنتية/.test(aiPanel.txt) &&
   /الكمياتُ والأسعارُ لا تُمَسّ/.test(aiPanel.txt));
-check('★★ والنداءُ لم يحمل سعراً ولا إجمالياً',
-  /الكمية: 1200/.test(aiPanel.sent) && !/28/.test(aiPanel.sent.split('البنود:')[1] || '') &&
-  /لا تذكر أسعاراً/.test(aiPanel.sent), (aiPanel.sent.split('البنود:')[1] || '').trim().slice(0, 80));
+/* المطابقةُ على **الحقول** لا على رقمٍ مجرّد: معرّفُ البند عشوائيٌّ وقد يحوي «28»
+   فيبدو السعرُ حاضراً وهو غائب (وقع فعلاً في أوّل تشغيل — فشُدَّ الفحص). */
+const aiBody = (aiPanel.sent.split('البنود:')[1] || '').trim();
+check('★★ والنداءُ لم يحمل سعراً ولا إجمالياً — الوصفُ والوحدةُ والكميةُ فقط',
+  /الكمية: 1200/.test(aiBody) &&
+  /^\d+\) \[id:[^\]]+\] الوصف: .+ · الوحدة: .+ · الكمية: \d+$/m.test(aiBody) &&
+  !/سعر|unitPrice|الإجمالي|ر\.س/.test(aiBody) && /لا تذكر أسعاراً/.test(aiPanel.sent),
+  aiBody.slice(0, 90));
 await page.screenshot({ path: `${SHOTS}/09c-ai-lines.png`, fullPage: true });
 await page.evaluate(() => window.contracts.aiApplyAllLines());
 await page.waitForTimeout(900);
@@ -880,6 +885,86 @@ check('★ والعقدُ يحمل معرّفَ طلبه (سلسلةُ التو�
 check('★ وورث القيمةَ المعتمَدة كما هي', conv.ctr.val === 33600);
 check('★ والشروطُ التجارية انتقلت من الطلب، والمقدَّمُ اشتُقّ (١٠٪ من 33,600)',
   conv.ctr.ret === 5 && conv.ctr.adv === 3360, JSON.stringify({ ret: conv.ctr.ret, adv: conv.ctr.adv }));
+
+/* ── حذفُ عقدٍ لم يُوقَّع بعد — للأدمن (طلبُ المالك: عقدٌ أُنشئ تجربةً) ──
+   يُجرَّب على **عقدٍ ثانٍ** يُنشأ ويُحذف، فلا يُفسد العقدَ الذي تقوم عليه بقيةُ
+   السيناريوهات. والمُثبَتُ الأهمّ: الحذفُ **يُحرِّر الطلبَ** فلا يبقى مشيراً إلى
+   عقدٍ غيرِ موجود — ثمّ يستأنف مسارَه (يُلغى ويُحذف كأيّ طلب). */
+const delCtr = await page.evaluate(async (a) => {
+  // طلبٌ جديدٌ يُعتمَد ويُحوَّل ثمّ يُحذف عقدُه
+  const rid = await window.contracts._create({
+    engagement: 'contract', projectId: 'hail', title: 'عقدٌ تجريبيٌّ يُحذف', vendorId: 'VND-0005',
+    vendorName: 'محمد أحمد الغامدي', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'x1', desc: 'أعمال', unit: 'عدد', qty: 1, unitPrice: 3000 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  });
+  for (let i = 0; i < 4; i++) {
+    if (window.contracts.requestById(rid).status === 'crq_approved') break;
+    await window.contracts._act(rid, 'approve', 'موافق');
+  }
+  const cid = await window.contracts._convert(rid);
+  const out = { rid, cid, beforeReq: window.contracts.requestById(rid).status };
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  try { await window.contracts._deleteCtr(cid, 'محاولةٌ بغير أدمن'); out.notAdmin = 'مرّ بغير أدمن'; }
+  catch (e) { out.notAdmin = e.message; }
+  currentUser.role = real;
+  try { await window.contracts._deleteCtr(cid, ''); out.noReason = 'مرّ بلا سبب'; }
+  catch (e) { out.noReason = e.message; }
+  await window.contracts._deleteCtr(cid, 'عقدٌ أُنشئ تجربةً');
+  const r = window.contracts.requestById(rid);
+  out.gone = !window.contracts.contractById(cid);
+  out.inStore = Object.keys(window.__store).filter(k => k.endsWith('/' + cid)).length;
+  out.reqStatus = r.status; out.reqLink = r.contractId;
+  out.reqCode = ((r.timeline || []).slice(-1)[0] || {}).code || '';
+  return out;
+}, {});
+check('★ عقدٌ ثانٍ أُنشئ للفحص ووُسِم طلبُه محوَّلاً', delCtr.beforeReq === 'crq_converted', delCtr.beforeReq);
+check('★★ ولا يحذفه غيرُ الأدمن', /للأدمن فقط/.test(delCtr.notAdmin), delCtr.notAdmin);
+check('★ ولا يُحذف بلا سبب', /سبب الحذف إلزامي/.test(delCtr.noReason), delCtr.noReason);
+check('★★ والأدمن يحذفه — يسقط من الذاكرة ومن المخزن',
+  delCtr.gone === true && delCtr.inStore === 0, JSON.stringify({ g: delCtr.gone, s: delCtr.inStore }));
+check('★★★ وحذفُه حرّر طلبَه: عاد إلى «معتمَد» بلا إشارةٍ لعقدٍ محذوف',
+  delCtr.reqStatus === 'crq_approved' && !delCtr.reqLink && delCtr.reqCode === 'unconverted',
+  JSON.stringify({ st: delCtr.reqStatus, link: delCtr.reqLink, code: delCtr.reqCode }));
+// ثمّ يُلغى الطلبُ ويُحذف كأيّ طلب — فتكتمل إزالةُ أثر التجربة
+const delCtrReq = await page.evaluate(async (rid) => {
+  await window.contracts._cancel(rid, 'تجربة');
+  await window.contracts._delete(rid);
+  return { gone: !window.contracts.requestById(rid),
+           inStore: Object.keys(window.__store).filter(k => k.endsWith('/' + rid)).length };
+}, delCtr.rid);
+check('★★ ثمّ يُلغى الطلبُ ويُحذف — فلا يبقى للتجربة أثر',
+  delCtrReq.gone === true && delCtrReq.inStore === 0, JSON.stringify(delCtrReq));
+/* والعقدُ الساري لا يُحذف — يُفسَخ. يُجرَّب على عقدٍ **ثالثٍ** يُنشأ ويُوقَّع ثمّ
+   يُفسَخ بعد الفحص: توقيعُ العقد الأصليِّ هنا كان سيُسقط فحوصاً لاحقةً تقوم على
+   بقائه «بانتظار التوقيع» (وقع فعلاً — فأُصلح). */
+const delActive = await page.evaluate(async () => {
+  const rid = await window.contracts._create({
+    engagement: 'contract', projectId: 'hail', title: 'عقدٌ سارٍ لا يُحذف', vendorId: 'VND-0005',
+    vendorName: 'محمد أحمد الغامدي', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'y1', desc: 'أعمال', unit: 'عدد', qty: 1, unitPrice: 2000 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  });
+  for (let i = 0; i < 4; i++) {
+    if (window.contracts.requestById(rid).status === 'crq_approved') break;
+    await window.contracts._act(rid, 'approve', 'موافق');
+  }
+  const cid = await window.contracts._convert(rid);
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  await window.contracts._sign(cid, { url: 'https://example.test/signed.pdf', name: 'عقد موقّع' });
+  currentUser.role = real;
+  const st = (window.contracts.contractById(cid) || {}).status;
+  let msg; try { await window.contracts._deleteCtr(cid, 'محاولة'); msg = 'حُذف عقدٌ سارٍ'; }
+  catch (e) { msg = e.message; }
+  // أعِد الساحةَ كما كانت: يُفسَخ العقدُ ويُلغى طلبُه ويُحذف
+  await window.contracts._transit(cid, 'terminate', 'انتهى الفحص');
+  await window.contracts._cancel(rid, 'انتهى الفحص').catch(() => {});
+  return { st, msg, after: (window.contracts.contractById(cid) || {}).status };
+});
+check('★★ والعقدُ الساري لا يُحذف ولو من الأدمن (يُفسَخ ولا يُمحى)',
+  delActive.st === 'ctr_active' && /لم يُوقَّع بعد/.test(delActive.msg),
+  delActive.st + ' · ' + delActive.msg);
+check('★ والفسخُ هو بابُه (فأُعيدت ساحةُ الفحص كما كانت)', delActive.after === 'ctr_terminated', delActive.after);
 
 // حارسُ عدم التكرار: ضغطةٌ ثانيةٌ لا تُنشئ عقداً ثانياً
 const twice = await page.evaluate(async (id) => {

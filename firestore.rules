@@ -216,17 +216,25 @@ service cloud.firestore {
         && ( request.resource.data.status == resource.data.status
              || ctrTransitOk(resource.data.status, request.resource.data.status) );
     }
+    /* الحذفُ **للأدمن وعلى غير الموقَّع وحدَه** (طلبُ المالك v18.9.2587): العقدُ
+       بين إنشائه وتوقيعِ الطرف لم يُنتج أثراً — والمستخلصُ وأمرُ التغيير لا يُنشآن
+       إلا على عقدٍ **سارٍ** (يحرسه `extCreateOk`/`chgCreateOk` والكودُ معاً)، فحالةُ
+       «بانتظار التوقيع» وحدَها ضمانةٌ كافيةٌ أنّ لا أبناءَ له. وما بعدها لا يُحذف
+       مهما كان الدور: الساري يُفسَخ (`ctr_terminated`) ولا يُمحى. */
+    function ctrDeleteOk() {
+      return isAdmin() && resource.data.status == 'ctr_pending_signature';
+    }
     match /global_contracts/{id} {
       allow read:   if hasRole();
       allow create: if ctrCreateOk();
       allow update: if ctrUpdateOk();
-      allow delete: if false;
+      allow delete: if ctrDeleteOk();
     }
     match /global_contracts_dev/{id} {
       allow read:   if hasRole();
       allow create: if ctrCreateOk();
       allow update: if ctrUpdateOk();
-      allow delete: if false;
+      allow delete: if ctrDeleteOk();
     }
 
     // ── المستخلصات: بوّابةٌ لكلّ حالة، والسدادُ لا يُسجَّل بلا إيصال ──

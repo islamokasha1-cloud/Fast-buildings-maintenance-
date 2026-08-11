@@ -159,6 +159,21 @@ await check("★★ والماليةُ تُنهي العقد فنّياً — ل
   assertSucceeds(updateDoc(doc(FIN, `${C}/C2`), { status: "ctr_completed", advance: { recovered: 10 } })));
 await check("ثمّ تُقفله", assertSucceeds(updateDoc(doc(FIN, `${C}/C2`), { status: "ctr_closed" })));
 
+/* ★★ حذفُ العقد: نافذةٌ واحدةٌ — ما لم يُوقَّع بعد، وللأدمن وحدَه (طلبُ المالك).
+   وحالةُ «بانتظار التوقيع» ضمانةٌ كافيةٌ أنّ لا مستخلصَ ولا أمرَ تغييرٍ له: الاثنان
+   لا يُنشآن إلا على عقدٍ سارٍ. وما بعدها يُفسَخ ولا يُمحى. */
+await seed(`${C}/CDEL`, Object.assign({}, CTR, { status: "ctr_pending_signature" }));
+await check("★★ والأدمن يحذف عقداً لم يُوقَّع بعد (البابُ المطلوب)",
+  assertSucceeds(deleteDoc(doc(ADMIN, `${C}/CDEL`))));
+await seed(`${C}/CDEL2`, Object.assign({}, CTR, { status: "ctr_pending_signature" }));
+await check("★★ ولا يحذفه غيرُ الأدمن ولو كان مَن يملك تسجيلَ التوقيع",
+  assertFails(deleteDoc(doc(PROC, `${C}/CDEL2`))));
+await seed(`${C}/CACT`, Object.assign({}, CTR, { status: "ctr_active" }));
+await check("★★ ولا يُحذف عقدٌ سارٍ ولو من الأدمن (يُفسَخ ولا يُمحى)",
+  assertFails(deleteDoc(doc(ADMIN, `${C}/CACT`))));
+await check("★ ولا المفسوخ", assertFails(deleteDoc(doc(ADMIN, `${C}/C1`))));
+await check("★ ولا المقفل", assertFails(deleteDoc(doc(ADMIN, `${C}/C2`))));
+
 /* ═════════ ٤) المستخلص — البوّابةُ والإيصال ═════════ */
 head("٤) المستخلص — لا سدادَ بلا إيصال");
 const EXT = { status: "ext_pending_pm", contractId: "C2", createdAt: "2026-02-01" };
