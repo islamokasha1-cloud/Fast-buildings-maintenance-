@@ -776,7 +776,13 @@ if (!PROBE && shots.length > 5) {
       // والجداول وهي جوهرُ المعروض؛ فالضبطُ بمعدّل بتٍّ محسوبٍ من السقف بمرورين.
       // مروران بـpreset veryslow ⇒ نحو ربع ساعة لفيديو ثلاث دقائق. هذا ثمنُ الحدّة.
       const lite = NO_BOOKENDS ? null : path.join(OUT, 'promo-hd.mp4');
-      if (!lite) { L('══════════════════════════════════════════════════════\n'); process.exit(0); }
+      // لا نسخةَ مشاركةٍ إن كان الأصلُ دون السقف: فرضُ معدّلِ بتٍّ على مشاهدَ ساكنةٍ
+      // يُنتج ملفاً أكبرَ وأدنى جودةً من الأصل — وقد حدث ذلك فعلاً بعد تنظيف المصدر.
+      if (lite) fs.rmSync(lite, { force: true });
+      if (!lite || fs.statSync(mp4).size / 1048576 <= Number(process.env.PROMO_MAX_MB || 28)) {
+        if (lite) L(`  (الأصلُ دون السقف — فهو نفسُه نسخةُ المشاركة، بلا إعادة ترميز)`);
+        L('══════════════════════════════════════════════════════\n'); process.exit(0);
+      }
       const secs = (() => { const m = /Duration: (\d+):(\d+):(\d+\.\d+)/.exec(d.stderr || ''); return m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : 0; })();
       const cap = Number(process.env.PROMO_MAX_MB || 28), abr = 96;
       const vbr = secs > 0 ? Math.max(600, Math.floor((cap * 8192) / secs) - abr) : 1200;
