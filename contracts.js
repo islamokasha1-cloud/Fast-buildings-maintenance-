@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2556";
+var MODULE_BUILD = "v18.9.2558";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -254,6 +254,53 @@ function payOrderAllowed(value, threshold){
   return v > 0 && v < t;
 }
 
+/* ════ غرامةُ التأخير — **بالريال** ════   (طلبُ المالك)
+
+   كانت نسبةً من قيمة العقد. والنسبةُ رقمٌ لا يراه أحد: المقاولُ يفاوض على ريالاتٍ
+   في اليوم، والمهندسُ يريد أن يقرأ في الوثيقة المبلغَ الذي اتُّفق عليه لا نسبةً
+   يحسبها في رأسه عند كل مطالبة. فصارت الغرامةُ **مبلغاً يومياً وسقفاً بالريال**.
+
+   **والوثائقُ القديمةُ لا تُكسَر.** عقودٌ سارية وطلباتٌ قائمةٌ خُزِّنت بالنسبة —
+   وتحويلُها حسابياً عند القراءة كان سيغيّر أرقاماً وقّع عليها الطرفان. فالوسمُ
+   (`mode`) يحفظ لكلّ وثيقةٍ لغتَها: القديمةُ تُقرأ نسبةً كما كُتبت، والجديدةُ
+   ريالاً. وكلُّ حسابٍ في الوحدة يمرّ بهاتين الدالّتين — فلا موضعان يفترقان. */
+function penaltyIsPct(pen){
+  var p = pen || {};
+  if(p.mode === "amount") return false;
+  if(p.mode === "pct")    return true;
+  // بلا وسمٍ: وثيقةٌ قديمةٌ إن حملت نسبةً، وإلا فالافتراضُ الجديدُ بالريال
+  return (Number(p.perDayPct)||0) > 0 || (Number(p.capPct)||0) > 0;
+}
+function penaltyPerDay(pen, contractVal){          // ريالاً عن كل يوم تأخير
+  var p = pen || {};
+  return penaltyIsPct(p) ? r2((Number(contractVal)||0) * (Number(p.perDayPct)||0) / 100)
+                         : r2(Number(p.perDayAmount)||0);
+}
+function penaltyCap(pen, contractVal){             // سقفُ الغرامة بالريال (٠ = بلا سقف)
+  var p = pen || {};
+  return penaltyIsPct(p) ? r2((Number(contractVal)||0) * (Number(p.capPct)||0) / 100)
+                         : r2(Number(p.capAmount)||0);
+}
+/* التطبيعُ عند الحفظ: يُثبَّت الوسمُ صراحةً فلا تبقى وثيقةٌ تُخمَّن لغتُها. */
+function normPenalty(pen){
+  var p = pen || {};
+  return penaltyIsPct(p)
+    ? { mode:"pct",    perDayPct:Number(p.perDayPct)||0,       capPct:Number(p.capPct)||0 }
+    : { mode:"amount", perDayAmount:Number(p.perDayAmount)||0, capAmount:Number(p.capAmount)||0 };
+}
+/* نصُّ الغرامة المعروض — مصدرٌ واحدٌ تقرؤه البطاقتان والوثيقةُ الورقية. */
+function penaltyText(pen, contractVal){
+  var p = pen || {};
+  if(penaltyIsPct(p)){
+    var pd = Number(p.perDayPct)||0, cp = Number(p.capPct)||0;
+    if(pd <= 0) return "—";
+    return pd+"٪ من قيمة العقد يومياً"+(cp>0 ? " — سقف "+cp+"٪ ("+money(penaltyCap(p, contractVal))+" ر.س)" : " — بلا سقف");
+  }
+  var pda = Number(p.perDayAmount)||0, ca = Number(p.capAmount)||0;
+  if(pda <= 0) return "—";
+  return money(pda)+" ر.س يومياً"+(ca>0 ? " — سقف "+money(ca)+" ر.س" : " — بلا سقف");
+}
+
 /* توجيهُ طلب التعاقد وأمرِ الدفع معاً — **مصدرُ الحقيقة الوحيد للتسلسل**.
 
    • العقد:      مدير المشاريع ← المشتريات ← المالية ← (التنفيذي فوق السقف) ← معتمَد.
@@ -343,7 +390,8 @@ function crqFinanceKey(req){
   return [
     r2(r.value), normVatMode(r.vatMode), String(r.engagement||""), String(r.budgetCategoryKey||""),
     r2(a.pct), r2(a.recoveryPct), r2(rt.pct), String(rt.releaseOn||""),
-    r2(pn.perDayPct), r2(pn.capPct), r2(w.months), r2(r.durationDays)
+    penaltyIsPct(pn)?"pct":"amount", r2(pn.perDayPct), r2(pn.capPct),
+    r2(pn.perDayAmount), r2(pn.capAmount), r2(w.months), r2(r.durationDays)
   ].join("~");
 }
 
@@ -559,11 +607,16 @@ function financialClauses(contract){
       body:"يُحتجز من قيمة أعمال كل مستخلص ما نسبته "+ret.pct+"٪ ضماناً لحسن التنفيذ، "+
            (ret.releaseOn==="warranty_end" ? "ويُفرج عنه بعد انتهاء مدة الضمان" : "ويُفرج عنه عند الاستلام الابتدائي للأعمال")+"." });
   }
-  if(Number(pen.perDayPct)>0){
+  if(penaltyPerDay(pen, contractValue(c))>0){
     out.push({ key:"_fin_pen", category:"penalty", title:"غرامة التأخير",
+      /* الوثيقةُ الورقيةُ تقول ما تقوله الشاشةُ بالضبط: الجديدُ ريالاً صريحاً،
+         والقديمُ نسبةً **كما وُقِّع عليه** — ولا يُترجَم عقدٌ قائمٌ إلى لغةٍ أخرى. */
       body:"إذا تأخر الطرف الثاني عن إنجاز الأعمال في المدة المتفق عليها، تُطبَّق غرامة تأخير قدرها "+
-           pen.perDayPct+"٪ من قيمة العقد عن كل يوم تأخير"+
-           (Number(pen.capPct)>0 ? "، بحد أقصى "+pen.capPct+"٪ من قيمة العقد ("+money(r2(contractValue(c)*Number(pen.capPct)/100))+" ريال)" : "")+
+           (penaltyIsPct(pen)
+             ? (pen.perDayPct+"٪ من قيمة العقد عن كل يوم تأخير"+
+                (Number(pen.capPct)>0 ? "، بحد أقصى "+pen.capPct+"٪ من قيمة العقد ("+money(penaltyCap(pen, contractValue(c)))+" ريال)" : ""))
+             : (money(penaltyPerDay(pen, contractValue(c)))+" ريال عن كل يوم تأخير"+
+                (penaltyCap(pen, contractValue(c))>0 ? "، بحد أقصى "+money(penaltyCap(pen, contractValue(c)))+" ريال" : "")))+
            ". وتُخصم الغرامة من مستحقات الطرف الثاني دون حاجة إلى إنذار أو حكم." });
   }
   if(Number(war.months)>0){
@@ -616,7 +669,7 @@ function contractFromRequest(req, contractId, now, by, clauses){
     startDate: r.startDate || "", durationDays: Number(r.durationDays)||0,
     advance:   Object.assign({ pct:0, recoveryPct:0, amount:0, recovered:0 }, r.advance||{}),
     retention: Object.assign({ pct:0, releaseOn:"completion", released:0 }, r.retention||{}),
-    penalty:   Object.assign({ perDayPct:0, capPct:0 }, r.penalty||{}),
+    penalty:   normPenalty(r.penalty),
     warranty:  Object.assign({ months:0 }, r.warranty||{}),
     guarantees: [], changeOrders: [],
     // نسخةٌ **مجمَّدةٌ** من الشروط وقت الإنشاء — تعديلُ القالب لاحقاً لا يمسّ عقداً موقَّعاً
@@ -942,8 +995,8 @@ function extNet(ext, contract, ctx){
 
   // (٦) − غرامةُ التأخير (بسقفها من قيمة العقد إن حُدِّد)
   var penalty = r2(Math.max(0, Number(x.penaltyAmount)||0));
-  var capPct = Number((c.penalty||{}).capPct);
-  if(isFinite(capPct) && capPct > 0) penalty = r2(Math.min(penalty, contractValue(c) * capPct / 100));
+  var penCap = penaltyCap(c.penalty, contractValue(c));
+  if(penCap > 0) penalty = r2(Math.min(penalty, penCap));
 
   // (٧) − الموادُّ المصروفةُ له من مستودعنا
   var materials = r2(Math.max(0, Number(x.materialsIssued)||0));
@@ -1048,11 +1101,12 @@ function lateDaysOf(contract, asOf){
   return d > 0 ? d : 0;
 }
 function suggestedPenalty(contract, lateDays){
-  var c = contract || {}, pct = Number((c.penalty||{}).perDayPct);
-  if(!isFinite(pct) || pct<=0 || !lateDays) return 0;
-  var raw = r2(contractValue(c) * pct / 100 * lateDays);
-  var cap = Number((c.penalty||{}).capPct);
-  if(isFinite(cap) && cap>0) raw = r2(Math.min(raw, contractValue(c)*cap/100));
+  var c = contract || {}, val = contractValue(c);
+  var perDay = penaltyPerDay(c.penalty, val);
+  if(perDay<=0 || !lateDays) return 0;
+  var raw = r2(perDay * lateDays);
+  var cap = penaltyCap(c.penalty, val);
+  if(cap>0) raw = r2(Math.min(raw, cap));
   return raw;
 }
 
@@ -1693,6 +1747,57 @@ function cancelRequest(id, reason){
     var i=_reqs.findIndex(function(x){ return x.id===id; });
     if(i>=0) _reqs[i]=r;
     _audit("إلغاء طلب تعاقد", id+(reason?(" — "+reason):""));
+    return r;
+  });
+}
+
+/* تعديلُ بنود الطلب — **للأدمن وحدَه** (طلبُ المالك).
+
+   **العهدُ الذي لا يُنقَض:** «وقّع المعتمِدُ على رقمٍ وسُدِّد غيرُه» — وهو سببُ تجميد
+   البنود أصلاً. فالتعديلُ هنا لا يخرقه بل يحترمه بطريقٍ آخر: القيمةُ تُعاد حسابُها
+   من البنود، ثمّ **`crqRevalidate` تُسقط بصمةَ المالية** (مفتاحُها يضمّ القيمةَ
+   والشروط) و**اعتمادُ التنفيذيِّ يسقط بقيمته** (`ceoApprovedAmount`)، ثمّ
+   `crqNextStage` تُرجع الطلبَ إلى بوّابتهما. فما وُقِّع على رقمٍ قديمٍ **يُبطَل**
+   لا يُمرَّر. واعتمادُ مدير المشاريع والمشتريات يبقى — بصمتُهما (الطرفُ والتنافس)
+   لم تتغيّر.
+
+   والسببُ إلزاميّ: من سقط توقيعُه يقرأ في الخطّ الزمنيِّ لماذا، وبكم تغيّرت القيمة. */
+function editRequestLines(id, lines, reason){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  if(_role() !== "admin") return Promise.reject(new Error("تعديل بنود الطلب للأدمن فقط"));
+  if(!reason) return Promise.reject(new Error("سبب التعديل إلزامي"));
+  var clean = (Array.isArray(lines)?lines:[]).map(function(l){
+    return { id: String((l&&l.id)||_uid()), boqLineId: (l&&l.boqLineId)||null,
+             desc: String((l&&l.desc)||"").trim(), unit: String((l&&l.unit)||"").trim(),
+             qty: Number((l&&l.qty))||0, unitPrice: Number((l&&l.unitPrice))||0,
+             budgetCategoryKey: (l&&l.budgetCategoryKey)||"" };
+  }).filter(function(l){ return l.desc && l.qty>0; });
+  if(!clean.length) return Promise.reject(new Error("أضِف بنداً واحداً على الأقل بوصفٍ وكمية"));
+  var ref = database.collection(REQUESTS_COL()).doc(id), th = ceoThreshold();
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("الطلب غير موجود");
+      var r = s.data()||{}; r.id = id;
+      if(crqIsFinal(r.status)) throw new Error("الطلب في حالةٍ نهائية — لا تُعدَّل بنوده");
+      var was = r2(r.value);
+      r.lines = clean;
+      r.value = crqValueOf(r);
+      if(r.value <= 0) throw new Error("قيمة الطلب صفر — راجع الكميات والأسعار");
+      if(r.engagement==="pay_order" && !payOrderAllowed(r.value, payOrderThreshold()))
+        throw new Error("أمر الدفع لا يجوز عند "+money0(payOrderThreshold())+" ر.س فأكثر — حوّله إلى عقد");
+      var next = crqRevalidate(r);              // ما بطَل من التوقيعات يسقط وحدَه
+      next.status = crqNextStage(next, th);
+      next.id = id; next.updatedAt=_now(); next.updatedBy=_me();
+      _pushTimeline(next, "تعديل البنود", "edited",
+        money(was)+" ← "+money(next.value)+" ر.س — "+reason);
+      var out = Object.assign({}, next); delete out.id;
+      t.set(ref, out, { merge:true });
+      return next;
+    });
+  }).then(function(r){
+    _mirror(_reqs, r, true);
+    _audit("تعديل بنود طلب تعاقد", id+" ⇐ "+money(r.value)+" ر.س — "+reason);
+    _notify("طلب تعاقد "+id, "عُدِّلت بنوده — "+money(r.value)+" ر.س", id);
     return r;
   });
 }
@@ -3103,7 +3208,7 @@ function newRequest(){
     vendorId:"", vendorName:"", vatMode:"incl", budgetCategoryKey:"",
     lines:[], candidates:[], rationale:"", durationDays:0, startDate:"",
     advance:{pct:0,recoveryPct:0}, retention:{pct:0,releaseOn:"completion"},
-    penalty:{perDayPct:0,capPct:0}, warranty:{months:0}, value:0
+    penalty:{mode:"amount",perDayAmount:0,capAmount:0}, warranty:{months:0}, value:0
   };
   paintReqs();
   loadProjectData(_draftLoadKey());
@@ -3166,7 +3271,8 @@ function syncReqDraft(){
   if(document.getElementById("ct-r-rationale")) d.rationale=v("ct-r-rationale");
   if(document.getElementById("ct-r-adv"))   { d.advance=d.advance||{}; d.advance.pct=n("ct-r-adv"); d.advance.recoveryPct=n("ct-r-advrec"); }
   if(document.getElementById("ct-r-ret"))   { d.retention=d.retention||{}; d.retention.pct=n("ct-r-ret"); var ro=document.getElementById("ct-r-reton"); if(ro) d.retention.releaseOn=ro.value; }
-  if(document.getElementById("ct-r-pen"))   { d.penalty=d.penalty||{}; d.penalty.perDayPct=n("ct-r-pen"); d.penalty.capPct=n("ct-r-pencap"); }
+  // الغرامةُ بالريال — والوسمُ يُكتب صراحةً فلا تُخمَّن لغةُ الوثيقة لاحقاً
+  if(document.getElementById("ct-r-pen"))   { d.penalty={ mode:"amount", perDayAmount:n("ct-r-pen"), capAmount:n("ct-r-pencap") }; }
   if(document.getElementById("ct-r-warr"))  { d.warranty=d.warranty||{}; d.warranty.months=n("ct-r-warr"); }
   var lt=document.getElementById("ct-r-lines");
   if(lt) lt.querySelectorAll("[data-lf]").forEach(function(inp){
@@ -3280,8 +3386,8 @@ function reqFormHTML(){
         '</select>')+
       '</div>'+
       '<div class="ct-form-row">'+
-        field("غرامة التأخير % لكل يوم", '<input class="form-input num" id="ct-r-pen" type="number" step="any" value="'+_esc((d.penalty||{}).perDayPct||0)+'">')+
-        field("سقف الغرامة % من العقد", '<input class="form-input num" id="ct-r-pencap" type="number" step="any" value="'+_esc((d.penalty||{}).capPct||0)+'">')+
+        field("غرامة التأخير (ر.س) لكل يوم", '<input class="form-input num" id="ct-r-pen" type="number" step="any" min="0" value="'+_esc((d.penalty||{}).perDayAmount||0)+'">')+
+        field("سقف الغرامة (ر.س) — ٠ بلا سقف", '<input class="form-input num" id="ct-r-pencap" type="number" step="any" min="0" value="'+_esc((d.penalty||{}).capAmount||0)+'">')+
       '</div>'+
       '<div class="ct-form-row">'+
         field("مدة الضمان (شهراً)", '<input class="form-input num" id="ct-r-warr" type="number" step="any" value="'+_esc((d.warranty||{}).months||0)+'">')+
@@ -3499,7 +3605,7 @@ function reqCardHTML(id){
     '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("shield","ic-sm")+' الشروط التجارية</div><div class="ct-info">'+
       infoCell("الدفعة المقدمة", ((r.advance||{}).pct||0)+"٪")+
       infoCell("محتجز الضمان", ((r.retention||{}).pct||0)+"٪")+
-      infoCell("غرامة التأخير", ((r.penalty||{}).perDayPct||0)+"٪ يومياً — سقف "+((r.penalty||{}).capPct||0)+"٪")+
+      infoCell("غرامة التأخير", _esc(penaltyText(r.penalty, crqValueOf(r))))+
       infoCell("مدة الضمان", ((r.warranty||{}).months||0)+" شهراً")+
     '</div></div>';
 
@@ -3547,11 +3653,15 @@ function reqCardHTML(id){
     waiting + sod + payBox +
     '<div class="card ct-sec">'+info+
       (r.scope?'<div class="ct-note" style="margin-top:12px">'+_esc(r.scope)+'</div>':'')+'</div>'+
-    '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود</div>'+
+    // في وضع التحرير يحلّ المحرّرُ محلَّ الجدول — لا جدولان لبنودٍ واحدة
+    (_lnEdit ? linesEditHTML(r) :
+      '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود'+
+        (canEditLines(r) ? '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.editLines()">'+_icn("edit","ic-sm")+' تعديل البنود</button>' : '')+
+      '</div>'+
       '<div class="ct-table-wrap"><table class="ct-table"><thead><tr><th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>'+
       '<tbody>'+lineRows+'</tbody></table></div>'+
       '<div class="ct-total">'+totalsHTML(t, r.vatMode)+'</div>'+
-    '</div>'+
+    '</div>')+
     termsRow + candSec +
     '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' السجل الزمني</div><div class="ct-timeline">'+tl+'</div></div>';
 }
@@ -3561,8 +3671,8 @@ function filterReqs(k,v){
   _rFilter[k]=v||""; paintReqs();
   if(k==="q"){ var i=document.getElementById("ct-r-q"); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length,i.value.length); }catch(e){} } }
 }
-function openReq(id){ _rOpen=id; _rDraft=null; paintReqs(); }
-function backToReqs(){ _rOpen=null; _rDraft=null; paintReqs(); }
+function openReq(id){ _rOpen=id; _rDraft=null; _lnEdit=null; paintReqs(); }
+function backToReqs(){ _rOpen=null; _rDraft=null; _lnEdit=null; paintReqs(); }
 function retryReqs(){ stopReqSync(); startReqSync(); paintReqs(); }
 
 function act(action){
@@ -3614,6 +3724,82 @@ function doDelete(){
   }).catch(function(e){
     console.warn("contracts/doDelete",e);
     _toast("⚠ "+(e&&e.message?e.message:"تعذّر الحذف"),"warn");
+  });
+}
+
+/* من يملك تعديلَ البنود؟ الأدمن، وعلى طلبٍ غيرِ منتهٍ. قاعدةٌ في موضعٍ واحد
+   يقرؤها الزرُّ **وطبقةُ البيانات** (وقواعدُ الخادم تقول مثلَها). */
+function canEditLines(req){ return _role()==="admin" && !!req && !crqIsFinal(req.status); }
+
+/* ── تحريرُ بنود الطلب (الأدمن) ── مسودّةٌ محلّيةٌ حتى الحفظ، فلا تُكتب كتابةٌ
+   جزئيةٌ في القاعدة أثناء الطباعة. والإجماليُّ يُحسب بالدالّة نفسِها التي تحسبه
+   في النموذج — لا حسابَ ثانٍ في الترميز. */
+var _lnEdit = null;
+function editLines(){
+  var r=requestById(_rOpen); if(!r) return;
+  if(_role()!=="admin") return _toast("⚠ تعديل البنود للأدمن فقط","warn");
+  _lnEdit = (r.lines||[]).map(function(l){ return Object.assign({}, l); });
+  if(!_lnEdit.length) _lnEdit.push({ id:_uid(), desc:"", unit:"", qty:0, unitPrice:0 });
+  paintReqs();
+  var b=document.getElementById("ct-ln-box"); if(b) b.scrollIntoView({behavior:"smooth", block:"center"});
+}
+function cancelLines(){ _lnEdit=null; paintReqs(); }
+function syncLines(){
+  if(!_lnEdit) return;
+  var box=document.getElementById("ct-ln-rows"); if(!box) return;
+  box.querySelectorAll("[data-ef]").forEach(function(inp){
+    var i=parseInt(inp.dataset.i,10), f=inp.dataset.ef;
+    if(!_lnEdit[i]||!f) return;
+    _lnEdit[i][f] = (f==="qty"||f==="unitPrice") ? (Number(inp.value)||0) : String(inp.value||"").trim();
+  });
+}
+function addEditLine(){ syncLines(); if(!_lnEdit) return; _lnEdit.push({ id:_uid(), desc:"", unit:"", qty:0, unitPrice:0 }); paintReqs(); }
+function delEditLine(i){ syncLines(); if(!_lnEdit) return; _lnEdit.splice(i,1); if(!_lnEdit.length) _lnEdit.push({ id:_uid(), desc:"", unit:"", qty:0, unitPrice:0 }); paintReqs(); }
+function editLinesRecalc(){
+  syncLines();
+  var r=requestById(_rOpen); if(!r||!_lnEdit) return;
+  var box=document.getElementById("ct-ln-total");
+  if(box) box.innerHTML = totalsHTML(linesTotal(_lnEdit, r.vatMode), r.vatMode);
+}
+function linesEditHTML(r){
+  var rows=_lnEdit.map(function(l,i){
+    var lt=lineTotal(l.qty,l.unitPrice,r.vatMode);
+    return '<tr>'+
+      '<td><input class="form-input" data-ef="desc" data-i="'+i+'" value="'+_esc(l.desc||"")+'" placeholder="وصف البند"></td>'+
+      '<td><input class="form-input" data-ef="unit" data-i="'+i+'" value="'+_esc(l.unit||"")+'" style="min-width:70px"></td>'+
+      '<td><input class="form-input num" data-ef="qty" data-i="'+i+'" type="number" step="any" value="'+_esc(l.qty||0)+'" style="min-width:80px" oninput="contracts.editLinesRecalc()"></td>'+
+      '<td><input class="form-input num" data-ef="unitPrice" data-i="'+i+'" type="number" step="any" value="'+_esc(l.unitPrice||0)+'" style="min-width:90px" oninput="contracts.editLinesRecalc()"></td>'+
+      '<td class="num">'+money(lt.total)+'</td>'+
+      '<td><button class="btn btn-delete" onclick="contracts.delEditLine('+i+')">'+_icn("trash","ic-sm")+'</button></td>'+
+    '</tr>';
+  }).join("");
+  return '<div class="card ct-sec" id="ct-ln-box"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' تعديل البنود</div>'+
+    '<div class="ct-note">'+_icn("shield","ic-sm")+
+      ' تغيّرُ القيمة يُسقط اعتمادَ المالية والتنفيذيِّ ويعيد الطلبَ إلى بوّابتهما — '+
+      'فلا يمرّ رقمٌ جديدٌ على توقيعٍ قديم. واعتمادُ مدير المشاريع والمشتريات يبقى.</div>'+
+    '<div class="ct-table-wrap" id="ct-ln-rows"><table class="ct-table"><thead><tr>'+
+      '<th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th><th></th>'+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="contracts.addEditLine()">'+_icn("plus","ic-sm")+' بند جديد</button></div>'+
+    '<div class="ct-total" id="ct-ln-total">'+totalsHTML(linesTotal(_lnEdit, r.vatMode), r.vatMode)+'</div>'+
+    '<div class="ct-form-row"><div>'+field("سبب التعديل *", '<input class="form-input" id="ct-ln-why" placeholder="لماذا تُعدَّل البنود؟">')+'</div><div></div></div>'+
+    '<div class="ct-save-bar" style="position:static">'+
+      '<button class="btn btn-ghost btn-sm" onclick="contracts.cancelLines()">إلغاء</button>'+
+      '<button class="btn btn-primary btn-sm" id="ct-ln-btn" onclick="contracts.saveLines()">'+_icn("save","ic-sm")+' حفظ البنود</button>'+
+    '</div></div>';
+}
+function saveLines(){
+  syncLines();
+  var w=document.getElementById("ct-ln-why"); var why=(w?w.value:"").trim();
+  if(!why){ _toast("⚠ سبب التعديل إلزامي","warn"); if(w) w.focus(); return; }
+  var btn=document.getElementById("ct-ln-btn"); if(btn) btn.disabled=true;
+  editRequestLines(_rOpen, _lnEdit, why).then(function(r){
+    _lnEdit=null; paintReqs();
+    _toast("✅ عُدِّلت البنود — "+money(r.value)+" ر.س ⇐ "+(CRQ_STATUS[r.status]||r.status),"success");
+  }).catch(function(e){
+    if(btn) btn.disabled=false;
+    console.warn("contracts/saveLines",e);
+    _toast("⚠ "+(e&&e.message?e.message:"تعذّر التعديل"),"warn");
   });
 }
 
@@ -3904,7 +4090,7 @@ function ctrOverviewHTML(c){
     '<div class="ct-info">'+
       infoCell("الدفعة المقدمة", ((c.advance||{}).pct||0)+"٪ — تُستردّ "+((c.advance||{}).recoveryPct||0)+"٪ من كل مستخلص")+
       infoCell("محتجز الضمان", ((c.retention||{}).pct||0)+"٪ — يُفرَج "+(((c.retention||{}).releaseOn)==="warranty_end"?"بعد انتهاء الضمان":"عند الاستلام الابتدائي"))+
-      infoCell("غرامة التأخير", ((c.penalty||{}).perDayPct||0)+"٪ يومياً — سقف "+((c.penalty||{}).capPct||0)+"٪")+
+      infoCell("غرامة التأخير", _esc(penaltyText(c.penalty, contractValue(c))))+
       infoCell("المُفرَج من المحتجز", money((c.retention||{}).released||0)+" ر.س")+
     '</div>'+
   '</div>';
@@ -5498,7 +5684,9 @@ window.contracts = {
   addCandidate: addCandidate, delCandidate: delCandidate, recalc: recalc,
   filterReqs: filterReqs, openReq: openReq, backToReqs: backToReqs,
   act: act, doCancel: doCancel, doDelete: doDelete, openPay: openPay,
-  openRewind: openRewind, closeRewind: closeRewind, doRewind: doRewind, closePay: closePay, doPay: doPay,
+  openRewind: openRewind, closeRewind: closeRewind, doRewind: doRewind,
+  editLines: editLines, cancelLines: cancelLines, addEditLine: addEditLine, canEditLines: canEditLines,
+  delEditLine: delEditLine, editLinesRecalc: editLinesRecalc, saveLines: saveLines, closePay: closePay, doPay: doPay,
   requests: requests, requestById: requestById,
   // العقود [المرحلة ٣]
   renderCtrs: renderCtrs, startCtrSync: startCtrSync, stopCtrSync: stopCtrSync,
@@ -5552,7 +5740,7 @@ window.contracts = {
   // مقابضُ طبقة البيانات — مكشوفةٌ لفحص المتصفّح ليختبر القواعد نفسَها التي
   // تحرسها الشاشة، لا نسخةً منها: الرفضُ يجب أن يقع في البيانات لا على الزرّ.
   _create: createRequest, _act: actOnRequest, _pay: payRequest, _cancel: cancelRequest,
-  _delete: deleteRequest, _rewind: rewindRequest,
+  _delete: deleteRequest, _rewind: rewindRequest, _editLines: editRequestLines,
   _crqRewind: crqRewind, _crqRewindTargets: crqRewindTargets,
   _draft: function(){ return _rDraft; },
   _mirror: _mirror, _confirm: _confirm, _CONFIRM_KINDS: _CONFIRM_KINDS,
@@ -5566,6 +5754,8 @@ window.contracts = {
   _lineTotal: lineTotal,
   _linesTotal: linesTotal,
   _payOrderAllowed: payOrderAllowed,
+  _penaltyIsPct: penaltyIsPct, _penaltyPerDay: penaltyPerDay, _penaltyCap: penaltyCap,
+  _normPenalty: normPenalty, _penaltyText: penaltyText,
   _crqNextStage: crqNextStage,
   _contractValue: contractValue,
   _contractLineQty: contractLineQty,

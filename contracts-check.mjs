@@ -328,8 +328,9 @@ await page.evaluate(() => { const a = document.querySelector('.main-area'); if (
 await page.fill('#ct-r-adv', '10');
 await page.fill('#ct-r-advrec', '20');
 await page.fill('#ct-r-ret', '5');
-await page.fill('#ct-r-pen', '0.1');
-await page.fill('#ct-r-pencap', '10');
+// الغرامةُ صارت بالريال: ٥٠٠ في اليوم بسقف ٢٠٬٠٠٠ (كانت ٠٫١٪ بسقف ١٠٪)
+await page.fill('#ct-r-pen', '500');
+await page.fill('#ct-r-pencap', '20000');
 await page.fill('#ct-r-warr', '12');
 await page.waitForTimeout(400);
 
@@ -439,6 +440,82 @@ const wrongGate = await page.evaluate(async (id) => {
   return msg;
 }, payStages.id);
 check('★ دورٌ لا يملك البوّابة يُرفض في طبقة البيانات', /ليست لدورك/.test(wrongGate), wrongGate);
+
+/* ── تعديلُ بنود الطلب — للأدمن (طلبُ المالك) ──
+   العهدُ الأصليُّ «وقّع المعتمِدُ على رقمٍ وسُدِّد غيرُه» يبقى: الفحصُ يتحقّق أن
+   القيمةَ الجديدةَ **أبطلت** اعتمادَ المالية والتنفيذيِّ فعاد الطلبُ إلى بوّابتهما،
+   وأن اعتمادَ مدير المشاريع والمشتريات بقي (بصمتُهما لم تتغيّر). */
+const edStart = await page.evaluate(async () => {
+  const id = await window.contracts._create({
+    engagement: 'contract', projectId: 'hail', title: 'طلبٌ تُعدَّل بنودُه', vendorId: 'VND-0005',
+    vendorName: 'محمد أحمد الغامدي', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'e1', desc: 'أعمال', unit: 'عدد', qty: 2, unitPrice: 5000 }],
+    candidates: [], advance: {}, retention: {},
+    penalty: { mode: 'amount', perDayAmount: 500, capAmount: 20000 }, warranty: {}
+  });
+  for (let i = 0; i < 3; i++) await window.contracts._act(id, 'approve', 'موافق');  // pm · proc · finance
+  const before = window.contracts.requestById(id);
+  window.contracts.openReq(id);
+  return { id, status: before.status, value: before.value, fin: !!before.financeApprovedAt };
+});
+await page.waitForTimeout(900);
+check('★ طلبٌ بـ١٠٬٠٠٠ اعتمدته البوّاباتُ الثلاث (مادّةُ فحص التعديل)',
+  edStart.value === 10000 && edStart.fin === true, JSON.stringify(edStart));
+check('★★ وزرُّ «تعديل البنود» يظهر للأدمن',
+  ((await page.textContent('#page-contract-requests')) || '').includes('تعديل البنود'));
+await page.evaluate(() => window.contracts.editLines());
+await page.waitForTimeout(700);
+check('★★ والمحرّرُ يحلّ محلَّ الجدول ويشرح أثرَ التغيير قبل وقوعه',
+  await page.evaluate(() => !!document.getElementById('ct-ln-rows')) &&
+  /يُسقط اعتمادَ المالية والتنفيذيِّ/.test((await page.textContent('#page-contract-requests')) || ''));
+const edNoReason = await page.evaluate(async (id) => {
+  try { await window.contracts._editLines(id, [{ desc: 'أعمال', unit: 'عدد', qty: 3, unitPrice: 5000 }], ''); return 'مرّ بلا سبب'; }
+  catch (e) { return e.message; }
+}, edStart.id);
+check('★★ ولا تعديلَ بلا سبب', /سبب التعديل إلزامي/.test(edNoReason), edNoReason);
+await page.fill('#ct-ln-rows [data-ef="qty"]', '3');
+await page.fill('#ct-ln-why', 'زيادة الكمية بعد المعاينة');
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${SHOTS}/12e-edit-lines.png`, fullPage: true });
+await page.click('#ct-ln-btn');
+await page.waitForTimeout(1400);
+const edAfter = await page.evaluate((id) => {
+  const r = window.contracts.requestById(id);
+  return { value: r.value, qty: (r.lines[0] || {}).qty, status: r.status,
+           pm: !!r.pmApprovedAt, proc: !!r.procApprovedAt, fin: !!r.financeApprovedAt,
+           note: ((r.timeline || []).slice(-1)[0] || {}).note || '',
+           code: ((r.timeline || []).slice(-1)[0] || {}).code || '' };
+}, edStart.id);
+check('★★ القيمةُ أُعيد حسابُها من البنود (١٥٬٠٠٠) والكميةُ صارت ٣',
+  edAfter.value === 15000 && edAfter.qty === 3, JSON.stringify(edAfter));
+check('★★ واعتمادُ المالية سقط فعاد الطلبُ إلى بوّابتها — ولم يسقط اعتمادُ مدير المشاريع والمشتريات',
+  edAfter.fin === false && edAfter.pm === true && edAfter.proc === true &&
+  edAfter.status === 'crq_pending_finance', JSON.stringify(edAfter));
+check('★ والخطُّ الزمنيُّ يحفظ القيمةَ قبل وبعد والسبب',
+  edAfter.code === 'edited' && /10,000\.00 ← 15,000\.00/.test(edAfter.note) &&
+  /زيادة الكمية بعد المعاينة/.test(edAfter.note), edAfter.note);
+const edPerm = await page.evaluate(async (id) => {
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  let msg; try { await window.contracts._editLines(id, [{ desc: 'x', qty: 1, unitPrice: 1 }], 'محاولة'); msg = 'مرّ بغير أدمن'; }
+  catch (e) { msg = e.message; }
+  currentUser.role = real;
+  let empty; try { await window.contracts._editLines(id, [], 'بلا بنود'); empty = 'مرّت بلا بنود'; }
+  catch (e) { empty = e.message; }
+  return { msg, empty };
+}, edStart.id);
+check('★★ والتعديلُ للأدمن وحدَه — الرفضُ في طبقة البيانات', /للأدمن فقط/.test(edPerm.msg), edPerm.msg);
+check('★ ولا تمرّ بنودٌ فارغة', /بنداً واحداً على الأقل/.test(edPerm.empty), edPerm.empty);
+
+/* ── غرامةُ التأخير بالريال (طلبُ المالك) ── */
+const penUI = await page.evaluate((id) => {
+  window.contracts.openReq(id);
+  return null;
+}, edStart.id);
+await page.waitForTimeout(800);
+const penCard = await page.textContent('#page-contract-requests') || '';
+check('★★ بطاقةُ الطلب تعرض الغرامةَ بالريال لا بالنسبة',
+  /500\.00 ر\.س يومياً/.test(penCard) && /سقف 20,000\.00 ر\.س/.test(penCard) && !/٪ يومياً/.test(penCard),
+  (penCard.match(/غرامة التأخير[\s\S]{0,60}/) || [''])[0].replace(/\s+/g, ' '));
 
 /* ── إرجاعُ الطلب إلى مرحلةٍ محدّدة — للأدمن (طلبُ المالك) ──
    يُنفَّذ **من الشاشة**: زرٌّ ⇐ صندوقٌ وجهاتُه مشتقّةٌ من الطلب ⇐ سببٌ إلزاميّ ⇐
@@ -675,10 +752,10 @@ await page.screenshot({ path: `${SHOTS}/16-manual-request-card.png` });
 
 await page.evaluate(() => window.contracts.backToReqs());
 await page.waitForTimeout(900);
-// خمسةُ طلباتٍ باقيةٍ في القائمة: المحوَّلُ لعقد · أمرُ الدفع · طلبُ الإرجاع لمرحلة ·
-// طلبُ فصل المهام · المشروعُ اليدويّ. (وطلبا سيناريو الحذف حُذفا فعلاً فلا أثرَ لهما.)
+// ستةُ طلباتٍ باقيةٍ في القائمة: المحوَّلُ لعقد · أمرُ الدفع · طلبُ تعديل البنود ·
+// طلبُ الإرجاع لمرحلة · طلبُ فصل المهام · المشروعُ اليدويّ. (وطلبا الحذف حُذفا فعلاً.)
 check('القائمةُ تعرض الطلبات وشريطَ «بانتظار دورك»',
-  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 5);
+  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 6);
 await page.screenshot({ path: `${SHOTS}/12-requests-list.png`, fullPage: true });
 
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
@@ -791,8 +868,9 @@ check('★ وفيها أطرافُ العقد والطرفُ الثاني **به
   /الطرف الأول/.test(printed) && /الطرف الثاني/.test(printed) && /1045667788/.test(printed));
 check('★ وجدولُ بنود الأعمال وشروطُ العقد وحقولُ التوقيع',
   /جدول بنود الأعمال/.test(printed) && /شروط العقد/.test(printed) && /الاسم \/ التوقيع \/ الختم/.test(printed));
-check('★ ونصُّ الغرامة المطبوع يحمل النسبةَ والسقف',
-  /غرامة تأخير قدرها 0\.1٪/.test(printed) && /بحد أقصى 10٪/.test(printed));
+check('★★ ونصُّ الغرامة المطبوع بالريال لا بالنسبة (كما اتُّفق عليه لا كما يُحسَب)',
+  /غرامة تأخير قدرها 500\.00 ريال عن كل يوم تأخير/.test(printed) &&
+  /بحد أقصى 20,000\.00 ريال/.test(printed) && !/٪ من قيمة العقد عن كل يوم/.test(printed));
 check('وقيمةُ العقد وإجماليُّه في جدول الملخّص', /قيمة العقد/.test(printed) && /33,600\.00/.test(printed));
 fs.writeFileSync(`${SHOTS}/contract-print.html`, printed);
 
