@@ -440,6 +440,60 @@ const wrongGate = await page.evaluate(async (id) => {
 }, payStages.id);
 check('★ دورٌ لا يملك البوّابة يُرفض في طبقة البيانات', /ليست لدورك/.test(wrongGate), wrongGate);
 
+/* ── فصلُ المهام: من اعتمد بوّابةً لا يعتمد التاليةَ (طلبُ المالك) ──
+   الحالةُ التي رآها بعينه: اعتمد كمدير مشاريع فعاد زرُّ الاعتماد — للمشتريات هذه
+   المرّة — لأن الأدمن عضوٌ في كلّ بوّابة. الفحصُ يعيد المشهد حرفياً: بلا مسؤول
+   مشترياتٍ في المستخدمين يبقى الزرُّ (نيابةً)، وبوجوده يختفي **ومعه سببُ غيابه**. */
+const sod = await page.evaluate(async () => {
+  const id = await window.contracts._create({
+    engagement: 'pay_order', projectId: 'hail', title: 'فحصُ فصل المهام', vendorId: 'VND-0006',
+    vendorName: 'راجو كومار', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 's1', desc: 'عمل', unit: 'عدد', qty: 1, unitPrice: 900 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  });
+  const out = { id, me: currentUser.user, role: currentUser.role };
+  await window.contracts._act(id, 'approve', '');            // بوّابةُ مدير المشاريع
+  const r1 = window.contracts.requestById(id);
+  out.status = r1.status;
+  out.storedUser = r1.pmApprovedByUser || '';
+  const M = (users) => window.contracts._crqActMode(
+    window.contracts.requestById(id), 'crq_pending_proc', currentUser.role,
+    currentUser.user, currentUser.name, users);
+  out.solo = M(USERS);                                        // لا مسؤولَ مشتريات بعد
+  USERS.push({ user: 'proc9', name: 'مسؤول المشتريات', role: 'procurement_officer' });
+  out.team = M(USERS);                                        // صار للبوّابة صاحبٌ آخر
+  try { await window.contracts._act(id, 'approve', ''); out.blocked = 'مرّ رغم المنع'; }
+  catch (e) { out.blocked = e.message; }
+  out.myTasks = window.contracts._myPendingItems('admin').filter(x => x.id === id).length;
+  window.contracts.openReq(id);
+  return out;
+});
+await page.waitForTimeout(900);
+check('★ الاعتمادُ الأوّل خزّن اسمَ الدخول (عليه تقوم المطابقةُ المستقرّة)',
+  sod.storedUser === sod.me && sod.status === 'crq_pending_proc', JSON.stringify({ u: sod.storedUser, s: sod.status }));
+check('★★ بلا مسؤولِ مشترياتٍ في المستخدمين: يعتمد **نيابةً** ولا يتعطّل العمل',
+  sod.solo === 'delegate', sod.solo);
+check('★★ وبوجود مسؤولِ مشترياتٍ: مُنِع — والمنعُ في طبقة البيانات لا على الزرّ',
+  sod.team === 'blocked' && /بوّابةٍ سابقة/.test(sod.blocked), sod.team + ' · ' + sod.blocked);
+check('★★ و«بانتظار إجراءك» لا تَعِد بزرٍّ مُنِع', sod.myTasks === 0, 'عدد=' + sod.myTasks);
+const sodUI = await page.evaluate(() => {
+  const p = document.getElementById('page-contract-requests');
+  const txt = (p && p.textContent) || '';
+  return {
+    approve: Array.from(p.querySelectorAll('button')).some(b => /اعتماد —/.test(b.textContent || '')),
+    reject: Array.from(p.querySelectorAll('button')).some(b => /رفض \/ إعادة/.test(b.textContent || '')),
+    why: /فصلُ المهام/.test(txt),
+    waiting: /بانتظار إجراءٍ منك/.test(txt)
+  };
+});
+check('★★ وزرُّ الاعتماد اختفى من الشاشة (وهو ما طلبه المالك)', sodUI.approve === false, JSON.stringify(sodUI));
+check('★★ ومعه **سببُ غيابه** — لا زرَّ يختفي بلا تفسير', sodUI.why === true, JSON.stringify(sodUI));
+check('★ والرفض/الإعادة يبقى متاحاً (مخرجٌ لا يُسدّ)', sodUI.reject === true, JSON.stringify(sodUI));
+check('★ ولا يقول الشريطُ «بانتظار إجراءٍ منك» لمن مُنِع', sodUI.waiting === false, JSON.stringify(sodUI));
+await page.screenshot({ path: `${SHOTS}/12c-separation-of-duties.png`, fullPage: true });
+// أعِد المستخدمين كما كانوا — بقيةُ السيناريوهات تعتمد أن الأدمن يملك كلّ بوّابة
+await page.evaluate(() => { const i = USERS.findIndex(u => u.user === 'proc9'); if (i >= 0) USERS.splice(i, 1); });
+
 /* ── حذفُ الطلبات الملغاة للأدمن (طلبُ المالك) ──
    الفعلُ الوحيدُ الذي لا رجعةَ فيه — فالفحصُ يُثبت البابَ **وحدودَه** في طبقة
    البيانات نفسِها: حيٌّ لا يُحذف · غيرُ الأدمن لا يحذف · والملغى يُحذف فعلاً
@@ -553,8 +607,10 @@ await page.screenshot({ path: `${SHOTS}/16-manual-request-card.png` });
 
 await page.evaluate(() => window.contracts.backToReqs());
 await page.waitForTimeout(900);
+// أربعةُ طلباتٍ باقيةٍ في القائمة: المحوَّلُ لعقد · أمرُ الدفع · طلبُ فصل المهام ·
+// المشروعُ اليدويّ. (وطلبا سيناريو الحذف حُذفا فعلاً فلا أثرَ لهما.)
 check('القائمةُ تعرض الطلبات وشريطَ «بانتظار دورك»',
-  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 3);
+  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 4);
 await page.screenshot({ path: `${SHOTS}/12-requests-list.png`, fullPage: true });
 
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
