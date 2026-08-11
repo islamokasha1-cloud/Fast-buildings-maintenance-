@@ -6250,8 +6250,9 @@ function contractsPhase1() {
     T("★ والاعتمادُ نيابةً يُوسَم في الخطّ الزمني ويُخزَّن عَلَمُه",
       /mode === "delegate"\) r\.delegatedApproval = true/.test(src) &&
       /نيابةً — لا يوجد غيرُك يملك هذه البوّابة/.test(src));
-    T("★ واسمُ الدخول يُخزَّن مع كلّ اعتمادٍ (بلا ذلك تسقط المطابقةُ المستقرّة)",
-      (src.match(/ApprovedByUser=_meUser\(\)/g) || []).length === 4);
+    T("★ واسمُ الدخول يُخزَّن مع كلّ اعتمادٍ في المستندات الثلاثة (بلا ذلك تسقط المطابقةُ المستقرّة)",
+      (src.match(/ApprovedByUser=_meUser\(\)/g) || []).length === 10,
+      "المواضع: " + (src.match(/ApprovedByUser=_meUser\(\)/g) || []).length);
   }
 
   /* ════ الإرجاعُ إلى بوّابةٍ محدّدة — للأدمن ════   (طلبُ المالك)
@@ -6302,6 +6303,79 @@ function contractsPhase1() {
       /_pushTimeline\(next, "إرجاع إلى "[\s\S]{0,200}"من «"\+from\+"» — "\+reason/.test(src));
     T("★ والزرُّ للأدمن وحدَه وحين توجد وجهةٌ صالحةٌ أصلاً (لا قائمةٌ فارغة)",
       /_role\(\)==="admin" && crqRewindTargets\(r, ceoThreshold\(\)\)\.length[\s\S]{0,160}contracts\.openRewind\(\)/.test(src));
+  }
+
+  /* ════ القاعدتان تعمّان المستندات الثلاثة ════   (طلبُ المالك: «نفّذ»)
+     كانتا على طلبات التعاقد وحدَها — والمستخلصُ **أولى** بهما: هو موضعُ خروج المال
+     شهرياً لا مرّةً واحدة. والمنطقُ **نسخةٌ واحدة**: لا يفترق مستندٌ عن آخر إلا في
+     ترتيب بوّاباته ودالّةِ توجيهه، فيُمرَّران وسيطين. ثلاثُ نسخٍ كانت ستنحرف. */
+  {
+    const TEAM3 = [{ user: "adm", role: "admin" }, { user: "pm1", role: "project_manager" },
+                   { user: "ceo1", role: "ceo" }, { user: "fin1", role: "finance" },
+                   { user: "proc1", role: "procurement_officer" }];
+    const SOLO3 = [{ user: "adm", role: "admin" }];
+    const afterPm = { pmApprovedAt: "t", pmApprovedByUser: "adm" };
+
+    /* ── المستخلص ── */
+    T("★★ المستخلص: من اعتمد بوّابةً لا يعتمد التاليةَ ما دام غيرُه يملكها",
+      C._extActMode(afterPm, "ext_pending_ceo", "admin", "adm", "م", TEAM3) === "blocked");
+    T("★★ ومهربُه نفسُه: لا أحدَ غيرُه ⇒ نيابةً لا منعاً",
+      C._extActMode(afterPm, "ext_pending_ceo", "admin", "adm", "م", SOLO3) === "delegate");
+    T("★★ وسدادُ المستخلص تحت القاعدة — وهو موضعُ خروج المال",
+      C._extActMode(afterPm, "ext_pending_finance", "admin", "adm", "م", TEAM3) === "blocked");
+    T("★ ومن لم يعتمد شيئاً يعتمد عادةً",
+      C._extActMode(afterPm, "ext_pending_ceo", "ceo", "ceo1", "ت", TEAM3) === "act");
+    T("★★ وإرجاعُ المستخلص يمسح البوّابةَ وما بعدها ثمّ التوجيهُ يقرّر",
+      (function () {
+        const e = { pmApprovedAt: "t", ceoApprovedAt: "t", ceoApprovedAmount: 90000, status: "ext_pending_finance" };
+        const o = C._extRewind(e, "ceo", 90000, 50000);
+        return o.status === "ext_pending_ceo" && !o.ceoApprovedAt && !o.ceoApprovedAmount && o.pmApprovedAt === "t";
+      })());
+    T("★★ ووجهاتُه تُشتقّ من صافيه: دون سقف التنفيذيِّ لا بوّابةَ له",
+      C._extRewindTargets({ pmApprovedAt: "t", status: "ext_pending_finance" }, 100, 50000).join(",") === "pm" &&
+      C._extRewindTargets({ pmApprovedAt: "t", status: "ext_pending_finance" }, 90000, 50000).join(",") === "pm,ceo");
+
+    /* ── أمرُ التغيير ── */
+    T("★★ أمرُ التغيير: القاعدةُ نفسُها",
+      C._chgActMode(afterPm, "chg_pending_proc", "admin", "adm", "م", TEAM3) === "blocked" &&
+      C._chgActMode(afterPm, "chg_pending_proc", "admin", "adm", "م", SOLO3) === "delegate" &&
+      C._chgActMode(afterPm, "chg_pending_proc", "procurement_officer", "proc1", "ش", TEAM3) === "act");
+    T("★★ وإرجاعُه يمرّ ببوّاباته الأربع",
+      C._chgRewindTargets({ pmApprovedAt: "t", procApprovedAt: "t", financeApprovedAt: "t",
+                            ceoApprovedAt: "t", ceoApprovedAmount: 90000, amount: 90000,
+                            status: "chg_approved" }, 50000).join(",") === "pm,proc,finance,ceo");
+    T("★ ولا وجهةَ بلا أثرٍ فيه أيضاً",
+      C._chgRewindTargets({ pmApprovedAt: "t", amount: 90000, status: "chg_pending_proc" }, 50000)
+        .indexOf("proc") === -1);
+
+    /* ── نسخةٌ واحدةٌ لا ثلاث ── */
+    T("★★ والمنطقُ نسخةٌ واحدة: `docRewind`/`gateActMode` تخدم الثلاثة بوسيطين",
+      /function docRewind\(doc, gateKey, order, nextStage\)/.test(src) &&
+      /function gateActMode\(gates, doc, status, role, meUser, meName, users\)/.test(src) &&
+      /function crqActMode[\s\S]{0,140}gateActMode\(GATE_ROLES/.test(src) &&
+      /function extActMode[\s\S]{0,140}gateActMode\(EXT_GATES/.test(src) &&
+      /function chgActMode[\s\S]{0,140}gateActMode\(CHG_GATES/.test(src));
+    T("★★ والمنعُ في طبقة البيانات للثلاثة لا على الأزرار",
+      /function actOnExtract[\s\S]{0,1400}extActMode\(e, e\.status, role[\s\S]{0,140}"blocked"\) throw/.test(src) &&
+      /function actOnChange[\s\S]{0,1400}chgActMode\(g, g\.status, role[\s\S]{0,140}"blocked"\) throw/.test(src) &&
+      /function payExtract[\s\S]{0,1200}extActMode\(e, e\.status, role[\s\S]{0,140}"blocked"\) throw/.test(src));
+    T("★★ والإرجاعُ للأدمن وبسببٍ إلزاميٍّ في الاثنين، ولا يُرجَع منتهٍ",
+      /function rewindExtract[\s\S]{0,300}_role\(\) !== "admin"[\s\S]{0,200}!reason\) return Promise\.reject/.test(src) &&
+      /function rewindChange[\s\S]{0,300}_role\(\) !== "admin"[\s\S]{0,200}!reason\) return Promise\.reject/.test(src) &&
+      /function rewindExtract[\s\S]{0,900}extIsFinal\(e\.status\)\) throw/.test(src) &&
+      /function rewindChange[\s\S]{0,900}chgIsFinal\(g\.status\)\) throw/.test(src));
+    T("★ ووجهةٌ غيرُ صالحةٍ تُرفَض في الاثنين",
+      /function rewindExtract[\s\S]{0,1200}extRewindTargets\(e, net, th\)\.indexOf\(gateKey\) === -1\) throw/.test(src) &&
+      /function rewindChange[\s\S]{0,900}chgRewindTargets\(g, th\)\.indexOf\(gateKey\) === -1\) throw/.test(src));
+    T("★★ و«بانتظار إجراءك» تحترم القاعدةَ في الثلاثة",
+      /_exts\.forEach[\s\S]{0,200}extActMode\(e, e\.status, role, meU, meN, us\) !== "blocked"/.test(src) &&
+      /_chgs\.forEach[\s\S]{0,200}chgActMode\(g, g\.status, role, meU, meN, us\) !== "blocked"/.test(src));
+    T("★ ونصُّ سببِ المنع مصدرٌ واحدٌ للثلاثة (لا ثلاثةُ نصوصٍ تنحرف)",
+      /function sodNoteHTML\(mode, owner\)/.test(src) &&
+      (src.match(/sodNoteHTML\(mode, owner\)/g) || []).length === 4);
+    T("★ وزرّا «إرجاع لمرحلة» يظهران للأدمن وحين توجد وجهةٌ صالحة",
+      /_role\(\)==="admin" && extRewindTargets\([\s\S]{0,120}contracts\.openExtRewind\(\)/.test(src) &&
+      /_role\(\)==="admin" && chgRewindTargets\(g, ceoThreshold\(\)\)\.length[\s\S]{0,120}contracts\.openChgRewind\(\)/.test(src));
   }
 
   /* ════ تعديلُ بنود الطلب — للأدمن وحدَه ════   (طلبُ المالك)

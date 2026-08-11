@@ -1019,6 +1019,70 @@ check('★ ومدّد مدةَ العقد', applied.days === before.days + 15, `
 check('★★ والنقرةُ المكرّرةُ لم تُطبّقه مرّتين', applied.n === 1, 'عدد أوامر العقد ' + applied.n);
 check('وخُتم الأمرُ «مطبَّقاً»', applied.gst === 'chg_applied', applied.gst);
 
+/* ── فصلُ المهام والإرجاعُ يعمّان أمرَ التغيير (طلبُ المالك: «نفّذ») ──
+   على أمرٍ جديدٍ لا على المطبَّق: المطبَّقُ نهائيٌّ لا يُرجَع — وهو نفسُه حارسٌ يُفحَص. */
+const chgSod = await page.evaluate(async (a) => {
+  const c = window.contracts.contractById(a.cid);
+  const gid = await window.contracts._createChg(c, {
+    lines: [{ id: a.lineId, qty: 5, unitPrice: 28 }], reason: 'فحصُ فصل المهام والإرجاع'
+  });
+  const out = { gid };
+  await window.contracts._actChg(gid, 'approve', '');        // بوّابةُ مدير المشاريع (أدمن)
+  const g = window.contracts.changeById(gid);
+  out.status = g.status; out.pmUser = g.pmApprovedByUser || ''; out.me = currentUser.user;
+  const M = (users) => window.contracts._chgActMode(window.contracts.changeById(gid),
+    'chg_pending_proc', 'admin', currentUser.user, currentUser.name, users);
+  out.solo = M(USERS);
+  USERS.push({ user: 'proc8', name: 'المشتريات', role: 'procurement_officer' });
+  out.team = M(USERS);
+  try { await window.contracts._actChg(gid, 'approve', ''); out.blocked = 'مرّ رغم المنع'; }
+  catch (e) { out.blocked = e.message; }
+  out.inTasks = window.contracts._myPendingItems('admin').filter(x => x.id === gid).length;
+  const i = USERS.findIndex(u => u.user === 'proc8'); if (i >= 0) USERS.splice(i, 1);
+  return out;
+}, { cid: conv.cid, lineId: before.lineId });
+check('★★ أمرُ التغيير: الاعتمادُ خزّن اسمَ الدخول وانتقل للمشتريات',
+  chgSod.status === 'chg_pending_proc' && chgSod.pmUser === chgSod.me, JSON.stringify(chgSod));
+check('★★ وبوجود مسؤولِ مشترياتٍ يُمنع المعتمِدُ نفسُه — وبغيابه يعتمد نيابةً',
+  chgSod.team === 'blocked' && chgSod.solo === 'delegate' && /بوّابةٍ سابقة/.test(chgSod.blocked),
+  chgSod.solo + ' · ' + chgSod.team);
+check('★★ و«بانتظار إجراءك» لا تَعِد بزرٍّ مُنِع في أمر التغيير', chgSod.inTasks === 0, 'عدد=' + chgSod.inTasks);
+
+await page.evaluate((a) => window.contracts.openChgFrom(a.gid, a.cid), { gid: chgSod.gid, cid: conv.cid });
+await page.waitForTimeout(900);
+check('★★ وزرُّ «إرجاع لمرحلة» يظهر في أمر التغيير للأدمن',
+  ((await page.textContent('#page-contracts-list')) || '').includes('إرجاع لمرحلة'));
+await page.evaluate(() => window.contracts.openChgRewind());
+await page.waitForTimeout(700);
+const chgRwOpts = await page.evaluate(() => {
+  const sel = document.getElementById('ct-rw2-gate');
+  return sel ? Array.from(sel.options).map(o => o.value) : [];
+});
+check('★ ووجهاتُه مشتقّةٌ من مساره ولا تعرض بوّابتَه الحالية',
+  chgRwOpts.includes('pm') && !chgRwOpts.includes('proc'), chgRwOpts.join(','));
+await page.selectOption('#ct-rw2-gate', 'pm');
+await page.fill('#ct-rw2-why', 'مراجعةُ سبب التغيير');
+await page.click('#ct-rw2-btn');
+await page.waitForTimeout(1300);
+const chgRwAfter = await page.evaluate((gid) => {
+  const g = window.contracts.changeById(gid);
+  return { status: g.status, pm: !!g.pmApprovedAt,
+           code: ((g.timeline || []).slice(-1)[0] || {}).code || '',
+           note: ((g.timeline || []).slice(-1)[0] || {}).note || '' };
+}, chgSod.gid);
+check('★★ وأمرُ التغيير عاد إلى بوّابة مدير المشاريع وسقط اعتمادُها',
+  chgRwAfter.status === 'chg_pending_pm' && chgRwAfter.pm === false, JSON.stringify(chgRwAfter));
+check('★ والسببُ في سجلّه', chgRwAfter.code === 'rewound' && /مراجعةُ سبب التغيير/.test(chgRwAfter.note), chgRwAfter.note);
+const chgFinalRw = await page.evaluate(async (gid) => {
+  try { await window.contracts._rewindChg(gid, 'pm', 'محاولةٌ على مطبَّق'); return 'رجع أمرٌ مطبَّق'; }
+  catch (e) { return e.message; }
+}, chgNew.id);
+check('★★ والمطبَّقُ لا يُرجَع (أثرُه وقع على العقد)', /حالةٍ نهائية/.test(chgFinalRw), chgFinalRw);
+await page.screenshot({ path: `${SHOTS}/30b-change-rewind.png`, fullPage: true });
+// أزِل أمرَ الفحص كي لا يحجب «المفتوحُ واحدٌ في المرة» بقيةَ السيناريوهات
+await page.evaluate(async (gid) => { await window.contracts._cancelChg(gid, 'انتهى الفحص'); }, chgSod.gid);
+await page.waitForTimeout(700);
+
 await page.evaluate(() => window.contracts.ctrTab('overview'));
 await page.waitForTimeout(800);
 check('★ وبطاقةُ العقد تشرح المعادلةَ للقارئ',
@@ -1130,6 +1194,68 @@ const noRcpt = await page.evaluate(async (eid) => {
   try { await window.contracts._payExt(eid, { ref: 'x' }); return 'مرّ بلا إيصال'; } catch (e) { return e.message; }
 }, ext1.id);
 check('★ سدادُ المستخلص يُرفض بلا إيصال', /إيصال/.test(noRcpt), noRcpt);
+
+/* ── فصلُ المهام والإرجاعُ يعمّان المستخلص (طلبُ المالك: «نفّذ») ──
+   المستخلصُ أولى المستندات بالقاعدة: هنا يخرج المال شهرياً. الفحصُ يُثبت الحدَّين
+   على المستند الحيّ نفسِه — الأدمن اعتمد بوّابةَ مدير المشاريع، فسدادُه ممنوعٌ
+   متى وُجدت ماليةٌ أخرى، ومسموحٌ نيابةً حين لا توجد. */
+const extSod = await page.evaluate((eid) => {
+  const e = window.contracts.extractById(eid);
+  const M = (users) => window.contracts._extActMode(e, 'ext_pending_finance', 'admin',
+    currentUser.user, currentUser.name, users);
+  const solo = M(USERS);
+  USERS.push({ user: 'fin9', name: 'المالية', role: 'finance' });
+  const team = M(USERS);
+  return { solo, team, pmUser: e.pmApprovedByUser || '', me: currentUser.user };
+}, ext1.id);
+check('★★ المستخلص: اعتمادُ الأدمن خزّن اسمَ دخوله', extSod.pmUser === extSod.me, JSON.stringify(extSod));
+check('★★ وسدادُه ممنوعٌ عليه متى وُجدت ماليةٌ أخرى — ونيابةً حين لا توجد',
+  extSod.solo === 'delegate' && extSod.team === 'blocked', JSON.stringify(extSod));
+const extBlocked = await page.evaluate(async (eid) => {
+  let msg; try { await window.contracts._payExt(eid, { ref: 'x', receiptUrl: 'https://example.test/r.pdf' }); msg = 'مرّ رغم المنع'; }
+  catch (e) { msg = e.message; }
+  const inTasks = window.contracts._myPendingItems('admin').filter(x => x.id === eid).length;
+  const i = USERS.findIndex(u => u.user === 'fin9'); if (i >= 0) USERS.splice(i, 1);
+  return { msg, inTasks };
+}, ext1.id);
+check('★★ والمنعُ يقع في طبقة البيانات لا على الزرّ', /بوّابةٍ سابقة/.test(extBlocked.msg), extBlocked.msg);
+check('★★ و«بانتظار إجراءك» لا تَعِد بزرٍّ مُنِع في المستخلص', extBlocked.inTasks === 0, 'عدد=' + extBlocked.inTasks);
+
+// والإرجاعُ لمرحلة: من الشاشة، ووجهاتُه مشتقّةٌ من **صافيه**
+await page.evaluate((cid) => { window.contracts.openCtr(cid); window.contracts.ctrTab('extracts'); }, conv.cid);
+await page.waitForTimeout(700);
+await page.evaluate((eid) => window.contracts.openExtFrom(eid, window.contracts.extractById(eid).contractId), ext1.id);
+await page.waitForTimeout(900);
+check('★★ وزرُّ «إرجاع لمرحلة» يظهر في المستخلص للأدمن',
+  ((await page.textContent('#page-contracts-list')) || '').includes('إرجاع لمرحلة'));
+await page.evaluate(() => window.contracts.openExtRewind());
+await page.waitForTimeout(700);
+const extRwBox = await page.evaluate(() => {
+  const sel = document.getElementById('ct-rw2-gate');
+  return sel ? Array.from(sel.options).map(o => o.value) : [];
+});
+check('★★ ووجهاتُه مشتقّةٌ من صافيه (مدير المشاريع والتنفيذيُّ فوق السقف)',
+  extRwBox.join(',') === 'pm,ceo', extRwBox.join(','));
+await page.selectOption('#ct-rw2-gate', 'ceo');
+await page.fill('#ct-rw2-why', 'مراجعةُ كمياتٍ منفَّذة');
+await page.click('#ct-rw2-btn');
+await page.waitForTimeout(1300);
+const extRwAfter = await page.evaluate((eid) => {
+  const e = window.contracts.extractById(eid);
+  return { status: e.status, pm: !!e.pmApprovedAt, ceo: !!e.ceoApprovedAt,
+           note: ((e.timeline || []).slice(-1)[0] || {}).note || '',
+           code: ((e.timeline || []).slice(-1)[0] || {}).code || '' };
+}, ext1.id);
+check('★★ والمستخلصُ عاد إلى بوّابة التنفيذيِّ وسقط اعتمادُها وبقي اعتمادُ مدير المشاريع',
+  extRwAfter.status === 'ext_pending_ceo' && extRwAfter.ceo === false && extRwAfter.pm === true,
+  JSON.stringify(extRwAfter));
+check('★ والسببُ في سجلّه مع الحالة التي أُرجع منها',
+  extRwAfter.code === 'rewound' && /مراجعةُ كمياتٍ منفَّذة/.test(extRwAfter.note) && /من «/.test(extRwAfter.note),
+  extRwAfter.note);
+await page.screenshot({ path: `${SHOTS}/22b-extract-rewind.png`, fullPage: true });
+// أعِده إلى بوّابة السداد كما كان — بقيةُ السيناريوهات تعتمد ذلك
+await page.evaluate(async (eid) => { await window.contracts._actExt(eid, 'approve', ''); }, ext1.id);
+await page.waitForTimeout(900);
 
 const paid = await page.evaluate(async (eid) => {
   await window.contracts._payExt(eid, { ref: 'TRX-1', receiptUrl: 'https://example.test/r.pdf' });
