@@ -6065,6 +6065,60 @@ function contractsPhase1() {
   T("★ البوّابة تُحسب من القيمة لا من علَمٍ يختاره المُنشئ",
     ns({ engagement: "contract", value: 50000, needsCeo: false, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x" }) === "crq_pending_ceo");
 
+  /* ════ فصلُ المهام: من اعتمد بوّابةً لا يعتمد التاليةَ ════   (طلبُ المالك)
+     العلّةُ التي رآها المالك: بعد اعتماده كمدير مشاريع عاد زرُّ الاعتماد — لأن
+     الأدمن عضوٌ في كلّ بوّابة، فيمرّر الطلبَ وحدَه من الإنشاء إلى السداد.
+     والمهربُ شرطٌ لا تفصيل: منعٌ بلا مهربٍ يحبس الطلبَ في فريقٍ لا ثانيَ فيه. */
+  {
+    const mode = (req, st, role, u, n, users) => C._crqActMode(req, st, role, u, n, users);
+    const TEAM = [{ user: "adm", role: "admin" }, { user: "proc1", role: "procurement_officer" },
+                  { user: "pm1", role: "project_manager" }];
+    const SOLO = [{ user: "adm", role: "admin" }];
+    const afterPm = { pmApprovedAt: "t", pmApprovedBy: "مدير النظام", pmApprovedByUser: "adm" };
+
+    T("★★ من اعتمد بوّابةً لا يعتمد التاليةَ ما دام غيرُه يملكها",
+      mode(afterPm, "crq_pending_proc", "admin", "adm", "مدير النظام", TEAM) === "blocked");
+    T("★★ ومن لم يعتمد شيئاً يعتمد عادةً",
+      mode(afterPm, "crq_pending_proc", "procurement_officer", "proc1", "مسؤول المشتريات", TEAM) === "act");
+    T("★★ والمهرب: لا أحدَ غيرُه يملك البوّابة ⇒ يعتمد **نيابةً** لا يُمنَع (لا يتعطّل العمل)",
+      mode(afterPm, "crq_pending_proc", "admin", "adm", "مدير النظام", SOLO) === "delegate");
+    T("★ ومن ليست البوّابةُ لدوره أصلاً: none (القاعدةُ الأولى لم تتغيّر)",
+      mode(afterPm, "crq_pending_proc", "finance", "fin1", "المالية", TEAM) === "none");
+    T("★★ والمطابقةُ باسم الدخول لا بالاسم المعروض (تغييرُ الاسم لا يُسقط القيد)",
+      mode({ pmApprovedAt: "t", pmApprovedBy: "اسمٌ قديم", pmApprovedByUser: "adm" },
+           "crq_pending_proc", "admin", "adm", "اسمٌ جديد", TEAM) === "blocked");
+    T("★★ ووثيقةٌ قديمةٌ بلا حقل اسم الدخول تُطابَق بالاسم المعروض (لا يسقط القيدُ عنها)",
+      mode({ pmApprovedAt: "t", pmApprovedBy: "مدير النظام" },
+           "crq_pending_proc", "admin", "adm", "مدير النظام", TEAM) === "blocked");
+    T("★ وشخصان مختلفان باسمين متطابقين لا يلتبسان متى وُجد اسمُ الدخول",
+      mode(afterPm, "crq_pending_proc", "admin", "adm2", "مدير النظام", TEAM) === "act");
+    T("★ والسدادُ تحت القاعدة نفسِها — هناك يخرج المال",
+      mode({ pmApprovedAt: "t", pmApprovedByUser: "adm" }, "crq_pending_pay", "admin", "adm", "",
+           [{ user: "adm", role: "admin" }, { user: "fin1", role: "finance" }]) === "blocked");
+    T("★ ومَن يملك البوّابةَ وحدَه دون أن يعتمد سابقاً يعتمد عادةً لا نيابةً",
+      mode({}, "crq_pending_proc", "admin", "adm", "مدير النظام", SOLO) === "act");
+    T("★★ والمنعُ يقع في طبقة البيانات لا على الزرّ — وعلى الوثيقة الطازجة",
+      /var mode = crqActMode\(r, st, role, _meUser\(\), _me\(\), _users\(\)\);[\s\S]{0,200}mode === "blocked"\) throw new Error/.test(src) &&
+      /function payRequest[\s\S]{0,900}pmode === "blocked"\) throw new Error/.test(src));
+    T("★★ والرفضُ/الإعادة لا يُمنع أبداً (لا يراكم سلطةً، ومنعُه يحبس الطلب)",
+      !/action === "reject"[\s\S]{0,300}crqActMode/.test(src) &&
+      /الرفضُ\/الإعادة لا يُمنع أبداً/.test(src));
+    T("★★ وسببُ غياب الزرّ يُقال صراحةً (زرٌّ يختفي بلا تفسيرٍ يُقرأ عطلاً)",
+      /mode === "blocked"[\s\S]{0,300}فصلُ المهام/.test(src) &&
+      /mode === "delegate"[\s\S]{0,300}نيابةً/.test(src));
+    T("★ وزرُّ الاعتماد يحمل اسمَ بوّابته (فلا يُقرأ ظهورُه ثانيةً زرّاً عالقاً)",
+      /' اعتماد — '\+_esc\(\(owner\|\|\{\}\)\.lbl\|\|""\)/.test(src));
+    T("★★ و«بانتظار إجراءك» لا تَعِد بزرٍّ مُنِع — تحترم القاعدةَ نفسَها",
+      /myPendingItems[\s\S]{0,700}crqActMode\(r, r\.status, role, meU, meN, us\) !== "blocked"/.test(src));
+    T("★★ وعدّادُ «بانتظار دورك» في الشريط يحترمها كذلك (عدّادٌ بلا زرٍّ يبعثك تبحث عن عملٍ ليس لك)",
+      /var mine   = all\.filter\(function\(r\)\{[\s\S]{0,200}crqActMode\(r, r\.status, role, meU, meN, us\) !== "blocked"/.test(src));
+    T("★ والاعتمادُ نيابةً يُوسَم في الخطّ الزمني ويُخزَّن عَلَمُه",
+      /mode === "delegate"\) r\.delegatedApproval = true/.test(src) &&
+      /نيابةً — لا يوجد غيرُك يملك هذه البوّابة/.test(src));
+    T("★ واسمُ الدخول يُخزَّن مع كلّ اعتمادٍ (بلا ذلك تسقط المطابقةُ المستقرّة)",
+      (src.match(/ApprovedByUser=_meUser\(\)/g) || []).length === 4);
+  }
+
   /* ════ قيمةُ العقد النافذة ════ */
   T("★ قيمة العقد = الأصلية + أوامرِ التغيير المعتمدة وحدها",
     C._contractValue({ value: 100000, changeOrders: [{ amount: 5000, status: "approved" }, { amount: 9000, status: "crq_pending_pm" }] }) === 105000);

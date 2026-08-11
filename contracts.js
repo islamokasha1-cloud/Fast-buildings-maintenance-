@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2553";
+var MODULE_BUILD = "v18.9.2555";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -400,6 +400,57 @@ function crqGateOwner(status){ return GATE_ROLES[status] || null; }
 function crqCanAct(status, role){
   var g = GATE_ROLES[status];
   return !!g && g.roles.indexOf(role) !== -1;
+}
+
+/* ════ فصلُ المهام: من اعتمد بوّابةً لا يعتمد التاليةَ ════   (طلبُ المالك)
+
+   **العلّة.** الأدمن عضوٌ في كلّ بوّابة (عمداً — «مديرُ المشاريع هو نفسُه الأدمن»).
+   فبعد أن يعتمد كمدير مشاريع يظهر له زرُّ الاعتماد ثانيةً — للمشتريات هذه المرّة —
+   فيمرّر الطلبَ من الإنشاء إلى السداد بنقراتٍ متتالية. والبوّاباتُ الأربعُ حينها
+   أربعُ نسخٍ من رأيٍ واحد: صُورةُ رقابةٍ بلا رقابة.
+
+   **القاعدة.** من وقّع بوّابةً لا يوقّع التاليةَ على **الطلب نفسِه**.
+
+   **والمهرب — شرطُ ألّا تتحوّل القاعدةُ إلى تعطيل.** في فريقٍ لا ثانيَ فيه لتلك
+   البوّابة يصير المنعُ باباً مسدوداً: الطلبُ يقف بلا أحدٍ يحرّكه. فالمنعُ مشروطٌ
+   **بوجود شخصٍ آخرَ يملك البوّابة فعلاً**؛ وإلا بقي الزرُّ وسُجِّل الاعتمادُ
+   **«نيابةً»** في الخطّ الزمني — فالقيدُ يظهر في السجلّ ولو لم يمنع.
+
+   **حدُّها الصريح.** هذا ضبطٌ إجرائيٌّ لا حاجزٌ أمنيّ: الأدمن يملك القاعدةَ نفسَها
+   ويستطيع تجاوزَه من أدوات المطوّر. غايتُه أن يجعل تجاوزَ الفصل **فعلاً واعياً
+   مسجَّلاً** لا نقرةً عابرة. والرفضُ/الإعادة لا يُمنع أبداً — لا يراكم سلطةً،
+   ومنعُه كان سيحبس الطلبَ بلا مخرج. */
+var APPROVAL_KEYS = ["pm","proc","finance","ceo"];
+function crqApprovers(req){
+  var r = req || {}, out = [];
+  APPROVAL_KEYS.forEach(function(k){
+    if(!r[k+"ApprovedAt"]) return;
+    out.push({ user:String(r[k+"ApprovedByUser"]||""), name:String(r[k+"ApprovedBy"]||"") });
+  });
+  return out;
+}
+/* المطابقةُ **باسم الدخول** أوّلاً — مستقرٌّ لا يتغيّر بتعديل الاسم المعروض؛
+   وبالاسم المعروض للوثائق التي خُزِّنت قبل إضافة الحقل (وإلا سقط القيدُ عنها بصمت). */
+function crqAlreadyApproved(req, meUser, meName){
+  var u = String(meUser||""), n = String(meName||"");
+  return crqApprovers(req).some(function(a){
+    return (a.user && u && a.user === u) || (!a.user && a.name && n && a.name === n);
+  });
+}
+function crqOtherGateHolder(status, meUser, users){
+  var g = GATE_ROLES[status]; if(!g) return false;
+  var me = String(meUser||"");
+  return (Array.isArray(users)?users:[]).some(function(u){
+    return u && u.role && g.roles.indexOf(u.role) !== -1 && String(u.user||"") !== me;
+  });
+}
+/* القرارُ الواحد الذي تقرؤه الشاشةُ **وطبقةُ البيانات** — فلا ينحرف زرٌّ عن قاعدة:
+   "none" ليست لدورك · "act" اعتمادٌ عاديّ · "delegate" اعتمادٌ نيابةً (لا ثانيَ
+   يملك البوّابة) · "blocked" ممنوعٌ لأنك وقّعت بوّابةً سابقة وغيرُك يملك هذه. */
+function crqActMode(req, status, role, meUser, meName, users){
+  if(!crqCanAct(status, role)) return "none";
+  if(!crqAlreadyApproved(req, meUser, meName)) return "act";
+  return crqOtherGateHolder(status, meUser, users) ? "blocked" : "delegate";
 }
 function crqIsFinal(s){ return CRQ_FINAL.indexOf(s) !== -1; }
 function crqIsBounced(s){ return CRQ_BOUNCED.indexOf(s) !== -1; }
@@ -1512,12 +1563,20 @@ function actOnRequest(id, action, note){
       if(!crqCanAct(st, role)) throw new Error("هذه البوّابة ليست لدورك");
 
       if(action === "approve"){
-        if(st === "crq_pending_pm"){ r.pmApprovedAt=_now(); r.pmApprovedBy=_me(); }
-        else if(st === "crq_pending_proc"){ r.procApprovedAt=_now(); r.procApprovedBy=_me(); r.procApprovedKey=crqProcKey(r); }
-        else if(st === "crq_pending_finance"){ r.financeApprovedAt=_now(); r.financeApprovedBy=_me(); r.financeApprovedKey=crqFinanceKey(r); }
-        else if(st === "crq_pending_ceo"){ r.ceoApprovedAt=_now(); r.ceoApprovedBy=_me(); r.ceoApprovedAmount=r2(r.value); }
+        /* فصلُ المهام يُفحَص على **الوثيقة الطازجة**: قد يكون معتمِدٌ آخرُ حرّك
+           الطلبَ بعد آخر لقطةٍ رآها المتصفّح، فالقرارُ من الخادم لا من الشاشة. */
+        var mode = crqActMode(r, st, role, _meUser(), _me(), _users());
+        if(mode === "blocked") throw new Error("اعتمدتَ هذا الطلب في بوّابةٍ سابقة — هذه البوّابة لغيرك");
+        if(st === "crq_pending_pm"){ r.pmApprovedAt=_now(); r.pmApprovedBy=_me(); r.pmApprovedByUser=_meUser(); }
+        else if(st === "crq_pending_proc"){ r.procApprovedAt=_now(); r.procApprovedBy=_me(); r.procApprovedByUser=_meUser(); r.procApprovedKey=crqProcKey(r); }
+        else if(st === "crq_pending_finance"){ r.financeApprovedAt=_now(); r.financeApprovedBy=_me(); r.financeApprovedByUser=_meUser(); r.financeApprovedKey=crqFinanceKey(r); }
+        else if(st === "crq_pending_ceo"){ r.ceoApprovedAt=_now(); r.ceoApprovedBy=_me(); r.ceoApprovedByUser=_meUser(); r.ceoApprovedAmount=r2(r.value); }
         else if(st === "crq_pending_pay") throw new Error("السداد يُسجَّل بإيصال");
-        _pushTimeline(r, "اعتماد — "+(crqGateOwner(st)||{}).lbl, "approved", note);
+        // الاعتمادُ نيابةً يُوسَم في الخطّ الزمني — القيدُ يظهر في السجلّ ولو لم يمنع
+        var dlg = (mode === "delegate") ? "نيابةً — لا يوجد غيرُك يملك هذه البوّابة" : "";
+        _pushTimeline(r, "اعتماد — "+(crqGateOwner(st)||{}).lbl, "approved",
+          dlg ? (note ? (note+" · "+dlg) : dlg) : note);
+        if(mode === "delegate") r.delegatedApproval = true;
         r.status = crqNextStage(r, th);
       } else if(action === "reject"){
         if(!note) throw new Error("سبب الرفض إلزامي");
@@ -1552,10 +1611,15 @@ function payRequest(id, payload){
       var r=s.data()||{}; r.id=id;
       if(r.status !== "crq_pending_pay") throw new Error("الطلب ليس بانتظار السداد");
       if(["finance","admin"].indexOf(role) === -1) throw new Error("السداد للمالية فقط");
+      /* والسدادُ تحت فصل المهام كبقية البوّابات — بل هو أولاها: هنا يخرج المال. */
+      var pmode = crqActMode(r, r.status, role, _meUser(), _me(), _users());
+      if(pmode === "blocked") throw new Error("اعتمدتَ هذا الطلب في بوّابةٍ سابقة — السدادُ لغيرك");
       r.payment = { amount:r2(payload.amount!=null?payload.amount:r.value), ref:payload.ref||"",
                     receiptUrl:payload.receiptUrl, at:_now(), by:_me() };
       r.status = "crq_paid";
-      _pushTimeline(r, "سداد أمر الدفع", "paid", money(r.payment.amount)+" ر.س"+(payload.ref?(" — "+payload.ref):""));
+      var pdlg = (pmode === "delegate") ? " · نيابةً — لا يوجد غيرُك يملك السداد" : "";
+      if(pmode === "delegate") r.delegatedApproval = true;
+      _pushTimeline(r, "سداد أمر الدفع", "paid", money(r.payment.amount)+" ر.س"+(payload.ref?(" — "+payload.ref):"")+pdlg);
       r.updatedAt=_now(); r.updatedBy=_me();
       var out=Object.assign({},r); delete out.id;
       t.set(ref, out, { merge:true });
@@ -2186,6 +2250,9 @@ function _notify(title, body, id){
   try{ if(typeof addNotification==="function") addNotification(title, body, id, "contract"); }catch(e){}
 }
 function _meUser(){ var u=_user(); return (u && u.user) || ""; }
+/* قائمةُ المستخدمين وأدوارُهم — مصدرٌ واحدٌ تديره «إدارة مستخدمي المشتريات».
+   يقرؤها مهربُ فصل المهام ليعرف: أثمّةَ شخصٌ آخرُ يملك هذه البوّابة أصلاً؟ */
+function _users(){ try{ return Array.isArray(USERS) ? USERS : []; }catch(e){ return []; } }
 
 /* ════════════════════════════════════════════════════════════════════
    ٦) سجلُّ الأطراف — الواجهة
@@ -2875,7 +2942,12 @@ function reqListHTML(){
     return true;
   });
 
-  var mine   = all.filter(function(r){ return crqCanAct(r.status, role); }).length;
+  /* «بانتظار دورك» يحترم فصلَ المهام كالبطاقة تماماً — عدّادٌ يعدّ ما لا زرَّ له
+     يبعث المستخدمَ يبحث عن عملٍ ليس له. */
+  var meU=_meUser(), meN=_me(), us=_users();
+  var mine   = all.filter(function(r){
+    return crqCanAct(r.status, role) && crqActMode(r, r.status, role, meU, meN, us) !== "blocked";
+  }).length;
   var wip    = all.filter(function(r){ return !crqIsFinal(r.status) && !crqIsBounced(r.status); });
   var ready  = all.filter(function(r){ return r.status==="crq_approved"; }).length;
   var wipVal = wip.reduce(function(s,r){ return s+(Number(r.value)||0); },0);
@@ -3297,6 +3369,9 @@ function reqCardHTML(id){
   var eng=ENGAGEMENTS[r.engagement]||ENGAGEMENTS.contract;
   var owner=crqGateOwner(r.status);
   var mine=crqCanAct(r.status,_role());
+  /* فصلُ المهام: مَن وقّع بوّابةً سابقةً لا يوقّع هذه — إلا إن لم يوجد غيرُه.
+     والقرارُ من الدالّة نفسِها التي تحرس طبقةَ البيانات، فلا ينحرف زرٌّ عن قاعدة. */
+  var mode=crqActMode(r, r.status, _role(), _meUser(), _me(), _users());
   var back='<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.backToReqs()">'+_icn("rotateCcw")+' كل الطلبات</button>';
 
   var tools="";
@@ -3307,10 +3382,16 @@ function reqCardHTML(id){
     tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.openCtrFromReq(\''+_jq(r.contractId)+'\')">'+_icn("briefcase","ic-sm")+' العقد '+_esc(r.contractId)+'</button> ';
   }
   if(mine && r.status==="crq_pending_pay"){
-    tools+='<button class="btn btn-success btn-sm" onclick="contracts.openPay()">'+_icn("banknote","ic-sm")+' تسجيل السداد</button> ';
+    // الممنوعُ بفصل المهام لا يرى زرَّ السداد — ويرى سببَ غيابه في الشريط أدناه
+    if(mode!=="blocked")
+      tools+='<button class="btn btn-success btn-sm" onclick="contracts.openPay()">'+_icn("banknote","ic-sm")+' تسجيل السداد</button> ';
   } else if(mine){
-    tools+='<button class="btn btn-success btn-sm" onclick="contracts.act(\'approve\')">'+_icn("checkCircle","ic-sm")+' اعتماد</button> '+
-           '<button class="btn btn-ghost btn-sm" onclick="contracts.act(\'reject\')">'+_icn("xCircle","ic-sm")+' رفض / إعادة</button> ';
+    // زرُّ الاعتماد يحمل **اسمَ بوّابته** — فلا يُقرأ ظهورُه ثانيةً زرّاً عالقاً
+    if(mode!=="blocked")
+      tools+='<button class="btn btn-success btn-sm" onclick="contracts.act(\'approve\')">'+_icn("checkCircle","ic-sm")+
+             ' اعتماد — '+_esc((owner||{}).lbl||"")+'</button> ';
+    // الرفضُ/الإعادة لا يُمنع أبداً: لا يراكم سلطةً، ومنعُه يحبس الطلبَ بلا مخرج
+    tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.act(\'reject\')">'+_icn("xCircle","ic-sm")+' رفض / إعادة</button> ';
   }
   if(!crqIsFinal(r.status) && (_role()==="admin" || r.createdByUser===_meUser())){
     tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.doCancel()">'+_icn("ban","ic-sm")+' إلغاء</button>';
@@ -3369,12 +3450,25 @@ function reqCardHTML(id){
     (r.payment.receiptUrl?' · <a class="ct-link" href="'+_esc(r.payment.receiptUrl)+'" target="_blank" rel="noopener">'+_icn("paperclip","ic-sm")+' الإيصال</a>':'')+'</div>' : "";
 
   var waiting = owner && !crqIsFinal(r.status)
-    ? '<div class="ct-note '+(mine?"warn":"")+'">'+_icn("timer","ic-sm")+' '+
-      (mine ? "الطلب بانتظار إجراءٍ منك — "+_esc(owner.lbl) : "بانتظار "+_esc(owner.lbl))+'</div>' : "";
+    ? '<div class="ct-note '+(mine && mode!=="blocked" ?"warn":"")+'">'+_icn("timer","ic-sm")+' '+
+      (mine && mode!=="blocked" ? "الطلب بانتظار إجراءٍ منك — "+_esc(owner.lbl) : "بانتظار "+_esc(owner.lbl))+'</div>' : "";
+
+  /* **سببُ غياب الزرّ يُقال صراحةً.** زرٌّ يختفي بلا تفسيرٍ يُقرأ عطلاً لا قاعدة —
+     ومن رآه ظاهراً قبل قليلٍ سيظنّ النظامَ نسي اعتمادَه. */
+  var sod = "";
+  if(mode === "blocked"){
+    sod = '<div class="ct-note">'+_icn("shield","ic-sm")+
+      ' اعتمدتَ هذا الطلب في بوّابةٍ سابقة — فبوّابةُ <strong>'+_esc(owner?owner.lbl:"")+
+      '</strong> لغيرِك (فصلُ المهام). والرفضُ/الإعادة ما زال متاحاً لك.</div>';
+  } else if(mode === "delegate"){
+    sod = '<div class="ct-note warn">'+_icn("shield","ic-sm")+
+      ' اعتمدتَ بوّابةً سابقةً على هذا الطلب، ولا يوجد مستخدمٌ آخرُ يملك <strong>'+
+      _esc(owner?owner.lbl:"")+'</strong> — فاعتمادُك يُسجَّل <strong>نيابةً</strong> في السجل الزمني.</div>';
+  }
 
   return back +
     headHTML(r.title||r.id, reqBadge(r.status)+' <span class="ct-id num">'+_esc(r.id)+'</span>', tools, eng.icon) +
-    waiting + payBox +
+    waiting + sod + payBox +
     '<div class="card ct-sec">'+info+
       (r.scope?'<div class="ct-note" style="margin-top:12px">'+_esc(r.scope)+'</div>':'')+'</div>'+
     '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود</div>'+
@@ -4138,8 +4232,13 @@ var MYTASK_ID = "ct-my-tasks-card";
 function myPendingItems(role){
   var out = [];
   if(!role || role==="viewer" || role==="observer") return out;
+  /* «بانتظار إجراءك» تُبنى من البوّابات نفسِها — **وتحترم فصلَ المهام**: ما مُنع
+     عنك ليس بانتظارك، وإدراجُه يعِد بزرٍّ لن تجده (الدرسُ نفسُه الذي علّمنا إيّاه
+     تناقضُ «بانتظار التوقيع» بين البطاقة والرسالة). */
+  var meU=_meUser(), meN=_me(), us=_users();
   _reqs.forEach(function(r){
-    if(r && !crqIsFinal(r.status) && crqCanAct(r.status, role))
+    if(r && !crqIsFinal(r.status) && crqCanAct(r.status, role) &&
+       crqActMode(r, r.status, role, meU, meN, us) !== "blocked")
       out.push({ kind:"req", id:r.id, lbl:"طلب تعاقد", title:r.title||r.vendorName||"", value:r2(r.value),
                  gate:(crqGateOwner(r.status)||{}).lbl||"", at:r.updatedAt||r.createdAt||"" });
   });
@@ -5363,6 +5462,8 @@ window.contracts = {
   _crqRevalidate: crqRevalidate,
   _crqValueOf: crqValueOf,
   _crqCanAct: crqCanAct,
+  _crqActMode: crqActMode, _crqApprovers: crqApprovers,
+  _crqAlreadyApproved: crqAlreadyApproved, _crqOtherGateHolder: crqOtherGateHolder,
   _crqGateOwner: crqGateOwner,
   _crqIsFinal: crqIsFinal,
   _crqIsBounced: crqIsBounced,
