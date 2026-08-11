@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2588";
+var MODULE_BUILD = "v18.9.2590";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -252,6 +252,71 @@ function payOrderAllowed(value, threshold){
   var v = Number(value), t = Number(threshold);
   if(!isFinite(v) || !isFinite(t) || t<=0) return false;
   return v > 0 && v < t;
+}
+
+/* ════ تفقيطُ المبلغ — «المبلغُ كتابةً» على أمر الدفع ════
+
+   ورقةُ صرفٍ تحمل رقماً وحدَه ورقةٌ يكفي فيها قلمٌ لتصير عشرةَ أضعافها. ولذلك
+   يكتب كلُّ سند صرفٍ المبلغَ **مرّتين**: رقماً وكتابةً — فلا يُغيَّر أحدُهما دون
+   أن يفضحه الآخر. والتفقيطُ **دالّةٌ نقيةٌ واحدة** يقرؤها المخرَجُ الورقيّ، ويحرسها
+   فحصٌ في `hail-tests` — فلا تُكتَب نسخةٌ ثانيةٌ تنحرف عن الأولى.
+   والهللاتُ تُقرَّب بـ`r2` نفسِها التي تحسب الإجماليّ، فلا يفترق المكتوبُ عن المرسوم. */
+var AW_ONES = ["","واحد","اثنان","ثلاثة","أربعة","خمسة","ستة","سبعة","ثمانية","تسعة","عشرة",
+               "أحد عشر","اثنا عشر","ثلاثة عشر","أربعة عشر","خمسة عشر","ستة عشر","سبعة عشر",
+               "ثمانية عشر","تسعة عشر"];
+var AW_TENS = ["","","عشرون","ثلاثون","أربعون","خمسون","ستون","سبعون","ثمانون","تسعون"];
+var AW_HUND = ["","مائة","مائتان","ثلاثمائة","أربعمائة","خمسمائة","ستمائة","سبعمائة","ثمانمائة","تسعمائة"];
+/* أسماءُ المراتب بصيغها العربية الأربع (مفردٌ · مثنّى · جمعُ قلّةٍ ٣–١٠ · تمييزٌ مفرد) */
+var AW_GROUPS = [ null,
+  { one:"ألف",   two:"ألفان",    few:"آلاف",    many:"ألفاً" },
+  { one:"مليون", two:"مليونان",  few:"ملايين",  many:"مليوناً" },
+  { one:"مليار", two:"ملياران",  few:"مليارات", many:"ملياراً" } ];
+
+function awUnder1000(n){
+  var out = [], h = Math.floor(n/100), r = n%100;
+  if(h) out.push(AW_HUND[h]);
+  if(r < 20){ if(r) out.push(AW_ONES[r]); }
+  else {
+    var o = r%10, t = Math.floor(r/10);
+    out.push(o ? (AW_ONES[o]+" و"+AW_TENS[t]) : AW_TENS[t]);
+  }
+  return out.join(" و");
+}
+function awGroup(n, g){
+  if(!g) return awUnder1000(n);
+  if(n === 1) return g.one;
+  if(n === 2) return g.two;
+  if(n <= 10) return awUnder1000(n)+" "+g.few;
+  return awUnder1000(n)+" "+g.many;
+}
+function amountWords(value){
+  var num = Number(value);
+  if(!isFinite(num)) num = 0;
+  var neg = num < 0;
+  num = r2(Math.abs(num));
+  var whole = Math.floor(num), cents = Math.round((num - whole)*100);
+  if(cents >= 100){ whole += 1; cents = 0; }
+  // فوق سقف المراتب الأربع لا نخترع اسماً: نعيد الرقم كما هو بدل نصٍّ مغلوط
+  if(whole >= 1e12) return money(num)+" ريال";
+  var parts = [], i = 0, x = whole;
+  while(x > 0){
+    var grp = x % 1000; x = Math.floor(x/1000);
+    if(grp) parts.unshift(awGroup(grp, AW_GROUPS[i]));
+    i++;
+  }
+  var out = awMoneyPhrase(whole, parts.join(" و"), AW_RIYAL);
+  if(cents > 0) out += " و" + awMoneyPhrase(cents, awUnder1000(cents), AW_HALALA);
+  return (neg ? "سالب " : "") + out + " لا غير";
+}
+/* صيغةُ اسم العملة تتبع العددَ لا العكس: **ريالٌ واحد** · **ريالان** · ثلاثةُ
+   **ريالاتٍ** · وما فوق العشرة «ريال». والواحدُ والاثنان يبتلعان عددَهما فلا
+   يُكتب «واحد ريال» ولا «اثنان ريال» — وهي أوّلُ ما يكشف ورقةً كتبتها آلة. */
+var AW_RIYAL  = { one:"ريال واحد", two:"ريالان",  few:"ريالات", plain:"ريال" };
+var AW_HALALA = { one:"هللة واحدة", two:"هللتان", few:"هللات",  plain:"هللة" };
+function awMoneyPhrase(n, numeral, f){
+  if(n === 1) return f.one;
+  if(n === 2) return f.two;
+  return (numeral || "صفر") + " " + ((n >= 3 && n <= 10) ? f.few : f.plain);
 }
 
 /* ════ غرامةُ التأخير — **بالريال** ════   (طلبُ المالك)
@@ -583,6 +648,52 @@ function chgActMode(chg, status, role, meUser, meName, users){
 }
 function crqIsFinal(s){ return CRQ_FINAL.indexOf(s) !== -1; }
 function crqIsBounced(s){ return CRQ_BOUNCED.indexOf(s) !== -1; }
+
+/* ════ أمرُ الدفع ورقةً — الحالةُ والتوقيعات ════
+
+   دالّتان نقيّتان يقرؤهما المخرَجُ الورقيُّ وحدَه، وسببُ وجودهما أن الورقةَ تخرج من
+   المنصّة فتُصدَّق وتُصرَف بها الأموال — فيجب أن تقول عن نفسها الصدقَ بلا وسيط.
+
+   • `payOrderPrintState` — **أهمُّ سطرٍ في الورقة**: أمرُ دفعٍ لم تكتمل بوّاباتُه
+     يُطبَع، نعم (للمراجعة والتمرير)، لكنه يخرج موسوماً **«غير صالحٍ للصرف»** —
+     ومنعُ طباعته كان سيدفع الناسَ إلى تصوير الشاشة، وهو أسوأُ: صورةٌ بلا وسم.
+   • `payOrderSignoffs` — التوقيعاتُ **مشتقّةٌ من حقول الاعتماد نفسِها** التي تقرؤها
+     `crqNextStage`، لا من قائمةٍ مكتوبةٍ هنا: فلا تطبع الورقةُ بوّابةً لم يمرّ بها
+     الأمرُ، ولا تُسقط بوّابةً مرّ بها. وبوّابةُ التنفيذيِّ تظهر إن اعتمد فعلاً أو
+     كان المبلغُ يبلغ سقفَه — بالقاعدة نفسِها التي تُوقف الطلبَ عندها. */
+function payOrderPrintState(req){
+  var st = (req||{}).status;
+  if(st === "crq_paid")
+    return { key:"paid",  cls:"ok",   lbl:"مسدَّد — مغلق",
+             note:"سُدِّد هذا الأمر وأُغلق. هذه نسخةٌ للحفظ لا أمرُ صرفٍ جديد." };
+  if(st === "crq_pending_pay")
+    return { key:"due",   cls:"ok",   lbl:"معتمَد — صالحٌ للصرف",
+             note:"اكتملت بوّاباتُ الاعتماد. للمالية صرفُه وتسجيلُ إيصاله على المنصّة." };
+  if(st === "crq_cancelled")
+    return { key:"void",  cls:"bad",  lbl:"ملغى — لا يُصرَف",
+             note:"أُلغي هذا الأمر على المنصّة. أيُّ نسخةٍ منه لاغيةٌ." };
+  if(crqIsBounced(st))
+    return { key:"void",  cls:"bad",  lbl:(CRQ_STATUS[st]||"مُعاد للتصحيح")+" — لا يُصرَف",
+             note:"أُعيد هذا الأمر إلى مُنشئه للتصحيح، فلا يُصرَف بصيغته هذه." };
+  if(crqIsFinal(st))
+    return { key:"void",  cls:"bad",  lbl:(CRQ_STATUS[st]||"منتهٍ")+" — لا يُصرَف", note:"" };
+  return { key:"draft", cls:"warn", lbl:"قيد الاعتماد — غير صالحٍ للصرف",
+           note:"لم تكتمل بوّاباتُ الاعتماد بعد. هذه نسخةُ مراجعةٍ لا أمرُ صرف." };
+}
+function payOrderSignoffs(req, ceoTh){
+  var r = req || {};
+  var amt = Number(crqValueOf(r)); if(!isFinite(amt)) amt = 0;
+  var th  = Number(ceoTh);         if(!isFinite(th))  th  = 0;
+  var out = [
+    { key:"pm",   lbl:"مدير المشاريع", by:r.pmApprovedBy   || "", at:r.pmApprovedAt   || "" },
+    { key:"proc", lbl:"المشتريات",     by:r.procApprovedBy || "", at:r.procApprovedAt || "" }
+  ];
+  if(r.ceoApprovedAt || (th > 0 && amt >= th))
+    out.push({ key:"ceo", lbl:"المدير التنفيذي", by:r.ceoApprovedBy || "", at:r.ceoApprovedAt || "" });
+  var p = r.payment || {};
+  out.push({ key:"pay", lbl:"المالية — السداد", by:p.by || "", at:p.at || "" });
+  return out;
+}
 
 /* ════ الوثيقةُ التعاقدية: شروطٌ نصّيةٌ لا أرقامٌ وحدها ════   [المرحلة ٤-ب]
 
@@ -3758,6 +3869,12 @@ function reqCardHTML(id){
   var back='<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.backToReqs()">'+_icn("rotateCcw")+' كل الطلبات</button>';
 
   var tools="";
+  /* طباعةُ أمر الدفع متاحةٌ في كل مراحله — والورقةُ نفسُها تُعلن أصالحةٌ للصرف هي
+     أم نسخةُ مراجعة (`payOrderPrintState`). فمنعُ الزرّ قبل الاعتماد كان سيدفع إلى
+     تصوير الشاشة: صورةٌ بلا وسمٍ ولا توقيعاتٍ ولا مبلغٍ كتابة. */
+  if(r.engagement==="pay_order"){
+    tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.printPay()">'+_icn("printer","ic-sm")+' طباعة أمر الدفع</button> ';
+  }
   if(r.status==="crq_approved" && ["procurement_officer","admin"].indexOf(_role())!==-1){
     tools+='<button class="btn btn-primary btn-sm" onclick="contracts.makeContract()">'+_icn("briefcase","ic-sm")+' إنشاء العقد</button> ';
   }
@@ -5452,13 +5569,36 @@ function transit(action){
 /* ════ المخرَجُ الورقيّ — الوثيقةُ التي يوقّعها الطرف ════
    تُبنى بـ`_openPrintWindow` القائمة في النواة (ومعها معالجةُ iOS المجرَّبة)،
    بنمط مطبوعات المنصة نفسِه. وهنا يثمر سجلُّ الأطراف: المنشأةُ تُعرَّف بسجلها
-   التجاريّ والشخصُ بهويته — كلٌّ بمسمّاه الصحيح، من `identityOf` لا بشرطٍ محلّيّ. */
+   التجاريّ والشخصُ بهويته — كلٌّ بمسمّاه الصحيح، من `identityOf` لا بشرطٍ محلّيّ.
+
+   وفتحُ النافذة نفسُها **دالّةٌ واحدةٌ** (`_emitPrint`) تقرؤها كلُّ مطبوعاتنا: سقوطُ
+   `_openPrintWindow` إلى `window.open` ومعالجةُ الفشل والقيدُ في السجلّ — ثلاثةُ
+   أشياءَ تُنسى في النسخة الثانية إن نُسخت. */
+function _printLogo(){
+  try{
+    var im = document.querySelector('img[data-logo="1"]');
+    if(im && im.src && im.src.indexOf("data:,") !== 0) return im.src;
+  }catch(e){}
+  return "";
+}
+function _emitPrint(html, auditAction, auditData){
+  try{
+    if(typeof _openPrintWindow === "function") _openPrintWindow(html);
+    else { var w=window.open("","_blank"); if(w){ w.document.write(html); w.document.close(); } }
+    _audit(auditAction, auditData);
+    return true;
+  }catch(e){
+    console.warn("contracts/"+auditAction, e);
+    _toast("⚠ تعذّر فتح نافذة الطباعة","warn");
+    return false;
+  }
+}
 function printContract(id){
   var c=contractById(id); if(!c) return _toast("⚠ العقد غير موجود","warn");
   var v=vendorById(c.vendorId), idn=v?identityOf(v):null;
   var val=contractValue(c), t=linesTotal(c.lines||[], c.vatMode);
   var groups=allClausesOf(c);
-  var logo=""; try{ var im=document.querySelector('img[data-logo="1"]'); if(im&&im.src&&im.src.indexOf("data:,")!==0) logo=im.src; }catch(e){}
+  var logo=_printLogo();
 
   var lineRows=(c.lines||[]).map(function(l,i){
     var lt=lineTotal(l.qty,l.unitPrice,c.vatMode);
@@ -5549,12 +5689,167 @@ function printContract(id){
   '<div class="foot">حُرِّر هذا العقد من نسختين بيد كل طرف نسخة للعمل بموجبها · '+_esc(c.id)+'</div>'+
   '</body></html>';
 
-  try{
-    if(typeof _openPrintWindow === "function") _openPrintWindow(html);
-    else { var w=window.open("","_blank"); if(w){ w.document.write(html); w.document.close(); } }
-    _audit("طباعة عقد", c.id);
-  }catch(e){ console.warn("contracts/printContract",e); _toast("⚠ تعذّر فتح نافذة الطباعة","warn"); }
+  _emitPrint(html, "طباعة عقد", c.id);
 }
+
+
+/* ════ المخرَجُ الورقيّ لأمر الدفع — سندُ الصرف ════   (طلبُ المالك)
+
+   **لماذا ورقةٌ أصلاً وكلُّ شيءٍ على المنصّة؟** لأن أمر الدفع هو المستندُ الوحيدُ
+   في المسار الذي **يخرج من المنصّة**: يُرفَق بالتحويل البنكيّ، ويُحفَظ في ملفّ
+   المحاسبة، ويُطلَب في المراجعة الخارجية بعد سنة. فحتّى تُطبَع، كانت المالية
+   تصوّر الشاشةَ — صورةٌ بلا رقمٍ ولا توقيعاتٍ ولا مبلغٍ كتابةً.
+
+   **ثلاثةُ قراراتٍ تحكم هذه الورقة:**
+   (١) **كلُّ أرقامها من دوالِّ الوحدة النقية** (`lineTotal`/`linesTotal`/`crqValueOf`)
+       لا من حسابٍ محلّيّ — فما يُطبَع هو ما تراه الشاشةُ وما تحرسه الفحوص. حسبةٌ
+       واحدةٌ هنا كانت ستجعل الورقةَ تكذب على الشاشة بلا أن يسقط فحص.
+   (٢) **الورقةُ تعلن حالتَها بصراحة**: شريطٌ في رأسها من `payOrderPrintState`، فأمرٌ
+       لم تكتمل بوّاباتُه يخرج موسوماً «غير صالحٍ للصرف» — والمنعُ من الطباعة كان
+       سيُنتج صورةَ شاشةٍ بلا وسمٍ أصلاً.
+   (٣) **الآيبانُ يُقنَّع على الورق كما يُقنَّع على الشاشة** (`canBank`): تسريبُ الحساب
+       البنكيِّ في ورقةٍ تُصوَّر وتُرسَل أخطرُ من تسريبه في شاشةٍ تُغلَق. */
+function printPayOrder(id){
+  var r = requestById(id); if(!r) return _toast("⚠ الطلب غير موجود","warn");
+  if(r.engagement !== "pay_order")
+    return _toast("⚠ هذا المستند ليس أمرَ دفع — العقدُ يُطبَع من بطاقة العقد","warn");
+
+  var v    = vendorById(r.vendorId), idn = v ? identityOf(v) : null;
+  var t    = linesTotal(r.lines||[], r.vatMode);
+  var val  = crqValueOf(r);
+  var st   = payOrderPrintState(r);
+  var sig  = payOrderSignoffs(r, ceoThreshold());
+  var vm   = VAT_MODES[normVatMode(r.vatMode)] || {};
+  var logo = _printLogo();
+
+  /* الآيبانُ بقاعدة الشاشة نفسِها — لا استثناءَ للورق */
+  var ibanRaw   = (v && v.bank && v.bank.iban) || "";
+  var ibanShown = canBank() ? (ibanRaw||"—") : (ibanRaw ? ("•••• "+String(ibanRaw).slice(-4)) : "—");
+
+  var dt = function(s){ return String(s||"").slice(0,16).replace("T"," ") || "—"; };
+
+  var lineRows=(r.lines||[]).map(function(l,i){
+    var lt=lineTotal(l.qty,l.unitPrice,r.vatMode);
+    return '<tr><td style="text-align:center">'+(i+1)+'</td>'+
+      '<td style="text-align:right">'+_esc(l.desc||"—")+'</td>'+
+      '<td style="text-align:center">'+_esc(l.unit||"—")+'</td>'+
+      '<td style="text-align:center">'+money0(l.qty)+'</td>'+
+      '<td style="text-align:center">'+money(l.unitPrice)+'</td>'+
+      '<td style="text-align:center;font-weight:700">'+money(lt.total)+'</td></tr>';
+  }).join("") || '<tr><td colspan="6" style="text-align:center;padding:14px">—</td></tr>';
+
+  var vatRow = normVatMode(r.vatMode)==="none" ? "" :
+    '<tr><td>ضريبة القيمة المضافة</td><td class="n">'+money(t.vat)+'</td></tr>';
+
+  var sigCells = sig.map(function(g){
+    return '<div class="sg">'+
+      '<div class="sg-l">'+_esc(g.lbl)+'</div>'+
+      '<div class="sg-n">'+(g.by?_esc(g.by):'<span class="sg-w">لم يوقّع بعد</span>')+'</div>'+
+      '<div class="sg-d">'+(g.at?_esc(dt(g.at)):'—')+'</div>'+
+      '<div class="sg-x">التوقيع</div></div>';
+  }).join("");
+
+  var p = r.payment || {};
+  var paidBox = p.at ? '<h2>بيانُ السداد</h2><table class="kv">'+
+      '<tr><td>المبلغ المسدَّد</td><td class="n">'+money(p.amount)+' ر.س</td></tr>'+
+      '<tr><td>مرجع التحويل</td><td class="n">'+_esc(p.ref||"—")+'</td></tr>'+
+      '<tr><td>سجّله</td><td class="t">'+_esc(p.by||"—")+'</td></tr>'+
+      '<tr><td>تاريخ السداد</td><td class="n">'+_esc(dt(p.at))+'</td></tr>'+
+    '</table>' : "";
+
+  var html='<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'+
+  '<title>أمر دفع '+_esc(r.id)+'</title><style>'+
+  '*{box-sizing:border-box}'+
+  'body{font-family:"Segoe UI",Tahoma,Arial,sans-serif;margin:0;padding:26px;color:#111827;direction:rtl;font-size:13px;line-height:1.9}'+
+  '.header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1b3a6b;padding-bottom:12px}'+
+  '.header-right{display:flex;align-items:center;gap:12px}'+
+  '.company-logo{width:56px;height:56px;object-fit:contain}'+
+  '.company{font-size:18px;font-weight:800}.subtitle{font-size:13px;color:#1b3a6b;font-weight:700}'+
+  '.doc-no{background:#eef2f7;color:#1b3a6b;border-radius:8px;padding:8px 14px;font-weight:800;font-family:monospace}'+
+  '.band{margin-top:14px;border-radius:8px;padding:9px 13px;font-weight:800;font-size:13px;border:2px solid}'+
+  '.band .bn{display:block;font-weight:600;font-size:11.5px;margin-top:2px}'+
+  '.band.ok{background:#ecfdf5;border-color:#059669;color:#065f46}'+
+  '.band.warn{background:#fffbeb;border-color:#d97706;color:#92400e}'+
+  '.band.bad{background:#fef2f2;border-color:#dc2626;color:#991b1b}'+
+  'h2{font-size:15px;color:#1b3a6b;margin:20px 0 8px;border-bottom:1px solid #dde3ed;padding-bottom:5px}'+
+  '.parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px}'+
+  '.party{border:1px solid #dde3ed;border-radius:8px;padding:11px 13px}'+
+  '.party .pl{font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px}'+
+  '.party .pn{font-size:14px;font-weight:800}'+
+  '.party .pm{font-size:12px;color:#374151;margin-top:3px}'+
+  'table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12.5px}'+
+  'th{background:#1b3a6b;color:#fff;padding:8px;font-weight:700}'+
+  'td{padding:7px 8px;border-bottom:1px solid #e5e7eb}'+
+  'tbody tr:nth-child(even){background:#f8fafc}'+
+  '.kv{width:100%;max-width:520px}.kv td{border-bottom:1px solid #eef2f7}'+
+  '.kv td:first-child{width:150px;color:#64748b}'+
+  /* الأرقامُ وحدَها بخطٍّ أحاديِّ العرض ومحاذاةٍ يسرى — والنصُّ يبقى نصّاً */
+  '.kv .n{text-align:left;font-family:monospace;font-weight:700}'+
+  '.kv .t{text-align:right;font-weight:700}'+
+  '.sum{width:340px;margin-inline-start:auto;margin-top:10px}'+
+  '.sum td{border-bottom:1px solid #eef2f7}.sum .n{text-align:left;font-family:monospace;font-weight:700}'+
+  '.sum tr:last-child td{border-top:2px solid #1b3a6b;font-weight:800;font-size:14px}'+
+  '.words{margin-top:10px;border:1px solid #1b3a6b;border-radius:8px;padding:10px 13px;background:#f8fafc;break-inside:avoid}'+
+  '.words .wl{font-size:11px;color:#64748b;font-weight:700}'+
+  '.words .wv{font-size:14px;font-weight:800;color:#1b3a6b}'+
+  '.sign{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:34px;break-inside:avoid}'+
+  '.sg{border:1px solid #dde3ed;border-radius:8px;padding:10px;min-height:104px;text-align:center}'+
+  '.sg-l{font-size:11px;color:#64748b;font-weight:700}'+
+  '.sg-n{font-size:12.5px;font-weight:800;margin-top:4px}'+
+  '.sg-w{color:#b45309;font-weight:700}'+
+  '.sg-d{font-size:11px;color:#64748b;font-family:monospace}'+
+  '.sg-x{margin-top:26px;border-top:1px solid #9ca3af;padding-top:5px;font-size:11px;color:#374151}'+
+  '.foot{margin-top:22px;font-size:10.5px;color:#94a3b8;text-align:center;border-top:1px solid #e5e7eb;padding-top:8px}'+
+  '@media print{body{padding:14px}@page{margin:14mm;size:A4}}'+
+  '</style></head><body>'+
+
+  '<div class="header"><div class="header-right">'+
+    (logo?'<img src="'+_esc(logo)+'" class="company-logo" alt="">':'')+
+    '<div><div class="company">شركة المباني السريعة للمقاولات</div>'+
+    '<div class="subtitle">أمر دفع — سند صرف</div></div></div>'+
+    '<div class="doc-no">'+_esc(r.id)+'</div></div>'+
+
+  '<div class="band '+_esc(st.cls)+'">'+_esc(st.lbl)+
+    (st.note?'<span class="bn">'+_esc(st.note)+'</span>':'')+'</div>'+
+
+  '<h2>أطراف الصرف</h2><div class="parties">'+
+    '<div class="party"><div class="pl">الجهة الصارفة</div>'+
+      '<div class="pn">شركة المباني السريعة للمقاولات</div>'+
+      '<div class="pm">المشروع: '+_esc(_projName(r))+'</div></div>'+
+    '<div class="party"><div class="pl">المستفيد</div>'+
+      '<div class="pn">'+_esc(r.vendorName||"—")+'</div>'+
+      '<div class="pm">'+(idn&&idn.number?(_esc(idn.label)+": "+_esc(idn.number)):"—")+'</div>'+
+      '<div class="pm">الآيبان: <span style="font-family:monospace" dir="ltr">'+_esc(ibanShown)+'</span>'+
+        ((v&&v.bank&&v.bank.bankName)?(' — '+_esc(v.bank.bankName)):'')+'</div></div>'+
+  '</div>'+
+
+  '<h2>بيانات الأمر</h2><table class="kv">'+
+    '<tr><td>موضوع الصرف</td><td class="t">'+_esc(r.title||"—")+'</td></tr>'+
+    (r.scope?'<tr><td>الوصف</td><td class="t">'+_esc(r.scope)+'</td></tr>':'')+
+    '<tr><td>تاريخ الإنشاء</td><td class="n">'+_esc(dt(r.createdAt))+'</td></tr>'+
+    '<tr><td>أنشأه</td><td class="t">'+_esc(r.createdBy||"—")+'</td></tr>'+
+    '<tr><td>وضع الضريبة</td><td class="t">'+_esc(vm.short||"—")+'</td></tr>'+
+  '</table>'+
+
+  '<h2>بنود الصرف</h2>'+
+  '<table><thead><tr><th style="width:36px">#</th><th style="text-align:right">البند</th>'+
+  '<th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>'+
+  '<tbody>'+lineRows+'</tbody></table>'+
+  '<table class="sum"><tr><td>الأساس</td><td class="n">'+money(t.base)+'</td></tr>'+
+  vatRow+'<tr><td>المطلوب صرفه ('+_esc(vm.short||"")+')</td><td class="n">'+money(val)+' ر.س</td></tr></table>'+
+  '<div class="words"><div class="wl">المبلغ كتابةً</div><div class="wv">'+_esc(amountWords(val))+'</div></div>'+
+
+  paidBox+
+
+  '<h2>الاعتمادات والتوقيعات</h2><div class="sign">'+sigCells+'</div>'+
+
+  '<div class="foot">صدر هذا الأمر من نظام إدارة المشتريات — شركة المباني السريعة للمقاولات · '+
+    _esc(r.id)+' · طُبع في '+_esc(dt(_now()))+'</div>'+
+  '</body></html>';
+
+  _emitPrint(html, "طباعة أمر دفع", r.id);
+}
+function printPay(){ printPayOrder(_rOpen); }
 
 
 /* ── تبويبُ شروط العقد ── */
@@ -6168,6 +6463,11 @@ window.contracts = {
   _aiSuggestions: function(){ return _aiLines; },
   delEditLine: delEditLine, editLinesRecalc: editLinesRecalc, saveLines: saveLines, closePay: closePay, doPay: doPay,
   requests: requests, requestById: requestById,
+  // المخرَجُ الورقيُّ لأمر الدفع — سندُ الصرف
+  printPay: printPay, printPayOrder: printPayOrder,
+  _amountWords: amountWords,
+  _payOrderSignoffs: payOrderSignoffs,
+  _payOrderPrintState: payOrderPrintState,
   // العقود [المرحلة ٣]
   renderCtrs: renderCtrs, startCtrSync: startCtrSync, stopCtrSync: stopCtrSync,
   filterCtrs: filterCtrs, openCtr: openCtr, backToCtrs: backToCtrs, ctrTab: ctrTab,
