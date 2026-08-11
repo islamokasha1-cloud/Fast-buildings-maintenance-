@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9.2588";
+const MODULE_BUILD = "v18.9.2590";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -131,7 +131,20 @@ function _overdueWorkingDays(ymd, todayYmd){
 // العرض: أي دورٍ معروف. التحرير (إنشاء/تعديل/حذف المهام): الأدمن ومدير المشروع.
 // التنفيذ (تعليم مهمةٍ منجزة): يضاف إليهم المشرف والفني — فهم من ينفّذ ميدانياً.
 function canView(){ return !!_role(); }
-function canEdit(){ const r=_role(); return r==="admin"||r==="project_manager"; }
+/* ★ التحرير بالدور **أو** بمفتاحٍ مانحٍ صريح (`permissions.cleaningEdit === true`).
+   السبب من الميدان: مَن يدير مشروع النظافة فعلاً قد يكون دورُه المسجَّل «مشرف» (حساب
+   حنان) — فالدورُ في هذا النظام حزمةٌ واحدةٌ تجرّ معها اعتمادَ طلبات الشراء وغيرَه،
+   ورفعُه لأجل تعديل مهمّةِ نظافةٍ يمنح ما لم يُطلَب. المفتاحُ **مانحٌ لا حاجب**: لا
+   يُقرأ إلا `=== true`، فلا يرث التحريرَ مستخدمٌ قائمٌ ولا مستخدمٌ قديمٌ بلا حقلِ
+   صلاحيات. والأدوارُ الاطّلاعية مستثناةٌ صراحةً — الخادمُ يردّ كتابةَ الزائر أصلاً،
+   فزرٌّ يَعِد بما يُرفَض عطلٌ لا صلاحية. */
+function _hasCleanEditPerm(){
+  const u=_user(), p=u&&u.permissions;
+  if(!p || p.cleaningEdit!==true) return false;
+  const r=_role();
+  return r!=="viewer" && r!=="observer";
+}
+function canEdit(){ const r=_role(); return r==="admin"||r==="project_manager"||_hasCleanEditPerm(); }
 /* ★ الدور المخزَّن في حسابات المستخدمين قد يكون **بالعربية**: قائمة الأدوار في إدارة
    المستخدمين تحفظ المشرف بالقيمة «مشرف» (لا supervisor) — فالمقارنة بالمفتاح الإنجليزي
    وحده كانت تحجب زرَّي التنفيذ وجولات الجودة عن المشرفين الحقيقيين (أبلغها المستخدم:
@@ -3649,7 +3662,9 @@ window.cleaningOps = {
   _addDays: _addDays, _today: _today,
   _isWeekend: _isWeekend, _nextWorkingDay: _nextWorkingDay, _advanceDue: _advanceDue, _overdueWorkingDays: _overdueWorkingDays,
   _FREQ_DAYS: FREQ_DAYS,
-  _WORK_TYPES: CLEANING_WORK_TYPES
+  _WORK_TYPES: CLEANING_WORK_TYPES,
+  // فحوصُ الصلاحية تنفيذاً لا نصّاً: تُقرأ من `currentUser` الحيّ في الحاضنة
+  _canEdit: canEdit, _canExecute: canExecute, _canQuality: canQuality
 };
 
 })();

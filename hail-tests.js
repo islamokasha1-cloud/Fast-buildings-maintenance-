@@ -3706,6 +3706,53 @@ function cleaningOpsTests() {
     src.includes("window._blockedPages.has(PAGE_ID)") &&
     /shouldShow = canView\(\) && isCleaningProject\(\) && !blocked/.test(src));
 
+  /* ══ ★ ce: «إدارة مهام النظافة» — مفتاحٌ مانحٌ يفتح التحرير بلا رفعِ دور ══
+     مديرةُ مشروع النظافة دورُها المسجَّل «مشرف»، وكان التحريرُ للأدمن ومدير المشاريع
+     وحدَهما. الحارسُ هنا يمنع الارتداد إلى: (١) اشتقاقِ التحرير من الدور وحده،
+     (٢) وأخطرَ منه — قراءةِ المفتاح المانح باصطلاح المفاتيح الحاجبة (`!== false`)
+     فينفتح التحريرُ لكلّ مستخدمٍ قائمٍ بأثرٍ رجعيّ. */
+  /* تنفيذاً لا نصّاً: نبدّل `currentUser` في الحاضنة ونسأل الدالّةَ نفسَها. */
+  {
+    const asUser = (u) => { sandbox.currentUser = u; };
+    const prevUser = sandbox.currentUser;
+    const sup = (perms) => ({ user:"hanan", name:"حنان", role:"مشرف", permissions:perms });
+    asUser(sup({ cleaning:true, cleaningEdit:true }));
+    T("★ ce: المشرفُ الممنوحُ صراحةً يحرّر — حالةُ حنان", CO._canEdit() === true);
+    asUser(sup({ cleaning:true }));
+    T("★ ce: مشرفٌ بلا المفتاح لا يحرّر (لا يُقرأ المانحُ إلا `=== true`)", CO._canEdit() === false);
+    asUser(sup({ cleaning:true, cleaningEdit:false }));
+    T("★ ce: المفتاحُ المعلَّم بـfalse لا يمنح", CO._canEdit() === false);
+    asUser({ user:"old", role:"مشرف" });                    // مستخدمٌ قديم بلا حقل صلاحيات
+    T("★ ce: المستخدمُ القديم بلا `permissions` لا يرث التحرير", CO._canEdit() === false);
+    asUser({ user:"v", role:"viewer",   permissions:{ cleaningEdit:true } });
+    T("★ ce: الزائرُ لا يفتح له المفتاحُ شيئاً (الخادمُ يردّ كتابتَه أصلاً)", CO._canEdit() === false);
+    asUser({ user:"o", role:"observer", permissions:{ cleaningEdit:true } });
+    T("★ ce: والمراقبُ كذلك", CO._canEdit() === false);
+    asUser({ user:"pm", role:"project_manager" });
+    T("★ ce: ومديرُ المشاريع يحرّر بدوره بلا مفتاح", CO._canEdit() === true);
+    asUser(sup({ cleaning:true }));
+    T("★ ce: المفتاحُ لم يمسّ التنفيذَ ولا جولاتِ الجودة (مشرفٌ بلا مفتاحٍ كما كان)",
+      CO._canExecute() === true && CO._canQuality() === true);
+    asUser({ user:"t", role:"فني" });
+    T("★ ce: والفنيُّ ينفّذ ولا يفتّش ولا يحرّر",
+      CO._canExecute() === true && CO._canQuality() === false && CO._canEdit() === false);
+    sandbox.currentUser = prevUser;
+  }
+  T("★ ce: النواة تفصل المفاتيح المانحة عن الحاجبة بمصدرٍ واحدٍ للقراءة",
+    /const _PERM_GRANT_KEYS = \["cleaningEdit"\];/.test(HTML) &&
+    /function _permOn\(perms, k\)\{[\s\S]{0,240}?perms\[k\] === true[\s\S]{0,120}?perms\[k\] !== false;/.test(HTML));
+  T("★ ce: الشارات ونافذة التعديل تقرآن _permOn لا المقارنة الحاجبة مباشرةً",
+    !/perms\[k\]!==false/.test(HTML) &&
+    (HTML.match(/_permOn\(perms,k\)/g) || []).length >= 3);
+  T("★ ce: مربّع المفتاح في نموذج الإضافة غيرُ مؤشَّرٍ افتراضاً",
+    HTML.includes('id="perm-cleaningEdit"> إدارة مهام النظافة') &&
+    !/id="perm-cleaningEdit"\s+checked/.test(HTML));
+  T("★ ce: المفتاح في مصفوفتَي الحفظ وفي تسميتَي الشارات والنافذة",
+    (HTML.match(/'globalPurchases','cleaning','cleaningEdit'\]/g) || []).length === 2 &&
+    (HTML.match(/cleaningEdit:"إدارة مهام النظافة"/g) || []).length === 2);
+  T("★ ce: الحفظ يكتب المانحَ بعلامةٍ صريحة والحاجبَ باصطلاحه",
+    (HTML.match(/\(_PERM_GRANT_KEYS\.indexOf\(k\)>=0\) \? \(el\?\.checked===true\) : \(el\?\.checked!==false\)/g) || []).length === 2);
+
   // ══ ★ v18.9wg: إعادة تسمية مبنى تُهاجر بيانات النظافة تلقائياً ══
   // الاسم مخزّن نصاً في المهام/السجل/الربط/تقييمات الجولات — تغييره في لوحة
   // الإدارة كان يترك المهام على الاسم القديم (بلاغ المستخدم).
