@@ -1,8 +1,8 @@
 // الفيلمُ الكامل: افتتاحيةُ إعلان Remotion ← جولةُ الشاشات الحقيقية ← ختامُ الإعلان.
 //
 // يجمع مخرَجَي أداتين قائمتين بلا نسخِ منطقِ أيٍّ منهما:
-//   • `remotion/` — مشهدا الافتتاح (١–١٢٠) والختام (١٣٨١–١٦٢٠) من `CompanyAnnouncement`،
-//     يُرندَران بلا موسيقى ليُفرَش تحت الفيلم كلِّه فراشٌ واحدٌ متّصل.
+//   • `remotion/` — افتتاحيةُ `PlatformIntro` (تركيبةٌ خاصةٌ بهذا العرض) وختامُ
+//     `CompanyAnnouncement` (١٣٨١–١٦٢٠)، بلا موسيقى ليُفرَش تحت الفيلم فراشٌ متّصل.
 //   • `promo-video.mjs --no-bookends` — جولةُ الشاشات بلا بطاقتَي افتتاحٍ وختام.
 // الوصلتان ذوبانٌ (xfade) لا قطعٌ حادّ، والموسيقى مؤلَّفةٌ بطول الفيلم بسكربت
 // الإعلان نفسِه (`make-music.py`) — فلا تنتهي قبله ولا تُقطَع في منتصفها.
@@ -26,8 +26,11 @@ const SKIP_BODY = process.argv.includes('--skip-body');
 
 const FPS = 30;
 const XF = 0.7;                                   // مدّةُ الذوبان عند كلّ وصلة (ثانية)
-const INTRO = { from: 0, to: 119 };               // مشهد ١ — ظهور الشعار واسم الشركة
-const OUTRO = { from: 1380, to: 1619 };           // مشهد ٩ — الختام والدعوة للتواصل
+// الافتتاحيةُ تركيبةٌ مستقلّةٌ (`PlatformIntro`) لا مشهدٌ من الإعلان: هذا عرضٌ موضوعُه
+// المنصةُ وحدَها، والإعلانُ عن الشركة وقطاعاتها الثلاثة — فلا يُكتَب فيه ما لا يعرضه.
+// أما الختامُ (الشعار والتواصل) فصالحٌ للاثنين، فيُقتطع من الإعلان بلا تكرار.
+const INTRO = { comp: 'PlatformIntro', label: 'الافتتاح' };
+const OUTRO = { comp: 'CompanyAnnouncement', from: 1380, to: 1619, label: 'الختام' };
 
 const L = (...a) => console.log(...a);
 const die = (m) => { console.error('\n❌ ' + m + '\n'); process.exit(1); };
@@ -59,11 +62,15 @@ L('═════════════════════════�
 // `musicVolume: 0` — الموسيقى تُفرَش لاحقاً على الفيلم كلِّه دفعةً واحدة.
 for (const [name, r] of [['intro', INTRO], ['outro', OUTRO]]) {
   const out = path.join(PARTS, `${name}.mp4`);
-  L(`\n▸ رندر مشهد «${name === 'intro' ? 'الافتتاح' : 'الختام'}» (${r.from}–${r.to})…`);
-  const res = run('npx', ['remotion', 'render', 'CompanyAnnouncement', out,
-    `--frames=${r.from}-${r.to}`, '--props', JSON.stringify({ musicVolume: 0 }),
-    '--log=error'], { cwd: RM });
-  if (res.status !== 0 || !fs.existsSync(out)) die(`فشل رندر مشهد ${name}`);
+  const range = r.from === undefined ? '' : ` (${r.from}–${r.to})`;
+  L(`\n▸ رندر مشهد «${r.label}»${range}…`);
+  const args = ['remotion', 'render', r.comp, out, '--log=error'];
+  if (r.from !== undefined) args.push(`--frames=${r.from}-${r.to}`);
+  // موسيقى الإعلان تُسكَت هنا لتُفرَش لاحقاً على الفيلم كلِّه؛ والتركيبةُ المستقلّةُ
+  // لا صوتَ فيها أصلاً فلا يضرّها المرور.
+  args.push('--props', JSON.stringify({ musicVolume: 0 }));
+  const res = run('npx', args, { cwd: RM });
+  if (res.status !== 0 || !fs.existsSync(out)) die(`فشل رندر مشهد ${r.label}`);
   L(`  ✅ ${out}  ·  ${dur(out).toFixed(2)} ث`);
 }
 
