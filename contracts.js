@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2562";
+var MODULE_BUILD = "v18.9.2584";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -3572,13 +3572,15 @@ function reqFormHTML(){
   '</div>')+
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود المطلوبة'+
-      '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.addFreeLine()">'+_icn("plus","ic-sm")+' بند حرّ</button></div>'+
+      '<span style="margin-inline-start:auto"></span>'+aiBtnHTML()+
+      '<button class="btn btn-ghost btn-sm" onclick="contracts.addFreeLine()">'+_icn("plus","ic-sm")+' بند حرّ</button></div>'+
     '<div class="ct-table-wrap"><table class="ct-table" id="ct-r-lines"><thead><tr>'+
       '<th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th><th></th>'+
     '</tr></thead><tbody>'+lineRows+'</tbody></table></div>'+
     '<div class="ct-total" id="ct-r-total">'+totalsHTML(tot, d.vatMode)+'</div>'+
     budWarn + ceoNote +
   '</div>'+
+  aiPanelHTML()+
   terms +
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("users","ic-sm")+' المرشّحون وعروضهم'+
@@ -3794,8 +3796,8 @@ function filterReqs(k,v){
   _rFilter[k]=v||""; paintReqs();
   if(k==="q"){ var i=document.getElementById("ct-r-q"); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length,i.value.length); }catch(e){} } }
 }
-function openReq(id){ _rOpen=id; _rDraft=null; _lnEdit=null; paintReqs(); }
-function backToReqs(){ _rOpen=null; _rDraft=null; _lnEdit=null; paintReqs(); }
+function openReq(id){ _rOpen=id; _rDraft=null; _lnEdit=null; _aiLines=null; paintReqs(); }
+function backToReqs(){ _rOpen=null; _rDraft=null; _lnEdit=null; _aiLines=null; paintReqs(); }
 function retryReqs(){ stopReqSync(); startReqSync(); paintReqs(); }
 
 function act(action){
@@ -3854,6 +3856,167 @@ function doDelete(){
    يقرؤها الزرُّ **وطبقةُ البيانات** (وقواعدُ الخادم تقول مثلَها). */
 function canEditLines(req){ return _role()==="admin" && !!req && !crqIsFinal(req.status); }
 
+/* ════════════════════════════════════════════════════════════════════
+   الصياغةُ الهندسيةُ لبنود الأعمال بالذكاء الاصطناعي        (طلبُ المالك)
+   ════════════════════════════════════════════════════════════════════
+
+   **الحاجة.** بنودُ الأعمال تُكتب على عجلٍ في الميدان: «محارة»، «تركيب أبواب».
+   وهذا الوصفُ يذهب إلى **وثيقةٍ يوقّعها الطرفان** ويُحاسَب عليها المستخلص. فبندٌ
+   غامضٌ خلافٌ مؤجَّل: أيُّ محارةٍ؟ بأيّ سُمكٍ؟ وهل تشمل الزوايا والشبك؟
+
+   **الحدُّ الذي لا يُتجاوَز — الذكاءُ يصوغ الكلماتِ لا الأرقام.**
+   الكميةُ وسعرُ الوحدة والإجماليُّ **لا تمرّ من هنا إطلاقاً**: هي مالٌ يقرّره
+   الإنسان، وإدخالُ نموذجٍ لغويٍّ عليها بابٌ لخطأٍ صامتٍ يوقّع عليه الطرفان. فما
+   يُقترَح هو **الوصفُ ووحدةُ القياس** فقط، والوحدةُ لأنها لغةُ البند لا قيمتَه.
+
+   **ولا تطبيقَ صامت.** الاقتراحُ يُعرَض جنباً إلى جنبٍ مع الأصل (قبل/بعد) ويُطبَّق
+   ببندٍ ببند أو دفعةً — بقرار المستخدم. والنموذجُ **لا يزيد بنداً ولا ينقص**:
+   المطابقةُ بالمعرّف، وما لم يُطابِق يُهمَل. فهو محرّرُ صياغةٍ لا مُقايِسٌ ثانٍ.
+
+   **ويعمل النظامُ بدونه.** الزرُّ لا يظهر إن لم تكن **طبقةُ الذكاء موجودةً** في
+   الصفحة أصلاً (`_aiText`). وإن كانت موجودةً بلا إعدادٍ (بروكسي غيرُ محفوظ) فالزرُّ
+   يظهر ورسالتُه صريحةٌ تدلّ على مكان الإعداد — وهو سلوكُ بقية أدوات الذكاء في
+   المنصة، ولا نخفي زرّاً لأن إعداداً ناقصٌ قد يُستكمَل بعد لحظة. وفشلُ النداء توستٌ
+   عربيٌّ مفهوم (`_msgErr` نفسُها التي تخدم بقية المنصة)، والنموذجُ يبقى قابلاً
+   للتعبئة يدوياً كما كان. */
+var _aiLines = null;          // [{id, wasDesc, newDesc, wasUnit, newUnit}]
+var _aiBusy  = false;
+
+function aiReady(){
+  try{ return typeof _aiText === "function"; }catch(e){ return false; }
+}
+/* السياقُ الذي يراه النموذج: طبيعةُ العمل ومشروعُه ونطاقُه — بلا أرقامٍ ماليّة.
+   لا يُمرَّر سعرٌ ولا إجماليٌّ: ما لا يحتاجه لصياغة الوصف لا يُرسَل. */
+function aiLinesPrompt(head, lines){
+  var body = lines.map(function(l,i){
+    return (i+1)+") [id:"+String(l.id||"")+"] الوصف: "+String(l.desc||"—")+
+           " · الوحدة: "+(String(l.unit||"").trim()||"—")+
+           " · الكمية: "+(Number(l.qty)||0);
+  }).join("\n");
+  return "أنت مهندسٌ مدنيٌّ يُعِدّ جداول الكميات (BOQ) لعقود مقاولات الباطن في السعودية.\n"+
+    "أعِد صياغة **وصف** كل بندٍ صياغةً هندسيةً دقيقةً تصلح لوثيقةٍ يوقّعها الطرفان:\n"+
+    "• حدِّد العملَ ومكوّناتِه ومعيارَ التنفيذ المتعارف عليه (السُّمك · النوع · التشطيب) متى دلّ عليه الوصفُ الأصليّ.\n"+
+    "• اذكر ما يشمله البندُ عادةً (التجهيز · التوريد · التركيب · التنظيف) إن كان لازماً لرفع الغموض.\n"+
+    "• صحِّح وحدةَ القياس إن كانت غيرَ مناسبة (م٢ · م.ط · م٣ · عدد · طن · مقطوعية).\n"+
+    "• **لا تخترع** مواصفةً لا يدلّ عليها الوصفُ الأصليُّ ولا سياقُ العمل، ولا تُضِف بنوداً ولا تحذف.\n"+
+    "• **لا تذكر أسعاراً ولا كمياتٍ ولا مبالغَ إطلاقاً** — الوصفُ فقط.\n"+
+    "• عربيةٌ فصحى مهنيةٌ موجزة: سطرٌ واحدٌ لكل بند، وحدُّه ٢٠٠ حرف.\n\n"+
+    "سياق العمل:\n"+head+"\n\nالبنود:\n"+body+"\n\n"+
+    "أعِد **JSON فقط** بلا أيّ نصٍّ آخر، مصفوفةً بهذا الشكل:\n"+
+    '[{"id":"<المعرّف كما هو>","desc":"<الوصف الهندسي>","unit":"<وحدة القياس>"}]';
+}
+/* قراءةُ ردّ النموذج: JSON صارمٌ، ومطابقةٌ بالمعرّف، وحدٌّ للطول.
+   دالّةٌ نقيةٌ تُختبَر وحدَها — فهي الحاجزُ الذي يمنع ردّاً مشوَّهاً من إفساد نموذجٍ
+   يعمل: ما لا يُفهَم يُهمَل ولا يُرمى خطأً في وجه المستخدم. */
+function aiParseLines(raw, lines){
+  var txt = String(raw||"").replace(/^```[a-z]*\s*/i,"").replace(/```\s*$/,"").trim();
+  var a = txt.indexOf("["), b = txt.lastIndexOf("]");
+  if(a < 0 || b <= a) return [];
+  var arr; try{ arr = JSON.parse(txt.slice(a, b+1)); }catch(e){ return []; }
+  if(!Array.isArray(arr)) return [];
+  var byId = {}; (lines||[]).forEach(function(l){ if(l && l.id) byId[String(l.id)] = l; });
+  var out = [];
+  arr.forEach(function(o){
+    if(!o || typeof o !== "object") return;
+    var src = byId[String(o.id||"")];
+    if(!src) return;                                   // بندٌ لا نعرفه ⇒ يُهمَل
+    var nd = String(o.desc||"").replace(/\s+/g," ").trim().slice(0,200);
+    var nu = String(o.unit||"").replace(/\s+/g," ").trim().slice(0,20);
+    if(!nd && !nu) return;
+    var wasD = String(src.desc||""), wasU = String(src.unit||"");
+    if(nd === wasD && (!nu || nu === wasU)) return;     // بلا تغيير ⇒ لا يُعرَض
+    out.push({ id:String(src.id), wasDesc:wasD, newDesc:nd||wasD, wasUnit:wasU, newUnit:nu||wasU });
+  });
+  return out;
+}
+/* الهدفُ الحيُّ: مسودّةُ النموذج أو مسودّةُ تحرير الأدمن — أيُّهما مفتوحة. */
+function aiTargetLines(){
+  if(_lnEdit) return _lnEdit;
+  if(_rDraft) return _rDraft.lines;
+  return null;
+}
+function aiHeadContext(){
+  if(_rDraft){
+    var ref = normalizeProjectRef(_rDraft.projectSel, _rDraft.projectName, pmManualPrefix());
+    return "العمل: "+(_rDraft.title||"—")+"\nالمشروع: "+_projName(ref)+
+           (_rDraft.scope?("\nنطاق العمل: "+_rDraft.scope):"");
+  }
+  var r = requestById(_rOpen) || {};
+  return "العمل: "+(r.title||"—")+"\nالمشروع: "+_projName(r)+(r.scope?("\nنطاق العمل: "+r.scope):"");
+}
+function aiDraftLines(){
+  if(_aiBusy) return;
+  if(!aiReady()) return _toast("⚠ الذكاء الاصطناعي غير مُفعّل — راجع: الإدارة › إعدادات الذكاء الاصطناعي","warn");
+  if(_lnEdit) syncLines(); else syncReqDraft();
+  var lines = aiTargetLines();
+  var usable = (lines||[]).filter(function(l){ return l && String(l.desc||"").trim(); });
+  if(!usable.length) return _toast("⚠ اكتب وصفاً مختصراً لبندٍ واحدٍ على الأقل، ثم اطلب الصياغة","warn");
+  _aiBusy = true; _aiLines = null;
+  var btn = document.getElementById("ct-ai-btn");
+  if(btn){ btn.disabled = true; btn.textContent = "⏳ جارٍ الصياغة…"; }
+  Promise.resolve(_aiText([{ role:"user", content: aiLinesPrompt(aiHeadContext(), usable) }],
+                          { maxTokens: 1200, feature: "صياغة بنود العقد" }))
+    .then(function(out){
+      _aiLines = aiParseLines(out, usable);
+      if(!_aiLines.length) _toast("⚠ لم يصل اقتراحٌ مختلفٌ عمّا كتبت","warn");
+      else _toast("✅ وصلت "+_aiLines.length+" صياغة — راجِعها قبل الاستبدال","success");
+    })
+    .catch(function(e){
+      console.warn("contracts/aiDraftLines", e);
+      var m; try{ m = _msgErr(e); }catch(_){ m = (e&&e.message)||"تعذّر الاتصال"; }
+      _toast("⚠ فشلت الصياغة: "+m, "warn");
+    })
+    .then(function(){ _aiBusy=false; paintReqs(); });
+}
+function aiCloseLines(){ _aiLines=null; paintReqs(); }
+/* الاستبدالُ يمسّ **الوصفَ والوحدةَ وحدَهما** — الكميةُ والسعرُ لا يُقرآن هنا أصلاً. */
+function aiApplyLine(i){
+  var s = _aiLines && _aiLines[i]; if(!s) return;
+  if(_lnEdit) syncLines(); else syncReqDraft();
+  var arr = aiTargetLines() || [];
+  for(var k=0;k<arr.length;k++){
+    if(String(arr[k].id) === s.id){ arr[k].desc = s.newDesc; if(s.newUnit) arr[k].unit = s.newUnit; break; }
+  }
+  _aiLines.splice(i,1);
+  if(!_aiLines.length) _aiLines=null;
+  paintReqs();
+  _toast("✅ استُبدل وصفُ البند","success");
+}
+function aiApplyAllLines(){
+  if(!_aiLines || !_aiLines.length) return;
+  var n = _aiLines.length;
+  while(_aiLines && _aiLines.length) aiApplyLine(0);
+  _toast("✅ استُبدلت "+n+" صياغة","success");
+}
+/* لوحةُ المراجعة: قبل/بعد صريحان — فالمستخدمُ يقارن ثمّ يقرّر، ولا يُفاجأ بنصٍّ
+   حلّ محلَّ نصِّه. والأرقامُ غائبةٌ عن اللوحة كغيابها عن النداء. */
+function aiPanelHTML(){
+  if(!_aiLines || !_aiLines.length) return "";
+  var rows = _aiLines.map(function(s,i){
+    return '<tr>'+
+      '<td style="color:var(--muted)">'+_esc(s.wasDesc||"—")+
+        (s.wasUnit?'<div class="ct-id">'+_esc(s.wasUnit)+'</div>':'')+'</td>'+
+      '<td><strong>'+_esc(s.newDesc)+'</strong>'+
+        (s.newUnit && s.newUnit!==s.wasUnit ? '<div class="ct-id">الوحدة: '+_esc(s.newUnit)+'</div>' : '')+'</td>'+
+      '<td><button class="btn btn-ghost btn-sm" onclick="contracts.aiApplyLine('+i+')">'+_icn("checkCircle","ic-sm")+' استبدال</button></td>'+
+    '</tr>';
+  }).join("");
+  return '<div class="card ct-sec" id="ct-ai-box"><div class="ct-sec-h">'+_icn("sparkles","ic-sm")+' صياغةٌ هندسيةٌ مقترَحة'+
+      '<span class="ct-sec-lock">اقتراحٌ يُراجَع — الكمياتُ والأسعارُ لا تُمَسّ</span></div>'+
+    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+
+      '<th>الوصف الحالي</th><th>الصياغة الهندسية المقترَحة</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="ct-save-bar" style="position:static">'+
+      '<button class="btn btn-ghost btn-sm" onclick="contracts.aiCloseLines()">تجاهل</button>'+
+      '<button class="btn btn-primary btn-sm" onclick="contracts.aiApplyAllLines()">'+_icn("checkCircle","ic-sm")+' استبدال الكل</button>'+
+    '</div></div>';
+}
+function aiBtnHTML(){
+  return aiReady()
+    ? '<button class="btn btn-ghost btn-sm" id="ct-ai-btn" onclick="contracts.aiDraftLines()">'+
+      _icn("sparkles","ic-sm")+' صياغة هندسية (AI)</button> '
+    : "";
+}
+
 /* ── تحريرُ بنود الطلب (الأدمن) ── مسودّةٌ محلّيةٌ حتى الحفظ، فلا تُكتب كتابةٌ
    جزئيةٌ في القاعدة أثناء الطباعة. والإجماليُّ يُحسب بالدالّة نفسِها التي تحسبه
    في النموذج — لا حسابَ ثانٍ في الترميز. */
@@ -3866,7 +4029,7 @@ function editLines(){
   paintReqs();
   var b=document.getElementById("ct-ln-box"); if(b) b.scrollIntoView({behavior:"smooth", block:"center"});
 }
-function cancelLines(){ _lnEdit=null; paintReqs(); }
+function cancelLines(){ _lnEdit=null; _aiLines=null; paintReqs(); }
 function syncLines(){
   if(!_lnEdit) return;
   var box=document.getElementById("ct-ln-rows"); if(!box) return;
@@ -3896,7 +4059,8 @@ function linesEditHTML(r){
       '<td><button class="btn btn-delete" onclick="contracts.delEditLine('+i+')">'+_icn("trash","ic-sm")+'</button></td>'+
     '</tr>';
   }).join("");
-  return '<div class="card ct-sec" id="ct-ln-box"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' تعديل البنود</div>'+
+  return '<div class="card ct-sec" id="ct-ln-box"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' تعديل البنود'+
+    '<span style="margin-inline-start:auto"></span>'+aiBtnHTML()+'</div>'+
     '<div class="ct-note">'+_icn("shield","ic-sm")+
       ' تغيّرُ القيمة يُسقط اعتمادَ المالية والتنفيذيِّ ويعيد الطلبَ إلى بوّابتهما — '+
       'فلا يمرّ رقمٌ جديدٌ على توقيعٍ قديم. واعتمادُ مدير المشاريع والمشتريات يبقى.</div>'+
@@ -3905,6 +4069,7 @@ function linesEditHTML(r){
     '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="contracts.addEditLine()">'+_icn("plus","ic-sm")+' بند جديد</button></div>'+
     '<div class="ct-total" id="ct-ln-total">'+totalsHTML(linesTotal(_lnEdit, r.vatMode), r.vatMode)+'</div>'+
+    aiPanelHTML()+
     '<div class="ct-form-row"><div>'+field("سبب التعديل *", '<input class="form-input" id="ct-ln-why" placeholder="لماذا تُعدَّل البنود؟">')+'</div><div></div></div>'+
     '<div class="ct-save-bar" style="position:static">'+
       '<button class="btn btn-ghost btn-sm" onclick="contracts.cancelLines()">إلغاء</button>'+
@@ -5900,6 +6065,10 @@ window.contracts = {
   openExtRewind: openExtRewind, doExtRewind: doExtRewind,
   openChgRewind: openChgRewind, doChgRewind: doChgRewind, closeDocRewind: closeDocRewind,
   editLines: editLines, cancelLines: cancelLines, addEditLine: addEditLine, canEditLines: canEditLines,
+  aiDraftLines: aiDraftLines, aiApplyLine: aiApplyLine, aiApplyAllLines: aiApplyAllLines,
+  aiCloseLines: aiCloseLines,
+  _aiParseLines: aiParseLines, _aiLinesPrompt: aiLinesPrompt, _aiReady: aiReady,
+  _aiSuggestions: function(){ return _aiLines; },
   delEditLine: delEditLine, editLinesRecalc: editLinesRecalc, saveLines: saveLines, closePay: closePay, doPay: doPay,
   requests: requests, requestById: requestById,
   // العقود [المرحلة ٣]

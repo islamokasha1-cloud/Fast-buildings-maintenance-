@@ -314,6 +314,94 @@ check('القيمةُ فوق سقف التنفيذي تُعلَن مسبقاً',
   ((await page.textContent('#page-contract-requests')) || '').includes('سيمرّ الطلب عليه'));
 
 await page.fill('#ct-r-title', 'محارة وبياض الدور الأول');
+
+/* ── الصياغةُ الهندسيةُ بالذكاء الاصطناعي (طلبُ المالك) ──
+   القناةُ تُستبدَل بجذعٍ في الصفحة (لا شبكةَ في الفحص)، والمُختبَرُ هو **ما يفعله
+   النظامُ بالرد**: يعرضه للمراجعة، ويستبدل الوصفَ والوحدةَ وحدَهما، ولا يمسّ
+   الكميةَ ولا السعرَ ولو أرسلهما النموذج. */
+// بلا طبقةِ الذكاء في الصفحة أصلاً: لا زرَّ يَعِد بما لا يستطيع
+const aiHidden = await page.evaluate(() => {
+  window.__aiReal = window._aiText;
+  // `_aiText` تعريفُ دالّةٍ عالميّ: `delete` عليه لا يعمل — فالإخفاءُ بالإسناد
+  window._aiText = undefined;
+  window.contracts.recalc(true);
+  return { ready: window.contracts._aiReady(), btn: !!document.getElementById('ct-ai-btn') };
+});
+check('★★ زرُّ الصياغة لا يظهر إن لم تكن طبقةُ الذكاء موجودةً أصلاً',
+  aiHidden.ready === false && aiHidden.btn === false, JSON.stringify(aiHidden));
+const aiSent = await page.evaluate(() => {
+  window.__aiSent = null;
+  window._aiText = function (messages) {
+    window.__aiSent = messages[0].content;
+    const d = window.contracts._draft();
+    const id = d.lines[0].id;
+    // ردٌّ يحمل كميةً وسعراً عمداً — يجب أن يسقطا
+    return Promise.resolve('```json\n[{"id":"' + id + '","desc":"محارة أسمنتية بسُمك ٢سم على طبقتين شاملة الزوايا والشبك","unit":"م٢","qty":9999,"unitPrice":9999}]\n```');
+  };
+  return true;
+});
+await page.evaluate(() => window.contracts.recalc(true));
+await page.waitForTimeout(700);
+check('★★ وبتهيئة القناة يظهر الزرُّ في نموذج الطلب', aiSent === true &&
+  await page.evaluate(() => !!document.getElementById('ct-ai-btn')));
+const beforeAi = await page.evaluate(() => {
+  const l = window.contracts._draft().lines[0];
+  return { desc: l.desc, unit: l.unit, qty: l.qty, up: l.unitPrice };
+});
+await page.click('#ct-ai-btn');
+await page.waitForTimeout(1200);
+const aiPanel = await page.evaluate(() => ({
+  shown: !!document.getElementById('ct-ai-box'),
+  n: (window.contracts._aiSuggestions() || []).length,
+  txt: (document.getElementById('ct-ai-box') || {}).textContent || '',
+  sent: window.__aiSent || '',
+  line: (function () { const l = window.contracts._draft().lines[0];
+    return { desc: l.desc, unit: l.unit, qty: l.qty, up: l.unitPrice }; })()
+}));
+check('★★ الاقتراحُ يُعرَض للمراجعة ولا يُطبَّق صامتاً',
+  aiPanel.shown && aiPanel.n === 1 && aiPanel.line.desc === beforeAi.desc,
+  JSON.stringify({ n: aiPanel.n, desc: aiPanel.line.desc }));
+check('★★ واللوحةُ تعرض «قبل/بعد» وتُعلن أن الأرقام لا تُمَسّ',
+  /الوصف الحالي/.test(aiPanel.txt) && /محارة أسمنتية/.test(aiPanel.txt) &&
+  /الكمياتُ والأسعارُ لا تُمَسّ/.test(aiPanel.txt));
+check('★★ والنداءُ لم يحمل سعراً ولا إجمالياً',
+  /الكمية: 1200/.test(aiPanel.sent) && !/28/.test(aiPanel.sent.split('البنود:')[1] || '') &&
+  /لا تذكر أسعاراً/.test(aiPanel.sent), (aiPanel.sent.split('البنود:')[1] || '').trim().slice(0, 80));
+await page.screenshot({ path: `${SHOTS}/09c-ai-lines.png`, fullPage: true });
+await page.evaluate(() => window.contracts.aiApplyAllLines());
+await page.waitForTimeout(900);
+const afterAi = await page.evaluate(() => {
+  const l = window.contracts._draft().lines[0];
+  return { desc: l.desc, unit: l.unit, qty: l.qty, up: l.unitPrice,
+           panel: !!document.getElementById('ct-ai-box') };
+});
+check('★★ والاستبدالُ غيّر الوصفَ والوحدة',
+  /محارة أسمنتية بسُمك ٢سم/.test(afterAi.desc) && afterAi.unit === 'م٢', JSON.stringify(afterAi));
+check('★★★ ولم يمسّ الكميةَ ولا سعرَ الوحدة — ولو أرسلهما النموذج',
+  afterAi.qty === beforeAi.qty && afterAi.up === beforeAi.up,
+  JSON.stringify({ was: beforeAi, now: { qty: afterAi.qty, up: afterAi.up } }));
+check('★ واللوحةُ تُغلق بعد الاستبدال', afterAi.panel === false);
+// ردٌّ مشوَّهٌ لا يُسقط النموذج
+await page.evaluate(() => { window._aiText = function () { return Promise.resolve('عذراً لا أستطيع'); }; });
+await page.click('#ct-ai-btn');
+await page.waitForTimeout(1000);
+const aiJunk = await page.evaluate(() => ({
+  panel: !!document.getElementById('ct-ai-box'),
+  lines: window.contracts._draft().lines.length,
+  desc: window.contracts._draft().lines[0].desc
+}));
+check('★★ وردٌّ غيرُ صالحٍ لا يُفسد النموذج ولا يُطبَّق شيء',
+  aiJunk.panel === false && aiJunk.lines === 1 && /محارة أسمنتية/.test(aiJunk.desc), JSON.stringify(aiJunk));
+// وفشلُ القناة رسالةٌ مفهومةٌ لا انهيار
+await page.evaluate(() => { window._aiText = function () { return Promise.reject(new Error('credit balance is too low')); }; });
+await page.click('#ct-ai-btn');
+await page.waitForTimeout(1000);
+check('★ وفشلُ القناة لا يكسر الشاشة (النموذجُ ما زال قابلاً للتعبئة)',
+  await page.evaluate(() => !!document.getElementById('ct-r-lines') && window.contracts._draft().lines.length === 1));
+// أعِد الدالّةَ الأصلية — بقيةُ الفحص لا شأن لها بالذكاء
+await page.evaluate(() => { window._aiText = window.__aiReal; });
+await page.evaluate(() => window.contracts.recalc(true));
+await page.waitForTimeout(600);
 // الصفحةُ تُمرَّر داخل `.main-area` لا في نافذة المتصفّح، فـfullPage لا يلتقط ما تحتها.
 const secs = await page.evaluate(() => Array.from(document.querySelectorAll('#page-contract-requests .ct-sec-h')).map(e => e.textContent.trim().split(' ')[0]));
 check('★ أقسامُ النموذج الخمسة مرسومة (الشروطُ التجارية والمرشّحون تحت الطيّة)',
