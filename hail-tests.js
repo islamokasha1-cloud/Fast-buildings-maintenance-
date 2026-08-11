@@ -1922,6 +1922,141 @@ function procToFinance() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   23-أ) ختمُ اعتماد التنفيذي مقرونٌ بمبلغه · وحارسُ «تم الشراء» (v18.9xa)
+
+   جذرُ الفحص طلبٌ حقيقيّ: PO-202608-0155. اعتمده التنفيذيُّ على 2,639 ر.س،
+   ثم أرجعه الأدمن من «بانتظار استلام المستودع» إلى «تمت مراجعة المستودع» —
+   والختمُ باقٍ بلا مبلغٍ ولا انتهاء. فصار «إحالة للمالية» يتخطّى التنفيذيَّ
+   على طلبٍ عاد إلى ما قبل بوّابته، بأيّ قيمةٍ بلغها بعد ذلك.
+
+   هذا القسم يُنفّذ المنطقَ المستخرَجَ من index.html لا يقرؤه.
+   ════════════════════════════════════════════════════════════════════ */
+function poCEOStampBound() {
+  H("23-أ) ختمُ اعتماد التنفيذي مقرونٌ بمبلغه · وحارسُ «تم الشراء»");
+  const grab = n => { const i = HTML.indexOf("function " + n + "("); return i < 0 ? "" : HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)); };
+  const po = (total, extra) => Object.assign({ items: [{ itemCost: total }] }, extra || {});
+
+  // ══ (أ) poCEOCovers / poClearCEOStamp / PO_PRE_CEO_STATUSES — تُنفَّذ ══
+  let A;
+  try {
+    // الوصلُ بسطرٍ جديد: كلُّ قطعةٍ تنتهي عند سطر `//` تعليقاً، فوصلُها بلا فاصلٍ
+    // يبتلع أوّلَ سطرٍ من التالية داخل التعليق.
+    A = new Function([grab("getPOTotal"), grab("poCEOCovers"), grab("poClearCEOStamp"),
+      "return {getPOTotal, poCEOCovers, poClearCEOStamp, PO_PRE_CEO_STATUSES};"].join("\n"))();
+  } catch (e) { T("تُبنى دوالّ ختم التنفيذي", false, String(e.message).slice(0, 140)); return; }
+  T("تُبنى دوالّ ختم التنفيذي", typeof A.poCEOCovers === "function" && typeof A.poClearCEOStamp === "function");
+
+  T("ختمٌ يغطّي المبلغ الحالي → مغطّى",
+    A.poCEOCovers(po(2639, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === true);
+  T("★★ ارتفاعُ القيمة فوق سقف الختم → غير مغطّى (لا شيك على بياض)",
+    A.poCEOCovers(po(200000, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === false);
+  T("★★ ختمٌ قديمٌ بلا مبلغ لا يُعتدّ به — نفس عُرف contracts.js:281",
+    A.poCEOCovers(po(2639, { ceoApprovedAt: "x" })) === false);
+  T("بلا ختمٍ أصلاً → غير مغطّى", A.poCEOCovers(po(2639, {})) === false);
+  T("تسامحُ الكسر (0.01) لا يُسقط المساوي",
+    A.poCEOCovers(po(2639.005, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === true);
+
+  const cleared = po(2639, { ceoApprovedAt: "x", ceoApprovedAmount: 2639, ceoApprovedBy: "التنفيذي" });
+  T("محوُ الختم يُرجع true أول مرّة ثم false", A.poClearCEOStamp(cleared) === true && A.poClearCEOStamp(cleared) === false);
+  T("★★ المحوُ بقيمةٍ فارغةٍ لا بـ delete — وإلا لم يمحُ شيئاً مع merge:true",
+    ("ceoApprovedAt" in cleared) && ("ceoApprovedAmount" in cleared) &&
+    cleared.ceoApprovedAt === "" && cleared.ceoApprovedAmount === 0);
+  T("والممحوُّ لم يعد يغطّي", A.poCEOCovers(cleared) === false);
+
+  T("★ مراحلُ ما قبل بوّابة التنفيذي تشمل «تمت مراجعة المستودع» (حالةُ PO-202608-0155)",
+    A.PO_PRE_CEO_STATUSES.includes("wh_reviewed") && A.PO_PRE_CEO_STATUSES.includes("pending_proc") &&
+    A.PO_PRE_CEO_STATUSES.includes("pending_pm") && A.PO_PRE_CEO_STATUSES.includes("ceo_rejected"));
+  T("★ ولا تشمل ما بعدها (فلا يسقط ختمٌ في مساره الطبيعي)",
+    !["proc_executing", "wh_receiving", "wh_auditing", "pending_finance", "closed", "pending_ceo"]
+      .some(s => A.PO_PRE_CEO_STATUSES.includes(s)));
+
+  // ══ (ب) قرارُ التوجيه في openSendToFinanceModal — يُنفَّذ بسطوره الحقيقية ══
+  const stf = grab("openSendToFinanceModal");
+  const ln = re => (stf.match(re) || [""])[0];
+  const sNeeds = ln(/const needsCEO = .*/), sClr = ln(/const cleared = .*/), sGo = ln(/const goCEO = .*/);
+  if (!sNeeds || !sClr || !sGo) { T("تُستخرج سطورُ قرار التوجيه", false, "تغيّرت صياغتها في openSendToFinanceModal"); return; }
+  let route;
+  try {
+    route = new Function("p", "getPOTotal", "PO_CEO_THRESHOLD", "poCEOCovers",
+      "const total = getPOTotal(p);\n" + sNeeds + "\n" + sClr + "\n" + sGo + "\nreturn goCEO;");
+  } catch (e) { T("يُبنى قرارُ التوجيه", false, String(e.message).slice(0, 140)); return; }
+  const goCEO = p => route(p, A.getPOTotal, 2000, A.poCEOCovers);
+
+  T("المسارُ السليم لا ينكسر: ختمٌ يغطّي القيمة → مباشرةً للمالية",
+    goCEO(po(2639, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === false);
+  T("★★ قيمةٌ فوق سقف الختم → يرجع للتنفيذي",
+    goCEO(po(5000, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === true);
+  T("★★ `finance_returned` لم يعد تصريحَ مرورٍ مطلقاً — الباب الخلفي أُغلق",
+    goCEO(po(5000, { status: "finance_returned", ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === true);
+  T("★★ ختمٌ قديمٌ بلا مبلغ → يرجع للتنفيذي بطلبٍ يراه",
+    goCEO(po(2639, { ceoApprovedAt: "x" })) === true);
+  T("تحت العتبة لا تنفيذيّ أصلاً", goCEO(po(1000, {})) === false);
+
+  // ══ (ج) كتابةُ الختم في doUpdatePurchaseStatus — تُنفَّذ ══
+  const upd = grab("doUpdatePurchaseStatus");
+  const mStamp = upd.match(/if\(oldStatus==="pending_ceo"[\s\S]*?\n  \}/);
+  if (!mStamp) { T("يُستخرج قيدُ ختم التنفيذي", false, "تغيّرت صياغته"); return; }
+  const stamp = new Function("p", "oldStatus", "newStatus", "now", "currentUser", "getPOTotal",
+    mStamp[0] + "\nreturn p;");
+  const st1 = stamp(po(2639, {}), "pending_ceo", "proc_executing", "T0", { name: "المدير التنفيذي" }, A.getPOTotal);
+  T("★★ الاعتماد يُختم بمبلغه واسمِ من اعتمده",
+    st1.ceoApprovedAmount === 2639 && st1.ceoApprovedBy === "المدير التنفيذي" && st1.ceoApprovedAt === "T0");
+  const st2 = stamp(po(2639, { ceoApprovedAt: "T0", ceoApprovedAmount: 1000 }), "pending_ceo", "pending_finance", "T1", { name: "ت" }, A.getPOTotal);
+  T("★★ اعتمادٌ ثانٍ يُعيد الختمَ بالسقف الجديد — لا يتشبّث بالقديم",
+    st2.ceoApprovedAmount === 2639 && st2.ceoApprovedAt === "T1");
+  const st3 = stamp(po(2639, {}), "wh_reviewed", "proc_executing", "T2", { name: "ت" }, A.getPOTotal);
+  T("انتقالٌ لا يمرّ ببوّابة التنفيذي لا يُنتج ختماً", !st3.ceoApprovedAt);
+
+  // ══ (د) إبطالُ الختم بالرجوع — يُنفَّذ ══
+  const mClr = upd.match(/let _ceoStampCleared = false;[\s\S]*?\n  \}/);
+  if (!mClr) { T("يُستخرج قيدُ إبطال الختم بالرجوع", false, "تغيّرت صياغته"); return; }
+  const revert = new Function("p", "oldStatus", "newStatus", "normalizePOStatus", "PO_PRE_CEO_STATUSES", "poClearCEOStamp",
+    mClr[0] + "\nreturn {p, _ceoStampCleared};");
+  const R = (from, to) => revert(po(2639, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 }), from, to, s => s, A.PO_PRE_CEO_STATUSES, A.poClearCEOStamp);
+  const rBack = R("wh_receiving", "wh_reviewed");
+  T("★★ عينُ PO-202608-0155: الرجوعُ لـ«تمت مراجعة المستودع» يُسقط الختم",
+    rBack._ceoStampCleared === true && A.poCEOCovers(rBack.p) === false);
+  T("★ ورفضُ التنفيذي يُسقطه كذلك", R("pending_ceo", "ceo_rejected")._ceoStampCleared === true);
+  T("★ والمضيُّ للأمام لا يُسقطه", R("pending_ceo", "proc_executing")._ceoStampCleared === false);
+  T("وثبات الحالة لا يُسقطه", R("wh_reviewed", "wh_reviewed")._ceoStampCleared === false);
+  T("★ نافذةُ تعديل المسؤول تطبّق القاعدةَ نفسَها (بابان يحرّكان الحالة)",
+    /PO_PRE_CEO_STATUSES\.includes\(normalizePOStatus\(pf\.status\)\) && poClearCEOStamp\(pf\)/.test(HTML));
+  T("★ وإسقاطُ الاعتماد قيدٌ في السجل لا حدثٌ صامت",
+    (HTML.match(/سقط اعتماد المدير التنفيذي — رجع الطلب إلى ما قبل بوّابته/g) || []).length >= 2);
+
+  // ══ (هـ) حارسُ «تم الشراء» في doNotifyWarehouse ══
+  const nw = grab("doNotifyWarehouse");
+  const iGuard = nw.indexOf("_poFreshStatus(poId)");
+  const iUp    = nw.indexOf("_poUploadFile(");
+  const iWrite = nw.indexOf('p.status = "wh_receiving"');
+  T("★★ «تم الشراء» صار يقرأ الحالة طازجةً من الخادم", iGuard > 0);
+  T("★★ والفحصُ قبل رفع الملف — فلا مرفقٌ يتيمٌ لطلبٍ سيُرفض", iGuard > 0 && iUp > 0 && iGuard < iUp);
+  T("★★ وقبل كتابة الحالة", iGuard > 0 && iWrite > 0 && iGuard < iWrite);
+  const mByp = nw.match(/const _bypass = .*/);
+  T("يُستخرج قرارُ التجاوز", !!mByp);
+  if (mByp) {
+    const byp = new Function("_st", mByp[0] + "\nreturn _bypass;");
+    T("★★ الحالةُ غيرُ «قيد تنفيذ المشتريات» = تجاوز", byp("pending_ceo") === true && byp("wh_reviewed") === true);
+    T("و«قيد تنفيذ المشتريات» تمرّ", byp("proc_executing") === false);
+  }
+  const bypBlock = (nw.match(/if\(_bypass\)\{[\s\S]*?\n  \}/) || [""])[0];
+  T("★★ غيرُ الأدمن يُردّ ولا يكتب شيئاً", /if\(!isAdmin\(\)\)\{[\s\S]*?return false;/.test(bypBlock));
+  T("★ والأدمن يتجاوز بتأكيدٍ يسمّي ما يتجاوزه", /showConfirm\(/.test(bypBlock) && /تجاوزُ مرحلة التنفيذ/.test(bypBlock));
+  T("★ والتجاوزُ يُكتب في قيد السجل نفسِه", /_bypass \? \("⚠ تجاوزُ مسؤول/.test(nw));
+  T("★ والنافذةُ تفشل مبكّراً لغير الأدمن قبل ملء النموذج",
+    /if\(!isAdmin\(\) && normalizePOStatus\(p\.status\) !== "proc_executing"\)/.test(grab("openNotifyWarehouseModal")));
+
+  // `_poFreshStatus` بلا اتصال: تُرجع "" فيمضي المستدعي بالمرآة المحلية
+  try {
+    // `grab` يبدأ عند "function" فيُسقط `async` — تُعاد لئلا يسقط `await` داخلها
+    const fresh = new Function("db", "purchases", "normalizePOStatus", "console",
+      "async " + grab("_poFreshStatus") + "\nreturn _poFreshStatus;")(null, [], s => s, console);
+    _deferred.push(Promise.resolve(fresh("PO-X")).then(v =>
+      T("★ بلا اتصالٍ تُرجع الحالةَ فارغةً — الحراسةُ أفضلُ جهدٍ لا شرطَ توفّر", v === "")));
+  } catch (e) { T("تُبنى _poFreshStatus", false, String(e.message).slice(0, 140)); }
+}
+
+/* ════════════════════════════════════════════════════════════════════
    23-ب) دمج مشروع يدوي في مشروع رسمي — إعادة ربط طلبات الشراء (v18.9vj)
    ════════════════════════════════════════════════════════════════════ */
 function mergeManualProject() {
@@ -7434,6 +7569,7 @@ function browserCheckTimeBombs() {
   auditRowAlignment();
   waExtrasPreserveQty();
   procToFinance();
+  poCEOStampBound();
   mergeManualProject();
   issueOrderWarehouseCol();
   issueOrderManualProject();
