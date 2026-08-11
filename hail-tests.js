@@ -6412,6 +6412,69 @@ function contractsPhase1() {
       /function backToReqs\(\)\{ _rOpen=null; _rDraft=null; _lnEdit=null;/.test(src));
   }
 
+  /* ════ الصياغةُ الهندسيةُ لبنود الأعمال بالذكاء الاصطناعي ════   (طلبُ المالك)
+     **الحدُّ الذي يحرسه هذا البلوك: الذكاءُ يصوغ الكلماتِ لا الأرقام.** الكميةُ
+     وسعرُ الوحدة مالٌ يقرّره الإنسان، وإدخالُ نموذجٍ لغويٍّ عليهما بابُ خطأٍ صامتٍ
+     يوقّع عليه الطرفان. فالقارئُ (`aiParseLines`) لا يقرأ رقماً أصلاً — وهذه
+     الحرّاسُ تُسقط أيَّ ارتدادٍ يفتح ذلك الباب. */
+  {
+    const L = [{ id: "a", desc: "محارة", unit: "م2", qty: 100, unitPrice: 28 },
+               { id: "b", desc: "دهان", unit: "عدد", qty: 5, unitPrice: 40 }];
+    const ok = C._aiParseLines('[{"id":"a","desc":"محارة أسمنتية بسُمك 2سم","unit":"م٢"}]', L);
+    T("★★ يقرأ الاقتراحَ ويطابقه بالمعرّف",
+      ok.length === 1 && ok[0].id === "a" && ok[0].newDesc === "محارة أسمنتية بسُمك 2سم" &&
+      ok[0].newUnit === "م٢" && ok[0].wasDesc === "محارة");
+    T("★★ ولا يحمل الاقتراحُ كميةً ولا سعراً — ولو أرسلهما النموذج",
+      (function () {
+        const o = C._aiParseLines('[{"id":"a","desc":"وصف","unit":"م٢","qty":999,"unitPrice":9999,"total":1}]', L)[0];
+        return o && o.qty === undefined && o.unitPrice === undefined && o.total === undefined &&
+               Object.keys(o).sort().join(",") === "id,newDesc,newUnit,wasDesc,wasUnit";
+      })());
+    T("★★ ولا يخترع بنداً غيرَ موجود (المطابقةُ بالمعرّف وما لا يُطابق يُهمَل)",
+      C._aiParseLines('[{"id":"zzz","desc":"بند مخترَع"}]', L).length === 0);
+    T("★ ويتجاهل ما لا تغيير فيه", C._aiParseLines('[{"id":"a","desc":"محارة","unit":"م2"}]', L).length === 0);
+    T("★★ وردٌّ مشوَّهٌ لا يُسقط النموذج — يُهمَل ولا يُرمى خطأً",
+      C._aiParseLines("عذراً لا أستطيع", L).length === 0 &&
+      C._aiParseLines("", L).length === 0 && C._aiParseLines(null, L).length === 0 &&
+      C._aiParseLines('[{"id":"a"', L).length === 0 && C._aiParseLines('{"id":"a"}', L).length === 0);
+    T("★ وسياجُ الشيفرة (```json) يُقشَّر",
+      C._aiParseLines('```json\n[{"id":"b","desc":"دهان بلاستيك وجهين"}]\n```', L).length === 1);
+    T("★ والطولُ محدودٌ فلا يُفسد وصفٌ هاربٌ جدولَ العقد",
+      C._aiParseLines('[{"id":"a","desc":"' + "ط".repeat(500) + '"}]', L)[0].newDesc.length === 200);
+    T("★ وبلا وصفٍ جديدٍ يبقى الأصل (الوحدةُ وحدَها قد تتغيّر)",
+      (function () {
+        const o = C._aiParseLines('[{"id":"a","desc":"","unit":"م.ط"}]', L)[0];
+        return o && o.newDesc === "محارة" && o.newUnit === "م.ط";
+      })());
+
+    T("★★ والنداءُ نفسُه لا يُرسل سعراً ولا إجمالياً (ما لا يلزم لا يُرسَل)",
+      (function () {
+        const p = C._aiLinesPrompt("العمل: محارة", L);
+        return !/28/.test(p) && !/unitPrice/.test(p) && !/الإجمالي/.test(p) && /الكمية: 100/.test(p);
+      })());
+    T("★ والتعليماتُ تمنع اختراعَ مواصفةٍ وذكرَ الأسعار",
+      /لا تخترع/.test(C._aiLinesPrompt("x", L)) && /لا تذكر أسعاراً/.test(C._aiLinesPrompt("x", L)));
+    T("★★ والاستبدالُ يمسّ الوصفَ والوحدةَ وحدَهما في الكود",
+      /function aiApplyLine[\s\S]{0,600}arr\[k\]\.desc = s\.newDesc; if\(s\.newUnit\) arr\[k\]\.unit = s\.newUnit;/.test(src) &&
+      !/function aiApplyLine[\s\S]{0,600}\.qty *=/.test(src) &&
+      !/function aiApplyLine[\s\S]{0,600}\.unitPrice *=/.test(src));
+    T("★★ ولا تطبيقَ صامت: لوحةُ «قبل/بعد» ثمّ قرارُ المستخدم",
+      /function aiPanelHTML[\s\S]{0,900}الوصف الحالي[\s\S]{0,200}الصياغة الهندسية المقترَحة/.test(src) &&
+      /contracts\.aiApplyLine\(/.test(src) && /contracts\.aiApplyAllLines\(\)/.test(src));
+    T("★ واللوحةُ تُعلن الحدَّ للمستخدم لا للمبرمج وحدَه",
+      /الكمياتُ والأسعارُ لا تُمَسّ/.test(src));
+    T("★★ والزرُّ لا يظهر إن لم تكن طبقةُ الذكاء موجودةً — والنظامُ يعمل بدونه",
+      /function aiReady\(\)\{[\s\S]{0,120}typeof _aiText === "function"/.test(src) &&
+      /function aiBtnHTML[\s\S]{0,120}aiReady\(\)/.test(src));
+    T("★ وفشلُ النداء رسالةٌ عربيةٌ بمترجم المنصة نفسِه لا خطأٌ خام",
+      /catch\(function\(e\)\{[\s\S]{0,200}_msgErr\(e\)[\s\S]{0,160}فشلت الصياغة/.test(src));
+    T("★ ونداءان متوازيان ممنوعان (زرٌّ يُضغط مرّتين لا يُرسل مرّتين)",
+      /if\(_aiBusy\) return;/.test(src) && /_aiBusy = true;/.test(src));
+    T("★ والاقتراحُ لا يبقى معلّقاً على مستندٍ آخر",
+      /function openReq\(id\)\{[\s\S]{0,90}_aiLines=null;/.test(src) &&
+      /function backToReqs\(\)\{[\s\S]{0,90}_aiLines=null;/.test(src));
+  }
+
   /* ════ قيمةُ العقد النافذة ════ */
   T("★ قيمة العقد = الأصلية + أوامرِ التغيير المعتمدة وحدها",
     C._contractValue({ value: 100000, changeOrders: [{ amount: 5000, status: "approved" }, { amount: 9000, status: "crq_pending_pm" }] }) === 105000);
