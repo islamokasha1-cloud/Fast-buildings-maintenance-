@@ -17,14 +17,17 @@ import wave
 import numpy as np
 
 SR = 44100
-DURATION = 54.0  # يجب أن تساوي مدة الفيديو في src/Root.tsx
+# المدة والمخرَج قابلان للتجاوز بمتغيّرَي بيئة — يستعملهما `promo-assemble.mjs`
+# ليؤلّف فراشاً موسيقياً بطول الفيلم المجمَّع دون أن يمسّ موسيقى الإعلان نفسِه.
+# الافتراضُ هو المطلوب للإعلان: يجب أن يساوي مدة الفيديو في src/Root.tsx.
+DURATION = float(os.environ.get("MUSIC_DURATION", 54.0))
 BPM = 84.0
 BEAT = 60.0 / BPM
 BAR = 4 * BEAT
 
 OUT_DIR = "public/audio"
 WAV = "/tmp/background.wav"
-MP3 = os.path.join(OUT_DIR, "background.mp3")
+MP3 = os.environ.get("MUSIC_OUT") or os.path.join(OUT_DIR, "background.mp3")
 
 N = int(SR * DURATION)
 t = np.arange(N) / SR
@@ -194,8 +197,10 @@ with wave.open(WAV, "w") as w:
     w.setframerate(SR)
     w.writeframes(pcm.tobytes())
 
+FFMPEG = os.environ.get("FFMPEG_BIN", "ffmpeg")
+os.makedirs(os.path.dirname(MP3) or ".", exist_ok=True)
 subprocess.run(
-    ["ffmpeg", "-y", "-loglevel", "error", "-i", WAV, "-codec:a", "libmp3lame",
+    [FFMPEG, "-y", "-loglevel", "error", "-i", WAV, "-codec:a", "libmp3lame",
      "-b:a", "160k", MP3],
     check=True,
 )

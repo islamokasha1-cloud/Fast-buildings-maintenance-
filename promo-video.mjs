@@ -10,7 +10,7 @@
 //   node promo-video.mjs --probe    → لقطاتٌ فقط بلا تسجيل (تكرارٌ سريع أثناء الضبط)
 //
 // المتطلّبات:  npm install --no-save playwright-core ffmpeg-static
-// المخرجات:    dist-video/promo.mp4 (1920×1080) · promo-720.mp4 (نسخةُ مشاركة) · shots/*.png
+// المخرجات:    dist-video/promo.mp4 (1920×1080) · promo-hd.mp4 (نسخةُ مشاركةٍ تحت سقف حجم) · shots/*.png
 //
 // لا يلمس الإنتاج إطلاقاً: كل نداءٍ خارجيٍّ مُجهَض، وFirestore في الذاكرة.
 
@@ -25,9 +25,14 @@ const REPO = process.env.REPO_DIR || path.resolve(path.dirname(new URL(import.me
 const OUT = process.env.OUT_DIR || path.join(REPO, 'dist-video');
 const SHOTS = path.join(OUT, 'shots');
 const PROBE = process.argv.includes('--probe');
+// بلا بطاقتَي الافتتاح والختام — حين تأتيان من إعلان Remotion في `promo-assemble.mjs`.
+const NO_BOOKENDS = process.argv.includes('--no-bookends');
+const NAME = NO_BOOKENDS ? 'promo-body' : 'promo';
 const SPEED = Number(process.env.PROMO_SPEED || (PROBE ? 12 : 1));   // مُسرِّعٌ للتجريب
 
-fs.rmSync(OUT, { recursive: true, force: true });
+// تُمسح مخرجاتُ هذا السكربت وحدَها لا المجلّدُ كلُّه — فقد تجاور فيه أجزاءُ التجميع.
+fs.rmSync(SHOTS, { recursive: true, force: true });
+for (const f of [`${NAME}.webm`, `${NAME}.mp4`, 'promo-hd.mp4']) fs.rmSync(path.join(OUT, f), { force: true });
 fs.mkdirSync(SHOTS, { recursive: true });
 
 /* ═══════════════ مُحاكي Firestore — مصدرٌ واحدٌ مع فحوص المتصفّح ═══════════════ */
@@ -469,6 +474,10 @@ const context = await browser.newContext(Object.assign(
   PROBE ? {} : { recordVideo: { dir: OUT, size: { width: 1920, height: 1080 } } }
 ));
 const page = await context.newPage();
+// التسجيلُ يبدأ مع فتح السياق — أي قبل إقلاع التطبيق. في الوضع المجمَّع نقصّ رأسَ
+// الفيديو حتى لحظةِ استواء شاشة الدخول، وإلّا وقع الذوبانُ على تطبيقٍ نصفِ محمَّل.
+const T_REC = Date.now();
+let TRIM = 0;
 await page.addInitScript(MOCK_FIREBASE);
 await page.addInitScript(CDN_STUBS);
 
@@ -609,8 +618,10 @@ const APPV = await page.evaluate(() => (typeof APP_VERSION === 'string' ? APP_VE
 L(`  ${el()}  التطبيق أقلع — الإصدار ${APPV || '؟'}`);
 
 /* ───────── ١) الافتتاحية ───────── */
-await pv('flash', true);
-await titleCard('شركة المباني السريعة', 'نظام إدارة المرافق والمشتريات',
+// بلا بطاقةٍ: نبدأ على شاشة الدخول مباشرةً كي يذوب مشهدُ Remotion الفاتحُ في مثله.
+if (!NO_BOOKENDS) await pv('flash', true);
+if (NO_BOOKENDS) { TRIM = Math.max(0, (Date.now() - T_REC - 400) / 1000); await wait(700); }
+else await titleCard('شركة المباني السريعة', 'نظام إدارة المرافق والمشتريات',
   'منصّةٌ واحدةٌ تُدير البلاغات والمشتريات والمخزون والأصول والصيانة الوقائية — بأثرٍ كاملٍ لكلّ حركة', 5200, { shot: 'intro' });
 await pv('flash', false); await wait(500);
 await progress();
@@ -694,7 +705,9 @@ await progress();
 
 /* ───────── ٦) الخاتمة ───────── */
 await fadeTo(async () => { await pv('cursorOff'); });
-await titleCard('شركة المباني السريعة', 'نظامٌ واحدٌ — من البلاغ إلى التقرير',
+// نُنهي على آخر شاشةٍ بلا تعليق: الذوبانُ إلى مشهد ختام Remotion يتكفّل بالانتقال.
+if (NO_BOOKENDS) { await pv('lowerOff'); await wait(1100); }
+else await titleCard('شركة المباني السريعة', 'نظامٌ واحدٌ — من البلاغ إلى التقرير',
   'بلاغاتٌ ومشترياتٌ ومخزونٌ وعهدٌ وأصولٌ وصيانةٌ وقائيةٌ ومؤشّراتُ أداء · الإصدار ' + (APPV || ''),
   6400, { shot: 'outro', keep: true });
 await progress();
@@ -715,14 +728,15 @@ L(`  اللقطات: ${SHOTS} (${shotN} لقطة)`);
 
 /* ───────── الترميز إلى MP4 ───────── */
 if (!PROBE && vpath && fs.existsSync(vpath)) {
-  const webm = path.join(OUT, 'promo.webm');
+  const webm = path.join(OUT, `${NAME}.webm`);
   fs.renameSync(vpath, webm);
   let ff = null;
   try { ff = require('ffmpeg-static'); } catch { }
   if (ff && fs.existsSync(ff)) {
-    const mp4 = path.join(OUT, 'promo.mp4');
+    const mp4 = path.join(OUT, `${NAME}.mp4`);
     L('  ترميز MP4 (H.264)…');
-    const r = spawnSync(ff, ['-y', '-i', webm, '-vf', 'fps=30,scale=1920:1080:flags=lanczos',
+    const r = spawnSync(ff, ['-y', ...(TRIM > 0 ? ['-ss', TRIM.toFixed(2)] : []), '-i', webm,
+      '-vf', 'fps=30,scale=1920:1080:flags=lanczos',
       '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart', mp4], { stdio: ['ignore', 'ignore', 'pipe'] });
     if (r.status === 0 && fs.existsSync(mp4)) {
@@ -730,13 +744,24 @@ if (!PROBE && vpath && fs.existsSync(vpath)) {
       const d = spawnSync(ff, ['-i', mp4], { encoding: 'utf8' });
       const dur = (/Duration: (\d+:\d+:\d+\.\d+)/.exec(d.stderr || '') || [, '؟'])[1];
       L(`  ✅ الفيديو: ${mp4}  ·  ${mb} م.ب  ·  المدّة ${dur}`);
-      // نسخةٌ خفيفةٌ للمشاركة: الأصليّةُ ~٤٢ م.ب تتجاوز حدَّ المرفقات في واتساب والبريد.
-      const lite = path.join(OUT, 'promo-720.mp4');
-      const r2 = spawnSync(ff, ['-y', '-i', webm, '-vf', 'fps=30,scale=1280:720:flags=lanczos',
-        '-c:v', 'libx264', '-preset', 'slow', '-crf', '26', '-pix_fmt', 'yuv420p',
+      // نسخةُ مشاركةٍ تحت سقف حجم: الأصليّةُ ~٤٢ م.ب تتجاوز حدَّ المرفقات في واتساب
+      // والبريد. تبقى **1920×1080 كاملةً** ولا تُصغَّر — التصغيرُ يُذهب حدّةَ النصوص
+      // والجداول وهي جوهرُ المعروض؛ فالضبطُ بمعدّل بتٍّ محسوبٍ من السقف بمرورين.
+      // مروران بـpreset veryslow ⇒ نحو ربع ساعة لفيديو ثلاث دقائق. هذا ثمنُ الحدّة.
+      const lite = NO_BOOKENDS ? null : path.join(OUT, 'promo-hd.mp4');
+      if (!lite) { L('══════════════════════════════════════════════════════\n'); process.exit(0); }
+      const secs = (() => { const m = /Duration: (\d+):(\d+):(\d+\.\d+)/.exec(d.stderr || ''); return m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : 0; })();
+      const cap = Number(process.env.PROMO_MAX_MB || 28), abr = 96;
+      const vbr = secs > 0 ? Math.max(600, Math.floor((cap * 8192) / secs) - abr) : 1200;
+      const plog = path.join(OUT, 'x264');
+      const common = ['-c:v', 'libx264', '-preset', 'veryslow', '-b:v', `${vbr}k`, '-pix_fmt', 'yuv420p', '-passlogfile', plog];
+      L(`  نسخةُ المشاركة 1080p — سقف ${cap} م.ب (${vbr} ك.ب/ث، مروران)…`);
+      spawnSync(ff, ['-y', '-i', mp4, ...common, '-pass', '1', '-an', '-f', 'mp4', '/dev/null'], { stdio: ['ignore', 'ignore', 'pipe'] });
+      const r2 = spawnSync(ff, ['-y', '-i', mp4, ...common, '-pass', '2', '-an',
         '-movflags', '+faststart', lite], { stdio: ['ignore', 'ignore', 'pipe'] });
+      for (const f of fs.readdirSync(OUT)) if (f.startsWith('x264')) fs.rmSync(path.join(OUT, f), { force: true });
       if (r2.status === 0 && fs.existsSync(lite))
-        L(`  ✅ نسخةُ المشاركة: ${lite}  ·  ${(fs.statSync(lite).size / 1048576).toFixed(1)} م.ب  ·  1280×720`);
+        L(`  ✅ نسخةُ المشاركة: ${lite}  ·  ${(fs.statSync(lite).size / 1048576).toFixed(1)} م.ب  ·  1920×1080`);
     } else {
       L('  ❌ فشل الترميز — يبقى WebM: ' + webm);
       L(String(r.stderr || '').split('\n').slice(-6).join('\n'));
