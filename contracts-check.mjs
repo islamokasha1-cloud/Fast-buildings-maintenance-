@@ -401,7 +401,7 @@ check('بطاقةُ الطلب تعرض «جاهزٌ لإنشاء العقد»',
   ((await page.textContent('#page-contract-requests')) || '').includes('جاهزٌ لإنشاء العقد'));
 await page.screenshot({ path: `${SHOTS}/11-request-approved.png`, fullPage: true });
 
-// أمرُ دفعٍ صغير: يتخطّى المشتريات والمالية ⇒ سدادٌ مباشرةً بعد مدير المشاريع
+// أمرُ دفعٍ صغير: مديرُ المشاريع ← المشتريات ← سدادُ المالية (بلا بوّابةِ اعتمادٍ ماليّ)
 const payStages = await page.evaluate(async () => {
   const d = {
     engagement: 'pay_order', projectId: 'hail', title: 'ترميم بابٍ واحد', vendorId: 'VND-0006',
@@ -413,10 +413,13 @@ const payStages = await page.evaluate(async () => {
   const out = [window.contracts.requestById(id).status];
   await window.contracts._act(id, 'approve', '');
   out.push(window.contracts.requestById(id).status);
+  await window.contracts._act(id, 'approve', '');
+  out.push(window.contracts.requestById(id).status);
   return { id, out };
 });
-check('★ أمرُ دفعٍ بـ١٥٠٠: مدير المشاريع ⇐ سدادُ المالية مباشرةً (بلا مشتريات ولا اعتمادِ مالية)',
-  payStages.out.join(' → ') === 'crq_pending_pm → crq_pending_pay', payStages.out.join(' → '));
+check('★★ أمرُ دفعٍ بـ١٥٠٠: مدير المشاريع ⇐ المشتريات ⇐ سدادُ المالية',
+  payStages.out.join(' → ') === 'crq_pending_pm → crq_pending_proc → crq_pending_pay',
+  payStages.out.join(' → '));
 
 // السدادُ يُرفض بلا إيصال
 const noReceipt = await page.evaluate(async (id) => {
@@ -436,6 +439,68 @@ const wrongGate = await page.evaluate(async (id) => {
   return msg;
 }, payStages.id);
 check('★ دورٌ لا يملك البوّابة يُرفض في طبقة البيانات', /ليست لدورك/.test(wrongGate), wrongGate);
+
+/* ── حذفُ الطلبات الملغاة للأدمن (طلبُ المالك) ──
+   الفعلُ الوحيدُ الذي لا رجعةَ فيه — فالفحصُ يُثبت البابَ **وحدودَه** في طبقة
+   البيانات نفسِها: حيٌّ لا يُحذف · غيرُ الأدمن لا يحذف · والملغى يُحذف فعلاً
+   ويسقط من الشاشة. (والقواعدُ على الخادم يفحصها `rules-check.mjs` على محاكٍ.) */
+const delGuards = await page.evaluate(async () => {
+  const d = {
+    engagement: 'pay_order', projectId: 'hail', title: 'طلبٌ سيُلغى', vendorId: 'VND-0006',
+    vendorName: 'راجو كومار', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'z', desc: 'عملٌ ملغى', unit: 'عدد', qty: 1, unitPrice: 500 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  };
+  const id = await window.contracts._create(d);
+  const out = { id };
+  try { await window.contracts._delete(id); out.live = 'حُذف وهو حيّ'; }
+  catch (e) { out.live = e.message; }
+  await window.contracts._cancel(id, 'لم يعد مطلوباً');
+  out.status = window.contracts.requestById(id).status;
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  try { await window.contracts._delete(id); out.notAdmin = 'حُذف بغير أدمن'; }
+  catch (e) { out.notAdmin = e.message; }
+  currentUser.role = real;
+  await window.contracts._delete(id);
+  out.gone = !window.contracts.requestById(id);
+  out.inStore = Object.keys(window.__store).filter(k => k.endsWith('/' + id)).length;
+  return out;
+});
+check('★★ الطلبُ الحيُّ لا يُحذف ولو من الأدمن', /لا يُحذف إلا الطلبُ الملغى/.test(delGuards.live), delGuards.live);
+check('★ والإلغاءُ ينقله إلى «ملغى»', delGuards.status === 'crq_cancelled', delGuards.status);
+check('★★ والملغى لا يحذفه غيرُ الأدمن', /للأدمن فقط/.test(delGuards.notAdmin), delGuards.notAdmin);
+check('★★ والأدمن يحذف الملغى — يسقط من الذاكرة **ومن المخزن**',
+  delGuards.gone === true && delGuards.inStore === 0, JSON.stringify(delGuards));
+
+// ثمّ المسارُ من الشاشة نفسِها: الزرُّ يظهر على الملغى وحدَه، وضغطُه يحذف فعلاً
+const delId = await page.evaluate(async () => {
+  const id = await window.contracts._create({
+    engagement: 'pay_order', projectId: 'hail', title: 'طلبٌ يُحذف من الشاشة', vendorId: 'VND-0006',
+    vendorName: 'راجو كومار', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'z2', desc: 'عملٌ ملغى', unit: 'عدد', qty: 1, unitPrice: 400 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  });
+  window.contracts.openReq(id);
+  return id;
+});
+await page.waitForTimeout(900);
+check('★ ولا زرَّ حذفٍ على طلبٍ حيّ (البابُ لا يُعرَض حيث لا يُفتح)',
+  !((await page.textContent('#page-contract-requests')) || '').includes('حذف الطلب'));
+await page.evaluate(async (id) => { await window.contracts._cancel(id, 'تكرار'); window.contracts.openReq(id); }, delId);
+await page.waitForTimeout(900);
+check('★★ وزرُّ «حذف الطلب» يظهر للأدمن على الملغى',
+  ((await page.textContent('#page-contract-requests')) || '').includes('حذف الطلب'));
+await page.screenshot({ path: `${SHOTS}/12b-cancelled-delete.png`, fullPage: true });
+await page.evaluate(() => window.contracts.doDelete());
+await page.waitForTimeout(600);
+await page.click('#confirm-ok-btn');
+await page.waitForTimeout(1200);
+const afterDel = await page.evaluate((id) => ({
+  gone: !window.contracts.requestById(id),
+  onList: ((document.getElementById('page-contract-requests') || {}).textContent || '').includes(id)
+}), delId);
+check('★★ وضغطُ الزرِّ يحذفه فعلاً ويعود لقائمةٍ بلا أثرٍ له',
+  afterDel.gone === true && afterDel.onList === false, JSON.stringify(afterDel));
 
 /* ── مشروعٌ يدويٌّ بلا موازنة: الربطُ اختياريٌّ فعلاً ── */
 await page.evaluate(() => window.contracts.newRequest());

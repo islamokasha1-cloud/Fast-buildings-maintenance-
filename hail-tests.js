@@ -6051,10 +6051,17 @@ function contractsPhase1() {
     ns({ ...big, value: 60000, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x", ceoApprovedAt: "x", ceoApprovedAmount: 50000 }) === "crq_pending_ceo");
   T("طلبٌ تحت السقف يُعتمد بلا التنفيذي",
     ns({ engagement: "contract", value: 1500, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x" }) === "crq_approved");
-  T("★ أمر الدفع يتخطّى المشتريات واعتمادَ المالية ⇐ السداد مباشرةً بعد مدير المشاريع",
-    ns({ engagement: "pay_order", value: 1500, pmApprovedAt: "x" }) === "crq_pending_pay");
-  T("★ لكنه لا يتخطّى بوّابة التنفيذي — السقف سقفُ المال لا سقفُ نوع الورقة",
-    ns({ engagement: "pay_order", value: 2500, pmApprovedAt: "x" }) === "crq_pending_ceo");
+  /* ★★ أمرُ الدفع صار يمرّ بالمشتريات (طلبُ المالك): مدير المشاريع ← المشتريات ←
+     سدادُ المالية. المشتريات هي التي تسأل «أهذا الطرفُ صحيحٌ وسعرُه معقول؟» — ولا
+     يُعوّضها مديرُ المشاريع (يراجع الحاجة) ولا المالية (تُنفّذ السداد ولا تُقرّر). */
+  T("★★ أمرُ الدفع يمرّ بالمشتريات بعد مدير المشاريع",
+    ns({ engagement: "pay_order", value: 1500, pmApprovedAt: "x" }) === "crq_pending_proc");
+  T("★★ ثم سدادُ المالية مباشرةً — بلا بوّابةِ اعتمادٍ ماليٍّ (لا شروطَ تجاريةً تُراجَع)",
+    ns({ engagement: "pay_order", value: 1500, pmApprovedAt: "x", procApprovedAt: "x" }) === "crq_pending_pay");
+  T("★ ولا يتخطّى بوّابة التنفيذي — السقف سقفُ المال لا سقفُ نوع الورقة",
+    ns({ engagement: "pay_order", value: 2500, pmApprovedAt: "x", procApprovedAt: "x" }) === "crq_pending_ceo");
+  T("★ وبوّابةُ التنفيذي **بعد** المشتريات لا قبلها (لا يوقّع التنفيذيُّ على ما لم يُراجَع)",
+    ns({ engagement: "pay_order", value: 2500, pmApprovedAt: "x" }) === "crq_pending_proc");
   T("★ البوّابة تُحسب من القيمة لا من علَمٍ يختاره المُنشئ",
     ns({ engagement: "contract", value: 50000, needsCeo: false, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x" }) === "crq_pending_ceo");
 
@@ -6965,6 +6972,8 @@ function contractsPhase1() {
     const rulesPath = path.resolve(path.dirname(IDX), "firestore.rules");
     const RUL = fs.existsSync(rulesPath) ? fs.readFileSync(rulesPath, "utf8") : "";
     T("ملفُّ قواعد Firestore موجود", RUL.length > 0);
+    const rcPath = path.resolve(path.dirname(IDX), "rules-check.mjs");
+    const RULES_CHECK = fs.existsSync(rcPath) ? fs.readFileSync(rcPath, "utf8") : "";
 
     /* ★ الحارسُ الأهمّ: القاعدةُ العامة تسمح لكلّ دورٍ بالكتابة في كلّ شيء، وقواعدُ
        Firestore تُقيَّم بـ«أو» — فما لم تُستثنَ مجموعاتُ التعاقدات منها، كلُّ القفل
@@ -7001,8 +7010,18 @@ function contractsPhase1() {
        كلّ عقد. الحارسُ يُثبّت الاستثناءَ لئلّا يُحذَف بحسن نيّةٍ عند «تنظيف» القواعد. */
     T("★★ والماليةُ مأذونٌ لها بالإنهاء الفنّيّ — لأنّ المستخلصَ الختاميَّ يفعلها في معاملتها",
       /to == 'ctr_completed'[\s\S]{0,120}'finance'/.test(transitBlock));
-    T("★ ولا حذفَ للعقود ولا للطلبات ولا للمستخلصات من العميل",
+    /* الحذفُ ممنوعٌ في كلّ مجموعاتِ التعاقدات — **إلا** بابٌ واحدٌ ضيّقٌ فُتح
+       بطلب المالك: الأدمن يحذف طلباً **ملغى** (ورقةٌ ماتت قبل أن تُنتج أثراً).
+       الحارسُ يُثبّت الحدَّين معاً: بقيةُ المجموعات مقفلةٌ بـ`if false`، والبابُ
+       المفتوحُ مشروطٌ بالأدمن **وبالحالة الملغاة** لا بأحدهما. */
+    T("★ ولا حذفَ للعقود ولا للمستخلصات ولا لأوامر التغيير من العميل",
       (RUL.match(/allow delete: if false;/g) || []).length >= 6);
+    T("★★ وحذفُ طلب التعاقد مشروطٌ بالأدمن **وبالحالة الملغاة** معاً",
+      /function crqDeleteOk\(\) \{[\s\S]{0,200}isAdmin\(\) && resource\.data\.status == 'crq_cancelled'/.test(RUL) &&
+      (RUL.match(/allow delete: if crqDeleteOk\(\);/g) || []).length === 2);
+    T("★ والفحصُ على المحاكي يُثبت البابَ وحدودَه (حيٌّ · مسدَّدٌ · محوَّلٌ · غيرُ أدمن)",
+      /crq_cancelled[\s\S]{0,600}deleteDoc\(doc\(ADMIN/.test(RULES_CHECK) &&
+      /deleteDoc\(doc\(PROC/.test(RULES_CHECK) && /RPAID/.test(RULES_CHECK));
     T("★ والآيبانُ لا يتغيّر إلا بيد المالية أو الأدمن",
       /ibanOf\(request\.resource\.data\) == ibanOf\(resource\.data\) \|\| anyRole\(\['finance','admin'\]\)/.test(RUL));
 
@@ -7105,6 +7124,27 @@ function contractsPhase1() {
       /_page===PAGE_VENDORS\) paintVendors\(\)/.test(src));
     T("★ ونمطُ الزرّ من توكنز المنصة داخل الخانة (لا يُزاحم الاسمَ على الجوال)",
       /\.ct-vbtn\{/.test(src) && /ct-vbtn/.test(src));
+  }
+
+  /* ── حذفُ الطلبات الملغاة للأدمن (طلبُ المالك) ──
+     الفعلُ الوحيدُ في الوحدة الذي **لا رجعةَ فيه**، فحدُّه ضيّقٌ بثلاث طبقات:
+     الزرُّ لا يظهر إلا للأدمن على ملغى · وطبقةُ البيانات ترفض غيرَ ذلك بعد قراءة
+     **الوثيقة الطازجة** · وقواعدُ الخادم تقول القاعدةَ نفسَها فلا تكفي واجهةٌ مزوَّرة. */
+  {
+    T("★★ الحذفُ للأدمن وحدَه — والرفضُ في طبقة البيانات لا على الزرّ",
+      /function deleteRequest\(id\)[\s\S]{0,300}_role\(\) !== "admin"[\s\S]{0,60}حذف الطلبات للأدمن فقط/.test(src));
+    T("★★ ولا يُحذف إلا **الملغى**، والحالةُ تُقرأ من الوثيقة الطازجة لا من المرآة",
+      /function deleteRequest[\s\S]{0,500}ref\.get\(\)[\s\S]{0,400}r\.status !== "crq_cancelled"[\s\S]{0,80}لا يُحذف إلا الطلبُ الملغى/.test(src));
+    T("★ والمرآةُ المحلّيةُ تُنظَّف والبطاقةُ المفتوحةُ تُغلق (لا بطاقةٌ لوثيقةٍ محذوفة)",
+      /function deleteRequest[\s\S]{0,700}_reqs\.splice\(i,1\)[\s\S]{0,120}if\(_rOpen===id\) _rOpen=null;/.test(src));
+    T("★★ والحذفُ يُسجَّل في التدقيق (ما حُذف يبقى مذكوراً)",
+      /function deleteRequest[\s\S]{0,800}_audit\("حذف طلب تعاقد ملغى"/.test(src));
+    T("★ والزرُّ لا يظهر إلا للأدمن على طلبٍ ملغى",
+      /r\.status==="crq_cancelled" && _role\(\)==="admin"[\s\S]{0,200}contracts\.doDelete\(\)/.test(src));
+    T("★ والتأكيدُ يقول «لا رجعة» ويذكر المعرّفَ الذي سيُمحى",
+      /function doDelete\(\)[\s\S]{0,600}kind:"danger"[\s\S]{0,400}لا يمكن استرجاعه/.test(src));
+    T("★ والمقبضان مكشوفان (الشاشةُ والبيانات) لفحص المتصفّح",
+      /doDelete: doDelete/.test(src) && /_delete: deleteRequest/.test(src));
   }
 
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */

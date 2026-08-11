@@ -102,7 +102,25 @@ await seed(`${R}/R2`, Object.assign({}, REQ, { status: "crq_pending_pay" }));
 await check("★ والسدادُ للمالية وحدَها", assertFails(updateDoc(doc(PROC, `${R}/R2`), { status: "crq_paid" })));
 await check("والماليةُ تُسدّد", assertSucceeds(updateDoc(doc(FIN, `${R}/R2`), { status: "crq_paid" })));
 await check("★ والمسدَّدُ لا يُفتح ثانيةً", assertFails(updateDoc(doc(ADMIN, `${R}/R2`), { status: "crq_pending_pay" })));
-await check("ولا يُحذف طلبٌ من العميل أبداً", assertFails(deleteDoc(doc(ADMIN, `${R}/R1`))));
+/* ★★ الحذفُ: بابٌ ضيّقٌ فُتح للأدمن على **الملغى وحدَه** (طلبُ المالك).
+   الملغى ورقةٌ ماتت قبل أن تُنتج أثراً — لا عقدَ ولا سداد. وما عداه أثرٌ ماليٌّ
+   يُقرأ ولا يُمحى، ولو كان الطالبُ أدمن. والفحصُ يكتب فعلاً ويقرأ الرفض. */
+await check("★★ ولا يُحذف طلبٌ حيٌّ ولو من الأدمن (بوّابةٌ مفتوحة)",
+  assertFails(deleteDoc(doc(ADMIN, `${R}/R1`))));
+await seed(`${R}/RDEL`, Object.assign({}, REQ, { status: "crq_cancelled" }));
+await check("★★ والأدمن يحذف الملغى (البابُ المطلوب)",
+  assertSucceeds(deleteDoc(doc(ADMIN, `${R}/RDEL`))));
+await seed(`${R}/RDEL2`, Object.assign({}, REQ, { status: "crq_cancelled" }));
+await check("★★ ولا يحذفه غيرُ الأدمن ولو كان صاحبَ بوّابةٍ",
+  assertFails(deleteDoc(doc(PROC, `${R}/RDEL2`))));
+await check("★ ولا مديرُ المشاريع مُنشئُ الطلب",
+  assertFails(deleteDoc(doc(PM, `${R}/RDEL2`))));
+await seed(`${R}/RPAID`, Object.assign({}, REQ, { status: "crq_paid" }));
+await check("★★ ولا يُحذف المسدَّدُ ولو من الأدمن (أثرٌ ماليٌّ لا يُمحى)",
+  assertFails(deleteDoc(doc(ADMIN, `${R}/RPAID`))));
+await seed(`${R}/RCONV`, Object.assign({}, REQ, { status: "crq_converted", contractId: "CT-1" }));
+await check("★ ولا المحوَّلُ إلى عقد (وإلا صار عقدٌ بلا طلبٍ يفسّره)",
+  assertFails(deleteDoc(doc(ADMIN, `${R}/RCONV`))));
 
 /* ═════════ ٣) العقد — الانتقالات ═════════ */
 head("٣) العقد — جدولُ الانتقالات على الخادم");
