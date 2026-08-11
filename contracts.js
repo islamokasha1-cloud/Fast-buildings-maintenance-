@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2545";
+var MODULE_BUILD = "v18.9.2548";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1190,7 +1190,28 @@ function _role(){ var u=_user(); return (u && u.role) ? u.role : ""; }
 function _me(){ var u=_user(); return (u && u.name) || "النظام"; }
 function _now(){ return new Date().toISOString(); }
 function _audit(a,d){ try{ if(typeof logAudit==="function") logAudit(a,d); }catch(e){} }
-function _confirm(o){ try{ return showConfirm(o); }catch(e){ return Promise.resolve(window.confirm((o&&o.msg)||"تأكيد؟")); } }
+/* نافذةُ التأكيد: `showConfirm` افتراضاتُها **للحذف** (سلّةٌ حمراء وزرُّ «حذف»)،
+   فاعتمادُ طلبٍ كان يظهر بزرِّ حذفٍ أحمر — نصٌّ يناقض الفعل. لذا تُمرَّر نيّةُ
+   الإجراء (`kind`) صراحةً، وافتراضُنا محايدٌ لا مدمِّر.
+   وهي كذلك **تَرفُض** عند «إلغاء» بـ`false`، فكان الإلغاءُ يهبط في `catch` المُستدعي
+   ويظهر تنبيهُ «تعذّر الإجراء» بلا خطأ. فنُطبّعها هنا إلى وعدٍ يُحلّ دائماً:
+   `true` للموافقة و`false` لغيرها — والخطأُ الحقيقيُّ وحدَه يبقى خطأً. */
+var _CONFIRM_KINDS = {
+  neutral: { icon:"❓", okText:"متابعة",  okClass:"btn-primary" },
+  approve: { icon:"✅", okText:"اعتماد",  okClass:"btn-primary" },
+  reject:  { icon:"↩",  okText:"رفض / إعادة", okClass:"btn-danger" },
+  danger:  { icon:"⚠",  okText:"متابعة",  okClass:"btn-danger" }
+};
+function _confirm(o){
+  var opt = Object.assign({}, _CONFIRM_KINDS[(o&&o.kind)||"neutral"], o||{});
+  delete opt.kind;
+  try{
+    return Promise.resolve(showConfirm(opt)).then(
+      function(v){ return v !== false; },
+      function(){ return false; }
+    );
+  }catch(e){ return Promise.resolve(window.confirm(opt.msg||"تأكيد؟")); }
+}
 function _today(){ return new Date(); }
 
 function money(n){ return (Number(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -1426,6 +1447,20 @@ function genReqId(){
     .catch(function(e){ console.warn("contracts/genReqId",e); return fallback; });
 }
 
+/* المرآةُ المحلّيةُ تُحدَّث **بالمعرّف** لا بإضافةٍ عمياء.
+   جذرُ العلّة: مستمعُ Firestore يعرض الكتابةَ محلّياً (تعويضُ الكمون) قبل أن يُحلَّ
+   وعدُ `set()`، فيكون الطلبُ قد دخل المصفوفةَ من اللقطة؛ ثمّ تُضيفه الإضافةُ بعده
+   مرّةً ثانية — فتظهر بطاقتان لطلبٍ واحدٍ بالمعرّف نفسِه، وتُحسب مرّتين في
+   العدّادات. الإسنادُ بالمعرّف يجعل التكرارَ مستحيلاً مهما كان ترتيبُ الوصول. */
+function _mirror(arr, doc, front){
+  if(!Array.isArray(arr) || !doc || !doc.id) return arr;
+  var i = arr.findIndex(function(x){ return x && x.id === doc.id; });
+  if(i >= 0) arr[i] = doc;
+  else if(front) arr.unshift(doc);
+  else arr.push(doc);
+  return arr;
+}
+
 function _pushTimeline(doc, event, code, note){
   if(!Array.isArray(doc.timeline)) doc.timeline=[];
   doc.timeline.push({ event:event, code:code, by:_me(), at:_now(), note:note||"" });
@@ -1443,7 +1478,7 @@ function createRequest(draft){
     _pushTimeline(doc, "إنشاء الطلب", "created",
       (ENGAGEMENTS[doc.engagement]||{}).lbl + " — " + money(doc.value) + " ر.س");
     return database.collection(REQUESTS_COL()).doc(id).set(doc).then(function(){
-      doc.id=id; _reqs.unshift(doc);
+      doc.id=id; _mirror(_reqs, doc, true);
       _audit("إنشاء طلب تعاقد", id+" — "+(doc.vendorName||"")+" — "+money(doc.value)+" ر.س");
       _notify("طلب تعاقد جديد", id+" — "+(doc.vendorName||"")+" — "+money(doc.value)+" ر.س", id);
       return id;
@@ -1489,8 +1524,7 @@ function actOnRequest(id, action, note){
       return r;
     });
   }).then(function(r){
-    var i=_reqs.findIndex(function(x){ return x.id===id; });
-    if(i>=0) _reqs[i]=r; else _reqs.unshift(r);
+    _mirror(_reqs, r, true);
     _audit("إجراء على طلب تعاقد", id+" ⇐ "+(CRQ_STATUS[r.status]||r.status));
     _notify("طلب تعاقد "+id, CRQ_STATUS[r.status]||r.status, id);
     return r;
@@ -1629,8 +1663,8 @@ function convertToContract(reqId){
   }).then(function(res){
     if(res.already) return res.id;
     // تحديثُ الذاكرة المحلية بنتيجة المعاملة فوراً (درسُ finance-audit)
-    if(res.contract){ var ci=_ctrs.findIndex(function(x){ return x.id===res.id; }); if(ci<0) _ctrs.unshift(res.contract); }
-    if(res.request){ var ri=_reqs.findIndex(function(x){ return x.id===reqId; }); if(ri>=0) _reqs[ri]=res.request; }
+    if(res.contract) _mirror(_ctrs, res.contract, true);
+    if(res.request)  _mirror(_reqs, res.request, true);
     _audit("إنشاء عقد من طلب تعاقد", res.id+" ← "+reqId);
     _notify("عقدٌ جديد "+res.id, (res.contract&&res.contract.vendorName)||"", res.id);
     return res.id;
@@ -1809,7 +1843,7 @@ function createExtract(contract, draft){
     doc.status = extNextStage(doc, calc.net, ceoThreshold());
     _pushTimeline(doc, "إعداد المستخلص", "created", "صافي "+money(calc.net)+" ر.س");
     return database.collection(EXTRACTS_COL()).doc(id).set(doc).then(function(){
-      doc.id=id; _exts.push(doc);
+      doc.id=id; _mirror(_exts, doc, false);
       _audit("إعداد مستخلص", id+" — "+contract.id+" — صافي "+money(calc.net)+" ر.س");
       _notify("مستخلصٌ جديد "+id, contract.vendorName||"", id);
       return id;
@@ -1970,7 +2004,7 @@ function createChange(contract, draft){
     _pushTimeline(doc, "إنشاء أمر التغيير", "created",
       (doc.amount>=0?"زيادة ":"خفض ")+money(Math.abs(doc.amount))+" ر.س");
     return database.collection(CHANGES_COL()).doc(id).set(doc).then(function(){
-      doc.id=id; _chgs.push(doc);
+      doc.id=id; _mirror(_chgs, doc, false);
       _audit("إنشاء أمر تغيير", id+" — "+contract.id+" — "+money(doc.amount)+" ر.س");
       _notify("أمرُ تغييرٍ جديد "+id, (contract.vendorName||"")+" — "+money(doc.amount)+" ر.س", id);
       return id;
@@ -2667,6 +2701,8 @@ function changeStatus(next){
   var v = vendorById(_vOpen); if(!v) return;
   var lbl = (VENDOR_STATUS[next]||{}).lbl || next;
   Promise.resolve(_confirm({
+    kind: next==="blacklisted" ? "danger" : "neutral",
+    icon: next==="blacklisted" ? "🚫" : "🔄", okText: "تغيير الحالة",
     title: "تغيير حالة الطرف",
     msg: 'هل تريد جعل «'+(v.name||v.id)+'» بحالة «'+lbl+'»؟'+(next==="blacklisted"?" الطرف المحظور لا يجوز الإسناد إليه.":"")
   })).then(function(ok){
@@ -3309,6 +3345,7 @@ function act(action){
   var r=requestById(_rOpen); if(!r) return;
   var isRej = action==="reject";
   Promise.resolve(_confirm({
+    kind: isRej?"reject":"approve",
     title: isRej?"رفض / إعادة الطلب":"اعتماد الطلب",
     msg: isRej ? "سيعود الطلب لمُنشئه للتصحيح. اكتب السبب في الخطوة التالية."
                : 'اعتماد «'+(r.title||r.id)+'» بقيمة '+money(r.value)+' ر.س؟'
@@ -3328,7 +3365,8 @@ function act(action){
   });
 }
 function doCancel(){
-  Promise.resolve(_confirm({ title:"إلغاء الطلب", msg:"سيُغلق الطلب نهائياً. متابعة؟" })).then(function(ok){
+  Promise.resolve(_confirm({ kind:"danger", icon:"🚫", okText:"إلغاء الطلب",
+    title:"إلغاء الطلب", msg:"سيُغلق الطلب نهائياً. متابعة؟" })).then(function(ok){
     if(!ok) return;
     var reason=(window.prompt("سبب الإلغاء:")||"").trim();
     return cancelRequest(_rOpen, reason).then(function(){ paintReqs(); _toast("✅ أُلغي الطلب","success"); });
@@ -4496,7 +4534,10 @@ function openCtrFromReq(cid){ try{ showPage(PAGE_CTRS); }catch(e){} openCtr(cid)
 function transit(action){
   var c=contractById(_cOpen); if(!c) return;
   var t=CTR_TRANSITIONS[action]; if(!t) return;
-  Promise.resolve(_confirm({ title:t.lbl, msg:'«'+(c.title||c.id)+'» — '+t.lbl+'؟' })).then(function(ok){
+  /* الفسخُ والإيقافُ إجراءان يُفقدان عملاً — لهما الزرُّ الأحمر؛ وما عداهما تقدُّمٌ
+     في دورة حياة العقد، فزرُّه محايد. */
+  Promise.resolve(_confirm({ kind:t.needsReason?"danger":"approve", okText:t.lbl,
+    title:t.lbl, msg:'«'+(c.title||c.id)+'» — '+t.lbl+'؟' })).then(function(ok){
     if(!ok) return;
     var reason="";
     if(t.needsReason){
@@ -4815,7 +4856,8 @@ function submitExtract(){
 function extAct(action){
   var e=extractById(_extOpen); if(!e) return;
   var isRej=action==="reject";
-  Promise.resolve(_confirm({ title:isRej?"رفض / إعادة المستخلص":"اعتماد المستخلص",
+  Promise.resolve(_confirm({ kind:isRej?"reject":"approve",
+    title:isRej?"رفض / إعادة المستخلص":"اعتماد المستخلص",
     msg:isRej?"سيعود المستخلص لمُعِدّه للتصحيح.":"اعتماد المستخلص "+e.id+"؟" })).then(function(ok){
     if(!ok) return;
     var note="";
@@ -4866,6 +4908,7 @@ function doExtPay(){
 function makeContract(){
   var r=requestById(_rOpen); if(!r) return;
   Promise.resolve(_confirm({
+    kind:"approve", icon:"📄", okText:"إنشاء العقد",
     title:"إنشاء العقد",
     msg:'سيُنشأ عقدٌ سارٍ من «'+(r.title||r.id)+'» بقيمة '+money(r.value)+' ر.س، ويُقفل الطلب.'
   })).then(function(ok){
@@ -5200,6 +5243,7 @@ window.contracts = {
   // تحرسها الشاشة، لا نسخةً منها: الرفضُ يجب أن يقع في البيانات لا على الزرّ.
   _create: createRequest, _act: actOnRequest, _pay: payRequest, _cancel: cancelRequest,
   _draft: function(){ return _rDraft; },
+  _mirror: _mirror, _confirm: _confirm, _CONFIRM_KINDS: _CONFIRM_KINDS,
   // الصلاحيات
   // الرابطُ العميق من رسالة واتساب [المرحلة ٩]
   openById: openById, ownsId: ctrOwnsId, _idKind: ctrIdKind,

@@ -7020,6 +7020,69 @@ function contractsPhase1() {
     }
   }
 
+  /* ════════════════════════════════════════════════════════════
+     المرآةُ المحلّية ونافذةُ التأكيد — علّتان ظهرتا للمالك في شاشةٍ واحدة
+     ════════════════════════════════════════════════════════════
+     **(أ) الطلبُ يظهر مرّتين.** بعد إنشاء طلب تعاقدٍ واحدٍ ظهرت بطاقتان
+     **بالمعرّف نفسِه** (CRQ-2608-0002) وعُدَّ الطلبُ مرّتين في العدّادات. الجذرُ ليس
+     إرسالاً مكرّراً — لو كان كذلك لاختلف المعرّفان: مستمعُ Firestore يعرض الكتابةَ
+     محلّياً (تعويضُ الكمون) **قبل** أن يُحلَّ وعدُ `set()`، فتدخل الوثيقةُ المصفوفةَ
+     من اللقطة، ثمّ تُضيفها إضافةٌ عمياءُ بعدها مرّةً ثانية.
+     **(ب) الاعتمادُ بزرِّ حذف.** `showConfirm` افتراضاتُها للحذف (سلّةٌ وزرٌّ أحمر
+     نصُّه «حذف»)، ونداءاتُ الوحدة كانت تمرّر العنوانَ والنصَّ فقط — فسأل المربّعُ
+     «اعتماد الطلب» وزرُّه يقول «حذف». وهي كذلك **تَرفُض** عند الإلغاء، فكانت
+     نقرةُ «إلغاء» تهبط في `catch` وتُظهر «تعذّر الإجراء» بلا خطأ. */
+  {
+    T("★★ الإضافةُ إلى المرآة المحلّية تمرّ بـ`_mirror` وحدَها (لا إضافةً عمياء)",
+      typeof C._mirror === "function" &&
+      !/_(reqs|ctrs|exts|chgs)\.(unshift|push)\(/.test(src));
+    T("★★ و`_mirror` يُسند بالمعرّف فلا تتكرّر الوثيقةُ مهما سبقت اللقطةُ الوعد",
+      (function () {
+        if (typeof C._mirror !== "function") return false;
+        const arr = [];
+        C._mirror(arr, { id: "CRQ-1", v: 1 }, true);        // وعدُ الإنشاء
+        C._mirror(arr, { id: "CRQ-1", v: 2 }, true);        // اللقطةُ نفسُها ثانيةً
+        C._mirror(arr, { id: "CRQ-2", v: 9 }, true);
+        return arr.length === 2 && arr[0].id === "CRQ-2" &&
+               arr[1].id === "CRQ-1" && arr[1].v === 2;      // الأحدثُ يدهس الأقدم
+      })());
+    T("★ والإدراجُ في المؤخّرة متاحٌ للمستخلصات وأوامر التغيير بلا تكرار",
+      (function () {
+        const arr = [{ id: "A" }];
+        C._mirror(arr, { id: "B" }, false);
+        C._mirror(arr, { id: "B" }, false);
+        return arr.length === 2 && arr[1].id === "B";
+      })());
+    T("★ ووثيقةٌ بلا معرّفٍ لا تدخل المرآة (لا سطرَ أشباحٍ بلا هوية)",
+      (function () { const a = []; C._mirror(a, { v: 1 }, true); return a.length === 0; })());
+
+    T("★★ كلُّ نداءِ تأكيدٍ يُصرّح بنيّته — فلا يظهر الاعتمادُ بزرِّ حذف",
+      (function () {
+        const calls = src.match(/_confirm\(\{[\s\S]{0,500}?\}\)\)/g) || [];
+        return calls.length >= 5 && calls.every(c => /\bkind\s*:/.test(c));
+      })());
+    T("★ والافتراضُ محايدٌ لا مدمِّر (لا سلّةَ حذفٍ ولا زرَّ أحمرَ بلا سبب)",
+      C._CONFIRM_KINDS && C._CONFIRM_KINDS.neutral.okClass !== "btn-danger" &&
+      C._CONFIRM_KINDS.neutral.okText !== "حذف" &&
+      C._CONFIRM_KINDS.approve.okClass === "btn-primary" &&
+      C._CONFIRM_KINDS.approve.icon !== "🗑");
+    if (typeof C._confirm === "function") {
+      const seen = [];
+      sandbox.showConfirm = o => { seen.push(o); return Promise.resolve(true); };
+      _deferred.push(C._confirm({ kind: "approve", title: "اعتماد الطلب", msg: "؟" }).then(ok => {
+        T("★★ نيّةُ «اعتماد» تُترجَم إلى زرِّ اعتمادٍ لا زرِّ حذف",
+          ok === true && seen.length === 1 && seen[0].okText === "اعتماد" &&
+          seen[0].okClass === "btn-primary" && seen[0].icon !== "🗑" &&
+          seen[0].kind === undefined, JSON.stringify(seen[0] || {}));
+      }));
+      sandbox.showConfirm = () => Promise.reject(false);   // ما تفعله «إلغاء» فعلاً
+      _deferred.push(C._confirm({ kind: "approve", msg: "؟" }).then(v => {
+        T("★★ و«إلغاء» تُحلّ بـ`false` ولا تُرفَض — فلا تنبيهَ «تعذّر الإجراء» بلا خطأ",
+          v === false, String(v));
+      }, () => T("★★ و«إلغاء» تُحلّ بـ`false` ولا تُرفَض — فلا تنبيهَ «تعذّر الإجراء» بلا خطأ", false, "رُفض الوعد")));
+    } else T("★★ `_confirm` مكشوفةٌ للفحص", false);
+  }
+
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
   const rawHex = (css.match(/#[0-9a-fA-F]{3,8}\b/g) || []);
