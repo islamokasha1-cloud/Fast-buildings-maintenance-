@@ -7083,6 +7083,30 @@ function contractsPhase1() {
     } else T("★★ `_confirm` مكشوفةٌ للفحص", false);
   }
 
+  /* ── زرُّ «تفاصيل الطرف» في بطاقتَي الطلب والعقد (طلبُ المالك) ──
+     خانةُ الطرف كانت اسماً مجرّداً: المعتمِدُ يقرّر على طرفٍ لا يرى وثائقَه ولا
+     صلاحيتَها ولا حالتَه ولا أداءَه. والفحصُ الحقيقيُّ (ضغطُ الزرِّ وفتحُ البطاقة)
+     في `contracts-check.mjs`؛ وهنا حرّاسُ الاتّساق. */
+  {
+    T("★★ خانةُ الطرف في بطاقتَي الطلب والعقد تمرّ بـ`vendorCell` (اسمٌ + زرّ)",
+      /function vendorCell\(vendorId, vendorName\)/.test(src) &&
+      (src.match(/infoCell\("الطرف", vendorCell\(/g) || []).length === 2 &&
+      !/infoCell\("الطرف", _esc\(/.test(src));
+    T("★ ولا زرَّ يَعِد ولا يفي: بلا معرّفِ طرفٍ أو بلا صلاحيةِ اطّلاعٍ لا يظهر",
+      /function vendorCell[\s\S]{0,300}if\(!vendorId \|\| !canView\(\)\) return name;/.test(src));
+    T("★★ والفتحُ ينقل الصفحةَ **ويفتح بطاقةَ الطرف** (لا قائمتَهم)",
+      /function openVendorFrom\(vendorId\)[\s\S]{0,400}showPage\(PAGE_VENDORS\)[\s\S]{0,80}openVendor\(vendorId\)/.test(src) &&
+      /openVendorFrom: openVendorFrom/.test(src));
+    T("★ والصلاحيةُ تُفحَص في الدالّة نفسِها لا على الزرّ وحده",
+      /function openVendorFrom[\s\S]{0,200}if\(!canView\(\)\)/.test(src));
+    T("★ ولا مؤقّتَ انتظارٍ: لقطةُ الأطراف تُعيد الرسمَ وحدَها متى وصلت",
+      /function openVendorFrom[\s\S]{0,400}\}/.test(src) &&
+      !/function openVendorFrom[\s\S]{0,400}setInterval/.test(src) &&
+      /_page===PAGE_VENDORS\) paintVendors\(\)/.test(src));
+    T("★ ونمطُ الزرّ من توكنز المنصة داخل الخانة (لا يُزاحم الاسمَ على الجوال)",
+      /\.ct-vbtn\{/.test(src) && /ct-vbtn/.test(src));
+  }
+
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
   const css = (src.match(/st\.textContent = \[([\s\S]*?)\]\.join/) || [])[1] || "";
   const rawHex = (css.match(/#[0-9a-fA-F]{3,8}\b/g) || []);
