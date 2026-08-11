@@ -191,10 +191,19 @@ async function checkRecipients(db) {
     }
   } catch (e) { wr("تعذّرت قراءة المستخدمين", e.message); return; }
 
+  // الدورُ الاحتياطيّ (`ROLE_FALLBACK` في config.js) يلتقط ما لا مستلمَ له. فدورٌ بلا رقمٍ
+  // **والاحتياطيُّ مغطّى** = الرسالةُ تصل فعلاً ⇒ تنبيهٌ لا خلل. أمّا أن يخلو الاثنان
+  // فالإشعارُ يضيع بصمت — وذلك وحدَه خلل. فحصٌ يصرخ بلا سببٍ يُهمَل بعد أسبوع.
+  let fb = "admin";
+  try { fb = require("./lib/config").ROLE_FALLBACK ?? "admin"; } catch (_) { }
+  const fbCovered = !!(fb && found[fb]);
+
   for (const [role, label] of Object.entries(ROLES)) {
-    if (found[role]) ok(label, found[role].join(" · "));
-    else if (role === "admin") wr(label + ": لا رقمَ مُفعَّل", "لا شبكةَ أمانٍ لدورٍ بلا مستلم");
-    else no(label + ": لا رقمَ مُفعَّل", "إشعاراتُ هذا الدور تُسقَط (أو ترتدّ للأدمن)");
+    if (found[role]) { ok(label, found[role].join(" · ")); continue; }
+    if (role === fb) { wr(label + ": لا رقمَ مُفعَّل", "لا شبكةَ أمانٍ لدورٍ بلا مستلم"); continue; }
+    if (fbCovered) wr(label + ": لا رقمَ مُفعَّل",
+                      "ترتدّ إلى «" + (ROLES[fb] || fb) + "» فتصل — اضبط رقماً له إن أردتها مباشرة");
+    else no(label + ": لا رقمَ مُفعَّل", "ولا احتياطيَّ يغطّيه ⇒ الإشعارُ يضيع بصمت");
   }
 }
 
