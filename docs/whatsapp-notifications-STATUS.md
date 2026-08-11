@@ -189,6 +189,35 @@ firebase deploy --only functions
 ```
 والرسائلُ تعمل بلا انقطاع طوال فترة المراجعة على القالب المستعار.
 
+> ### 🛑 قبل تبديل `.env`: تأكّد أن القالب في **WABA الصحيح**
+>
+> **وقع فعلاً (2026-08-10):** اعتُمد القالبان، وبُدِّل `.env`، ونُشر — ففشل كلُّ إرسالٍ
+> بخطأ Meta **`#132001 Template name does not exist in the translation`**. السببُ أن
+> القالبين أُنشئا تحت **حساب أعمالٍ (WABA) غير الذي يملك الرقم المُرسِل** — والحسابُ
+> الإنتاجيُّ لم يكن فيه إلا `ticket_assigned` و`po_approval_needed` و`po_status_update`.
+> (توثيقُ §الإطلاق يذكر حسابين فارغين مكرّرين، ومن السهل أن يفتح المتصفّح أحدَهما.)
+>
+> **القوالبُ لا تُنقَل بين الحسابات** — العلاجُ إعادةُ إنشائها في WABA «Fast Buildings»
+> (`2149904325585354`). وفي الواجهة: تحقّق من **مبدّل الحساب أعلى اليسار** قبل `Create`.
+>
+> **الفحصُ القاطع قبل التبديل** — يطبع سطراً لكل قالبٍ في الحساب الإنتاجيّ:
+> ```bash
+> TOKEN=$(gcloud secrets versions access latest --secret=WHATSAPP_TOKEN --project=fast-buildings)
+> curl -s "https://graph.facebook.com/v21.0/2149904325585354/message_templates?fields=name,language,status&limit=100" \
+>   -H "Authorization: Bearer $TOKEN" > /tmp/tpl.json
+> unset TOKEN
+> python3 -c 'import json; d=json.load(open("/tmp/tpl.json"));
+> [print("%-26s %-8s %s" % (t.get("name"), t.get("language"), t.get("status"))) for t in d.get("data", [])]'
+> ```
+> لا تبدّل `.env` حتى يظهر السطران باسميهما الدقيقين ولغة `ar` وحالة `APPROVED`.
+>
+> **والتراجعُ فوريٌّ إن حدث** — يعيد القالبَ المستعار العامل في أقلّ من دقيقة:
+> ```bash
+> cd ~/Fast-buildings-maintenance-/functions
+> sed -i '/^WA_HRP_APPROVAL_TEMPLATE=/d; /^WA_HRP_STATUS_TEMPLATE=/d' .env
+> firebase deploy --only functions:hrpRouteCreate,functions:hrpRouteUpdate
+> ```
+
 **ولا بيانٌ مختصرٌ في أيّ قالب:** البيانُ نصٌّ حرٌّ قد يحمل اسمَ موظّف («تجديد إقامة
 فلان») — وقاعدةُ الوحدة أن الإشعارات **بلا أسماء موظفين**، والتفاصيلُ تُقرأ داخلها.
 
