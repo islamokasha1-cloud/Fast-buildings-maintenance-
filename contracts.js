@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2587";
+var MODULE_BUILD = "v18.9.2588";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1408,6 +1408,21 @@ function _confirm(o){
     );
   }catch(e){ return Promise.resolve(window.confirm(opt.msg||"تأكيد؟")); }
 }
+/* رسالةُ الخطأ للمستخدم: رفضُ الخادم يصل بالإنجليزية «Missing or insufficient
+   permissions» فيبدو **عطلاً في النظام** وهو في الغالب **قواعدُ لم تُنشَر بعد**.
+   وقع فعلاً: زرُّ حذف العقد ظهر وعمل، والقواعدُ المنشورةُ ترفض الكتابةَ الثانية في
+   معاملته — فرأى المالكُ سطراً إنجليزياً لا يدلّ على شيء. الآن يدلّ على مكان العلاج. */
+function _errMsg(e){
+  var m = (e && (e.message || e.code)) ? String(e.message || e.code) : "";
+  if(!m) return "تعذّر تنفيذ العملية";
+  if(/permission-denied|Missing or insufficient permissions|PERMISSION_DENIED/i.test(m))
+    return "رفضَ الخادمُ العملية — غالباً قواعدُ Firestore لم تُنشَر بآخر نسخة "+
+           "(لوحة Firebase ← Firestore ← Rules ← Publish). وإن تكرّر بعد النشر فأبلغ الدعم.";
+  if(/unavailable|Failed to fetch|Load failed|network/i.test(m))
+    return "تعذّر الاتصال بالخادم — تحقّق من الشبكة ثمّ أعِد المحاولة";
+  return m;
+}
+
 function _today(){ return new Date(); }
 
 function money(n){ return (Number(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -3875,7 +3890,7 @@ function act(action){
     });
   }).catch(function(e){
     console.warn("contracts/act",e);
-    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإجراء"),"warn");
+    _toast("⚠ "+_errMsg(e),"warn");
   });
 }
 function doCancel(){
@@ -3884,7 +3899,7 @@ function doCancel(){
     if(!ok) return;
     var reason=(window.prompt("سبب الإلغاء:")||"").trim();
     return cancelRequest(_rOpen, reason).then(function(){ paintReqs(); _toast("✅ أُلغي الطلب","success"); });
-  }).catch(function(e){ _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإلغاء"),"warn"); });
+  }).catch(function(e){ _toast("⚠ "+_errMsg(e),"warn"); });
 }
 
 /* حذفُ طلبٍ ملغى — الفعلُ الوحيدُ في الوحدة الذي **لا رجعةَ فيه**، فرسالتُه تقول
@@ -3903,7 +3918,7 @@ function doDelete(){
     });
   }).catch(function(e){
     console.warn("contracts/doDelete",e);
-    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الحذف"),"warn");
+    _toast("⚠ "+_errMsg(e),"warn");
   });
 }
 
@@ -4142,7 +4157,7 @@ function saveLines(){
   }).catch(function(e){
     if(btn) btn.disabled=false;
     console.warn("contracts/saveLines",e);
-    _toast("⚠ "+(e&&e.message?e.message:"تعذّر التعديل"),"warn");
+    _toast("⚠ "+_errMsg(e),"warn");
   });
 }
 
@@ -4187,7 +4202,7 @@ function doRewind(){
   }).catch(function(e){
     if(btn) btn.disabled=false;
     console.warn("contracts/doRewind",e);
-    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإرجاع"),"warn");
+    _toast("⚠ "+_errMsg(e),"warn");
   });
 }
 
@@ -5345,7 +5360,7 @@ function chgAct(action){
   var run=function(note){
     actOnChange(id, action, note).then(function(g){
       paintCtrs(); _toast("✅ "+(CHG_STATUS[g.status]||g.status),"success");
-    }).catch(function(e){ _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإجراء"),"warn"); });
+    }).catch(function(e){ _toast("⚠ "+_errMsg(e),"warn"); });
   };
   if(action==="reject"){
     var r=prompt("سبب الرفض (إلزاميّ):"); if(!r) return;
@@ -5363,7 +5378,7 @@ function doCancelChange(){
   var r=prompt("سبب الإلغاء (اختياريّ):");
   if(r===null) return;
   cancelChange(id, r).then(function(){ paintCtrs(); _toast("✅ أُلغي أمرُ التغيير","success"); })
-    .catch(function(e){ _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإلغاء"),"warn"); });
+    .catch(function(e){ _toast("⚠ "+_errMsg(e),"warn"); });
 }
 
 function filterCtrs(k,v){
@@ -5406,7 +5421,7 @@ function doDeleteCtr(){
     });
   }).catch(function(e){
     console.warn("contracts/doDeleteCtr",e);
-    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الحذف"),"warn");
+    _toast("⚠ "+_errMsg(e),"warn");
   });
 }
 
@@ -5428,7 +5443,7 @@ function transit(action){
     });
   }).catch(function(e){
     console.warn("contracts/transit",e);
-    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإجراء"),"warn");
+    _toast("⚠ "+_errMsg(e),"warn");
   });
 }
 
@@ -5793,7 +5808,7 @@ function doExtRewind(){
     closeDocRewind(); paintCtrs(); _toast("✅ أُرجع المستخلص إلى "+(EXT_STATUS[e.status]||e.status),"success");
   }).catch(function(err){
     if(f.btn) f.btn.disabled=false;
-    _toast("⚠ "+(err&&err.message?err.message:"تعذّر الإرجاع"),"warn");
+    _toast("⚠ "+_errMsg(err),"warn");
   });
 }
 function openChgRewind(){
@@ -5811,7 +5826,7 @@ function doChgRewind(){
     closeDocRewind(); paintCtrs(); _toast("✅ أُرجع أمرُ التغيير إلى "+(CHG_STATUS[g.status]||g.status),"success");
   }).catch(function(err){
     if(f.btn) f.btn.disabled=false;
-    _toast("⚠ "+(err&&err.message?err.message:"تعذّر الإرجاع"),"warn");
+    _toast("⚠ "+_errMsg(err),"warn");
   });
 }
 
