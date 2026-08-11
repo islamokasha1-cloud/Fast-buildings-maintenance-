@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2548";
+var MODULE_BUILD = "v18.9.2552";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -2437,6 +2437,19 @@ function vendorCardHTML(id){
 function infoCell(label, valueHtml){
   return '<div class="ct-cell"><div class="ct-cell-l">'+_esc(label)+'</div><div class="ct-cell-v">'+valueHtml+'</div></div>';
 }
+
+/* خانةُ الطرف: الاسمُ **وزرٌّ يفتح سجلَّه**.
+   الاسمُ وحدَه كان نصّاً ميتاً في أهمّ لحظة: المعتمِدُ يقرّر على طرفٍ لا يرى وثائقَه
+   ولا صلاحيتَها ولا حالتَه (محظورٌ؟) ولا أداءَه السابق — وكلُّ ذلك في سجلّ الأطراف
+   على بُعد صفحتين من التنقّل اليدويّ. والزرُّ لا يظهر إلا حين يكون خلفه شيءٌ يُفتَح:
+   معرّفُ طرفٍ مخزَّن **وصلاحيةُ اطّلاعٍ** على السجل — فلا زرَّ يَعِد ولا يفي. */
+function vendorCell(vendorId, vendorName){
+  var name = _esc(vendorName || "—");
+  if(!vendorId || !canView()) return name;
+  return name +
+    '<div><button class="btn btn-ghost btn-sm ct-vbtn" onclick="contracts.openVendorFrom(\''+_jq(vendorId)+'\')">'+
+      _icn("hardHat","ic-sm")+' تفاصيل الطرف</button></div>';
+}
 function numOrDash(s){ return s ? '<span class="num">'+_esc(s)+'</span>' : "—"; }
 
 /* ── نموذجُ التحرير ── */
@@ -3269,7 +3282,7 @@ function reqCardHTML(id){
 
   var t=linesTotal(r.lines||[], r.vatMode);
   var info='<div class="ct-info">'+
-    infoCell("الطرف", _esc(r.vendorName||"—"))+
+    infoCell("الطرف", vendorCell(r.vendorId, r.vendorName))+
     infoCell("المشروع", _esc(_projName(r))+(r.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':""))+
     infoCell("نوع الارتباط", _icn(eng.icon,"ic-sm")+" "+_esc(eng.lbl))+
     infoCell("وضع الضريبة", _esc((VAT_MODES[normVatMode(r.vatMode)]||{}).short||"—"))+
@@ -3600,7 +3613,7 @@ function ctrOverviewHTML(c){
   '</div>'+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("clipboardList","ic-sm")+' بيانات العقد</div>'+
     '<div class="ct-info">'+
-      infoCell("الطرف", _esc(c.vendorName||"—"))+
+      infoCell("الطرف", vendorCell(c.vendorId, c.vendorName))+
       infoCell("المشروع", _esc(_projName(c))+(c.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':""))+
       infoCell("بند الموازنة", budgetCell)+
       infoCell("وضع الضريبة", _esc((VAT_MODES[normVatMode(c.vatMode)]||{}).short||"—"))+
@@ -4528,6 +4541,17 @@ function filterCtrs(k,v){
 function openCtr(id){ _cOpen=id; _cTab="overview"; _extDraft=null; _extOpen=null; _clEdit=null; _chgDraft=null; _chgOpen=null; paintCtrs(); }
 function backToCtrs(){ _cOpen=null; paintCtrs(); }
 function ctrTab(t){ _cTab=t; _extDraft=null; _extOpen=null; _clEdit=null; _chgDraft=null; _chgOpen=null; paintCtrs(); }
+/* فتحُ سجلّ الطرف من بطاقة الطلب أو العقد.
+   يُنقَل المستخدمُ فوراً ولو لم تصل بياناتُ الأطراف بعد: `showPage` تُشغّل مزامنتَها،
+   ولقطتُها تُعيد الرسمَ وحدَها متى وصلت (`_page===PAGE_VENDORS`) — فلا حاجةَ لمؤقّتٍ
+   ولا تبقى «تعذّر العثور على الطرف» معلّقةً لطرفٍ موجودٍ لم يُحمَّل بعد. */
+function openVendorFrom(vendorId){
+  if(!vendorId) return;
+  if(!canView()) return _toast("⚠ لا تملك صلاحية الاطلاع على سجلّ الأطراف","warn");
+  try{ showPage(PAGE_VENDORS); }catch(e){}
+  openVendor(vendorId);
+}
+
 function openReqFromCtr(reqId){ try{ showPage(PAGE_REQS); }catch(e){} openReq(reqId); }
 function openCtrFromReq(cid){ try{ showPage(PAGE_CTRS); }catch(e){} openCtr(cid); }
 
@@ -5046,6 +5070,9 @@ function injectCSS(){
 ".ct-cell{display:flex;flex-direction:column;gap:3px;min-width:0}",
 ".ct-cell-l{font-size:10.5px;color:var(--muted);font-weight:700}",
 ".ct-cell-v{font-size:13px;font-weight:700;color:var(--text);word-break:break-word}",
+/* زرُّ «تفاصيل الطرف» يسكن داخل الخانة: سطرٌ خاصٌّ به تحت الاسم فلا يُزاحمه على
+   الجوال، ومقاسٌ يناسب النصَّ لا أزرارَ الأوامر. */
+".ct-vbtn{margin-top:5px;padding:4px 10px;font-size:11px;gap:5px}",
 ".ct-table-wrap{overflow-x:auto}",
 ".ct-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:520px}",
 ".ct-table th{text-align:right;font-size:11px;color:var(--muted);font-weight:800;padding:7px 9px;border-bottom:1px solid var(--border);white-space:nowrap}",
@@ -5196,6 +5223,7 @@ window.contracts = {
   filterCtrs: filterCtrs, openCtr: openCtr, backToCtrs: backToCtrs, ctrTab: ctrTab,
   transit: transit, makeContract: makeContract,
   openReqFromCtr: openReqFromCtr, openCtrFromReq: openCtrFromReq,
+  openVendorFrom: openVendorFrom,
   // الوثيقة التعاقدية [المرحلة ٤-ب]
   printCtr: printCtr, printContract: printContract,
   editClauses: editClauses, addClause: addClause, delClause: delClause,

@@ -361,6 +361,27 @@ await page.evaluate((id) => window.contracts.openReq(id), reqId);
 await page.waitForTimeout(600);
 await page.screenshot({ path: `${SHOTS}/10-request-card.png`, fullPage: true });
 
+/* ★★ طلبُ المالك: «احتاج يظهر زر يفتح تفاصيل الطرف».
+   الاسمُ وحدَه نصٌّ ميت — والمعتمِدُ يقرّر على طرفٍ لا يرى وثائقَه ولا حالتَه.
+   الفحصُ **يضغط الزرَّ** ويتحقّق أنّ سجلَّ الطرف نفسِه فُتح: صفحةُ الأطراف نشطةٌ
+   وبطاقةُ هذا الطرف معروضةٌ (لا قائمتُهم) — لا وجودَ الزرِّ في الترميز فحسب. */
+const vBtnCount = await page.evaluate(() =>
+  document.querySelectorAll('#page-contract-requests .ct-vbtn').length);
+check('★★ بطاقةُ الطلب فيها زرُّ «تفاصيل الطرف»', vBtnCount === 1, 'عدد=' + vBtnCount);
+await page.click('#page-contract-requests .ct-vbtn');
+await page.waitForTimeout(1200);
+const vOpened = await page.evaluate(() => {
+  const p = document.getElementById('page-vendors');
+  return { active: !!p && p.classList.contains('active'), txt: (p && p.textContent) || '' };
+});
+check('★★ والزرُّ يفتح **بطاقةَ** الطرف نفسِه لا قائمةَ الأطراف',
+  vOpened.active && vOpened.txt.includes('محمد أحمد الغامدي') &&
+  vOpened.txt.includes('كل الأطراف') && !vOpened.txt.includes('تعذّر العثور على الطرف'),
+  'نشطة=' + vOpened.active);
+await page.screenshot({ path: `${SHOTS}/10b-vendor-from-request.png`, fullPage: true });
+await page.evaluate((id) => { window.contracts.backToVendors(); window.contracts.openReqFrom(id); }, reqId);
+await page.waitForTimeout(900);
+
 // دورةُ الاعتماد الكاملة — أربعُ بوّابات (المستخدمُ أدمن فيملكها كلَّها)
 const stages = [];
 for (let i = 0; i < 4; i++) {
