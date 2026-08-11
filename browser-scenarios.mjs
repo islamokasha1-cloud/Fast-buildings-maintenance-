@@ -10,24 +10,39 @@ window.__store = {};                       // path -> data (Firestore في ال�
   function keyDoc(p){ return p; }
   function snap(path){ var d=window.__store[path]; return { exists:d!==undefined, id:path.split('/').pop(), data:function(){return d||{};}, get:function(f){return (d||{})[f];} }; }
   function applyVal(cur,k,v){ if(v && v.__inc!==undefined) return (cur[k]||0)+v.__inc; if(v && v.__sv) return Date.now(); if(v && v.__del) return undefined; return v; }
-  function writeDoc(path,d,merge){ var cur=window.__store[path]||{}; var nd=merge?Object.assign({},cur):{}; for(var k in d){ var nv=applyVal(cur,k,d[k]); if(nv===undefined) delete nd[k]; else nd[k]=nv; } window.__store[path]=nd; }
+  /* ── المستمعون أحياء: الكتابةُ تُبثّ فوراً كما يفعل Firestore ──
+     المحاكي كان يستدعي onSnapshot مرّةً عند التركيب ولا يعود أبداً، فكان يُخفي
+     صنفاً كاملاً من العلل: **تعويضُ الكمون**. في Firestore الحقيقيّ تصل اللقطةُ
+     المحلّيةُ قبل أن يُحلَّ وعدُ set()، فمن يضيف الوثيقةَ يدوياً بعد الوعد يكرّرها.
+     وقد وقع فعلاً: بطاقتان لطلب تعاقدٍ واحدٍ بالمعرّف نفسِه (بلاغُ المالك).
+     (لا شرطةٌ مائلةٌ خلفيةٌ ولا علامةُ اقتباسٍ خلفيةٍ هنا — النصُّ كلُّه قالبٌ نصّيّ.) */
+  var _subs = [];     // {coll|path, cb}
+  function _emit(path){
+    var coll = path.slice(0, path.lastIndexOf('/'));
+    _subs.slice().forEach(function(s){
+      try{ if(s.path === path) s.cb(snap(path)); else if(s.coll === coll) s.cb(collSnap(coll)); }catch(e){}
+    });
+  }
+  function _sub(o){ _subs.push(o); return function(){ var i=_subs.indexOf(o); if(i>=0) _subs.splice(i,1); }; }
+  function writeDoc(path,d,merge){ var cur=window.__store[path]||{}; var nd=merge?Object.assign({},cur):{}; for(var k in d){ var nv=applyVal(cur,k,d[k]); if(nv===undefined) delete nd[k]; else nd[k]=nv; } window.__store[path]=nd; _emit(path); }
+  function delDoc(path){ delete window.__store[path]; _emit(path); }
   function docsUnder(coll){ return Object.keys(window.__store).filter(function(k){ return k.indexOf(coll+'/')===0 && k.slice(coll.length+1).indexOf('/')<0; }); }
   function docRef(path){ return {
     path:path, id:path.split('/').pop(),
     get:function(){ return Promise.resolve(snap(path)); },
     set:function(d,opt){ writeDoc(path,d,!!(opt&&opt.merge)); return Promise.resolve(); },
     update:function(d){ writeDoc(path,d,true); return Promise.resolve(); },
-    delete:function(){ delete window.__store[path]; return Promise.resolve(); },
+    delete:function(){ delDoc(path); return Promise.resolve(); },
     collection:function(c){ return collRef(path+'/'+c); },
-    onSnapshot:function(cb){ try{ cb(snap(path)); }catch(e){} return function(){}; }
+    onSnapshot:function(cb){ try{ cb(snap(path)); }catch(e){} return _sub({ path:path, cb:cb }); }
   }; }
   function collSnap(coll){ var ds=docsUnder(coll).map(snap); return { empty:ds.length===0, size:ds.length, docs:ds, forEach:function(f){ds.forEach(f);} }; }
   function collRef(coll){ var q={
     doc:function(id){ return docRef(id? coll+'/'+id : coll+'/auto_'+Math.random().toString(36).slice(2)); },
-    add:function(d){ var id='auto_'+Math.random().toString(36).slice(2); window.__store[coll+'/'+id]=d; return Promise.resolve(docRef(coll+'/'+id)); },
+    add:function(d){ var id='auto_'+Math.random().toString(36).slice(2); window.__store[coll+'/'+id]=d; _emit(coll+'/'+id); return Promise.resolve(docRef(coll+'/'+id)); },
     where:function(){ return q; }, orderBy:function(){ return q; }, limit:function(){ return q; },
     get:function(){ return Promise.resolve(collSnap(coll)); },
-    onSnapshot:function(cb){ try{ cb(collSnap(coll)); }catch(e){} return function(){}; }
+    onSnapshot:function(cb){ try{ cb(collSnap(coll)); }catch(e){} return _sub({ coll:coll, cb:cb }); }
   }; return q; }
   var FieldValue={ serverTimestamp:function(){return {__sv:1};}, increment:function(n){return {__inc:n};}, arrayUnion:function(){return {};}, arrayRemove:function(){return {};}, delete:function(){return {__del:1};} };
   // نمذجة عزل Firestore التسلسلي: كل معاملة تُنفَّذ كاملةً قبل التالية (طابور)،
@@ -38,7 +53,7 @@ window.__store = {};                       // path -> data (Firestore في ال�
       var tx={ get:function(ref){ return Promise.resolve(snap(ref.path)); },
                set:function(ref,d,opt){ writeDoc(ref.path,d,!!(opt&&opt.merge)); },
                update:function(ref,d){ writeDoc(ref.path,d,true); },
-               delete:function(ref){ delete window.__store[ref.path]; } };
+               delete:function(ref){ delDoc(ref.path); } };
       return Promise.resolve().then(function(){ return fn(tx); });
     };
     var res = __txq.then(run, run);            // نفِّذ بعد المعاملة السابقة أياً كانت نتيجتها
@@ -47,7 +62,7 @@ window.__store = {};                       // path -> data (Firestore في ال�
   }, batch:function(){ return {
              set:function(ref,d,opt){ writeDoc(ref.path,d,!!(opt&&opt.merge)); },
              update:function(ref,d){ writeDoc(ref.path,d,true); },
-             delete:function(ref){ delete window.__store[ref.path]; },
+             delete:function(ref){ delDoc(ref.path); },
              commit:function(){ return Promise.resolve(); } }; }};
   var firestoreFn=function(){ return fs; };
   firestoreFn.FieldValue=FieldValue;

@@ -340,6 +340,25 @@ check('★ أُنشئ الطلب وبدأ عند مدير المشاريع',
   await page.evaluate(() => (window.contracts.requests()[0] || {}).status === 'crq_pending_pm'), reqId);
 check('السجلُّ الزمنيُّ سجّل الإنشاء',
   await page.evaluate(() => ((window.contracts.requests()[0] || {}).timeline || []).length === 1));
+
+/* ★★ بلاغُ المالك: «عند إنشاء طلب تعاقد يكرّر مرتين» — بطاقتان بالمعرّف نفسِه.
+   الجذرُ ليس إرسالاً مكرّراً (لاختلف المعرّفان) بل **تعويضُ الكمون**: لقطةُ المستمع
+   تصل قبل أن يُحلَّ وعدُ set()، فالإضافةُ اليدويةُ بعده نسخةٌ ثانية. الفحصُ يعدّ
+   الوثيقةَ في الذاكرة **وفي الشاشة** — فلا يمرّ ارتدادٌ يظهر في إحداهما دون الأخرى. */
+await page.evaluate(() => window.contracts.backToReqs());
+await page.waitForTimeout(600);
+const dupChk = await page.evaluate((id) => ({
+  inMemory: window.contracts.requests().filter(r => r.id === id).length,
+  inStore: Object.keys(window.__store).filter(k => k.endsWith('/' + id)).length,
+  tiles: Array.from(document.querySelectorAll('#page-contract-requests .ct-tile'))
+    .filter(el => (el.textContent || '').includes(id)).length
+}), reqId);
+check('★★ الطلبُ المُنشأ مرّةً لا يتكرّر في الذاكرة (تعويضُ الكمون لا يخلق نسخةً ثانية)',
+  dupChk.inMemory === 1 && dupChk.inStore === 1, JSON.stringify(dupChk));
+check('★★ ولا بطاقتان له في الشاشة (وهو ما رآه المالك)',
+  dupChk.tiles === 1, JSON.stringify(dupChk));
+await page.evaluate((id) => window.contracts.openReq(id), reqId);
+await page.waitForTimeout(600);
 await page.screenshot({ path: `${SHOTS}/10-request-card.png`, fullPage: true });
 
 // دورةُ الاعتماد الكاملة — أربعُ بوّابات (المستخدمُ أدمن فيملكها كلَّها)
@@ -971,11 +990,16 @@ const poTab = await page.textContent('#page-contracts-list') || '';
 check('★ تبويبُ «طلبات الشراء» يشرح سببَ الربط لا يعرض حقلاً بلا معنى',
   /طلبات الشراء المرتبطة/.test(poTab) && /مرّتين/.test(poTab));
 
-// نزرع طلبَ شراءٍ في مشروع العقد ثم نربطه من الشاشة
+// نزرع طلبَ شراءٍ في مشروع العقد ثم نربطه من الشاشة.
+// البذرةُ تُكتب في **المخزن** لا في المصفوفة وحدَها: مستمعُ المشتريات حيٌّ في المحاكي
+// كما في الإنتاج، فأوّلُ كتابةٍ في المجموعة تُعيد بناء المصفوفة من المخزن — وبذرةٌ
+// محلّيةٌ فقط كانت تختفي عند الربط.
 const linkRes = await page.evaluate(async (cid) => {
   const c = window.contracts.contractById(cid);
-  purchases.push({ id: 'PO-LINK-1', projectId: c.projectId || 'hail', status: 'proc_executing',
-                   items: [{ itemType: 'مواد بناء', itemCost: 7000, qty: 1 }], estCost: 7000 });
+  const seed = { id: 'PO-LINK-1', projectId: c.projectId || 'hail', status: 'proc_executing',
+                 items: [{ itemType: 'مواد بناء', itemCost: 7000, qty: 1 }], estCost: 7000 };
+  await db.collection(PURCHASES_COLLECTION()).doc('PO-LINK-1').set(seed);
+  if (!purchases.some(p => p.id === 'PO-LINK-1')) purchases.push(seed);
   const cands = window.contracts._poCandidatesFor(c).map(p => p.id);
   const real = currentUser.role; currentUser.role = 'procurement_officer';
   await window.contracts._linkPurchase('PO-LINK-1', cid);
