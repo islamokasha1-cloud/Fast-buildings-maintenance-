@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2584";
+var MODULE_BUILD = "v18.9.2587";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -2166,6 +2166,61 @@ function createExtract(contract, draft){
       _notify("مستخلصٌ جديد "+id, contract.vendorName||"", id);
       return id;
     });
+  });
+}
+
+/* حذفُ عقدٍ **لم يُوقَّع بعد** — للأدمن (طلبُ المالك: عقدٌ أُنشئ تجربةً).
+
+   **لماذا يجوز هنا وحدَه.** العقدُ سجلٌّ ماليٌّ لا يُمحى — إلا في نافذةٍ واحدة:
+   ما بين إنشائه وتوقيعِ الطرف. في تلك النافذة **لم يُنتج أثراً**: لا مستخلصَ ولا
+   أمرَ تغييرٍ ولا سداد — لأن الثلاثة لا تُنشأ إلا على عقدٍ **سارٍ** (يحرسه الكود
+   والقواعد معاً). فحالةُ «بانتظار التوقيع» وحدَها ضمانةٌ كافيةٌ على الخادم: لا
+   حاجةَ لاستعلامٍ عن أبناءٍ لا يمكن أن يوجدوا. وما بعدها لا يُحذف مهما كان الدور —
+   والفسخُ (`terminate`) هو بابُ إنهاء العقد الساري، لا الحذف.
+
+   **وحذفُه يُحرِّر طلبَه.** الطلبُ صار `crq_converted` وقتَ التحويل، فلو حُذف العقدُ
+   وحدَه لبقي الطلبُ يشير إلى عقدٍ غيرِ موجود — سطرٌ ميتٌ في البيانات. فالمعاملةُ
+   الواحدةُ تحذف العقدَ **وتُعيد الطلبَ إلى «معتمَد»** وتمسح `contractId`: كأنّ
+   التحويلَ لم يقع. وبذلك يستأنف الطلبُ مسارَه — يُحوَّل ثانيةً أو يُلغى ثمّ يُحذف. */
+function deleteContract(id, reason){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  if(_role() !== "admin") return Promise.reject(new Error("حذف العقد للأدمن فقط"));
+  if(!reason) return Promise.reject(new Error("سبب الحذف إلزامي"));
+  // حزامٌ ثانٍ فوق ضمانة الحالة: بياناتٌ قديمةٌ قد تحمل ما لا يسمح به الكودُ اليوم
+  if(extractsFor(id).length) return Promise.reject(new Error("للعقد مستخلصاتٌ — لا يُحذف"));
+  if(changesFor(id).length)  return Promise.reject(new Error("للعقد أوامرُ تغيير — لا يُحذف"));
+  var cRef=database.collection(CONTRACTS_COL()).doc(id);
+  return database.runTransaction(function(t){
+    return t.get(cRef).then(function(cs){
+      if(!cs.exists) throw new Error("العقد غير موجود");
+      var c=cs.data()||{}; c.id=id;
+      if(c.status !== "ctr_pending_signature")
+        throw new Error("لا يُحذف إلا عقدٌ لم يُوقَّع بعد — الساري يُفسَخ ولا يُمحى");
+      var reqId=String(c.requestId||"");
+      if(!reqId){ t.delete(cRef); return { id:id, req:null }; }
+      var rRef=database.collection(REQUESTS_COL()).doc(reqId);
+      return t.get(rRef).then(function(rs){
+        t.delete(cRef);
+        if(!rs.exists) return { id:id, req:null };
+        var r=rs.data()||{}; r.id=reqId;
+        if(r.contractId === id || r.status === "crq_converted"){
+          r.status="crq_approved"; r.contractId="";
+          r.updatedAt=_now(); r.updatedBy=_me();
+          _pushTimeline(r, "أُلغي التحويل — حُذف العقد "+id, "unconverted", reason);
+          var out=Object.assign({}, r); delete out.id;
+          t.set(rRef, out, { merge:true });
+          return { id:id, req:r };
+        }
+        return { id:id, req:null };
+      });
+    });
+  }).then(function(res){
+    var i=_ctrs.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _ctrs.splice(i,1);
+    if(_cOpen===id) _cOpen=null;
+    if(res.req) _mirror(_reqs, res.req, true);
+    _audit("حذف عقد لم يُوقَّع", id+(res.req?(" — أُعيد الطلب "+res.req.id+" إلى «معتمد»"):"")+" — "+reason);
+    return res;
   });
 }
 
@@ -4291,6 +4346,10 @@ function ctrCardHTML(id){
   if(c.status==="ctr_pending_signature" && ctrCanTransit("sign","ctr_pending_signature",role)){
     tools+='<button class="btn btn-primary btn-sm" onclick="contracts.openSign()">'+_icn("save","ic-sm")+' تسجيل التوقيع</button> ';
   }
+  /* حذفُ العقد غيرِ الموقَّع — للأدمن: النافذةُ الوحيدةُ التي لم يُنتج فيها أثراً. */
+  if(c.status==="ctr_pending_signature" && role==="admin"){
+    tools+='<button class="btn btn-delete btn-sm" onclick="contracts.doDeleteCtr()">'+_icn("trash","ic-sm")+' حذف العقد</button> ';
+  }
   tools+=acts.filter(function(a){ return a!=="sign"; }).map(function(a){
     var t=CTR_TRANSITIONS[a];
     var cls = (a==="terminate") ? "btn-ghost" : (a==="resume"||a==="close" ? "btn-success" : "btn-ghost");
@@ -5328,6 +5387,29 @@ function openVendorFrom(vendorId){
 function openReqFromCtr(reqId){ try{ showPage(PAGE_REQS); }catch(e){} openReq(reqId); }
 function openCtrFromReq(cid){ try{ showPage(PAGE_CTRS); }catch(e){} openCtr(cid); }
 
+/* حذفُ العقد: الرسالةُ تقول بالضبط ما سيقع للطلب — فلا يُفاجأ الأدمن بعودته
+   إلى «معتمَد». وهذا الفعلُ لا رجعةَ فيه، فنصُّه صريحٌ ويذكر المعرّف. */
+function doDeleteCtr(){
+  var c=contractById(_cOpen); if(!c) return;
+  var id=_cOpen;
+  var reqNote = c.requestId ? ' وسيعود طلبُه '+c.requestId+' إلى «معتمَد» فتستأنفه أو تُلغيه.' : '';
+  Promise.resolve(_confirm({ kind:"danger", icon:"🗑", okText:"حذف نهائياً",
+    title:"حذف العقد غير الموقَّع",
+    msg:'سيُحذف العقد «'+(c.title||id)+'» ('+id+') نهائياً ولا يمكن استرجاعه.'+reqNote+' يبقى الحذفُ مسجّلاً في سجل التدقيق.'
+  })).then(function(ok){
+    if(!ok) return;
+    var reason=(window.prompt("سبب الحذف (إلزامي):")||"").trim();
+    if(!reason){ _toast("⚠ سبب الحذف إلزامي","warn"); return; }
+    return deleteContract(id, reason).then(function(res){
+      paintCtrs();
+      _toast("✅ حُذف العقد "+id+(res.req?" — وعاد الطلب "+res.req.id+" إلى «معتمد»":""),"success");
+    });
+  }).catch(function(e){
+    console.warn("contracts/doDeleteCtr",e);
+    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الحذف"),"warn");
+  });
+}
+
 function transit(action){
   var c=contractById(_cOpen); if(!c) return;
   var t=CTR_TRANSITIONS[action]; if(!t) return;
@@ -6074,7 +6156,7 @@ window.contracts = {
   // العقود [المرحلة ٣]
   renderCtrs: renderCtrs, startCtrSync: startCtrSync, stopCtrSync: stopCtrSync,
   filterCtrs: filterCtrs, openCtr: openCtr, backToCtrs: backToCtrs, ctrTab: ctrTab,
-  transit: transit, makeContract: makeContract,
+  transit: transit, makeContract: makeContract, doDeleteCtr: doDeleteCtr,
   openReqFromCtr: openReqFromCtr, openCtrFromReq: openCtrFromReq,
   openVendorFrom: openVendorFrom,
   // الوثيقة التعاقدية [المرحلة ٤-ب]
@@ -6086,7 +6168,7 @@ window.contracts = {
   saveClauseTemplates: saveClauseTemplates,
   _sign: signContract, _saveClauses: saveContractClauses,
   contractsList: contractsList, contractById: contractById, contractForRequest: contractForRequest,
-  _convert: convertToContract, _transit: transitContract,
+  _convert: convertToContract, _transit: transitContract, _deleteCtr: deleteContract,
   // المستخلصات [المرحلة ٤]
   startExtSync: startExtSync, stopExtSync: stopExtSync,
   newExtract: newExtract, cancelExtract: cancelExtract, submitExtract: submitExtract,
