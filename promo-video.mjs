@@ -538,8 +538,8 @@ async function titleCard(kicker, main, sub, ms, opt) {
   await pv('titleOff'); await wait(700);
 }
 
-// تحريكُ المؤشّر إلى عنصرٍ ثم النقرُ عليه فعلياً.
-async function clickEl(selector, opts) {
+// النقرُ مرحلتان كي يُمكن إدخالُ إخفاءِ المحتوى بينهما: وصولُ المؤشّر ثم الضغط.
+async function cursorTo(selector, opts) {
   const o = opts || {};
   const box = await page.evaluate(sel => {
     const e = document.querySelector(sel);
@@ -548,13 +548,20 @@ async function clickEl(selector, opts) {
     const r = e.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2, ok: r.width > 0 && r.height > 0 };
   }, selector).catch(() => null);
-  if (!box || !box.ok) return false;
+  if (!box || !box.ok) return null;
   await pv('cursor', Math.round(box.x), Math.round(box.y));
   await wait(o.settle || 520);
+  return box;
+}
+async function clickAt(selector, box) {
   await pv('ring', Math.round(box.x), Math.round(box.y));
   await wait(180);
   try { await page.click(selector, { timeout: 3000 }); } catch { return false; }
   return true;
+}
+async function clickEl(selector, opts) {
+  const box = await cursorTo(selector, opts);
+  return box ? clickAt(selector, box) : false;
 }
 
 // تصفّحٌ هادئ داخل الصفحة (تمريرٌ ناعمٌ لأسفل ثم عودة).
@@ -573,6 +580,44 @@ async function scrollTop() {
     c.scrollTop = 0; window.scrollTo({ top: 0, behavior: 'smooth' });
   }).catch(() => { });
   await wait(500);
+}
+
+// الصفحةُ تُبنى على دفعات: تُرسَم فارغةً ثم تمتلئ. تصويرُ ذلك يُظهر «تأخيراً
+// وتكسيراً في الظهور» — وهو بناءٌ حقيقيٌّ لا خللَ عرض، لكنّه ليس ما يُعرَض في فيلم.
+// فنُخفي منطقةَ المحتوى قبل التبديل، وننتظر **استقرارَها فعلاً** لا مهلةً مقدَّرة،
+// ثم نكشفها بذوبانٍ قصير — فلا يرى المشاهدُ إلا صفحةً مكتملة.
+async function contentHide() {
+  await page.evaluate(() => {
+    const c = document.querySelector('.main-area');
+    if (!c) return;
+    c.style.transition = 'opacity .22s ease';
+    c.style.opacity = '0';
+  }).catch(() => { });
+  await page.waitForTimeout(240);
+}
+async function contentShow() {
+  await page.evaluate(() => {
+    const c = document.querySelector('.main-area');
+    if (c) c.style.opacity = '1';
+  }).catch(() => { });
+  await page.waitForTimeout(320);
+}
+// الاستقرار: حجمُ محتوى الصفحة لا يتغيّر ثلاثَ قراءاتٍ متتالية، ولا «جارٍ التحميل».
+// مهلةٌ عليا كي لا تعلّق شاشةٌ تُحدِّث نفسَها باستمرار (لوحةُ العرض TV مثلاً).
+async function waitSettled(id, maxMs) {
+  const t0 = Date.now(), cap = maxMs || 5000;
+  let last = -1, stable = 0;
+  while (Date.now() - t0 < cap) {
+    const st = await page.evaluate(pid => {
+      const el = document.getElementById('page-' + pid);
+      if (!el) return { n: -1, loading: false };
+      return { n: (el.innerHTML || '').length, loading: /جارٍ التحميل|جاري التحميل/.test(el.innerText || '') };
+    }, id).catch(() => ({ n: -1, loading: false }));
+    if (st.n === last && !st.loading) { if (++stable >= 3) return true; }
+    else { stable = 0; last = st.n; }
+    await page.waitForTimeout(140);
+  }
+  return false;
 }
 
 // انتقالٌ إلى صفحةٍ بالنقر على زرّها في القائمة الجانبية، وإلا برمجياً.
@@ -605,12 +650,17 @@ async function goPage(id) {
     const e = document.getElementById(g.id); if (e && !e.classList.contains('collapsed')) e.style.maxHeight = 'none';
   }), (target && target.groups) || []).catch(() => { });
   await page.evaluate(s => { const e = s && document.querySelector(s); if (e) e.scrollIntoView({ block: 'center' }); }, target ? target.sel : '').catch(() => { });
-  const clicked = target ? await clickEl(target.sel, { settle: 380 }) : false;
+  // المؤشّرُ يصل الزرَّ أوّلاً ثم تُخفى منطقةُ المحتوى — فالنقرُ يبقى مرئياً
+  // ومفهوماً، وما يُخفى هو البناءُ الذي يليه لا الفعلُ نفسُه.
+  const box = target ? await cursorTo(target.sel) : null;
+  await contentHide();
+  const clicked = box ? await clickAt(target.sel, box) : false;
   // بعضُ الأقسام يُخفي النظامُ أزرارَها عمداً في هذا الوضع (مثل «العهد»)، فنفتحها
   // برمجياً — ونُخفي المؤشّرَ حتى لا يبقى واقفاً في مكانٍ لم يُنقَر فيه شيء.
   if (!clicked) { await pv('cursorOff'); await page.evaluate(pid => showPage(pid), id).catch(() => { }); }
-  await wait(850);
+  await waitSettled(id);
   await overlay();
+  await contentShow();
   return clicked;
 }
 
@@ -693,7 +743,19 @@ for (const ch of CHAPTERS) {
   await pv('lower', ch.title, ch.lower[1], 'الفصل ' + ch.n + ' — ' + ch.kicker);
   await wait(3400);
   // بعضُ الشاشات نموذجٌ فارغٌ حتى يُضغط زرُّها — فنضغطه ليُرى المخرَجُ لا النموذج.
-  if (ch.act) { await clickEl(ch.act, { settle: 800 }); await wait(2600); await overlay(); await pv('lower', ch.title, ch.lower[1], 'الفصل ' + ch.n + ' — ' + ch.kicker); await wait(900); }
+  if (ch.act) {
+    // هنا الزرُّ داخل منطقة المحتوى — فالنقرُ أوّلاً ليُرى، ثم يُخفى ما يليه من بناء.
+    const b = await cursorTo(ch.act, { settle: 700 });
+    if (b) {
+      await clickAt(ch.act, b);
+      await contentHide();
+      await waitSettled(ch.page);
+      await overlay();
+      await contentShow();
+      await pv('lower', ch.title, ch.lower[1], 'الفصل ' + ch.n + ' — ' + ch.kicker);
+      await wait(1200);
+    }
+  }
   await shot(ch.page);
   await browseDown(700, 1500);
   await scrollTop();
