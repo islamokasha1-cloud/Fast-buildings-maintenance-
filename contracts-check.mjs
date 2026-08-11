@@ -328,8 +328,9 @@ await page.evaluate(() => { const a = document.querySelector('.main-area'); if (
 await page.fill('#ct-r-adv', '10');
 await page.fill('#ct-r-advrec', '20');
 await page.fill('#ct-r-ret', '5');
-await page.fill('#ct-r-pen', '0.1');
-await page.fill('#ct-r-pencap', '10');
+// الغرامةُ صارت بالريال: ٥٠٠ في اليوم بسقف ٢٠٬٠٠٠ (كانت ٠٫١٪ بسقف ١٠٪)
+await page.fill('#ct-r-pen', '500');
+await page.fill('#ct-r-pencap', '20000');
 await page.fill('#ct-r-warr', '12');
 await page.waitForTimeout(400);
 
@@ -340,7 +341,47 @@ check('★ أُنشئ الطلب وبدأ عند مدير المشاريع',
   await page.evaluate(() => (window.contracts.requests()[0] || {}).status === 'crq_pending_pm'), reqId);
 check('السجلُّ الزمنيُّ سجّل الإنشاء',
   await page.evaluate(() => ((window.contracts.requests()[0] || {}).timeline || []).length === 1));
+
+/* ★★ بلاغُ المالك: «عند إنشاء طلب تعاقد يكرّر مرتين» — بطاقتان بالمعرّف نفسِه.
+   الجذرُ ليس إرسالاً مكرّراً (لاختلف المعرّفان) بل **تعويضُ الكمون**: لقطةُ المستمع
+   تصل قبل أن يُحلَّ وعدُ set()، فالإضافةُ اليدويةُ بعده نسخةٌ ثانية. الفحصُ يعدّ
+   الوثيقةَ في الذاكرة **وفي الشاشة** — فلا يمرّ ارتدادٌ يظهر في إحداهما دون الأخرى. */
+await page.evaluate(() => window.contracts.backToReqs());
+await page.waitForTimeout(600);
+const dupChk = await page.evaluate((id) => ({
+  inMemory: window.contracts.requests().filter(r => r.id === id).length,
+  inStore: Object.keys(window.__store).filter(k => k.endsWith('/' + id)).length,
+  tiles: Array.from(document.querySelectorAll('#page-contract-requests .ct-tile'))
+    .filter(el => (el.textContent || '').includes(id)).length
+}), reqId);
+check('★★ الطلبُ المُنشأ مرّةً لا يتكرّر في الذاكرة (تعويضُ الكمون لا يخلق نسخةً ثانية)',
+  dupChk.inMemory === 1 && dupChk.inStore === 1, JSON.stringify(dupChk));
+check('★★ ولا بطاقتان له في الشاشة (وهو ما رآه المالك)',
+  dupChk.tiles === 1, JSON.stringify(dupChk));
+await page.evaluate((id) => window.contracts.openReq(id), reqId);
+await page.waitForTimeout(600);
 await page.screenshot({ path: `${SHOTS}/10-request-card.png`, fullPage: true });
+
+/* ★★ طلبُ المالك: «احتاج يظهر زر يفتح تفاصيل الطرف».
+   الاسمُ وحدَه نصٌّ ميت — والمعتمِدُ يقرّر على طرفٍ لا يرى وثائقَه ولا حالتَه.
+   الفحصُ **يضغط الزرَّ** ويتحقّق أنّ سجلَّ الطرف نفسِه فُتح: صفحةُ الأطراف نشطةٌ
+   وبطاقةُ هذا الطرف معروضةٌ (لا قائمتُهم) — لا وجودَ الزرِّ في الترميز فحسب. */
+const vBtnCount = await page.evaluate(() =>
+  document.querySelectorAll('#page-contract-requests .ct-vbtn').length);
+check('★★ بطاقةُ الطلب فيها زرُّ «تفاصيل الطرف»', vBtnCount === 1, 'عدد=' + vBtnCount);
+await page.click('#page-contract-requests .ct-vbtn');
+await page.waitForTimeout(1200);
+const vOpened = await page.evaluate(() => {
+  const p = document.getElementById('page-vendors');
+  return { active: !!p && p.classList.contains('active'), txt: (p && p.textContent) || '' };
+});
+check('★★ والزرُّ يفتح **بطاقةَ** الطرف نفسِه لا قائمةَ الأطراف',
+  vOpened.active && vOpened.txt.includes('محمد أحمد الغامدي') &&
+  vOpened.txt.includes('كل الأطراف') && !vOpened.txt.includes('تعذّر العثور على الطرف'),
+  'نشطة=' + vOpened.active);
+await page.screenshot({ path: `${SHOTS}/10b-vendor-from-request.png`, fullPage: true });
+await page.evaluate((id) => { window.contracts.backToVendors(); window.contracts.openReqFrom(id); }, reqId);
+await page.waitForTimeout(900);
 
 // دورةُ الاعتماد الكاملة — أربعُ بوّابات (المستخدمُ أدمن فيملكها كلَّها)
 const stages = [];
@@ -361,7 +402,7 @@ check('بطاقةُ الطلب تعرض «جاهزٌ لإنشاء العقد»',
   ((await page.textContent('#page-contract-requests')) || '').includes('جاهزٌ لإنشاء العقد'));
 await page.screenshot({ path: `${SHOTS}/11-request-approved.png`, fullPage: true });
 
-// أمرُ دفعٍ صغير: يتخطّى المشتريات والمالية ⇒ سدادٌ مباشرةً بعد مدير المشاريع
+// أمرُ دفعٍ صغير: مديرُ المشاريع ← المشتريات ← سدادُ المالية (بلا بوّابةِ اعتمادٍ ماليّ)
 const payStages = await page.evaluate(async () => {
   const d = {
     engagement: 'pay_order', projectId: 'hail', title: 'ترميم بابٍ واحد', vendorId: 'VND-0006',
@@ -373,10 +414,13 @@ const payStages = await page.evaluate(async () => {
   const out = [window.contracts.requestById(id).status];
   await window.contracts._act(id, 'approve', '');
   out.push(window.contracts.requestById(id).status);
+  await window.contracts._act(id, 'approve', '');
+  out.push(window.contracts.requestById(id).status);
   return { id, out };
 });
-check('★ أمرُ دفعٍ بـ١٥٠٠: مدير المشاريع ⇐ سدادُ المالية مباشرةً (بلا مشتريات ولا اعتمادِ مالية)',
-  payStages.out.join(' → ') === 'crq_pending_pm → crq_pending_pay', payStages.out.join(' → '));
+check('★★ أمرُ دفعٍ بـ١٥٠٠: مدير المشاريع ⇐ المشتريات ⇐ سدادُ المالية',
+  payStages.out.join(' → ') === 'crq_pending_pm → crq_pending_proc → crq_pending_pay',
+  payStages.out.join(' → '));
 
 // السدادُ يُرفض بلا إيصال
 const noReceipt = await page.evaluate(async (id) => {
@@ -396,6 +440,266 @@ const wrongGate = await page.evaluate(async (id) => {
   return msg;
 }, payStages.id);
 check('★ دورٌ لا يملك البوّابة يُرفض في طبقة البيانات', /ليست لدورك/.test(wrongGate), wrongGate);
+
+/* ── تعديلُ بنود الطلب — للأدمن (طلبُ المالك) ──
+   العهدُ الأصليُّ «وقّع المعتمِدُ على رقمٍ وسُدِّد غيرُه» يبقى: الفحصُ يتحقّق أن
+   القيمةَ الجديدةَ **أبطلت** اعتمادَ المالية والتنفيذيِّ فعاد الطلبُ إلى بوّابتهما،
+   وأن اعتمادَ مدير المشاريع والمشتريات بقي (بصمتُهما لم تتغيّر). */
+const edStart = await page.evaluate(async () => {
+  const id = await window.contracts._create({
+    engagement: 'contract', projectId: 'hail', title: 'طلبٌ تُعدَّل بنودُه', vendorId: 'VND-0005',
+    vendorName: 'محمد أحمد الغامدي', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'e1', desc: 'أعمال', unit: 'عدد', qty: 2, unitPrice: 5000 }],
+    candidates: [], advance: {}, retention: {},
+    penalty: { mode: 'amount', perDayAmount: 500, capAmount: 20000 }, warranty: {}
+  });
+  for (let i = 0; i < 3; i++) await window.contracts._act(id, 'approve', 'موافق');  // pm · proc · finance
+  const before = window.contracts.requestById(id);
+  window.contracts.openReq(id);
+  return { id, status: before.status, value: before.value, fin: !!before.financeApprovedAt };
+});
+await page.waitForTimeout(900);
+check('★ طلبٌ بـ١٠٬٠٠٠ اعتمدته البوّاباتُ الثلاث (مادّةُ فحص التعديل)',
+  edStart.value === 10000 && edStart.fin === true, JSON.stringify(edStart));
+check('★★ وزرُّ «تعديل البنود» يظهر للأدمن',
+  ((await page.textContent('#page-contract-requests')) || '').includes('تعديل البنود'));
+await page.evaluate(() => window.contracts.editLines());
+await page.waitForTimeout(700);
+check('★★ والمحرّرُ يحلّ محلَّ الجدول ويشرح أثرَ التغيير قبل وقوعه',
+  await page.evaluate(() => !!document.getElementById('ct-ln-rows')) &&
+  /يُسقط اعتمادَ المالية والتنفيذيِّ/.test((await page.textContent('#page-contract-requests')) || ''));
+const edNoReason = await page.evaluate(async (id) => {
+  try { await window.contracts._editLines(id, [{ desc: 'أعمال', unit: 'عدد', qty: 3, unitPrice: 5000 }], ''); return 'مرّ بلا سبب'; }
+  catch (e) { return e.message; }
+}, edStart.id);
+check('★★ ولا تعديلَ بلا سبب', /سبب التعديل إلزامي/.test(edNoReason), edNoReason);
+await page.fill('#ct-ln-rows [data-ef="qty"]', '3');
+await page.fill('#ct-ln-why', 'زيادة الكمية بعد المعاينة');
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${SHOTS}/12e-edit-lines.png`, fullPage: true });
+await page.click('#ct-ln-btn');
+await page.waitForTimeout(1400);
+const edAfter = await page.evaluate((id) => {
+  const r = window.contracts.requestById(id);
+  return { value: r.value, qty: (r.lines[0] || {}).qty, status: r.status,
+           pm: !!r.pmApprovedAt, proc: !!r.procApprovedAt, fin: !!r.financeApprovedAt,
+           note: ((r.timeline || []).slice(-1)[0] || {}).note || '',
+           code: ((r.timeline || []).slice(-1)[0] || {}).code || '' };
+}, edStart.id);
+check('★★ القيمةُ أُعيد حسابُها من البنود (١٥٬٠٠٠) والكميةُ صارت ٣',
+  edAfter.value === 15000 && edAfter.qty === 3, JSON.stringify(edAfter));
+check('★★ واعتمادُ المالية سقط فعاد الطلبُ إلى بوّابتها — ولم يسقط اعتمادُ مدير المشاريع والمشتريات',
+  edAfter.fin === false && edAfter.pm === true && edAfter.proc === true &&
+  edAfter.status === 'crq_pending_finance', JSON.stringify(edAfter));
+check('★ والخطُّ الزمنيُّ يحفظ القيمةَ قبل وبعد والسبب',
+  edAfter.code === 'edited' && /10,000\.00 ← 15,000\.00/.test(edAfter.note) &&
+  /زيادة الكمية بعد المعاينة/.test(edAfter.note), edAfter.note);
+const edPerm = await page.evaluate(async (id) => {
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  let msg; try { await window.contracts._editLines(id, [{ desc: 'x', qty: 1, unitPrice: 1 }], 'محاولة'); msg = 'مرّ بغير أدمن'; }
+  catch (e) { msg = e.message; }
+  currentUser.role = real;
+  let empty; try { await window.contracts._editLines(id, [], 'بلا بنود'); empty = 'مرّت بلا بنود'; }
+  catch (e) { empty = e.message; }
+  return { msg, empty };
+}, edStart.id);
+check('★★ والتعديلُ للأدمن وحدَه — الرفضُ في طبقة البيانات', /للأدمن فقط/.test(edPerm.msg), edPerm.msg);
+check('★ ولا تمرّ بنودٌ فارغة', /بنداً واحداً على الأقل/.test(edPerm.empty), edPerm.empty);
+
+/* ── غرامةُ التأخير بالريال (طلبُ المالك) ── */
+const penUI = await page.evaluate((id) => {
+  window.contracts.openReq(id);
+  return null;
+}, edStart.id);
+await page.waitForTimeout(800);
+const penCard = await page.textContent('#page-contract-requests') || '';
+check('★★ بطاقةُ الطلب تعرض الغرامةَ بالريال لا بالنسبة',
+  /500\.00 ر\.س يومياً/.test(penCard) && /سقف 20,000\.00 ر\.س/.test(penCard) && !/٪ يومياً/.test(penCard),
+  (penCard.match(/غرامة التأخير[\s\S]{0,60}/) || [''])[0].replace(/\s+/g, ' '));
+
+/* ── إرجاعُ الطلب إلى مرحلةٍ محدّدة — للأدمن (طلبُ المالك) ──
+   يُنفَّذ **من الشاشة**: زرٌّ ⇐ صندوقٌ وجهاتُه مشتقّةٌ من الطلب ⇐ سببٌ إلزاميّ ⇐
+   وقوفُ الطلب عند البوّابة المختارة بعد سقوط اعتماداتها وما بعدها. */
+const rwStart = await page.evaluate(async () => {
+  const id = await window.contracts._create({
+    engagement: 'contract', projectId: 'hail', title: 'طلبٌ يُرجَع لمرحلة', vendorId: 'VND-0005',
+    vendorName: 'محمد أحمد الغامدي', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'w1', desc: 'أعمال', unit: 'عدد', qty: 1, unitPrice: 40000 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  });
+  const seq = [];
+  for (let i = 0; i < 4; i++) { await window.contracts._act(id, 'approve', 'موافق'); seq.push(window.contracts.requestById(id).status); }
+  window.contracts.openReq(id);
+  return { id, seq };
+});
+await page.waitForTimeout(900);
+check('★ طلبٌ عبَر بوّاباتِه الأربع ⇐ معتمَد (مادّةُ فحص الإرجاع)',
+  rwStart.seq[3] === 'crq_approved', rwStart.seq.join(' → '));
+check('★★ وزرُّ «إرجاع لمرحلة» يظهر للأدمن',
+  ((await page.textContent('#page-contract-requests')) || '').includes('إرجاع لمرحلة'));
+await page.evaluate(() => window.contracts.openRewind());
+await page.waitForTimeout(700);
+const rwBox = await page.evaluate(() => {
+  const sel = document.getElementById('ct-rw-gate');
+  return { open: !!sel, opts: sel ? Array.from(sel.options).map(o => o.value) : [],
+           labels: sel ? Array.from(sel.options).map(o => o.textContent.trim()) : [] };
+});
+check('★★ وصندوقُ الإرجاع يعرض الوجهاتِ المشتقّةَ من مسار الطلب لا قائمةً ثابتة',
+  rwBox.open && rwBox.opts.join(',') === 'pm,proc,finance,ceo' && rwBox.labels.includes('المشتريات'),
+  JSON.stringify(rwBox.opts));
+const rwNoReason = await page.evaluate(async (id) => {
+  try { await window.contracts._rewind(id, 'proc', ''); return 'مرّ بلا سبب'; }
+  catch (e) { return e.message; }
+}, rwStart.id);
+check('★★ ولا إرجاعَ بلا سبب (من أُسقط توقيعُه يقرأ لماذا)', /سبب الإرجاع إلزامي/.test(rwNoReason), rwNoReason);
+await page.selectOption('#ct-rw-gate', 'proc');
+await page.fill('#ct-rw-why', 'تغيّر المرشَّح الفائز');
+await page.screenshot({ path: `${SHOTS}/12d-rewind-box.png`, fullPage: true });
+await page.click('#ct-rw-btn');
+await page.waitForTimeout(1400);
+const rwAfter = await page.evaluate((id) => {
+  const r = window.contracts.requestById(id);
+  return { status: r.status, pm: !!r.pmApprovedAt, proc: !!r.procApprovedAt, fin: !!r.financeApprovedAt,
+           ceo: !!r.ceoApprovedAt, procKey: !!r.procApprovedKey, value: r.value, lines: (r.lines || []).length,
+           tl: (r.timeline || []).map(x => x.code).join(','),
+           note: ((r.timeline || []).slice(-1)[0] || {}).note || '' };
+}, rwStart.id);
+check('★★ الطلبُ وقف عند بوّابة المشتريات فعلاً', rwAfter.status === 'crq_pending_proc', rwAfter.status);
+check('★★ واعتماداتُ المشتريات وما بعدها سقطت — ولم يسقط اعتمادُ مدير المشاريع',
+  rwAfter.pm === true && !rwAfter.proc && !rwAfter.fin && !rwAfter.ceo && !rwAfter.procKey,
+  JSON.stringify(rwAfter));
+check('★ والقيمةُ والبنودُ لم تُمَسّ (إجراءُ اعتمادٍ لا تحرير)',
+  rwAfter.value === 40000 && rwAfter.lines === 1, JSON.stringify({ v: rwAfter.value, n: rwAfter.lines }));
+check('★★ والخطُّ الزمنيُّ يحفظ الإرجاعَ وسببَه ومن أين',
+  /rewound$/.test(rwAfter.tl) && /تغيّر المرشَّح الفائز/.test(rwAfter.note) && /من «/.test(rwAfter.note),
+  rwAfter.note);
+const rwPerm = await page.evaluate(async (id) => {
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  let msg; try { await window.contracts._rewind(id, 'pm', 'محاولة'); msg = 'مرّ بغير أدمن'; }
+  catch (e) { msg = e.message; }
+  currentUser.role = real;
+  let bad; try { await window.contracts._rewind(id, 'ceo', 'وجهةٌ غيرُ صالحة'); bad = 'مرّت وجهةٌ غيرُ صالحة'; }
+  catch (e) { bad = e.message; }
+  return { msg, bad };
+}, rwStart.id);
+check('★★ والإرجاعُ للأدمن وحدَه — الرفضُ في طبقة البيانات', /للأدمن فقط/.test(rwPerm.msg), rwPerm.msg);
+check('★★ ووجهةٌ لا يقف عندها الطلبُ تُرفَض (لا وعدَ كاذب)', /ليست وجهةً صالحة/.test(rwPerm.bad), rwPerm.bad);
+
+/* ── فصلُ المهام: من اعتمد بوّابةً لا يعتمد التاليةَ (طلبُ المالك) ──
+   الحالةُ التي رآها بعينه: اعتمد كمدير مشاريع فعاد زرُّ الاعتماد — للمشتريات هذه
+   المرّة — لأن الأدمن عضوٌ في كلّ بوّابة. الفحصُ يعيد المشهد حرفياً: بلا مسؤول
+   مشترياتٍ في المستخدمين يبقى الزرُّ (نيابةً)، وبوجوده يختفي **ومعه سببُ غيابه**. */
+const sod = await page.evaluate(async () => {
+  const id = await window.contracts._create({
+    engagement: 'pay_order', projectId: 'hail', title: 'فحصُ فصل المهام', vendorId: 'VND-0006',
+    vendorName: 'راجو كومار', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 's1', desc: 'عمل', unit: 'عدد', qty: 1, unitPrice: 900 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  });
+  const out = { id, me: currentUser.user, role: currentUser.role };
+  await window.contracts._act(id, 'approve', '');            // بوّابةُ مدير المشاريع
+  const r1 = window.contracts.requestById(id);
+  out.status = r1.status;
+  out.storedUser = r1.pmApprovedByUser || '';
+  const M = (users) => window.contracts._crqActMode(
+    window.contracts.requestById(id), 'crq_pending_proc', currentUser.role,
+    currentUser.user, currentUser.name, users);
+  out.solo = M(USERS);                                        // لا مسؤولَ مشتريات بعد
+  USERS.push({ user: 'proc9', name: 'مسؤول المشتريات', role: 'procurement_officer' });
+  out.team = M(USERS);                                        // صار للبوّابة صاحبٌ آخر
+  try { await window.contracts._act(id, 'approve', ''); out.blocked = 'مرّ رغم المنع'; }
+  catch (e) { out.blocked = e.message; }
+  out.myTasks = window.contracts._myPendingItems('admin').filter(x => x.id === id).length;
+  window.contracts.openReq(id);
+  return out;
+});
+await page.waitForTimeout(900);
+check('★ الاعتمادُ الأوّل خزّن اسمَ الدخول (عليه تقوم المطابقةُ المستقرّة)',
+  sod.storedUser === sod.me && sod.status === 'crq_pending_proc', JSON.stringify({ u: sod.storedUser, s: sod.status }));
+check('★★ بلا مسؤولِ مشترياتٍ في المستخدمين: يعتمد **نيابةً** ولا يتعطّل العمل',
+  sod.solo === 'delegate', sod.solo);
+check('★★ وبوجود مسؤولِ مشترياتٍ: مُنِع — والمنعُ في طبقة البيانات لا على الزرّ',
+  sod.team === 'blocked' && /بوّابةٍ سابقة/.test(sod.blocked), sod.team + ' · ' + sod.blocked);
+check('★★ و«بانتظار إجراءك» لا تَعِد بزرٍّ مُنِع', sod.myTasks === 0, 'عدد=' + sod.myTasks);
+const sodUI = await page.evaluate(() => {
+  const p = document.getElementById('page-contract-requests');
+  const txt = (p && p.textContent) || '';
+  return {
+    approve: Array.from(p.querySelectorAll('button')).some(b => /اعتماد —/.test(b.textContent || '')),
+    reject: Array.from(p.querySelectorAll('button')).some(b => /رفض \/ إعادة/.test(b.textContent || '')),
+    why: /فصلُ المهام/.test(txt),
+    waiting: /بانتظار إجراءٍ منك/.test(txt)
+  };
+});
+check('★★ وزرُّ الاعتماد اختفى من الشاشة (وهو ما طلبه المالك)', sodUI.approve === false, JSON.stringify(sodUI));
+check('★★ ومعه **سببُ غيابه** — لا زرَّ يختفي بلا تفسير', sodUI.why === true, JSON.stringify(sodUI));
+check('★ والرفض/الإعادة يبقى متاحاً (مخرجٌ لا يُسدّ)', sodUI.reject === true, JSON.stringify(sodUI));
+check('★ ولا يقول الشريطُ «بانتظار إجراءٍ منك» لمن مُنِع', sodUI.waiting === false, JSON.stringify(sodUI));
+await page.screenshot({ path: `${SHOTS}/12c-separation-of-duties.png`, fullPage: true });
+// أعِد المستخدمين كما كانوا — بقيةُ السيناريوهات تعتمد أن الأدمن يملك كلّ بوّابة
+await page.evaluate(() => { const i = USERS.findIndex(u => u.user === 'proc9'); if (i >= 0) USERS.splice(i, 1); });
+
+/* ── حذفُ الطلبات الملغاة للأدمن (طلبُ المالك) ──
+   الفعلُ الوحيدُ الذي لا رجعةَ فيه — فالفحصُ يُثبت البابَ **وحدودَه** في طبقة
+   البيانات نفسِها: حيٌّ لا يُحذف · غيرُ الأدمن لا يحذف · والملغى يُحذف فعلاً
+   ويسقط من الشاشة. (والقواعدُ على الخادم يفحصها `rules-check.mjs` على محاكٍ.) */
+const delGuards = await page.evaluate(async () => {
+  const d = {
+    engagement: 'pay_order', projectId: 'hail', title: 'طلبٌ سيُلغى', vendorId: 'VND-0006',
+    vendorName: 'راجو كومار', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'z', desc: 'عملٌ ملغى', unit: 'عدد', qty: 1, unitPrice: 500 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  };
+  const id = await window.contracts._create(d);
+  const out = { id };
+  try { await window.contracts._delete(id); out.live = 'حُذف وهو حيّ'; }
+  catch (e) { out.live = e.message; }
+  await window.contracts._cancel(id, 'لم يعد مطلوباً');
+  out.status = window.contracts.requestById(id).status;
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  try { await window.contracts._delete(id); out.notAdmin = 'حُذف بغير أدمن'; }
+  catch (e) { out.notAdmin = e.message; }
+  currentUser.role = real;
+  await window.contracts._delete(id);
+  out.gone = !window.contracts.requestById(id);
+  out.inStore = Object.keys(window.__store).filter(k => k.endsWith('/' + id)).length;
+  return out;
+});
+check('★★ الطلبُ الحيُّ لا يُحذف ولو من الأدمن', /لا يُحذف إلا الطلبُ الملغى/.test(delGuards.live), delGuards.live);
+check('★ والإلغاءُ ينقله إلى «ملغى»', delGuards.status === 'crq_cancelled', delGuards.status);
+check('★★ والملغى لا يحذفه غيرُ الأدمن', /للأدمن فقط/.test(delGuards.notAdmin), delGuards.notAdmin);
+check('★★ والأدمن يحذف الملغى — يسقط من الذاكرة **ومن المخزن**',
+  delGuards.gone === true && delGuards.inStore === 0, JSON.stringify(delGuards));
+
+// ثمّ المسارُ من الشاشة نفسِها: الزرُّ يظهر على الملغى وحدَه، وضغطُه يحذف فعلاً
+const delId = await page.evaluate(async () => {
+  const id = await window.contracts._create({
+    engagement: 'pay_order', projectId: 'hail', title: 'طلبٌ يُحذف من الشاشة', vendorId: 'VND-0006',
+    vendorName: 'راجو كومار', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'z2', desc: 'عملٌ ملغى', unit: 'عدد', qty: 1, unitPrice: 400 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  });
+  window.contracts.openReq(id);
+  return id;
+});
+await page.waitForTimeout(900);
+check('★ ولا زرَّ حذفٍ على طلبٍ حيّ (البابُ لا يُعرَض حيث لا يُفتح)',
+  !((await page.textContent('#page-contract-requests')) || '').includes('حذف الطلب'));
+await page.evaluate(async (id) => { await window.contracts._cancel(id, 'تكرار'); window.contracts.openReq(id); }, delId);
+await page.waitForTimeout(900);
+check('★★ وزرُّ «حذف الطلب» يظهر للأدمن على الملغى',
+  ((await page.textContent('#page-contract-requests')) || '').includes('حذف الطلب'));
+await page.screenshot({ path: `${SHOTS}/12b-cancelled-delete.png`, fullPage: true });
+await page.evaluate(() => window.contracts.doDelete());
+await page.waitForTimeout(600);
+await page.click('#confirm-ok-btn');
+await page.waitForTimeout(1200);
+const afterDel = await page.evaluate((id) => ({
+  gone: !window.contracts.requestById(id),
+  onList: ((document.getElementById('page-contract-requests') || {}).textContent || '').includes(id)
+}), delId);
+check('★★ وضغطُ الزرِّ يحذفه فعلاً ويعود لقائمةٍ بلا أثرٍ له',
+  afterDel.gone === true && afterDel.onList === false, JSON.stringify(afterDel));
 
 /* ── مشروعٌ يدويٌّ بلا موازنة: الربطُ اختياريٌّ فعلاً ── */
 await page.evaluate(() => window.contracts.newRequest());
@@ -448,8 +752,10 @@ await page.screenshot({ path: `${SHOTS}/16-manual-request-card.png` });
 
 await page.evaluate(() => window.contracts.backToReqs());
 await page.waitForTimeout(900);
+// ستةُ طلباتٍ باقيةٍ في القائمة: المحوَّلُ لعقد · أمرُ الدفع · طلبُ تعديل البنود ·
+// طلبُ الإرجاع لمرحلة · طلبُ فصل المهام · المشروعُ اليدويّ. (وطلبا الحذف حُذفا فعلاً.)
 check('القائمةُ تعرض الطلبات وشريطَ «بانتظار دورك»',
-  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 3);
+  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 6);
 await page.screenshot({ path: `${SHOTS}/12-requests-list.png`, fullPage: true });
 
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
@@ -562,8 +868,9 @@ check('★ وفيها أطرافُ العقد والطرفُ الثاني **به
   /الطرف الأول/.test(printed) && /الطرف الثاني/.test(printed) && /1045667788/.test(printed));
 check('★ وجدولُ بنود الأعمال وشروطُ العقد وحقولُ التوقيع',
   /جدول بنود الأعمال/.test(printed) && /شروط العقد/.test(printed) && /الاسم \/ التوقيع \/ الختم/.test(printed));
-check('★ ونصُّ الغرامة المطبوع يحمل النسبةَ والسقف',
-  /غرامة تأخير قدرها 0\.1٪/.test(printed) && /بحد أقصى 10٪/.test(printed));
+check('★★ ونصُّ الغرامة المطبوع بالريال لا بالنسبة (كما اتُّفق عليه لا كما يُحسَب)',
+  /غرامة تأخير قدرها 500\.00 ريال عن كل يوم تأخير/.test(printed) &&
+  /بحد أقصى 20,000\.00 ريال/.test(printed) && !/٪ من قيمة العقد عن كل يوم/.test(printed));
 check('وقيمةُ العقد وإجماليُّه في جدول الملخّص', /قيمة العقد/.test(printed) && /33,600\.00/.test(printed));
 fs.writeFileSync(`${SHOTS}/contract-print.html`, printed);
 
@@ -971,11 +1278,16 @@ const poTab = await page.textContent('#page-contracts-list') || '';
 check('★ تبويبُ «طلبات الشراء» يشرح سببَ الربط لا يعرض حقلاً بلا معنى',
   /طلبات الشراء المرتبطة/.test(poTab) && /مرّتين/.test(poTab));
 
-// نزرع طلبَ شراءٍ في مشروع العقد ثم نربطه من الشاشة
+// نزرع طلبَ شراءٍ في مشروع العقد ثم نربطه من الشاشة.
+// البذرةُ تُكتب في **المخزن** لا في المصفوفة وحدَها: مستمعُ المشتريات حيٌّ في المحاكي
+// كما في الإنتاج، فأوّلُ كتابةٍ في المجموعة تُعيد بناء المصفوفة من المخزن — وبذرةٌ
+// محلّيةٌ فقط كانت تختفي عند الربط.
 const linkRes = await page.evaluate(async (cid) => {
   const c = window.contracts.contractById(cid);
-  purchases.push({ id: 'PO-LINK-1', projectId: c.projectId || 'hail', status: 'proc_executing',
-                   items: [{ itemType: 'مواد بناء', itemCost: 7000, qty: 1 }], estCost: 7000 });
+  const seed = { id: 'PO-LINK-1', projectId: c.projectId || 'hail', status: 'proc_executing',
+                 items: [{ itemType: 'مواد بناء', itemCost: 7000, qty: 1 }], estCost: 7000 };
+  await db.collection(PURCHASES_COLLECTION()).doc('PO-LINK-1').set(seed);
+  if (!purchases.some(p => p.id === 'PO-LINK-1')) purchases.push(seed);
   const cands = window.contracts._poCandidatesFor(c).map(p => p.id);
   const real = currentUser.role; currentUser.role = 'procurement_officer';
   await window.contracts._linkPurchase('PO-LINK-1', cid);

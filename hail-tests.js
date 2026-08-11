@@ -1922,6 +1922,141 @@ function procToFinance() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   23-أ) ختمُ اعتماد التنفيذي مقرونٌ بمبلغه · وحارسُ «تم الشراء» (v18.9xa)
+
+   جذرُ الفحص طلبٌ حقيقيّ: PO-202608-0155. اعتمده التنفيذيُّ على 2,639 ر.س،
+   ثم أرجعه الأدمن من «بانتظار استلام المستودع» إلى «تمت مراجعة المستودع» —
+   والختمُ باقٍ بلا مبلغٍ ولا انتهاء. فصار «إحالة للمالية» يتخطّى التنفيذيَّ
+   على طلبٍ عاد إلى ما قبل بوّابته، بأيّ قيمةٍ بلغها بعد ذلك.
+
+   هذا القسم يُنفّذ المنطقَ المستخرَجَ من index.html لا يقرؤه.
+   ════════════════════════════════════════════════════════════════════ */
+function poCEOStampBound() {
+  H("23-أ) ختمُ اعتماد التنفيذي مقرونٌ بمبلغه · وحارسُ «تم الشراء»");
+  const grab = n => { const i = HTML.indexOf("function " + n + "("); return i < 0 ? "" : HTML.slice(i, HTML.indexOf("\nfunction ", i + 10)); };
+  const po = (total, extra) => Object.assign({ items: [{ itemCost: total }] }, extra || {});
+
+  // ══ (أ) poCEOCovers / poClearCEOStamp / PO_PRE_CEO_STATUSES — تُنفَّذ ══
+  let A;
+  try {
+    // الوصلُ بسطرٍ جديد: كلُّ قطعةٍ تنتهي عند سطر `//` تعليقاً، فوصلُها بلا فاصلٍ
+    // يبتلع أوّلَ سطرٍ من التالية داخل التعليق.
+    A = new Function([grab("getPOTotal"), grab("poCEOCovers"), grab("poClearCEOStamp"),
+      "return {getPOTotal, poCEOCovers, poClearCEOStamp, PO_PRE_CEO_STATUSES};"].join("\n"))();
+  } catch (e) { T("تُبنى دوالّ ختم التنفيذي", false, String(e.message).slice(0, 140)); return; }
+  T("تُبنى دوالّ ختم التنفيذي", typeof A.poCEOCovers === "function" && typeof A.poClearCEOStamp === "function");
+
+  T("ختمٌ يغطّي المبلغ الحالي → مغطّى",
+    A.poCEOCovers(po(2639, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === true);
+  T("★★ ارتفاعُ القيمة فوق سقف الختم → غير مغطّى (لا شيك على بياض)",
+    A.poCEOCovers(po(200000, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === false);
+  T("★★ ختمٌ قديمٌ بلا مبلغ لا يُعتدّ به — نفس عُرف contracts.js:281",
+    A.poCEOCovers(po(2639, { ceoApprovedAt: "x" })) === false);
+  T("بلا ختمٍ أصلاً → غير مغطّى", A.poCEOCovers(po(2639, {})) === false);
+  T("تسامحُ الكسر (0.01) لا يُسقط المساوي",
+    A.poCEOCovers(po(2639.005, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === true);
+
+  const cleared = po(2639, { ceoApprovedAt: "x", ceoApprovedAmount: 2639, ceoApprovedBy: "التنفيذي" });
+  T("محوُ الختم يُرجع true أول مرّة ثم false", A.poClearCEOStamp(cleared) === true && A.poClearCEOStamp(cleared) === false);
+  T("★★ المحوُ بقيمةٍ فارغةٍ لا بـ delete — وإلا لم يمحُ شيئاً مع merge:true",
+    ("ceoApprovedAt" in cleared) && ("ceoApprovedAmount" in cleared) &&
+    cleared.ceoApprovedAt === "" && cleared.ceoApprovedAmount === 0);
+  T("والممحوُّ لم يعد يغطّي", A.poCEOCovers(cleared) === false);
+
+  T("★ مراحلُ ما قبل بوّابة التنفيذي تشمل «تمت مراجعة المستودع» (حالةُ PO-202608-0155)",
+    A.PO_PRE_CEO_STATUSES.includes("wh_reviewed") && A.PO_PRE_CEO_STATUSES.includes("pending_proc") &&
+    A.PO_PRE_CEO_STATUSES.includes("pending_pm") && A.PO_PRE_CEO_STATUSES.includes("ceo_rejected"));
+  T("★ ولا تشمل ما بعدها (فلا يسقط ختمٌ في مساره الطبيعي)",
+    !["proc_executing", "wh_receiving", "wh_auditing", "pending_finance", "closed", "pending_ceo"]
+      .some(s => A.PO_PRE_CEO_STATUSES.includes(s)));
+
+  // ══ (ب) قرارُ التوجيه في openSendToFinanceModal — يُنفَّذ بسطوره الحقيقية ══
+  const stf = grab("openSendToFinanceModal");
+  const ln = re => (stf.match(re) || [""])[0];
+  const sNeeds = ln(/const needsCEO = .*/), sClr = ln(/const cleared = .*/), sGo = ln(/const goCEO = .*/);
+  if (!sNeeds || !sClr || !sGo) { T("تُستخرج سطورُ قرار التوجيه", false, "تغيّرت صياغتها في openSendToFinanceModal"); return; }
+  let route;
+  try {
+    route = new Function("p", "getPOTotal", "PO_CEO_THRESHOLD", "poCEOCovers",
+      "const total = getPOTotal(p);\n" + sNeeds + "\n" + sClr + "\n" + sGo + "\nreturn goCEO;");
+  } catch (e) { T("يُبنى قرارُ التوجيه", false, String(e.message).slice(0, 140)); return; }
+  const goCEO = p => route(p, A.getPOTotal, 2000, A.poCEOCovers);
+
+  T("المسارُ السليم لا ينكسر: ختمٌ يغطّي القيمة → مباشرةً للمالية",
+    goCEO(po(2639, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === false);
+  T("★★ قيمةٌ فوق سقف الختم → يرجع للتنفيذي",
+    goCEO(po(5000, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === true);
+  T("★★ `finance_returned` لم يعد تصريحَ مرورٍ مطلقاً — الباب الخلفي أُغلق",
+    goCEO(po(5000, { status: "finance_returned", ceoApprovedAt: "x", ceoApprovedAmount: 2639 })) === true);
+  T("★★ ختمٌ قديمٌ بلا مبلغ → يرجع للتنفيذي بطلبٍ يراه",
+    goCEO(po(2639, { ceoApprovedAt: "x" })) === true);
+  T("تحت العتبة لا تنفيذيّ أصلاً", goCEO(po(1000, {})) === false);
+
+  // ══ (ج) كتابةُ الختم في doUpdatePurchaseStatus — تُنفَّذ ══
+  const upd = grab("doUpdatePurchaseStatus");
+  const mStamp = upd.match(/if\(oldStatus==="pending_ceo"[\s\S]*?\n  \}/);
+  if (!mStamp) { T("يُستخرج قيدُ ختم التنفيذي", false, "تغيّرت صياغته"); return; }
+  const stamp = new Function("p", "oldStatus", "newStatus", "now", "currentUser", "getPOTotal",
+    mStamp[0] + "\nreturn p;");
+  const st1 = stamp(po(2639, {}), "pending_ceo", "proc_executing", "T0", { name: "المدير التنفيذي" }, A.getPOTotal);
+  T("★★ الاعتماد يُختم بمبلغه واسمِ من اعتمده",
+    st1.ceoApprovedAmount === 2639 && st1.ceoApprovedBy === "المدير التنفيذي" && st1.ceoApprovedAt === "T0");
+  const st2 = stamp(po(2639, { ceoApprovedAt: "T0", ceoApprovedAmount: 1000 }), "pending_ceo", "pending_finance", "T1", { name: "ت" }, A.getPOTotal);
+  T("★★ اعتمادٌ ثانٍ يُعيد الختمَ بالسقف الجديد — لا يتشبّث بالقديم",
+    st2.ceoApprovedAmount === 2639 && st2.ceoApprovedAt === "T1");
+  const st3 = stamp(po(2639, {}), "wh_reviewed", "proc_executing", "T2", { name: "ت" }, A.getPOTotal);
+  T("انتقالٌ لا يمرّ ببوّابة التنفيذي لا يُنتج ختماً", !st3.ceoApprovedAt);
+
+  // ══ (د) إبطالُ الختم بالرجوع — يُنفَّذ ══
+  const mClr = upd.match(/let _ceoStampCleared = false;[\s\S]*?\n  \}/);
+  if (!mClr) { T("يُستخرج قيدُ إبطال الختم بالرجوع", false, "تغيّرت صياغته"); return; }
+  const revert = new Function("p", "oldStatus", "newStatus", "normalizePOStatus", "PO_PRE_CEO_STATUSES", "poClearCEOStamp",
+    mClr[0] + "\nreturn {p, _ceoStampCleared};");
+  const R = (from, to) => revert(po(2639, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 }), from, to, s => s, A.PO_PRE_CEO_STATUSES, A.poClearCEOStamp);
+  const rBack = R("wh_receiving", "wh_reviewed");
+  T("★★ عينُ PO-202608-0155: الرجوعُ لـ«تمت مراجعة المستودع» يُسقط الختم",
+    rBack._ceoStampCleared === true && A.poCEOCovers(rBack.p) === false);
+  T("★ ورفضُ التنفيذي يُسقطه كذلك", R("pending_ceo", "ceo_rejected")._ceoStampCleared === true);
+  T("★ والمضيُّ للأمام لا يُسقطه", R("pending_ceo", "proc_executing")._ceoStampCleared === false);
+  T("وثبات الحالة لا يُسقطه", R("wh_reviewed", "wh_reviewed")._ceoStampCleared === false);
+  T("★ نافذةُ تعديل المسؤول تطبّق القاعدةَ نفسَها (بابان يحرّكان الحالة)",
+    /PO_PRE_CEO_STATUSES\.includes\(normalizePOStatus\(pf\.status\)\) && poClearCEOStamp\(pf\)/.test(HTML));
+  T("★ وإسقاطُ الاعتماد قيدٌ في السجل لا حدثٌ صامت",
+    (HTML.match(/سقط اعتماد المدير التنفيذي — رجع الطلب إلى ما قبل بوّابته/g) || []).length >= 2);
+
+  // ══ (هـ) حارسُ «تم الشراء» في doNotifyWarehouse ══
+  const nw = grab("doNotifyWarehouse");
+  const iGuard = nw.indexOf("_poFreshStatus(poId)");
+  const iUp    = nw.indexOf("_poUploadFile(");
+  const iWrite = nw.indexOf('p.status = "wh_receiving"');
+  T("★★ «تم الشراء» صار يقرأ الحالة طازجةً من الخادم", iGuard > 0);
+  T("★★ والفحصُ قبل رفع الملف — فلا مرفقٌ يتيمٌ لطلبٍ سيُرفض", iGuard > 0 && iUp > 0 && iGuard < iUp);
+  T("★★ وقبل كتابة الحالة", iGuard > 0 && iWrite > 0 && iGuard < iWrite);
+  const mByp = nw.match(/const _bypass = .*/);
+  T("يُستخرج قرارُ التجاوز", !!mByp);
+  if (mByp) {
+    const byp = new Function("_st", mByp[0] + "\nreturn _bypass;");
+    T("★★ الحالةُ غيرُ «قيد تنفيذ المشتريات» = تجاوز", byp("pending_ceo") === true && byp("wh_reviewed") === true);
+    T("و«قيد تنفيذ المشتريات» تمرّ", byp("proc_executing") === false);
+  }
+  const bypBlock = (nw.match(/if\(_bypass\)\{[\s\S]*?\n  \}/) || [""])[0];
+  T("★★ غيرُ الأدمن يُردّ ولا يكتب شيئاً", /if\(!isAdmin\(\)\)\{[\s\S]*?return false;/.test(bypBlock));
+  T("★ والأدمن يتجاوز بتأكيدٍ يسمّي ما يتجاوزه", /showConfirm\(/.test(bypBlock) && /تجاوزُ مرحلة التنفيذ/.test(bypBlock));
+  T("★ والتجاوزُ يُكتب في قيد السجل نفسِه", /_bypass \? \("⚠ تجاوزُ مسؤول/.test(nw));
+  T("★ والنافذةُ تفشل مبكّراً لغير الأدمن قبل ملء النموذج",
+    /if\(!isAdmin\(\) && normalizePOStatus\(p\.status\) !== "proc_executing"\)/.test(grab("openNotifyWarehouseModal")));
+
+  // `_poFreshStatus` بلا اتصال: تُرجع "" فيمضي المستدعي بالمرآة المحلية
+  try {
+    // `grab` يبدأ عند "function" فيُسقط `async` — تُعاد لئلا يسقط `await` داخلها
+    const fresh = new Function("db", "purchases", "normalizePOStatus", "console",
+      "async " + grab("_poFreshStatus") + "\nreturn _poFreshStatus;")(null, [], s => s, console);
+    _deferred.push(Promise.resolve(fresh("PO-X")).then(v =>
+      T("★ بلا اتصالٍ تُرجع الحالةَ فارغةً — الحراسةُ أفضلُ جهدٍ لا شرطَ توفّر", v === "")));
+  } catch (e) { T("تُبنى _poFreshStatus", false, String(e.message).slice(0, 140)); }
+}
+
+/* ════════════════════════════════════════════════════════════════════
    23-ب) دمج مشروع يدوي في مشروع رسمي — إعادة ربط طلبات الشراء (v18.9vj)
    ════════════════════════════════════════════════════════════════════ */
 function mergeManualProject() {
@@ -6051,12 +6186,157 @@ function contractsPhase1() {
     ns({ ...big, value: 60000, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x", ceoApprovedAt: "x", ceoApprovedAmount: 50000 }) === "crq_pending_ceo");
   T("طلبٌ تحت السقف يُعتمد بلا التنفيذي",
     ns({ engagement: "contract", value: 1500, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x" }) === "crq_approved");
-  T("★ أمر الدفع يتخطّى المشتريات واعتمادَ المالية ⇐ السداد مباشرةً بعد مدير المشاريع",
-    ns({ engagement: "pay_order", value: 1500, pmApprovedAt: "x" }) === "crq_pending_pay");
-  T("★ لكنه لا يتخطّى بوّابة التنفيذي — السقف سقفُ المال لا سقفُ نوع الورقة",
-    ns({ engagement: "pay_order", value: 2500, pmApprovedAt: "x" }) === "crq_pending_ceo");
+  /* ★★ أمرُ الدفع صار يمرّ بالمشتريات (طلبُ المالك): مدير المشاريع ← المشتريات ←
+     سدادُ المالية. المشتريات هي التي تسأل «أهذا الطرفُ صحيحٌ وسعرُه معقول؟» — ولا
+     يُعوّضها مديرُ المشاريع (يراجع الحاجة) ولا المالية (تُنفّذ السداد ولا تُقرّر). */
+  T("★★ أمرُ الدفع يمرّ بالمشتريات بعد مدير المشاريع",
+    ns({ engagement: "pay_order", value: 1500, pmApprovedAt: "x" }) === "crq_pending_proc");
+  T("★★ ثم سدادُ المالية مباشرةً — بلا بوّابةِ اعتمادٍ ماليٍّ (لا شروطَ تجاريةً تُراجَع)",
+    ns({ engagement: "pay_order", value: 1500, pmApprovedAt: "x", procApprovedAt: "x" }) === "crq_pending_pay");
+  T("★ ولا يتخطّى بوّابة التنفيذي — السقف سقفُ المال لا سقفُ نوع الورقة",
+    ns({ engagement: "pay_order", value: 2500, pmApprovedAt: "x", procApprovedAt: "x" }) === "crq_pending_ceo");
+  T("★ وبوّابةُ التنفيذي **بعد** المشتريات لا قبلها (لا يوقّع التنفيذيُّ على ما لم يُراجَع)",
+    ns({ engagement: "pay_order", value: 2500, pmApprovedAt: "x" }) === "crq_pending_proc");
   T("★ البوّابة تُحسب من القيمة لا من علَمٍ يختاره المُنشئ",
     ns({ engagement: "contract", value: 50000, needsCeo: false, pmApprovedAt: "x", procApprovedAt: "x", financeApprovedAt: "x" }) === "crq_pending_ceo");
+
+  /* ════ فصلُ المهام: من اعتمد بوّابةً لا يعتمد التاليةَ ════   (طلبُ المالك)
+     العلّةُ التي رآها المالك: بعد اعتماده كمدير مشاريع عاد زرُّ الاعتماد — لأن
+     الأدمن عضوٌ في كلّ بوّابة، فيمرّر الطلبَ وحدَه من الإنشاء إلى السداد.
+     والمهربُ شرطٌ لا تفصيل: منعٌ بلا مهربٍ يحبس الطلبَ في فريقٍ لا ثانيَ فيه. */
+  {
+    const mode = (req, st, role, u, n, users) => C._crqActMode(req, st, role, u, n, users);
+    const TEAM = [{ user: "adm", role: "admin" }, { user: "proc1", role: "procurement_officer" },
+                  { user: "pm1", role: "project_manager" }];
+    const SOLO = [{ user: "adm", role: "admin" }];
+    const afterPm = { pmApprovedAt: "t", pmApprovedBy: "مدير النظام", pmApprovedByUser: "adm" };
+
+    T("★★ من اعتمد بوّابةً لا يعتمد التاليةَ ما دام غيرُه يملكها",
+      mode(afterPm, "crq_pending_proc", "admin", "adm", "مدير النظام", TEAM) === "blocked");
+    T("★★ ومن لم يعتمد شيئاً يعتمد عادةً",
+      mode(afterPm, "crq_pending_proc", "procurement_officer", "proc1", "مسؤول المشتريات", TEAM) === "act");
+    T("★★ والمهرب: لا أحدَ غيرُه يملك البوّابة ⇒ يعتمد **نيابةً** لا يُمنَع (لا يتعطّل العمل)",
+      mode(afterPm, "crq_pending_proc", "admin", "adm", "مدير النظام", SOLO) === "delegate");
+    T("★ ومن ليست البوّابةُ لدوره أصلاً: none (القاعدةُ الأولى لم تتغيّر)",
+      mode(afterPm, "crq_pending_proc", "finance", "fin1", "المالية", TEAM) === "none");
+    T("★★ والمطابقةُ باسم الدخول لا بالاسم المعروض (تغييرُ الاسم لا يُسقط القيد)",
+      mode({ pmApprovedAt: "t", pmApprovedBy: "اسمٌ قديم", pmApprovedByUser: "adm" },
+           "crq_pending_proc", "admin", "adm", "اسمٌ جديد", TEAM) === "blocked");
+    T("★★ ووثيقةٌ قديمةٌ بلا حقل اسم الدخول تُطابَق بالاسم المعروض (لا يسقط القيدُ عنها)",
+      mode({ pmApprovedAt: "t", pmApprovedBy: "مدير النظام" },
+           "crq_pending_proc", "admin", "adm", "مدير النظام", TEAM) === "blocked");
+    T("★ وشخصان مختلفان باسمين متطابقين لا يلتبسان متى وُجد اسمُ الدخول",
+      mode(afterPm, "crq_pending_proc", "admin", "adm2", "مدير النظام", TEAM) === "act");
+    T("★ والسدادُ تحت القاعدة نفسِها — هناك يخرج المال",
+      mode({ pmApprovedAt: "t", pmApprovedByUser: "adm" }, "crq_pending_pay", "admin", "adm", "",
+           [{ user: "adm", role: "admin" }, { user: "fin1", role: "finance" }]) === "blocked");
+    T("★ ومَن يملك البوّابةَ وحدَه دون أن يعتمد سابقاً يعتمد عادةً لا نيابةً",
+      mode({}, "crq_pending_proc", "admin", "adm", "مدير النظام", SOLO) === "act");
+    T("★★ والمنعُ يقع في طبقة البيانات لا على الزرّ — وعلى الوثيقة الطازجة",
+      /var mode = crqActMode\(r, st, role, _meUser\(\), _me\(\), _users\(\)\);[\s\S]{0,200}mode === "blocked"\) throw new Error/.test(src) &&
+      /function payRequest[\s\S]{0,900}pmode === "blocked"\) throw new Error/.test(src));
+    T("★★ والرفضُ/الإعادة لا يُمنع أبداً (لا يراكم سلطةً، ومنعُه يحبس الطلب)",
+      !/action === "reject"[\s\S]{0,300}crqActMode/.test(src) &&
+      /الرفضُ\/الإعادة لا يُمنع أبداً/.test(src));
+    T("★★ وسببُ غياب الزرّ يُقال صراحةً (زرٌّ يختفي بلا تفسيرٍ يُقرأ عطلاً)",
+      /mode === "blocked"[\s\S]{0,300}فصلُ المهام/.test(src) &&
+      /mode === "delegate"[\s\S]{0,300}نيابةً/.test(src));
+    T("★ وزرُّ الاعتماد يحمل اسمَ بوّابته (فلا يُقرأ ظهورُه ثانيةً زرّاً عالقاً)",
+      /' اعتماد — '\+_esc\(\(owner\|\|\{\}\)\.lbl\|\|""\)/.test(src));
+    T("★★ و«بانتظار إجراءك» لا تَعِد بزرٍّ مُنِع — تحترم القاعدةَ نفسَها",
+      /myPendingItems[\s\S]{0,700}crqActMode\(r, r\.status, role, meU, meN, us\) !== "blocked"/.test(src));
+    T("★★ وعدّادُ «بانتظار دورك» في الشريط يحترمها كذلك (عدّادٌ بلا زرٍّ يبعثك تبحث عن عملٍ ليس لك)",
+      /var mine   = all\.filter\(function\(r\)\{[\s\S]{0,200}crqActMode\(r, r\.status, role, meU, meN, us\) !== "blocked"/.test(src));
+    T("★ والاعتمادُ نيابةً يُوسَم في الخطّ الزمني ويُخزَّن عَلَمُه",
+      /mode === "delegate"\) r\.delegatedApproval = true/.test(src) &&
+      /نيابةً — لا يوجد غيرُك يملك هذه البوّابة/.test(src));
+    T("★ واسمُ الدخول يُخزَّن مع كلّ اعتمادٍ (بلا ذلك تسقط المطابقةُ المستقرّة)",
+      (src.match(/ApprovedByUser=_meUser\(\)/g) || []).length === 4);
+  }
+
+  /* ════ الإرجاعُ إلى بوّابةٍ محدّدة — للأدمن ════   (طلبُ المالك)
+     «رفض/إعادة» يُرجع للمُنشئ دائماً: خطوةٌ واحدةٌ للخلف مهما كان الخطأ. والإرجاعُ
+     **ليس حالةً جديدة** بل مسحُ اعتماداتِ البوّابة وما بعدها ثمّ `crqNextStage`
+     وحدَها تقرّر — فلا آلةَ حالاتٍ ثانيةٌ تنحرف عن الأولى. */
+  {
+    const rw = (req, k) => C._crqRewind(req, k, TH);
+    const tg = (req) => C._crqRewindTargets(req, TH);
+    const full = { engagement: "contract", value: 50000, pmApprovedAt: "t", pmApprovedByUser: "pm1",
+                   procApprovedAt: "t", procApprovedKey: "K", financeApprovedAt: "t", financeApprovedKey: "F",
+                   ceoApprovedAt: "t", ceoApprovedAmount: 50000, status: "crq_approved" };
+    T("★★ الإرجاعُ إلى المشتريات يُعيد الطلبَ إلى بوّابتها",
+      rw(full, "proc").status === "crq_pending_proc");
+    T("★★ ويُسقط اعتمادَها **وما بعدها** — لا يمرّ الطلبُ على توقيعٍ لم يُراجَع بعد التغيير",
+      (function () { const o = rw(full, "proc");
+        return !o.procApprovedAt && !o.financeApprovedAt && !o.ceoApprovedAt &&
+               !o.procApprovedKey && !o.financeApprovedKey && !o.ceoApprovedAmount; })());
+    T("★★ ويُبقي ما قبلها صحيحاً (اعتمادُ مدير المشاريع لا يسقط بلا سبب)",
+      rw(full, "proc").pmApprovedAt === "t" && rw(full, "proc").pmApprovedByUser === "pm1");
+    T("★ والإرجاعُ إلى مدير المشاريع يمسح الأربعةَ جميعاً",
+      (function () { const o = rw(full, "pm");
+        return o.status === "crq_pending_pm" && !o.pmApprovedAt && !o.ceoApprovedAt; })());
+    T("★ والقيمةُ والبنودُ والطرفُ لا تُمَسّ (الإرجاعُ إجراءُ اعتمادٍ لا تحرير)",
+      rw(full, "pm").value === 50000 && rw(full, "pm").engagement === "contract");
+    T("★ ومفتاحٌ غيرُ معروفٍ يُرفَض", rw(full, "nope") === null);
+
+    T("★★ والوجهاتُ تُشتقّ من مسار الطلب نفسِه: العقدُ فوق السقف ⇒ أربعُ بوّابات",
+      tg(full).join(",") === "pm,proc,finance,ceo", tg(full).join(","));
+    T("★★ وأمرُ الدفع بلا بوّابةِ اعتمادٍ ماليّ (وجهةٌ يقفز فوقها الطلبُ وعدٌ كاذب)",
+      tg({ engagement: "pay_order", value: 1500, pmApprovedAt: "t", procApprovedAt: "t",
+           status: "crq_pending_pay" }).join(",") === "pm,proc");
+    T("★ وما دون سقف التنفيذيِّ بلا بوّابته",
+      tg({ engagement: "contract", value: 100, pmApprovedAt: "t", procApprovedAt: "t",
+           financeApprovedAt: "t", status: "crq_approved" }).join(",") === "pm,proc,finance");
+    T("★★ ولا تُعرَض وجهةٌ لا تغيّر الحالةَ الحالية (إرجاعٌ بلا أثر)",
+      tg({ engagement: "contract", value: 50000, pmApprovedAt: "t", status: "crq_pending_proc" })
+        .indexOf("proc") === -1);
+    T("★ والمرفوضُ يُرجَع إلى بوّابةٍ فيُستأنف مساره",
+      tg({ engagement: "contract", value: 50000, pmApprovedAt: "t", procApprovedAt: "t",
+           status: "crq_finance_returned" }).indexOf("proc") !== -1);
+
+    T("★★ والتنفيذُ للأدمن وحدَه وبسببٍ إلزاميّ",
+      /function rewindRequest\(id, gateKey, reason\)[\s\S]{0,400}_role\(\) !== "admin"[\s\S]{0,200}!reason\) return Promise\.reject/.test(src));
+    T("★★ ولا يُرجَع منتهٍ (محوَّلٌ · مسدَّدٌ · ملغى) ولا وجهةٌ غيرُ صالحة — على الوثيقة الطازجة",
+      /function rewindRequest[\s\S]{0,900}crqIsFinal\(r\.status\)\) throw[\s\S]{0,300}crqRewindTargets\(r, th\)\.indexOf\(gateKey\) === -1\) throw/.test(src));
+    T("★ والخطُّ الزمنيُّ يحفظ من أين أُرجع ولماذا (من أسقطنا توقيعَه يقرأ السبب)",
+      /_pushTimeline\(next, "إرجاع إلى "[\s\S]{0,200}"من «"\+from\+"» — "\+reason/.test(src));
+    T("★ والزرُّ للأدمن وحدَه وحين توجد وجهةٌ صالحةٌ أصلاً (لا قائمةٌ فارغة)",
+      /_role\(\)==="admin" && crqRewindTargets\(r, ceoThreshold\(\)\)\.length[\s\S]{0,160}contracts\.openRewind\(\)/.test(src));
+  }
+
+  /* ════ تعديلُ بنود الطلب — للأدمن وحدَه ════   (طلبُ المالك)
+     البنودُ والقيمةُ كانتا مجمَّدتين بعد الإرسال لسببٍ وجيه: «وقّع المعتمِدُ على
+     رقمٍ وسُدِّد غيرُه». والبابُ الجديدُ لا ينقض العهدَ بل يحترمه بطريقٍ آخر —
+     ما وُقِّع على رقمٍ قديمٍ **يُبطَل** لا يُمرَّر. */
+  {
+    const RULX = (function () {
+      const q = path.resolve(path.dirname(IDX), "firestore.rules");
+      return fs.existsSync(q) ? fs.readFileSync(q, "utf8") : "";
+    })();
+    T("★★ التعديلُ للأدمن وحدَه وبسببٍ إلزاميّ",
+      /function editRequestLines\(id, lines, reason\)[\s\S]{0,400}_role\(\) !== "admin"[\s\S]{0,200}!reason\) return Promise\.reject/.test(src));
+    T("★★ والقيمةُ تُعاد حسابُها من البنود بالدالّة الموحّدة لا في الترميز",
+      /function editRequestLines[\s\S]{0,2000}r\.value = crqValueOf\(r\);/.test(src));
+    T("★★ وبصمةُ المالية تسقط ثمّ `crqNextStage` تُعيد الطلبَ لبوّابتها (لا توقيعَ على رقمٍ قديم)",
+      /function editRequestLines[\s\S]{0,2200}crqRevalidate\(r\)[\s\S]{0,120}crqNextStage\(next, th\)/.test(src));
+    T("★ ولا تُعدَّل بنودُ طلبٍ منتهٍ، ولا تمرّ بنودٌ فارغةٌ أو قيمةٌ صفر",
+      /function editRequestLines[\s\S]{0,2000}crqIsFinal\(r\.status\)\) throw/.test(src) &&
+      /أضِف بنداً واحداً على الأقل بوصفٍ وكمية/.test(src) &&
+      /function editRequestLines[\s\S]{0,2100}r\.value <= 0\) throw/.test(src));
+    T("★★ وعتبةُ أمر الدفع تُفحَص بعد التعديل (لا يتضخّم أمرُ دفعٍ فوق سقفه)",
+      /function editRequestLines[\s\S]{0,2200}engagement==="pay_order" && !payOrderAllowed\(r\.value, payOrderThreshold\(\)\)/.test(src));
+    T("★ والخطُّ الزمنيُّ يحفظ القيمةَ قبل وبعد والسبب",
+      /_pushTimeline\(next, "تعديل البنود", "edited",[\s\S]{0,120}money\(was\)\+" ← "\+money\(next\.value\)/.test(src));
+    T("★★ وقاعدةُ «من يعدّل» في موضعٍ واحدٍ يقرؤها الزرُّ والبيانات",
+      /function canEditLines\(req\)\{ return _role\(\)==="admin" && !!req && !crqIsFinal\(req\.status\); \}/.test(src) &&
+      /canEditLines\(r\) \? '<button[\s\S]{0,120}contracts\.editLines\(\)/.test(src));
+    T("★★ وقواعدُ الخادم تفتح البنودَ والقيمةَ للأدمن **وحدَهما** (الطرفُ والشكلُ مجمَّدان للجميع)",
+      /unchanged\(\['createdAt','createdByUser','vendorId','engagement','projectId'\]\)/.test(RULX) &&
+      /\(unchanged\(\['value','lines'\]\) \|\| isAdmin\(\)\)/.test(RULX));
+    T("★ والمسودّةُ محلّيةٌ حتى الحفظ ولا تبقى معلّقةً على طلبٍ آخر",
+      /function openReq\(id\)\{ _rOpen=id; _rDraft=null; _lnEdit=null;/.test(src) &&
+      /function backToReqs\(\)\{ _rOpen=null; _rDraft=null; _lnEdit=null;/.test(src));
+  }
 
   /* ════ قيمةُ العقد النافذة ════ */
   T("★ قيمة العقد = الأصلية + أوامرِ التغيير المعتمدة وحدها",
@@ -6349,6 +6629,57 @@ function contractsPhase1() {
     const missing = [...used].filter(n => !known.has(n));
     T("★ كلُّ أيقونةٍ تستعملها الوحدة موجودةٌ في مجموعة المنصة (وإلا رُسم فراغٌ صامت)",
       known.size > 0 && missing.length === 0, missing.join(" "));
+  }
+
+  /* ════ غرامةُ التأخير بالريال ════   (طلبُ المالك)
+     النسبةُ رقمٌ لا يراه أحد: المقاولُ يفاوض على ريالاتٍ في اليوم. والوثائقُ القديمةُ
+     المخزَّنةُ بالنسبة **لا تُترجَم** — تُقرأ بلغتها التي وُقِّع عليها، والوسمُ
+     (`mode`) هو الفيصل. وكلُّ حسابٍ يمرّ بالدالّتين فلا موضعان يفترقان. */
+  {
+    const AMT = { mode: "amount", perDayAmount: 500, capAmount: 20000 };
+    const PCT = { mode: "pct", perDayPct: 0.1, capPct: 10 };
+    const OLD = { perDayPct: 0.1, capPct: 10 };          // وثيقةٌ قديمةٌ بلا وسم
+    const NEW0 = {};                                      // وثيقةٌ فارغةٌ ⇒ الافتراضُ الجديد
+    T("★★ الغرامةُ الجديدةُ بالريال: ٥٠٠ يومياً كما كُتبت (بلا نسبةٍ من القيمة)",
+      C._penaltyPerDay(AMT, 1000000) === 500 && C._penaltyCap(AMT, 1000000) === 20000);
+    T("★★ والوثيقةُ القديمةُ بالنسبة تبقى تُقرأ نسبةً — لا يُترجَم عقدٌ وُقِّع عليه",
+      C._penaltyIsPct(OLD) === true && C._penaltyPerDay(OLD, 100000) === 100 &&
+      C._penaltyCap(OLD, 100000) === 10000);
+    T("★ والوسمُ الصريحُ يغلب التخمين", C._penaltyIsPct(PCT) === true && C._penaltyIsPct(AMT) === false);
+    T("★ والفارغةُ افتراضُها الجديدُ بالريال (لا نسبةَ صامتة)",
+      C._penaltyIsPct(NEW0) === false && C._penaltyPerDay(NEW0, 100000) === 0);
+    T("★★ والغرامةُ المقترَحةُ تُحسب بالمبلغ وتُقصَر بالسقف",
+      C._suggestedPenalty({ value: 1000000, penalty: AMT }, 10) === 5000 &&
+      C._suggestedPenalty({ value: 1000000, penalty: AMT }, 100) === 20000);
+    T("★ وبلا سقفٍ (٠) لا تُقصَر",
+      C._suggestedPenalty({ value: 1000000, penalty: { mode: "amount", perDayAmount: 500, capAmount: 0 } }, 100) === 50000);
+    T("★ والقديمةُ تُحسب كما كانت تماماً (لا ارتداد)",
+      C._suggestedPenalty({ value: 100000, penalty: OLD }, 10) === 1000);
+    T("★★ وسقفُ المستخلص يقرأ المبلغَ لا النسبة",
+      C._extNet({ lines: [{ cumQty: 1000, unitPrice: 100 }] },
+                { value: 1000000, vatMode: "none", retention: {}, advance: {}, penalty: AMT },
+                { prevGross: 0, penaltyAmount: 99999 }).penalty === 20000);
+    T("★ والتطبيعُ يثبّت الوسمَ عند الحفظ",
+      C._normPenalty(OLD).mode === "pct" && C._normPenalty({ perDayAmount: 300 }).mode === "amount" &&
+      C._normPenalty(OLD).perDayPct === 0.1 && C._normPenalty({ perDayAmount: 300 }).perDayAmount === 300);
+    T("★★ والعقدُ يرث الشرطَ بلغته لا مخلوطاً",
+      (function () {
+        const fromNew = C._contractFromRequest({ penalty: AMT, lines: [] }, "X", "", "").penalty;
+        const fromOld = C._contractFromRequest({ penalty: OLD, lines: [] }, "X", "", "").penalty;
+        return fromNew.mode === "amount" && fromNew.perDayAmount === 500 && fromNew.perDayPct === undefined &&
+               fromOld.mode === "pct" && fromOld.perDayPct === 0.1 && fromOld.perDayAmount === undefined;
+      })());
+    T("★ والنصُّ المعروض يقول ريالاً للجديد ونسبةً للقديم",
+      /ر\.س يومياً/.test(C._penaltyText(AMT, 1000000)) && /٪ من قيمة العقد يومياً/.test(C._penaltyText(OLD, 100000)) &&
+      C._penaltyText({}, 1000) === "—");
+    T("★★ وبصمةُ المالية تشمل الشكلين — فتغيُّرُ الغرامة يُسقط اعتمادَها أياً كانت لغتُها",
+      C._crqFinanceKey({ penalty: AMT }) !== C._crqFinanceKey({ penalty: { mode: "amount", perDayAmount: 600, capAmount: 20000 } }) &&
+      C._crqFinanceKey({ penalty: AMT }) !== C._crqFinanceKey({ penalty: OLD }));
+    T("★ ونموذجُ الطلب صار بالريال (لا حقلَ نسبةٍ باقٍ في الشاشة)",
+      /غرامة التأخير \(ر\.س\) لكل يوم/.test(src) && /سقف الغرامة \(ر\.س\)/.test(src) &&
+      !/غرامة التأخير % لكل يوم/.test(src));
+    T("★ والوثيقةُ الورقيةُ تتبع لغةَ العقد نفسِه",
+      /penaltyIsPct\(pen\)[\s\S]{0,400}ريال عن كل يوم تأخير/.test(src));
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -6965,6 +7296,8 @@ function contractsPhase1() {
     const rulesPath = path.resolve(path.dirname(IDX), "firestore.rules");
     const RUL = fs.existsSync(rulesPath) ? fs.readFileSync(rulesPath, "utf8") : "";
     T("ملفُّ قواعد Firestore موجود", RUL.length > 0);
+    const rcPath = path.resolve(path.dirname(IDX), "rules-check.mjs");
+    const RULES_CHECK = fs.existsSync(rcPath) ? fs.readFileSync(rcPath, "utf8") : "";
 
     /* ★ الحارسُ الأهمّ: القاعدةُ العامة تسمح لكلّ دورٍ بالكتابة في كلّ شيء، وقواعدُ
        Firestore تُقيَّم بـ«أو» — فما لم تُستثنَ مجموعاتُ التعاقدات منها، كلُّ القفل
@@ -7001,8 +7334,18 @@ function contractsPhase1() {
        كلّ عقد. الحارسُ يُثبّت الاستثناءَ لئلّا يُحذَف بحسن نيّةٍ عند «تنظيف» القواعد. */
     T("★★ والماليةُ مأذونٌ لها بالإنهاء الفنّيّ — لأنّ المستخلصَ الختاميَّ يفعلها في معاملتها",
       /to == 'ctr_completed'[\s\S]{0,120}'finance'/.test(transitBlock));
-    T("★ ولا حذفَ للعقود ولا للطلبات ولا للمستخلصات من العميل",
+    /* الحذفُ ممنوعٌ في كلّ مجموعاتِ التعاقدات — **إلا** بابٌ واحدٌ ضيّقٌ فُتح
+       بطلب المالك: الأدمن يحذف طلباً **ملغى** (ورقةٌ ماتت قبل أن تُنتج أثراً).
+       الحارسُ يُثبّت الحدَّين معاً: بقيةُ المجموعات مقفلةٌ بـ`if false`، والبابُ
+       المفتوحُ مشروطٌ بالأدمن **وبالحالة الملغاة** لا بأحدهما. */
+    T("★ ولا حذفَ للعقود ولا للمستخلصات ولا لأوامر التغيير من العميل",
       (RUL.match(/allow delete: if false;/g) || []).length >= 6);
+    T("★★ وحذفُ طلب التعاقد مشروطٌ بالأدمن **وبالحالة الملغاة** معاً",
+      /function crqDeleteOk\(\) \{[\s\S]{0,200}isAdmin\(\) && resource\.data\.status == 'crq_cancelled'/.test(RUL) &&
+      (RUL.match(/allow delete: if crqDeleteOk\(\);/g) || []).length === 2);
+    T("★ والفحصُ على المحاكي يُثبت البابَ وحدودَه (حيٌّ · مسدَّدٌ · محوَّلٌ · غيرُ أدمن)",
+      /crq_cancelled[\s\S]{0,600}deleteDoc\(doc\(ADMIN/.test(RULES_CHECK) &&
+      /deleteDoc\(doc\(PROC/.test(RULES_CHECK) && /RPAID/.test(RULES_CHECK));
     T("★ والآيبانُ لا يتغيّر إلا بيد المالية أو الأدمن",
       /ibanOf\(request\.resource\.data\) == ibanOf\(resource\.data\) \|\| anyRole\(\['finance','admin'\]\)/.test(RUL));
 
@@ -7018,6 +7361,114 @@ function contractsPhase1() {
       T("★ ونسخةُ Java في CI ≥ 21 (firebase-tools يرفض ما دونها)",
         Number(jv) >= 21, "java-version " + jv);
     }
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     المرآةُ المحلّية ونافذةُ التأكيد — علّتان ظهرتا للمالك في شاشةٍ واحدة
+     ════════════════════════════════════════════════════════════
+     **(أ) الطلبُ يظهر مرّتين.** بعد إنشاء طلب تعاقدٍ واحدٍ ظهرت بطاقتان
+     **بالمعرّف نفسِه** (CRQ-2608-0002) وعُدَّ الطلبُ مرّتين في العدّادات. الجذرُ ليس
+     إرسالاً مكرّراً — لو كان كذلك لاختلف المعرّفان: مستمعُ Firestore يعرض الكتابةَ
+     محلّياً (تعويضُ الكمون) **قبل** أن يُحلَّ وعدُ `set()`، فتدخل الوثيقةُ المصفوفةَ
+     من اللقطة، ثمّ تُضيفها إضافةٌ عمياءُ بعدها مرّةً ثانية.
+     **(ب) الاعتمادُ بزرِّ حذف.** `showConfirm` افتراضاتُها للحذف (سلّةٌ وزرٌّ أحمر
+     نصُّه «حذف»)، ونداءاتُ الوحدة كانت تمرّر العنوانَ والنصَّ فقط — فسأل المربّعُ
+     «اعتماد الطلب» وزرُّه يقول «حذف». وهي كذلك **تَرفُض** عند الإلغاء، فكانت
+     نقرةُ «إلغاء» تهبط في `catch` وتُظهر «تعذّر الإجراء» بلا خطأ. */
+  {
+    T("★★ الإضافةُ إلى المرآة المحلّية تمرّ بـ`_mirror` وحدَها (لا إضافةً عمياء)",
+      typeof C._mirror === "function" &&
+      !/_(reqs|ctrs|exts|chgs)\.(unshift|push)\(/.test(src));
+    T("★★ و`_mirror` يُسند بالمعرّف فلا تتكرّر الوثيقةُ مهما سبقت اللقطةُ الوعد",
+      (function () {
+        if (typeof C._mirror !== "function") return false;
+        const arr = [];
+        C._mirror(arr, { id: "CRQ-1", v: 1 }, true);        // وعدُ الإنشاء
+        C._mirror(arr, { id: "CRQ-1", v: 2 }, true);        // اللقطةُ نفسُها ثانيةً
+        C._mirror(arr, { id: "CRQ-2", v: 9 }, true);
+        return arr.length === 2 && arr[0].id === "CRQ-2" &&
+               arr[1].id === "CRQ-1" && arr[1].v === 2;      // الأحدثُ يدهس الأقدم
+      })());
+    T("★ والإدراجُ في المؤخّرة متاحٌ للمستخلصات وأوامر التغيير بلا تكرار",
+      (function () {
+        const arr = [{ id: "A" }];
+        C._mirror(arr, { id: "B" }, false);
+        C._mirror(arr, { id: "B" }, false);
+        return arr.length === 2 && arr[1].id === "B";
+      })());
+    T("★ ووثيقةٌ بلا معرّفٍ لا تدخل المرآة (لا سطرَ أشباحٍ بلا هوية)",
+      (function () { const a = []; C._mirror(a, { v: 1 }, true); return a.length === 0; })());
+
+    T("★★ كلُّ نداءِ تأكيدٍ يُصرّح بنيّته — فلا يظهر الاعتمادُ بزرِّ حذف",
+      (function () {
+        const calls = src.match(/_confirm\(\{[\s\S]{0,500}?\}\)\)/g) || [];
+        return calls.length >= 5 && calls.every(c => /\bkind\s*:/.test(c));
+      })());
+    T("★ والافتراضُ محايدٌ لا مدمِّر (لا سلّةَ حذفٍ ولا زرَّ أحمرَ بلا سبب)",
+      C._CONFIRM_KINDS && C._CONFIRM_KINDS.neutral.okClass !== "btn-danger" &&
+      C._CONFIRM_KINDS.neutral.okText !== "حذف" &&
+      C._CONFIRM_KINDS.approve.okClass === "btn-primary" &&
+      C._CONFIRM_KINDS.approve.icon !== "🗑");
+    if (typeof C._confirm === "function") {
+      const seen = [];
+      sandbox.showConfirm = o => { seen.push(o); return Promise.resolve(true); };
+      _deferred.push(C._confirm({ kind: "approve", title: "اعتماد الطلب", msg: "؟" }).then(ok => {
+        T("★★ نيّةُ «اعتماد» تُترجَم إلى زرِّ اعتمادٍ لا زرِّ حذف",
+          ok === true && seen.length === 1 && seen[0].okText === "اعتماد" &&
+          seen[0].okClass === "btn-primary" && seen[0].icon !== "🗑" &&
+          seen[0].kind === undefined, JSON.stringify(seen[0] || {}));
+      }));
+      sandbox.showConfirm = () => Promise.reject(false);   // ما تفعله «إلغاء» فعلاً
+      _deferred.push(C._confirm({ kind: "approve", msg: "؟" }).then(v => {
+        T("★★ و«إلغاء» تُحلّ بـ`false` ولا تُرفَض — فلا تنبيهَ «تعذّر الإجراء» بلا خطأ",
+          v === false, String(v));
+      }, () => T("★★ و«إلغاء» تُحلّ بـ`false` ولا تُرفَض — فلا تنبيهَ «تعذّر الإجراء» بلا خطأ", false, "رُفض الوعد")));
+    } else T("★★ `_confirm` مكشوفةٌ للفحص", false);
+  }
+
+  /* ── زرُّ «تفاصيل الطرف» في بطاقتَي الطلب والعقد (طلبُ المالك) ──
+     خانةُ الطرف كانت اسماً مجرّداً: المعتمِدُ يقرّر على طرفٍ لا يرى وثائقَه ولا
+     صلاحيتَها ولا حالتَه ولا أداءَه. والفحصُ الحقيقيُّ (ضغطُ الزرِّ وفتحُ البطاقة)
+     في `contracts-check.mjs`؛ وهنا حرّاسُ الاتّساق. */
+  {
+    T("★★ خانةُ الطرف في بطاقتَي الطلب والعقد تمرّ بـ`vendorCell` (اسمٌ + زرّ)",
+      /function vendorCell\(vendorId, vendorName\)/.test(src) &&
+      (src.match(/infoCell\("الطرف", vendorCell\(/g) || []).length === 2 &&
+      !/infoCell\("الطرف", _esc\(/.test(src));
+    T("★ ولا زرَّ يَعِد ولا يفي: بلا معرّفِ طرفٍ أو بلا صلاحيةِ اطّلاعٍ لا يظهر",
+      /function vendorCell[\s\S]{0,300}if\(!vendorId \|\| !canView\(\)\) return name;/.test(src));
+    T("★★ والفتحُ ينقل الصفحةَ **ويفتح بطاقةَ الطرف** (لا قائمتَهم)",
+      /function openVendorFrom\(vendorId\)[\s\S]{0,400}showPage\(PAGE_VENDORS\)[\s\S]{0,80}openVendor\(vendorId\)/.test(src) &&
+      /openVendorFrom: openVendorFrom/.test(src));
+    T("★ والصلاحيةُ تُفحَص في الدالّة نفسِها لا على الزرّ وحده",
+      /function openVendorFrom[\s\S]{0,200}if\(!canView\(\)\)/.test(src));
+    T("★ ولا مؤقّتَ انتظارٍ: لقطةُ الأطراف تُعيد الرسمَ وحدَها متى وصلت",
+      /function openVendorFrom[\s\S]{0,400}\}/.test(src) &&
+      !/function openVendorFrom[\s\S]{0,400}setInterval/.test(src) &&
+      /_page===PAGE_VENDORS\) paintVendors\(\)/.test(src));
+    T("★ ونمطُ الزرّ من توكنز المنصة داخل الخانة (لا يُزاحم الاسمَ على الجوال)",
+      /\.ct-vbtn\{/.test(src) && /ct-vbtn/.test(src));
+  }
+
+  /* ── حذفُ الطلبات الملغاة للأدمن (طلبُ المالك) ──
+     الفعلُ الوحيدُ في الوحدة الذي **لا رجعةَ فيه**، فحدُّه ضيّقٌ بثلاث طبقات:
+     الزرُّ لا يظهر إلا للأدمن على ملغى · وطبقةُ البيانات ترفض غيرَ ذلك بعد قراءة
+     **الوثيقة الطازجة** · وقواعدُ الخادم تقول القاعدةَ نفسَها فلا تكفي واجهةٌ مزوَّرة. */
+  {
+    T("★★ الحذفُ للأدمن وحدَه — والرفضُ في طبقة البيانات لا على الزرّ",
+      /function deleteRequest\(id\)[\s\S]{0,300}_role\(\) !== "admin"[\s\S]{0,60}حذف الطلبات للأدمن فقط/.test(src));
+    T("★★ ولا يُحذف إلا **الملغى**، والحالةُ تُقرأ من الوثيقة الطازجة لا من المرآة",
+      /function deleteRequest[\s\S]{0,500}ref\.get\(\)[\s\S]{0,400}r\.status !== "crq_cancelled"[\s\S]{0,80}لا يُحذف إلا الطلبُ الملغى/.test(src));
+    T("★ والمرآةُ المحلّيةُ تُنظَّف والبطاقةُ المفتوحةُ تُغلق (لا بطاقةٌ لوثيقةٍ محذوفة)",
+      /function deleteRequest[\s\S]{0,700}_reqs\.splice\(i,1\)[\s\S]{0,120}if\(_rOpen===id\) _rOpen=null;/.test(src));
+    T("★★ والحذفُ يُسجَّل في التدقيق (ما حُذف يبقى مذكوراً)",
+      /function deleteRequest[\s\S]{0,800}_audit\("حذف طلب تعاقد ملغى"/.test(src));
+    T("★ والزرُّ لا يظهر إلا للأدمن على طلبٍ ملغى",
+      /r\.status==="crq_cancelled" && _role\(\)==="admin"[\s\S]{0,200}contracts\.doDelete\(\)/.test(src));
+    T("★ والتأكيدُ يقول «لا رجعة» ويذكر المعرّفَ الذي سيُمحى",
+      /function doDelete\(\)[\s\S]{0,600}kind:"danger"[\s\S]{0,400}لا يمكن استرجاعه/.test(src));
+    T("★ والمقبضان مكشوفان (الشاشةُ والبيانات) لفحص المتصفّح",
+      /doDelete: doDelete/.test(src) && /_delete: deleteRequest/.test(src));
   }
 
   /* ════ التصميم: بلا لونٍ جديدٍ خارج توكنز المنصة ════ */
@@ -7118,6 +7569,7 @@ function browserCheckTimeBombs() {
   auditRowAlignment();
   waExtrasPreserveQty();
   procToFinance();
+  poCEOStampBound();
   mergeManualProject();
   issueOrderWarehouseCol();
   issueOrderManualProject();
