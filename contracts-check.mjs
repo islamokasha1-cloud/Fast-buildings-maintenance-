@@ -105,6 +105,8 @@ await page.evaluate(() => {
     name: 'راجو كومار', entityType: 'individual', kind: 'subcontractor', status: 'active',
     // إقامةٌ **توشك** (١١ يوماً) — هي مادّةُ فحص «وإقامتُه الموشكةُ على الانتهاء تُنبَّه»
     legal: { idType: 'iqama', idNumber: '2398112233', idExpiry: _dayOff(11), nationality: 'هندي' },
+    // آيبانٌ حقيقيٌّ في البذرة — به وحدَه يصير فحصُ قناعِ الورقة فحصاً لا تمريناً
+    bank: { iban: 'SA0380000000608010167519', bankName: 'الأهلي', holder: 'راجو كومار' },
     docs: [{ type: 'workPermit', number: 'WP-441', expiry: _dayOff(11) }]
   };
 });
@@ -521,6 +523,58 @@ const noReceipt = await page.evaluate(async (id) => {
   catch (e) { return e.message; }
 }, payStages.id);
 check('★ السدادُ يُرفض بلا إيصال', /إيصال/.test(noReceipt), noReceipt);
+
+/* ── سندُ صرفِ أمر الدفع: الزرُّ والورقةُ والأرقامُ والقناعُ البنكيّ ──
+   الورقةُ الوحيدةُ في المسار التي تخرج من المنصّة ويُصرَف بها مال. */
+await page.evaluate((id) => window.contracts.openReq(id), payStages.id);
+await page.waitForTimeout(800);
+const payCardTxt = await page.textContent('#page-contract-requests') || '';
+check('★ وزرُّ «طباعة أمر الدفع» ظاهرٌ على بطاقة أمر الدفع', /طباعة أمر الدفع/.test(payCardTxt));
+
+const payPrint = await page.evaluate((id) => {
+  let captured = '';
+  const realOpen = window.open;
+  window.open = function () { return { document: { write(h) { captured = h; }, close() { } }, focus() { }, print() { }, close() { } }; };
+  window.contracts.printPayOrder(id);
+  window.open = realOpen;
+  const r = window.contracts.requestById(id);
+  return { html: captured, calc: window.contracts._crqValueOf(r), words: window.contracts._amountWords(window.contracts._crqValueOf(r)) };
+}, payStages.id);
+check('★★ الطباعةُ تُنتج سندَ صرفٍ كاملاً بعنوانه ورقمه',
+  payPrint.html.length > 2000 && /<title>أمر دفع CRQ-/.test(payPrint.html) &&
+  /أمر دفع — سند صرف/.test(payPrint.html));
+check('★★ والرقمُ المطبوع = الرقمُ المحسوب من دوالِّ الوحدة (لا حسبةَ محلّيةً في الورقة)',
+  payPrint.calc === 1500 && payPrint.html.includes('1,500.00'), String(payPrint.calc));
+check('★★ والمبلغُ كتابةً مطابقٌ للتفقيط — رقمٌ واحدٌ بصيغتين لا يُحوَّر بقلم',
+  /المبلغ كتابةً/.test(payPrint.html) && payPrint.html.includes(payPrint.words) &&
+  /ألف وخمسمائة ريال لا غير/.test(payPrint.words), payPrint.words);
+check('★★ والورقةُ تُعلن أنها **صالحةٌ للصرف** بعد اكتمال بوّاباتها',
+  /معتمَد — صالحٌ للصرف/.test(payPrint.html) && !/غير صالحٍ للصرف/.test(payPrint.html));
+check('★ وفيها المستفيدُ بهويته والمشروعُ وبنودُ الصرف وخاناتُ التوقيع',
+  /المستفيد/.test(payPrint.html) && /بنود الصرف/.test(payPrint.html) &&
+  /الاعتمادات والتوقيعات/.test(payPrint.html) && /المالية — السداد/.test(payPrint.html));
+check('★★ وخاناتُ التوقيع هي بوّاباتُ مسارِه هو — بلا بوّابةِ اعتمادٍ ماليّ',
+  /مدير المشاريع/.test(payPrint.html) && /المشتريات/.test(payPrint.html) &&
+  !/بانتظار اعتماد المالية/.test(payPrint.html));
+
+/* الآيبانُ يُقنَّع على الورق كما يُقنَّع على الشاشة — تسريبُه في ورقةٍ تُصوَّر أخطر */
+const ibanPrint = await page.evaluate((id) => {
+  const cap = () => { let c = ''; const ro = window.open;
+    window.open = function () { return { document: { write(h) { c = h; }, close() { } }, focus() { }, print() { }, close() { } }; };
+    window.contracts.printPayOrder(id); window.open = ro; return c; };
+  const real = currentUser.role;
+  const asAdmin = cap();
+  currentUser.role = 'project_manager';
+  const asPm = cap();
+  currentUser.role = real;
+  return { asAdmin, asPm };
+}, payStages.id);
+const ibanFull = await page.evaluate(() => (window.contracts.vendorById('VND-0006').bank || {}).iban || '');
+check('★★ الآيبانُ كاملٌ لمن يراه على الشاشة، ومقنَّعٌ على ورقةِ غيرِه',
+  !!ibanFull && ibanPrint.asAdmin.includes(ibanFull) &&
+  !ibanPrint.asPm.includes(ibanFull) && /••••/.test(ibanPrint.asPm),
+  'iban=' + ibanFull);
+fs.writeFileSync(`${SHOTS}/pay-order-print.html`, payPrint.html);
 
 // وبوّابةٌ ليست لدورك تُرفض في طبقة البيانات لا على الزرّ
 const wrongGate = await page.evaluate(async (id) => {
