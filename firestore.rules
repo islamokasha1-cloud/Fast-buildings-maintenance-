@@ -156,9 +156,13 @@ service cloud.firestore {
       return anyRole(['project_manager','procurement_officer','finance','ceo','admin'])
         // الحالةُ النهائيةُ نهائية — لا تُفتح بعد إغلاقها
         && !(resource.data.status in ['crq_converted','crq_paid','crq_cancelled'])
-        // قيمةُ الطلب وبنودُه وطرفُه لا تتغيّر بعد الإرسال: وإلا وقّع المعتمِدُ على
-        // رقمٍ وسُدِّد غيرُه
-        && unchanged(['createdAt','createdByUser','value','vendorId','engagement','projectId','lines'])
+        // طرفُ الطلب وشكلُه لا يتغيّران بعد الإرسال لأحدٍ كائناً من كان
+        && unchanged(['createdAt','createdByUser','vendorId','engagement','projectId'])
+        /* البنودُ والقيمةُ: مجمّدتان لكلّ دورٍ — **إلا الأدمن** (طلبُ المالك
+           v18.9.2558). القاعدةُ الأصليةُ («وقّع المعتمِدُ على رقمٍ وسُدِّد غيرُه»)
+           تبقى قائمةً لأن الوحدةَ تُسقط بصمةَ المالية عند تغيّر القيمة فيعود الطلبُ
+           إلى بوّابتها — فالتعديلُ لا يمرّ على توقيعٍ قديم بل يُبطله. */
+        && (unchanged(['value','lines']) || isAdmin())
         && ( request.resource.data.status == resource.data.status
              || request.resource.data.status == 'crq_cancelled'
              || anyRole(crqGate(resource.data.status)) );

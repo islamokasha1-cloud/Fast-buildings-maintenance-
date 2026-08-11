@@ -98,6 +98,16 @@ await check("★ والقيمةُ لا تتغيّر بعد الإرسال (وق�
   assertFails(updateDoc(doc(PROC, `${R}/R1`), { value: 999999 })));
 await check("★ ولا يتبدّل الطرفُ المتعاقَد معه بعد الاعتماد",
   assertFails(updateDoc(doc(PROC, `${R}/R1`), { vendorId: "V-OTHER" })));
+/* ★★ بابٌ ضيّقٌ للأدمن (طلبُ المالك): البنودُ والقيمةُ وحدَهما — والطرفُ والشكلُ
+   يبقيان مجمَّدين له كما لغيره. والوحدةُ تُسقط بصمةَ المالية عند تغيّر القيمة
+   فيعود الطلبُ إلى بوّابتها، فلا يمرّ رقمٌ جديدٌ على توقيعٍ قديم. */
+await check("★★ والأدمن يعدّل البنودَ والقيمةَ (البابُ المطلوب)",
+  assertSucceeds(updateDoc(doc(ADMIN, `${R}/R1`), { value: 60000, lines: [{ q: 2 }] })));
+await check("★★ ولا يعدّلهما غيرُ الأدمن ولو كان صاحبَ البوّابة",
+  assertFails(updateDoc(doc(PROC, `${R}/R1`), { value: 70000, lines: [{ q: 3 }] })));
+await check("★★ والأدمن نفسُه لا يبدّل الطرفَ ولا شكلَ الارتباط (البابُ لم يتّسع)",
+  assertFails(updateDoc(doc(ADMIN, `${R}/R1`), { vendorId: "V-OTHER" })));
+await check("★ ولا مشروعَ الطلب", assertFails(updateDoc(doc(ADMIN, `${R}/R1`), { projectId: "other" })));
 await seed(`${R}/R2`, Object.assign({}, REQ, { status: "crq_pending_pay" }));
 await check("★ والسدادُ للمالية وحدَها", assertFails(updateDoc(doc(PROC, `${R}/R2`), { status: "crq_paid" })));
 await check("والماليةُ تُسدّد", assertSucceeds(updateDoc(doc(FIN, `${R}/R2`), { status: "crq_paid" })));
