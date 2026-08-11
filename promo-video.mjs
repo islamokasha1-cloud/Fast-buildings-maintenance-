@@ -32,7 +32,7 @@ const SPEED = Number(process.env.PROMO_SPEED || (PROBE ? 12 : 1));   // مُسر
 
 // تُمسح مخرجاتُ هذا السكربت وحدَها لا المجلّدُ كلُّه — فقد تجاور فيه أجزاءُ التجميع.
 fs.rmSync(SHOTS, { recursive: true, force: true });
-for (const f of [`${NAME}.webm`, `${NAME}.mp4`, 'promo-hd.mp4']) fs.rmSync(path.join(OUT, f), { force: true });
+for (const f of [`${NAME}.mp4`, 'promo-hd.mp4']) fs.rmSync(path.join(OUT, f), { force: true });
 fs.mkdirSync(SHOTS, { recursive: true });
 
 /* ═══════════════ مُحاكي Firestore — مصدرٌ واحدٌ مع فحوص المتصفّح ═══════════════ */
@@ -469,15 +469,35 @@ const L = (...a) => console.log(...a);
 const el = () => ((Date.now() - t0) / 1000).toFixed(1).padStart(5) + 's';
 
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox', '--force-device-scale-factor=1'] });
-const context = await browser.newContext(Object.assign(
-  { viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1, locale: 'ar-SA' },
-  PROBE ? {} : { recordVideo: { dir: OUT, size: { width: 1920, height: 1080 } } }
-));
+const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1, locale: 'ar-SA' });
 const page = await context.newPage();
-// التسجيلُ يبدأ مع فتح السياق — أي قبل إقلاع التطبيق. في الوضع المجمَّع نقصّ رأسَ
-// الفيديو حتى لحظةِ استواء شاشة الدخول، وإلّا وقع الذوبانُ على تطبيقٍ نصفِ محمَّل.
-const T_REC = Date.now();
-let TRIM = 0;
+let TRIM_AT = 0;                       // لحظةُ بدء المشهد المفيد (قصُّ رأسِ الإقلاع)
+
+/* ── الالتقاط: لقطاتٌ من CDP لا تسجيلُ Playwright ──
+   `recordVideo` يخرج VP8 عند ~٩٥٥ ك.ب/ث لـ1080p — وهو سقفٌ لا يُرفَع من الواجهة،
+   يظهر تكسيرُه في التدرّجات والتمرير مهما جوّدنا الترميز بعده، لأن التلفَ في المصدر.
+   بدلَه: `Page.startScreencast` يسلّم إطاراتٍ JPEG بجودةٍ نطلبها نحن، ونركّبها
+   بمدّةِ كلِّ إطارٍ من طابعه الزمنيّ — فالمصدرُ نظيفٌ والترميزُ وحدَه يحكم الجودة. */
+const FRAMES = path.join(OUT, 'frames');
+const shots = [];                      // { file, ts, wall }
+let cdp = null;
+if (!PROBE) {
+  fs.rmSync(FRAMES, { recursive: true, force: true });
+  fs.mkdirSync(FRAMES, { recursive: true });
+  cdp = await context.newCDPSession(page);
+  cdp.on('Page.screencastFrame', (f) => {
+    try {
+      const file = path.join(FRAMES, String(shots.length).padStart(6, '0') + '.jpg');
+      fs.writeFileSync(file, Buffer.from(f.data, 'base64'));
+      shots.push({ file, ts: f.metadata.timestamp, wall: Date.now() });
+    } catch (e) { }
+    cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => { });
+  });
+  await cdp.send('Page.startScreencast', {
+    format: 'jpeg', quality: Number(process.env.PROMO_JPEG_Q || 96),
+    maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1
+  });
+}
 await page.addInitScript(MOCK_FIREBASE);
 await page.addInitScript(CDN_STUBS);
 
@@ -504,13 +524,6 @@ let shotN = 0;
 const shot = (name) => page.screenshot({ path: `${SHOTS}/${String(++shotN).padStart(2, '0')}-${name}.png` }).catch(() => { });
 
 async function overlay() { await page.evaluate(OVERLAY).catch(() => { }); }
-
-// انتقالٌ بغطاءٍ داكن: يُخفي إعادةَ البناء المفاجئة بين الشاشات.
-async function fadeTo(fn) {
-  await pv('flash', true); await wait(280);
-  await fn();
-  await wait(200); await pv('flash', false); await wait(260);
-}
 
 // بطاقةُ فصل: تُعرَض فوق الشاشة الحالية ثم تنقشع.
 async function titleCard(kicker, main, sub, ms, opt) {
@@ -620,7 +633,8 @@ L(`  ${el()}  التطبيق أقلع — الإصدار ${APPV || '؟'}`);
 /* ───────── ١) الافتتاحية ───────── */
 // بلا بطاقةٍ: نبدأ على شاشة الدخول مباشرةً كي يذوب مشهدُ Remotion الفاتحُ في مثله.
 if (!NO_BOOKENDS) await pv('flash', true);
-if (NO_BOOKENDS) { TRIM = Math.max(0, (Date.now() - T_REC - 400) / 1000); await wait(700); }
+TRIM_AT = Date.now() - 400;                  // كلُّ ما قبله إقلاعٌ لا مشهد
+if (NO_BOOKENDS) await wait(700);
 else await titleCard('شركة المباني السريعة', 'نظام إدارة المرافق والمشتريات',
   'منصّةٌ واحدةٌ تُدير البلاغات والمشتريات والمخزون والأصول والصيانة الوقائية — بأثرٍ كاملٍ لكلّ حركة', 5200, { shot: 'intro' });
 await pv('flash', false); await wait(500);
@@ -671,13 +685,15 @@ L(`  ${el()}  دخلنا المشروع`);
 
 /* ───────── ٤) الفصول ───────── */
 for (const ch of CHAPTERS) {
-  await fadeTo(async () => { await pv('lowerOff'); await pv('cursorOff'); });
-  await titleCard('الفصل ' + ch.n + ' — ' + ch.kicker, ch.title, ch.sub, 2300);
+  // لا بطاقةَ فصلٍ ملءَ الشاشة ولا وميضٌ داكن: الشاشةُ تبقى معروضةً بلا انقطاع،
+  // وعنوانُ الفصل يأتي في الشريط السفليّ فوقها. القطعُ إلى لوحٍ أزرقَ كان يقطع
+  // السياق البصريّ، وتدرّجُه العريض أسوأُ ما يكسّره ضغطُ الفيديو.
+  await pv('lowerOff'); await pv('cursorOff'); await wait(320);
   const clicked = await goPage(ch.page);
-  await pv('lower', ch.lower[0], ch.lower[1], ch.kicker);
-  await wait(2300);
+  await pv('lower', ch.title, ch.lower[1], 'الفصل ' + ch.n + ' — ' + ch.kicker);
+  await wait(3400);
   // بعضُ الشاشات نموذجٌ فارغٌ حتى يُضغط زرُّها — فنضغطه ليُرى المخرَجُ لا النموذج.
-  if (ch.act) { await clickEl(ch.act, { settle: 800 }); await wait(2600); await overlay(); await pv('lower', ch.lower[0], ch.lower[1], ch.kicker); await wait(900); }
+  if (ch.act) { await clickEl(ch.act, { settle: 800 }); await wait(2600); await overlay(); await pv('lower', ch.title, ch.lower[1], 'الفصل ' + ch.n + ' — ' + ch.kicker); await wait(900); }
   await shot(ch.page);
   await browseDown(700, 1500);
   await scrollTop();
@@ -687,9 +703,7 @@ for (const ch of CHAPTERS) {
 }
 
 /* ───────── ٥) تفصيلُ طلبِ شراءٍ حقيقيّ ───────── */
-await fadeTo(async () => { await pv('lowerOff'); await pv('cursorOff'); });
-await titleCard('عن قرب', 'طلبُ شراءٍ من الداخل',
-  'الأصنافُ وأسعارُها وضريبتُها، ومراحلُ الاعتماد باسم كلِّ معتمِدٍ ووقته', 3900);
+await pv('lowerOff'); await pv('cursorOff'); await wait(320);
 await goPage('purchases');
 const POCAP = ['تفاصيل الطلب PO-1038', 'المستلَمُ مقابل المطلوب، ومرجعُ الاستلام ورقمُ الفاتورة — الإغلاقُ لا يتمّ دونها', 'عن قرب'];
 await page.evaluate(() => { try { openPurchaseDetail('PO-1038'); } catch (e) { } }).catch(() => { });
@@ -704,7 +718,7 @@ await pv('lowerOff');
 await progress();
 
 /* ───────── ٦) الخاتمة ───────── */
-await fadeTo(async () => { await pv('cursorOff'); });
+await pv('cursorOff'); await wait(300);
 // نُنهي على آخر شاشةٍ بلا تعليق: الذوبانُ إلى مشهد ختام Remotion يتكفّل بالانتقال.
 if (NO_BOOKENDS) { await pv('lowerOff'); await wait(1100); }
 else await titleCard('شركة المباني السريعة', 'نظامٌ واحدٌ — من البلاغ إلى التقرير',
@@ -719,27 +733,40 @@ if (errors.length) {
   [...new Set(errors)].slice(0, 6).forEach(e => L('   • ' + e));
 } else L('  ✨ لا أخطاء جافاسكربت في الجولة كلّها');
 
-const vid = PROBE ? null : page.video();
-const vpath = vid ? await vid.path() : null;
+if (cdp) { try { await cdp.send('Page.stopScreencast'); } catch (e) { } }
+await new Promise(r => setTimeout(r, 600));      // امنح الإطاراتِ المتأخّرةَ فرصةَ الوصول
 await context.close();
 await browser.close();
 
 L(`  اللقطات: ${SHOTS} (${shotN} لقطة)`);
 
-/* ───────── الترميز إلى MP4 ───────── */
-if (!PROBE && vpath && fs.existsSync(vpath)) {
-  const webm = path.join(OUT, `${NAME}.webm`);
-  fs.renameSync(vpath, webm);
+/* ───────── التركيب والترميز ───────── */
+if (!PROBE && shots.length > 5) {
   let ff = null;
   try { ff = require('ffmpeg-static'); } catch { }
   if (ff && fs.existsSync(ff)) {
     const mp4 = path.join(OUT, `${NAME}.mp4`);
-    L('  ترميز MP4 (H.264)…');
-    const r = spawnSync(ff, ['-y', ...(TRIM > 0 ? ['-ss', TRIM.toFixed(2)] : []), '-i', webm,
-      '-vf', 'fps=30,scale=1920:1080:flags=lanczos',
-      '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-pix_fmt', 'yuv420p',
+    // كلُّ إطارٍ يعيش حتى طابعِ الإطار الذي يليه — فالإيقاعُ هو إيقاعُ الصفحة نفسِها
+    // لا معدّلٌ ثابتٌ نفرضه. ثم `fps=30` يوحّد الناتج بلا حذفٍ ولا قفز.
+    const keep = shots.filter(f => f.wall >= TRIM_AT);
+    const list = keep.length > 5 ? keep : shots;
+    const lines = [];
+    for (let i = 0; i < list.length; i++) {
+      const d = i + 1 < list.length ? Math.min(2, Math.max(0.01, list[i + 1].ts - list[i].ts)) : 0.2;
+      lines.push(`file '${list[i].file}'`, `duration ${d.toFixed(4)}`);
+    }
+    lines.push(`file '${list[list.length - 1].file}'`);
+    const concat = path.join(OUT, `${NAME}-frames.txt`);
+    fs.writeFileSync(concat, lines.join('\n'));
+    const secsCap = list[list.length - 1].ts - list[0].ts;
+    L(`  ترميز MP4 (H.264) من ${list.length} إطاراً · ${secsCap.toFixed(1)} ث…`);
+    const r = spawnSync(ff, ['-y', '-f', 'concat', '-safe', '0', '-i', concat,
+      '-vf', 'fps=30,format=yuv420p',
+      '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
       '-movflags', '+faststart', mp4], { stdio: ['ignore', 'ignore', 'pipe'] });
+    fs.rmSync(concat, { force: true });
     if (r.status === 0 && fs.existsSync(mp4)) {
+      fs.rmSync(FRAMES, { recursive: true, force: true });
       const mb = (fs.statSync(mp4).size / 1048576).toFixed(1);
       const d = spawnSync(ff, ['-i', mp4], { encoding: 'utf8' });
       const dur = (/Duration: (\d+:\d+:\d+\.\d+)/.exec(d.stderr || '') || [, '؟'])[1];
@@ -763,10 +790,10 @@ if (!PROBE && vpath && fs.existsSync(vpath)) {
       if (r2.status === 0 && fs.existsSync(lite))
         L(`  ✅ نسخةُ المشاركة: ${lite}  ·  ${(fs.statSync(lite).size / 1048576).toFixed(1)} م.ب  ·  1920×1080`);
     } else {
-      L('  ❌ فشل الترميز — يبقى WebM: ' + webm);
+      L('  ❌ فشل الترميز — تبقى الإطارات في: ' + FRAMES);
       L(String(r.stderr || '').split('\n').slice(-6).join('\n'));
     }
-  } else L('  ⚠️  ffmpeg-static غير مثبّت — يبقى WebM: ' + webm);
+  } else L('  ⚠️  ffmpeg-static غير مثبّت — تبقى الإطارات في: ' + FRAMES);
 }
 L('══════════════════════════════════════════════════════\n');
 process.exit(0);

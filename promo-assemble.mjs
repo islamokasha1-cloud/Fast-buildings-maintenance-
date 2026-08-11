@@ -116,7 +116,7 @@ args.push('-filter_complex', haveMusic
   : v.join(';'));
 args.push('-map', '[v]');
 if (haveMusic) args.push('-map', '[aud]', '-c:a', 'aac', '-b:a', '192k', '-shortest');
-args.push('-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-pix_fmt', 'yuv420p',
+args.push('-c:v', 'libx264', '-preset', 'slow', '-crf', '18', '-pix_fmt', 'yuv420p',
   '-movflags', '+faststart', film);
 
 const enc = ff(args);
