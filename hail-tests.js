@@ -6422,6 +6422,10 @@ function contractsPhase1() {
       const q = path.resolve(path.dirname(IDX), "firestore.rules");
       return fs.existsSync(q) ? fs.readFileSync(q, "utf8") : "";
     })();
+    const RULES_CHK = (function () {
+      const q = path.resolve(path.dirname(IDX), "rules-check.mjs");
+      return fs.existsSync(q) ? fs.readFileSync(q, "utf8") : "";
+    })();
     T("★★ الحذفُ للأدمن وحدَه وبسببٍ إلزاميّ",
       /function deleteContract\(id, reason\)[\s\S]{0,400}_role\(\) !== "admin"[\s\S]{0,200}!reason\) return Promise\.reject/.test(src));
     T("★★ ولا يُحذف إلا ما لم يُوقَّع — والساري يُفسَخ ولا يُمحى",
@@ -6437,6 +6441,20 @@ function contractsPhase1() {
       /c\.status==="ctr_pending_signature" && role==="admin"[\s\S]{0,200}contracts\.doDeleteCtr\(\)/.test(src));
     T("★ والتأكيدُ يقول ما سيقع للطلب قبل وقوعه",
       /function doDeleteCtr\(\)[\s\S]{0,600}وسيعود طلبُه[\s\S]{0,400}لا يمكن استرجاعه/.test(src));
+    /* ★★★ العطلُ الذي بلّغ عنه المالك في الإنتاج: الحذفُ **معاملةٌ بكتابتين** —
+       حذفُ العقد وإعادةُ طلبه من `crq_converted` إلى `crq_approved`. وقاعدةُ
+       «المحوَّلُ لا يُفتح» كانت تمنع الكتابةَ الثانية فتُرَدّ المعاملةُ كلُّها
+       بـ`permission-denied`. والفحصُ الأوّلُ لم يمسكه لأنه جرّب `deleteDoc` وحدَه
+       لا العمليةَ كما ينفّذها التطبيق. */
+    T("★★★ واستثناءُ «إلغاء التحويل» موجودٌ — وإلا رُدّت معاملةُ الحذف كلُّها",
+      /function crqUnconvertOk\(\) \{[\s\S]{0,400}isAdmin\(\)[\s\S]{0,200}resource\.data\.status == 'crq_converted'[\s\S]{0,200}request\.resource\.data\.status == 'crq_approved'[\s\S]{0,200}contractId', ''\) == ''/.test(RULY) &&
+      /\|\| crqUnconvertOk\(\) \)/.test(RULY));
+    T("★★ والفحصُ على المحاكي يجرّب **العمليةَ كما ينفّذها التطبيق** لا القاعدةَ وحدَها",
+      /writeBatch/.test(RULES_CHK) && /b\.delete\(doc\(ADMIN, `\$\{C\}\/CPAIR`\)\)/.test(RULES_CHK) &&
+      /crq_approved", contractId: "" \}, \{ merge: true \}\)/.test(RULES_CHK));
+    T("★ ورفضُ الخادم يُترجَم إلى عربيةٍ تدلّ على العلاج لا سطرٍ إنجليزيٍّ غامض",
+      /function _errMsg\(e\)/.test(src) && /قواعدُ Firestore لم تُنشَر بآخر نسخة/.test(src) &&
+      !/e&&e\.message\?e\.message:"تعذّر (الإجراء|الحذف|الإرجاع|التعديل|الإلغاء)"/.test(src));
     T("★★ وقاعدةُ الخادم تقول القاعدةَ نفسَها (أدمن + لم يُوقَّع)",
       /function ctrDeleteOk\(\) \{[\s\S]{0,200}isAdmin\(\) && resource\.data\.status == 'ctr_pending_signature'/.test(RULY) &&
       (RULY.match(/allow delete: if ctrDeleteOk\(\);/g) || []).length === 2);

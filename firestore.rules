@@ -152,10 +152,25 @@ service cloud.firestore {
       return anyRole(['project_manager','admin'])
         && request.resource.data.status == 'crq_pending_pm';
     }
+    /* **إلغاءُ التحويل** — الاستثناءُ الوحيدُ من «المحوَّلُ لا يُفتح» (v18.9.2588).
+       حين يحذف الأدمنُ عقداً لم يُوقَّع، تُعيد المعاملةُ نفسُها طلبَه إلى «معتمَد»
+       وتمسح `contractId` — وإلا بقي الطلبُ يشير إلى عقدٍ محذوف. وبلا هذا الاستثناء
+       تُرفض المعاملةُ كلُّها (`permission-denied`) فيفشل الحذفُ رغم أن قاعدةَ حذف
+       العقد تسمح به — وهو ما وقع فعلاً في الإنتاج وبلّغ عنه المالك.
+       والبابُ **ضيّقٌ بأربعة شروطٍ معاً**: أدمن · من `crq_converted` وحدَها · إلى
+       `crq_approved` بالضبط · وبمسح `contractId`. فلا يُفتح به المسدَّدُ ولا الملغى،
+       ولا يُنقل المحوَّلُ إلى حالةٍ أخرى. */
+    function crqUnconvertOk() {
+      return isAdmin()
+        && resource.data.status == 'crq_converted'
+        && request.resource.data.status == 'crq_approved'
+        && request.resource.data.get('contractId', '') == '';
+    }
     function crqUpdateOk() {
       return anyRole(['project_manager','procurement_officer','finance','ceo','admin'])
-        // الحالةُ النهائيةُ نهائية — لا تُفتح بعد إغلاقها
-        && !(resource.data.status in ['crq_converted','crq_paid','crq_cancelled'])
+        // الحالةُ النهائيةُ نهائية — لا تُفتح بعد إغلاقها، إلا إلغاءَ التحويل أعلاه
+        && ( !(resource.data.status in ['crq_converted','crq_paid','crq_cancelled'])
+             || crqUnconvertOk() )
         // طرفُ الطلب وشكلُه لا يتغيّران بعد الإرسال لأحدٍ كائناً من كان
         && unchanged(['createdAt','createdByUser','vendorId','engagement','projectId'])
         /* البنودُ والقيمةُ: مجمّدتان لكلّ دورٍ — **إلا الأدمن** (طلبُ المالك

@@ -13,7 +13,7 @@ import {
 } from "@firebase/rules-unit-testing";
 import fs from "node:fs";
 import {
-  doc, getDoc, setDoc, updateDoc, deleteDoc
+  doc, getDoc, setDoc, updateDoc, deleteDoc, writeBatch
 } from "firebase/firestore";
 
 const HOST = "127.0.0.1";
@@ -173,6 +173,36 @@ await check("★★ ولا يُحذف عقدٌ سارٍ ولو من الأدمن
   assertFails(deleteDoc(doc(ADMIN, `${C}/CACT`))));
 await check("★ ولا المفسوخ", assertFails(deleteDoc(doc(ADMIN, `${C}/C1`))));
 await check("★ ولا المقفل", assertFails(deleteDoc(doc(ADMIN, `${C}/C2`))));
+
+/* ★★★ **العمليةُ كما ينفّذها التطبيقُ لا القاعدةُ وحدَها** (درسُ v18.9.2589).
+   حذفُ العقد في الوحدة **معاملةٌ بكتابتين**: حذفُ العقد **وإعادةُ طلبه** من
+   `crq_converted` إلى `crq_approved`. وفحصي الأوّلُ جرّب `deleteDoc` وحدَه فمرّ —
+   بينما ردّ الإنتاجُ العمليةَ كلَّها بـ`permission-denied`، لأنّ «المحوَّلُ لا يُفتح»
+   كان يمنع الكتابةَ الثانية. فالفحصُ الآن **دفعةٌ واحدةٌ** كالمعاملة تماماً. */
+await seed(`${C}/CPAIR`, Object.assign({}, CTR, { status: "ctr_pending_signature", requestId: "RPAIR" }));
+await seed(`${R}/RPAIR`, Object.assign({}, REQ, { status: "crq_converted", contractId: "CPAIR" }));
+await check("★★★ والأدمن يحذف العقدَ ويُحرِّر طلبَه في **دفعةٍ واحدة** (كما تفعل الوحدة)",
+  assertSucceeds((function () {
+    const b = writeBatch(ADMIN);
+    b.delete(doc(ADMIN, `${C}/CPAIR`));
+    b.set(doc(ADMIN, `${R}/RPAIR`), { status: "crq_approved", contractId: "" }, { merge: true });
+    return b.commit();
+  })()));
+/* وحدودُ الاستثناء: لا يُفتح به غيرُ المحوَّل، ولا لغير الأدمن، ولا إلى حالةٍ أخرى،
+   ولا مع إبقاء الرابط — وإلا صار «إلغاءُ التحويل» باباً خلفياً لفتح المغلق. */
+await seed(`${R}/RUN1`, Object.assign({}, REQ, { status: "crq_converted", contractId: "CX" }));
+await check("★★ ولا يُلغي التحويلَ غيرُ الأدمن",
+  assertFails(updateDoc(doc(PROC, `${R}/RUN1`), { status: "crq_approved", contractId: "" })));
+await check("★★ ولا يُنقل المحوَّلُ إلى حالةٍ أخرى (بوّابةٍ مثلاً)",
+  assertFails(updateDoc(doc(ADMIN, `${R}/RUN1`), { status: "crq_pending_pm", contractId: "" })));
+await check("★★ ولا يُلغى التحويلُ مع إبقاء الرابط (طلبٌ معتمَدٌ يشير إلى عقد)",
+  assertFails(updateDoc(doc(ADMIN, `${R}/RUN1`), { status: "crq_approved" })));
+await seed(`${R}/RUN2`, Object.assign({}, REQ, { status: "crq_paid" }));
+await check("★★ والمسدَّدُ لا يُفتح بهذا الباب",
+  assertFails(updateDoc(doc(ADMIN, `${R}/RUN2`), { status: "crq_approved", contractId: "" })));
+await seed(`${R}/RUN3`, Object.assign({}, REQ, { status: "crq_cancelled" }));
+await check("★ ولا الملغى",
+  assertFails(updateDoc(doc(ADMIN, `${R}/RUN3`), { status: "crq_approved", contractId: "" })));
 
 /* ═════════ ٤) المستخلص — البوّابةُ والإيصال ═════════ */
 head("٤) المستخلص — لا سدادَ بلا إيصال");
