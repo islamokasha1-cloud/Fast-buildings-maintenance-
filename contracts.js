@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2560";
+var MODULE_BUILD = "v18.9.2562";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -345,28 +345,57 @@ function crqNextStage(req, ceoThreshold){
    اعتمادٍ ماليّ، وما دون سقف التنفيذيِّ بلا بوّابته. فالوجهةُ تُقبَل إن كانت
    الآلةُ **ستقف عندها فعلاً** — نجرّبها ونسأل النتيجة، فلا نَعِد ببوّابةٍ يقفز
    الطلبُ فوقها فيبدو الإرجاعُ كذباً. */
+/* **مصدرٌ واحدٌ للمستندات الثلاثة** (الطلب · المستخلص · أمر التغيير): حقولُ
+   الاعتماد فيها متطابقةُ الأسماء (`pmApprovedAt`…)، ولا يفترق بعضُها عن بعضٍ إلا
+   في شيئين — **ترتيبِ بوّاباته** و**دالّةِ توجيهه**. فيُمرَّران وسيطين، ويبقى
+   المنطقُ نسخةً واحدةً: ثلاثُ نسخٍ منه كانت ستنحرف عند أوّل تعديل. */
 var GATE_ORDER = ["pm","proc","finance","ceo"];
 var GATE_STATUS_OF = { pm:"crq_pending_pm", proc:"crq_pending_proc",
                        finance:"crq_pending_finance", ceo:"crq_pending_ceo" };
-function crqRewind(req, gateKey, ceoTh){
-  if(GATE_ORDER.indexOf(gateKey) < 0) return null;
-  var r = Object.assign({}, req || {});
-  GATE_ORDER.slice(GATE_ORDER.indexOf(gateKey)).forEach(function(k){
+var EXT_ORDER = ["pm","ceo"];
+var EXT_STATUS_OF = { pm:"ext_pending_pm", ceo:"ext_pending_ceo" };
+var CHG_ORDER = ["pm","proc","finance","ceo"];
+var CHG_STATUS_OF = { pm:"chg_pending_pm", proc:"chg_pending_proc",
+                      finance:"chg_pending_finance", ceo:"chg_pending_ceo" };
+function docRewind(doc, gateKey, order, nextStage){
+  if(order.indexOf(gateKey) < 0) return null;
+  var r = Object.assign({}, doc || {});
+  order.slice(order.indexOf(gateKey)).forEach(function(k){
     r[k+"ApprovedAt"]=null; r[k+"ApprovedBy"]=null; r[k+"ApprovedByUser"]=null;
     if(k==="proc")    r.procApprovedKey=null;
     if(k==="finance") r.financeApprovedKey=null;
     if(k==="ceo")     r.ceoApprovedAmount=null;
   });
-  r.status = crqNextStage(r, ceoTh);
+  r.status = nextStage(r);
   return r;
 }
 /* الوجهاتُ المتاحة: ما تقف عندها الآلةُ فعلاً، وما يُغيّر الحالةَ الحاليةَ حقاً. */
-function crqRewindTargets(req, ceoTh){
-  var cur = (req||{}).status;
-  return GATE_ORDER.filter(function(k){
-    var probe = crqRewind(req, k, ceoTh);
-    return probe && probe.status === GATE_STATUS_OF[k] && probe.status !== cur;
+function docRewindTargets(doc, order, statusOf, nextStage){
+  var cur = (doc||{}).status;
+  return order.filter(function(k){
+    var probe = docRewind(doc, k, order, nextStage);
+    return probe && probe.status === statusOf[k] && probe.status !== cur;
   });
+}
+function crqRewind(req, gateKey, ceoTh){
+  return docRewind(req, gateKey, GATE_ORDER, function(r){ return crqNextStage(r, ceoTh); });
+}
+function crqRewindTargets(req, ceoTh){
+  return docRewindTargets(req, GATE_ORDER, GATE_STATUS_OF, function(r){ return crqNextStage(r, ceoTh); });
+}
+/* المستخلصُ: بوّابتان (مدير المشاريع ثمّ التنفيذيُّ فوق السقف) — وتوجيهُه يحتاج
+   **صافيَ المستخلص** لا قيمةً مخزَّنة، فيُمرَّر مع الوسيط. */
+function extRewind(ext, gateKey, net, ceoTh){
+  return docRewind(ext, gateKey, EXT_ORDER, function(e){ return extNextStage(e, net, ceoTh); });
+}
+function extRewindTargets(ext, net, ceoTh){
+  return docRewindTargets(ext, EXT_ORDER, EXT_STATUS_OF, function(e){ return extNextStage(e, net, ceoTh); });
+}
+function chgRewind(chg, gateKey, ceoTh){
+  return docRewind(chg, gateKey, CHG_ORDER, function(g){ return chgNextStage(g, ceoTh); });
+}
+function chgRewindTargets(chg, ceoTh){
+  return docRewindTargets(chg, CHG_ORDER, CHG_STATUS_OF, function(g){ return chgNextStage(g, ceoTh); });
 }
 
 /* ════ بصمتا الاعتماد ════
@@ -524,8 +553,9 @@ function crqAlreadyApproved(req, meUser, meName){
     return (a.user && u && a.user === u) || (!a.user && a.name && n && a.name === n);
   });
 }
-function crqOtherGateHolder(status, meUser, users){
-  var g = GATE_ROLES[status]; if(!g) return false;
+function crqOtherGateHolder(status, meUser, users){ return gateOtherHolder(GATE_ROLES, status, meUser, users); }
+function gateOtherHolder(gates, status, meUser, users){
+  var g = gates[status]; if(!g) return false;
   var me = String(meUser||"");
   return (Array.isArray(users)?users:[]).some(function(u){
     return u && u.role && g.roles.indexOf(u.role) !== -1 && String(u.user||"") !== me;
@@ -534,10 +564,22 @@ function crqOtherGateHolder(status, meUser, users){
 /* القرارُ الواحد الذي تقرؤه الشاشةُ **وطبقةُ البيانات** — فلا ينحرف زرٌّ عن قاعدة:
    "none" ليست لدورك · "act" اعتمادٌ عاديّ · "delegate" اعتمادٌ نيابةً (لا ثانيَ
    يملك البوّابة) · "blocked" ممنوعٌ لأنك وقّعت بوّابةً سابقة وغيرُك يملك هذه. */
+function gateActMode(gates, doc, status, role, meUser, meName, users){
+  var g = gates[status];
+  if(!g || g.roles.indexOf(role) === -1) return "none";
+  if(!crqAlreadyApproved(doc, meUser, meName)) return "act";
+  return gateOtherHolder(gates, status, meUser, users) ? "blocked" : "delegate";
+}
 function crqActMode(req, status, role, meUser, meName, users){
-  if(!crqCanAct(status, role)) return "none";
-  if(!crqAlreadyApproved(req, meUser, meName)) return "act";
-  return crqOtherGateHolder(status, meUser, users) ? "blocked" : "delegate";
+  return gateActMode(GATE_ROLES, req, status, role, meUser, meName, users);
+}
+/* المستخلصُ وأمرُ التغيير تحت القاعدة نفسِها — بل المستخلصُ أولاها: هو موضعُ خروج
+   المال شهرياً لا مرّةً واحدة. (حقولُ الاعتماد متطابقةُ الأسماء فتُقرأ بالدالّة نفسِها.) */
+function extActMode(ext, status, role, meUser, meName, users){
+  return gateActMode(EXT_GATES, ext, status, role, meUser, meName, users);
+}
+function chgActMode(chg, status, role, meUser, meName, users){
+  return gateActMode(CHG_GATES, chg, status, role, meUser, meName, users);
 }
 function crqIsFinal(s){ return CRQ_FINAL.indexOf(s) !== -1; }
 function crqIsBounced(s){ return CRQ_BOUNCED.indexOf(s) !== -1; }
@@ -2127,6 +2169,39 @@ function createExtract(contract, draft){
   });
 }
 
+/* إرجاعُ المستخلص إلى بوّابةٍ محدّدة — للأدمن، بالقاعدة نفسِها التي للطلب.
+   والصافي يُحسب من العقد لا يُقرأ مخزَّناً: توجيهُ المستخلص دالّةٌ في صافيه. */
+function rewindExtract(id, gateKey, reason){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  if(_role() !== "admin") return Promise.reject(new Error("إرجاع المستخلص لمرحلةٍ سابقة للأدمن فقط"));
+  if(!reason) return Promise.reject(new Error("سبب الإرجاع إلزامي"));
+  var ref=database.collection(EXTRACTS_COL()).doc(id), th=ceoThreshold();
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("المستخلص غير موجود");
+      var e=s.data()||{}; e.id=id;
+      if(extIsFinal(e.status)) throw new Error("المستخلص في حالةٍ نهائية — لا يُرجَع");
+      var c=contractById(e.contractId);
+      if(!c) throw new Error("عقد المستخلص غير محمَّل");
+      var net=r2(extCalc(e,c).net);
+      if(extRewindTargets(e, net, th).indexOf(gateKey) === -1) throw new Error("هذه المرحلة ليست وجهةً صالحةً لهذا المستخلص");
+      var from=EXT_STATUS[e.status]||e.status;
+      var next=extRewind(e, gateKey, net, th);
+      next.id=id; next.updatedAt=_now(); next.updatedBy=_me();
+      _pushTimeline(next, "إرجاع إلى "+(extGateOwner(next.status)||{}).lbl, "rewound", "من «"+from+"» — "+reason);
+      var out=Object.assign({}, next); delete out.id;
+      t.set(ref, out, { merge:true });
+      return next;
+    });
+  }).then(function(e){
+    var i=_exts.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _exts[i]=e; else _mirror(_exts, e, false);
+    _audit("إرجاع مستخلص لمرحلة", id+" ⇐ "+(EXT_STATUS[e.status]||e.status)+" — "+reason);
+    _notify("مستخلص "+id, "أُرجع إلى "+(EXT_STATUS[e.status]||e.status), id);
+    return e;
+  });
+}
+
 function actOnExtract(id, action, note){
   var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
   var ref=database.collection(EXTRACTS_COL()).doc(id), role=_role(), th=ceoThreshold();
@@ -2140,10 +2215,15 @@ function actOnExtract(id, action, note){
       if(!c) throw new Error("عقد المستخلص غير محمَّل");
       var calc=extCalc(e, c);
       if(action==="approve"){
-        if(e.status==="ext_pending_pm"){ e.pmApprovedAt=_now(); e.pmApprovedBy=_me(); }
-        else if(e.status==="ext_pending_ceo"){ e.ceoApprovedAt=_now(); e.ceoApprovedBy=_me(); e.ceoApprovedAmount=r2(calc.net); }
+        var mode = extActMode(e, e.status, role, _meUser(), _me(), _users());
+        if(mode === "blocked") throw new Error("اعتمدتَ هذا المستخلص في بوّابةٍ سابقة — هذه البوّابة لغيرك");
+        if(e.status==="ext_pending_pm"){ e.pmApprovedAt=_now(); e.pmApprovedBy=_me(); e.pmApprovedByUser=_meUser(); }
+        else if(e.status==="ext_pending_ceo"){ e.ceoApprovedAt=_now(); e.ceoApprovedBy=_me(); e.ceoApprovedByUser=_meUser(); e.ceoApprovedAmount=r2(calc.net); }
         else if(e.status==="ext_pending_finance") throw new Error("السداد يُسجَّل بإيصال");
-        _pushTimeline(e, "اعتماد — "+(extGateOwner(e.status)||{}).lbl, "approved", note);
+        var edlg = (mode === "delegate") ? "نيابةً — لا يوجد غيرُك يملك هذه البوّابة" : "";
+        if(mode === "delegate") e.delegatedApproval = true;
+        _pushTimeline(e, "اعتماد — "+(extGateOwner(e.status)||{}).lbl, "approved",
+          edlg ? (note ? (note+" · "+edlg) : edlg) : note);
         e.status = extNextStage(e, calc.net, th);
       } else if(action==="reject"){
         if(!note) throw new Error("سبب الرفض إلزامي");
@@ -2176,6 +2256,10 @@ function payExtract(id, payload){
       if(!s.exists) throw new Error("المستخلص غير موجود");
       var e=s.data()||{}; e.id=id;
       if(e.status !== "ext_pending_finance") throw new Error("المستخلص ليس بانتظار السداد");
+      /* سدادُ المستخلص تحت فصل المهام — وهو أولى المواضع به: هنا يخرج المال شهرياً. */
+      var pmode = extActMode(e, e.status, role, _meUser(), _me(), _users());
+      if(pmode === "blocked") throw new Error("اعتمدتَ هذا المستخلص في بوّابةٍ سابقة — السدادُ لغيرك");
+      if(pmode === "delegate") e.delegatedApproval = true;
       var c=contractById(e.contractId);
       if(!c) throw new Error("عقد المستخلص غير محمَّل");
       var cRef=database.collection(CONTRACTS_COL()).doc(e.contractId);
@@ -2289,6 +2373,35 @@ function createChange(contract, draft){
 }
 
 /* اعتمادٌ أو رفضٌ — معاملةٌ تقرأ الوثيقةَ الطازجة كبقية البوّابات. */
+/* إرجاعُ أمر التغيير إلى بوّابةٍ محدّدة — للأدمن، بالقاعدة نفسِها. */
+function rewindChange(id, gateKey, reason){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  if(_role() !== "admin") return Promise.reject(new Error("إرجاع أمر التغيير لمرحلةٍ سابقة للأدمن فقط"));
+  if(!reason) return Promise.reject(new Error("سبب الإرجاع إلزامي"));
+  var ref=database.collection(CHANGES_COL()).doc(id), th=ceoThreshold();
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("أمر التغيير غير موجود");
+      var g=s.data()||{}; g.id=id;
+      if(chgIsFinal(g.status)) throw new Error("أمر التغيير في حالةٍ نهائية — لا يُرجَع");
+      if(chgRewindTargets(g, th).indexOf(gateKey) === -1) throw new Error("هذه المرحلة ليست وجهةً صالحةً لهذا الأمر");
+      var from=CHG_STATUS[g.status]||g.status;
+      var next=chgRewind(g, gateKey, th);
+      next.id=id; next.updatedAt=_now(); next.updatedBy=_me();
+      _pushTimeline(next, "إرجاع إلى "+(chgGateOwner(next.status)||{}).lbl, "rewound", "من «"+from+"» — "+reason);
+      var out=Object.assign({}, next); delete out.id;
+      t.set(ref, out, { merge:true });
+      return next;
+    });
+  }).then(function(g){
+    var i=_chgs.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _chgs[i]=g; else _mirror(_chgs, g, false);
+    _audit("إرجاع أمر تغيير لمرحلة", id+" ⇐ "+(CHG_STATUS[g.status]||g.status)+" — "+reason);
+    _notify("أمر تغيير "+id, "أُرجع إلى "+(CHG_STATUS[g.status]||g.status), id);
+    return g;
+  });
+}
+
 function actOnChange(id, action, note){
   var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
   var ref=database.collection(CHANGES_COL()).doc(id), role=_role(), th=ceoThreshold();
@@ -2299,11 +2412,16 @@ function actOnChange(id, action, note){
       if(chgIsFinal(g.status)) throw new Error("أمر التغيير في حالةٍ نهائية");
       if(!chgCanAct(g.status, role)) throw new Error("هذه البوّابة ليست لدورك");
       if(action==="approve"){
-        if(g.status==="chg_pending_pm"){ g.pmApprovedAt=_now(); g.pmApprovedBy=_me(); }
-        else if(g.status==="chg_pending_proc"){ g.procApprovedAt=_now(); g.procApprovedBy=_me(); }
-        else if(g.status==="chg_pending_finance"){ g.financeApprovedAt=_now(); g.financeApprovedBy=_me(); }
-        else if(g.status==="chg_pending_ceo"){ g.ceoApprovedAt=_now(); g.ceoApprovedBy=_me(); g.ceoApprovedAmount=r2(Math.abs(Number(g.amount)||0)); }
-        _pushTimeline(g, "اعتماد — "+(chgGateOwner(g.status)||{}).lbl, "approved", note);
+        var cmode = chgActMode(g, g.status, role, _meUser(), _me(), _users());
+        if(cmode === "blocked") throw new Error("اعتمدتَ أمرَ التغيير في بوّابةٍ سابقة — هذه البوّابة لغيرك");
+        if(g.status==="chg_pending_pm"){ g.pmApprovedAt=_now(); g.pmApprovedBy=_me(); g.pmApprovedByUser=_meUser(); }
+        else if(g.status==="chg_pending_proc"){ g.procApprovedAt=_now(); g.procApprovedBy=_me(); g.procApprovedByUser=_meUser(); }
+        else if(g.status==="chg_pending_finance"){ g.financeApprovedAt=_now(); g.financeApprovedBy=_me(); g.financeApprovedByUser=_meUser(); }
+        else if(g.status==="chg_pending_ceo"){ g.ceoApprovedAt=_now(); g.ceoApprovedBy=_me(); g.ceoApprovedByUser=_meUser(); g.ceoApprovedAmount=r2(Math.abs(Number(g.amount)||0)); }
+        var cdlg = (cmode === "delegate") ? "نيابةً — لا يوجد غيرُك يملك هذه البوّابة" : "";
+        if(cmode === "delegate") g.delegatedApproval = true;
+        _pushTimeline(g, "اعتماد — "+(chgGateOwner(g.status)||{}).lbl, "approved",
+          cdlg ? (note ? (note+" · "+cdlg) : cdlg) : note);
         g.status = chgNextStage(g, th);
       } else if(action==="reject"){
         if(!note) throw new Error("سبب الرفض إلزامي");
@@ -2711,6 +2829,22 @@ function vendorCardHTML(id){
   return back +
     headHTML(v.name||v.id, '<span class="badge '+st.cls+'">'+_icn(st.icon,"ic-sm")+' '+_esc(st.lbl)+'</span> <span class="ct-id num">'+_esc(v.id)+'</span>', tools, (VENDOR_KINDS[v.kind]||VENDOR_KINDS.subcontractor).icon) +
     warn + '<div class="card ct-sec">'+info+'</div>' + bank + vendorPerfHTML(v) + docsSec + contactsSec;
+}
+
+/* **سببُ غياب الزرّ يُقال صراحةً** — للمستندات الثلاثة بنصٍّ واحد. زرٌّ يختفي
+   بلا تفسيرٍ يُقرأ عطلاً لا قاعدة، ومن رآه ظاهراً قبل قليلٍ سيظنّ النظامَ نسي
+   اعتمادَه. (وهو أصلُ بلاغ المالك الذي وُلدت منه القاعدةُ كلُّها.) */
+function sodNoteHTML(mode, owner){
+  var lbl = _esc(owner ? owner.lbl : "");
+  if(mode === "blocked")
+    return '<div class="ct-note">'+_icn("shield","ic-sm")+
+      ' اعتمدتَ هذا المستند في بوّابةٍ سابقة — فبوّابةُ <strong>'+lbl+
+      '</strong> لغيرِك (فصلُ المهام). والرفضُ/الإعادة ما زال متاحاً لك.</div>';
+  if(mode === "delegate")
+    return '<div class="ct-note warn">'+_icn("shield","ic-sm")+
+      ' اعتمدتَ بوّابةً سابقةً عليه، ولا يوجد مستخدمٌ آخرُ يملك <strong>'+lbl+
+      '</strong> — فاعتمادُك يُسجَّل <strong>نيابةً</strong> في السجل الزمني.</div>';
+  return "";
 }
 
 function infoCell(label, valueHtml){
@@ -3635,18 +3769,7 @@ function reqCardHTML(id){
     ? '<div class="ct-note '+(mine && mode!=="blocked" ?"warn":"")+'">'+_icn("timer","ic-sm")+' '+
       (mine && mode!=="blocked" ? "الطلب بانتظار إجراءٍ منك — "+_esc(owner.lbl) : "بانتظار "+_esc(owner.lbl))+'</div>' : "";
 
-  /* **سببُ غياب الزرّ يُقال صراحةً.** زرٌّ يختفي بلا تفسيرٍ يُقرأ عطلاً لا قاعدة —
-     ومن رآه ظاهراً قبل قليلٍ سيظنّ النظامَ نسي اعتمادَه. */
-  var sod = "";
-  if(mode === "blocked"){
-    sod = '<div class="ct-note">'+_icn("shield","ic-sm")+
-      ' اعتمدتَ هذا الطلب في بوّابةٍ سابقة — فبوّابةُ <strong>'+_esc(owner?owner.lbl:"")+
-      '</strong> لغيرِك (فصلُ المهام). والرفضُ/الإعادة ما زال متاحاً لك.</div>';
-  } else if(mode === "delegate"){
-    sod = '<div class="ct-note warn">'+_icn("shield","ic-sm")+
-      ' اعتمدتَ بوّابةً سابقةً على هذا الطلب، ولا يوجد مستخدمٌ آخرُ يملك <strong>'+
-      _esc(owner?owner.lbl:"")+'</strong> — فاعتمادُك يُسجَّل <strong>نيابةً</strong> في السجل الزمني.</div>';
-  }
+  var sod = sodNoteHTML(mode, owner);
 
   return back +
     headHTML(r.title||r.id, reqBadge(r.status)+' <span class="ct-id num">'+_esc(r.id)+'</span>', tools, eng.icon) +
@@ -4268,13 +4391,21 @@ function extCardHTML(c, id){
   if(!e) return '<div class="card">تعذّر العثور على المستخلص.</div>';
   var calc = e.settled || extCalc(e,c);
   var owner=extGateOwner(e.status), mine=extCanAct(e.status,_role());
+  var mode=extActMode(e, e.status, _role(), _meUser(), _me(), _users());
   var tools="";
   if(mine && e.status==="ext_pending_finance"){
-    tools='<button class="btn btn-success btn-sm" onclick="contracts.openExtPay()">'+_icn("banknote","ic-sm")+' تسجيل السداد</button>';
+    if(mode!=="blocked")
+      tools='<button class="btn btn-success btn-sm" onclick="contracts.openExtPay()">'+_icn("banknote","ic-sm")+' تسجيل السداد</button>';
   } else if(mine){
-    tools='<button class="btn btn-success btn-sm" onclick="contracts.extAct(\'approve\')">'+_icn("checkCircle","ic-sm")+' اعتماد</button> '+
-          '<button class="btn btn-ghost btn-sm" onclick="contracts.extAct(\'reject\')">'+_icn("xCircle","ic-sm")+' رفض / إعادة</button>';
+    if(mode!=="blocked")
+      tools='<button class="btn btn-success btn-sm" onclick="contracts.extAct(\'approve\')">'+_icn("checkCircle","ic-sm")+
+            ' اعتماد — '+_esc((owner||{}).lbl||"")+'</button> ';
+    tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.extAct(\'reject\')">'+_icn("xCircle","ic-sm")+' رفض / إعادة</button>';
   }
+  if(!extIsFinal(e.status) && _role()==="admin" && extRewindTargets(e, r2(calc.net), ceoThreshold()).length){
+    tools+=' <button class="btn btn-ghost btn-sm" onclick="contracts.openExtRewind()">'+_icn("rotateCcw","ic-sm")+' إرجاع لمرحلة</button>';
+  }
+  var extSod = sodNoteHTML(mode, owner);
   var lineRows=(e.lines||[]).map(function(l){
     return '<tr><td>'+_esc(l.desc||"—")+'</td><td class="num">'+money0(contractLineQty(c,l.lineId))+'</td>'+
       '<td class="num">'+money0(l.cumQty)+'</td><td class="num">'+money(l.unitPrice)+'</td></tr>';
@@ -4291,7 +4422,7 @@ function extCardHTML(c, id){
   '<div class="ct-head"><div><h2 class="ct-title">'+_icn("banknote")+' '+_esc(e.id)+(e.isFinal?' <span class="ct-doc s-ok">ختاميّ</span>':'')+'</h2>'+
     '<div class="ct-sub">'+extBadge(e.status)+(owner&&!extIsFinal(e.status)?' <span class="ct-id">بانتظار '+_esc(owner.lbl)+'</span>':'')+' <span class="ct-id">'+_esc(e.period||"")+'</span></div></div>'+
     '<div class="ct-actions">'+tools+'</div></div>'+
-  pay+
+  extSod + pay+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("pieChart","ic-sm")+' سُلَّم الحساب'+
     (e.settled?'<span class="ct-sec-lock">لقطةٌ محفوظةٌ وقت السداد</span>':'')+'</div>'+ladderHTML(calc,c)+'</div>'+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود المنفَّذة</div>'+
@@ -4555,7 +4686,8 @@ function myPendingItems(role){
                  value:contractValue(c), gate:"تسجيل التوقيع", at:c.updatedAt||c.createdAt||"" });
   });
   _exts.forEach(function(e){
-    if(e && !extIsFinal(e.status) && extCanAct(e.status, role)){
+    if(e && !extIsFinal(e.status) && extCanAct(e.status, role) &&
+       extActMode(e, e.status, role, meU, meN, us) !== "blocked"){
       var c=contractById(e.contractId);
       out.push({ kind:"ext", id:e.id, lbl:"مستخلص", title:(c&&(c.title||c.vendorName))||e.contractId||"",
                  value:r2((e.settled||{}).net), gate:(extGateOwner(e.status)||{}).lbl||"",
@@ -4563,7 +4695,8 @@ function myPendingItems(role){
     }
   });
   _chgs.forEach(function(g){
-    if(g && !chgIsFinal(g.status) && chgCanAct(g.status, role)){
+    if(g && !chgIsFinal(g.status) && chgCanAct(g.status, role) &&
+       chgActMode(g, g.status, role, meU, meN, us) !== "blocked"){
       var c2=contractById(g.contractId);
       out.push({ kind:"chg", id:g.id, lbl:"أمر تغيير", title:(c2&&(c2.title||c2.vendorName))||g.contractId||"",
                  value:r2(g.amount), gate:(chgGateOwner(g.status)||{}).lbl||"",
@@ -4930,12 +5063,19 @@ function chgCardHTML(c, id){
   var g=changeById(id);
   if(!g) return '<div class="card">تعذّر العثور على أمر التغيير.</div>';
   var owner=chgGateOwner(g.status), mine=chgCanAct(g.status,_role());
+  var mode=chgActMode(g, g.status, _role(), _meUser(), _me(), _users());
   var eff=chgEffect(c, g);
   var tools="";
   if(mine){
-    tools='<button class="btn btn-success btn-sm" onclick="contracts.chgAct(\'approve\')">'+_icn("checkCircle","ic-sm")+' اعتماد</button> '+
-          '<button class="btn btn-ghost btn-sm" onclick="contracts.chgAct(\'reject\')">'+_icn("xCircle","ic-sm")+' رفض</button> ';
+    if(mode!=="blocked")
+      tools='<button class="btn btn-success btn-sm" onclick="contracts.chgAct(\'approve\')">'+_icn("checkCircle","ic-sm")+
+            ' اعتماد — '+_esc((owner||{}).lbl||"")+'</button> ';
+    tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.chgAct(\'reject\')">'+_icn("xCircle","ic-sm")+' رفض</button> ';
   }
+  if(!chgIsFinal(g.status) && _role()==="admin" && chgRewindTargets(g, ceoThreshold()).length){
+    tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.openChgRewind()">'+_icn("rotateCcw","ic-sm")+' إرجاع لمرحلة</button> ';
+  }
+  var chgSod = sodNoteHTML(mode, owner);
   if(g.status==="chg_approved" && ["procurement_officer","admin"].indexOf(_role())!==-1){
     tools+='<button class="btn btn-primary btn-sm" onclick="contracts.doApplyChange()">'+_icn("repeat","ic-sm")+' التطبيق على العقد</button> ';
   }
@@ -4964,6 +5104,7 @@ function chgCardHTML(c, id){
   '<div class="ct-head"><div><h2 class="ct-title">'+_icn("repeat")+' '+_esc(g.id)+'</h2>'+
     '<div class="ct-sub">'+chgBadge(g.status)+(owner&&!chgIsFinal(g.status)?' <span class="ct-id">بانتظار '+_esc(owner.lbl)+'</span>':'')+'</div></div>'+
     '<div class="ct-actions">'+tools+'</div></div>'+
+  chgSod +
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("pieChart","ic-sm")+' الأثر على العقد</div>'+effBox+
     '<div class="ct-note" style="margin-top:12px">'+_icn("fileText","ic-sm")+' <b>السبب:</b> '+_esc(g.reason||"—")+'</div>'+
     (g.durationDaysDelta?'<div class="ct-note">'+_icn("timer","ic-sm")+' تمديدُ المدة '+money0(g.durationDaysDelta)+' يوماً</div>':'')+
@@ -5356,6 +5497,77 @@ function extAct(action){
     return actOnExtract(_extOpen, action, note).then(function(){ paintCtrs(); _toast(isRej?"✅ أُعيد":"✅ اعتُمد","success"); });
   }).catch(function(err){ _toast("⚠ "+(err&&err.message?err.message:"تعذّر الإجراء"),"warn"); });
 }
+/* صندوقا الإرجاع للمستخلص وأمر التغيير — بنيةٌ واحدةٌ ونصٌّ واحد، والوجهاتُ
+   مشتقّةٌ من المستند نفسِه كما في الطلب. */
+function _rewindBoxHTML(title, targets, statusOf, gates, closeFn, saveFn){
+  var opts=targets.map(function(k){
+    var st=statusOf[k];
+    return '<option value="'+_esc(k)+'">'+_esc((gates[st]||{}).lbl||st)+'</option>';
+  }).join("");
+  return '<div class="ct-sec-h">'+_icn("rotateCcw","ic-sm")+' '+_esc(title)+'</div>'+
+    '<div class="ct-note">'+_icn("shield","ic-sm")+
+      ' ستسقط اعتماداتُ المرحلة المختارة <strong>وما بعدها</strong> ويعود المستند إليها. '+
+      'ولا يمسّ ذلك أرقامَه ولا خطَّه الزمنيّ — والإرجاعُ نفسُه يُسجَّل فيه.</div>'+
+    '<div class="ct-form-row">'+
+      field("المرحلة", '<select class="form-input" id="ct-rw2-gate">'+opts+'</select>')+
+      field("سبب الإرجاع *", '<input class="form-input" id="ct-rw2-why" placeholder="لماذا يُعاد الاعتماد؟">')+
+    '</div>'+
+    '<div class="ct-save-bar" style="position:static">'+
+      '<button class="btn btn-ghost btn-sm" onclick="'+closeFn+'">إلغاء</button>'+
+      '<button class="btn btn-primary btn-sm" id="ct-rw2-btn" onclick="'+saveFn+'">'+_icn("rotateCcw","ic-sm")+' إرجاع</button>'+
+    '</div>';
+}
+function _mountRewindBox(html){
+  var el=document.getElementById("page-"+PAGE_CTRS); if(!el) return;
+  var old=document.getElementById("ct-rw2"); if(old) old.remove();
+  var box=document.createElement("div");
+  box.className="card ct-sec"; box.id="ct-rw2"; box.innerHTML=html;
+  el.insertBefore(box, el.children[2]||null);
+  box.scrollIntoView({behavior:"smooth",block:"center"});
+}
+function closeDocRewind(){ var b=document.getElementById("ct-rw2"); if(b) b.remove(); }
+function _readRewindBox(){
+  var g=document.getElementById("ct-rw2-gate"), w=document.getElementById("ct-rw2-why");
+  return { gate:g?g.value:"", why:(w?w.value:"").trim(), whyEl:w,
+           btn:document.getElementById("ct-rw2-btn") };
+}
+function openExtRewind(){
+  var e=extractById(_extOpen), c=contractById(_cOpen); if(!e||!c) return;
+  var targets=extRewindTargets(e, r2(extCalc(e,c).net), ceoThreshold());
+  if(!targets.length) return _toast("⚠ لا توجد مرحلةٌ سابقةٌ يُرجَع إليها هذا المستخلص","warn");
+  _mountRewindBox(_rewindBoxHTML("إرجاع المستخلص "+e.id+" إلى مرحلة", targets, EXT_STATUS_OF, EXT_GATES,
+    "contracts.closeDocRewind()", "contracts.doExtRewind()"));
+}
+function doExtRewind(){
+  var f=_readRewindBox();
+  if(!f.why){ _toast("⚠ سبب الإرجاع إلزامي","warn"); if(f.whyEl) f.whyEl.focus(); return; }
+  if(f.btn) f.btn.disabled=true;
+  rewindExtract(_extOpen, f.gate, f.why).then(function(e){
+    closeDocRewind(); paintCtrs(); _toast("✅ أُرجع المستخلص إلى "+(EXT_STATUS[e.status]||e.status),"success");
+  }).catch(function(err){
+    if(f.btn) f.btn.disabled=false;
+    _toast("⚠ "+(err&&err.message?err.message:"تعذّر الإرجاع"),"warn");
+  });
+}
+function openChgRewind(){
+  var g=changeById(_chgOpen); if(!g) return;
+  var targets=chgRewindTargets(g, ceoThreshold());
+  if(!targets.length) return _toast("⚠ لا توجد مرحلةٌ سابقةٌ يُرجَع إليها هذا الأمر","warn");
+  _mountRewindBox(_rewindBoxHTML("إرجاع أمر التغيير "+g.id+" إلى مرحلة", targets, CHG_STATUS_OF, CHG_GATES,
+    "contracts.closeDocRewind()", "contracts.doChgRewind()"));
+}
+function doChgRewind(){
+  var f=_readRewindBox();
+  if(!f.why){ _toast("⚠ سبب الإرجاع إلزامي","warn"); if(f.whyEl) f.whyEl.focus(); return; }
+  if(f.btn) f.btn.disabled=true;
+  rewindChange(_chgOpen, f.gate, f.why).then(function(g){
+    closeDocRewind(); paintCtrs(); _toast("✅ أُرجع أمرُ التغيير إلى "+(CHG_STATUS[g.status]||g.status),"success");
+  }).catch(function(err){
+    if(f.btn) f.btn.disabled=false;
+    _toast("⚠ "+(err&&err.message?err.message:"تعذّر الإرجاع"),"warn");
+  });
+}
+
 function openExtPay(){
   var e=extractById(_extOpen), c=contractById(_cOpen); if(!e||!c) return;
   var calc=extCalc(e,c);
@@ -5685,6 +5897,8 @@ window.contracts = {
   filterReqs: filterReqs, openReq: openReq, backToReqs: backToReqs,
   act: act, doCancel: doCancel, doDelete: doDelete, openPay: openPay,
   openRewind: openRewind, closeRewind: closeRewind, doRewind: doRewind,
+  openExtRewind: openExtRewind, doExtRewind: doExtRewind,
+  openChgRewind: openChgRewind, doChgRewind: doChgRewind, closeDocRewind: closeDocRewind,
   editLines: editLines, cancelLines: cancelLines, addEditLine: addEditLine, canEditLines: canEditLines,
   delEditLine: delEditLine, editLinesRecalc: editLinesRecalc, saveLines: saveLines, closePay: closePay, doPay: doPay,
   requests: requests, requestById: requestById,
@@ -5742,6 +5956,9 @@ window.contracts = {
   _create: createRequest, _act: actOnRequest, _pay: payRequest, _cancel: cancelRequest,
   _delete: deleteRequest, _rewind: rewindRequest, _editLines: editRequestLines,
   _crqRewind: crqRewind, _crqRewindTargets: crqRewindTargets,
+  _extRewind: extRewind, _extRewindTargets: extRewindTargets, _rewindExt: rewindExtract,
+  _chgRewind: chgRewind, _chgRewindTargets: chgRewindTargets, _rewindChg: rewindChange,
+  _extActMode: extActMode, _chgActMode: chgActMode,
   _draft: function(){ return _rDraft; },
   _mirror: _mirror, _confirm: _confirm, _CONFIRM_KINDS: _CONFIRM_KINDS,
   // الصلاحيات
