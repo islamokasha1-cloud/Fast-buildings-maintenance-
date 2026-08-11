@@ -440,6 +440,74 @@ const wrongGate = await page.evaluate(async (id) => {
 }, payStages.id);
 check('★ دورٌ لا يملك البوّابة يُرفض في طبقة البيانات', /ليست لدورك/.test(wrongGate), wrongGate);
 
+/* ── إرجاعُ الطلب إلى مرحلةٍ محدّدة — للأدمن (طلبُ المالك) ──
+   يُنفَّذ **من الشاشة**: زرٌّ ⇐ صندوقٌ وجهاتُه مشتقّةٌ من الطلب ⇐ سببٌ إلزاميّ ⇐
+   وقوفُ الطلب عند البوّابة المختارة بعد سقوط اعتماداتها وما بعدها. */
+const rwStart = await page.evaluate(async () => {
+  const id = await window.contracts._create({
+    engagement: 'contract', projectId: 'hail', title: 'طلبٌ يُرجَع لمرحلة', vendorId: 'VND-0005',
+    vendorName: 'محمد أحمد الغامدي', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'w1', desc: 'أعمال', unit: 'عدد', qty: 1, unitPrice: 40000 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  });
+  const seq = [];
+  for (let i = 0; i < 4; i++) { await window.contracts._act(id, 'approve', 'موافق'); seq.push(window.contracts.requestById(id).status); }
+  window.contracts.openReq(id);
+  return { id, seq };
+});
+await page.waitForTimeout(900);
+check('★ طلبٌ عبَر بوّاباتِه الأربع ⇐ معتمَد (مادّةُ فحص الإرجاع)',
+  rwStart.seq[3] === 'crq_approved', rwStart.seq.join(' → '));
+check('★★ وزرُّ «إرجاع لمرحلة» يظهر للأدمن',
+  ((await page.textContent('#page-contract-requests')) || '').includes('إرجاع لمرحلة'));
+await page.evaluate(() => window.contracts.openRewind());
+await page.waitForTimeout(700);
+const rwBox = await page.evaluate(() => {
+  const sel = document.getElementById('ct-rw-gate');
+  return { open: !!sel, opts: sel ? Array.from(sel.options).map(o => o.value) : [],
+           labels: sel ? Array.from(sel.options).map(o => o.textContent.trim()) : [] };
+});
+check('★★ وصندوقُ الإرجاع يعرض الوجهاتِ المشتقّةَ من مسار الطلب لا قائمةً ثابتة',
+  rwBox.open && rwBox.opts.join(',') === 'pm,proc,finance,ceo' && rwBox.labels.includes('المشتريات'),
+  JSON.stringify(rwBox.opts));
+const rwNoReason = await page.evaluate(async (id) => {
+  try { await window.contracts._rewind(id, 'proc', ''); return 'مرّ بلا سبب'; }
+  catch (e) { return e.message; }
+}, rwStart.id);
+check('★★ ولا إرجاعَ بلا سبب (من أُسقط توقيعُه يقرأ لماذا)', /سبب الإرجاع إلزامي/.test(rwNoReason), rwNoReason);
+await page.selectOption('#ct-rw-gate', 'proc');
+await page.fill('#ct-rw-why', 'تغيّر المرشَّح الفائز');
+await page.screenshot({ path: `${SHOTS}/12d-rewind-box.png`, fullPage: true });
+await page.click('#ct-rw-btn');
+await page.waitForTimeout(1400);
+const rwAfter = await page.evaluate((id) => {
+  const r = window.contracts.requestById(id);
+  return { status: r.status, pm: !!r.pmApprovedAt, proc: !!r.procApprovedAt, fin: !!r.financeApprovedAt,
+           ceo: !!r.ceoApprovedAt, procKey: !!r.procApprovedKey, value: r.value, lines: (r.lines || []).length,
+           tl: (r.timeline || []).map(x => x.code).join(','),
+           note: ((r.timeline || []).slice(-1)[0] || {}).note || '' };
+}, rwStart.id);
+check('★★ الطلبُ وقف عند بوّابة المشتريات فعلاً', rwAfter.status === 'crq_pending_proc', rwAfter.status);
+check('★★ واعتماداتُ المشتريات وما بعدها سقطت — ولم يسقط اعتمادُ مدير المشاريع',
+  rwAfter.pm === true && !rwAfter.proc && !rwAfter.fin && !rwAfter.ceo && !rwAfter.procKey,
+  JSON.stringify(rwAfter));
+check('★ والقيمةُ والبنودُ لم تُمَسّ (إجراءُ اعتمادٍ لا تحرير)',
+  rwAfter.value === 40000 && rwAfter.lines === 1, JSON.stringify({ v: rwAfter.value, n: rwAfter.lines }));
+check('★★ والخطُّ الزمنيُّ يحفظ الإرجاعَ وسببَه ومن أين',
+  /rewound$/.test(rwAfter.tl) && /تغيّر المرشَّح الفائز/.test(rwAfter.note) && /من «/.test(rwAfter.note),
+  rwAfter.note);
+const rwPerm = await page.evaluate(async (id) => {
+  const real = currentUser.role; currentUser.role = 'procurement_officer';
+  let msg; try { await window.contracts._rewind(id, 'pm', 'محاولة'); msg = 'مرّ بغير أدمن'; }
+  catch (e) { msg = e.message; }
+  currentUser.role = real;
+  let bad; try { await window.contracts._rewind(id, 'ceo', 'وجهةٌ غيرُ صالحة'); bad = 'مرّت وجهةٌ غيرُ صالحة'; }
+  catch (e) { bad = e.message; }
+  return { msg, bad };
+}, rwStart.id);
+check('★★ والإرجاعُ للأدمن وحدَه — الرفضُ في طبقة البيانات', /للأدمن فقط/.test(rwPerm.msg), rwPerm.msg);
+check('★★ ووجهةٌ لا يقف عندها الطلبُ تُرفَض (لا وعدَ كاذب)', /ليست وجهةً صالحة/.test(rwPerm.bad), rwPerm.bad);
+
 /* ── فصلُ المهام: من اعتمد بوّابةً لا يعتمد التاليةَ (طلبُ المالك) ──
    الحالةُ التي رآها بعينه: اعتمد كمدير مشاريع فعاد زرُّ الاعتماد — للمشتريات هذه
    المرّة — لأن الأدمن عضوٌ في كلّ بوّابة. الفحصُ يعيد المشهد حرفياً: بلا مسؤول
@@ -607,10 +675,10 @@ await page.screenshot({ path: `${SHOTS}/16-manual-request-card.png` });
 
 await page.evaluate(() => window.contracts.backToReqs());
 await page.waitForTimeout(900);
-// أربعةُ طلباتٍ باقيةٍ في القائمة: المحوَّلُ لعقد · أمرُ الدفع · طلبُ فصل المهام ·
-// المشروعُ اليدويّ. (وطلبا سيناريو الحذف حُذفا فعلاً فلا أثرَ لهما.)
+// خمسةُ طلباتٍ باقيةٍ في القائمة: المحوَّلُ لعقد · أمرُ الدفع · طلبُ الإرجاع لمرحلة ·
+// طلبُ فصل المهام · المشروعُ اليدويّ. (وطلبا سيناريو الحذف حُذفا فعلاً فلا أثرَ لهما.)
 check('القائمةُ تعرض الطلبات وشريطَ «بانتظار دورك»',
-  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 4);
+  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 5);
 await page.screenshot({ path: `${SHOTS}/12-requests-list.png`, fullPage: true });
 
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });

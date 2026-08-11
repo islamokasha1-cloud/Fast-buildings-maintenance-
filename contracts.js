@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2555";
+var MODULE_BUILD = "v18.9.2556";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -281,6 +281,45 @@ function crqNextStage(req, ceoThreshold){
   var ceoOk = !!r.ceoApprovedAt && amt <= (Number(r.ceoApprovedAmount)||0) + 0.01;
   if(th > 0 && amt >= th && !ceoOk) return "crq_pending_ceo";
   return isPay ? "crq_pending_pay" : "crq_approved";
+}
+
+/* ════ الإرجاعُ إلى بوّابةٍ محدّدة — للأدمن ════   (طلبُ المالك)
+
+   **الفجوة.** «رفض/إعادة» يُرجع الطلبَ إلى **مُنشئه** دائماً: خطوةٌ واحدةٌ إلى
+   الخلف مهما كان الخطأ. فإن اكتُشف بعد اعتماد التنفيذيِّ أن المشتريات وقّعت على
+   مرشَّحٍ خطأ، لم يكن أمام الأدمن إلا إلغاءُ الطلب وإعادةُ إنشائه من الصفر —
+   فيضيع خطُّه الزمنيُّ ورقمُه ومرفقاتُه، ويُعاد كلُّ اعتمادٍ صحيحٍ بلا سبب.
+
+   **الآلية — بلا آلةِ حالاتٍ ثانية.** الإرجاعُ ليس حالةً جديدةً تُضاف، بل **مسحُ
+   اعتماداتِ البوّابة المقصودة وما بعدها**؛ ثمّ `crqNextStage` وحدَها تقرّر أين يقف
+   الطلب. فمصدرُ الحقيقة يبقى واحداً، ويستحيل أن يقف الطلبُ في مكانٍ لا تعرفه.
+
+   **وقائمةُ الوجهات تُشتقّ لا تُكتب.** لكلّ طلبٍ مسارُه: أمرُ الدفع بلا بوّابةِ
+   اعتمادٍ ماليّ، وما دون سقف التنفيذيِّ بلا بوّابته. فالوجهةُ تُقبَل إن كانت
+   الآلةُ **ستقف عندها فعلاً** — نجرّبها ونسأل النتيجة، فلا نَعِد ببوّابةٍ يقفز
+   الطلبُ فوقها فيبدو الإرجاعُ كذباً. */
+var GATE_ORDER = ["pm","proc","finance","ceo"];
+var GATE_STATUS_OF = { pm:"crq_pending_pm", proc:"crq_pending_proc",
+                       finance:"crq_pending_finance", ceo:"crq_pending_ceo" };
+function crqRewind(req, gateKey, ceoTh){
+  if(GATE_ORDER.indexOf(gateKey) < 0) return null;
+  var r = Object.assign({}, req || {});
+  GATE_ORDER.slice(GATE_ORDER.indexOf(gateKey)).forEach(function(k){
+    r[k+"ApprovedAt"]=null; r[k+"ApprovedBy"]=null; r[k+"ApprovedByUser"]=null;
+    if(k==="proc")    r.procApprovedKey=null;
+    if(k==="finance") r.financeApprovedKey=null;
+    if(k==="ceo")     r.ceoApprovedAmount=null;
+  });
+  r.status = crqNextStage(r, ceoTh);
+  return r;
+}
+/* الوجهاتُ المتاحة: ما تقف عندها الآلةُ فعلاً، وما يُغيّر الحالةَ الحاليةَ حقاً. */
+function crqRewindTargets(req, ceoTh){
+  var cur = (req||{}).status;
+  return GATE_ORDER.filter(function(k){
+    var probe = crqRewind(req, k, ceoTh);
+    return probe && probe.status === GATE_STATUS_OF[k] && probe.status !== cur;
+  });
 }
 
 /* ════ بصمتا الاعتماد ════
@@ -1654,6 +1693,38 @@ function cancelRequest(id, reason){
     var i=_reqs.findIndex(function(x){ return x.id===id; });
     if(i>=0) _reqs[i]=r;
     _audit("إلغاء طلب تعاقد", id+(reason?(" — "+reason):""));
+    return r;
+  });
+}
+
+/* تنفيذُ الإرجاع — **معاملةٌ على الوثيقة الطازجة**، والسببُ إلزاميّ.
+   إلزامُ السبب ليس تشدّداً: هذا الفعلُ يُسقط اعتماداتٍ وقّعها آخرون، فمن حقّهم أن
+   يقرؤوا في الخطّ الزمنيِّ **لماذا** سقط توقيعُهم. والمنتهي لا يُرجَع: المحوَّلُ
+   صار عقداً، والمسدَّدُ خرج ماله، والملغى مغلق. */
+function rewindRequest(id, gateKey, reason){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  if(_role() !== "admin") return Promise.reject(new Error("إرجاع الطلب لمرحلةٍ سابقة للأدمن فقط"));
+  if(!reason) return Promise.reject(new Error("سبب الإرجاع إلزامي"));
+  var ref = database.collection(REQUESTS_COL()).doc(id), th = ceoThreshold();
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("الطلب غير موجود");
+      var r = s.data()||{}; r.id = id;
+      if(crqIsFinal(r.status)) throw new Error("الطلب في حالةٍ نهائية — لا يُرجَع");
+      if(crqRewindTargets(r, th).indexOf(gateKey) === -1) throw new Error("هذه المرحلة ليست وجهةً صالحةً لهذا الطلب");
+      var from = CRQ_STATUS[r.status] || r.status;
+      var next = crqRewind(r, gateKey, th);
+      next.id = id; next.updatedAt=_now(); next.updatedBy=_me();
+      _pushTimeline(next, "إرجاع إلى "+(crqGateOwner(next.status)||{}).lbl, "rewound",
+        "من «"+from+"» — "+reason);
+      var out = Object.assign({}, next); delete out.id;
+      t.set(ref, out, { merge:true });
+      return next;
+    });
+  }).then(function(r){
+    _mirror(_reqs, r, true);
+    _audit("إرجاع طلب تعاقد لمرحلة", id+" ⇐ "+(CRQ_STATUS[r.status]||r.status)+" — "+reason);
+    _notify("طلب تعاقد "+id, "أُرجع إلى "+(CRQ_STATUS[r.status]||r.status), id);
     return r;
   });
 }
@@ -3393,6 +3464,11 @@ function reqCardHTML(id){
     // الرفضُ/الإعادة لا يُمنع أبداً: لا يراكم سلطةً، ومنعُه يحبس الطلبَ بلا مخرج
     tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.act(\'reject\')">'+_icn("xCircle","ic-sm")+' رفض / إعادة</button> ';
   }
+  /* إرجاعٌ إلى بوّابةٍ محدّدة — للأدمن، وعلى الطلب غيرِ المنتهي، وحين توجد وجهةٌ
+     صالحةٌ أصلاً (فلا زرَّ يفتح قائمةً فارغة). */
+  if(!crqIsFinal(r.status) && _role()==="admin" && crqRewindTargets(r, ceoThreshold()).length){
+    tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.openRewind()">'+_icn("rotateCcw","ic-sm")+' إرجاع لمرحلة</button> ';
+  }
   if(!crqIsFinal(r.status) && (_role()==="admin" || r.createdByUser===_meUser())){
     tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.doCancel()">'+_icn("ban","ic-sm")+' إلغاء</button>';
   }
@@ -3538,6 +3614,51 @@ function doDelete(){
   }).catch(function(e){
     console.warn("contracts/doDelete",e);
     _toast("⚠ "+(e&&e.message?e.message:"تعذّر الحذف"),"warn");
+  });
+}
+
+/* صندوقُ الإرجاع: الوجهاتُ **مشتقّةٌ من الطلب نفسِه** لا قائمةٌ ثابتة، ومعها
+   تحذيرٌ يقول بالضبط أيُّ اعتماداتٍ ستسقط — فلا يُفاجَأ الأدمن بما فعله. */
+function openRewind(){
+  var r=requestById(_rOpen); if(!r) return;
+  var el=document.getElementById("page-"+PAGE_REQS); if(!el) return;
+  var targets=crqRewindTargets(r, ceoThreshold());
+  if(!targets.length) return _toast("⚠ لا توجد مرحلةٌ سابقةٌ يُرجَع إليها هذا الطلب","warn");
+  var opts=targets.map(function(k){
+    var st=GATE_STATUS_OF[k];
+    return '<option value="'+_esc(k)+'">'+_esc((GATE_ROLES[st]||{}).lbl||st)+'</option>';
+  }).join("");
+  var box=document.createElement("div");
+  box.className="card ct-sec"; box.id="ct-rw-box";
+  box.innerHTML='<div class="ct-sec-h">'+_icn("rotateCcw","ic-sm")+' إرجاع الطلب إلى مرحلة</div>'+
+    '<div class="ct-note">'+_icn("shield","ic-sm")+
+      ' ستسقط اعتماداتُ المرحلة المختارة <strong>وما بعدها</strong> ويعود الطلبُ إليها. '+
+      'ولا يمسّ ذلك بنودَ الطلب ولا قيمتَه ولا خطَّه الزمنيّ — والإرجاعُ نفسُه يُسجَّل فيه.</div>'+
+    '<div class="ct-form-row">'+
+      field("المرحلة", '<select class="form-input" id="ct-rw-gate">'+opts+'</select>')+
+      field("سبب الإرجاع *", '<input class="form-input" id="ct-rw-why" placeholder="لماذا يُعاد الاعتماد؟">')+
+    '</div>'+
+    '<div class="ct-save-bar" style="position:static">'+
+      '<button class="btn btn-ghost btn-sm" onclick="contracts.closeRewind()">إلغاء</button>'+
+      '<button class="btn btn-primary btn-sm" id="ct-rw-btn" onclick="contracts.doRewind()">'+_icn("rotateCcw","ic-sm")+' إرجاع</button>'+
+    '</div>';
+  var old=document.getElementById("ct-rw-box"); if(old) old.remove();
+  el.insertBefore(box, el.children[2] || null);
+  box.scrollIntoView({behavior:"smooth", block:"center"});
+}
+function closeRewind(){ var b=document.getElementById("ct-rw-box"); if(b) b.remove(); }
+function doRewind(){
+  var g=document.getElementById("ct-rw-gate"), w=document.getElementById("ct-rw-why");
+  var gate=g?g.value:"", why=(w?w.value:"").trim();
+  if(!why){ _toast("⚠ سبب الإرجاع إلزامي","warn"); if(w) w.focus(); return; }
+  var btn=document.getElementById("ct-rw-btn"); if(btn) btn.disabled=true;
+  rewindRequest(_rOpen, gate, why).then(function(r){
+    closeRewind(); paintReqs();
+    _toast("✅ أُرجع الطلب إلى "+(CRQ_STATUS[r.status]||r.status),"success");
+  }).catch(function(e){
+    if(btn) btn.disabled=false;
+    console.warn("contracts/doRewind",e);
+    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإرجاع"),"warn");
   });
 }
 
@@ -5376,7 +5497,8 @@ window.contracts = {
   toggleBoqLine: toggleBoqLine, addFreeLine: addFreeLine, delReqLine: delReqLine,
   addCandidate: addCandidate, delCandidate: delCandidate, recalc: recalc,
   filterReqs: filterReqs, openReq: openReq, backToReqs: backToReqs,
-  act: act, doCancel: doCancel, doDelete: doDelete, openPay: openPay, closePay: closePay, doPay: doPay,
+  act: act, doCancel: doCancel, doDelete: doDelete, openPay: openPay,
+  openRewind: openRewind, closeRewind: closeRewind, doRewind: doRewind, closePay: closePay, doPay: doPay,
   requests: requests, requestById: requestById,
   // العقود [المرحلة ٣]
   renderCtrs: renderCtrs, startCtrSync: startCtrSync, stopCtrSync: stopCtrSync,
@@ -5430,7 +5552,8 @@ window.contracts = {
   // مقابضُ طبقة البيانات — مكشوفةٌ لفحص المتصفّح ليختبر القواعد نفسَها التي
   // تحرسها الشاشة، لا نسخةً منها: الرفضُ يجب أن يقع في البيانات لا على الزرّ.
   _create: createRequest, _act: actOnRequest, _pay: payRequest, _cancel: cancelRequest,
-  _delete: deleteRequest,
+  _delete: deleteRequest, _rewind: rewindRequest,
+  _crqRewind: crqRewind, _crqRewindTargets: crqRewindTargets,
   _draft: function(){ return _rDraft; },
   _mirror: _mirror, _confirm: _confirm, _CONFIRM_KINDS: _CONFIRM_KINDS,
   // الصلاحيات

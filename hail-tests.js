@@ -6119,6 +6119,56 @@ function contractsPhase1() {
       (src.match(/ApprovedByUser=_meUser\(\)/g) || []).length === 4);
   }
 
+  /* ════ الإرجاعُ إلى بوّابةٍ محدّدة — للأدمن ════   (طلبُ المالك)
+     «رفض/إعادة» يُرجع للمُنشئ دائماً: خطوةٌ واحدةٌ للخلف مهما كان الخطأ. والإرجاعُ
+     **ليس حالةً جديدة** بل مسحُ اعتماداتِ البوّابة وما بعدها ثمّ `crqNextStage`
+     وحدَها تقرّر — فلا آلةَ حالاتٍ ثانيةٌ تنحرف عن الأولى. */
+  {
+    const rw = (req, k) => C._crqRewind(req, k, TH);
+    const tg = (req) => C._crqRewindTargets(req, TH);
+    const full = { engagement: "contract", value: 50000, pmApprovedAt: "t", pmApprovedByUser: "pm1",
+                   procApprovedAt: "t", procApprovedKey: "K", financeApprovedAt: "t", financeApprovedKey: "F",
+                   ceoApprovedAt: "t", ceoApprovedAmount: 50000, status: "crq_approved" };
+    T("★★ الإرجاعُ إلى المشتريات يُعيد الطلبَ إلى بوّابتها",
+      rw(full, "proc").status === "crq_pending_proc");
+    T("★★ ويُسقط اعتمادَها **وما بعدها** — لا يمرّ الطلبُ على توقيعٍ لم يُراجَع بعد التغيير",
+      (function () { const o = rw(full, "proc");
+        return !o.procApprovedAt && !o.financeApprovedAt && !o.ceoApprovedAt &&
+               !o.procApprovedKey && !o.financeApprovedKey && !o.ceoApprovedAmount; })());
+    T("★★ ويُبقي ما قبلها صحيحاً (اعتمادُ مدير المشاريع لا يسقط بلا سبب)",
+      rw(full, "proc").pmApprovedAt === "t" && rw(full, "proc").pmApprovedByUser === "pm1");
+    T("★ والإرجاعُ إلى مدير المشاريع يمسح الأربعةَ جميعاً",
+      (function () { const o = rw(full, "pm");
+        return o.status === "crq_pending_pm" && !o.pmApprovedAt && !o.ceoApprovedAt; })());
+    T("★ والقيمةُ والبنودُ والطرفُ لا تُمَسّ (الإرجاعُ إجراءُ اعتمادٍ لا تحرير)",
+      rw(full, "pm").value === 50000 && rw(full, "pm").engagement === "contract");
+    T("★ ومفتاحٌ غيرُ معروفٍ يُرفَض", rw(full, "nope") === null);
+
+    T("★★ والوجهاتُ تُشتقّ من مسار الطلب نفسِه: العقدُ فوق السقف ⇒ أربعُ بوّابات",
+      tg(full).join(",") === "pm,proc,finance,ceo", tg(full).join(","));
+    T("★★ وأمرُ الدفع بلا بوّابةِ اعتمادٍ ماليّ (وجهةٌ يقفز فوقها الطلبُ وعدٌ كاذب)",
+      tg({ engagement: "pay_order", value: 1500, pmApprovedAt: "t", procApprovedAt: "t",
+           status: "crq_pending_pay" }).join(",") === "pm,proc");
+    T("★ وما دون سقف التنفيذيِّ بلا بوّابته",
+      tg({ engagement: "contract", value: 100, pmApprovedAt: "t", procApprovedAt: "t",
+           financeApprovedAt: "t", status: "crq_approved" }).join(",") === "pm,proc,finance");
+    T("★★ ولا تُعرَض وجهةٌ لا تغيّر الحالةَ الحالية (إرجاعٌ بلا أثر)",
+      tg({ engagement: "contract", value: 50000, pmApprovedAt: "t", status: "crq_pending_proc" })
+        .indexOf("proc") === -1);
+    T("★ والمرفوضُ يُرجَع إلى بوّابةٍ فيُستأنف مساره",
+      tg({ engagement: "contract", value: 50000, pmApprovedAt: "t", procApprovedAt: "t",
+           status: "crq_finance_returned" }).indexOf("proc") !== -1);
+
+    T("★★ والتنفيذُ للأدمن وحدَه وبسببٍ إلزاميّ",
+      /function rewindRequest\(id, gateKey, reason\)[\s\S]{0,400}_role\(\) !== "admin"[\s\S]{0,200}!reason\) return Promise\.reject/.test(src));
+    T("★★ ولا يُرجَع منتهٍ (محوَّلٌ · مسدَّدٌ · ملغى) ولا وجهةٌ غيرُ صالحة — على الوثيقة الطازجة",
+      /function rewindRequest[\s\S]{0,900}crqIsFinal\(r\.status\)\) throw[\s\S]{0,300}crqRewindTargets\(r, th\)\.indexOf\(gateKey\) === -1\) throw/.test(src));
+    T("★ والخطُّ الزمنيُّ يحفظ من أين أُرجع ولماذا (من أسقطنا توقيعَه يقرأ السبب)",
+      /_pushTimeline\(next, "إرجاع إلى "[\s\S]{0,200}"من «"\+from\+"» — "\+reason/.test(src));
+    T("★ والزرُّ للأدمن وحدَه وحين توجد وجهةٌ صالحةٌ أصلاً (لا قائمةٌ فارغة)",
+      /_role\(\)==="admin" && crqRewindTargets\(r, ceoThreshold\(\)\)\.length[\s\S]{0,160}contracts\.openRewind\(\)/.test(src));
+  }
+
   /* ════ قيمةُ العقد النافذة ════ */
   T("★ قيمة العقد = الأصلية + أوامرِ التغيير المعتمدة وحدها",
     C._contractValue({ value: 100000, changeOrders: [{ amount: 5000, status: "approved" }, { amount: 9000, status: "crq_pending_pm" }] }) === 105000);
