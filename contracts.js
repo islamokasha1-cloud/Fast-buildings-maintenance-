@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2552";
+var MODULE_BUILD = "v18.9.2553";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -255,14 +255,24 @@ function payOrderAllowed(value, threshold){
 }
 
 /* توجيهُ طلب التعاقد وأمرِ الدفع معاً — **مصدرُ الحقيقة الوحيد للتسلسل**.
-   أمرُ الدفع يتخطّى بوّابتَي المشتريات واعتمادِ المالية (فلا نطاقَ يُراجَع ولا
-   شروطَ تجارية)، لكنه **لا يتخطّى بوّابة التنفيذي** — السقفُ سقفُ المال لا سقفُ
-   نوع الورقة. ويبقى المسارُ دالةً واحدةً فلا يفترق فرعان بصمت. */
+
+   • العقد:      مدير المشاريع ← المشتريات ← المالية ← (التنفيذي فوق السقف) ← معتمَد.
+   • أمرُ الدفع: مدير المشاريع ← **المشتريات** ← (التنفيذي فوق السقف) ← سدادُ المالية.
+
+   بوّابةُ المشتريات في أمر الدفع (طلبُ المالك v18.9.2553): كانت مُتخطّاةً بحجّة «لا
+   نطاقَ يُراجَع ولا شروطَ تجارية» — وهي حجّةٌ تنظر إلى الورقة لا إلى المال. فأمرُ
+   الدفع **صرفٌ لطرفٍ خارجيّ**، ومراجعةُ المشتريات هي التي تسأل: أهذا الطرفُ صحيحٌ
+   وسعرُه معقول؟ ولا يُعوّضها اعتمادُ مدير المشاريع (يراجع الحاجةَ لا التوريد) ولا
+   سدادُ المالية (يُنفّذ ولا يُقرّر).
+   وتبقى المالية في أمر الدفع **مُسدِّدةً لا مُعتمِدة**: بوّابةُ اعتمادِها للشروط
+   التجارية والمحتجز — ولا شروطَ في أمر الدفع. فالمسارُ يزيد بوّابةً واحدةً لا اثنتين.
+   وبوّابةُ التنفيذي على حالها: السقفُ سقفُ المال لا سقفُ نوع الورقة.
+   والمسارُ يبقى دالةً واحدةً فلا يفترق فرعان بصمت. */
 function crqNextStage(req, ceoThreshold){
   var r = req || {};
   var isPay = r.engagement === "pay_order";
   if(!r.pmApprovedAt) return "crq_pending_pm";
-  if(!isPay && !r.procApprovedAt)    return "crq_pending_proc";
+  if(!r.procApprovedAt)              return "crq_pending_proc";
   if(!isPay && !r.financeApprovedAt) return "crq_pending_finance";
   var amt = Number(r.value); if(!isFinite(amt)) amt = 0;
   var th  = Number(ceoThreshold); if(!isFinite(th)) th = 0;
@@ -1581,6 +1591,32 @@ function cancelRequest(id, reason){
     if(i>=0) _reqs[i]=r;
     _audit("إلغاء طلب تعاقد", id+(reason?(" — "+reason):""));
     return r;
+  });
+}
+
+/* حذفُ طلبٍ **ملغى** — للأدمن وحدَه (طلبُ المالك).
+   لماذا الملغى وحدَه: هو الورقةُ الوحيدةُ التي ماتت **قبل أن تُنتج أثراً** — لا عقدَ
+   ولا سداد. فحذفُه تنظيفُ شاشةٍ لا طمسُ سجلٍّ ماليّ. وما عداه لا يُحذف مهما كان
+   الدور: المعتمَدُ والمحوَّلُ والمسدَّدُ أثرٌ ماليٌّ يُقرأ ولا يُمحى.
+   والحالةُ تُقرأ من **الوثيقة الطازجة** لا من المرآة المحلّية: لقطةٌ قديمةٌ في
+   المتصفّح كانت ستسمح بحذف طلبٍ خرج من الإلغاء في متصفّحٍ آخر. والقاعدةُ نفسُها
+   مكتوبةٌ في `firestore.rules` — فالرفضُ يقع في الخادم ولو زُوِّرت الواجهة.
+   ويبقى **قيدُ التدقيق** شاهداً على الحذف: ما حُذف يُذكر ولا يُنسى. */
+function deleteRequest(id){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  if(_role() !== "admin") return Promise.reject(new Error("حذف الطلبات للأدمن فقط"));
+  var ref=database.collection(REQUESTS_COL()).doc(id);
+  return ref.get().then(function(s){
+    if(!s.exists) throw new Error("الطلب غير موجود");
+    var r=s.data()||{};
+    if(r.status !== "crq_cancelled") throw new Error("لا يُحذف إلا الطلبُ الملغى");
+    return ref.delete().then(function(){
+      var i=_reqs.findIndex(function(x){ return x.id===id; });
+      if(i>=0) _reqs.splice(i,1);
+      if(_rOpen===id) _rOpen=null;
+      _audit("حذف طلب تعاقد ملغى", id+" — "+(r.vendorName||"")+" — "+money(r.value)+" ر.س");
+      return id;
+    });
   });
 }
 
@@ -3279,6 +3315,11 @@ function reqCardHTML(id){
   if(!crqIsFinal(r.status) && (_role()==="admin" || r.createdByUser===_meUser())){
     tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.doCancel()">'+_icn("ban","ic-sm")+' إلغاء</button>';
   }
+  /* حذفُ الملغى — للأدمن وحدَه: الورقةُ التي ماتت قبل أن تُنتج أثراً تُنظَّف،
+     وما أنتج أثراً ماليّاً (معتمَدٌ · محوَّلٌ · مسدَّد) لا يظهر له زرُّ حذفٍ أصلاً. */
+  if(r.status==="crq_cancelled" && _role()==="admin"){
+    tools+='<button class="btn btn-delete btn-sm" onclick="contracts.doDelete()">'+_icn("trash","ic-sm")+' حذف الطلب</button>';
+  }
 
   var t=linesTotal(r.lines||[], r.vatMode);
   var info='<div class="ct-info">'+
@@ -3384,6 +3425,26 @@ function doCancel(){
     var reason=(window.prompt("سبب الإلغاء:")||"").trim();
     return cancelRequest(_rOpen, reason).then(function(){ paintReqs(); _toast("✅ أُلغي الطلب","success"); });
   }).catch(function(e){ _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإلغاء"),"warn"); });
+}
+
+/* حذفُ طلبٍ ملغى — الفعلُ الوحيدُ في الوحدة الذي **لا رجعةَ فيه**، فرسالتُه تقول
+   ذلك صراحةً وتذكر المعرّفَ الذي سيُمحى. والرفضُ الحقيقيُّ في طبقة البيانات وفي
+   قواعد الخادم — وهذه الشاشةُ آخرُ حاجزٍ لا أوّلُه. */
+function doDelete(){
+  var r=requestById(_rOpen); if(!r) return;
+  var id=_rOpen;
+  Promise.resolve(_confirm({ kind:"danger", icon:"🗑", okText:"حذف نهائياً",
+    title:"حذف الطلب الملغى",
+    msg:'سيُحذف الطلب «'+(r.title||id)+'» ('+id+') نهائياً ولا يمكن استرجاعه. يبقى الحذفُ مسجّلاً في سجل التدقيق.'
+  })).then(function(ok){
+    if(!ok) return;
+    return deleteRequest(id).then(function(){
+      paintReqs(); _toast("✅ حُذف الطلب "+id,"success");
+    });
+  }).catch(function(e){
+    console.warn("contracts/doDelete",e);
+    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الحذف"),"warn");
+  });
 }
 
 /* سدادُ أمر الدفع — الإيصالُ إلزاميّ، وفشلُ رفعه **لا يُسجّل سداداً بلا إثبات**. */
@@ -5216,7 +5277,7 @@ window.contracts = {
   toggleBoqLine: toggleBoqLine, addFreeLine: addFreeLine, delReqLine: delReqLine,
   addCandidate: addCandidate, delCandidate: delCandidate, recalc: recalc,
   filterReqs: filterReqs, openReq: openReq, backToReqs: backToReqs,
-  act: act, doCancel: doCancel, openPay: openPay, closePay: closePay, doPay: doPay,
+  act: act, doCancel: doCancel, doDelete: doDelete, openPay: openPay, closePay: closePay, doPay: doPay,
   requests: requests, requestById: requestById,
   // العقود [المرحلة ٣]
   renderCtrs: renderCtrs, startCtrSync: startCtrSync, stopCtrSync: stopCtrSync,
@@ -5270,6 +5331,7 @@ window.contracts = {
   // مقابضُ طبقة البيانات — مكشوفةٌ لفحص المتصفّح ليختبر القواعد نفسَها التي
   // تحرسها الشاشة، لا نسخةً منها: الرفضُ يجب أن يقع في البيانات لا على الزرّ.
   _create: createRequest, _act: actOnRequest, _pay: payRequest, _cancel: cancelRequest,
+  _delete: deleteRequest,
   _draft: function(){ return _rDraft; },
   _mirror: _mirror, _confirm: _confirm, _CONFIRM_KINDS: _CONFIRM_KINDS,
   // الصلاحيات

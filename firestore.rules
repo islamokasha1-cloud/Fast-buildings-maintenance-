@@ -163,17 +163,24 @@ service cloud.firestore {
              || request.resource.data.status == 'crq_cancelled'
              || anyRole(crqGate(resource.data.status)) );
     }
+    // الحذفُ **للأدمن وعلى الملغى وحدَه** (طلبُ المالك v18.9.2553): الطلبُ الملغى
+    // ورقةٌ ماتت قبل أن تُنتج أثراً — لا عقدَ ولا سداد — فحذفُها تنظيفٌ لا طمسٌ
+    // لأثرٍ ماليّ. وما عداه لا يُحذف مهما كان الدور: المعتمَدُ والمحوَّلُ والمسدَّدُ
+    // سجلٌّ ماليٌّ يُقرأ ولا يُمحى، والقيدُ في `audit` يبقى شاهداً على الحذف نفسِه.
+    function crqDeleteOk() {
+      return isAdmin() && resource.data.status == 'crq_cancelled';
+    }
     match /global_contract_requests/{id} {
       allow read:   if hasRole();
       allow create: if crqCreateOk();
       allow update: if crqUpdateOk();
-      allow delete: if false;
+      allow delete: if crqDeleteOk();
     }
     match /global_contract_requests_dev/{id} {
       allow read:   if hasRole();
       allow create: if crqCreateOk();
       allow update: if crqUpdateOk();
-      allow delete: if false;
+      allow delete: if crqDeleteOk();
     }
 
     // ── العقود: جدولُ الانتقالات نفسُه الذي يحرس الأزرار ──
