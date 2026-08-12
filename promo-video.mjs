@@ -819,7 +819,7 @@ for (const ch of CHAPTERS) {
   await captionOut(); await pv('cursorOff');
   const clicked = await goPage(ch.page);
   await captionIn(ch.title, ch.lower[1], 'الفصل ' + ch.n + ' — ' + ch.kicker);
-  await wait(3100);
+  await wait(2400);
   // بعضُ الشاشات نموذجٌ فارغٌ حتى يُضغط زرُّها — فنضغطه ليُرى المخرَجُ لا النموذج.
   if (ch.act) {
     // هنا الزرُّ داخل منطقة المحتوى — فالنقرُ أوّلاً ليُرى، ثم يُخفى ما يليه من بناء.
@@ -889,15 +889,22 @@ if (!PROBE && shots.length > 5) {
     // لا معدّلٌ ثابتٌ نفرضه. ثم `fps=30` يوحّد الناتج بلا حذفٍ ولا قفز.
     const keep = shots.filter(f => f.wall >= TRIM_AT);
     const list = keep.length > 5 ? keep : shots;
-    // إطاراتُ التمرير المُخطّى تأخذ 1/30ث ثابتةً؛ وما عداها يأخذ فارقَ طابعَيه الزمنيّين.
+    // إطاراتُ الحركة المُخطّاة تأخذ 1/30ث ثابتةً — **إلا آخرَ إطارٍ في كلّ حركة**.
+    // ذاك الإطارُ هو المشهدُ الذي يستقرّ عليه العرض بعد انتهاء الحركة (التعليقُ وقد
+    // اكتمل ظهورُه مثلاً)، والشاشةُ بعده ساكنةٌ فلا يُرسل المُصيّرُ إطاراً جديداً.
+    // إعطاؤه 1/30ث كان يجعل التعليقَ **يظهر ويختفي في جزءٍ من ثانية** مهما أطلنا
+    // زمنَ الوقفة — لأن الوقفةَ لم تكن تُترجَم إلى زمنٍ في المخرَج أصلاً. فيأخذ
+    // آخرُ إطارٍ فارقَ طابعَيه الزمنيّين، أي زمنَ الوقفة الحقيقيّ.
     const idxOf = new Map(list.map((f, i) => [f.file, i]));
     const pacedIdx = new Set();
     for (const [a, b] of paced) for (let i = a; i < b; i++) { const j = idxOf.get(shots[i] && shots[i].file); if (j !== undefined) pacedIdx.add(j); }
+    // والسقفُ الأعلى للوقفة كان ثانيتين، فيقصّ وقفةَ القراءة (٣ ثوانٍ) قصّاً صامتاً.
+    const HOLD_CAP = 8;
     const lines = [];
     for (let i = 0; i < list.length; i++) {
-      const d = pacedIdx.has(i) ? 1 / 30
-        : (i + 1 < list.length ? Math.min(2, Math.max(0.01, list[i + 1].ts - list[i].ts)) : 0.2);
-      lines.push(`file '${list[i].file}'`, `duration ${d.toFixed(4)}`);
+      const gap = i + 1 < list.length ? Math.min(HOLD_CAP, Math.max(0.01, list[i + 1].ts - list[i].ts)) : 0.4;
+      const midMotion = pacedIdx.has(i) && pacedIdx.has(i + 1);
+      lines.push(`file '${list[i].file}'`, `duration ${(midMotion ? 1 / 30 : gap).toFixed(4)}`);
     }
     lines.push(`file '${list[list.length - 1].file}'`);
     const concat = path.join(OUT, `${NAME}-frames.txt`);
