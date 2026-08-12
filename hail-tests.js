@@ -6096,9 +6096,29 @@ function tvWallGuards() {
       /id="tvwall-btn-ico"/.test(HTML) && /_wallIco\.innerHTML = _svgIcon\("radar"\)/.test(HTML) &&
       (HTML.match(/circle cx="12" cy="12" r="2\.1"/g) || []).length === 1);
     T("★ ak: صفوفُ شبكة المباني تتقاسم الارتفاع فلا تُقصّ بطاقةُ مبنى",
-      /#tvl-proj-blds\{[^}]*grid-auto-rows:minmax\(0,1fr\)[^}]*\}/.test(HTML) &&
-      /#tvl-proj-blds \.tvw-bld\{max-height:/.test(HTML),
+      /#tvl-proj-blds\{[^}]*grid-auto-rows:minmax\(0,1fr\)[^}]*\}/.test(HTML),
       "١٧ مبنى في أربعة أعمدة = خمسةُ صفوفٍ كانت تفيض خارج العمود");
+    /* v18.9an: البطاقةُ صفٌّ لا عمود — الاسمُ يأخذ العرضَ (وهو المتاح) لا الارتفاع
+       (وهو الشحيح)، فلا يُقصّ اسمُ مبنًى عربيٌّ طويلٌ في أربعة أعمدةٍ ضيّقة. */
+    T("★ an: بطاقةُ المبنى صفٌّ أفقيٌّ والاسمُ يتمدّد فيه",
+      /\.tvw-bld\{[^}]*flex-direction:row[^}]*\}/.test(HTML) &&
+      /\.tvw-bld \.bname\{flex:1;min-width:0/.test(HTML) &&
+      /\.tvw-blds\{[^}]*repeat\(auto-fit,minmax\(clamp\(148px/.test(HTML),
+      "عمودٌ ضيّقٌ يقصّ الاسمَ مهما فعلت بالخطّ");
+    T("★ an: الاسمُ سطران لا سطرٌ واحد، والاسمُ الأصليُّ كاملٌ في title",
+      /\.tvw-bld \.bname\{[^}]*-webkit-line-clamp:2/.test(HTML) &&
+      (HTML.match(/<div class="tvw-bld \$\{cls\}" title="\$\{esc\(String\(b\)\)\}"/g) || []).length === 2,
+      "اللوحتان معاً: لوحةُ العرض المفردة ولوحةُ المشروع في المركز");
+    T("★ an: الاسمُ يسبق الرقمَ في الصف (المبنى يُعرَف باسمه لا برقمه)",
+      /<div class="bname">\$\{short\}<\/div><div class="bcount">\$\{op\}<\/div>/.test(HTML));
+    T("★ an: ما لا يتّسع في بطاقة الرسم يُعلَن عدداً لا يُقصّ بصمت",
+      /function _tvcMore\(shown,total\)\{[\s\S]*?total>shown/.test(HTML) &&
+      /_tvcMore\(cov\.length,covAll\.length\)/.test(HTML) &&
+      /_tvcMore\(press\.length,withData\.length\)/.test(HTML) &&
+      (HTML.match(/_tvcMore\(top\.length,topAll\.length\)/g) || []).length === 3,
+      "أربعةُ مبانٍ تُقرأ «هذه كلُّ مباني المشروع»");
+    T("★ an: عنوانُ بطاقة التغطية يقول «الأضعف» صراحةً لا «حسب المبنى»",
+      /"أضعفُ المباني تغطيةً اليوم"/.test(HTML) && !/"تغطيةُ اليوم حسب المبنى"/.test(HTML));
   }
 
   // (٤) التسمية والعلامة الجديدتان — لا بقايا للاسم القديم في الواجهة
@@ -6117,6 +6137,41 @@ function tvWallGuards() {
     "نصٌّ ظاهرٌ بالاسم القديم");
   T("★ ai: علامةُ الرادار حلّت محلّ أيقونة الشاشة في زرّ البوّابة",
     /<circle cx="12" cy="12" r="2\.1" fill="currentColor" stroke="none"\/>/.test(HTML));
+
+  /* ══ v18.9am: فصلُ إنجاز الشهر عن عدد المتأخّرات — مقياسان ⇒ ترميزان ══ */
+  {
+    const toneSrc = (HTML.match(/function tvRateTone\(pct\)\{[\s\S]*?\n\}/) || [])[0];
+    T("★ am: tvRateTone موجودة (مصدرٌ واحدٌ لنبرة الإنجاز)", !!toneSrc);
+    if (toneSrc) {
+      const tone = new Function(toneSrc + "; return tvRateTone;")();
+      T("★ am: ٩٠٪ فأكثر إنجازٌ عالٍ (أخضر) مهما بلغ عددُ المتأخّرات",
+        tone(94).key === "high" && tone(90).key === "high" && tone(100).c === "var(--green)");
+      T("★ am: ٧٥–٨٩ متوسّط · دون ٧٥ منخفض", tone(89).key === "mid" && tone(75).key === "mid" && tone(74).key === "low");
+      T("★ am: بلا نسبةٍ ⇒ نبرةٌ محايدةٌ لا خضراءُ ولا حمراء (null ≠ صفر)",
+        tone(null).key === "none" && tone(undefined).key === "none" && tone(0).key === "low");
+      T("★ am: عتباتُ الإنجاز مستقلّةٌ عن عتبات tvHealth (مقياسان لا يشتركان)",
+        !/overdue|tvHealth|SLA/.test(toneSrc), "أيُّ ذكرٍ للتأخّر هنا يعيد خلطَ المقياسين");
+    }
+    // الحلقةُ والنسبةُ والشريطُ يقرأون النبرة، والكلمةُ وسببُها يقرآن الصحّة
+    T("★ am: حلقةُ الجاهزية ونسبتُها بنبرة الإنجاز لا بلون الصحّة",
+      /\.tvw-ring-prog\{[^}]*stroke:var\(--rate,var\(--health\)\)/.test(HTML) &&
+      /\.tvw-status-pct\{[^}]*color:var\(--rate,var\(--ink\)\)/.test(HTML),
+      "إنجازُ ٩٤٪ مرسومٌ بالأحمر: لونٌ يقول «سيّئ» ورقمٌ يقول «ممتاز»");
+    T("★ am: شريطُ الإنجاز في البطاقة بنبرته هو",
+      /\.tvl-c-fill\{[^}]*background:var\(--bc,var\(--c,var\(--brand\)\)\)/.test(HTML) &&
+      /--bc:\$\{tvRateTone\(barV\)\.c\}/.test(HTML));
+    T("★ am: كلمةُ الحالة تبقى بلون الصحّة (الترميزان لا يتبادلان)",
+      /\.tvw-status-word\{[^}]*color:var\(--health\)/.test(HTML) &&
+      /\.tvw-status-why\{[^}]*color:var\(--health\)/.test(HTML));
+    T("★ am: سببُ الكلمة مكتوبٌ تحتها في اللوحتين (لا تُقرأ حكماً على النسبة)",
+      /id="tvw-b-why"/.test(HTML) && /id="tvl-proj-bwhy"/.test(HTML) &&
+      /setTx\("tvw-b-why",overdue\?/.test(HTML) && /setTx\("tvl-proj-bwhy"/.test(HTML));
+    T("★ am: سببُ النظافة بمفرداتها (مهمّة متأخّرة لا بلاغ)",
+      /cleanP\?" مهمّة متأخّرة":" متأخرة عن SLA"/.test(HTML));
+    T("★ am: النبرةُ تُضبط على الحاوية في اللوحتين معاً",
+      /_beacon\.style\.setProperty\("--rate",_tone\.c\)/.test(HTML) &&
+      /beaconEl\.style\.setProperty\("--rate",tone\.c\)/.test(HTML));
+  }
 
   /* ══ v18.9al: شريطُ التحليلات — الرسومُ داخل المركز ══ */
   {
@@ -6155,20 +6210,38 @@ function tvWallGuards() {
         { status: "مفتوح", createdAt: day(0) + "T09:00:00.000Z" },
         { status: "مغلق",  createdAt: day(5) + "T08:00:00.000Z", closedAt: day(1) + "T08:00:00.000Z" },
         { status: "مغلق",  createdAt: day(40) + "T08:00:00.000Z", closedAt: day(2) + "T08:00:00.000Z" }, // أُنشئ خارج النافذة وأُغلق داخلها
-        { status: "مفتوح", createdAt: day(0) + "T10:00:00.000Z", archived: true },                        // مؤرشف ⇒ خارج الحساب
+        { status: "مفتوح", createdAt: day(0) + "T10:00:00.000Z", archived: true },                        // مؤرشف — تعدّه البلاطات فيَعدّه المنحنى
         { status: "مفتوح", createdAt: day(60) + "T08:00:00.000Z" }                                        // خارج النافذة تماماً
       ]]);
       T("★ al: النافذةُ أربعةَ عشرَ يوماً، آخرُها اليوم",
         r.days.length === 14 && r.days[13] === day(0) && r.days[0] === day(13), r.days[0] + " → " + r.days[13]);
       T("★ al: الوارِدُ يُعدّ بيوم الإنشاء والمغلقُ بيوم الإغلاق (لا بيومٍ واحد)",
-        r.opened[13] === 2 && r.closed[12] === 1 && r.closed[11] === 1 && r.opened[8] === 1,
+        r.opened[13] === 3 && r.closed[12] === 1 && r.closed[11] === 1 && r.opened[8] === 1,
         JSON.stringify({ opened: r.opened, closed: r.closed }));
-      T("★ al: المؤرشفُ خارج المنحنى كما هو خارج البطاقة (رقمان لا يتناقضان)",
-        r.openedN === 3 && r.closedN === 2, `وارد=${r.openedN} مغلق=${r.closedN}`);
+      T("★ am: المنحنى يَعدّ المؤرشفَ كما تَعدّه بلاطاتُ المدد (سكّانٌ واحدون)",
+        r.openedN === 4 && r.closedN === 2, `وارد=${r.openedN} مغلق=${r.closedN}`);
       T("★ al: ما خرج من النافذة لا يُحشر في طرفها (لا قمّةٌ ملفَّقةٌ يوم ١)",
         r.opened[0] === 0, "opened[0]=" + r.opened[0]);
       T("★ al: قائمةٌ فارغةٌ أو غائبةٌ ⇒ أصفارٌ لا انهيار",
         F([]).openedN === 0 && F([null]).closedN === 0 && F(null).opened.length === 14);
+      /* الحارسُ الذي أمسك العطل على شاشةٍ حقيقية: نافذةُ الأربعةَ عشرَ يوماً **تحتوي**
+         الشهرَ حتى اليوم، فوارِدُها لا يمكن أن يقلّ عن «بلاغات الشهر» أبداً. كان
+         المنحنى يستثني المؤرشفَ والبلاطةُ تَعدّه، فظهر «الشهر ١٢٨» و«وارد ٩٣». */
+      if (calcSrc && thSrc) {
+        const rows = [];
+        const mo = new Date().toISOString().slice(0, 7);
+        for (let i = 0; i < 9; i++) rows.push({ id: "A" + i, status: "مغلق", archived: i % 3 === 0,
+          createdAt: day(i) + "T08:00:00.000Z", closedAt: day(0) + "T09:00:00.000Z" });
+        const inMonth = rows.filter(t => t.createdAt.slice(0, 7) === mo).length;
+        const calc = new Function("_tvwall", "isOverdue", "tvHealth", calcSrc + "; return _tvwallCalcTickets;")
+          ({ data: { p: rows } }, () => false, new Function(thSrc + "; return tvHealth;")())("p");
+        const tr = F([rows]);
+        T("★ am: وارِدُ المنحنى ≥ بلاغات الشهر (النافذةُ تحتوي الشهرَ فلا تنقص عنه)",
+          tr.openedN >= calc.monthN && calc.monthN === inMonth,
+          `وارد=${tr.openedN} الشهر=${calc.monthN}`);
+        T("★ am: ومغلقُ المنحنى ≥ مغلقِ الشهر بنفس السبب",
+          tr.closedN >= calc.monthClosed, `مغلق=${tr.closedN} مغلق الشهر=${calc.monthClosed}`);
+      }
     }
     // (٣) توزيعُ الالتزام بالمهلة — من slaOf وحدها
     const slaSrc = (HTML.match(/function _tvwallSlaSplit\(list\)\{[\s\S]*?\n\}/) || [])[0];
