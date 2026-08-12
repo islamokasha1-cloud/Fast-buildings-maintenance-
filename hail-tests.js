@@ -6893,6 +6893,85 @@ function contractsPhase1() {
   T("والوثائقُ العامّة تظهر للصفتين", dIndiv.includes("insurance") && dFirm.includes("insurance"));
 
   /* ════════════════════════════════════════════════════════════
+     نوعُ الأعمال (تخصّصُ الطرف) — قائمةٌ **أو** كتابةٌ يدوية
+     المحكُّ الذي يجب أن يحرسه الاختبار: المكتوبُ يدوياً والمختارُ من
+     القائمة يجب أن **يلتقيا** في مرشّحٍ واحد، وإلا صار بابُ الكتابة
+     بابَ دفنٍ: يُسجَّل التخصّصُ ثم لا يجده الباحثُ عنه.
+     ════════════════════════════════════════════════════════════ */
+  T("مفتاحُ القائمة يبقى كما هو، والنصُّ الحرُّ يُصدَّر ببادئةٍ لا تصطدم بمفتاح",
+    C._normTrade("electrical") === "electrical" && C._normTrade("لحام خاص").charAt(0) === "~");
+  T("★ المكتوبُ يدوياً مطابقاً لاسمٍ في القائمة **يصير مفتاحَها** (لا تخصّصان بالاسم نفسِه)",
+    C._normTrade("كهرباء") === "electrical" && C._normTrade("  كهرباء  ") === "electrical");
+  T("★ والتطبيعُ العربيُّ يسري عليه (همزةٌ وتاءٌ مربوطةٌ ومسافات)",
+    C._normTrade("عزل مائى وحرارى") === C._normTrade("عزل مائي وحراري"));
+  T("فراغٌ لا يُنتج تخصّصاً وهمياً", C._normTrade("") === "" && C._normTrade(null) === "" && C._normTrade("   ") === "");
+  T("التسميةُ: المفتاحُ يُترجَم والنصُّ الحرُّ يُعرَض كما كُتب",
+    C._tradeLabel("hvac") === "تكييف وتبريد" && C._tradeLabel("لحام خاص") === "لحام خاص");
+  T("★ ونصٌّ يطابق اسمَ القائمة يُعرَض بتسميتها الرسمية لا بما كُتب",
+    C._tradeLabel("كهرباء") === "كهرباء" && C._tradeLabel("عزل مائى وحرارى") === "عزل مائي وحراري");
+
+  T("★ تخصّصاتُ الطرف تُزال تكراراتُها **بالمفتاح لا بالحرف**",
+    JSON.stringify(C._vendorTrades({ trades: ["electrical", "كهرباء", "hvac", "", null, "hvac"] })) ===
+    JSON.stringify(["electrical", "hvac"]));
+  T("والنصُّ الحرُّ يُحفَظ كما كُتب لا كمفتاح",
+    C._vendorTrades({ trades: ["لحام خاص"] })[0] === "لحام خاص");
+  T("طرفٌ بلا حقل `trades` (بياناتٌ قديمة) لا يسقط ولا يخترع تخصّصاً",
+    C._vendorTrades({}).length === 0 && C._vendorTrades(null).length === 0);
+
+  const vElec = { id: "V1", kind: "subcontractor", trades: ["electrical", "lowCurrent"] };
+  const vSupp = { id: "V2", kind: "supplier", trades: ["elecSupply"] };
+  const vBoth = { id: "V3", kind: "both", trades: ["كهرباء"] };          // ⇐ مكتوبٌ يدوياً
+  const vNone = { id: "V4", kind: "subcontractor", trades: [] };
+  const vCust = { id: "V5", kind: "supplier", trades: ["لحام خاص"] };    // ⇐ خارجَ الكتالوج كلّياً
+  const vPool = [vElec, vSupp, vBoth, vNone, vCust];
+
+  T("مطابقةُ التخصّص تعمل بالمفتاح وبالاسم المكتوب سواءً",
+    C._vendorHasTrade(vElec, "electrical") && C._vendorHasTrade(vElec, "كهرباء") &&
+    C._vendorHasTrade(vBoth, "electrical") && !C._vendorHasTrade(vSupp, "electrical"));
+  T("★ مرشّحٌ فارغٌ يعني «الكلّ» لا «من لا تخصّصَ له»",
+    C._vendorHasTrade(vNone, "") === true && C._vendorHasTrade(vElec, "") === true);
+
+  T("★ «مقاول ومورّد» يظهر في نتيجة «المقاولين» وفي نتيجة «الموردين» معاً",
+    C._kindMatches(vBoth, "subcontractor") && C._kindMatches(vBoth, "supplier"));
+  T("ولا يتسرّب مورّدٌ إلى قائمة المقاولين",
+    !C._kindMatches(vSupp, "subcontractor") && C._kindMatches(vSupp, "supplier"));
+  T("نوعٌ غائبٌ في وثيقةٍ قديمة يُقرأ «مقاول باطن» (لا يختفي من كل المرشّحات)",
+    C._kindMatches({ trades: [] }, "subcontractor") === true);
+
+  T("★ «مقاولو الكهرباء» = المقاولُ الصريح + «مقاول ومورّد» المكتوبُ تخصّصُه يدوياً",
+    C._vendorsByTrade("electrical", "subcontractor", vPool).map(v => v.id).join(",") === "V1,V3");
+  T("★ و«موردو الكهرباء» شيءٌ آخر — المحوران مستقلّان",
+    C._vendorsByTrade("elecSupply", "supplier", vPool).map(v => v.id).join(",") === "V2");
+  T("تخصّصٌ بلا نوعٍ يمرّ على الجميع، ونوعٌ بلا تخصّصٍ كذلك",
+    C._vendorsByTrade("electrical", "", vPool).length === 2 &&
+    C._vendorsByTrade("", "subcontractor", vPool).length === 3);
+  T("تخصّصٌ لا يملكه أحدٌ يُرجع صفراً لا الكلّ",
+    C._vendorsByTrade("elevators", "", vPool).length === 0);
+  T("★ والتخصّصُ المكتوبُ يدوياً قابلٌ للترشيح كنظيره من القائمة (وإلا فبابُ دفن)",
+    C._vendorsByTrade("لحام خاص", "supplier", vPool).map(v => v.id).join(",") === "V5" &&
+    C._vendorsByTrade("لحام  خاص", "", vPool).length === 1);
+
+  const opts = C._tradeOptions(vPool);
+  T("★ خياراتُ المرشّح تضمّ الكتالوجَ **وما كُتب يدوياً فعلاً** في السجل",
+    opts.some(o => o.key === "electrical" && !o.custom) &&
+    opts.some(o => o.custom && C._normTrade(o.key).charAt(0) === "~"));
+  T("★ ولا يتكرّر تخصّصٌ في القائمة لأنّ أحدَهم كتب اسمَه يدوياً",
+    opts.filter(o => C._normTrade(o.key) === "electrical").length === 1);
+  T("والكتالوجُ نفسُه بلا مفاتيحَ مكرّرة ولا تسمياتٍ مكرّرة",
+    new Set(C._TRADES.map(t => t.key)).size === C._TRADES.length &&
+    new Set(C._TRADES.map(t => C._normTrade(t.lbl))).size === C._TRADES.length);
+
+  T("★ نوعُ الأعمال يُحفَظ في الوثيقة (لا يبقى في المسوّدة وحدَها)",
+    /trades:\s*vendorTrades\(d\)/.test(src) && /trades:\s*vendorTrades\(v\)/.test(src));
+  T("★ ومرشّحُه على الشاشة يقرأ الدالّةَ النقيّة لا شرطاً محلّياً",
+    /if\(!vendorHasTrade\(v,\s*_vFilter\.trade\)\)\s*return false/.test(src) &&
+    /if\(!kindMatches\(v,\s*_vFilter\.kind\)\)\s*return false/.test(src));
+  T("النموذجُ يعرض القائمةَ **وحقلَ الكتابة** معاً (لا أحدَهما)",
+    /id="ct-f-trade-pick"/.test(src) && /id="ct-f-trade-new"/.test(src));
+  T("والبحثُ الحرُّ يشمل نوعَ الأعمال",
+    /normName\(vendorTrades\(v\)\.map\(tradeLabel\)\.join\(" "\)\)/.test(src));
+
+  /* ════════════════════════════════════════════════════════════
      المرحلة ٢ — طلبُ التعاقد ودورتُه وأمرُ الدفع
      ════════════════════════════════════════════════════════════ */
   T("الصفحاتُ تُركَّب ذاتياً (سجل الأطراف + طلبات التعاقد + العقود)",
