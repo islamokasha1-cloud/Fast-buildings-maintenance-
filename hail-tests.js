@@ -6138,6 +6138,45 @@ function tvWallGuards() {
   T("★ ai: علامةُ الرادار حلّت محلّ أيقونة الشاشة في زرّ البوّابة",
     /<circle cx="12" cy="12" r="2\.1" fill="currentColor" stroke="none"\/>/.test(HTML));
 
+  /* ══ v18.9ao: الاسمُ يُقرأ كاملاً — لا قصَّ ولا تداخل ══ */
+  {
+    const shortSrc = (HTML.match(/function tvBldShort\(name\)\{[\s\S]*?\n\}/) || [])[0];
+    const lblSrc = (HTML.match(/function tvBldLabels\(names\)\{[\s\S]*?\n\}/) || [])[0];
+    T("★ ao: tvBldShort/tvBldLabels موجودتان (مُختصِرٌ واحدٌ لكل المواضع)", !!shortSrc && !!lblSrc);
+    if (lblSrc && shortSrc) {
+      const F = new Function(shortSrc + "\n" + lblSrc + "; return tvBldLabels;")();
+      T("★ ao: البادئةُ العامّة تُحذف بأشكالها الأربعة (مبنى · مبني · مباني · مبانى)",
+        F(["مبنى الإدارة", "مبني الخدمات", "مباني الوثائق", "مبانى الورش"]).join("|") === "الإدارة|الخدمات|الوثائق|الورش",
+        "المطابقةُ النصّيةُ الحرفية كانت تلتقط شكلاً واحداً فيبقى الاسمُ بطوله");
+      T("★ ao: وأطولُ بادئةِ كلماتٍ مشتركةٍ بين الجميع تُحذف بعدها",
+        F(["دورة مياه الحوازم", "دورة مياه حديقة جده", "دورة مياه الرواد"]).join("|") === "الحوازم|حديقة جده|الرواد",
+        "كلمتان مكرّرتان في كل اسمٍ تلتهمان نصفَ العرض ولا تميّزان شيئاً");
+      T("★ ao: بادئةٌ غيرُ مشتركةٍ للجميع لا تُحذف (لا تخمين)",
+        F(["دورة مياه الحوازم", "مسجد الأمانة"]).join("|") === "دورة مياه الحوازم|مسجد الأمانة");
+      T("★ ao: لا يُمحى اسمٌ كاملاً مهما اشتركت كلماتُه",
+        F(["مبنى الإدارة", "مبنى الإدارة العامة"]).every(x => x.length > 0) &&
+        F(["أ ب", "أ ب"]).every(x => x.length > 0), JSON.stringify(F(["مبنى الإدارة", "مبنى الإدارة العامة"])));
+      T("★ ao: اسمٌ واحدٌ يمرّ بلا اشتقاقِ بادئةٍ مشتركة", F(["مبنى الإدارة"]).join("") === "الإدارة");
+      T("★ ao: قائمةٌ فارغةٌ أو قيمٌ غائبةٌ ⇒ لا انهيار",
+        F([]).length === 0 && F(null).length === 0 && F([null, ""]).length === 2);
+    }
+    T("★ ao: اللوحتان والرسمُ تقرأ المُختصِرَ نفسَه (لا ثلاثَ نسخٍ من القاعدة)",
+      (HTML.match(/tvBldLabels\(/g) || []).length >= 4 && !/replace\("مبنى ",""\)/.test(HTML),
+      "استبدالٌ حرفيٌّ باقٍ = اسمٌ يُقصّ في موضعٍ ويُختصر في آخر");
+    // الحلقةُ حاويةُ قياسٍ لنصّها — وإلا كبُر النصُّ بعرض الشاشة وصغُرت الحلقةُ بارتفاعها
+    T("★ ao: الحلقةُ container والنصُّ بوحداتها (cqw) مع احتياطِ clamp قبله",
+      /\.tvw-ring-wrap\{[^}]*container-type:size/.test(HTML) &&
+      /\.tvw-status-word\{font-size:clamp\([^)]*\);font-size:14cqw/.test(HTML) &&
+      /\.tvw-status-pct\{[^}]*font-size:clamp\([^)]*\);font-size:9\.5cqw/.test(HTML) &&
+      /\.tvw-status-why\{font-size:clamp\([^)]*\);font-size:5\.6cqw/.test(HTML),
+      "نصٌّ مقيسٌ بـvw داخل حلقةٍ مقيسةٍ بـvh ⇒ تداخلُ سطورٍ على شاشةٍ عريضةٍ قصيرة");
+    T("★ ao: اسمُ الصفّ في الرسم سطران بحصّةٍ أوسعَ من شريطه",
+      /\.tvl-hb \.r\{[^}]*minmax\(0,1\.45fr\) minmax\(0,1\.15fr\) auto/.test(HTML) &&
+      /\.tvl-hb \.r \.n\{[^}]*-webkit-line-clamp:2/.test(HTML) &&
+      !/\.tvl-hb \.r \.n\{[^}]*white-space:nowrap/.test(HTML),
+      "سطرٌ واحدٌ في ٨٠ بكسل لا يسع اسمَ مشروعٍ عربيّ");
+  }
+
   /* ══ v18.9am: فصلُ إنجاز الشهر عن عدد المتأخّرات — مقياسان ⇒ ترميزان ══ */
   {
     const toneSrc = (HTML.match(/function tvRateTone\(pct\)\{[\s\S]*?\n\}/) || [])[0];
@@ -6192,7 +6231,7 @@ function tvWallGuards() {
       T("★ al: تسمياتُ محور الزمن ltr قسراً (وإلا قُرئ الرسمُ معكوساً)",
         /\.tvl-ch-x\{[^}]*direction:ltr/.test(HTML));
       T("★ al: صفوفُ الرسم الأفقي تُحسَب بعددٍ يتبع الارتفاع، لا تُخفى بـCSS",
-        /function _tvcRows\(\)\{ return \(window\.innerHeight\|\|900\) < 900 \? 3 : TVWALL_BAR_ROWS; \}/.test(wallSrc) &&
+        /function _tvcRows\(\)\{ return \(window\.innerHeight\|\|900\) < 1000 \? 3 : TVWALL_BAR_ROWS; \}/.test(wallSrc) &&
         !/\.tvl-hb \.r:nth-child/.test(HTML), "إخفاءُ صفٍّ بـCSS قصٌّ صامتٌ يُقرأ «هذا كلُّ شيء»");
       T("★ al: نبضُ التشغيل وحلقةُ الجاهزية في المركز محدودان بالارتفاع أيضاً",
         /#tvwall-screen \.tvl-screen-proj \.tvw-kpi \.kv\{font-size:clamp\([^)]*min\(4\.2vw,/.test(HTML) &&
