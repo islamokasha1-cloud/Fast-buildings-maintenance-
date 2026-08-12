@@ -8049,6 +8049,50 @@ function contractsPhase1() {
    (`top:-20mm` يرتدّ إلى أسفل الصفحة لا إلى هامشها العلويّ) — فالترويسةُ المرسومةُ
    بإزاحةٍ سالبةٍ تظهر في قاع الورقة. الحلُّ القائم: هامشُ `@page` عند حافّة الصورة،
    وفراغُ النصّ محجوزٌ بصفَّي `thead`/`tfoot`. ومن أعاد الإزاحةَ السالبة أعاد العطل. */
+/* ══ شبكةُ بطاقات الشراء — أصغرُ ومتجاورة ══   (طلبُ المالك)
+   القائمةُ كانت بطاقةً بعرض الشاشة لكلّ طلب. صارت شبكةً تقيس **حاويَها** لا الشاشة،
+   فتعطي عمودين على اللوحيّ وثلاثةً على الكمبيوتر وعموداً على الجوال بلا نقطة انكسار.
+
+   **والحارسُ الأهمّ هنا حارسُ انضباطٍ لا شكل**: أنماطُ البطاقة السطرية (`style="…"`)
+   **تتخطّى media query وورقةَ الأنماط معاً** — وهو العطلُ الذي وقع فعلاً في شبكة
+   `.ast-stats` (قيد §6): عددُ أعمدةٍ ثابتٌ في نمطٍ سطريٍّ أفاض البطاقةَ ٣٨px خارج
+   شاشة الجوال ولم تنفع media query المكتوبةُ له. فبنيةُ البطاقة الآن **أصنافٌ**
+   (`po-row`/`po-main`/`po-badges`/`po-items`/`po-meta`/`po-actions`) وتخطيطُها كلُّه
+   في ورقة الأنماط. ومن أعاد `style="display:flex…"` إلى الترميز أعاد الباب. */
+function purchaseCardsGrid() {
+  H("بطاقاتُ الشراء — شبكةٌ متجاورة");
+
+  // ── الشبكةُ تقيس حاويَها: auto-fill + minmax، ولا عددَ أعمدةٍ محفور ──
+  const grid = (HTML.match(/#purchases-list\{[^}]*\}/) || [""])[0];
+  T("★★ القائمةُ شبكةٌ بعمودٍ يقيس الحاوي (auto-fill + minmax) لا بعددٍ محفور",
+    /display:grid/.test(grid) && /repeat\(auto-fill,minmax\(/.test(grid) &&
+    !/repeat\(\d+,/.test(grid), grid.slice(0, 120));
+  T("★★ وحدُّ العمود لا يتجاوز عرضَ الحاوي — min(100%,…) يمنع فيضانَ الجوال",
+    /minmax\(min\(100%,\s*\d+px\),1fr\)/.test(grid));
+  T("★ ولا نقطةَ انكسارٍ ثانيةٌ تفرض عدداً ثابتاً على القائمة",
+    !/@media[^{]*\{[^{}]*#purchases-list\{[^}]*repeat\(\d+,/.test(HTML));
+  T("★ وهامشُ البطاقة السفليُّ يسقط داخل الشبكة (الفجوةُ من gap لا من margin)",
+    /#purchases-list \.po-card\{margin-bottom:0\}/.test(HTML));
+
+  // ── ما يمتدّ على الأعمدة كلّها: شريطُ الصفحات وحالتا الفراغ ──
+  T("★★ شريطُ الصفحات وحالتا «لا نتائج»/«جارٍ التحميل» تمتدّ على الأعمدة كلّها",
+    /\.po-span\{grid-column:1\/-1\}/.test(HTML) &&
+    /<div class="po-span">\$\{pgBar\("purchases"/.test(HTML) &&
+    (HTML.match(/<div class="card po-span"/g) || []).length === 2);
+
+  // ── بنيةُ البطاقة أصنافٌ لا أنماطاً سطرية ──
+  const a = HTML.indexOf('list.innerHTML = pgItems.map(p=>{');
+  const card = a < 0 ? "" : HTML.slice(a, HTML.indexOf('}).join("")', a));
+  T("بنيةُ بطاقة الشراء مستخرَجة", !!card && card.includes("po-card"));
+  ["po-row", "po-main", "po-badges", "po-items", "po-meta", "po-actions"].forEach(c =>
+    T(`★ الترميزُ يحمل الصنف ${c}`, new RegExp(`class="${c}"`).test(card)));
+  T("★★ ولا تخطيطَ سطريّاً في هيكل البطاقة — النمطُ السطريُّ يتخطّى media query",
+    !/style="[^"]*display:flex/.test(card) && !/style="[^"]*flex-direction/.test(card),
+    (card.match(/style="[^"]*(display:flex|flex-direction)[^"]*"/) || [""])[0].slice(0, 90));
+  T("★ وسطرُ البنود مقصورٌ على سطرين فلا يُطيل بطاقةً على حساب جاراتها",
+    /\.po-items\{[^}]*-webkit-line-clamp:2/.test(HTML));
+}
+
 function contractLetterhead() {
   H("مطبوعاتُ التعاقد — الورقةُ الرسمية للشركة");
   if (!CTR_PATH) { T("contracts.js موجود", false); return; }
@@ -8202,6 +8246,7 @@ function browserCheckTimeBombs() {
   versionStampGuards();
   contractsPhase1();
   contractLetterhead();
+  purchaseCardsGrid();
   browserCheckTimeBombs();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
