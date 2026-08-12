@@ -6096,9 +6096,29 @@ function tvWallGuards() {
       /id="tvwall-btn-ico"/.test(HTML) && /_wallIco\.innerHTML = _svgIcon\("radar"\)/.test(HTML) &&
       (HTML.match(/circle cx="12" cy="12" r="2\.1"/g) || []).length === 1);
     T("★ ak: صفوفُ شبكة المباني تتقاسم الارتفاع فلا تُقصّ بطاقةُ مبنى",
-      /#tvl-proj-blds\{[^}]*grid-auto-rows:minmax\(0,1fr\)[^}]*\}/.test(HTML) &&
-      /#tvl-proj-blds \.tvw-bld\{max-height:/.test(HTML),
+      /#tvl-proj-blds\{[^}]*grid-auto-rows:minmax\(0,1fr\)[^}]*\}/.test(HTML),
       "١٧ مبنى في أربعة أعمدة = خمسةُ صفوفٍ كانت تفيض خارج العمود");
+    /* v18.9an: البطاقةُ صفٌّ لا عمود — الاسمُ يأخذ العرضَ (وهو المتاح) لا الارتفاع
+       (وهو الشحيح)، فلا يُقصّ اسمُ مبنًى عربيٌّ طويلٌ في أربعة أعمدةٍ ضيّقة. */
+    T("★ an: بطاقةُ المبنى صفٌّ أفقيٌّ والاسمُ يتمدّد فيه",
+      /\.tvw-bld\{[^}]*flex-direction:row[^}]*\}/.test(HTML) &&
+      /\.tvw-bld \.bname\{flex:1;min-width:0/.test(HTML) &&
+      /\.tvw-blds\{[^}]*repeat\(auto-fit,minmax\(clamp\(148px/.test(HTML),
+      "عمودٌ ضيّقٌ يقصّ الاسمَ مهما فعلت بالخطّ");
+    T("★ an: الاسمُ سطران لا سطرٌ واحد، والاسمُ الأصليُّ كاملٌ في title",
+      /\.tvw-bld \.bname\{[^}]*-webkit-line-clamp:2/.test(HTML) &&
+      (HTML.match(/<div class="tvw-bld \$\{cls\}" title="\$\{esc\(String\(b\)\)\}"/g) || []).length === 2,
+      "اللوحتان معاً: لوحةُ العرض المفردة ولوحةُ المشروع في المركز");
+    T("★ an: الاسمُ يسبق الرقمَ في الصف (المبنى يُعرَف باسمه لا برقمه)",
+      /<div class="bname">\$\{short\}<\/div><div class="bcount">\$\{op\}<\/div>/.test(HTML));
+    T("★ an: ما لا يتّسع في بطاقة الرسم يُعلَن عدداً لا يُقصّ بصمت",
+      /function _tvcMore\(shown,total\)\{[\s\S]*?total>shown/.test(HTML) &&
+      /_tvcMore\(cov\.length,covAll\.length\)/.test(HTML) &&
+      /_tvcMore\(press\.length,withData\.length\)/.test(HTML) &&
+      (HTML.match(/_tvcMore\(top\.length,topAll\.length\)/g) || []).length === 3,
+      "أربعةُ مبانٍ تُقرأ «هذه كلُّ مباني المشروع»");
+    T("★ an: عنوانُ بطاقة التغطية يقول «الأضعف» صراحةً لا «حسب المبنى»",
+      /"أضعفُ المباني تغطيةً اليوم"/.test(HTML) && !/"تغطيةُ اليوم حسب المبنى"/.test(HTML));
   }
 
   // (٤) التسمية والعلامة الجديدتان — لا بقايا للاسم القديم في الواجهة

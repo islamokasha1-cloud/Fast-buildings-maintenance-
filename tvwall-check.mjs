@@ -224,7 +224,8 @@ const cpanel = await page.evaluate(() => ({
   ringLbl: (document.getElementById('tvl-proj-blbl').textContent || '').trim(),
   pct: (document.getElementById('tvl-proj-bpct').textContent || '').trim(),
   foot: ['tvl-proj-l1', 'tvl-proj-l2', 'tvl-proj-l3'].map(id => (document.getElementById(id).textContent || '').trim()),
-  blds: Array.from(document.querySelectorAll('#tvl-proj-blds .tvw-bld')).map(b => (b.innerText || '').replace(/\s+/g, ' ').trim()),
+  blds: Array.from(document.querySelectorAll('#tvl-proj-blds .tvw-bld')).map(b =>
+    ((b.querySelector('.bcount') || {}).textContent || '') + ' ' + ((b.querySelector('.bname') || {}).textContent || '').trim()),
   totals: (document.getElementById('tvl-totals').textContent || '').replace(/\s+/g, ' ').trim()
 }));
 check('★ لوحةُ النظافة: نبضُ التشغيل بالمهام', cpanel.name === 'أعمال النظافة' &&
@@ -250,6 +251,33 @@ const bldFit = await page.evaluate(() => {
 });
 check('★ لا بطاقةَ مبنًى مقصوصةً خارج شبكتها (١٧ مبنى)',
   bldFit.total === 17 && bldFit.bad === 0, JSON.stringify(bldFit));
+
+/* v18.9an: الفحصُ الذي أمسك الشكوى — **اسمُ المبنى نفسُه** كان يُقصّ داخل بطاقته
+   (أربعةُ أعمدةٍ ضيّقةٍ ورقمٌ ضخمٌ يلتهم الارتفاع). القياسُ على الاسم لا على البطاقة. */
+const nameFit = await page.evaluate(() => {
+  const rows = Array.from(document.querySelectorAll('#tvl-proj-blds .tvw-bld')).map(b => {
+    const n = b.querySelector('.bname'), r = n.getBoundingClientRect(), br = b.getBoundingClientRect();
+    return { t: n.textContent.trim(), cut: n.scrollHeight - n.clientHeight > 1 || n.scrollWidth - n.clientWidth > 1,
+             out: r.bottom > br.bottom + 1 || r.width < 30, title: b.getAttribute('title') || '' };
+  });
+  return { n: rows.length, cut: rows.filter(r => r.cut || r.out).map(r => r.t),
+           titled: rows.every(r => r.title.length > 0),
+           w: Math.round(rows[0] ? document.querySelector('#tvl-proj-blds .bname').getBoundingClientRect().width : 0) };
+});
+check('★ an: اسمُ كلِّ مبنًى ظاهرٌ كاملاً في بطاقته (لا قصَّ أفقيٍّ ولا رأسي)',
+  nameFit.n === 17 && nameFit.cut.length === 0 && nameFit.titled,
+  nameFit.cut.length ? nameFit.cut.join(' | ') : `١٧ اسماً · عرضُ الاسم ${nameFit.w}px`);
+// اسمٌ عربيٌّ طويلٌ حقيقيّ — أقسى من أسماء الفحص القصيرة
+const longFit = await page.evaluate(() => {
+  const b = document.querySelector('#tvl-proj-blds .tvw-bld .bname');
+  const old = b.textContent;
+  b.textContent = 'الوحدة المركزية والنظم الجغرافية';
+  const cut = b.scrollHeight - b.clientHeight > 1 || b.scrollWidth - b.clientWidth > 1;
+  const r = { cut, h: Math.round(b.getBoundingClientRect().height), sh: b.scrollHeight };
+  b.textContent = old; return r;
+});
+check('★ an: اسمٌ من ٣٢ حرفاً يظهر كاملاً (سطران في صفٍّ عريض)',
+  !longFit.cut, JSON.stringify(longFit));
 
 check('★ شريطُ اللوحة بمقاييس النظافة لا البلاغات',
   cpanel.totals.includes('جدول اليوم') && cpanel.totals.includes('تغطية اليوم') && !cpanel.totals.includes('بلاغات الشهر'),
@@ -388,7 +416,7 @@ const anaC = await page.evaluate(() => {
            cols: Array.from(cards[1].querySelectorAll('.tvl-cb .c')).map(c => (c.textContent || '').replace(/\s+/g, ' ').trim()) };
 });
 check('★ al: لوحةُ النظافة برسومِ المهام لا برسومِ البلاغات',
-  anaC.titles.every(t => !/بلاغ/.test(t)) && /تغطيةُ اليوم حسب المبنى/.test(anaC.titles[0]) &&
+  anaC.titles.every(t => !/بلاغ/.test(t)) && /أضعفُ المباني تغطيةً/.test(anaC.titles[0]) &&
   /شرائحُ تأخّر المهام/.test(anaC.titles[1]), anaC.titles.join(' | '));
 check('★ al: تغطيةُ المبنى تعرض النسبةَ ومقامَها (لا نسبةً مجرّدة)',
   anaC.cov.length >= 1 && /%/.test(anaC.cov[0]) && /\d+\/\d+/.test(anaC.cov[0]), anaC.cov.join(' | '));
