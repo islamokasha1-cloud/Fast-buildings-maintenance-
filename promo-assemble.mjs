@@ -81,7 +81,9 @@ if (SKIP_BODY) {
   L(`\n▸ تخطّي التسجيل — أُعيد استخدام ${body}`);
 } else {
   L('\n▸ تسجيل جولة الشاشات (بلا بطاقتَي افتتاحٍ وختام)…');
-  const res = run(process.execPath, ['promo-video.mjs', '--no-bookends'], { cwd: REPO });
+  // الجسمُ وسيطٌ يُعاد ترميزُه عند الوصل — فيُحفَظ شبهَ عديمِ الفقد كيلا يتراكم جيلان.
+  const res = run(process.execPath, ['promo-video.mjs', '--no-bookends'],
+    { cwd: REPO, env: Object.assign({}, process.env, { PROMO_CRF: process.env.PROMO_BODY_CRF || '12' }) });
   if (res.status !== 0 || !fs.existsSync(body)) die('فشل تسجيل الجولة');
 }
 L(`  ✅ الجولة: ${fmt(dur(body))}`);
@@ -119,11 +121,14 @@ if (haveMusic) args.push('-i', music);
 // تلاشٍ لطيفٌ في أوّل الموسيقى وآخرِها كي لا تبدأ أو تنقطع فجأة.
 const fadeOutAt = Math.max(0, total - 3);
 args.push('-filter_complex', haveMusic
-  ? v.join(';') + `;[3:a]afade=t=in:st=0:d=2,afade=t=out:st=${fadeOutAt.toFixed(2)}:d=3,volume=0.55[aud]`
+  // `volume=0.55` كان يخفضها إلى ~‏−٢٠ ديسيبل: مسموعةٌ في السكون، تختفي عملياً على
+  // سمّاعة هاتف. `loudnorm` يضبطها على معيار الويب (−١٦ LUFS) فتبقى حاضرةً بثباتٍ
+  // من أوّل الفيلم إلى آخره.
+  ? v.join(';') + `;[3:a]afade=t=in:st=0:d=2,afade=t=out:st=${fadeOutAt.toFixed(2)}:d=3,loudnorm=I=-16:TP=-1.5:LRA=11[aud]`
   : v.join(';'));
 args.push('-map', '[v]');
 if (haveMusic) args.push('-map', '[aud]', '-c:a', 'aac', '-b:a', '192k', '-shortest');
-args.push('-c:v', 'libx264', '-preset', 'slow', '-crf', '18', '-pix_fmt', 'yuv420p',
+args.push('-c:v', 'libx264', '-preset', 'slow', '-crf', String(process.env.PROMO_FILM_CRF || 15), '-pix_fmt', 'yuv420p',
   '-movflags', '+faststart', film);
 
 const enc = ff(args);

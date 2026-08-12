@@ -494,7 +494,7 @@ if (!PROBE) {
     cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => { });
   });
   await cdp.send('Page.startScreencast', {
-    format: 'jpeg', quality: Number(process.env.PROMO_JPEG_Q || 96),
+    format: 'jpeg', quality: Number(process.env.PROMO_JPEG_Q || 100),
     maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1
   });
 }
@@ -860,7 +860,7 @@ if (!PROBE && shots.length > 5) {
     L(`  ترميز MP4 (H.264) من ${list.length} إطاراً · ${secsCap.toFixed(1)} ث…`);
     const r = spawnSync(ff, ['-y', '-f', 'concat', '-safe', '0', '-i', concat,
       '-vf', 'fps=30,format=yuv420p',
-      '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+      '-c:v', 'libx264', '-preset', 'slow', '-crf', String(process.env.PROMO_CRF || 16),
       '-movflags', '+faststart', mp4], { stdio: ['ignore', 'ignore', 'pipe'] });
     fs.rmSync(concat, { force: true });
     if (r.status === 0 && fs.existsSync(mp4)) {
