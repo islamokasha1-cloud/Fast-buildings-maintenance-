@@ -1261,6 +1261,45 @@ check('★★ ونصُّ الغرامة المطبوع بالريال لا با�
 check('وقيمةُ العقد وإجماليُّه في جدول الملخّص', /قيمة العقد/.test(printed) && /33,600\.00/.test(printed));
 fs.writeFileSync(`${SHOTS}/contract-print.html`, printed);
 
+/* ══ الورقةُ الرسميةُ للشركة — تُفحَص بالطباعة لا بقراءة النمط ══   (طلبُ المالك)
+   العقدُ **يتجاوز الصفحةَ الواحدة**، فالسؤالُ الوحيدُ المعتبَر ليس «أفي النصِّ صورةُ
+   ترويسة؟» بل «أهي على **كل** صفحةٍ تخرج من الطابعة؟». ولذلك يُطبَع هنا ملفُّ الورقة
+   فعلاً إلى PDF ثم تُقرأ موارِدُ كلّ صفحةٍ منه: أتحمل الصورَ الثلاثَ نفسَها؟
+   (هذا الصنفُ بالذات كان معطّلاً في أوّل صياغة: الترويسةُ بإزاحةٍ سالبةٍ ظهرت في
+   قاع الورقة — ولا فحصَ نصّيٌّ كان ليكشفه.) */
+const lhAssets = await page.evaluate(() => window.contracts._letterheadAssets());
+check('★★ صورُ الورقة الرسمية الثلاث محمَّلةٌ فعلاً في الصفحة (لا مربّعاتٍ مكسورة)',
+  !!lhAssets.head && !!lhAssets.foot && !!lhAssets.mark &&
+  /letterhead-header\.jpg$/.test(lhAssets.head), Object.keys(lhAssets).join('·'));
+check('★ وورقةُ العقد تحمل طبقاتِها الثلاثَ وجدولَ حجزِ الفراغ',
+  /class="lh lh-h"/.test(printed) && /class="lh lh-f"/.test(printed) &&
+  /class="lh lh-m"/.test(printed) && /<table class="pg">/.test(printed));
+
+const paperPage = await browser.newPage();
+await paperPage.goto('file://' + `${SHOTS}/contract-print.html`, { waitUntil: 'networkidle' });
+const lhGeo = await paperPage.evaluate(() => {
+  const mm = px => px / (96 / 25.4), q = s => document.querySelector(s).getBoundingClientRect();
+  return { h: mm(q('.lh-h').width), f: mm(q('.lh-f').width), m: mm(q('.lh-m').width),
+           spH: mm(q('.sp-h').height), spF: mm(q('.sp-f').height) };
+});
+const near1 = (a, b) => Math.abs(a - b) < 0.6;
+check('★★ وهندستُها على الورق هي المقيسةُ من قالب الشركة (بالمليمتر)',
+  near1(lhGeo.h, 202.5) && near1(lhGeo.f, 191.8) && near1(lhGeo.m, 108.4) &&
+  near1(lhGeo.spH, 35.6) && near1(lhGeo.spF, 24.9), JSON.stringify(lhGeo));
+
+const paperPdf = await paperPage.pdf({ printBackground: true, preferCSSPageSize: true });
+await paperPage.close();
+const pdfTxt = paperPdf.toString('latin1');
+const pdfPages = (pdfTxt.match(/\/Type \/Page(?!s)/g) || []).length;
+const xoSets = [...pdfTxt.matchAll(/\/XObject <<([^>]*)>>/g)].map(m => m[1].trim());
+check('★★ والوثيقةُ تُطبَع على أكثرَ من صفحةٍ فعلاً — وإلا فالفحصُ لا يفحص شيئاً',
+  pdfPages >= 2, `صفحات=${pdfPages}`);
+check('★★★ والترويسةُ والتذييلُ والعلامةُ المائيةُ على **كل** صفحةٍ مطبوعة',
+  xoSets.length === pdfPages && xoSets.every(s => s === xoSets[0]) &&
+  (xoSets[0].match(/\d+ 0 R/g) || []).length >= 3,
+  `صفحات=${pdfPages} · صور/صفحة=${(xoSets[0] || '').split('/').length - 1}`);
+fs.writeFileSync(`${SHOTS}/contract-print.pdf`, paperPdf);
+
 // تسجيلُ التوقيع ⇒ العقد ساري
 const signRes = await page.evaluate(async (cid) => {
   const noDoc = await window.contracts._sign(cid, {}).then(() => 'مرّ بلا نسخة', e => e.message);

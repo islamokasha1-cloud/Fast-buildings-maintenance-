@@ -8036,6 +8036,73 @@ function contractsPhase1() {
        على الانتهاء تُنبَّه» كان يصير «منتهية» بعد ذلك اليوم (أُثبت بمحاكاته: ١٢٦/١٢٧).
    **القاعدة:** المرساةُ تُحسَب من `Date.now()` بإزاحةٍ مسمّاة، والتوقُّعُ يُحسَب بنفس
    قواعد الدالّة لا يُحفَر رقماً. وهذان الحارسان يُسقطان أيَّ ارتدادٍ إلى الحفر. */
+/* ══ الورقةُ الرسمية لمطبوعات التعاقد — الهندسةُ لا تُمَسّ إلا بقياس ══
+   مطبوعاتُ التعاقد الثلاث (العقدُ · مسودتُه · سندُ صرفِ أمر الدفع) تخرج على ورقة
+   الشركة المعتمَدة: ترويسةٌ أعلى، وتذييلُ العناوين أسفل، وعلامةٌ مائيةٌ وسطى —
+   **على كل صفحة** لا على الأولى وحدَها.
+
+   وأرقامُ هذه الهندسة **مقيسةٌ من قالب الشركة الورقيّ** لا مقدَّرة، فتغييرُ رقمٍ
+   منها بالعين يزيح المطبوعَ عن الورقة المعتمَدة بلا أن يسقط شيء. ولذلك تُحرَس هنا.
+
+   **والحارسُ الثاني أهمّ**: لا إزاحةَ سالبةً في طبقات الورقة. قِيس في متصفّحٍ حقيقيّ
+   أن `position:fixed` **يُحصر في صندوق محتوى الصفحة** وأن الإزاحةَ السالبة **تلتفّ**
+   (`top:-20mm` يرتدّ إلى أسفل الصفحة لا إلى هامشها العلويّ) — فالترويسةُ المرسومةُ
+   بإزاحةٍ سالبةٍ تظهر في قاع الورقة. الحلُّ القائم: هامشُ `@page` عند حافّة الصورة،
+   وفراغُ النصّ محجوزٌ بصفَّي `thead`/`tfoot`. ومن أعاد الإزاحةَ السالبة أعاد العطل. */
+function contractLetterhead() {
+  H("مطبوعاتُ التعاقد — الورقةُ الرسمية للشركة");
+  if (!CTR_PATH) { T("contracts.js موجود", false); return; }
+  const src = fs.readFileSync(CTR_PATH, "utf8");
+  const dir = path.dirname(IDX);
+
+  // ── الصورُ الثلاث موجودةٌ فعلاً (ورقةٌ بلا صورِها ورقةٌ بيضاء) ──
+  const assets = ["letterhead-header.jpg", "letterhead-footer.jpg", "letterhead-watermark.png"];
+  assets.forEach(f => {
+    const p = path.resolve(dir, f);
+    T(`ملفُّ الورقة الرسمية موجودٌ وغيرُ فارغ — ${f}`,
+      fs.existsSync(p) && fs.statSync(p).size > 1024);
+  });
+
+  // ── مصدرُ عناوينها واحدٌ في index.html (المسارُ النسبيّ ميتٌ في نافذة blob على iOS) ──
+  T("★ الصورُ الثلاث معرَّفةٌ مرّةً واحدةً في index.html بمعرّفاتها",
+    /<img id="_lh_head_" src="letterhead-header\.jpg"/.test(HTML) &&
+    /<img id="_lh_foot_" src="letterhead-footer\.jpg"/.test(HTML) &&
+    /<img id="_lh_mark_" src="letterhead-watermark\.png"/.test(HTML));
+  T("★★ والوحدةُ تقرأ عنوانَها المطلقَ من الصفحة لا تكتب مساراً نسبياً",
+    /document\.getElementById\(id\)/.test(src) && /_lh_head_/.test(src) &&
+    !/src="letterhead-/.test(src));
+  T("★ وتتحقّق أنها حُمِّلت فعلاً (naturalWidth) وإلا عادت للترويسة النصّية",
+    /naturalWidth\s*>\s*0/.test(src) && /function letterheadOn\(/.test(src) &&
+    /function docHeadHTML\(/.test(src));
+
+  // ── الهندسةُ المقيسة — رقمٌ رقماً ──
+  const css = (src.match(/function letterheadCSS\(\)\{[\s\S]*?\n\}/) || [])[0] || "";
+  T("★★ هامشُ الورقة عند حافّة الصورة: أعلى ٣مم · أسفل ١١٫٥مم · بلا هامشٍ جانبيّ",
+    /@page\{size:A4;margin:3mm 0 11\.5mm\}/.test(css));
+  T("★★ عرضُ الترويسة ٢٠٢٫٥مم عند −٢٫٦٥مم، والتذييلُ ١٩١٫٨مم عند ٣٫٧٢مم",
+    /\.lh-h\{left:-2\.65mm;top:0;width:202\.5mm\}/.test(css) &&
+    /\.lh-f\{left:3\.72mm;bottom:0;width:191\.8mm\}/.test(css));
+  T("★★ والعلامةُ المائية ١٠٨٫٤مم عرضاً خلف النصّ لا فوقه",
+    /\.lh-m\{left:48\.95mm;top:89\.9mm;width:108\.4mm;z-index:0\}/.test(css) &&
+    /\.pg>tbody>tr>td\{padding:0 20\.7mm;position:relative;z-index:1\}/.test(css));
+  T("★★ وفراغُ النصّ محجوزٌ بصفَّي thead/tfoot — ٣٥٫٦مم و٢٤٫٩مم",
+    /\.sp-h\{height:35\.6mm\}\.sp-f\{height:24\.9mm\}/.test(css) &&
+    /<thead><tr><td><div class="sp-h">/.test(src) &&
+    /<tfoot><tr><td><div class="sp-f">/.test(src));
+  T("★★ ولا إزاحةَ سالبةً رأسيةً في طبقات الورقة — المتصفّحُ يلويها إلى الصفحة المجاورة",
+    !/\.lh-[hfm]\{[^}]*(top|bottom):-/.test(css));
+  T("★ والتكرارُ على كل صفحةٍ بـfixed في وسط الطباعة وحدَه",
+    /@media print\{\.lh\{position:fixed\}\}/.test(css));
+
+  // ── المطبوعاتُ الثلاث كلُّها تمرّ بالإطار الواحد ──
+  const wraps = (src.match(/letterheadWrap\(/g) || []).length;
+  T("★★ المطبوعتان (ورقةُ العقد ومسودتُها · سندُ الصرف) تلفّان بالإطار نفسِه لا بنسختين",
+    wraps === 3 && /function letterheadWrap\(/.test(src),
+    `letterheadWrap ×${wraps}`);
+  T("★ ولا ترويسةَ شركةٍ مكرّرةً فوق ترويسة الورقة",
+    (src.match(/<div class="company">شركة المباني السريعة للمقاولات<\/div>/g) || []).length === 1);
+}
+
 function browserCheckTimeBombs() {
   H("فحوصُ المتصفّح: بلا تاريخٍ محفورٍ في توقُّعٍ زمنيّ");
 
@@ -8134,6 +8201,7 @@ function browserCheckTimeBombs() {
   photoQueueGuards();
   versionStampGuards();
   contractsPhase1();
+  contractLetterhead();
   browserCheckTimeBombs();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);

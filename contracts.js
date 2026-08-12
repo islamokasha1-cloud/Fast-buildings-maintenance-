@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2605";
+var MODULE_BUILD = "v18.9.2607";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -5931,6 +5931,89 @@ function _printLogo(){
   }catch(e){}
   return "";
 }
+
+/* ════ الورقةُ الرسميةُ للشركة — ترويسةٌ وتذييلٌ وعلامةٌ مائيةٌ على كل صفحة ════
+   (طلبُ المالك: «صفحاتُ التعاقد نفسُ الصفحة المرفقة»)
+
+   **الهندسةُ مقيسةٌ من قالب الشركة الورقيّ نفسِه** (A4 = ٢١٠×٢٩٧مم) لا مقدَّرةً
+   بالعين — فما يخرج من الطابعة ينطبق على الورقة المعتمَدة:
+     · الترويسة: عرضُها ٢٠٢٫٥مم يبدأ عند −٢٫٦٥مم (نَزفٌ يسيرٌ خارج الحافّة كما في
+       الأصل)، وقمّتُها على بُعد ٣مم من رأس الورقة.
+     · التذييل: عرضُه ١٩١٫٨مم يبدأ عند ٣٫٧٢مم، وقاعُه على بُعد ١١٫٥مم من أسفلها.
+     · العلامةُ المائية: ١٠٨٫٤مم عرضاً، يسارُها ٤٨٫٩٥مم وقمّتُها ٩٢٫٩مم من الرأس.
+     · فيبقى للنصّ: ٣٨٫٦مم أعلى · ٣٦٫٤مم أسفل · ٢٠٫٧مم جانبين.
+
+   **ولماذا جدولٌ يلفّ المحتوى وثلاثُ صورٍ مثبَّتةٍ لا صورٌ في مجرى النصّ؟** لأن
+   العقدَ **يتجاوز الصفحةَ الواحدة**، والترويسةُ تلزم كلَّ صفحةٍ لا الأولى وحدَها.
+   والمتصفّحُ يكرّر العنصرَ `fixed` على كل صفحةٍ مطبوعةٍ — فحُلَّ الرسمُ به. لكنّه
+   **يحصره في صندوق المحتوى ويلوي الإزاحةَ السالبة**: قِيس فعلاً أن `top:-20mm`
+   يرتدّ إلى أسفل الصفحة لا إلى هامشها العلويّ. فلا سبيلَ إلى الرسم في هامش
+   `@page`؛ ولذلك **جُعل الهامشُ عند حافّة الصورة نفسِها** (٣مم / ١١٫٥مم) وحُجز
+   فراغُ النصّ بصفَّي `thead`/`tfoot` — وهما وحدَهما ما تضمن المواصفةُ تكرارَه على
+   كل صفحة — ثمّ ثُبِّت الرسمُ فوقهما.
+
+   **وثلاثُ الصور تُقرأ من الصفحة لا تُكتَب هنا** (`img#_lh_*`): نافذةُ الطباعة على
+   iOS مستندُ `blob:` لا أصلَ له، فالمسارُ النسبيّ فيه ميت — والمقروءُ من `img.src`
+   مطلقٌ دائماً. ومن وجدها غيرَ محمَّلةٍ (`naturalWidth === 0`) عاد إلى الترويسة
+   النصّية القديمة: ورقةٌ بلا زخرفٍ خيرٌ من ورقةٍ بمربّعاتٍ مكسورة. */
+function _lhSrc(id){
+  try{
+    var im = document.getElementById(id);
+    if(im && im.src && im.naturalWidth > 0) return im.src;
+  }catch(e){}
+  return "";
+}
+function letterheadAssets(){
+  return { head:_lhSrc("_lh_head_"), foot:_lhSrc("_lh_foot_"), mark:_lhSrc("_lh_mark_") };
+}
+function letterheadOn(l){ return !!(l && l.head && l.foot); }
+
+/* أنماطُ الورقة الرسمية — تُلحَق **بعد** أنماط المطبوعة فتغلبها بالترتيب
+   (الهامشُ والحشوةُ والـ`@page` كلُّها إعلاناتٌ متأخّرةٌ تكسب). */
+function letterheadCSS(){
+  return '@page{size:A4;margin:3mm 0 11.5mm}'+
+    'html,body{margin:0;padding:0}'+
+    '@media print{body{padding:0}}'+
+    '.lh{position:absolute;z-index:3}'+
+    '.lh img{display:block;width:100%;height:auto}'+
+    '.lh-h{left:-2.65mm;top:0;width:202.5mm}'+
+    '.lh-f{left:3.72mm;bottom:0;width:191.8mm}'+
+    '.lh-m{left:48.95mm;top:89.9mm;width:108.4mm;z-index:0}'+
+    /* على الشاشة تُرسَم مرّةً في مجرى الصفحة، وفي الطباعة تتكرّر على كل ورقة */
+    '@media print{.lh{position:fixed}}'+
+    '.pg{width:100%;border-collapse:collapse;margin:0;font-size:inherit}'+
+    '.pg>thead>tr>td,.pg>tfoot>tr>td,.pg>tbody>tr>td{padding:0;border:0;background:none}'+
+    '.pg>tbody>tr>td{padding:0 20.7mm;position:relative;z-index:1}'+
+    '.sp-h{height:35.6mm}.sp-f{height:24.9mm}'+
+    /* شريطُ عنوان المستند حين تحمله الورقةُ الرسمية — بلا اسم شركةٍ ولا شعارٍ
+       مكرَّرين، فهما في الترويسة فوقه */
+    '.dochead{display:flex;justify-content:space-between;align-items:center;gap:14px;'+
+      'border-bottom:3px solid #1b3a6b;padding-bottom:10px}'+
+    '.dh-t{font-size:17px;font-weight:800;color:#1b3a6b}'+
+    /* سطرُ التذييل يمرّ فوق العلامة المائية — فيُغمَق قليلاً ليبقى مقروءاً */
+    '.foot{color:#64748b}';
+}
+/* يلفّ محتوى المطبوعة بإطار الورقة — أو يعيده كما هو إن غابت الصور. */
+function letterheadWrap(inner, l){
+  if(!letterheadOn(l)) return inner;
+  return '<div class="lh lh-h"><img src="'+_esc(l.head)+'" alt=""></div>'+
+    (l.mark ? '<div class="lh lh-m"><img src="'+_esc(l.mark)+'" alt=""></div>' : '')+
+    '<div class="lh lh-f"><img src="'+_esc(l.foot)+'" alt=""></div>'+
+    '<table class="pg"><thead><tr><td><div class="sp-h"></div></td></tr></thead>'+
+    '<tfoot><tr><td><div class="sp-f"></div></td></tr></tfoot>'+
+    '<tbody><tr><td>'+inner+'</td></tr></tbody></table>';
+}
+/* رأسُ المستند: شريطٌ نحيلٌ فوق الورقة الرسمية، والترويسةُ النصّيةُ القديمةُ دونها. */
+function docHeadHTML(o){
+  if(o.on) return '<div class="dochead"><div class="dh-t">'+_esc(o.subtitle||"")+'</div>'+
+    '<div class="doc-no">'+_esc(o.docNo||"")+'</div></div>';
+  return '<div class="header"><div class="header-right">'+
+    (o.logo?'<img src="'+_esc(o.logo)+'" class="company-logo" alt="">':'')+
+    '<div><div class="company">شركة المباني السريعة للمقاولات</div>'+
+    '<div class="subtitle">'+_esc(o.subtitle||"")+'</div></div></div>'+
+    '<div class="doc-no">'+_esc(o.docNo||"")+'</div></div>';
+}
+
 function _emitPrint(html, auditAction, auditData){
   try{
     if(typeof _openPrintWindow === "function") _openPrintWindow(html);
@@ -5954,6 +6037,7 @@ function contractPaperHTML(c, opt){
   var val=contractValue(c), t=linesTotal(c.lines||[], c.vatMode);
   var groups=allClausesOf(c);
   var logo=_printLogo();
+  var lh=letterheadAssets(), lhOn=letterheadOn(lh);
   var dt=function(s){ return String(s||"").slice(0,16).replace("T"," ") || "—"; };
 
   var lineRows=(c.lines||[]).map(function(l,i){
@@ -6034,12 +6118,11 @@ function contractPaperHTML(c, opt){
   '.sign div{border-top:1px solid #9ca3af;padding-top:8px;text-align:center;color:#374151;min-height:70px}'+
   '.foot{margin-top:26px;font-size:10.5px;color:#94a3b8;text-align:center;border-top:1px solid #e5e7eb;padding-top:8px}'+
   '@media print{body{padding:14px}@page{margin:14mm}}'+
+  (lhOn?letterheadCSS():"")+
   '</style></head><body>'+
-  '<div class="header"><div class="header-right">'+
-    (logo?'<img src="'+_esc(logo)+'" class="company-logo" alt="">':'')+
-    '<div><div class="company">شركة المباني السريعة للمقاولات</div>'+
-    '<div class="subtitle">'+_esc(o.subtitle || "عقد إسناد أعمال — مقاول باطن")+'</div></div></div>'+
-    '<div class="doc-no">'+_esc(docNo)+'</div></div>'+
+  letterheadWrap(
+  docHeadHTML({ on:lhOn, logo:logo, docNo:docNo,
+                subtitle:(o.subtitle || "عقد إسناد أعمال — مقاول باطن") })+
 
   bandHtml+
 
@@ -6072,7 +6155,8 @@ function contractPaperHTML(c, opt){
 
   '<div class="sign"><div>الطرف الأول — شركة المباني السريعة للمقاولات<br><br>الاسم / التوقيع / الختم</div>'+
   '<div>الطرف الثاني — '+_esc(c.vendorName||"")+'<br><br>الاسم / التوقيع / الختم</div></div>'+
-  '<div class="foot">'+_esc(o.foot || ("حُرِّر هذا العقد من نسختين بيد كل طرف نسخة للعمل بموجبها · "+docNo))+'</div>'+
+  '<div class="foot">'+_esc(o.foot || ("حُرِّر هذا العقد من نسختين بيد كل طرف نسخة للعمل بموجبها · "+docNo))+'</div>'
+  , lh)+
   '</body></html>';
 
   return html;
@@ -6134,6 +6218,7 @@ function printPayOrder(id){
   var sig  = payOrderSignoffs(r, ceoThreshold());
   var vm   = VAT_MODES[normVatMode(r.vatMode)] || {};
   var logo = _printLogo();
+  var lh   = letterheadAssets(), lhOn = letterheadOn(lh);
 
   /* الآيبانُ بقاعدة الشاشة نفسِها — لا استثناءَ للورق */
   var ibanRaw   = (v && v.bank && v.bank.iban) || "";
@@ -6214,13 +6299,11 @@ function printPayOrder(id){
   '.sg-x{margin-top:26px;border-top:1px solid #9ca3af;padding-top:5px;font-size:11px;color:#374151}'+
   '.foot{margin-top:22px;font-size:10.5px;color:#94a3b8;text-align:center;border-top:1px solid #e5e7eb;padding-top:8px}'+
   '@media print{body{padding:14px}@page{margin:14mm;size:A4}}'+
+  (lhOn?letterheadCSS():"")+
   '</style></head><body>'+
 
-  '<div class="header"><div class="header-right">'+
-    (logo?'<img src="'+_esc(logo)+'" class="company-logo" alt="">':'')+
-    '<div><div class="company">شركة المباني السريعة للمقاولات</div>'+
-    '<div class="subtitle">أمر دفع — سند صرف</div></div></div>'+
-    '<div class="doc-no">'+_esc(r.id)+'</div></div>'+
+  letterheadWrap(
+  docHeadHTML({ on:lhOn, logo:logo, docNo:r.id, subtitle:"أمر دفع — سند صرف" })+
 
   '<div class="band '+_esc(st.cls)+'">'+_esc(st.lbl)+
     (st.note?'<span class="bn">'+_esc(st.note)+'</span>':'')+'</div>'+
@@ -6257,7 +6340,8 @@ function printPayOrder(id){
   '<h2>الاعتمادات والتوقيعات</h2><div class="sign">'+sigCells+'</div>'+
 
   '<div class="foot">صدر هذا الأمر من نظام إدارة المشتريات — شركة المباني السريعة للمقاولات · '+
-    _esc(r.id)+' · طُبع في '+_esc(dt(_now()))+'</div>'+
+    _esc(r.id)+' · طُبع في '+_esc(dt(_now()))+'</div>'
+  , lh)+
   '</body></html>';
 
   _emitPrint(html, "طباعة أمر دفع", r.id);
@@ -6905,6 +6989,8 @@ window.contracts = {
   openVendorFrom: openVendorFrom,
   // الوثيقة التعاقدية [المرحلة ٤-ب]
   printCtr: printCtr, printContract: printContract,
+  _contractPaperHTML: contractPaperHTML,
+  _letterheadAssets: letterheadAssets, _letterheadOn: letterheadOn,
   editClauses: editClauses, addClause: addClause, delClause: delClause,
   cancelClauses: cancelClauses, saveClauses: saveClauses,
   openSign: openSign, closeSign: closeSign, doSign: doSign,
