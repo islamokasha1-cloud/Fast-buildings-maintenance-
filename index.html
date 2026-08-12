@@ -2137,12 +2137,14 @@ html[data-theme="dark"] .ppm-approval-row{background:#1a2d45;border-color:#2e4a6
 .tvw-ring-wrap{position:relative;width:clamp(160px,16vw,270px);aspect-ratio:1;display:grid;place-items:center}
 .tvw-ring-wrap svg{width:100%;height:100%;transform:rotate(-90deg) scaleX(-1);overflow:visible}
 .tvw-ring-track{fill:none;stroke:rgba(120,155,215,.13);stroke-width:13}
-.tvw-ring-prog{fill:none;stroke-width:13;stroke-linecap:round;stroke:var(--health);transition:stroke-dashoffset 1.1s cubic-bezier(.5,0,.2,1),stroke .5s}
+.tvw-ring-prog{fill:none;stroke-width:13;stroke-linecap:round;stroke:var(--rate,var(--health));transition:stroke-dashoffset 1.1s cubic-bezier(.5,0,.2,1),stroke .5s}
 .tvw-ring-glow feDropShadow{flood-color:var(--health-glow)}
 .tvw-ring-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
 .tvw-status-word{font-size:clamp(18px,1.9vw,30px);font-weight:900;line-height:1.05;color:var(--health);text-shadow:0 0 22px var(--health-glow);max-width:66%;text-align:center;overflow-wrap:break-word;word-break:break-word}
 .tvw-status-sub{margin-top:clamp(6px,1vh,12px);font-size:clamp(11px,.9vw,14px);color:var(--tv-muted);font-weight:700}
-.tvw-status-pct{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:clamp(15px,1.4vw,22px);color:var(--ink);margin-top:2px;font-variant-numeric:tabular-nums}
+.tvw-status-pct{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:clamp(15px,1.4vw,22px);color:var(--rate,var(--ink));margin-top:2px;font-variant-numeric:tabular-nums}
+/* سببُ الكلمة تحتها مباشرةً بلونها: «حرِج» وحدَها تُقرأ حكماً على النسبة فوقها */
+.tvw-status-why{font-size:clamp(9px,.78vw,12px);font-weight:800;color:var(--health);opacity:.92;margin-top:3px;max-width:80%;text-align:center;line-height:1.25}
 .tvw-beacon-foot{display:flex;gap:clamp(14px,1.6vw,30px);margin-top:clamp(12px,1.6vh,22px)}
 .tvw-bf{text-align:center}
 .tvw-bf .v{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:clamp(18px,1.7vw,28px);line-height:1;font-variant-numeric:tabular-nums}
@@ -2309,7 +2311,7 @@ html[data-theme="dark"] .ppm-approval-row{background:#1a2d45;border-color:#2e4a6
 .tvl-c-bar .bl{display:flex;justify-content:space-between;align-items:baseline;font-size:clamp(9.5px,.78vw,12px);color:var(--tv-muted);font-weight:800}
 .tvl-c-bar .bl b{font-family:'JetBrains Mono',monospace;color:var(--ink);font-variant-numeric:tabular-nums;direction:ltr}
 .tvl-c-track{height:7px;border-radius:999px;background:rgba(120,155,215,.13);overflow:hidden}
-.tvl-c-fill{height:100%;border-radius:999px;background:var(--c,var(--brand));transition:width .8s cubic-bezier(.5,0,.2,1)}
+.tvl-c-fill{height:100%;border-radius:999px;background:var(--bc,var(--c,var(--brand)));transition:width .8s cubic-bezier(.5,0,.2,1)}
 .tvl-c-foot{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:clamp(9.5px,.78vw,12px);color:var(--tv-muted-2);font-weight:700;min-height:16px}
 .tvl-c-foot .ok{color:var(--green)}
 .tvl-c-foot .bad{color:var(--red)}
@@ -2343,6 +2345,7 @@ html[data-theme="dark"] .ppm-approval-row{background:#1a2d45;border-color:#2e4a6
 .tvl-hb .r{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.9fr) auto;align-items:center;gap:clamp(5px,.6vw,10px);min-width:0;font-size:clamp(8.5px,.7vw,11px);font-weight:800;color:var(--tv-muted)}
 .tvl-hb .r .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tvl-hb .r .v{color:var(--ink);font-weight:900;white-space:nowrap}
+.tvl-hb .r .v b{font-weight:900}
 .tvl-hb .tk{display:flex;gap:2px;height:clamp(6px,.95vh,11px);border-radius:999px;background:rgba(120,155,215,.13);overflow:hidden}
 .tvl-hb .tk i{display:block;border-radius:999px;min-width:2px;transition:width .7s cubic-bezier(.5,0,.2,1)}
 /* أعمدةٌ رأسية: القيمةُ فوق العمود واسمُ الفئة تحته */
@@ -4938,6 +4941,7 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
               </svg>
               <div class="tvw-ring-center">
                 <div class="tvw-status-word" id="tvw-b-word">—</div>
+                <div class="tvw-status-why" id="tvw-b-why"></div>
                 <div class="tvw-status-sub">معدل الإنجاز</div>
                 <div class="tvw-status-pct tvw-num" id="tvw-b-pct">0%</div>
               </div>
@@ -6266,6 +6270,7 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
               </svg>
               <div class="tvw-ring-center">
                 <div class="tvw-status-word" id="tvl-proj-bword">—</div>
+                <div class="tvw-status-why" id="tvl-proj-bwhy"></div>
                 <div class="tvw-status-sub" id="tvl-proj-blbl">إنجاز بلاغات الشهر</div>
                 <div class="tvw-status-pct tvw-num" id="tvl-proj-bpct">—</div>
               </div>
@@ -35646,6 +35651,21 @@ function tvHealth(overdue){
   return      { key:"stable", word:"مستقر"  };
 }
 
+/* v18.9am: **نبرةُ الإنجاز — مقياسٌ مستقلٌّ عن عدد المتأخّرات.**
+   كانت حلقةُ الجاهزية وشريطُ الإنجاز يأخذان لونَ الصحّة (`--health`)، والصحّةُ
+   ليست الإنجازَ بل **عددُ البلاغات المتأخّرة عن SLA** — فيُرسم إنجازُ ٩٤٪ باللون
+   الأحمر: لونٌ يقول «سيّئ» ورقمٌ يقول «ممتاز» في مكانٍ واحد، والناظرُ من بعيدٍ
+   يقرأ اللونَ لا الرقم. مقياسان مستقلّان ⇒ **ترميزان مستقلّان**:
+   الكلمةُ (حرِج/متابعة/مستقر) وسببُها بلونِ الصحّة، والنسبةُ وحلقتُها بنبرةِ الإنجاز.
+   العتبات هنا للإنجاز وحدَه ولا علاقة لها بعتبات `tvHealth`. */
+function tvRateTone(pct){
+  if(pct==null)  return { key:"none", c:"var(--tv-muted-2)" };
+  const p=Number(pct)||0;
+  if(p>=90) return { key:"high", c:"var(--green)" };
+  if(p>=75) return { key:"mid",  c:"var(--amber)" };
+  return      { key:"low",  c:"var(--red)"   };
+}
+
 function renderTVDashboard(flipTicker){
   const pageEl=document.getElementById("page-tv");
   const _all=(typeof allTickets==="function")?allTickets():tickets.slice();
@@ -35676,7 +35696,13 @@ function renderTVDashboard(flipTicker){
 
   const setTx=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   setTx("tvw-b-word",word);
+  // v18.9am: سببُ الكلمة صريحٌ تحتها — فلا تُقرأ حكماً على نسبة الإنجاز المجاورة
+  setTx("tvw-b-why",overdue?(overdue+" متأخرة عن SLA"):"لا بلاغات متأخرة");
   setTx("tvw-b-pct",closeRate+"%");
+  // ونبرةُ الحلقة والنسبة من الإنجاز نفسِه لا من عدد المتأخّرات
+  const _tone=tvRateTone(closeRate);
+  const _beacon=document.querySelector("#page-tv .tvw-beacon");
+  if(_beacon) _beacon.style.setProperty("--rate",_tone.c);
   setTx("tvw-b-prog",prog);
   setTx("tvw-b-open",openN);
   setTx("tvw-b-today",closedToday);
@@ -36055,7 +36081,7 @@ function _tvcBars(rows){
   return `<div class="tvl-hb">` + rows.map(r=>
     `<div class="r" title="${esc(r.l)}"><span class="n">${esc(r.l)}</span>`
     + `<span class="tk">${r.segs.filter(s=>s.w>0).map(s=>`<i style="width:${Math.min(100,s.w).toFixed(1)}%;background:${s.c}"></i>`).join("")}</span>`
-    + `<span class="v tvw-num">${esc(String(r.v))}</span></div>`
+    + `<span class="v"><b class="tvw-num">${esc(String(r.v))}</b>${r.u?(" "+esc(r.u)):""}</span></div>`
   ).join("") + `</div>`;
 }
 
@@ -36088,14 +36114,19 @@ function _tvcStack(segs){
 
 /* حركةُ ١٤ يوماً: كم وَرَد وكم أُغلق في كل يوم. المفاتيحُ بنفس اصطلاح بقية المركز
    (أوّلُ عشرة أحرفٍ من الطابع) — فالرقمُ في المنحنى هو الرقمُ في البلاطة، لا رقمٌ
-   ثانٍ يُحسب بقاعدةِ يومٍ مختلفة. */
+   ثانٍ يُحسب بقاعدةِ يومٍ مختلفة.
+   v18.9am: **والمؤرشفُ يُعدّ هنا كما تَعدّه البلاطات.** كان يُستثنى قياساً على
+   «بلاغات نشطة» — وهي وحدَها تستثنيه لأنها تسأل «ما يحتاج عملاً الآن»؛ أما
+   `monthN`/`newToday`/`closedToday` فتعدّ الكلَّ. النتيجةُ على شاشةٍ حقيقية:
+   مشروعٌ يعرض «بلاغات الشهر ١٢٨» ومنحناه يقول «وارد ٩٣» — والنافذةُ الأربعةَ عشرَ
+   يوماً **تحتوي** الشهرَ حتى اليوم، فرقمٌ أصغرُ من مُحتواه تناقضٌ ظاهرٌ للعين.
+   القاعدة: نافذةٌ واحدةٌ وسكّانٌ واحدون لكل ما يُعرَض في الشاشة نفسها. */
 function _tvwallTrend(lists){
   const days=[];
   for(let k=TVWALL_TREND_DAYS-1;k>=0;k--) days.push(new Date(Date.now()-k*86400000).toISOString().slice(0,10));
   const ix={}; days.forEach((d,i)=>{ ix[d]=i; });
   const opened=days.map(()=>0), closed=days.map(()=>0);
   (lists||[]).forEach(list=>(list||[]).forEach(t=>{
-    if(t.archived) return;
     const a=ix[String(t.createdAt||"").slice(0,10)]; if(a!=null) opened[a]++;
     if(t.status==="مغلق"){ const z=ix[String(t.closedAt||"").slice(0,10)]; if(z!=null) closed[z]++; }
   }));
@@ -36147,19 +36178,27 @@ function _tvwallAnaAll(rows){
   }
 
   // (٢) أين يتركّز الضغط: عملٌ ينتظر في كل مشروع، والمتأخّرُ منه مصبوغٌ داخله.
-  //     المقامُ واحدٌ لكل الصفوف (أكبرُ مشروعٍ ضغطاً) وإلا كذب طولُ الشريط.
+  //     v18.9am: **مقامٌ لكل وحدةِ عمل، لا مقامٌ واحدٌ للجميع.** كان أطولُ شريطٍ
+  //     يُقاس عليه الكلُّ، فمشروعُ نظافةٍ بـ٨٣ مهمّةً يُقزّم مشروعَ صيانةٍ بـ١١ بلاغاً
+  //     ويُقرأ «ضغطُه سبعةُ أضعافه» — ومقارنةُ مهمّةٍ ببلاغٍ لا تعني شيئاً (نفس قرار
+  //     الشريط العلوي: بلاطةٌ لكل وحدة). فكلُّ صفٍّ يُقاس على أسوأ مشروعٍ **من نوعه**،
+  //     والوحدةُ مكتوبةٌ في قيمته فلا يُقارَن ما لا يُقارَن.
+  const _unit=r=>(r.m.kind==="cleaning")?"مهمة":"بلاغ";
   const press=withData.map(r=>({
-    name:String(r.p.name||r.p.id),
+    name:String(r.p.name||r.p.id), clean:r.m.kind==="cleaning", unit:_unit(r),
     tot:(r.m.kind==="cleaning")?r.m.due:r.m.openN,
     od:r.m.overdue
-  })).sort((a,b)=>b.tot-a.tot).slice(0,_tvcRows());
-  const pMax=Math.max(1,...press.map(x=>x.tot));
+  })).sort((a,b)=>(a.clean===b.clean)?(b.tot-a.tot):(a.clean?1:-1)).slice(0,_tvcRows());
+  const pMax={ maint:Math.max(1,...press.filter(x=>!x.clean).map(x=>x.tot)),
+               clean:Math.max(1,...press.filter(x=>x.clean).map(x=>x.tot)) };
   cards.push(_tvcCard("ضغطُ العمل حسب المشروع",
     _tvcLegend([{l:"متأخّر",c:"var(--red)"},{l:"ضمن الوقت",c:"var(--brand)"}]),
-    _tvcBars(press.map(x=>({l:x.name, v:x.tot, segs:[
-      {w:x.od/pMax*100, c:"var(--red)"},
-      {w:Math.max(0,x.tot-x.od)/pMax*100, c:"var(--brand)"}
-    ]})))));
+    _tvcBars(press.map(x=>{ const mx=x.clean?pMax.clean:pMax.maint;
+      return {l:x.name, v:x.tot, u:x.unit, segs:[
+        {w:x.od/mx*100, c:"var(--red)"},
+        {w:Math.max(0,x.tot-x.od)/mx*100, c:"var(--brand)"}
+      ]};
+    }))));
 
   // (٣) الالتزام بالمهلة — سؤالُ «هل نلحق؟» قبل أن يصير الرقمُ الأحمرَ أكبر
   if(maint.length){
@@ -36295,7 +36334,7 @@ function _tvwallCard(proj, m, err){
     <div class="tvl-c-stats">${cells}</div>
     <div class="tvl-c-bar">
       <div class="bl"><span>${barL}</span><b>${barTxt} <span style="opacity:.65">(${barN})</span></b></div>
-      <div class="tvl-c-track"><div class="tvl-c-fill" style="width:${barV==null?0:barV}%"></div></div>
+      <div class="tvl-c-track"><div class="tvl-c-fill" style="width:${barV==null?0:barV}%;--bc:${tvRateTone(barV).c}"></div></div>
     </div>
     <div class="tvl-c-foot">${foot.join("")}</div>
   </button>`;
@@ -36576,7 +36615,15 @@ function _tvwallRenderProject(pid, entering){
   // حلقةُ الجاهزية: تغطيةُ اليوم للنظافة (مقياسُ لوحتها)، وإنجازُ بلاغات الشهر للصيانة
   const pct = cleanP ? (m.holiday?null:m.coverage) : m.rate;
   setTx("tvl-proj-bword",cleanP&&m.holiday?"إجازة":m.health.word);
+  // v18.9am: الكلمةُ حكمٌ على **المتأخّرات**، والنسبةُ تحتها حكمٌ على **الإنجاز**.
+  // بلا هذا السطر تُقرأ «حرِج» وصفاً لـ«٩٤٪» — وهما مقياسان لا يلتقيان.
+  setTx("tvl-proj-bwhy", (cleanP&&m.holiday) ? "لا مهامَّ مستحقّة اليوم"
+    : m.overdue ? (m.overdue+(cleanP?" مهمّة متأخّرة":" متأخرة عن SLA"))
+                : (cleanP?"لا مهامَّ متأخّرة":"لا بلاغات متأخرة"));
   setTx("tvl-proj-bpct",pct==null?"—":(pct+"%"));
+  const tone=tvRateTone(pct);
+  const beaconEl=scr.querySelector(".tvw-beacon");
+  if(beaconEl) beaconEl.style.setProperty("--rate",tone.c);
   const ringLbl=document.getElementById("tvl-proj-blbl");
   if(ringLbl) ringLbl.textContent=cleanP?"تغطية اليوم":"إنجاز بلاغات الشهر";
   const foot=cleanP

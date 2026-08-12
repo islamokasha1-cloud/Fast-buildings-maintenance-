@@ -301,6 +301,43 @@ check('★ نبض التشغيل: ٣ متأخرة · ٤ نشطة · بلاغات
 check('★ حالة التشغيل: قيد التنفيذ ١ · في الانتظار ٣ · أُغلقت اليوم ١',
   panel.prog === '1' && panel.wait === '3' && panel.done === '1', `${panel.prog}/${panel.wait}/${panel.done}`);
 check('★ حلقةُ الجاهزية تعرض إنجاز بلاغات الشهر', /%$/.test(panel.pct), panel.pct);
+
+/* v18.9am: الحلقةُ كانت تُلوَّن بلون الصحّة، فيُرسم إنجازُ ٩٤٪ أحمرَ — لونٌ يقول
+   «سيّئ» ورقمٌ يقول «ممتاز». الفحصُ يقيس اللونَ المحسوب فعلاً لا قاعدةَ CSS. */
+// الحلقةُ لها `transition: stroke .5s` — فالقراءةُ فور التغيير تُرجع اللونَ السابق.
+const readTone = () => page.evaluate(() => {
+  const g = n => getComputedStyle(document.getElementById(n));
+  const m = _tvwallCalc('hail');
+  return { rate: m.rate, overdue: m.overdue,
+    ring: g('tvl-proj-ring').stroke, pct: g('tvl-proj-bpct').color, word: g('tvl-proj-bword').color,
+    why: (document.getElementById('tvl-proj-bwhy').textContent || '').trim() };
+});
+const tone = await readTone();
+// نفس اللوحة بإنجازٍ عالٍ: النبرةُ وحدَها تتغيّر والكلمةُ تبقى بلون الصحّة
+await page.evaluate(() => document.querySelector('#tvl-screen-proj .tvw-beacon')
+  .style.setProperty('--rate', tvRateTone(94).c));
+await page.waitForTimeout(900);
+tone.high = await readTone();
+await page.evaluate(() => document.querySelector('#tvl-screen-proj .tvw-beacon')
+  .style.setProperty('--rate', tvRateTone(_tvwallCalc('hail').rate).c));
+await page.waitForTimeout(900);
+const RED = 'rgb(240, 67, 90)', GREEN = 'rgb(45, 212, 106)';
+check('★ am: كلمةُ الحالة حمراءُ (٣ متأخرة) بينما الحلقةُ تتبع الإنجاز لا التأخّر',
+  tone.word === RED && tone.high.ring === GREEN && tone.high.word === RED,
+  `word=${tone.word} ring@94%=${tone.high.ring}`);
+check('★ am: النسبةُ المنخفضةُ (١٧٪) تُرسم حمراءَ بنبرتها هي لا بلون الصحّة',
+  tone.rate < 75 && tone.ring === RED && tone.pct === RED, `rate=${tone.rate}% ring=${tone.ring}`);
+check('★ am: سببُ الكلمة مكتوبٌ تحتها فلا تُقرأ حكماً على النسبة',
+  /^3 متأخرة عن SLA$/.test(tone.why), tone.why);
+// والمنحنى يَعدّ نفسَ سكّان البلاطات: نافذةُ ١٤ يوماً تحتوي الشهرَ فلا تنقص عنه
+const contain = await page.evaluate(() => {
+  const m = _tvwallCalc('hail'), t = _tvwallTrend([_tvwall.data['hail']]);
+  return { o: t.openedN, c: t.closedN, mn: m.monthN, mc: m.monthClosed,
+           arch: (_tvwall.data['hail'] || []).filter(x => x.archived).length };
+});
+check('★ am: وارِدُ المنحنى ≥ بلاغات الشهر رغم وجود مؤرشف (سكّانٌ واحدون)',
+  contain.arch >= 1 && contain.o >= contain.mn && contain.c >= contain.mc,
+  `وارد=${contain.o} الشهر=${contain.mn} مؤرشف=${contain.arch}`);
 check('★ حالة المباني معروضة (من إعدادات المشروع)', panel.blds >= 1, panel.blds + ' مبنى');
 check('★ الشريط العلوي تحوّل لمقاييس المشروع (لا إجماليَّ تراكمي)',
   panel.totals.includes('بلاغات الأسبوع') && panel.totals.includes('متوسط زمن الإغلاق') && !panel.totals.includes('إجمالي البلاغات'),
@@ -367,7 +404,7 @@ const anaA = await page.evaluate(() => {
   return { n: cards.length, titles: cards.map(c => (c.querySelector('.t').textContent || '').trim()),
            rows: press ? Array.from(press.querySelectorAll('.r')).map(r => ({
              l: (r.querySelector('.n').textContent || '').trim(),
-             v: (r.querySelector('.v').textContent || '').trim(),
+             v: (r.querySelector('.v').textContent || '').replace(/\s+/g, ' ').trim(),
              w: Array.from(r.querySelectorAll('.tk i')).map(i => i.style.width)
            })) : [] };
 });
@@ -375,11 +412,20 @@ check('★ al: شاشةُ «الكل» تحمل شريطَ تحليلاتٍ بأ
   anaA.n >= 3 && anaA.n <= 4 && anaA.titles.some(t => /ضغطُ العمل حسب المشروع/.test(t)),
   anaA.titles.join(' | '));
 check('★ al: ضغطُ العمل مرتّبٌ الأكثرَ أولاً بمقامٍ واحدٍ لكل الصفوف',
-  anaA.rows.length >= 2 && Number(anaA.rows[0].v) >= Number(anaA.rows[1].v) &&
+  anaA.rows.length >= 2 && parseInt(anaA.rows[0].v) >= parseInt(anaA.rows[1].v) &&
   Math.abs(anaA.rows[0].w.reduce((a, w) => a + parseFloat(w), 0) - 100) < 0.6 &&
   Math.abs(anaA.rows[1].w.reduce((a, w) => a + parseFloat(w), 0)
-           - Number(anaA.rows[1].v) / Number(anaA.rows[0].v) * 100) < 0.6,
+           - parseInt(anaA.rows[1].v) / parseInt(anaA.rows[0].v) * 100) < 0.6,
   anaA.rows.map(r => `${r.l}=${r.v}[${r.w.join('+')}]`).join(' | '));
+/* v18.9am: مقارنةُ «٨٣ مهمّة» بـ«١١ بلاغاً» على مقامٍ واحدٍ تقول «ضغطُه سبعةُ
+   أضعافه» — ولا معنى لها. لكلِّ وحدةٍ مقامُها، والوحدةُ مكتوبةٌ في القيمة. */
+const mixed = anaA.rows.filter(r => /مهمة/.test(r.v));
+check('★ am: البلاغاتُ والمهامُّ لا تُقاسان على مقامٍ واحد، والوحدةُ مكتوبة',
+  anaA.rows.every(r => /^\d+ (بلاغ|مهمة)$/.test(r.v)) &&
+  anaA.rows.filter(r => /بلاغ/.test(r.v)).every((r, i, a) => i === 0 || parseInt(a[i - 1].v) >= parseInt(r.v)) &&
+  mixed.length === 1 && Math.abs(mixed[0].w.reduce((a, w) => a + parseFloat(w), 0) - 100) < 0.6 &&
+  anaA.rows.findIndex(r => /مهمة/.test(r.v)) === anaA.rows.length - 1,
+  anaA.rows.map(r => `${r.v}[${r.w.join('+')}]`).join(' | '));
 
 /* أخطرُ ما في شريطٍ يُضاف تحت لوحةٍ ممتلئة: يقضم ارتفاعَ ما فوقه فتُقصّ تسمياتُه
    بلا أثرٍ في أيّ رقم. الفحصُ هندسيٌّ على ثلاثة ارتفاعاتٍ حقيقية. */
