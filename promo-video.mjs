@@ -556,7 +556,22 @@ const pv = (fn, ...args) => page.evaluate(([f, a]) => { window.pv && window.pv.k
 let shotN = 0;
 const shot = (name) => page.screenshot({ path: `${SHOTS}/${String(++shotN).padStart(2, '0')}-${name}.png` }).catch(() => { });
 
-async function overlay() { await page.evaluate(OVERLAY).catch(() => { }); await page.evaluate(() => window.pv && window.pv.raw(true)).catch(() => { }); }
+async function overlay() {
+  await page.evaluate(OVERLAY).catch(() => { });
+  await page.evaluate(() => {
+    window.pv && window.pv.raw(true);
+    // إشعاراتُ التطبيق (`toast`) تومض أسفل الشاشة ثم تختفي في أقلّ من ثانية —
+    // منها تشغيليٌّ بحت («✓ Rollups جاهزة: ٠ شهر») لا معنى له للمشاهد. تُكتَم في
+    // الفيلم وحدَه: لا مساسَ بالتطبيق، والتعطيلُ يُعاد بعد كلّ إعادةِ بناءٍ للصفحة.
+    if (typeof window.toast === 'function' && !window.toast.__pvMuted) {
+      const noop = function () { };
+      noop.__pvMuted = true;
+      window.toast = noop;
+    }
+    const tc = document.getElementById('toast-container');
+    if (tc) { tc.innerHTML = ''; tc.style.display = 'none'; }
+  }).catch(() => { });
+}
 
 // بطاقةُ فصل: تُعرَض فوق الشاشة الحالية ثم تنقشع.
 async function titleCard(kicker, main, sub, ms, opt) {
