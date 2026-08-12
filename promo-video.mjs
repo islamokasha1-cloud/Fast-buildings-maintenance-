@@ -146,9 +146,9 @@ const OVERLAY = `
       document.getElementById('pv-lower').classList.remove('on');
       document.getElementById('pv-scrim').classList.remove('on');
     },
-    cursor: function(x, y){ var c=document.getElementById('pv-cursor'); c.classList.add('on'); c.style.transform='translate('+x+'px,'+y+'px)'; },
+    cursor: function(x, y){ var Z=parseFloat(getComputedStyle(document.documentElement).zoom)||1; var c=document.getElementById('pv-cursor'); c.classList.add('on'); c.style.transform='translate('+(x/Z)+'px,'+(y/Z)+'px)'; },
     cursorOff: function(){ document.getElementById('pv-cursor').classList.remove('on'); },
-    ring: function(x, y){ var g=document.getElementById('pv-ring'); g.style.transform='translate('+x+'px,'+y+'px)'; g.classList.remove('go'); void g.offsetWidth; g.classList.add('go'); },
+    ring: function(x, y){ var Z=parseFloat(getComputedStyle(document.documentElement).zoom)||1; var g=document.getElementById('pv-ring'); g.style.transform='translate('+(x/Z)+'px,'+(y/Z)+'px)'; g.classList.remove('go'); void g.offsetWidth; g.classList.add('go'); },
     bar: function(pct){ document.getElementById('pv-bar').style.width = Math.max(0,Math.min(100,pct))+'%'; },
     flash: function(on){ document.getElementById('pv-flash').classList.toggle('on', !!on); },
     keep: function(){ if(!document.getElementById('pv-root').isConnected) document.body.appendChild(document.getElementById('pv-root')); },
@@ -163,7 +163,11 @@ const OVERLAY = `
       var m = document.querySelector('.main-area'); if (m) m.style.transition = on ? 'none' : '';
     },
     at: function(what, a, b){
-      if (what === 'cursor'){ var c = document.getElementById('pv-cursor'); c.classList.add('on'); c.style.transform = 'translate('+a+'px,'+b+'px)'; return; }
+      if (what === 'cursor'){
+        var Z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+        var c = document.getElementById('pv-cursor'); c.classList.add('on');
+        c.style.transform = 'translate('+(a/Z)+'px,'+(b/Z)+'px)'; return;
+      }
       if (what === 'caption'){
         var l = document.getElementById('pv-lower');
         l.style.opacity = a; l.style.transform = 'translateY('+(24*(1-a))+'px)';
@@ -650,6 +654,9 @@ async function browseTour() {
 // فنُخفي منطقةَ المحتوى قبل التبديل، وننتظر **استقرارَها فعلاً** لا مهلةً مقدَّرة،
 // ثم نكشفها بذوبانٍ قصير — فلا يرى المشاهدُ إلا صفحةً مكتملة.
 // ظهورُ التعليق واختفاؤه بالإيقاع نفسِه — وإلا بدا الشريطُ يقفز عند 4K.
+// عددُ الخطوات هو **زمنُ الحركة في المخرَج** لا سرعةَ التقاطها: ١٥ خطوةً = نصفُ ثانية
+// عند ٣٠ إطاراً/ث. كانت ٦ خطوات ⇒ ٠٫٢ث، فبدا التعليقُ يومض ويختفي قبل أن يُقرأ.
+const FADE = 15;
 async function captionIn(main, sub, badge) {
   await page.evaluate(([m, s2, b]) => {
     const l = document.getElementById('pv-lower'); if (!l) return;
@@ -658,17 +665,18 @@ async function captionIn(main, sub, badge) {
     l.querySelector('b').textContent = m || '';
     l.querySelector('span').textContent = s2 || '';
   }, [main, sub, badge]).catch(() => { });
-  await tween(7, (u) => setAt('caption', u.toFixed(3)));
+  await tween(FADE + 2, (u) => setAt('caption', u.toFixed(3)));
 }
 async function captionOut() {
-  await tween(6, (u) => setAt('caption', (1 - u).toFixed(3)));
+  await tween(FADE, (u) => setAt('caption', (1 - u).toFixed(3)));
+  await page.waitForTimeout(120);              // لا يبدأ تغيّرُ الشاشة قبل اكتمال الانقشاع
 }
 
 async function contentHide() {
-  await tween(6, (u) => setAt('main', (1 - u).toFixed(3)));
+  await tween(FADE - 3, (u) => setAt('main', (1 - u).toFixed(3)));
 }
 async function contentShow() {
-  await tween(8, (u) => setAt('main', u.toFixed(3)));
+  await tween(FADE + 1, (u) => setAt('main', u.toFixed(3)));
   await page.waitForTimeout(120);
 }
 // الاستقرار: حجمُ محتوى الصفحة لا يتغيّر ثلاثَ قراءاتٍ متتالية، ولا «جارٍ التحميل».
