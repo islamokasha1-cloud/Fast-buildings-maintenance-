@@ -6386,6 +6386,58 @@ function contractsPhase1() {
         .filter(g => g.key === "pay")[0].by === "المالية");
   }
 
+  /* ════ مسودةُ العقد في مراحل الاعتماد ════   (طلبُ المالك)
+     المعتمِدُ يوقّع على ارتباطٍ لا على ملخّصه، فالمسودةُ تُعرَض في كلّ مرحلةٍ للجميع.
+     وحارسُها ثلاثةُ أشياء: (١) أنها **الدالّةُ الناقلةُ نفسُها** لا محاكاةٌ لها،
+     (٢) أنها تُعلن حالتَها فلا تُقرأ عقداً نافذاً، (٣) أن خاناتِ اعتمادها هي
+     بوّاباتُ مسارِه هو — بمصدرٍ واحدٍ يخدم سندَ الصرف والمسودةَ معاً. */
+  {
+    const ctrReq = {
+      id: "CRQ-2608-0009", engagement: "contract", vendorId: "V1", vendorName: "مؤسسة الطريق",
+      projectId: "hail", title: "تركيب بلدورة", vatMode: "none",
+      lines: [{ id: "l1", desc: "بلدورة", unit: "م.ط", qty: 160, unitPrice: 9 }],
+      penalty: { mode: "amount", perDayAmount: 500 }, retention: { pct: 5 },
+      warranty: { months: 12 }, durationDays: 10, status: "crq_pending_finance"
+    };
+    T("★★ المسودةُ تُبنى بـ`contractFromRequest` نفسِها — لا وثيقةَ ثانيةَ تفترق عمّا سيُنشأ",
+      typeof C._crqDraftContract === "function" &&
+      JSON.stringify({ ...C._crqDraftContract(ctrReq, undefined), timeline: 0 }) ===
+      JSON.stringify({ ...C._contractFromRequest(ctrReq, "", "", "", undefined), timeline: 0 }));
+
+    const dc = C._crqDraftContract(ctrReq, undefined);
+    T("★★ وتحمل قيمةَ الطلب وبنودَه وشروطَه التجارية كما اعتمدها الموقّعون",
+      dc.value === C._crqValueOf(ctrReq) && dc.value === 1440 && dc.lines.length === 1 &&
+      dc.retention.pct === 5 && dc.warranty.months === 12 && dc.penalty.perDayAmount === 500,
+      String(dc.value));
+    T("★ وشروطُها القانونيةُ من القوالب، والماليةُ تتولّد من أرقام الطلب نصّاً",
+      dc.clauses.length === C._DEFAULT_CLAUSES.length &&
+      C._allClausesOf(dc).some(g => g.items.some(x => x.key === "_fin_pen" && /500\.00 ريال/.test(x.body))));
+    T("★★ وبلا رقمِ عقدٍ مخترَع — الرقمُ يُولد مع العقد لا مع مسودته", dc.id === "");
+
+    const ds = (s, extra) => C._crqDraftState({ status: s, ...(extra || {}) });
+    T("★★ مسودةُ طلبٍ لم تكتمل بوّاباتُه تخرج موسومةً **لا تُوقَّع**",
+      ["crq_pending_pm", "crq_pending_proc", "crq_pending_finance", "crq_pending_ceo"]
+        .every(s => ds(s).key === "draft" && /لا تُوقَّع/.test(ds(s).lbl)));
+    T("★ والمعتمَدُ يُعلن أنه صورةُ العقد الذي سيُنشأ", ds("crq_approved").key === "ready");
+    T("★ والمحوَّلُ يدلّ على العقد نفسِه لا على مسودته",
+      ds("crq_converted", { contractId: "CTR-1" }).key === "issued" &&
+      /CTR-1/.test(ds("crq_converted", { contractId: "CTR-1" }).lbl));
+    T("★★ والملغى والمُعادُ للتصحيح يخرجان موسومَين **لا يُتعاقَد به**",
+      ds("crq_cancelled").key === "void" && ds("crq_finance_returned").key === "void" &&
+      /لا يُتعاقَد به/.test(ds("crq_cancelled").lbl));
+
+    T("★★ خاناتُ اعتماد العقد: مدير المشاريع · المشتريات · المالية (وبلا تنفيذيٍّ دون سقفه)",
+      C._crqSignoffs(ctrReq, 50000).map(g => g.key).join(",") === "pm,proc,finance",
+      C._crqSignoffs(ctrReq, 50000).map(g => g.key).join(","));
+    T("★ وفوق السقف تظهر خانةُ التنفيذي — بالقاعدة التي تُوقف الطلبَ عندها",
+      C._crqSignoffs(ctrReq, 1000).map(g => g.key).join(",") === "pm,proc,finance,ceo");
+    T("★★ وأمرُ الدفع بلا خانةِ اعتمادٍ ماليّ — الماليةُ فيه مُسدِّدةٌ لا مُعتمِدة",
+      C._crqSignoffs({ engagement: "pay_order", lines: [{ qty: 1, unitPrice: 1500 }] }, 3000)
+        .map(g => g.key).join(",") === "pm,proc");
+    T("★ ومسمّياتُ الخانات من `GATE_ROLES` نفسِها التي تحرس الأزرار",
+      C._crqSignoffs(ctrReq, 50000).map(g => g.lbl).join(",") === "مدير المشاريع,المشتريات,المالية");
+  }
+
   /* ════ التوجيه: دالةٌ واحدةٌ للعقد ولأمر الدفع ════ */
   const TH = 2000;
   const ns = (r) => C._crqNextStage(r, TH);

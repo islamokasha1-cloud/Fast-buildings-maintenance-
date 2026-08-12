@@ -56,7 +56,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2601";
+  var MODULE_BUILD = "v18.9.2603";
 
   function COLL(){
     var dev=false;

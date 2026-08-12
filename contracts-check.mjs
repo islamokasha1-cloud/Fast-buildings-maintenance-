@@ -478,18 +478,82 @@ await page.screenshot({ path: `${SHOTS}/10b-vendor-from-request.png`, fullPage: 
 await page.evaluate((id) => { window.contracts.backToVendors(); window.contracts.openReqFrom(id); }, reqId);
 await page.waitForTimeout(900);
 
+/* ★★ طلبُ المالك: «يظهر في كل مراحل الاعتماد للعقد، وللجميع، مسودةُ العقد».
+   المعتمِدُ يوقّع على ارتباطٍ لا على ملخّصه: البنودُ والشروطُ التجاريةُ على البطاقة
+   لم تكن تُظهر **الوثيقةَ التي سيوقّعها الطرفُ الآخر** — نطاقاً والتزاماتٍ وسلامةً
+   وجزاءاتٍ وضماناً. والفحصُ يتحقّق أنها معروضةٌ **قبل** الاعتماد لا بعده. */
+const draftFirst = await page.textContent('#page-contract-requests') || '';
+check('★★ مسودةُ العقد معروضةٌ على بطاقة الطلب من أوّل مرحلة',
+  /مسودة العقد/.test(draftFirst) && /نطاق الأعمال/.test(draftFirst) &&
+  /الوثيقةُ التي سيوقّعها الطرف/.test(draftFirst));
+check('★★ وتُعلن أنها **لا تُوقَّع** ما لم تكتمل البوّابات',
+  /لا تُوقَّع/.test(draftFirst) && /نسخةُ مراجعةٍ للمعتمِدين/.test(draftFirst));
+check('★ وشروطُها الماليةُ متولّدةٌ من أرقام الطلب نفسِها (المحتجزُ والغرامةُ والضمان)',
+  /محتجز الضمان/.test(draftFirst) && /غرامة التأخير/.test(draftFirst) &&
+  /يتولّد من أرقام الطلب/.test(draftFirst));
+
+/* «للجميع» شرطٌ لا تفصيل: القراءةُ ليست بوّابة — دورٌ لا يملك أيَّ اعتمادٍ يراها. */
+const draftForAll = await page.evaluate(async (id) => {
+  const real = currentUser.role;
+  currentUser.role = 'warehouse_manager';
+  window.contracts.openReq(id);
+  await new Promise(r => setTimeout(r, 500));
+  const txt = document.getElementById('page-contract-requests').textContent || '';
+  currentUser.role = real;
+  window.contracts.openReq(id);
+  await new Promise(r => setTimeout(r, 500));
+  return txt;
+}, reqId);
+check('★★ ويراها دورٌ لا يملك بوّابةً أصلاً — القراءةُ ليست اعتماداً',
+  /مسودة العقد/.test(draftForAll) && /نطاق الأعمال/.test(draftForAll) &&
+  !/اعتماد — /.test(draftForAll), 'طول=' + draftForAll.length);
+
+/* والورقةُ **هي ورقةُ العقد نفسُها** موسومةً — لا وثيقةٌ ثانيةٌ تُصاغ للمسودة. */
+const draftPrint = await page.evaluate((id) => {
+  let captured = '';
+  const realOpen = window.open;
+  window.open = function () { return { document: { write(h) { captured = h; }, close() { } }, focus() { }, print() { }, close() { } }; };
+  window.contracts.printContractDraft(id);
+  window.open = realOpen;
+  return { html: captured, calc: window.contracts._crqValueOf(window.contracts.requestById(id)) };
+}, reqId);
+check('★★ وطباعتُها تُنتج ورقةَ العقد نفسَها موسومةً «مسودة»',
+  /<title>مسودة عقد CRQ-/.test(draftPrint.html) && /مسودة عقد إسناد أعمال/.test(draftPrint.html) &&
+  /جدول بنود الأعمال/.test(draftPrint.html) && /شروط العقد/.test(draftPrint.html) &&
+  /مسودة — قيد الاعتماد ولا تُوقَّع/.test(draftPrint.html));
+check('★★ ورقمُها المطبوع = الرقمُ المحسوب من دوالِّ الوحدة (لا حسبةَ في الورقة)',
+  draftPrint.calc > 0 && draftPrint.html.includes(
+    draftPrint.calc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })),
+  String(draftPrint.calc));
+check('★★ وفيها خاناتُ الاعتماد الداخليّ — بوّاباتُ مسارِ العقد الثلاث فأكثر',
+  /الاعتمادات الداخلية/.test(draftPrint.html) && /لم يعتمد بعد/.test(draftPrint.html) &&
+  /المالية/.test(draftPrint.html));
+check('★ وتذييلُها يقول إنها ليست عقداً بعد',
+  /تصير عقداً برقمه الخاصّ بعد اكتمال الاعتماد/.test(draftPrint.html));
+fs.writeFileSync(`${SHOTS}/contract-draft-print.html`, draftPrint.html);
+await page.screenshot({ path: `${SHOTS}/10c-contract-draft.png`, fullPage: true });
+
 // دورةُ الاعتماد الكاملة — أربعُ بوّابات (المستخدمُ أدمن فيملكها كلَّها)
 const stages = [];
+const draftAtStage = [];
 for (let i = 0; i < 4; i++) {
   const st = await page.evaluate(async (id) => {
     await window.contracts._act(id, 'approve', 'موافق');
     return (window.contracts.requestById(id) || {}).status;
   }, reqId);
   stages.push(st);
+  draftAtStage.push(await page.evaluate(async (id) => {
+    window.contracts.openReq(id);
+    await new Promise(r => setTimeout(r, 400));
+    const t = document.getElementById('page-contract-requests').textContent || '';
+    return /مسودة العقد/.test(t) && /نطاق الأعمال/.test(t);
+  }, reqId));
 }
 check('★ الطلبُ عبَر البوّابات الأربع بالترتيب ⇐ معتمَد',
   stages.join(' → ') === 'crq_pending_proc → crq_pending_finance → crq_pending_ceo → crq_approved',
   stages.join(' → '));
+check('★★ والمسودةُ حاضرةٌ في **كل** مرحلةٍ من المراحل الأربع — لا في واحدةٍ منها',
+  draftAtStage.length === 4 && draftAtStage.every(Boolean), draftAtStage.join(','));
 await page.waitForTimeout(800);
 await page.evaluate(() => window.contracts.openReq(window.contracts.requests()[0].id));
 await page.waitForTimeout(800);
