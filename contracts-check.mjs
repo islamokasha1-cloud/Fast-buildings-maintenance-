@@ -1291,13 +1291,21 @@ const paperPdf = await paperPage.pdf({ printBackground: true, preferCSSPageSize:
 await paperPage.close();
 const pdfTxt = paperPdf.toString('latin1');
 const pdfPages = (pdfTxt.match(/\/Type \/Page(?!s)/g) || []).length;
-const xoSets = [...pdfTxt.matchAll(/\/XObject <<([^>]*)>>/g)].map(m => m[1].trim());
+/* قواميسُ **الصفحات** وحدَها — التي يعقبها `/MediaBox`. والتمييزُ لازمٌ لا زائد:
+   العلامةُ المائيةُ المخفَّفةُ يلفّها المتصفّح في Form XObject بمجموعة شفافية، وله
+   قاموسُ موارد خاصٌّ به يشبه قاموسَ الصفحة حرفياً.
+   **ولذلك لا يصحّ اشتراطُ تطابق القواميس حرفياً** (كما كان أوّلَ مرّة): الغلافُ
+   الشفّافُ **كائنٌ مستقلٌّ لكل صفحة**، فتختلف الأرقامُ وتتطابق الوظيفة. والعهدُ
+   المقصودُ هو: كلُّ صفحةٍ ترسم ثلاثَ طبقات، واثنتان منها (الترويسةُ والتذييل)
+   **الكائنُ نفسُه على كل الصفحات**. فهذا ما يُشترَط. */
+const pageXo = [...pdfTxt.matchAll(/\/XObject <<([^>]*)>>(?=[\s\S]{0,1200}?\/MediaBox)/g)]
+  .map(m => new Set(m[1].match(/\d+ 0 R/g) || []));
+const shared = pageXo.length ? [...pageXo.reduce((a, s) => new Set([...a].filter(x => s.has(x))))] : [];
 check('★★ والوثيقةُ تُطبَع على أكثرَ من صفحةٍ فعلاً — وإلا فالفحصُ لا يفحص شيئاً',
   pdfPages >= 2, `صفحات=${pdfPages}`);
 check('★★★ والترويسةُ والتذييلُ والعلامةُ المائيةُ على **كل** صفحةٍ مطبوعة',
-  xoSets.length === pdfPages && xoSets.every(s => s === xoSets[0]) &&
-  (xoSets[0].match(/\d+ 0 R/g) || []).length >= 3,
-  `صفحات=${pdfPages} · صور/صفحة=${(xoSets[0] || '').split('/').length - 1}`);
+  pageXo.length === pdfPages && pageXo.every(s => s.size >= 3) && shared.length >= 2,
+  `صفحات=${pdfPages} · طبقات/صفحة=${pageXo.map(s => s.size).join(",")} · مشترَكة=${shared.length}`);
 fs.writeFileSync(`${SHOTS}/contract-print.pdf`, paperPdf);
 
 // تسجيلُ التوقيع ⇒ العقد ساري

@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2615";
+var MODULE_BUILD = "v18.9.2616";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -5978,7 +5978,10 @@ function letterheadCSS(){
     '.lh img{display:block;width:100%;height:auto}'+
     '.lh-h{left:-2.65mm;top:0;width:202.5mm}'+
     '.lh-f{left:3.72mm;bottom:0;width:191.8mm}'+
-    '.lh-m{left:48.95mm;top:89.9mm;width:108.4mm;z-index:0}'+
+    /* العلامةُ المائيةُ بنصف شدّتها (طلبُ المالك): بشدّة القالب الأصلية كانت تُقرأ
+       خلف جدول البنود والأرقام فتزاحم ما يُوقَّع عليه. والتخفيفُ بالشفافية لا
+       بصورةٍ ثانيةٍ أفتح — فالأصلُ يبقى مصدراً واحداً، والشدّةُ رقمٌ يُعدَّل. */
+    '.lh-m{left:48.95mm;top:89.9mm;width:108.4mm;z-index:0;opacity:.5}'+
     /* على الشاشة تُرسَم مرّةً في مجرى الصفحة، وفي الطباعة تتكرّر على كل ورقة */
     '@media print{.lh{position:fixed}}'+
     '.pg{width:100%;border-collapse:collapse;margin:0;font-size:inherit}'+
