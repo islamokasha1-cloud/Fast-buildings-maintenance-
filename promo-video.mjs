@@ -25,6 +25,13 @@ const REPO = process.env.REPO_DIR || path.resolve(path.dirname(new URL(import.me
 const OUT = process.env.OUT_DIR || path.join(REPO, 'dist-video');
 const SHOTS = path.join(OUT, 'shots');
 const PROBE = process.argv.includes('--probe');
+// 4K حقيقيّ لا تكبيرَ صورة: النافذةُ 3840×2160 والتخطيطُ يبقى بعرض 1920 بتكبير CSS ×2،
+// فالرسمُ بأربعة أضعاف البكسلات والشكلُ كما هو. (لقطةُ CDP تُقيَّد بمقاس النافذة، فلا
+// يكفي `deviceScaleFactor` وحدَه — جُرّب فأعطى 1920×1080 رغم كثافةِ ٢.)
+const FOURK = process.argv.includes('--4k') || process.env.PROMO_4K === '1';
+const VW = FOURK ? 3840 : 1920, VH = FOURK ? 2160 : 1080;
+// زمنُ رسمِ الإطار مقيسٌ في هذه البيئة: ٤٤م.ث عند 1080p و~١٥٠م.ث عند 4K.
+const STEP_MS = Number(process.env.PROMO_STEP_MS || (FOURK ? 152 : 44));
 // بلا بطاقتَي الافتتاح والختام — حين تأتيان من إعلان Remotion في `promo-assemble.mjs`.
 const NO_BOOKENDS = process.argv.includes('--no-bookends');
 const NAME = NO_BOOKENDS ? 'promo-body' : 'promo';
@@ -144,7 +151,28 @@ const OVERLAY = `
     ring: function(x, y){ var g=document.getElementById('pv-ring'); g.style.transform='translate('+x+'px,'+y+'px)'; g.classList.remove('go'); void g.offsetWidth; g.classList.add('go'); },
     bar: function(pct){ document.getElementById('pv-bar').style.width = Math.max(0,Math.min(100,pct))+'%'; },
     flash: function(on){ document.getElementById('pv-flash').classList.toggle('on', !!on); },
-    keep: function(){ if(!document.getElementById('pv-root').isConnected) document.body.appendChild(document.getElementById('pv-root')); }
+    keep: function(){ if(!document.getElementById('pv-root').isConnected) document.body.appendChild(document.getElementById('pv-root')); },
+    // ── ضبطٌ مباشرٌ خطوةً خطوة (بلا انتقالات CSS) ──
+    // الانتقالُ الذي يقوده المتصفّح يفترض ٦٠ إطاراً/ث؛ وحين يلتقط المُصيّرُ ٧ فقط
+    // تصل منه أربعُ عيّناتٍ فيبدو متقطّعاً. فنقودُ القيمةَ بأنفسنا: خطوةٌ لكلّ إطارٍ
+    // مُلتقَط، ثمّ يُعطى كلُّ إطارٍ 1/30ث في المخرَج — فيُعرَض ناعماً مهما بطُؤ الالتقاط.
+    raw: function(on){
+      ['pv-cursor','pv-lower','pv-scrim'].forEach(function(id){
+        var e = document.getElementById(id); if (e) e.style.transition = on ? 'none' : '';
+      });
+      var m = document.querySelector('.main-area'); if (m) m.style.transition = on ? 'none' : '';
+    },
+    at: function(what, a, b){
+      if (what === 'cursor'){ var c = document.getElementById('pv-cursor'); c.classList.add('on'); c.style.transform = 'translate('+a+'px,'+b+'px)'; return; }
+      if (what === 'caption'){
+        var l = document.getElementById('pv-lower');
+        l.style.opacity = a; l.style.transform = 'translateY('+(24*(1-a))+'px)';
+        document.getElementById('pv-scrim').style.opacity = a;
+        l.classList.toggle('on', a > 0.02); document.getElementById('pv-scrim').classList.toggle('on', a > 0.02);
+        return;
+      }
+      if (what === 'main'){ var m = document.querySelector('.main-area'); if (m) m.style.opacity = a; }
+    }
   };
 })();
 `;
@@ -469,8 +497,9 @@ const L = (...a) => console.log(...a);
 const el = () => ((Date.now() - t0) / 1000).toFixed(1).padStart(5) + 's';
 
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox', '--force-device-scale-factor=1'] });
-const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1, locale: 'ar-SA' });
+const context = await browser.newContext({ viewport: { width: VW, height: VH }, deviceScaleFactor: 1, locale: 'ar-SA' });
 const page = await context.newPage();
+if (FOURK) await page.addInitScript(`document.addEventListener('DOMContentLoaded',function(){document.documentElement.style.zoom='2';});`);
 let TRIM_AT = 0;                       // لحظةُ بدء المشهد المفيد (قصُّ رأسِ الإقلاع)
 
 /* ── الالتقاط: لقطاتٌ من CDP لا تسجيلُ Playwright ──
@@ -495,7 +524,7 @@ if (!PROBE) {
   });
   await cdp.send('Page.startScreencast', {
     format: 'jpeg', quality: Number(process.env.PROMO_JPEG_Q || 100),
-    maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1
+    maxWidth: VW, maxHeight: VH, everyNthFrame: 1
   });
 }
 await page.addInitScript(MOCK_FIREBASE);
@@ -523,7 +552,7 @@ const pv = (fn, ...args) => page.evaluate(([f, a]) => { window.pv && window.pv.k
 let shotN = 0;
 const shot = (name) => page.screenshot({ path: `${SHOTS}/${String(++shotN).padStart(2, '0')}-${name}.png` }).catch(() => { });
 
-async function overlay() { await page.evaluate(OVERLAY).catch(() => { }); }
+async function overlay() { await page.evaluate(OVERLAY).catch(() => { }); await page.evaluate(() => window.pv && window.pv.raw(true)).catch(() => { }); }
 
 // بطاقةُ فصل: تُعرَض فوق الشاشة الحالية ثم تنقشع.
 async function titleCard(kicker, main, sub, ms, opt) {
@@ -539,6 +568,7 @@ async function titleCard(kicker, main, sub, ms, opt) {
 }
 
 // النقرُ مرحلتان كي يُمكن إدخالُ إخفاءِ المحتوى بينهما: وصولُ المؤشّر ثم الضغط.
+let curPos = { x: VW / 2, y: VH / 2 };
 async function cursorTo(selector, opts) {
   const o = opts || {};
   const box = await page.evaluate(sel => {
@@ -549,8 +579,11 @@ async function cursorTo(selector, opts) {
     return { x: r.left + r.width / 2, y: r.top + r.height / 2, ok: r.width > 0 && r.height > 0 };
   }, selector).catch(() => null);
   if (!box || !box.ok) return null;
-  await pv('cursor', Math.round(box.x), Math.round(box.y));
-  await wait(o.settle || 520);
+  const from = curPos, to = { x: Math.round(box.x), y: Math.round(box.y) };
+  const steps = Math.max(8, Math.min(20, Math.round(Math.hypot(to.x - from.x, to.y - from.y) / 60)));
+  await tween(steps, (u) => setAt('cursor', Math.round(from.x + (to.x - from.x) * u), Math.round(from.y + (to.y - from.y) * u)));
+  curPos = to;
+  await wait(o.settle === undefined ? 240 : Math.min(o.settle, 260));
   return box;
 }
 async function clickAt(selector, box) {
@@ -564,16 +597,25 @@ async function clickEl(selector, opts) {
   return box ? clickAt(selector, box) : false;
 }
 
-/* ── التصفّح: تمريرٌ مُخطّى بإيقاعٍ نُمليه نحن ──
-   قياسٌ كشف أمرين: (أ) `.main-area` وحدَه هو ما يُمرَّر، وكثيرٌ من الصفحات ارتفاعُها
-   لا يتجاوز الشاشة — فأمرُ «مرّر ٧٠٠ بكسل» كان **لا يحرّك شيئاً** ويترك ثانيتين
-   من الجمود في كلّ فصل. (ب) التمريرُ الناعم ينتهي في ~٤٠٠م.ث ثم سكون، والتقاطُ
-   المُصيّر البرمجيّ يبلغ ~٢٣ إطاراً/ث فقط أثناء الحركة.
-   فالحلّ شقّان: لا نمرّر إلا ما يُمرَّر فعلاً، ونُخطّي التمريرَ خطوةً خطوة ثم نُعطي
-   كلَّ إطارٍ منه **1/30 ثانيةً في المخرَج** أياً كان زمنُ التقاطه — فالحركةُ تُعرَض
-   ناعمةً عند ٣٠ إطاراً/ث وإن كان الالتقاطُ أبطأ. (التقاطٌ بطيء، عرضٌ منتظم.) */
+/* ── الإيقاع المُملى: خطوةٌ لكلّ إطارٍ مُلتقَط، و1/30ث لكلّ إطارٍ في المخرَج ──
+   قياسٌ في هذه البيئة: رسمُ الإطار ٤٤م.ث عند 1080p و~١٥٠م.ث عند 4K (لا تسريعَ
+   رسومياً — الرسمُ برمجيٌّ بالكامل). فالانتقالاتُ التي يقودها المتصفّح تصل منها
+   عيّناتٌ قليلةٌ فتبدو متقطّعة. الحلّ: نقودُ كلَّ حركةٍ بأنفسنا خطوةً خطوة، ونُعطي
+   كلَّ إطارٍ منها زمناً ثابتاً في المخرَج — التقاطٌ بطيء، عرضٌ منتظمٌ ٣٠ إطاراً/ث. */
 const paced = [];                                  // مدياتُ إطاراتٍ تُعرَض بإيقاعٍ ثابت
 const SCROLLER = '.main-area';
+const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+// يُشغّل `apply(u)` لقيم u من 0 إلى 1 على `steps` خطوة، خطوةً لكلّ إطار.
+async function tween(steps, apply) {
+  const i0 = shots.length;
+  for (let i = 1; i <= steps; i++) {
+    await apply(ease(i / steps));
+    await page.waitForTimeout(STEP_MS);
+  }
+  if (shots.length > i0) paced.push([i0, shots.length]);
+}
+const setAt = (what, a, b) => page.evaluate(([w, x, y]) => { window.pv && window.pv.at(w, x, y); }, [what, a, b]).catch(() => { });
 
 async function scrollMax() {
   return page.evaluate(sel => {
@@ -587,22 +629,12 @@ async function scrollReset() {
     if (c) { c.style.scrollBehavior = 'auto'; c.scrollTop = 0; }
   }, SCROLLER).catch(() => { });
 }
-// تسارعٌ وتباطؤٌ عند الطرفين — تمريرٌ خطّيٌّ يبدو آلياً.
-const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 async function pacedScroll(to, steps) {
-  const i0 = shots.length;
   const from = await page.evaluate(sel => (document.querySelector(sel) || {}).scrollTop || 0, SCROLLER).catch(() => 0);
-  for (let i = 1; i <= steps; i++) {
-    const y = Math.round(from + (to - from) * ease(i / steps));
-    await page.evaluate(([sel, v]) => {
-      const c = document.querySelector(sel);
-      if (c) { c.style.scrollBehavior = 'auto'; c.scrollTop = v; }
-    }, [SCROLLER, y]).catch(() => { });
-    // ٤٤م.ث ≈ زمنُ رسمِ إطارٍ قِيس في هذا المُصيّر (~٢٣ إ/ث). أقلُّ منه يُسقط خطواتٍ
-    // بلا إطارٍ لها، فيعود التقطّع الذي نعالجه.
-    await page.waitForTimeout(44);
-  }
-  if (shots.length > i0) paced.push([i0, shots.length]);
+  await tween(steps, (u) => page.evaluate(([sel, v]) => {
+    const c = document.querySelector(sel);
+    if (c) { c.style.scrollBehavior = 'auto'; c.scrollTop = v; }
+  }, [SCROLLER, Math.round(from + (to - from) * u)]).catch(() => { }));
 }
 // جولةٌ داخل الصفحة: لا تُهدَر ثانيتان على صفحةٍ لا شيءَ فيها يُمرَّر.
 async function browseTour() {
@@ -617,21 +649,27 @@ async function browseTour() {
 // وتكسيراً في الظهور» — وهو بناءٌ حقيقيٌّ لا خللَ عرض، لكنّه ليس ما يُعرَض في فيلم.
 // فنُخفي منطقةَ المحتوى قبل التبديل، وننتظر **استقرارَها فعلاً** لا مهلةً مقدَّرة،
 // ثم نكشفها بذوبانٍ قصير — فلا يرى المشاهدُ إلا صفحةً مكتملة.
+// ظهورُ التعليق واختفاؤه بالإيقاع نفسِه — وإلا بدا الشريطُ يقفز عند 4K.
+async function captionIn(main, sub, badge) {
+  await page.evaluate(([m, s2, b]) => {
+    const l = document.getElementById('pv-lower'); if (!l) return;
+    const i = l.querySelector('i');
+    i.textContent = b || ''; i.style.display = b ? 'inline-block' : 'none';
+    l.querySelector('b').textContent = m || '';
+    l.querySelector('span').textContent = s2 || '';
+  }, [main, sub, badge]).catch(() => { });
+  await tween(7, (u) => setAt('caption', u.toFixed(3)));
+}
+async function captionOut() {
+  await tween(6, (u) => setAt('caption', (1 - u).toFixed(3)));
+}
+
 async function contentHide() {
-  await page.evaluate(() => {
-    const c = document.querySelector('.main-area');
-    if (!c) return;
-    c.style.transition = 'opacity .22s ease';
-    c.style.opacity = '0';
-  }).catch(() => { });
-  await page.waitForTimeout(240);
+  await tween(6, (u) => setAt('main', (1 - u).toFixed(3)));
 }
 async function contentShow() {
-  await page.evaluate(() => {
-    const c = document.querySelector('.main-area');
-    if (c) c.style.opacity = '1';
-  }).catch(() => { });
-  await page.waitForTimeout(320);
+  await tween(8, (u) => setAt('main', u.toFixed(3)));
+  await page.waitForTimeout(120);
 }
 // الاستقرار: حجمُ محتوى الصفحة لا يتغيّر ثلاثَ قراءاتٍ متتالية، ولا «جارٍ التحميل».
 // مهلةٌ عليا كي لا تعلّق شاشةٌ تُحدِّث نفسَها باستمرار (لوحةُ العرض TV مثلاً).
@@ -723,7 +761,7 @@ await pv('flash', false); await wait(500);
 await progress();
 
 /* ───────── ٢) تسجيل الدخول ───────── */
-await pv('lower', 'دخولٌ آمنٌ بالصلاحيات', 'لكلّ دورٍ صلاحياتُه: مدير المشروع، المستودع، المشتريات، الإدارة', 'شاشة الدخول');
+await captionIn('دخولٌ آمنٌ بالصلاحيات', 'لكلّ دورٍ صلاحياتُه: مدير المشروع، المستودع، المشتريات، الإدارة', 'شاشة الدخول');
 await wait(900);
 const seeded = await page.evaluate(seedAll);
 L(`  ${el()}  زُرع ${seeded} مستنداً تجريبياً`);
@@ -736,17 +774,17 @@ await page.type('#login-pass', 'Passw0rd!', { delay: 95 });
 await wait(600);
 await shot('login');
 // التعليقُ يُرفَع قبل الضغط لا بعده — وإلا ظهر تعليقُ شاشةِ الدخول فوق شاشةِ المشاريع.
-await pv('lowerOff'); await wait(420);
+await captionOut();
 await clickEl('.login-btn', { settle: 700 });
 await wait(3800);
 await overlay();
 await progress();
 
 /* ───────── ٣) بوّابة المشاريع ───────── */
-await pv('lower', 'عدّةُ مشاريعَ بعزلٍ تامّ', 'بياناتُ كلّ مشروعٍ منفصلةٌ عن غيره — والمشترياتُ المركزيةُ تراها جميعاً', 'بوّابة المشاريع');
+await captionIn('عدّةُ مشاريعَ بعزلٍ تامّ', 'بياناتُ كلّ مشروعٍ منفصلةٌ عن غيره — والمشترياتُ المركزيةُ تراها جميعاً', 'بوّابة المشاريع');
 await wait(3200);
 await shot('projects');
-await pv('lowerOff'); await wait(420);
+await captionOut();
 await clickEl('[onclick*="selectProject(\'hail\')"]', { settle: 800 });
 await wait(3400);
 // مُحاكي Firestore يُطلق onSnapshot مرّةً واحدةً عند الاشتراك، والتطبيق يُفرّغ مصفوفاته
@@ -770,10 +808,10 @@ for (const ch of CHAPTERS) {
   // لا بطاقةَ فصلٍ ملءَ الشاشة ولا وميضٌ داكن: الشاشةُ تبقى معروضةً بلا انقطاع،
   // وعنوانُ الفصل يأتي في الشريط السفليّ فوقها. القطعُ إلى لوحٍ أزرقَ كان يقطع
   // السياق البصريّ، وتدرّجُه العريض أسوأُ ما يكسّره ضغطُ الفيديو.
-  await pv('lowerOff'); await pv('cursorOff'); await wait(320);
+  await captionOut(); await pv('cursorOff');
   const clicked = await goPage(ch.page);
-  await pv('lower', ch.title, ch.lower[1], 'الفصل ' + ch.n + ' — ' + ch.kicker);
-  await wait(3400);
+  await captionIn(ch.title, ch.lower[1], 'الفصل ' + ch.n + ' — ' + ch.kicker);
+  await wait(3100);
   // بعضُ الشاشات نموذجٌ فارغٌ حتى يُضغط زرُّها — فنضغطه ليُرى المخرَجُ لا النموذج.
   if (ch.act) {
     // هنا الزرُّ داخل منطقة المحتوى — فالنقرُ أوّلاً ليُرى، ثم يُخفى ما يليه من بناء.
@@ -784,36 +822,36 @@ for (const ch of CHAPTERS) {
       await waitSettled(ch.page);
       await overlay();
       await contentShow();
-      await pv('lower', ch.title, ch.lower[1], 'الفصل ' + ch.n + ' — ' + ch.kicker);
+      await captionIn(ch.title, ch.lower[1], 'الفصل ' + ch.n + ' — ' + ch.kicker);
       await wait(1200);
     }
   }
   await shot(ch.page);
   await browseTour();
-  await pv('lowerOff');
+  await captionOut();
   await progress();
   L(`  ${el()}  ${ch.n}) ${ch.page}${clicked ? '' : ' (فُتحت برمجياً)'}`);
 }
 
 /* ───────── ٥) تفصيلُ طلبِ شراءٍ حقيقيّ ───────── */
-await pv('lowerOff'); await pv('cursorOff'); await wait(320);
+await captionOut(); await pv('cursorOff');
 await goPage('purchases');
 const POCAP = ['تفاصيل الطلب PO-1038', 'المستلَمُ مقابل المطلوب، ومرجعُ الاستلام ورقمُ الفاتورة — الإغلاقُ لا يتمّ دونها', 'عن قرب'];
 await page.evaluate(() => { try { openPurchaseDetail('PO-1038'); } catch (e) { } }).catch(() => { });
 await wait(2600);
 await overlay();
-await pv('lower', POCAP[0], POCAP[1], POCAP[2]);
+await captionIn(POCAP[0], POCAP[1], POCAP[2]);
 await wait(3400);
 await shot('po-detail');
 await page.evaluate(() => { try { closeModal('modal-purchase-detail'); } catch (e) { } }).catch(() => { });
 await wait(900);
-await pv('lowerOff');
+await captionOut();
 await progress();
 
 /* ───────── ٦) الخاتمة ───────── */
 await pv('cursorOff'); await wait(300);
 // نُنهي على آخر شاشةٍ بلا تعليق: الذوبانُ إلى مشهد ختام Remotion يتكفّل بالانتقال.
-if (NO_BOOKENDS) { await pv('lowerOff'); await wait(1100); }
+if (NO_BOOKENDS) { await captionOut(); await wait(900); }
 else await titleCard('شركة المباني السريعة', 'نظامٌ واحدٌ — من البلاغ إلى التقرير',
   'بلاغاتٌ ومشترياتٌ ومخزونٌ وعهدٌ وأصولٌ وصيانةٌ وقائيةٌ ومؤشّراتُ أداء · الإصدار ' + (APPV || ''),
   6400, { shot: 'outro', keep: true });

@@ -23,6 +23,9 @@ const OUT = path.join(REPO, 'dist-video');
 const PARTS = path.join(OUT, 'parts');
 const RM = path.join(REPO, 'remotion');
 const SKIP_BODY = process.argv.includes('--skip-body');
+// 4K: الجولةُ تُلتقط بنافذةٍ 3840×2160 (تكبير CSS ×2)، ومشهدا Remotion يُرندَران
+// بـ`--scale=2` — كلاهما 4K أصليّ لا تكبيرَ صورة، وإلا اختلف مقاسا مدخلَي الذوبان.
+const FOURK = process.argv.includes('--4k') || process.env.PROMO_4K === '1';
 
 const FPS = 30;
 const XF = 0.7;                                   // مدّةُ الذوبان عند كلّ وصلة (ثانية)
@@ -65,6 +68,7 @@ for (const [name, r] of [['intro', INTRO], ['outro', OUTRO]]) {
   const range = r.from === undefined ? '' : ` (${r.from}–${r.to})`;
   L(`\n▸ رندر مشهد «${r.label}»${range}…`);
   const args = ['remotion', 'render', r.comp, out, '--log=error'];
+  if (FOURK) args.push('--scale=2');
   if (r.from !== undefined) args.push(`--frames=${r.from}-${r.to}`);
   // موسيقى الإعلان تُسكَت هنا لتُفرَش لاحقاً على الفيلم كلِّه؛ والتركيبةُ المستقلّةُ
   // لا صوتَ فيها أصلاً فلا يضرّها المرور.
@@ -82,7 +86,7 @@ if (SKIP_BODY) {
 } else {
   L('\n▸ تسجيل جولة الشاشات (بلا بطاقتَي افتتاحٍ وختام)…');
   // الجسمُ وسيطٌ يُعاد ترميزُه عند الوصل — فيُحفَظ شبهَ عديمِ الفقد كيلا يتراكم جيلان.
-  const res = run(process.execPath, ['promo-video.mjs', '--no-bookends'],
+  const res = run(process.execPath, ['promo-video.mjs', '--no-bookends', ...(FOURK ? ['--4k'] : [])],
     { cwd: REPO, env: Object.assign({}, process.env, { PROMO_CRF: process.env.PROMO_BODY_CRF || '12' }) });
   if (res.status !== 0 || !fs.existsSync(body)) die('فشل تسجيل الجولة');
 }
@@ -105,7 +109,7 @@ const haveMusic = mres.status === 0 && fs.existsSync(music);
 if (!haveMusic) L('  ⚠️  تعذّر تأليف الموسيقى (numpy؟) — يُجمَّع الفيلم صامتاً');
 
 /* ═════════ ٤) الوصل بذوبانٍ + فرشُ الموسيقى ═════════ */
-const film = path.join(OUT, 'promo-film.mp4');
+const film = path.join(OUT, FOURK ? 'promo-film-4k.mp4' : 'promo-film.mp4');
 L('\n▸ الوصل والترميز…');
 
 // ذوبانان: الافتتاحُ في الجولة، ثم الناتجُ في الختام. الإزاحةُ = طولُ ما قبله ناقص XF.
@@ -128,7 +132,8 @@ args.push('-filter_complex', haveMusic
   : v.join(';'));
 args.push('-map', '[v]');
 if (haveMusic) args.push('-map', '[aud]', '-c:a', 'aac', '-b:a', '192k', '-shortest');
-args.push('-c:v', 'libx264', '-preset', 'slow', '-crf', String(process.env.PROMO_FILM_CRF || 15), '-pix_fmt', 'yuv420p',
+args.push('-c:v', 'libx264', '-preset', FOURK ? 'medium' : 'slow',
+  '-crf', String(process.env.PROMO_FILM_CRF || (FOURK ? 17 : 15)), '-pix_fmt', 'yuv420p',
   '-movflags', '+faststart', film);
 
 const enc = ff(args);
@@ -145,7 +150,7 @@ const CAP_MB = Number(process.env.PROMO_MAX_MB || 28);
 const hd = path.join(OUT, 'promo-film-hd.mp4');
 fs.rmSync(hd, { force: true });
 const filmMB = fs.statSync(film).size / 1048576;
-if (filmMB > CAP_MB) {
+if (filmMB > CAP_MB && !FOURK) {
   const secs = dur(film);
   const abr = 96;
   const vbr = Math.max(600, Math.floor((CAP_MB * 8192) / secs) - abr);   // كيلوبت/ث
@@ -162,7 +167,7 @@ if (filmMB > CAP_MB) {
 const mb = (f) => (fs.statSync(f).size / 1048576).toFixed(1);
 L('\n══════════════════════════════════════════════════════');
 L(`  ✅ الفيلم (أصليّ): ${film}`);
-L(`     ${fmt(dur(film))}  ·  1920×1080  ·  ${mb(film)} م.ب  ·  ${haveMusic ? 'بموسيقى' : 'صامت'}`);
+L(`     ${fmt(dur(film))}  ·  ${FOURK ? '3840×2160' : '1920×1080'}  ·  ${mb(film)} م.ب  ·  ${haveMusic ? 'بموسيقى' : 'صامت'}`);
 if (fs.existsSync(hd)) L(`  ✅ نسخةُ المشاركة: ${hd}  ·  ${mb(hd)} م.ب  ·  1920×1080`);
 else L(`     (الأصلُ دون سقف ${CAP_MB} م.ب — فهو نفسُه نسخةُ المشاركة، بلا إعادة ترميز)`);
 L(`     البنية: افتتاح ${dIn.toFixed(1)}ث + جولة ${fmt(dBody)} + ختام ${dOut.toFixed(1)}ث (ذوبان ${XF}ث ×٢)`);
