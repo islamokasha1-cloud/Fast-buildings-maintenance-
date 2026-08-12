@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2601";
+var MODULE_BUILD = "v18.9.2603";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -680,19 +680,67 @@ function payOrderPrintState(req){
   return { key:"draft", cls:"warn", lbl:"قيد الاعتماد — غير صالحٍ للصرف",
            note:"لم تكتمل بوّاباتُ الاعتماد بعد. هذه نسخةُ مراجعةٍ لا أمرُ صرف." };
 }
-function payOrderSignoffs(req, ceoTh){
+/* بوّاباتُ الطلب موقّعةً — **مصدرٌ واحدٌ للورقتين** (سندُ صرف أمر الدفع ومسودةُ
+   العقد). ومسمّياتُها تُقرأ من `GATE_ROLES` نفسِها التي تحرس الأزرار، فلا تُسمّى
+   بوّابةٌ على الورق باسمٍ غيرِ اسمها على الشاشة. */
+function crqSignoffs(req, ceoTh){
   var r = req || {};
+  var isPay = r.engagement === "pay_order";
   var amt = Number(crqValueOf(r)); if(!isFinite(amt)) amt = 0;
   var th  = Number(ceoTh);         if(!isFinite(th))  th  = 0;
-  var out = [
-    { key:"pm",   lbl:"مدير المشاريع", by:r.pmApprovedBy   || "", at:r.pmApprovedAt   || "" },
-    { key:"proc", lbl:"المشتريات",     by:r.procApprovedBy || "", at:r.procApprovedAt || "" }
-  ];
-  if(r.ceoApprovedAt || (th > 0 && amt >= th))
-    out.push({ key:"ceo", lbl:"المدير التنفيذي", by:r.ceoApprovedBy || "", at:r.ceoApprovedAt || "" });
-  var p = r.payment || {};
-  out.push({ key:"pay", lbl:"المالية — السداد", by:p.by || "", at:p.at || "" });
+  var lbl = function(k){ return (GATE_ROLES[GATE_STATUS_OF[k]] || {}).lbl || k; };
+  var cell = function(k){
+    return { key:k, lbl:lbl(k), by:r[k+"ApprovedBy"] || "", at:r[k+"ApprovedAt"] || "" };
+  };
+  var out = [cell("pm"), cell("proc")];
+  // الماليةُ في أمر الدفع **مُسدِّدةٌ لا مُعتمِدة** — فلا خانةَ اعتمادٍ لها فيه
+  if(!isPay) out.push(cell("finance"));
+  if(r.ceoApprovedAt || (th > 0 && amt >= th)) out.push(cell("ceo"));
   return out;
+}
+function payOrderSignoffs(req, ceoTh){
+  var p = (req || {}).payment || {};
+  return crqSignoffs(req, ceoTh).concat(
+    [{ key:"pay", lbl:"المالية — السداد", by:p.by || "", at:p.at || "" }]);
+}
+
+/* ════ مسودةُ العقد في مراحل الاعتماد ════   (طلبُ المالك)
+
+   **الفجوة.** المعتمِدون الأربعة يوقّعون على طلبٍ يعرض بنوداً وأرقاماً وشروطاً
+   تجاريةً مختصرة — بينما ما سيوقّعه الطرفُ الآخرُ **وثيقةٌ كاملة**: نطاقٌ والتزاماتٌ
+   وسلامةٌ وجزاءاتٌ وضمان. فالماليةُ تعتمد قيمةً لا تعرف بأيّ شروطٍ ستُصرف، ومديرُ
+   المشاريع يعتمد نطاقاً لا يرى صياغتَه التي سيُحاسَب عليها المستخلص. وأوّلُ من يرى
+   الوثيقةَ كاملةً اليومَ هو **المشتريات بعد اكتمال الاعتمادات** — حين لم يبقَ لأحدٍ
+   اعتراض.
+
+   **العلاج — ولا وثيقةَ ثانية.** المسودةُ ليست عرضاً موازياً يُصاغ هنا: هي
+   `contractFromRequest` نفسُها (الدالّةُ التي ستُنشئ العقدَ فعلاً) مطبوعةً بورقة
+   `contractPaperHTML` نفسِها. فما يراه المعتمِدُ اليومَ هو **ما سيخرج غداً حرفياً**،
+   ولا سبيلَ لافتراقهما لأن لا نسخةَ ثانيةَ تفترق.
+
+   **وتُعلن عن نفسها** بشريطٍ من `crqDraftState` — بالمنطق نفسِه الذي يحرس سندَ صرف
+   أمر الدفع: ورقةٌ بلا وسمٍ تُصوَّر وتُرسَل فتُقرأ عقداً.
+
+   **ولمن تظهر؟ للجميع وفي كلّ مرحلة.** لا بوّابةَ على القراءة: من يرى الطلبَ يرى
+   مسودتَه — حجبُها عمّن لم يحن دورُه يجعله يعتمد على وصفٍ شفهيّ حين يحين. */
+function crqDraftState(req){
+  var r = req || {}, st = r.status;
+  if(st === "crq_converted")
+    return { key:"issued", cls:"ok",   lbl:"صار عقداً"+(r.contractId ? (" — "+r.contractId) : ""),
+             note:"أُنشئ العقدُ من هذا الطلب، والوثيقةُ النافذةُ هي العقدُ نفسُه لا هذه المسودة." };
+  if(st === "crq_approved")
+    return { key:"ready",  cls:"ok",   lbl:"معتمَد — بانتظار إنشاء العقد",
+             note:"اكتملت بوّاباتُ الاعتماد. هذه صورةُ العقد الذي سيُنشأ من هذا الطلب." };
+  if(st === "crq_cancelled")
+    return { key:"void",   cls:"bad",  lbl:"ملغى — لا يُتعاقَد به",
+             note:"أُلغي الطلبُ على المنصّة، وأيُّ نسخةٍ من مسودته لاغية." };
+  if(crqIsBounced(st))
+    return { key:"void",   cls:"bad",  lbl:(CRQ_STATUS[st]||"مُعاد للتصحيح")+" — لا يُتعاقَد به",
+             note:"أُعيد الطلبُ إلى مُنشئه للتصحيح، فلا يُوقَّع بصيغته هذه." };
+  if(crqIsFinal(st))
+    return { key:"void",   cls:"bad",  lbl:(CRQ_STATUS[st]||"منتهٍ")+" — لا يُتعاقَد به", note:"" };
+  return { key:"draft",    cls:"warn", lbl:"مسودة — قيد الاعتماد ولا تُوقَّع",
+           note:"لم تكتمل بوّاباتُ الاعتماد بعد. هذه نسخةُ مراجعةٍ للمعتمِدين لا عقدٌ نافذ." };
 }
 
 /* ════ الوثيقةُ التعاقدية: شروطٌ نصّيةٌ لا أرقامٌ وحدها ════   [المرحلة ٤-ب]
@@ -836,6 +884,15 @@ function contractFromRequest(req, contractId, now, by, clauses){
     createdAt: now||"", createdBy: by||"", id: contractId||""
   };
 }
+/* مسودةُ عقدِ الطلب — **الدالّةُ الناقلةُ نفسُها** لا محاكاةٌ لها. فرقُها الوحيدُ
+   أنها بلا معرّفٍ ولا وقتِ إنشاء: ما دام العقدُ لم يُنشأ بعدُ فلا رقمَ له، ورقمٌ
+   مخترَعٌ في مسودةٍ تُطبَع أسوأُ من لا رقم. وما عداه — البنودُ والقيمةُ والشروطُ
+   التجاريةُ والقانونية — هو ما سيحمله العقدُ حرفياً. */
+function crqDraftContract(req, clauses){
+  var r = req || {};
+  return contractFromRequest(r, r.contractId || "", "", r.createdBy || "", clauses);
+}
+
 /* مبلغُ الدفعة المقدمة يُشتقّ من نسبتها على قيمة العقد — رقمٌ محسوبٌ لا مُدخَل. */
 function advanceAmountOf(contract){
   var c = contract || {}, pct = Number((c.advance||{}).pct);
@@ -3874,6 +3931,10 @@ function reqCardHTML(id){
      تصوير الشاشة: صورةٌ بلا وسمٍ ولا توقيعاتٍ ولا مبلغٍ كتابة. */
   if(r.engagement==="pay_order"){
     tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.printPay()">'+_icn("printer","ic-sm")+' طباعة أمر الدفع</button> ';
+  } else {
+    /* مسودةُ العقد — **في كلّ مرحلةٍ ولكلّ دور**: مَن يُطلَب منه اعتمادُ ارتباطٍ
+       يرى الوثيقةَ التي سيوقّعها الطرفُ الآخر، لا ملخّصَها. */
+    tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.printDraft()">'+_icn("printer","ic-sm")+' طباعة مسودة العقد</button> ';
   }
   if(r.status==="crq_approved" && ["procurement_officer","admin"].indexOf(_role())!==-1){
     tools+='<button class="btn btn-primary btn-sm" onclick="contracts.makeContract()">'+_icn("briefcase","ic-sm")+' إنشاء العقد</button> ';
@@ -3932,6 +3993,8 @@ function reqCardHTML(id){
       infoCell("مدة الضمان", ((r.warranty||{}).months||0)+" شهراً")+
     '</div></div>';
 
+  var draftSec = r.engagement==="pay_order" ? "" : crqDraftSecHTML(r);
+
   var cands=(r.candidates||[]).filter(function(c){ return c.vendorId; });
   var candSec = cands.length ? '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("users","ic-sm")+' المرشّحون</div>'+
     '<div class="ct-table-wrap"><table class="ct-table"><thead><tr><th>الطرف</th><th>العرض</th><th>ملاحظة</th></tr></thead><tbody>'+
@@ -3974,8 +4037,43 @@ function reqCardHTML(id){
       '<tbody>'+lineRows+'</tbody></table></div>'+
       '<div class="ct-total">'+totalsHTML(t, r.vatMode)+'</div>'+
     '</div>')+
-    termsRow + candSec +
+    termsRow + candSec + draftSec +
     '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' السجل الزمني</div><div class="ct-timeline">'+tl+'</div></div>';
+}
+
+/* ── مسودةُ العقد على الشاشة ──
+   الورقةُ تُطبَع، وهذه تُقرأ في مكانها: الشروطُ القانونيةُ والماليةُ كما ستُنسَخ إلى
+   العقد حرفياً، مع شريطِ حالتها. **بلا شرطِ دورٍ ولا شرطِ مرحلة** — القراءةُ ليست
+   بوّابة، ومَن يرى الطلبَ يرى ما سيصير إليه.
+
+   والنصُّ من `allClausesOf(crqDraftContract(...))` — القوالبُ المخزَّنةُ نفسُها التي
+   ستُجمَّد في العقد، والشروطُ الماليةُ متولّدةٌ من أرقام الطلب. فلا نصَّ يُكتب هنا
+   ويُخالف ما سيُطبَع هناك. */
+function crqDraftSecHTML(r){
+  var st = crqDraftState(r);
+  var d  = crqDraftContract(r, clauseTemplates());
+  var groups = allClausesOf(d);
+  var body = groups.map(function(g){
+    return '<div class="ct-cl-grp"><div class="ct-cl-cat">'+_esc(g.label)+'</div>'+
+      g.items.map(function(x){
+        var auto = String(x.key||"").indexOf("_fin_")===0;
+        return '<div class="ct-cl"><div class="ct-cl-t">'+_esc(x.title||"")+
+          (auto?' <span class="ct-doc s-ok">يتولّد من أرقام الطلب</span>':'')+'</div>'+
+          '<div class="ct-cl-b">'+_esc(x.body||"")+'</div></div>';
+      }).join("")+'</div>';
+  }).join("") || '<div style="color:var(--muted);font-size:12.5px">لا شروط.</div>';
+
+  // شريطُ الحالة بلغة الشاشة: `ok` حيادٌ · `warn` تنبيهٌ · `bad` ⇐ `crit`
+  var cls = st.cls==="ok" ? "" : (st.cls==="bad" ? "crit" : "warn");
+  return '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("fileText","ic-sm")+' مسودة العقد'+
+      '<span class="ct-sec-lock">الوثيقةُ التي سيوقّعها الطرف — تُعرَض في كل مراحل الاعتماد</span>'+
+      '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.printDraft()">'+
+        _icn("printer","ic-sm")+' طباعة</button>'+
+    '</div>'+
+    '<div class="ct-note '+cls+'">'+_icn("alertCircle","ic-sm")+' <b>'+_esc(st.lbl)+'</b>'+
+      (st.note?' — '+_esc(st.note):'')+'</div>'+
+    body+
+  '</div>';
 }
 
 /* ── أفعالُ الطلب ── */
@@ -5593,12 +5691,18 @@ function _emitPrint(html, auditAction, auditData){
     return false;
   }
 }
-function printContract(id){
-  var c=contractById(id); if(!c) return _toast("⚠ العقد غير موجود","warn");
+/* **ورقةُ العقد دالّةٌ واحدةٌ** يقرؤها العقدُ النافذُ ومسودتُه معاً (`opt`):
+   رقمُ المستند · شريطُ الحالة · خاناتُ الاعتماد الداخليّ · التذييل. ونسخُها لصنع
+   «ورقةِ مسودةٍ» ثانيةٍ كان سيُنتج وثيقتين تفترقان عند أوّل تعديلٍ على أيّهما —
+   والمعتمِدُ حينها يوقّع على ورقةٍ ليست التي ستُوقَّع. */
+function contractPaperHTML(c, opt){
+  var o=opt||{};
+  var docNo=o.docNo || c.id || "";
   var v=vendorById(c.vendorId), idn=v?identityOf(v):null;
   var val=contractValue(c), t=linesTotal(c.lines||[], c.vatMode);
   var groups=allClausesOf(c);
   var logo=_printLogo();
+  var dt=function(s){ return String(s||"").slice(0,16).replace("T"," ") || "—"; };
 
   var lineRows=(c.lines||[]).map(function(l,i){
     var lt=lineTotal(l.qty,l.unitPrice,c.vatMode);
@@ -5621,8 +5725,23 @@ function printContract(id){
   var vatRow = normVatMode(c.vatMode)==="none" ? "" :
     '<tr><td>ضريبة القيمة المضافة</td><td class="n">'+money(t.vat)+'</td></tr>';
 
+  /* شريطُ الحالة — يُطبَع فقط حين تُمرَّر حالةٌ (العقدُ النافذُ لا يحتاج وسماً). */
+  var st = o.band || null;
+  var bandHtml = st ? '<div class="band '+_esc(st.cls||"warn")+'">'+_esc(st.lbl||"")+
+    (st.note?'<span class="bn">'+_esc(st.note)+'</span>':'')+'</div>' : "";
+
+  /* خاناتُ الاعتماد الداخليّ — بوّاباتُ الطلب كما وقّعتها فعلاً (`crqSignoffs`):
+     فيقرأ المعتمِدُ التاليّ من الورقة نفسِها **أين تقف** قبل أن يوقّع. */
+  var sig = Array.isArray(o.signoffs) ? o.signoffs : [];
+  var apprHtml = sig.length ? '<h2>الاعتمادات الداخلية</h2><div class="appr">'+
+    sig.map(function(g){
+      return '<div class="ap"><div class="ap-l">'+_esc(g.lbl)+'</div>'+
+        '<div class="ap-n">'+(g.by?_esc(g.by):'<span class="ap-w">لم يعتمد بعد</span>')+'</div>'+
+        '<div class="ap-d">'+(g.at?_esc(dt(g.at)):'—')+'</div></div>';
+    }).join("")+'</div>' : "";
+
   var html='<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'+
-  '<title>عقد '+_esc(c.id)+'</title><style>'+
+  '<title>'+_esc(o.title || ("عقد "+docNo))+'</title><style>'+
   '*{box-sizing:border-box}'+
   'body{font-family:"Segoe UI",Tahoma,Arial,sans-serif;margin:0;padding:26px;color:#111827;direction:rtl;font-size:13px;line-height:1.9}'+
   '.header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1b3a6b;padding-bottom:12px}'+
@@ -5630,6 +5749,17 @@ function printContract(id){
   '.company-logo{width:56px;height:56px;object-fit:contain}'+
   '.company{font-size:18px;font-weight:800}.subtitle{font-size:13px;color:#1b3a6b;font-weight:700}'+
   '.doc-no{background:#eef2f7;color:#1b3a6b;border-radius:8px;padding:8px 14px;font-weight:800;font-family:monospace}'+
+  '.band{margin-top:14px;border-radius:8px;padding:9px 13px;font-weight:800;font-size:13px;border:2px solid}'+
+  '.band .bn{display:block;font-weight:600;font-size:11.5px;margin-top:2px}'+
+  '.band.ok{background:#ecfdf5;border-color:#059669;color:#065f46}'+
+  '.band.warn{background:#fffbeb;border-color:#d97706;color:#92400e}'+
+  '.band.bad{background:#fef2f2;border-color:#dc2626;color:#991b1b}'+
+  '.appr{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:10px;break-inside:avoid}'+
+  '.ap{border:1px solid #dde3ed;border-radius:8px;padding:9px;text-align:center}'+
+  '.ap-l{font-size:11px;color:#64748b;font-weight:700}'+
+  '.ap-n{font-size:12.5px;font-weight:800;margin-top:4px}'+
+  '.ap-w{color:#b45309;font-weight:700}'+
+  '.ap-d{font-size:11px;color:#64748b;font-family:monospace}'+
   'h2{font-size:15px;color:#1b3a6b;margin:22px 0 8px;border-bottom:1px solid #dde3ed;padding-bottom:5px}'+
   '.parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px}'+
   '.party{border:1px solid #dde3ed;border-radius:8px;padding:11px 13px}'+
@@ -5656,8 +5786,10 @@ function printContract(id){
   '<div class="header"><div class="header-right">'+
     (logo?'<img src="'+_esc(logo)+'" class="company-logo" alt="">':'')+
     '<div><div class="company">شركة المباني السريعة للمقاولات</div>'+
-    '<div class="subtitle">عقد إسناد أعمال — مقاول باطن</div></div></div>'+
-    '<div class="doc-no">'+_esc(c.id)+'</div></div>'+
+    '<div class="subtitle">'+_esc(o.subtitle || "عقد إسناد أعمال — مقاول باطن")+'</div></div></div>'+
+    '<div class="doc-no">'+_esc(docNo)+'</div></div>'+
+
+  bandHtml+
 
   '<h2>أطراف العقد</h2><div class="parties">'+
     '<div class="party"><div class="pl">الطرف الأول</div>'+
@@ -5684,13 +5816,42 @@ function printContract(id){
 
   '<h2>شروط العقد</h2>'+clauseHtml+
 
+  apprHtml+
+
   '<div class="sign"><div>الطرف الأول — شركة المباني السريعة للمقاولات<br><br>الاسم / التوقيع / الختم</div>'+
   '<div>الطرف الثاني — '+_esc(c.vendorName||"")+'<br><br>الاسم / التوقيع / الختم</div></div>'+
-  '<div class="foot">حُرِّر هذا العقد من نسختين بيد كل طرف نسخة للعمل بموجبها · '+_esc(c.id)+'</div>'+
+  '<div class="foot">'+_esc(o.foot || ("حُرِّر هذا العقد من نسختين بيد كل طرف نسخة للعمل بموجبها · "+docNo))+'</div>'+
   '</body></html>';
 
-  _emitPrint(html, "طباعة عقد", c.id);
+  return html;
 }
+function printContract(id){
+  var c=contractById(id); if(!c) return _toast("⚠ العقد غير موجود","warn");
+  _emitPrint(contractPaperHTML(c, {}), "طباعة عقد", c.id);
+}
+
+/* مسودةُ عقدِ الطلب — تُطبَع في **كلّ مرحلةٍ ولكلّ دور**. وحين يكون العقدُ قد أُنشئ
+   فعلاً تُحوَّل الطباعةُ إليه: الوثيقةُ النافذةُ أولى بالورق من صورةٍ عنها. */
+function printContractDraft(id){
+  var r = requestById(id); if(!r) return _toast("⚠ الطلب غير موجود","warn");
+  if(r.engagement === "pay_order")
+    return _toast("⚠ أمرُ الدفع ليس عقداً — اطبع سندَ صرفه","warn");
+  if(r.contractId && contractById(r.contractId)) return printContract(r.contractId);
+
+  var d  = crqDraftContract(r, clauseTemplates());
+  var st = crqDraftState(r);
+  var html = contractPaperHTML(d, {
+    docNo:    r.id,
+    title:    "مسودة عقد "+r.id,
+    subtitle: "مسودة عقد إسناد أعمال — للمراجعة والاعتماد",
+    band:     st,
+    signoffs: crqSignoffs(r, ceoThreshold()),
+    foot:     "مسودةٌ من طلب التعاقد "+r.id+" — تصير عقداً برقمه الخاصّ بعد اكتمال الاعتماد · طُبعت في "+
+              String(_now()||"").slice(0,16).replace("T"," ")
+  });
+  _emitPrint(html, "طباعة مسودة عقد", r.id);
+}
+function printDraft(){ printContractDraft(_rOpen); }
 
 
 /* ════ المخرَجُ الورقيّ لأمر الدفع — سندُ الصرف ════   (طلبُ المالك)
@@ -6468,6 +6629,10 @@ window.contracts = {
   _amountWords: amountWords,
   _payOrderSignoffs: payOrderSignoffs,
   _payOrderPrintState: payOrderPrintState,
+  _crqSignoffs: crqSignoffs,
+  // مسودةُ العقد في مراحل الاعتماد
+  printDraft: printDraft, printContractDraft: printContractDraft,
+  _crqDraftState: crqDraftState, _crqDraftContract: crqDraftContract,
   // العقود [المرحلة ٣]
   renderCtrs: renderCtrs, startCtrSync: startCtrSync, stopCtrSync: stopCtrSync,
   filterCtrs: filterCtrs, openCtr: openCtr, backToCtrs: backToCtrs, ctrTab: ctrTab,
