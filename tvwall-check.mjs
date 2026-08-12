@@ -307,6 +307,106 @@ check('★ الشريط العلوي تحوّل لمقاييس المشروع (�
   panel.totals.slice(0, 100));
 await page.screenshot({ path: `${SHOTS}/wall-project.png` });
 
+/* ═══ شريطُ التحليلات (v18.9al) — الرسومُ تُرسم فعلاً وتقول ما تقوله البلاطات ═══ */
+const anaP = await page.evaluate(() => {
+  const el = document.getElementById('tvl-ana-proj');
+  const cards = Array.from(el.querySelectorAll('.tvl-ch'));
+  const tr = _tvwallTrend([_tvwall.data['hail']]);
+  return {
+    n: cards.length,
+    titles: cards.map(c => (c.querySelector('.t').textContent || '').trim()),
+    leg: (cards[0].querySelector('.tvl-ch-leg').textContent || '').replace(/\s+/g, ' ').trim(),
+    trend: { o: tr.openedN, c: tr.closedN, days: tr.days.length },
+    xs: Array.from(cards[0].querySelectorAll('.tvl-ch-x span')).map(s => s.textContent.trim()),
+    xdir: getComputedStyle(cards[0].querySelector('.tvl-ch-x')).direction,
+    paths: cards[0].querySelectorAll('svg path').length,
+    sla: (cards[1].querySelector('.sl').textContent || '').replace(/\s+/g, ' ').trim(),
+    slaSegs: cards[1].querySelectorAll('.tk i').length,
+    types: Array.from(cards[2].querySelectorAll('.tvl-hb .r')).map(r => (r.textContent || '').replace(/\s+/g, ' ').trim())
+  };
+});
+check('★ al: لوحةُ المشروع تحمل ثلاثةَ رسومٍ (اتّجاه · التزام · أنواع)',
+  anaP.n === 3 && /حركةُ البلاغات/.test(anaP.titles[0]) && /التزامُ/.test(anaP.titles[1]) && /أنواع الأعمال/.test(anaP.titles[2]),
+  anaP.titles.join(' | '));
+check('★ al: مجاميعُ المنحنى في وسيلة الإيضاح = ما تحسبه _tvwallTrend',
+  new RegExp('وارد\\s*' + anaP.trend.o).test(anaP.leg) && new RegExp('مغلق\\s*' + anaP.trend.c).test(anaP.leg) && anaP.trend.days === 14,
+  anaP.leg);
+check('★ al: المنحنى مسارانِ ومساحةٌ واحدةٌ على محورٍ واحد', anaP.paths === 3, anaP.paths + ' مسار');
+check('★ al: محورُ الزمن ltr والأقدمُ يساراً (وإلا قُرئ الرسمُ معكوساً)',
+  anaP.xdir === 'ltr' && anaP.xs.length === 3 && anaP.xs[0] !== anaP.xs[2], anaP.xs.join(' → '));
+// ٣ متأخرة من ٤ نشطة ⇒ تجاوز٣ ومهلةٌ سليمةٌ للرابع؛ والقطعةُ الصفريةُ مسمّاةٌ ولا تُرسم
+check('★ al: توزيعُ الالتزام يطابق نبضَ التشغيل (٣ تجاوز من ٤ نشطة)',
+  /تجاوز\s*3/.test(anaP.sla) && /داخل الوقت\s*1/.test(anaP.sla) && anaP.slaSegs === 2,
+  anaP.sla + ' · قطع=' + anaP.slaSegs);
+check('★ al: أنواعُ الأعمال تُعدّ البلاغات النشطة وحدها (٤ كهرباء)',
+  anaP.types.length === 1 && /كهرباء/.test(anaP.types[0]) && /4/.test(anaP.types[0]), anaP.types.join(' | '));
+
+// لوحةُ النظافة: رسومٌ بلغةِ نوعها — لا منحنى بلاغاتٍ لا تُنشأ
+const anaC = await page.evaluate(() => {
+  const i = _tvwall.screens.findIndex(s => s.pid === 'clean1');
+  _tvwallShowScreen(i);
+  const cards = Array.from(document.querySelectorAll('#tvl-ana-proj .tvl-ch'));
+  return { titles: cards.map(c => (c.querySelector('.t').textContent || '').trim()),
+           cov: Array.from(cards[0].querySelectorAll('.tvl-hb .r')).map(r => (r.textContent || '').replace(/\s+/g, ' ').trim()),
+           cols: Array.from(cards[1].querySelectorAll('.tvl-cb .c')).map(c => (c.textContent || '').replace(/\s+/g, ' ').trim()) };
+});
+check('★ al: لوحةُ النظافة برسومِ المهام لا برسومِ البلاغات',
+  anaC.titles.every(t => !/بلاغ/.test(t)) && /تغطيةُ اليوم حسب المبنى/.test(anaC.titles[0]) &&
+  /شرائحُ تأخّر المهام/.test(anaC.titles[1]), anaC.titles.join(' | '));
+check('★ al: تغطيةُ المبنى تعرض النسبةَ ومقامَها (لا نسبةً مجرّدة)',
+  anaC.cov.length >= 1 && /%/.test(anaC.cov[0]) && /\d+\/\d+/.test(anaC.cov[0]), anaC.cov.join(' | '));
+// K-1 متأخّرة ٣ أيام و K-2 يوماً ⇒ «يوم واحد»=١ و«حتى ٣»=١ (والمديات بلا شَرطةٍ تُقلب)
+check('★ al: شرائحُ التأخّر أربعٌ مرتّبةٌ بمُسمّياتٍ لا تُقلب في العربية',
+  anaC.cols.length === 4 && anaC.cols.every(c => !/\d-\d|[٠-٩]-[٠-٩]/.test(c)) &&
+  /يوم واحد/.test(anaC.cols[0]) && /أكثر من/.test(anaC.cols[3]), anaC.cols.join(' | '));
+await page.evaluate(() => _tvwallShowScreen(0));
+await page.waitForTimeout(500);
+const anaA = await page.evaluate(() => {
+  const cards = Array.from(document.querySelectorAll('#tvl-ana-all .tvl-ch'));
+  const press = cards.find(c => /ضغطُ العمل/.test(c.querySelector('.t').textContent));
+  return { n: cards.length, titles: cards.map(c => (c.querySelector('.t').textContent || '').trim()),
+           rows: press ? Array.from(press.querySelectorAll('.r')).map(r => ({
+             l: (r.querySelector('.n').textContent || '').trim(),
+             v: (r.querySelector('.v').textContent || '').trim(),
+             w: Array.from(r.querySelectorAll('.tk i')).map(i => i.style.width)
+           })) : [] };
+});
+check('★ al: شاشةُ «الكل» تحمل شريطَ تحليلاتٍ بأربع بطاقاتٍ حدّاً أقصى',
+  anaA.n >= 3 && anaA.n <= 4 && anaA.titles.some(t => /ضغطُ العمل حسب المشروع/.test(t)),
+  anaA.titles.join(' | '));
+check('★ al: ضغطُ العمل مرتّبٌ الأكثرَ أولاً بمقامٍ واحدٍ لكل الصفوف',
+  anaA.rows.length >= 2 && Number(anaA.rows[0].v) >= Number(anaA.rows[1].v) &&
+  Math.abs(anaA.rows[0].w.reduce((a, w) => a + parseFloat(w), 0) - 100) < 0.6 &&
+  Math.abs(anaA.rows[1].w.reduce((a, w) => a + parseFloat(w), 0)
+           - Number(anaA.rows[1].v) / Number(anaA.rows[0].v) * 100) < 0.6,
+  anaA.rows.map(r => `${r.l}=${r.v}[${r.w.join('+')}]`).join(' | '));
+
+/* أخطرُ ما في شريطٍ يُضاف تحت لوحةٍ ممتلئة: يقضم ارتفاعَ ما فوقه فتُقصّ تسمياتُه
+   بلا أثرٍ في أيّ رقم. الفحصُ هندسيٌّ على ثلاثة ارتفاعاتٍ حقيقية. */
+const fitRows = [];
+for (const [w, h] of [[1920, 1080], [1600, 950], [1365, 768]]) {
+  await page.setViewportSize({ width: w, height: h });
+  await page.waitForTimeout(500);
+  for (const scr of [0, 1]) {
+    await page.evaluate(i => _tvwallShowScreen(i), scr);
+    await page.waitForTimeout(400);
+    fitRows.push(await page.evaluate(() => {
+      const bad = [];
+      document.querySelectorAll('#tvwall-screen .tvl-ch, #tvwall-screen .tvw-kpi, #tvwall-screen .tvw-beacon')
+        .forEach(e => { if (e.scrollHeight - e.clientHeight > 1) bad.push((e.textContent || '').trim().slice(0, 14)); });
+      const root = document.querySelector('.tvl-root');
+      return { bad, scroll: root.scrollHeight - innerHeight };
+    }));
+  }
+}
+await page.setViewportSize({ width: 1600, height: 950 });
+await page.waitForTimeout(500);
+check('★ al: لا مقطعَ مقصوصٌ ولا تمرير على ١٠٨٠ و٩٥٠ و٧٦٨ (الشريط لا يقضم ما فوقه)',
+  fitRows.every(r => r.bad.length === 0 && r.scroll <= 1),
+  JSON.stringify(fitRows.filter(r => r.bad.length || r.scroll > 1)).slice(0, 160) || 'كلها سليمة');
+await page.evaluate(() => _tvwallShowScreen(1));
+await page.waitForTimeout(400);
+
 // الرجوع لشاشة «الكل» يعيد المجاميع
 await page.click('#tvl-rot-dots button:nth-child(1)');
 await page.waitForTimeout(700);

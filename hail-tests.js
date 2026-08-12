@@ -6117,6 +6117,124 @@ function tvWallGuards() {
     "نصٌّ ظاهرٌ بالاسم القديم");
   T("★ ai: علامةُ الرادار حلّت محلّ أيقونة الشاشة في زرّ البوّابة",
     /<circle cx="12" cy="12" r="2\.1" fill="currentColor" stroke="none"\/>/.test(HTML));
+
+  /* ══ v18.9al: شريطُ التحليلات — الرسومُ داخل المركز ══ */
+  {
+    // (١) الرسمُ بلا مكتبةٍ ولا شبكة: الجدارُ قد لا يصله CDN
+    if (wallSrc) {
+      T("★ al: الرسمُ بـSVG/HTML خالصٍ بلا مكتبةِ رسمٍ خارجية",
+        !/new Chart\(/.test(wallSrc) && !/https?:\/\/[^"'\s]*(cdn|unpkg|jsdelivr)/i.test(wallSrc) && /<svg viewBox="0 0 \$\{W\} \$\{H\}"/.test(wallSrc),
+        "مكتبةٌ خارجيةٌ = لوحةٌ فارغةٌ عند أوّل انقطاع");
+      T("★ al: ألوانُ SVG في style لا في سمةِ العرض (var() لا يُحلّ في السمة)",
+        /style="stroke:\$\{s\.c\}"/.test(wallSrc) && !/stroke="\$\{s\.c\}"/.test(wallSrc));
+      T("★ al: الشريطان مربوطان بمسارَي الرسم (لا يُبنيان ثم يُهملان)",
+        /_tvwallAnaAll\(rows\);/.test(wallSrc) && /_tvwallAnaProject\(pid,m\);/.test(wallSrc) &&
+        /_tvwallAnaProject\(pid,null\);/.test(wallSrc), "حالةُ التحميل تمسح الشريط ولا تُبقي رسمَ مشروعٍ سابق");
+      T("★ al: الحاويتان في الشاشتين معاً (الكل + لوحة المشروع)",
+        /id="tvl-ana-all"/.test(HTML) && /id="tvl-ana-proj"/.test(HTML));
+      T("★ al: شريطٌ فارغٌ يختفي ولا يترك فجوةً بارتفاعٍ ثابت",
+        /\.tvl-ana:empty\{display:none\}/.test(HTML));
+      T("★ al: تسمياتُ محور الزمن ltr قسراً (وإلا قُرئ الرسمُ معكوساً)",
+        /\.tvl-ch-x\{[^}]*direction:ltr/.test(HTML));
+      T("★ al: صفوفُ الرسم الأفقي تُحسَب بعددٍ يتبع الارتفاع، لا تُخفى بـCSS",
+        /function _tvcRows\(\)\{ return \(window\.innerHeight\|\|900\) < 900 \? 3 : TVWALL_BAR_ROWS; \}/.test(wallSrc) &&
+        !/\.tvl-hb \.r:nth-child/.test(HTML), "إخفاءُ صفٍّ بـCSS قصٌّ صامتٌ يُقرأ «هذا كلُّ شيء»");
+      T("★ al: نبضُ التشغيل وحلقةُ الجاهزية في المركز محدودان بالارتفاع أيضاً",
+        /#tvwall-screen \.tvl-screen-proj \.tvw-kpi \.kv\{font-size:clamp\([^)]*min\(4\.2vw,/.test(HTML) &&
+        /#tvwall-screen \.tvl-screen-proj \.tvw-ring-wrap\{width:min\(/.test(HTML),
+        "قياسٌ بالعرض وحدَه يفيض على عمودٍ أقصر ويقصّ التسمية");
+    }
+    // (٢) حركةُ ١٤ يوماً — تنفيذٌ حقيقيٌّ للدالة
+    const trendSrc = (HTML.match(/function _tvwallTrend\(lists\)\{[\s\S]*?\n\}/) || [])[0];
+    T("★ al: _tvwallTrend موجودة", !!trendSrc);
+    if (trendSrc) {
+      const F = new Function("TVWALL_TREND_DAYS", trendSrc + "; return _tvwallTrend;")(14);
+      const day = k => new Date(Date.now() - k * 86400000).toISOString().slice(0, 10);
+      const r = F([[
+        { status: "مفتوح", createdAt: day(0) + "T08:00:00.000Z" },
+        { status: "مفتوح", createdAt: day(0) + "T09:00:00.000Z" },
+        { status: "مغلق",  createdAt: day(5) + "T08:00:00.000Z", closedAt: day(1) + "T08:00:00.000Z" },
+        { status: "مغلق",  createdAt: day(40) + "T08:00:00.000Z", closedAt: day(2) + "T08:00:00.000Z" }, // أُنشئ خارج النافذة وأُغلق داخلها
+        { status: "مفتوح", createdAt: day(0) + "T10:00:00.000Z", archived: true },                        // مؤرشف ⇒ خارج الحساب
+        { status: "مفتوح", createdAt: day(60) + "T08:00:00.000Z" }                                        // خارج النافذة تماماً
+      ]]);
+      T("★ al: النافذةُ أربعةَ عشرَ يوماً، آخرُها اليوم",
+        r.days.length === 14 && r.days[13] === day(0) && r.days[0] === day(13), r.days[0] + " → " + r.days[13]);
+      T("★ al: الوارِدُ يُعدّ بيوم الإنشاء والمغلقُ بيوم الإغلاق (لا بيومٍ واحد)",
+        r.opened[13] === 2 && r.closed[12] === 1 && r.closed[11] === 1 && r.opened[8] === 1,
+        JSON.stringify({ opened: r.opened, closed: r.closed }));
+      T("★ al: المؤرشفُ خارج المنحنى كما هو خارج البطاقة (رقمان لا يتناقضان)",
+        r.openedN === 3 && r.closedN === 2, `وارد=${r.openedN} مغلق=${r.closedN}`);
+      T("★ al: ما خرج من النافذة لا يُحشر في طرفها (لا قمّةٌ ملفَّقةٌ يوم ١)",
+        r.opened[0] === 0, "opened[0]=" + r.opened[0]);
+      T("★ al: قائمةٌ فارغةٌ أو غائبةٌ ⇒ أصفارٌ لا انهيار",
+        F([]).openedN === 0 && F([null]).closedN === 0 && F(null).opened.length === 14);
+    }
+    // (٣) توزيعُ الالتزام بالمهلة — من slaOf وحدها
+    const slaSrc = (HTML.match(/function _tvwallSlaSplit\(list\)\{[\s\S]*?\n\}/) || [])[0];
+    T("★ al: _tvwallSlaSplit موجودة", !!slaSrc);
+    if (slaSrc) {
+      const F = new Function("slaOf", slaSrc + "; return _tvwallSlaSplit;")(
+        t => t.st ? { state: t.st } : null);
+      const o = F([{ st: "تجاوز" }, { st: "تجاوز" }, { st: "اقترب" }, { st: "داخل الوقت" }, {}]);
+      T("★ al: كلُّ بلاغٍ في خانةٍ واحدة والمجموعُ = العدد",
+        o.over === 2 && o.near === 1 && o.ok === 1 && o.none === 1 &&
+        (o.over + o.near + o.ok + o.none) === 5, JSON.stringify(o));
+      T("★ al: بلا فئةِ مهلةٍ يُعرَض على حدةٍ لا يُلحَق بالملتزم (تجميلٌ لا قياس)", o.ok === 1);
+      T("★ al: بلا دالّةِ SLA محمَّلةٍ لا انهيار",
+        new Function("slaOf", slaSrc + "; return _tvwallSlaSplit;")(undefined)([{}, {}]).none === 2);
+    }
+    // (٤) أعلى القيم — ترتيبٌ وقصٌّ مُعلَنان
+    const topSrc = (HTML.match(/function _tvwallTop\(list, field, n\)\{[\s\S]*?\n\}/) || [])[0];
+    T("★ al: _tvwallTop موجودة", !!topSrc);
+    if (topSrc) {
+      const F = new Function(topSrc + "; return _tvwallTop;")();
+      const r = F([{ w: "كهرباء" }, { w: "كهرباء" }, { w: "كهرباء" }, { w: "سباكة" }, { w: "سباكة" },
+                   { w: "تكييف" }, { w: "" }, { w: "نجارة" }, { w: "دهان" }], "w", 3);
+      T("★ al: الأعلى أولاً وبعددٍ محدود", r.length === 3 && r[0].l === "كهرباء" && r[0].v === 3 && r[1].v === 2);
+      T("★ al: الحقلُ الفارغ يُسمّى «غير محدّد» ولا يُسقَط بصمت",
+        F([{ w: "" }, { w: null }], "w", 5)[0].l === "غير محدّد");
+      T("★ al: قائمةٌ فارغةٌ ⇒ مصفوفةٌ فارغة لا انهيار", F([], "w", 5).length === 0 && F(null, "w", 5).length === 0);
+    }
+    // (٥) رسمُ الأشكال نفسُه — يُنفَّذ ويُفحَص مُخرَجُه
+    const chartFns = ["_tvcNone", "_tvcLegend", "_tvcLine", "_tvcBars", "_tvcCols", "_tvcStack"]
+      .map(n => (HTML.match(new RegExp("function " + n + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}")) || [])[0]);
+    const chartSrc = chartFns.filter(Boolean).join("\n");
+    T("★ al: دوالُّ الرسم كلُّها موجودة", chartFns.every(Boolean), chartFns.filter(x => !x).length + " مفقودة");
+    if (chartSrc) {
+      const mk = () => new Function("esc", "_tvcSeq", chartSrc + "; return {_tvcLine,_tvcBars,_tvcCols,_tvcStack};")
+        (s => String(s), 0);
+      const C = mk();
+      const bars = C._tvcBars([{ l: "أ", v: 4, segs: [{ w: 100, c: "red" }] },
+                               { l: "ب", v: 2, segs: [{ w: 50, c: "red" }] }]);
+      T("★ al: الأعمدةُ الأفقية بمقامٍ واحدٍ لكل الصفوف (وإلا كذب طولُ الشريط)",
+        /width:100\.0%/.test(bars) && /width:50\.0%/.test(bars));
+      T("★ al: القطعةُ الصفرية لا تُرسم (شريطٌ بعرضٍ صفرٍ زينةٌ لا معلومة)",
+        !/width:0\.0%/.test(C._tvcBars([{ l: "أ", v: 0, segs: [{ w: 0, c: "red" }] }])));
+      T("★ al: بلا صفوفٍ ⇒ رسالةُ «لا بيانات» لا رسمٌ فارغ", /tvl-ch-none/.test(C._tvcBars([])));
+      const cols = C._tvcCols([{ l: "يوم", v: 2 }, { l: "حتى ٣", v: 8 }], "red");
+      T("★ al: أطولُ عمودٍ يبلغ السقفَ والباقي نسبةً منه",
+        /top:0%/.test(cols) && /top:75%/.test(cols), cols.replace(/\s+/g, " ").slice(0, 120));
+      T("★ al: كلُّ الأعمدة أصفارٌ ⇒ «لا بيانات» لا خطٌّ عند القاع",
+        /tvl-ch-none/.test(C._tvcCols([{ l: "أ", v: 0 }, { l: "ب", v: 0 }], "red")));
+      const st = C._tvcStack([{ l: "داخل الوقت", v: 3, c: "g" }, { l: "اقترب", v: 0, c: "a" }, { l: "تجاوز", v: 1, c: "r" }]);
+      T("★ al: المكدَّسُ نِسَبٌ من مجموعه، والقطعةُ الصفريةُ لا تُرسم",
+        /flex:3/.test(st) && /flex:1/.test(st) && !/flex:0/.test(st));
+      T("★ al: كلُّ قطعةٍ مسمّاةٌ برقمها ولو كانت صفراً (لا قراءةَ باللون وحده)",
+        (st.match(/<b class="tvw-num">/g) || []).length === 3 && /اقترب/.test(st));
+      T("★ al: مجموعٌ صفرٌ ⇒ «لا بيانات» لا شريطٌ ملوَّنٌ بلا معنى",
+        /tvl-ch-none/.test(C._tvcStack([{ l: "أ", v: 0, c: "g" }])));
+      const line = C._tvcLine([{ c: "b", pts: [0, 2, 4] }, { c: "g", pts: [1, 1, 1] }], ["a", "b", "ج"]);
+      T("★ al: المنحنى سلسلتان على محورٍ واحد (مقامٌ واحدٌ لكلتيهما)",
+        (line.match(/<path/g) || []).length === 3 && /preserveAspectRatio="none"/.test(line) &&
+        /vector-effect="non-scaling-stroke"/.test(line), "محوران لمقياسين = أشهرُ خطأٍ في الرسوم");
+      T("★ al: نقطةٌ واحدةٌ لا تُرسم منحنى (خطٌّ بلا اتّجاه)",
+        /tvl-ch-none/.test(C._tvcLine([{ c: "b", pts: [3] }], ["a"])));
+      T("★ al: معرّفُ التدرّج فريدٌ لكل رسم (تكرارُه = تدرّجٌ خاطئ)",
+        (C._tvcLine([{ c: "b", pts: [1, 2] }], null).match(/id="(tvcg\d+)"/) || [])[1] !==
+        (C._tvcLine([{ c: "b", pts: [1, 2] }], null).match(/id="(tvcg\d+)"/) || [])[1]);
+    }
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════
