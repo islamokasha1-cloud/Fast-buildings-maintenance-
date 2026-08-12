@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2603";
+var MODULE_BUILD = "v18.9.2605";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -133,6 +133,131 @@ var VENDOR_STATUS = {
   suspended:  { key:"suspended",  lbl:"موقوف مؤقتاً",     cls:"b-po-approval",  icon:"alertTriangle" },
   blacklisted:{ key:"blacklisted",lbl:"محظور",           cls:"b-po-rejected",  icon:"ban" }
 };
+
+/* ── نوعُ الأعمال (تخصّصُ الطرف) — **قائمةٌ يُختار منها أو نصٌّ يُكتب** ──
+   «النوع» أعلاه يقول **ماذا يكون** الطرف (مقاولٌ أم مورّد)، وهذا يقول **ماذا يعمل**
+   (كهرباءَ أم تكييفاً أم عزلاً). المحوران مستقلّان تماماً: مقاولُ باطنٍ للكهرباء
+   ومورّدُ موادَّ كهربائيةٍ يتشاركان التخصّصَ ويفترقان في النوع — ومن يبحث عن
+   «مقاولي الكهرباء» يريد الأوّلَ وحدَه.
+
+   **ولماذا القائمةُ والكتابةُ معاً؟** كتالوجٌ مغلقٌ يعني أن أوّلَ تخصّصٍ لم نتوقّعه
+   يُسجَّل تحت «أخرى» فيضيع، ونصٌّ حرٌّ محضٌ يعني بعد سنةٍ سبعَ تهجئاتٍ لـ«تكييف»
+   لا يجمعها مرشّح. فالقائمةُ هي الطريقُ المعبَّد، والكتابةُ مخرجُ الطوارئ —
+   و`normTrade` تلمّ الاثنين: ما يُكتب مطابقاً لاسمٍ في القائمة **يصير مفتاحَها**
+   لا تخصّصاً ثانياً بالاسم نفسِه.
+
+   التخزينُ: `vendor.trades` مصفوفةُ نصوص — مفتاحٌ لاتينيٌّ لما جاء من القائمة،
+   والنصُّ كما كُتب لما جاء يدوياً. واللاتينيُّ لا يصطدم بالعربيّ فلا لبس. */
+var TRADES = [
+  { key:"civil",        lbl:"أعمال مدنية وإنشائية" },
+  { key:"plumbing",     lbl:"سباكة" },
+  { key:"electrical",   lbl:"كهرباء" },
+  { key:"hvac",         lbl:"تكييف وتبريد" },
+  { key:"firefighting", lbl:"مكافحة حريق وإنذار" },
+  { key:"lowCurrent",   lbl:"تيار خفيف (كاميرات وشبكات)" },
+  { key:"elevators",    lbl:"مصاعد" },
+  { key:"generators",   lbl:"مولّدات وأنظمة طوارئ" },
+  { key:"solar",        lbl:"طاقة شمسية" },
+  { key:"water",        lbl:"خزانات ومضخّات ومياه" },
+  { key:"plaster",      lbl:"محارة وبياض" },
+  { key:"tiling",       lbl:"بلاط وسيراميك ورخام" },
+  { key:"paint",        lbl:"دهانات" },
+  { key:"gypsum",       lbl:"جبس بورد وأسقف مستعارة" },
+  { key:"finishes",     lbl:"تشطيبات عامة" },
+  { key:"carpentry",    lbl:"نجارة وأبواب" },
+  { key:"aluminum",     lbl:"ألوميتال وزجاج" },
+  { key:"metalwork",    lbl:"حدادة وأعمال معدنية" },
+  { key:"steel",        lbl:"هناجر وإنشاءات معدنية" },
+  { key:"insulation",   lbl:"عزل مائي وحراري" },
+  { key:"roads",        lbl:"طرق وأسفلت وأرصفة" },
+  { key:"landscape",    lbl:"تنسيق حدائق وريّ" },
+  { key:"cleaning",     lbl:"نظافة" },
+  { key:"pestControl",  lbl:"مكافحة حشرات" },
+  { key:"safety",       lbl:"سلامة ومعدات وقاية" },
+  { key:"equipment",    lbl:"تأجير معدات" },
+  { key:"transport",    lbl:"نقل ومناولة" },
+  { key:"manpower",     lbl:"توريد عمالة" },
+  { key:"materials",    lbl:"توريد مواد بناء" },
+  { key:"elecSupply",   lbl:"توريد مواد كهربائية" },
+  { key:"plumbSupply",  lbl:"توريد مواد صحية وسباكة" },
+  { key:"hvacSupply",   lbl:"توريد مواد تكييف" },
+  { key:"hardware",     lbl:"توريد عُدد وأدوات" },
+  { key:"cleanSupply",  lbl:"توريد مواد نظافة" },
+  { key:"furniture",    lbl:"أثاث وتجهيزات مكتبية" },
+  { key:"itSupply",     lbl:"توريد حاسبات وطابعات" },
+  { key:"printing",     lbl:"دعاية وطباعة" },
+  { key:"consulting",   lbl:"استشارات وتصميم هندسي" }
+];
+var TRADE_LBL = (function(){ var m={}; TRADES.forEach(function(t){ m[t.key]=t.lbl; }); return m; })();
+/* اسمُ التخصّص مطبَّعاً ⇐ مفتاحُه — به يلتقي المكتوبُ يدوياً بنظيره في القائمة. */
+var TRADE_BY_NAME = (function(){ var m={}; TRADES.forEach(function(t){ m[normName(t.lbl)]=t.key; }); return m; })();
+
+/* المفتاحُ القانونيُّ للتخصّص — كلُّ ما يعني الشيءَ نفسَه يعود بمفتاحٍ واحد.
+   بدونه تصير «كهرباء» المكتوبةُ يدوياً تخصّصاً ثانياً غيرَ `electrical`، فيبحث
+   المشتري عن مقاولي الكهرباء فلا يجد نصفَهم — وهو أسوأُ من ألّا يجد أحداً،
+   لأنه يظنّ أنه رأى القائمةَ كاملة. النصُّ الحرُّ يُصدَّر بادئةً `~` فلا يصطدم بمفتاح. */
+function normTrade(t){
+  var s = String(t==null?"":t).trim();
+  if(!s) return "";
+  if(TRADE_LBL[s]) return s;
+  var n = normName(s);
+  if(!n) return "";
+  return TRADE_BY_NAME[n] || ("~"+n);
+}
+/* التسميةُ المعروضة: مفتاحُ القائمة يُترجَم، والنصُّ الحرُّ يُعرَض كما كُتب. */
+function tradeLabel(t){
+  var s = String(t==null?"":t).trim();
+  if(TRADE_LBL[s]) return TRADE_LBL[s];
+  var k = normTrade(s);
+  return TRADE_LBL[k] ? TRADE_LBL[k] : s;
+}
+/* تخصّصاتُ الطرف مقنّنةً: تُنقّى وتُزال تكراراتُها (بالمفتاح لا بالحرف) ويُحفَظ الترتيب. */
+function vendorTrades(v){
+  var raw = (v && Array.isArray(v.trades)) ? v.trades : [];
+  var seen = {}, out = [];
+  raw.forEach(function(t){
+    var k = normTrade(t); if(!k || seen[k]) return;
+    seen[k] = true;
+    out.push(TRADE_LBL[k] ? k : String(t).trim());
+  });
+  return out;
+}
+/* مرشّحٌ فارغٌ يعني «الكلّ» — لا «من لا تخصّصَ له». */
+function vendorHasTrade(v, trade){
+  var k = normTrade(trade); if(!k) return true;
+  return vendorTrades(v).some(function(x){ return normTrade(x) === k; });
+}
+/* **«مقاول ومورّد» مقاولٌ حقّاً ومورّدٌ حقّاً.** المطابقةُ الحرفيةُ كانت تُسقطه من
+   نتيجة «أرِني المقاولين» — فيبحث المشتري عمّن يعرف أنه موجودٌ فلا يجده. */
+function kindMatches(v, kind){
+  if(!kind) return true;
+  var k = (v && v.kind) || "subcontractor";
+  if(k === kind) return true;
+  return k === "both" && (kind === "subcontractor" || kind === "supplier");
+}
+/* خياراتُ المرشّح = الكتالوجُ + **ما كُتب يدوياً فعلاً** في السجل.
+   كتالوجٌ وحدَه يجعل التخصّصَ المكتوبَ يدوياً غيرَ قابلٍ للترشيح أصلاً — فيصير
+   بابُ الكتابة اليدوية بابَ دفنٍ لا بابَ مرونة. */
+function tradeOptions(list){
+  var pool = Array.isArray(list) ? list : _vendors;
+  var seen = {};
+  var out = TRADES.map(function(t){ seen[t.key]=true; return { key:t.key, lbl:t.lbl, custom:false }; });
+  (pool||[]).forEach(function(v){
+    vendorTrades(v).forEach(function(t){
+      var k = normTrade(t); if(!k || seen[k]) return;
+      seen[k] = true; out.push({ key:t, lbl:tradeLabel(t), custom:true });
+    });
+  });
+  return out;
+}
+/* الدالّةُ النقيّةُ التي يقوم عليها الطلبُ كلُّه: «مقاولون أو موردون لنوع أعمالٍ
+   معيّن». تقرؤها الشاشةُ ويقرؤها الفحص — فلا مرشّحَ ثانٍ يفترق عنها. */
+function vendorsByTrade(trade, kind, list){
+  var pool = Array.isArray(list) ? list : _vendors;
+  return (pool||[]).filter(function(v){
+    return kindMatches(v, kind) && vendorHasTrade(v, trade);
+  });
+}
 
 /* ── وثائقُ الطرف: النوعُ ثابتٌ والتاريخُ متغيّر ──
    القائمةُ ثابتةٌ عمداً — «أضِف نوعاً» يعني بعد سنةٍ عشرين تهجئةً للسجل التجاري
@@ -2790,7 +2915,7 @@ function _users(){ try{ return Array.isArray(USERS) ? USERS : []; }catch(e){ ret
    ٦) سجلُّ الأطراف — الواجهة
    ════════════════════════════════════════════════════════════════════ */
 var _page    = "";        // الصفحةُ المعروضة حالياً من هذه الوحدة
-var _vFilter = { q:"", kind:"", entity:"", status:"" };
+var _vFilter = { q:"", kind:"", entity:"", status:"", trade:"" };
 var _vOpen   = null;      // معرّفُ الطرف المفتوح (null = القائمة)
 var _vEdit   = null;      // مسوّدةُ التحرير (null = عرض)
 
@@ -2828,12 +2953,15 @@ function vendorListHTML(){
 
   var q = normName(_vFilter.q);
   var list = all.filter(function(v){
-    if(_vFilter.kind && v.kind !== _vFilter.kind) return false;
+    if(!kindMatches(v, _vFilter.kind)) return false;
     if(_vFilter.entity && normEntity(v.entityType) !== _vFilter.entity) return false;
     if(_vFilter.status && (v.status||"active") !== _vFilter.status) return false;
+    if(!vendorHasTrade(v, _vFilter.trade)) return false;
     if(q){
+      // نوعُ الأعمال داخلَ البحث: من يكتب «عزل» في المربّع يقصد التخصّصَ لا الاسمَ فقط
       var hay = normName(v.name) + " " + normName((v.aliases||[]).join(" ")) + " " +
-                normName(identityOf(v).number) + " " + normName((v.legal||{}).vatNumber);
+                normName(identityOf(v).number) + " " + normName((v.legal||{}).vatNumber) + " " +
+                normName(vendorTrades(v).map(tradeLabel).join(" "));
       if(hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -2880,7 +3008,13 @@ function vendorListHTML(){
         return '<option value="'+k+'"'+(_vFilter.status===k?' selected':'')+'>'+_esc(VENDOR_STATUS[k].lbl)+'</option>';
       }).join("")+
     '</select>'+
-  '</div>';
+    '<select class="form-input" id="ct-v-trade" onchange="contracts.filterVendors(\'trade\',this.value)">'+
+      tradeFilterOptionsHTML(all, _vFilter.trade)+
+    '</select>'+
+  '</div>'+
+  // **يُقال ما وُجد ومن أيّ مجموعة** — «٣ نتائج» وحدَه لا يخبر أنّ المرشَّح مقاولون
+  // من تخصّصٍ بعينه، ومن نسي مرشّحاً مفعَّلاً يقرأ سجلاً ناقصاً ويظنّه كاملاً.
+  (tradeNoteHTML(list) || "");
 
   var body;
   if(_vError){
@@ -2905,6 +3039,36 @@ function vendorListHTML(){
   return head + strip + filters + body;
 }
 
+/* خياراتُ مرشّح نوع الأعمال — مجموعتان مفصولتان صراحةً: ما جاء من القائمة وما
+   كُتب يدوياً. الفصلُ ليس زينة: المكتوبُ يدوياً مرشَّحٌ للتوحيد لاحقاً، ورؤيتُه
+   مجموعاً تحت عنوانه هي ما يجعل «سبعَ تهجئاتٍ لتكييف» ظاهرةً بدل أن تتوارى. */
+function tradeFilterOptionsHTML(pool, sel){
+  var opts = tradeOptions(pool);
+  var selK = normTrade(sel);
+  function o(t){
+    return '<option value="'+_esc(t.key)+'"'+(selK && normTrade(t.key)===selK?' selected':'')+'>'+_esc(t.lbl)+'</option>';
+  }
+  var cat = opts.filter(function(t){ return !t.custom; });
+  var cus = opts.filter(function(t){ return t.custom; });
+  return '<option value=""'+(selK?'':' selected')+'>كل أنواع الأعمال</option>'+
+    '<optgroup label="من القائمة">'+cat.map(o).join("")+'</optgroup>'+
+    (cus.length ? '<optgroup label="مكتوبة يدوياً">'+cus.map(o).join("")+'</optgroup>' : "");
+}
+
+/* سطرُ «ما تراه الآن» — يظهر فقط حين يكون مرشّحُ النوع أو التخصّص مفعَّلاً. */
+function tradeNoteHTML(list){
+  if(!_vFilter.trade && !_vFilter.kind) return "";
+  var kindLbl = _vFilter.kind ? ((VENDOR_KINDS[_vFilter.kind]||{}).lbl || "") : "كل الأطراف";
+  var who = _vFilter.trade
+    ? kindLbl + " — نوع الأعمال: «" + tradeLabel(_vFilter.trade) + "»"
+    : kindLbl;
+  return '<div class="ct-note" style="margin:-6px 0 12px">'+_icn("search","ic-sm")+
+    ' '+_esc(who)+' · <b class="num">'+list.length+'</b> نتيجة'+
+    (_vFilter.kind==="subcontractor"||_vFilter.kind==="supplier"
+      ? ' <span style="color:var(--muted)">(ويشمل «مقاول ومورّد»)</span>' : '')+
+    ' <button class="btn btn-ghost btn-sm" onclick="contracts.clearTradeFilter()">'+_icn("rotateCcw","ic-sm")+' إلغاء الترشيح</button></div>';
+}
+
 function vendorTileHTML(v, today){
   var kind = VENDOR_KINDS[v.kind] || VENDOR_KINDS.subcontractor;
   var ent  = ENTITY_TYPES[normEntity(v.entityType)];
@@ -2913,6 +3077,15 @@ function vendorTileHTML(v, today){
   var comp = vendorComplianceState(v, today);
   var rail = comp.expired ? "var(--sla-crit)" : (comp.soon ? "var(--sla-warn)" : "var(--sla-ok)");
   if((v.status||"active") !== "active") rail = "var(--muted)";
+
+  // نوعُ الأعمال على البطاقة: هو أوّلُ ما يبحث عنه الناظرُ في شبكةٍ من عشرات الأطراف
+  var tr = vendorTrades(v);
+  var trHTML = tr.length
+    ? '<div class="ct-trades">'+
+        tr.slice(0,3).map(function(t){ return '<span class="ct-trade">'+_esc(tradeLabel(t))+'</span>'; }).join("")+
+        (tr.length>3 ? '<span class="ct-trade more">+'+(tr.length-3)+'</span>' : '')+
+      '</div>'
+    : '';
 
   var chips = allExpiring(v).slice(0,5).map(function(dc){
     var s = docExpiryState(dc.expiry, today);
@@ -2930,6 +3103,7 @@ function vendorTileHTML(v, today){
       ' <span class="ct-dot">·</span> '+_icn(kind.icon,"ic-sm")+' '+_esc(kind.lbl)+
       (id.number?' <span class="ct-dot">·</span> <b class="num">'+_esc(id.number)+'</b>':'')+
     '</div>'+
+    trHTML +
     '<div class="ct-docs">'+chips+'</div>'+
   '</div>';
 }
@@ -3016,6 +3190,7 @@ function vendorCardHTML(id){
       : infoCell("الرقم الضريبي", numOrDash((v.legal||{}).vatNumber))) +
     infoCell("وضع الضريبة المقترَح", _esc(vatSug ? vatSug.short : "—")) +
     infoCell("العنوان الوطني", _esc((v.legal||{}).nationalAddress||"—")) +
+    infoCell("نوع الأعمال", vendorTradesHTML(v), true) +
   '</div>';
 
   /* الآيبان حقلٌ حسّاسٌ لا حقلٌ عادي: يظهر مقنَّعاً لغير المخوَّل، وتغييرُه مقيَّدٌ
@@ -3085,8 +3260,18 @@ function sodNoteHTML(mode, owner){
   return "";
 }
 
-function infoCell(label, valueHtml){
-  return '<div class="ct-cell"><div class="ct-cell-l">'+_esc(label)+'</div><div class="ct-cell-v">'+valueHtml+'</div></div>';
+function infoCell(label, valueHtml, wide){
+  return '<div class="ct-cell'+(wide?' wide':'')+'"><div class="ct-cell-l">'+_esc(label)+'</div><div class="ct-cell-v">'+valueHtml+'</div></div>';
+}
+
+/* شارات تخصّصات الطرف — وحين لا تخصّصَ **يُقال السبب**: الفراغُ هنا ليس «لا شيء»
+   بل «لن يجدَه أحدٌ بالبحث»، وهو ما يجب أن يقرأه من يفتح البطاقة. */
+function vendorTradesHTML(v){
+  var tr = vendorTrades(v);
+  if(!tr.length) return '<span style="color:var(--muted);font-weight:600">— لم يُحدَّد بعد</span>';
+  return '<div class="ct-trades" style="margin:0">'+tr.map(function(t){
+    return '<span class="ct-trade">'+_esc(tradeLabel(t))+'</span>';
+  }).join("")+'</div>';
 }
 
 /* خانةُ الطرف: الاسمُ **وزرٌّ يفتح سجلَّه**.
@@ -3102,6 +3287,41 @@ function vendorCell(vendorId, vendorName){
       _icn("hardHat","ic-sm")+' تفاصيل الطرف</button></div>';
 }
 function numOrDash(s){ return s ? '<span class="num">'+_esc(s)+'</span>' : "—"; }
+
+/* ── نوعُ الأعمال في النموذج: قائمةٌ **و**كتابة ──
+   الاختيارُ من القائمة يُضيف فوراً (بلا زرِّ تأكيدٍ ثانٍ يُنسى)، والكتابةُ تُضيف
+   بـEnter أو بالزرّ. والمختارُ يُعرَض شاراتٍ تُحذَف بنقرة — فلا حقلَ نصٍّ واحدٍ
+   بفواصلَ يقرؤه المستخدمُ خطأً «تخصّصاً واحداً طويلاً». */
+function tradeEditHTML(d){
+  var picked = vendorTrades(d);
+  var avail  = TRADES.filter(function(t){ return !vendorHasTrade(d, t.key); });
+
+  var chips = picked.length
+    ? '<div class="ct-trades edit">'+picked.map(function(t,i){
+        return '<span class="ct-trade">'+_esc(tradeLabel(t))+
+          '<button type="button" class="ct-trade-x" title="إزالة" onclick="contracts.delTrade('+i+')">×</button></span>';
+      }).join("")+'</div>'
+    : '<div class="ct-note" style="margin:2px 0 8px">'+_icn("alertCircle","ic-sm")+
+      ' لا نوعَ أعمالٍ بعد — وبدونه لا يظهر هذا الطرف حين يُبحث عن «مقاولي الكهرباء» ونظائرِها.</div>';
+
+  return '<div class="ct-form-row">'+
+    '<div class="ct-field" style="grid-column:1/-1">'+
+      '<span class="ct-field-l">نوع الأعمال (تخصّصه) — اختر من القائمة أو اكتب نوعاً غيرَ موجودٍ فيها</span>'+
+      chips+
+      '<div class="ct-trade-add">'+
+        '<select class="form-input" id="ct-f-trade-pick" onchange="contracts.addTrade(this.value)">'+
+          '<option value="">— اختر من القائمة —</option>'+
+          avail.map(function(t){ return '<option value="'+_esc(t.key)+'">'+_esc(t.lbl)+'</option>'; }).join("")+
+        '</select>'+
+        '<input class="form-input" id="ct-f-trade-new" placeholder="أو اكتب نوعاً آخر ثم Enter" '+
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();contracts.addTradeText();}">'+
+        '<button class="btn btn-ghost btn-sm" type="button" onclick="contracts.addTradeText()">'+_icn("plus","ic-sm")+' إضافة</button>'+
+      '</div>'+
+      '<div class="ct-note" style="margin:8px 0 0">'+_icn("alertCircle","ic-sm")+
+        ' يجوز أكثرُ من نوع. وما تكتبه مطابقاً لاسمٍ في القائمة يُوحَّد معه تلقائياً فلا يتكرّر التخصّصُ باسمين.</div>'+
+    '</div>'+
+  '</div>';
+}
 
 /* ── نموذجُ التحرير ── */
 function vendorEditHTML(v){
@@ -3156,6 +3376,7 @@ function vendorEditHTML(v){
         Object.keys(VENDOR_KINDS).map(function(k){ return '<option value="'+k+'"'+(d.kind===k?' selected':'')+'>'+_esc(VENDOR_KINDS[k].lbl)+'</option>'; }).join("")+
       '</select>') +
     '</div>'+
+    tradeEditHTML(d)+
     '<div class="ct-form-row">'+
       field(ent==="individual" ? "اسم الشخص *" : "اسم المنشأة *",
         '<input class="form-input" id="ct-f-name" value="'+_esc(d.name||"")+'" placeholder="'+(ent==="individual"?"الاسم الرباعي كما في الهوية":"الاسم كما في السجل التجاري")+'">') +
@@ -3224,6 +3445,7 @@ function filterVendors(key, val){
     if(inp){ inp.focus(); try{ inp.setSelectionRange(inp.value.length, inp.value.length); }catch(e){} }
   }
 }
+function clearTradeFilter(){ _vFilter.trade = ""; _vFilter.kind = ""; paintVendors(); }
 function openVendor(id){ _vOpen = id; _vEdit = null; paintVendors(); }
 function backToVendors(){ _vOpen = null; _vEdit = null; paintVendors(); }
 function retry(){ stopSync(); startSync(); paintVendors(); }
@@ -3231,7 +3453,7 @@ function retry(){ stopSync(); startSync(); paintVendors(); }
 function newVendor(){
   if(!canEdit()) return _toast("⚠ لا صلاحية لإضافة طرف","warn");
   _vOpen = null;
-  _vEdit = { name:"", entityType:"establishment", kind:"subcontractor", legal:{}, bank:{}, docs:[], aliases:[], status:"active", taxRegistered:null };
+  _vEdit = { name:"", entityType:"establishment", kind:"subcontractor", legal:{}, bank:{}, docs:[], aliases:[], trades:[], status:"active", taxRegistered:null };
   var el = document.getElementById("page-"+PAGE_VENDORS);
   if(el) el.innerHTML = vendorEditHTML(null);
 }
@@ -3245,6 +3467,7 @@ function editVendor(){
     bank:  Object.assign({}, v.bank||{}),
     docs:  (Array.isArray(v.docs)?v.docs:[]).map(function(d){ return Object.assign({}, d); }),
     aliases: (Array.isArray(v.aliases)?v.aliases:[]).slice(),
+    trades: vendorTrades(v),
     status: v.status||"active"
   };
   paintVendors();
@@ -3294,6 +3517,30 @@ function syncDraft(){
 }
 /* تبديلُ الصفة يُعيد رسمَ النموذج بحقولها — بعد مزامنةِ ما كُتب، فلا يضيع شيء. */
 function setEntity(v){ syncDraft(); if(!_vEdit) return; _vEdit.entityType = normEntity(v); paintDraft(); }
+
+/* إضافةُ تخصّصٍ من القائمة — تُضاف فوراً بلا زرِّ تأكيدٍ ثانٍ. */
+function addTrade(key){
+  syncDraft(); if(!_vEdit) return;
+  var k = String(key||"").trim(); if(!k){ paintDraft(); return; }
+  _vEdit.trades = vendorTrades({ trades: vendorTrades(_vEdit).concat([k]) });
+  paintDraft();
+}
+/* إضافةُ تخصّصٍ مكتوبٍ يدوياً — يُوحَّد مع القائمة إن طابق اسماً فيها (`normTrade`). */
+function addTradeText(){
+  var inp = document.getElementById("ct-f-trade-new");
+  var txt = inp ? String(inp.value||"").trim() : "";
+  syncDraft(); if(!_vEdit) return;
+  if(!txt) return _toast("⚠ اكتب نوع الأعمال أوّلاً","warn");
+  var before = vendorTrades(_vEdit);
+  var after  = vendorTrades({ trades: before.concat([txt]) });
+  if(after.length === before.length) return _toast("⚠ «"+tradeLabel(txt)+"» مُضافٌ بالفعل","warn");
+  _vEdit.trades = after;
+  paintDraft();
+}
+function delTrade(i){
+  syncDraft(); if(!_vEdit) return;
+  var t = vendorTrades(_vEdit); t.splice(i,1); _vEdit.trades = t; paintDraft();
+}
 function addDoc(){ syncDraft(); if(!_vEdit) return; _vEdit.docs.push({ type:(docTypesFor(_vEdit.entityType)[0]||{key:"other"}).key, number:"", expiry:"" }); paintDraft(); }
 function delDoc(i){ syncDraft(); if(!_vEdit) return; _vEdit.docs.splice(i,1); paintDraft(); }
 function paintDraft(){
@@ -3342,6 +3589,7 @@ function saveVendorEdit(){
     return chain.then(function(){
       var payload = {
         name: d.name, entityType: ent, kind: d.kind, aliases: d.aliases,
+        trades: vendorTrades(d),
         taxRegistered: (d.taxRegistered===true||d.taxRegistered===false) ? d.taxRegistered : null,
         legal: d.legal || {}, docs: d.docs || [],
         status: d.status || "active"
@@ -3865,10 +4113,14 @@ function totalsHTML(t, mode){
     '<div class="ct-tl"><span class="l">ض.ق.م</span><span class="v num">'+money(t.vat)+'</span></div>'+
     '<div class="ct-tl big"><span class="l">الإجمالي — '+_esc(m.short)+'</span><span class="v num">'+money(t.total)+'</span></div>';
 }
+/* تخصّصُ الطرف داخلَ خيار الاختيار: من يُسند عملَ كهرباءَ يحتاج أن يميّز
+   كهربائياً من سبّاكٍ **وهو في لحظة الاختيار**، لا بعد فتح سجلّ الأطراف. */
 function vendorOptions(sel){
   return '<option value="">— اختر الطرف —</option>'+_vendors.map(function(v){
     var ent=ENTITY_TYPES[normEntity(v.entityType)];
-    return '<option value="'+_esc(v.id)+'"'+(sel===v.id?' selected':'')+'>'+_esc(v.name||v.id)+' — '+_esc(ent.short)+'</option>';
+    var tr =vendorTrades(v).slice(0,2).map(tradeLabel).join(" · ");
+    return '<option value="'+_esc(v.id)+'"'+(sel===v.id?' selected':'')+'>'+_esc(v.name||v.id)+' — '+_esc(ent.short)+
+      (tr?' · '+_esc(tr):'')+'</option>';
   }).join("");
 }
 /* إعادةُ حسابِ الإجماليات وحدَها دون إعادة رسم النموذج — فلا يقفز مؤشّرُ الكتابة. */
@@ -6403,6 +6655,16 @@ function injectCSS(){
 ".ct-doc.s-expired{background:var(--sla-crit-bg);color:var(--sla-crit);border-color:var(--sla-crit-bd)}",
 ".ct-doc.s-none{background:var(--surface2);color:var(--muted);border-color:var(--border)}",
 ".ct-row-id td{background:var(--surface2)}",
+/* شاراتُ نوع الأعمال — تُميَّز عن شارات الوثائق بلونها المحايد: تلك حالةُ سريانٍ
+   تتغيّر بالزمن، وهذه صفةٌ ثابتة. تشابهُهما بصرياً يُقرأ حالةً حيث لا حالة. */
+".ct-trades{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px}",
+".ct-trade{font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:7px;background:var(--surface2);color:var(--primary);border:1px solid var(--border);white-space:nowrap;display:inline-flex;align-items:center;gap:4px}",
+".ct-trade.more{color:var(--muted)}",
+".ct-trade-x{border:0;background:none;color:var(--muted);font-size:14px;line-height:1;cursor:pointer;padding:0;font-weight:800}",
+".ct-trade-x:hover{color:var(--danger)}",
+".ct-trades.edit{margin:2px 0 8px}",
+".ct-trade-add{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center}",
+".ct-cell.wide{grid-column:1/-1}",
 /* ── طلبات التعاقد ── */
 ".ct-tile-foot{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;margin-top:10px;padding-top:9px;border-top:1px dashed var(--border)}",
 ".ct-money{font-size:17px;font-weight:800;color:var(--text);font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;direction:ltr}",
@@ -6494,7 +6756,7 @@ function injectCSS(){
 ".ct-empty-ic svg{width:46px;height:46px;stroke-width:1.5}",
 ".ct-empty-t{font-size:15px;font-weight:800;color:var(--primary);margin-bottom:6px}",
 ".ct-empty-s{font-size:12.5px;color:var(--muted);max-width:420px;margin:0 auto;line-height:1.7}",
-"@media(max-width:760px){.ct-filters{grid-template-columns:1fr}.ct-form-row{grid-template-columns:1fr}.ct-grid{grid-template-columns:1fr}.ct-picks{grid-template-columns:1fr}}",
+"@media(max-width:760px){.ct-filters{grid-template-columns:1fr}.ct-form-row{grid-template-columns:1fr}.ct-grid{grid-template-columns:1fr}.ct-picks{grid-template-columns:1fr}.ct-trade-add{grid-template-columns:1fr}}",
 "@media(prefers-reduced-motion:reduce){.ct-tile{transition:none}.ct-tile:hover{transform:none}.ct-bar>span{transition:none}}"
   ].join("\n");
   document.head.appendChild(st);
@@ -6605,6 +6867,8 @@ window.contracts = {
   newVendor: newVendor, editVendor: editVendor, cancelVendorEdit: cancelVendorEdit,
   saveVendorEdit: saveVendorEdit, addDoc: addDoc, delDoc: delDoc, changeStatus: changeStatus,
   setEntity: setEntity,
+  addTrade: addTrade, addTradeText: addTradeText, delTrade: delTrade,
+  clearTradeFilter: clearTradeFilter,
   vendors: vendors, vendorById: vendorById,
   // طلبات التعاقد [المرحلة ٢]
   renderReqs: renderReqs, startReqSync: startReqSync, stopReqSync: stopReqSync, retryReqs: retryReqs,
@@ -6718,6 +6982,12 @@ window.contracts = {
   _duplicateOf: duplicateOf,
   _docTypesFor: docTypesFor,
   _normEntity: normEntity,
+  // نوعُ الأعمال (التخصّص) — الدوالُّ النقيّةُ التي تقرؤها الشاشةُ والفحصُ معاً
+  _TRADES: TRADES,
+  _normTrade: normTrade, _tradeLabel: tradeLabel,
+  _vendorTrades: vendorTrades, _vendorHasTrade: vendorHasTrade,
+  _kindMatches: kindMatches, _tradeOptions: tradeOptions,
+  _vendorsByTrade: vendorsByTrade,
   _crqProcKey: crqProcKey,
   _crqFinanceKey: crqFinanceKey,
   _crqRevalidate: crqRevalidate,

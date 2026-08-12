@@ -73,6 +73,7 @@ await page.evaluate(() => {
   const _dayOff = n => new Date(Date.now() + n*86400000).toISOString().slice(0, 10);
   window.__store[V + '/VND-0001'] = {
     name: 'مؤسسة الأنوار للمقاولات', kind: 'subcontractor', status: 'active',
+    trades: ['electrical', 'lowCurrent'],
     legal: { crNumber: '1010234567', vatNumber: '300012345600003', nationalAddress: 'حائل — حي النقرة' },
     bank: { iban: 'SA0380000000608010167519', bankName: 'الأهلي' },
     docs: [{ type: 'cr', number: '1010234567', expiry: _dayOff(265) }, { type: 'vat', number: '3000123456', expiry: _dayOff(160) },
@@ -81,17 +82,21 @@ await page.evaluate(() => {
   };
   window.__store[V + '/VND-0002'] = {
     name: 'شركة البناء الحديث', kind: 'both', status: 'active',
+    // «كهرباء» **مكتوبةٌ يدوياً** لا مفتاحاً — مادّةُ فحصِ التقاء المكتوب بالمختار
+    trades: ['كهرباء', 'civil'],
     legal: { crNumber: '4030998877' },
     docs: [{ type: 'cr', number: '4030998877', expiry: _dayOff(-39) }, // ⇐ منتهية
            { type: 'zakat', number: 'Z-12', expiry: _dayOff(510) }]
   };
   window.__store[V + '/VND-0003'] = {
     name: 'مؤسسة الإتقان للتوريدات', kind: 'supplier', status: 'suspended', statusReason: 'تأخّر متكرّر في التوريد',
+    trades: ['elecSupply', 'تمديدات غاز مركزي'],   // ⇐ الثاني خارجَ الكتالوج كلّياً
     legal: { crNumber: '1010777888' },
     docs: [{ type: 'cr', number: '1010777888', expiry: _dayOff(940) }]
   };
   window.__store[V + '/VND-0004'] = {
     name: 'ورشة الحرفي للألوميتال', entityType: 'establishment', kind: 'subcontractor', status: 'active',
+    trades: ['aluminum'],
     legal: { crNumber: '1128456' }, docs: []
   };
   // ── أشخاصٌ طبيعيّون: التعاقدُ بالهوية/الإقامة، بلا سجلٍّ تجاريٍّ ولا ضريبة ──
@@ -197,6 +202,97 @@ await page.waitForTimeout(700);
 check('★ مرشّحُ «شخص» يعرض الشخصين وحدهما',
   await page.evaluate(() => document.querySelectorAll('#page-vendors .ct-tile').length) === 2);
 await page.evaluate(() => window.contracts.filterVendors('entity', ''));
+await page.waitForTimeout(600);
+
+/* ══ نوعُ الأعمال: القائمةُ والكتابةُ اليدوية، ومرشّحُ «مقاولٌ أو مورّدٌ لتخصّصٍ معيّن» ══
+   المحكُّ ليس أن المرشّحَ «يرشّح»، بل أنّ الطرفَ الذي كُتب تخصّصُه **يدوياً**
+   يظهر في نتيجة من اختار التخصّصَ نفسَه **من القائمة**. */
+const tradeSel = await page.evaluate(() => {
+  const s = document.getElementById('ct-v-trade');
+  if (!s) return null;
+  return {
+    groups: Array.from(s.querySelectorAll('optgroup')).map(g => g.label),
+    hasCatalog: !!s.querySelector('option[value="electrical"]'),
+    custom: Array.from(s.querySelectorAll('optgroup[label="مكتوبة يدوياً"] option')).map(o => o.textContent.trim())
+  };
+});
+check('مرشّحُ نوع الأعمال موجودٌ في الشاشة', !!tradeSel);
+check('★ خياراتُه مفصولةٌ: من القائمة · مكتوبة يدوياً',
+  !!tradeSel && tradeSel.groups.includes('من القائمة') && tradeSel.groups.includes('مكتوبة يدوياً') && tradeSel.hasCatalog,
+  JSON.stringify(tradeSel && tradeSel.groups));
+check('★ والمكتوبُ يدوياً وحدَه هو الذي يظهر في مجموعته (لا «كهرباء» المكتوبةُ يدوياً — وُحِّدت مع القائمة)',
+  !!tradeSel && tradeSel.custom.length === 1 && tradeSel.custom[0] === 'تمديدات غاز مركزي',
+  JSON.stringify(tradeSel && tradeSel.custom));
+
+check('★ شاراتُ نوع الأعمال مرسومةٌ على بطاقات القائمة',
+  await page.evaluate(() => document.querySelectorAll('#page-vendors .ct-tile .ct-trade').length) >= 4);
+
+// «مقاولو الكهرباء» — المقاولُ الصريح + «مقاول ومورّد» المكتوبُ تخصّصُه يدوياً
+await page.evaluate(() => { window.contracts.filterVendors('kind', 'subcontractor'); window.contracts.filterVendors('trade', 'electrical'); });
+await page.waitForTimeout(800);
+const elecIds = await page.evaluate(() => Array.from(document.querySelectorAll('#page-vendors .ct-tile .ct-tile-name')).map(e => e.textContent.trim()));
+check('★★ «مقاولون · كهرباء» يعرض الأنوار **و** البناء الحديث (تخصّصُه مكتوبٌ يدوياً)',
+  elecIds.length === 2 && elecIds.some(n => n.includes('الأنوار')) && elecIds.some(n => n.includes('البناء الحديث')),
+  elecIds.join(' | '));
+// والرقمُ المرسوم = المحسوب من الدالّة النقيّة نفسِها
+const elecCalc = await page.evaluate(() => window.contracts._vendorsByTrade('electrical', 'subcontractor', window.contracts.vendors()).length);
+check('★ الرقمُ المرسوم = ما تحسبه `vendorsByTrade`', elecIds.length === elecCalc, `مرسوم ${elecIds.length} · محسوب ${elecCalc}`);
+check('سطرُ «ما تراه الآن» يقول التخصّصَ والعدد',
+  /نوع الأعمال/.test(await page.textContent('#page-vendors')) &&
+  /نتيجة/.test(await page.textContent('#page-vendors')));
+
+// «موردون · كهرباء» محورٌ آخر — لا يخلط مورّدَ المواد بمقاول التنفيذ
+await page.evaluate(() => { window.contracts.filterVendors('kind', 'supplier'); window.contracts.filterVendors('trade', 'elecSupply'); });
+await page.waitForTimeout(700);
+check('★ «موردون · توريد مواد كهربائية» يعرض الإتقان وحدَه',
+  await page.evaluate(() => Array.from(document.querySelectorAll('#page-vendors .ct-tile .ct-tile-name')).map(e => e.textContent.trim()).join('|')) === 'مؤسسة الإتقان للتوريدات');
+
+// التخصّصُ المكتوبُ يدوياً قابلٌ للترشيح مثلَ نظيره من القائمة
+await page.evaluate(() => { window.contracts.filterVendors('kind', ''); window.contracts.filterVendors('trade', 'تمديدات غاز مركزي'); });
+await page.waitForTimeout(700);
+check('★★ التخصّصُ المكتوبُ يدوياً قابلٌ للترشيح (وإلا فبابُ الكتابة بابُ دفن)',
+  await page.evaluate(() => document.querySelectorAll('#page-vendors .ct-tile').length) === 1);
+
+// والبحثُ الحرُّ يجده بتخصّصه لا باسمه
+await page.evaluate(() => window.contracts.clearTradeFilter());
+await page.waitForTimeout(500);
+await page.fill('#ct-v-q', 'الوميتال');   // اسمُ التخصّص لا اسمُ الطرف — وبلا همزة
+await page.waitForTimeout(700);
+check('★ البحثُ الحرُّ يشمل نوعَ الأعمال',
+  await page.evaluate(() => document.querySelectorAll('#page-vendors .ct-tile').length) >= 1);
+await page.fill('#ct-v-q', '');
+await page.waitForTimeout(500);
+await page.screenshot({ path: `${SHOTS}/09-trade-filter.png`, fullPage: true });
+
+// النموذج: القائمةُ والكتابةُ معاً — وإضافةٌ يدويةٌ تُوحَّد مع القائمة
+await page.evaluate(() => window.contracts.openVendor('VND-0004'));
+await page.waitForTimeout(700);
+check('★ بطاقةُ الطرف تعرض نوعَ أعماله', /نوع الأعمال/.test(await page.textContent('#page-vendors')));
+await page.evaluate(() => window.contracts.editVendor());
+await page.waitForTimeout(800);
+check('★ النموذجُ يعرض القائمةَ **وحقلَ الكتابة** معاً',
+  await page.evaluate(() => !!document.getElementById('ct-f-trade-pick') && !!document.getElementById('ct-f-trade-new')));
+await page.evaluate(() => window.contracts.addTrade('carpentry'));
+await page.waitForTimeout(600);
+await page.fill('#ct-f-trade-new', 'تكييف وتبريد');   // ⇐ اسمٌ موجودٌ في القائمة، مكتوبٌ يدوياً
+await page.evaluate(() => window.contracts.addTradeText());
+await page.waitForTimeout(600);
+await page.fill('#ct-f-trade-new', 'ترميم واجهات');   // ⇐ خارجَ القائمة
+await page.evaluate(() => window.contracts.addTradeText());
+await page.waitForTimeout(600);
+const draftTrades = await page.evaluate(() => Array.from(document.querySelectorAll('#page-vendors .ct-trades.edit .ct-trade')).map(e => e.textContent.replace(/[×\s]+$/, '').trim()));
+check('★★ الاختيارُ والكتابةُ يُنتجان قائمةً واحدةً — والمكتوبُ المطابقُ لاسمٍ في القائمة يُعرَض بتسميتها',
+  draftTrades.length === 4 && draftTrades.includes('نجارة وأبواب') && draftTrades.includes('تكييف وتبريد') && draftTrades.includes('ترميم واجهات'),
+  draftTrades.join(' | '));
+await page.screenshot({ path: `${SHOTS}/10-trade-edit.png`, fullPage: true });
+// الحفظُ يكتب الحقل في الوثيقة
+await page.evaluate(() => window.contracts.saveVendorEdit());
+await page.waitForTimeout(1800);
+const saved = await page.evaluate(() => (window.contracts.vendorById('VND-0004') || {}).trades || []);
+check('★ نوعُ الأعمال يُحفَظ في وثيقة الطرف بمفاتيحَ موحَّدة',
+  saved.includes('aluminum') && saved.includes('carpentry') && saved.includes('hvac') && saved.includes('ترميم واجهات'),
+  JSON.stringify(saved));
+await page.evaluate(() => window.contracts.backToVendors());
 await page.waitForTimeout(600);
 
 const rails = await page.evaluate(() => Array.from(document.querySelectorAll('#page-vendors .ct-tile')).map(e => e.style.getPropertyValue('--rail')));
