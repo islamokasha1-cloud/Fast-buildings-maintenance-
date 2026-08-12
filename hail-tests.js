@@ -8239,8 +8239,13 @@ function contractLetterhead() {
     /\.lh-h\{left:-2\.65mm;top:0;width:202\.5mm\}/.test(css) &&
     /\.lh-f\{left:3\.72mm;bottom:0;width:191\.8mm\}/.test(css));
   T("★★ والعلامةُ المائية ١٠٨٫٤مم عرضاً خلف النصّ لا فوقه",
-    /\.lh-m\{left:48\.95mm;top:89\.9mm;width:108\.4mm;z-index:0\}/.test(css) &&
+    /\.lh-m\{left:48\.95mm;top:89\.9mm;width:108\.4mm;z-index:0;opacity:[.\d]+\}/.test(css) &&
     /\.pg>tbody>tr>td\{padding:0 20\.7mm;position:relative;z-index:1\}/.test(css));
+  /* شدّتُها نصفُ الأصل: بشدّة القالب كانت تُقرأ خلف جدول البنود فتزاحم ما يُوقَّع
+     عليه — والحدُّ هنا يمنع ارتدادَها إلى الشدّة الكاملة بلا قصد. */
+  T("★ وشدّتُها مخفَّفةٌ لا تزاحم ما يُوقَّع عليه (≤ ٦٠٪)",
+    parseFloat((css.match(/\.lh-m\{[^}]*opacity:([.\d]+)\}/) || [])[1]) <= 0.6,
+    (css.match(/\.lh-m\{[^}]*opacity:([.\d]+)\}/) || [])[1]);
   T("★★ وفراغُ النصّ محجوزٌ بصفَّي thead/tfoot — ٣٥٫٦مم و٢٤٫٩مم",
     /\.sp-h\{height:35\.6mm\}\.sp-f\{height:24\.9mm\}/.test(css) &&
     /<thead><tr><td><div class="sp-h">/.test(src) &&
