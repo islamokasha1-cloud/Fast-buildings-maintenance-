@@ -279,6 +279,41 @@ const longFit = await page.evaluate(() => {
 check('★ an: اسمٌ من ٣٢ حرفاً يظهر كاملاً (سطران في صفٍّ عريض)',
   !longFit.cut, JSON.stringify(longFit));
 
+/* v18.9ao: شكوتان من الشاشة الحيّة — اسمٌ مقصوصٌ في صفوف الرسم، وسطورٌ متداخلةٌ
+   داخل الحلقة. القياسُ على العنصر نفسِه في كل الشاشات، لا على البطاقة الحاوية. */
+const readAll = () => page.evaluate(() => {
+  const cut = e => e.scrollHeight - e.clientHeight > 1 || e.scrollWidth - e.clientWidth > 1;
+  const bad = [];
+  document.querySelectorAll('#tvwall-screen .bname').forEach(n => { if (cut(n)) bad.push('مبنى:' + n.textContent.trim()); });
+  document.querySelectorAll('#tvwall-screen .tvl-hb .r .n').forEach(n => { if (cut(n)) bad.push('صف:' + n.textContent.trim()); });
+  const c = Array.from(document.querySelectorAll('#tvwall-screen .tvl-screen-proj .tvw-ring-center > *'))
+    .filter(e => e.offsetParent !== null);
+  const r = c.map(e => e.getBoundingClientRect());
+  const lap = r.some((x, i) => i && x.top < r[i - 1].bottom - 0.5);
+  const outside = c.some(e => cut(e));
+  return { bad, lap, outside, lines: c.length };
+});
+const fitAll = [];
+for (const [w, h] of [[1920, 1080], [1600, 950], [1365, 768]]) {
+  await page.setViewportSize({ width: w, height: h });
+  await page.waitForTimeout(500);
+  for (const scr of [0, 1]) {
+    await page.evaluate(i => _tvwallShowScreen(i), scr);
+    await page.waitForTimeout(400);
+    fitAll.push(Object.assign({ v: `${w}×${h}`, s: scr }, await readAll()));
+  }
+}
+await page.setViewportSize({ width: 1600, height: 950 });
+await page.waitForTimeout(500);
+check('★ ao: لا اسمَ مقصوصٌ في بطاقة مبنًى ولا في صفِّ رسمٍ على الثلاثة مقاسات',
+  fitAll.every(f => f.bad.length === 0),
+  JSON.stringify(fitAll.filter(f => f.bad.length).map(f => [f.v, f.bad])).slice(0, 170) || 'كلها كاملة');
+check('★ ao: سطورُ الحلقة الأربعةُ لا تتداخل ولا تخرج عن مركزها',
+  fitAll.some(f => f.lines === 4) && fitAll.every(f => !f.lap && !f.outside),
+  JSON.stringify(fitAll.map(f => `${f.v}/${f.s}:${f.lines}${f.lap ? '⚠تداخل' : ''}`)));
+await page.evaluate(() => _tvwallShowScreen(1));
+await page.waitForTimeout(400);
+
 check('★ شريطُ اللوحة بمقاييس النظافة لا البلاغات',
   cpanel.totals.includes('جدول اليوم') && cpanel.totals.includes('تغطية اليوم') && !cpanel.totals.includes('بلاغات الشهر'),
   cpanel.totals.slice(0, 90));
@@ -439,21 +474,25 @@ const anaA = await page.evaluate(() => {
 check('★ al: شاشةُ «الكل» تحمل شريطَ تحليلاتٍ بأربع بطاقاتٍ حدّاً أقصى',
   anaA.n >= 3 && anaA.n <= 4 && anaA.titles.some(t => /ضغطُ العمل حسب المشروع/.test(t)),
   anaA.titles.join(' | '));
-check('★ al: ضغطُ العمل مرتّبٌ الأكثرَ أولاً بمقامٍ واحدٍ لكل الصفوف',
-  anaA.rows.length >= 2 && parseInt(anaA.rows[0].v) >= parseInt(anaA.rows[1].v) &&
-  Math.abs(anaA.rows[0].w.reduce((a, w) => a + parseFloat(w), 0) - 100) < 0.6 &&
-  Math.abs(anaA.rows[1].w.reduce((a, w) => a + parseFloat(w), 0)
-           - parseInt(anaA.rows[1].v) / parseInt(anaA.rows[0].v) * 100) < 0.6,
-  anaA.rows.map(r => `${r.l}=${r.v}[${r.w.join('+')}]`).join(' | '));
+const _sum = r => r.w.reduce((a, w) => a + parseFloat(w), 0);
+const _share = anaA.rows.map(_sum);
+check('★ al: ضغطُ العمل مرتّبٌ بالنسبة تنازلياً، وقائدُ الترتيب يملأ شريطَه',
+  anaA.rows.length >= 2 && _share.every((v, i) => i === 0 || _share[i - 1] >= v - 0.6) &&
+  Math.abs(_share[0] - 100) < 0.6,
+  anaA.rows.map((r, i) => `${r.l}=${r.v}[${Math.round(_share[i])}%]`).join(' | '));
 /* v18.9am: مقارنةُ «٨٣ مهمّة» بـ«١١ بلاغاً» على مقامٍ واحدٍ تقول «ضغطُه سبعةُ
-   أضعافه» — ولا معنى لها. لكلِّ وحدةٍ مقامُها، والوحدةُ مكتوبةٌ في القيمة. */
+   أضعافه» — ولا معنى لها. لكلِّ وحدةٍ مقامُها، والوحدةُ مكتوبةٌ في القيمة.
+   v18.9ao: والترتيبُ بالنسبة لا بالعدد الخام — فالفرزُ بالنوع كان يُسقط مشروعَ
+   النظافة الوحيدَ كلَّما ضاقت الشاشةُ إلى ثلاثة صفوف. */
 const mixed = anaA.rows.filter(r => /مهمة/.test(r.v));
+const tick = anaA.rows.filter(r => /بلاغ/.test(r.v));
 check('★ am: البلاغاتُ والمهامُّ لا تُقاسان على مقامٍ واحد، والوحدةُ مكتوبة',
   anaA.rows.every(r => /^\d+ (بلاغ|مهمة)$/.test(r.v)) &&
-  anaA.rows.filter(r => /بلاغ/.test(r.v)).every((r, i, a) => i === 0 || parseInt(a[i - 1].v) >= parseInt(r.v)) &&
-  mixed.length === 1 && Math.abs(mixed[0].w.reduce((a, w) => a + parseFloat(w), 0) - 100) < 0.6 &&
-  anaA.rows.findIndex(r => /مهمة/.test(r.v)) === anaA.rows.length - 1,
-  anaA.rows.map(r => `${r.v}[${r.w.join('+')}]`).join(' | '));
+  mixed.length === 1 && tick.length >= 2 &&
+  Math.abs(_sum(mixed[0]) - 100) < 0.6 && Math.abs(_sum(tick[0]) - 100) < 0.6 &&
+  parseInt(tick[0].v) > parseInt(mixed[0].v),
+  anaA.rows.map(r => `${r.v}[${Math.round(_sum(r))}%]`).join(' | ')
+  + ' — نوعان يبلغان ١٠٠٪ بمقامين مختلفين');
 
 /* أخطرُ ما في شريطٍ يُضاف تحت لوحةٍ ممتلئة: يقضم ارتفاعَ ما فوقه فتُقصّ تسمياتُه
    بلا أثرٍ في أيّ رقم. الفحصُ هندسيٌّ على ثلاثة ارتفاعاتٍ حقيقية. */
