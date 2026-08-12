@@ -564,22 +564,53 @@ async function clickEl(selector, opts) {
   return box ? clickAt(selector, box) : false;
 }
 
-// تصفّحٌ هادئ داخل الصفحة (تمريرٌ ناعمٌ لأسفل ثم عودة).
-async function browseDown(px, ms) {
-  await page.evaluate(y => {
-    const c = document.querySelector('.main-content') || document.scrollingElement || document.documentElement;
-    c.style.scrollBehavior = 'smooth';
-    c.scrollTop = y;
-    window.scrollTo({ top: y, behavior: 'smooth' });
-  }, px).catch(() => { });
-  await wait(ms || 2200);
+/* ── التصفّح: تمريرٌ مُخطّى بإيقاعٍ نُمليه نحن ──
+   قياسٌ كشف أمرين: (أ) `.main-area` وحدَه هو ما يُمرَّر، وكثيرٌ من الصفحات ارتفاعُها
+   لا يتجاوز الشاشة — فأمرُ «مرّر ٧٠٠ بكسل» كان **لا يحرّك شيئاً** ويترك ثانيتين
+   من الجمود في كلّ فصل. (ب) التمريرُ الناعم ينتهي في ~٤٠٠م.ث ثم سكون، والتقاطُ
+   المُصيّر البرمجيّ يبلغ ~٢٣ إطاراً/ث فقط أثناء الحركة.
+   فالحلّ شقّان: لا نمرّر إلا ما يُمرَّر فعلاً، ونُخطّي التمريرَ خطوةً خطوة ثم نُعطي
+   كلَّ إطارٍ منه **1/30 ثانيةً في المخرَج** أياً كان زمنُ التقاطه — فالحركةُ تُعرَض
+   ناعمةً عند ٣٠ إطاراً/ث وإن كان الالتقاطُ أبطأ. (التقاطٌ بطيء، عرضٌ منتظم.) */
+const paced = [];                                  // مدياتُ إطاراتٍ تُعرَض بإيقاعٍ ثابت
+const SCROLLER = '.main-area';
+
+async function scrollMax() {
+  return page.evaluate(sel => {
+    const c = document.querySelector(sel);
+    return c ? Math.max(0, c.scrollHeight - c.clientHeight) : 0;
+  }, SCROLLER).catch(() => 0);
 }
-async function scrollTop() {
-  await page.evaluate(() => {
-    const c = document.querySelector('.main-content') || document.scrollingElement || document.documentElement;
-    c.scrollTop = 0; window.scrollTo({ top: 0, behavior: 'smooth' });
-  }).catch(() => { });
-  await wait(500);
+async function scrollReset() {
+  await page.evaluate(sel => {
+    const c = document.querySelector(sel);
+    if (c) { c.style.scrollBehavior = 'auto'; c.scrollTop = 0; }
+  }, SCROLLER).catch(() => { });
+}
+// تسارعٌ وتباطؤٌ عند الطرفين — تمريرٌ خطّيٌّ يبدو آلياً.
+const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+async function pacedScroll(to, steps) {
+  const i0 = shots.length;
+  const from = await page.evaluate(sel => (document.querySelector(sel) || {}).scrollTop || 0, SCROLLER).catch(() => 0);
+  for (let i = 1; i <= steps; i++) {
+    const y = Math.round(from + (to - from) * ease(i / steps));
+    await page.evaluate(([sel, v]) => {
+      const c = document.querySelector(sel);
+      if (c) { c.style.scrollBehavior = 'auto'; c.scrollTop = v; }
+    }, [SCROLLER, y]).catch(() => { });
+    // ٤٤م.ث ≈ زمنُ رسمِ إطارٍ قِيس في هذا المُصيّر (~٢٣ إ/ث). أقلُّ منه يُسقط خطواتٍ
+    // بلا إطارٍ لها، فيعود التقطّع الذي نعالجه.
+    await page.waitForTimeout(44);
+  }
+  if (shots.length > i0) paced.push([i0, shots.length]);
+}
+// جولةٌ داخل الصفحة: لا تُهدَر ثانيتان على صفحةٍ لا شيءَ فيها يُمرَّر.
+async function browseTour() {
+  const max = await scrollMax();
+  if (max < 140) { await wait(700); return false; }
+  await pacedScroll(Math.round(max * 0.92), Math.min(60, Math.max(26, Math.round(max / 26))));
+  await wait(600);
+  return true;
 }
 
 // الصفحةُ تُبنى على دفعات: تُرسَم فارغةً ثم تمتلئ. تصويرُ ذلك يُظهر «تأخيراً
@@ -654,6 +685,7 @@ async function goPage(id) {
   // ومفهوماً، وما يُخفى هو البناءُ الذي يليه لا الفعلُ نفسُه.
   const box = target ? await cursorTo(target.sel) : null;
   await contentHide();
+  await scrollReset();          // الحاويةُ مشتركةٌ بين الصفحات — وإلا فُتحت التاليةُ ممرَّرة
   const clicked = box ? await clickAt(target.sel, box) : false;
   // بعضُ الأقسام يُخفي النظامُ أزرارَها عمداً في هذا الوضع (مثل «العهد»)، فنفتحها
   // برمجياً — ونُخفي المؤشّرَ حتى لا يبقى واقفاً في مكانٍ لم يُنقَر فيه شيء.
@@ -757,8 +789,7 @@ for (const ch of CHAPTERS) {
     }
   }
   await shot(ch.page);
-  await browseDown(700, 1500);
-  await scrollTop();
+  await browseTour();
   await pv('lowerOff');
   await progress();
   L(`  ${el()}  ${ch.n}) ${ch.page}${clicked ? '' : ' (فُتحت برمجياً)'}`);
@@ -812,9 +843,14 @@ if (!PROBE && shots.length > 5) {
     // لا معدّلٌ ثابتٌ نفرضه. ثم `fps=30` يوحّد الناتج بلا حذفٍ ولا قفز.
     const keep = shots.filter(f => f.wall >= TRIM_AT);
     const list = keep.length > 5 ? keep : shots;
+    // إطاراتُ التمرير المُخطّى تأخذ 1/30ث ثابتةً؛ وما عداها يأخذ فارقَ طابعَيه الزمنيّين.
+    const idxOf = new Map(list.map((f, i) => [f.file, i]));
+    const pacedIdx = new Set();
+    for (const [a, b] of paced) for (let i = a; i < b; i++) { const j = idxOf.get(shots[i] && shots[i].file); if (j !== undefined) pacedIdx.add(j); }
     const lines = [];
     for (let i = 0; i < list.length; i++) {
-      const d = i + 1 < list.length ? Math.min(2, Math.max(0.01, list[i + 1].ts - list[i].ts)) : 0.2;
+      const d = pacedIdx.has(i) ? 1 / 30
+        : (i + 1 < list.length ? Math.min(2, Math.max(0.01, list[i + 1].ts - list[i].ts)) : 0.2);
       lines.push(`file '${list[i].file}'`, `duration ${d.toFixed(4)}`);
     }
     lines.push(`file '${list[list.length - 1].file}'`);
