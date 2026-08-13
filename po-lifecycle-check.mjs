@@ -329,6 +329,51 @@ try {
   check('١٠و) بطاقةُ الطلب صارت مرئيّةً في إطار العرض', await cardEl.isVisible());
 } catch (e) { check('١٠و) بطاقةُ الطلب صارت مرئيّةً في إطار العرض', false, e.message.slice(0, 80)); }
 
+/* ══ ١١) بنودُ الطلب تظهر على الجوال ══   (بلاغُ المالك — v18.9.2621)
+   `po-items` كان اسمَ مكوّنين لا صلةَ بينهما: **صندوقُ جدول البنود** في نافذة
+   التفاصيل، و**سطرُ ملخّص البنود** في بطاقة القائمة ومعه `-webkit-line-clamp:2`.
+   والثاني أدنى في الورقة فيرثه الصندوق، فيُقصّ على WebKit (آيفون) إلى سطرين:
+   شريطُ العنوان وصفُّ الترويسة **وتختفي البنودُ كلُّها**؛ بينما يتجاهله Blink
+   فيبدو الكمبيوتر سليماً — ولذلك يُفحَص **النمطُ المحسوب** لا الارتفاعُ وحدَه:
+   المحرّكُ الذي بين أيدينا لا يُظهر العطلَ الذي يراه المستخدم. */
+L('\n=== ١١) بنودُ الطلب على الجوال — الصندوقُ لا يُقصّ ═══');
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(400);
+const mob = await page.evaluate(() => {
+  try {
+    const COL = (typeof PURCHASE_COLLECTION === 'function') ? PURCHASE_COLLECTION() : 'global_purchases';
+    const po = window.__store[COL + '/PO-LIFE-1'];
+    openPurchaseDetail(po.id || 'PO-LIFE-1');
+    const box  = document.querySelector('#modal-purchase-detail .po-items');
+    const scr  = document.querySelector('#modal-purchase-detail .po-items-scroll');
+    const rows = Array.from(document.querySelectorAll('#modal-purchase-detail .po-table tbody tr'));
+    if (!box) return { ok: false, err: 'صندوقُ البنود غير موجود' };
+    const cs = getComputedStyle(box), bx = box.getBoundingClientRect();
+    return {
+      ok: true,
+      clamp: cs.webkitLineClamp, display: cs.display,
+      want: (po.items || []).length,          // العددُ من الوثيقة لا رقمٌ محفورٌ في الفحص
+      rows: rows.length,
+      inside: rows.filter(tr => { const r = tr.getBoundingClientRect(); return r.height > 0 && r.bottom <= bx.bottom + 1; }).length,
+      scrolls: scr ? (scr.scrollWidth > scr.clientWidth + 1) : false,
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+    };
+  } catch (e) { return { ok: false, err: e.message }; }
+});
+check('١١·٠) نافذةُ التفاصيل فُتحت على مقاس الجوال', mob.ok === true, mob.ok ? '' : mob.err);
+check('١١أ) ★★ صندوقُ البنود بلا قصِّ أسطر (لو ورث clamp لاختفت البنودُ على آيفون)',
+  mob.ok && mob.clamp === 'none' && mob.display !== '-webkit-box',
+  'clamp=' + mob.clamp + ' · display=' + mob.display);
+check('١١ب) ★★ كلُّ بندٍ في الوثيقة مرسومٌ **داخل** الصندوق لا مقصوصاً خارجَه',
+  mob.ok && mob.want > 1 && mob.rows === mob.want && mob.inside === mob.want,
+  'في الوثيقة ' + mob.want + ' · مرسوم ' + mob.rows + ' · داخل ' + mob.inside);
+check('١١ج) ★ والجدولُ العريض يُمرَّر أفقياً داخل صندوقه لا بإفاضة الصفحة',
+  mob.ok && mob.scrolls === true && mob.pageOverflow <= 1,
+  'تمريرُ الصندوق=' + mob.scrolls + ' · فيضُ الصفحة=' + mob.pageOverflow + 'px');
+await page.screenshot({ path: SHOTS + '/po-detail-mobile.png', fullPage: false });
+await page.evaluate(() => { try { closeModal('modal-purchase-detail'); } catch (e) {} });
+await page.setViewportSize({ width: 1440, height: 900 });
+
 L('\n=== أخطاء الجافاسكربت ═══');
 check('✨ لا أخطاء جافاسكربت في الرحلة كلّها', errors.length === 0, errors.slice(0, 3).join(' | '));
 
