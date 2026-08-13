@@ -593,7 +593,12 @@ async function cursorTo(selector, opts) {
   const box = await page.evaluate(sel => {
     const e = document.querySelector(sel);
     if (!e) return null;
-    e.scrollIntoView({ block: 'center', behavior: 'instant' });
+    // `scrollIntoView` يمرّر أقربَ حاويةٍ قابلةٍ للتمرير — وحاويةُ القائمة الجانبية
+    // ليست كذلك، فيمرّر **المستندَ كلَّه** وتخرج الترويسةُ من الشاشة وتبقى خارجها.
+    // فلا نستعمله إلا لما هو داخل منطقة المحتوى، ونعيد تمريرَ المستند إلى الصفر دائماً.
+    if (e.closest('.main-area')) e.scrollIntoView({ block: 'center', behavior: 'instant' });
+    const doc = document.scrollingElement || document.documentElement;
+    if (doc.scrollTop || window.scrollY) { doc.scrollTop = 0; window.scrollTo(0, 0); }
     const r = e.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2, ok: r.width > 0 && r.height > 0 };
   }, selector).catch(() => null);
@@ -673,6 +678,12 @@ async function browseTour() {
 // عند ٣٠ إطاراً/ث. كانت ٦ خطوات ⇒ ٠٫٢ث، فبدا التعليقُ يومض ويختفي قبل أن يُقرأ.
 const FADE = 15;
 async function captionIn(main, sub, badge) {
+  // إن كان ظاهراً أصلاً فلا تُعِد إشعاله: `tween` يبدأ من الصفر فيُطفئه ثم يُشعله —
+  // ظهورٌ ثانٍ للنصّ نفسِه. يحدث في الفصول ذات الفعل (التقارير) حيث تُستدعى مرّتين.
+  const vis0 = await page.evaluate(() => {
+    const l = document.getElementById('pv-lower');
+    return l ? parseFloat(l.style.opacity || (l.classList.contains('on') ? '1' : '0')) : 0;
+  }).catch(() => 0);
   await page.evaluate(([m, s2, b]) => {
     const l = document.getElementById('pv-lower'); if (!l) return;
     const i = l.querySelector('i');
@@ -680,6 +691,7 @@ async function captionIn(main, sub, badge) {
     l.querySelector('b').textContent = m || '';
     l.querySelector('span').textContent = s2 || '';
   }, [main, sub, badge]).catch(() => { });
+  if (vis0 > 0.9) { await setAt('caption', '1'); return; }   // ظاهرٌ سلفاً: حدِّث النصَّ فقط
   await tween(FADE + 2, (u) => setAt('caption', u.toFixed(3)));
 }
 async function captionOut() {
