@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2621";
+var MODULE_BUILD = "v18.9.2623";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -276,12 +276,64 @@ var DOC_TYPES = [
   { key:"profCert",  lbl:"شهادة مهنية / رخصة حرفة",    short:"مهنية",   entity:"individual"    },
   { key:"identity",  lbl:"الهوية / الإقامة",           short:"هوية",    entity:"individual"    },
   { key:"insurance", lbl:"بوليصة تأمين",               short:"تأمين"    },
+  /* للصفتين معاً: للشخص آيبانٌ وعنوانٌ وطنيٌّ كما للمنشأة. وهما بلا انتهاءٍ عادةً
+     فيبقى حقلُ التاريخ اختيارياً — ومحرّكُ الانتهاء لا يُنبّه على ما لا تاريخَ له. */
+  { key:"bank",      lbl:"شهادة الحساب البنكي (الآيبان)", short:"آيبان",  noExpiry:true },
+  { key:"natAddr",   lbl:"العنوان الوطني",             short:"عنوان",   noExpiry:true },
   { key:"other",     lbl:"مستند آخر",                  short:"مستند"    }
 ];
 /* الوثائقُ المتاحةُ لصفةٍ بعينها: العامّةُ (بلا `entity`) + الخاصةُ بها. */
 function docTypesFor(entityType){
   var e = normEntity(entityType);
   return DOC_TYPES.filter(function(d){ return !d.entity || d.entity === e; });
+}
+/* ── الوثيقةُ تقرأ بياناتها من فوقها ──
+   أربعُ وثائقَ بياناتُها **مكتوبةٌ أصلاً** في البيانات الأساسية: السجلُّ التجاريُّ
+   ورقمُه وانتهاؤه · الشهادةُ الضريبيةُ ورقمُها · الحسابُ البنكيُّ وآيبانُه · العنوانُ
+   الوطنيّ. وإعادةُ كتابتها في صفّ الوثيقة ليست إزعاجاً فحسب: هي **مصدرُ حقيقةٍ ثانٍ**
+   يفترق عن الأول بأوّل تصحيحٍ في أحدهما، فيُقرأ سجلٌّ تجاريٌّ في الأعلى وآخرُ أسفلَه.
+   فتُشتقّ هنا اشتقاقاً — دالّةٌ نقيّةٌ واحدةٌ تقرؤها الشاشةُ والفحصُ معاً.
+
+   و`canBank` شرطٌ في الآيبان لا زينة: الآيبانُ مقنَّعٌ لغير المخوَّل في كل شاشة،
+   فملؤُه في خانةٍ ظاهرةٍ يكشفه لمن لا يراه — تسريبٌ من بابٍ خلفيّ. */
+var DOC_AUTOFILL = {
+  cr:      function(d){ return { number:(d.legal||{}).crNumber, expiry:(d.legal||{}).crExpiry }; },
+  vat:     function(d){ return { number:(d.legal||{}).vatNumber }; },
+  natAddr: function(d){ return { number:(d.legal||{}).nationalAddress }; },
+  bank:    function(d){ return canBank() ? { number:(d.bank||{}).iban } : null; }
+};
+/* ما يُقترَح لهذه الوثيقة من بيانات الطرف — أو `null` إن لا شيء. */
+function docAutoValue(type, vendorDraft){
+  var f = DOC_AUTOFILL[type];
+  if(!f) return null;
+  var got = f(vendorDraft || {}) || {};
+  var out = {};
+  if(String(got.number||"").trim()) out.number = String(got.number).trim();
+  if(String(got.expiry||"").trim()) out.expiry = String(got.expiry).trim();
+  return Object.keys(out).length ? out : null;
+}
+/* ما يُكتب في الوثيقة فعلاً — بلا حقول المسوّدة المؤقّتة (`_file` جسمُ ملفٍّ حيٌّ
+   ترفضه Firestore، و`_auto` شارةُ عرضٍ لا بيانات). القاعدةُ صريحة: **ما بدأ بشَرطةٍ
+   سفليةٍ لا يُحفَظ** — فمن أضاف حقلَ مسوّدةٍ جديداً لا يحتاج تذكُّرَ تنقيته. */
+function docsForSave(docs){
+  return (Array.isArray(docs)?docs:[]).map(function(dc){
+    var out = {};
+    Object.keys(dc||{}).forEach(function(k){ if(k.charAt(0) !== "_") out[k] = dc[k]; });
+    return out;
+  });
+}
+/* يملأ **الفارغَ وحدَه** في صفوف الوثائق — ما كتبه المستخدمُ بيده لا يُدهَس أبداً،
+   ولو خالف ما في الأعلى (قد يكون سجلاً فرعياً أو عنواناً ثانياً بقصد). */
+function applyDocAutofill(vendorDraft){
+  var d = vendorDraft || {};
+  (Array.isArray(d.docs) ? d.docs : []).forEach(function(dc){
+    if(!dc) return;
+    var auto = docAutoValue(dc.type, d);
+    if(!auto) return;
+    if(auto.number && !String(dc.number||"").trim()){ dc.number = auto.number; dc._auto = true; }
+    if(auto.expiry && !String(dc.expiry||"").trim()){ dc.expiry = auto.expiry; dc._auto = true; }
+  });
+  return d;
 }
 var DOC_LBL = (function(){ var m={}; DOC_TYPES.forEach(function(d){ m[d.key]=d.lbl; }); return m; })();
 /* الاختصارُ حقلٌ صريحٌ لا قصُّ أولِ كلمة: «شهادة ضريبة…» و«شهادة التأمينات…»
@@ -3478,19 +3530,33 @@ function vendorEditHTML(v){
   // قائمةُ الوثائق تتبع الصفة — ويبقى النوعُ المحفوظ ظاهراً ولو خرج عنها بعد تبديلها،
   // فلا تُمحى وثيقةٌ سجّلها أحدٌ لمجرّد تغييرِ صفةٍ بالخطأ.
   var docOpts = docTypesFor(ent);
+  applyDocAutofill(d);          // ما في الأعلى يملأ ما تحته — الفارغَ وحدَه
   var docRows = (d.docs||[]).map(function(dc,i){
     var opts = docOpts.slice();
     if(dc.type && !opts.some(function(t){ return t.key===dc.type; })){
       var keep = DOC_TYPES.filter(function(t){ return t.key===dc.type; })[0];
       if(keep) opts = opts.concat([keep]);
     }
+    var meta = DOC_TYPES.filter(function(t){ return t.key===dc.type; })[0] || {};
+    var ph = dc.type==="natAddr" ? "العنوان الوطني" : dc.type==="bank" ? "الآيبان (SA…)" : "الرقم";
+    /* **الملفُّ المختارُ يبقى مختاراً**: حقلُ `input[type=file]` لا يُملأ برمجياً
+       (حاجزُ المتصفّح الأمنيّ)، فإعادةُ رسم النموذج تمحو ما اختاره المستخدم بلا أثر.
+       فالمسوّدةُ تحمل الملفَّ نفسَه (`_file`)، والصفُّ يُعلن اسمَه بدلاً من حقلٍ
+       يبدو فارغاً كذباً. (وهو بلاغُ المالك: إضافةُ وثيقةٍ ثانيةٍ تُضيّع ملفَ الأولى.) */
+    var fileCell = dc._file
+      ? '<div class="ct-file-chip">'+_icn("paperclip","ic-sm")+'<span class="ct-file-nm">'+_esc(dc._fileName||"ملف")+'</span>'+
+          '<button type="button" class="ct-trade-x" title="إزالة الملف المختار" onclick="contracts.delDocFile('+i+')">×</button></div>'
+      : '<input type="file" class="form-input ct-file" data-i="'+i+'" accept="image/*,application/pdf" onchange="contracts.pickDocFile('+i+',this)">';
     return '<tr>'+
-      '<td><select class="form-input" data-f="type" data-i="'+i+'">'+
+      '<td><select class="form-input" data-f="type" data-i="'+i+'" onchange="contracts.setDocType('+i+',this.value)">'+
         opts.map(function(t){ return '<option value="'+t.key+'"'+(dc.type===t.key?' selected':'')+'>'+_esc(t.lbl)+'</option>'; }).join("")+
       '</select></td>'+
-      '<td><input class="form-input" data-f="number" data-i="'+i+'" value="'+_esc(dc.number||"")+'" placeholder="الرقم"></td>'+
-      '<td><input class="form-input" type="date" data-f="expiry" data-i="'+i+'" value="'+_esc(dc.expiry||"")+'"></td>'+
-      '<td><input type="file" class="form-input ct-file" data-i="'+i+'" accept="image/*,application/pdf">'+
+      '<td><input class="form-input" data-f="number" data-i="'+i+'" value="'+_esc(dc.number||"")+'" placeholder="'+_esc(ph)+'">'+
+        (dc._auto?'<div class="ct-auto">'+_icn("checkCircle","ic-sm")+' من البيانات الأساسية</div>':'')+'</td>'+
+      '<td>'+(meta.noExpiry
+        ? '<input class="form-input" type="date" data-f="expiry" data-i="'+i+'" value="'+_esc(dc.expiry||"")+'" title="اختياريّ — هذه الوثيقة لا تنتهي عادةً">'
+        : '<input class="form-input" type="date" data-f="expiry" data-i="'+i+'" value="'+_esc(dc.expiry||"")+'">')+'</td>'+
+      '<td>'+fileCell+
         (dc.url?'<a href="'+_esc(dc.url)+'" target="_blank" rel="noopener" class="ct-link">'+_icn("paperclip","ic-sm")+' الحالي</a>':'')+'</td>'+
       '<td><button class="btn btn-delete" onclick="contracts.delDoc('+i+')">'+_icn("trash","ic-sm")+'</button></td>'+
     '</tr>';
@@ -3592,7 +3658,7 @@ function vendorEditHTML(v){
     '<div class="ct-sec-h">'+_icn("fileText","ic-sm")+' الوثائق'+
       '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.addDoc()">'+_icn("plus","ic-sm")+' وثيقة</button></div>'+
     '<div class="ct-table-wrap"><table class="ct-table" id="ct-docs-tbl"><thead><tr>'+
-      '<th>الوثيقة</th><th>الرقم</th><th>تنتهي في</th><th>المرفق</th><th></th>'+
+      '<th>الوثيقة</th><th>الرقم / البيان</th><th>تنتهي في</th><th>المرفق</th><th></th>'+
     '</tr></thead><tbody>'+(docRows||'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:14px">لا وثائق — أضِف واحدة.</td></tr>')+'</tbody></table></div>'+
   '</div>'+
   '<div class="ct-save-bar">'+
@@ -3688,7 +3754,20 @@ function syncDraft(){
     tbl.querySelectorAll("[data-f]").forEach(function(inp){
       var i = parseInt(inp.dataset.i,10), f = inp.dataset.f;
       if(!_vEdit.docs[i] || !f) return;
+      var was = _vEdit.docs[i][f];
       _vEdit.docs[i][f] = String(inp.value||"").trim();
+      // ما لمسه المستخدمُ بيده لم يعد «مملوءاً تلقائياً» — تسقط الشارةُ عنه
+      if(_vEdit.docs[i]._auto && _vEdit.docs[i][f] !== was) _vEdit.docs[i]._auto = false;
+    });
+    // **الملفُّ قبل كل شيء**: هذه الدالّةُ تُستدعى قبل كلّ إعادةِ رسم، وإعادةُ الرسم
+    // تُتلف حقولَ الملفّات. فما لم يُلتقط هنا يضيع بلا أثرٍ ولا رسالة.
+    tbl.querySelectorAll("input.ct-file").forEach(function(inp){
+      var i = parseInt(inp.dataset.i,10);
+      if(!_vEdit.docs[i]) return;
+      if(inp.files && inp.files[0]){
+        _vEdit.docs[i]._file = inp.files[0];
+        _vEdit.docs[i]._fileName = String(inp.files[0].name||"ملف").slice(0,120);
+      }
     });
   }
   var ctb = document.getElementById("ct-contacts-tbl");
@@ -3729,6 +3808,35 @@ function delTrade(i){
 }
 function addDoc(){ syncDraft(); if(!_vEdit) return; _vEdit.docs.push({ type:(docTypesFor(_vEdit.entityType)[0]||{key:"other"}).key, number:"", expiry:"" }); paintDraft(); }
 function delDoc(i){ syncDraft(); if(!_vEdit) return; _vEdit.docs.splice(i,1); paintDraft(); }
+/* اختيارُ الملفّ يُثبَّت في المسوّدة **فور اختياره** لا عند الحفظ: بينهما إعادةُ رسمٍ
+   واحدةٌ تكفي لمحوه (إضافةُ وثيقةٍ أخرى · تبديلُ الصفة · إضافةُ تخصّص). */
+function pickDocFile(i, inp){
+  if(!_vEdit || !_vEdit.docs[i]) return;
+  var f = inp && inp.files && inp.files[0];
+  if(!f) return;
+  syncDraft();
+  _vEdit.docs[i]._file = f;
+  _vEdit.docs[i]._fileName = String(f.name||"ملف").slice(0,120);
+  paintDraft();
+}
+function delDocFile(i){
+  syncDraft(); if(!_vEdit || !_vEdit.docs[i]) return;
+  delete _vEdit.docs[i]._file; delete _vEdit.docs[i]._fileName;
+  paintDraft();
+}
+/* تبديلُ نوع الوثيقة: **ما اشتُقّ للنوع القديم يسقط** ثمّ يُشتقّ للجديد. بدونه يبقى
+   رقمُ السجل التجاريّ في صفٍّ صار «عنواناً وطنياً» — قيمةٌ باليةٌ لا خطأَ مستخدمٍ
+   ولا بيانَ وثيقة. والمقارنةُ **بقيمة الاشتقاق القديمة نفسِها** لا بشارةٍ عامّة:
+   فما كتبه المستخدمُ بيده لا يُمسّ ولو بدّل النوعَ عشر مرّات. */
+function setDocType(i, type){
+  syncDraft(); if(!_vEdit || !_vEdit.docs[i]) return;
+  var dc = _vEdit.docs[i];
+  var wasAuto = docAutoValue(dc.type, _vEdit) || {};
+  if(wasAuto.number && String(dc.number||"") === wasAuto.number){ dc.number = ""; dc._auto = false; }
+  if(wasAuto.expiry && String(dc.expiry||"") === wasAuto.expiry){ dc.expiry = ""; dc._auto = false; }
+  dc.type = String(type||"other");
+  paintDraft();
+}
 function addContact(){ syncDraft(); if(!_vEdit) return; _vEdit.contacts = (_vEdit.contacts||[]).concat([{ name:"", role:"", phone:"" }]); paintDraft(); }
 function delContact(i){ syncDraft(); if(!_vEdit) return; (_vEdit.contacts||[]).splice(i,1); paintDraft(); }
 function paintDraft(){
@@ -3770,14 +3878,10 @@ function saveVendorEdit(){
 
   // الملفاتُ تُرفع أولاً؛ فشلُ رفعِ ملفٍ **لا يمنع** حفظَ بقيةِ البيانات، لكنه
   // لا يسجّل رابطاً وهمياً — الوثيقةُ تُحفظ ببياناتها بلا مرفق ويُعلَن ذلك.
+  // **ومصدرُها المسوّدةُ لا الـDOM**: حقولُ الملفّات تُتلَف مع كل إعادةِ رسم، فقراءتُها
+  // من الشاشة عند الحفظ تُسقط كلَّ ملفٍّ اختير قبل آخرِ إعادةِ رسم — وهو العطلُ نفسُه.
   var files = [];
-  var tbl = document.getElementById("ct-docs-tbl");
-  if(tbl){
-    tbl.querySelectorAll("input.ct-file").forEach(function(inp){
-      var i = parseInt(inp.dataset.i,10);
-      if(inp.files && inp.files[0] && _vEdit.docs[i]) files.push({ i:i, file:inp.files[0] });
-    });
-  }
+  (d.docs||[]).forEach(function(dc,i){ if(dc && dc._file) files.push({ i:i, file:dc._file }); });
 
   var vidPromise = _vOpen ? Promise.resolve(_vOpen) : genVendorId();
   var failedUploads = 0;
@@ -3802,7 +3906,7 @@ function saveVendorEdit(){
           return { name:(c.name||"").trim(), role:(c.role||"").trim(), phone:normPhone(c.phone) };
         }).filter(function(c){ return c.name || c.role || c.phone; }),
         taxRegistered: (d.taxRegistered===true||d.taxRegistered===false) ? d.taxRegistered : null,
-        legal: d.legal || {}, docs: d.docs || [],
+        legal: d.legal || {}, docs: docsForSave(d.docs),
         status: d.status || "active"
       };
       if(canBank()) payload.bank = d.bank || {};
@@ -7055,6 +7159,11 @@ function injectCSS(){
 ".ct-field{display:flex;flex-direction:column;gap:5px}",
 ".ct-field-l{font-size:11px;color:var(--muted);font-weight:700}",
 ".ct-file{font-size:11px;padding:4px}",
+/* الملفُّ المختارُ يُعلَن باسمه: حقلُ الملفّ لا يُملأ برمجياً، فلولا هذه الشارةُ
+   لبدا الحقلُ فارغاً بعد إعادة الرسم والملفُّ محفوظٌ في المسوّدة. */
+".ct-file-chip{display:inline-flex;align-items:center;gap:5px;max-width:190px;font-size:10.5px;font-weight:700;color:var(--sla-ok);background:var(--sla-ok-bg);border:1px solid var(--sla-ok-bd);border-radius:20px;padding:3px 9px}",
+".ct-file-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr}",
+".ct-auto{font-size:9.5px;font-weight:700;color:var(--sla-ok);display:flex;align-items:center;gap:3px;margin-top:3px}",
 ".ct-save-bar{display:flex;gap:8px;justify-content:flex-end;position:sticky;bottom:0;background:var(--bg);padding:12px 0 4px;border-top:1px solid var(--border)}",
 /* الفراغ */
 ".ct-empty{text-align:center;padding:38px 20px}",
@@ -7172,6 +7281,8 @@ window.contracts = {
   openVendor: openVendor, backToVendors: backToVendors, filterVendors: filterVendors,
   newVendor: newVendor, editVendor: editVendor, cancelVendorEdit: cancelVendorEdit,
   saveVendorEdit: saveVendorEdit, addDoc: addDoc, delDoc: delDoc, changeStatus: changeStatus,
+  pickDocFile: pickDocFile, delDocFile: delDocFile, setDocType: setDocType,
+  _draftVendor: function(){ return _vEdit; },
   addContact: addContact, delContact: delContact,
   setEntity: setEntity,
   addTrade: addTrade, addTradeText: addTradeText, delTrade: delTrade,
@@ -7294,6 +7405,8 @@ window.contracts = {
   _allExpiring: allExpiring,
   _duplicateOf: duplicateOf,
   _docTypesFor: docTypesFor,
+  _DOC_TYPES: DOC_TYPES,
+  _docAutoValue: docAutoValue, _applyDocAutofill: applyDocAutofill, _docsForSave: docsForSave,
   _normEntity: normEntity,
   // نوعُ الأعمال (التخصّص) — الدوالُّ النقيّةُ التي تقرؤها الشاشةُ والفحصُ معاً
   _TRADES: TRADES,
