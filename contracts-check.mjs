@@ -2127,6 +2127,57 @@ const ov5 = await page.evaluate(() => document.documentElement.scrollWidth - doc
 check('★ وجدولُ الموازنة بلا تمريرٍ أفقيٍّ للصفحة على الجوال', ov5 <= 1, 'زيادة ' + ov5 + 'px');
 await page.screenshot({ path: `${SHOTS}/27-budget-mobile.png` });
 
+/* ═════════ قسمُ التعاقدات في الصلاحيات ═════════
+   الحجبُ يُفحَص **تنفيذاً على المستخدم نفسِه**: تُبدَّل صلاحيتُه ثمّ يُسأل النظامُ
+   ماذا يرى — فحجبُ زرٍّ في الترميز وحدَه بابٌ يبقى مفتوحاً بالعنوان المباشر. */
+console.log('\n=== الصلاحيات: قسمُ التعاقدات ===');
+await page.setViewportSize({ width: 1440, height: 980 });
+const permStates = await page.evaluate(() => {
+  const prev = currentUser;
+  const probe = (user) => {
+    currentUser = user;
+    window.contracts.refreshNav();
+    return {
+      canView: window.contracts.canView(),
+      grp: !!document.getElementById('grp-contracts'),
+      hdr: !!document.getElementById('hdr-grp-contracts'),
+      blocked: (typeof _blockedPagesForUser === 'function')
+        ? ['vendors', 'contract-requests', 'contracts-list'].filter(p => _blockedPagesForUser().has(p)).length : -1
+    };
+  };
+  const pm = (perms) => ({ user: 'pm', name: 'مدير المشاريع', role: 'project_manager', permissions: perms });
+  const out = {
+    allowed: probe(pm({ contracts: true })),
+    blockedU: probe(pm({ contracts: false })),
+    legacy:  probe({ user: 'old', name: 'قديم', role: 'project_manager' }),   // بلا حقل صلاحيات
+    admin:   probe({ user: 'a', name: 'أدمن', role: 'admin', permissions: { contracts: false } })
+  };
+  // ومحاولةُ الدخول المباشر بالعنوان وهو محجوب
+  currentUser = pm({ contracts: false });
+  window.contracts.refreshNav();
+  showPage('vendors');
+  out.landedOn = (document.querySelector('.page.active') || {}).id || '';
+  currentUser = prev;
+  window.contracts.refreshNav();
+  return out;
+});
+check('★ الإذنُ ممنوحٌ ⇒ القسمُ ظاهرٌ في القائمة',
+  permStates.allowed.canView === true && permStates.allowed.grp === true && permStates.allowed.hdr === true,
+  JSON.stringify(permStates.allowed));
+check('★★ والإذنُ محجوبٌ ⇒ لا مجموعةَ ولا رأسَ في القائمة أصلاً (لا زرٌّ مخفيٌّ بـCSS)',
+  permStates.blockedU.canView === false && permStates.blockedU.grp === false && permStates.blockedU.hdr === false,
+  JSON.stringify(permStates.blockedU));
+check('★★ وصفحاتُه الثلاثُ محجوبةٌ في حارس النواة (لا دخولَ بالعنوان المباشر)',
+  permStates.blockedU.blocked === 3, 'محجوبة ' + permStates.blockedU.blocked + '/3');
+check('★★ ومحاولةُ فتحِه مباشرةً ترتدّ ولا تفتح صفحةَ تعاقدات',
+  permStates.landedOn !== 'page-vendors', 'هبط على ' + permStates.landedOn);
+check('★★ ومستخدمٌ قديمٌ بلا حقل صلاحيات يبقى كما كان (المفتاحُ حاجبٌ لا مانح)',
+  permStates.legacy.canView === true && permStates.legacy.grp === true,
+  JSON.stringify(permStates.legacy));
+check('★★ والأدمنُ يتجاوز الحجبَ كما في كل مفاتيح النواة',
+  permStates.admin.canView === true && permStates.admin.grp === true,
+  JSON.stringify(permStates.admin));
+
 check('لا أخطاء جافاسكربت طوال الرحلة', errors.length === 0, errors.slice(0, 2).join(' | '));
 
 console.log('\n' + '═'.repeat(58));

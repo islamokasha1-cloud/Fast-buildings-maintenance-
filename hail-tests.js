@@ -3696,8 +3696,9 @@ function cleaningOpsTests() {
   // لم يكن للنظافة مفتاح صلاحية — فلا سبيل لمنح/حجب الوحدة عند إضافة مستخدم.
   T("★ wf: مربّع «تشغيل النظافة» في نموذج إضافة المستخدم",
     HTML.includes('id="perm-cleaning" checked> تشغيل النظافة'));
-  T("★ wf: مفتاح cleaning في مصفوفتَي الحفظ (إضافة + تعديل الصلاحيات)",
-    (HTML.match(/'tickets','ppm','assets','purchases','reports','kpi','globalPurchases','cleaning'/g) || []).length === 2);
+  T("★ wf: مفتاح cleaning في مصدر المفاتيح الواحد (تقرؤه مصفوفتا الحفظ معاً)",
+    /const _PERM_LABELS = \{[\s\S]*?cleaning:"تشغيل النظافة"[\s\S]*?\};/.test(HTML) &&
+    (HTML.match(/const permKeys=_PERM_KEYS;/g) || []).length === 2);
   T("★ wf: الخريطة تربط cleaning بصفحة cleaning-ops (حجبُ showPage المباشر)",
     /cleaning:\s*\["cleaning-ops"\]/.test(HTML));
   T("★ wf: تسمية «تشغيل النظافة» في شارات القائمة ونافذة التعديل",
@@ -3747,9 +3748,47 @@ function cleaningOpsTests() {
   T("★ ce: مربّع المفتاح في نموذج الإضافة غيرُ مؤشَّرٍ افتراضاً",
     HTML.includes('id="perm-cleaningEdit"> إدارة مهام النظافة') &&
     !/id="perm-cleaningEdit"\s+checked/.test(HTML));
-  T("★ ce: المفتاح في مصفوفتَي الحفظ وفي تسميتَي الشارات والنافذة",
-    (HTML.match(/'globalPurchases','cleaning','cleaningEdit'\]/g) || []).length === 2 &&
-    (HTML.match(/cleaningEdit:"إدارة مهام النظافة"/g) || []).length === 2);
+  T("★ ce: المفتاح في مصدر المفاتيح الواحد الذي تقرؤه الحفظُ والتسمياتُ معاً",
+    /cleaningEdit:"إدارة مهام النظافة"/.test(HTML) &&
+    /const permLabels=_PERM_LABELS;/.test(HTML) &&
+    (HTML.match(/const permKeys=_PERM_KEYS;/g) || []).length === 2);
+
+  /* ══ ★★ مصدرُ مفاتيح الصلاحيات واحدٌ — والشبكةُ الساكنةُ تُطابقه ══
+     كانت القائمةُ مكرَّرةً في أربعة مواضع (شبكةُ «مستخدم جديد» · تسمياتُ نافذة
+     التعديل · مصفوفتا `permKeys`). ومفتاحٌ يُضاف في ثلاثةٍ ويُنسى في الرابع
+     **يُحفَظ بلا قيمة** أو **يُقرأ بلا خانةٍ تُعدّله** — بلا خطأٍ ظاهرٍ يُنبّه.
+     فالحارسُ يطابق مفاتيحَ المصدر بمربّعات الترميز الساكن مفتاحاً مفتاحاً. */
+  {
+    const labelsBlock = (HTML.match(/const _PERM_LABELS = \{([\s\S]*?)\};/) || [])[1] || "";
+    const keys = [...labelsBlock.matchAll(/(\w+)\s*:\s*"/g)].map(m => m[1]);
+    const missingBox = keys.filter(k => !new RegExp('id="perm-' + k + '"').test(HTML));
+    T("★★ pk: مصدرُ المفاتيح موجودٌ ومنه تُشتقّ `_PERM_KEYS`",
+      keys.length >= 10 && /const _PERM_KEYS = Object\.keys\(_PERM_LABELS\);/.test(HTML), keys.join(","));
+    T("★★ pk: لكلِّ مفتاحٍ في المصدر مربّعٌ في نموذج إضافة المستخدم",
+      missingBox.length === 0, missingBox.join(","));
+    T("★★ pk: ولا مربّعَ صلاحيةٍ في الترميز بلا مفتاحٍ في المصدر (خانةٌ لا تُحفَظ)",
+      [...HTML.matchAll(/id="perm-(\w+)"/g)].map(m => m[1]).every(k => keys.includes(k)));
+  }
+
+  /* ══ ★★ قسمُ التعاقدات في الصلاحيات (طلبُ المالك) ══
+     الحجبُ هنا **حارسٌ ثانٍ** لا الوحيد: `contracts.canView` تقرأ المفتاحَ نفسَه
+     فتُزيل مجموعةَ القائمة وتردّ الرابطَ العميق وبطاقةَ اللوحة و«بانتظار إجراءك»؛
+     وهذه تمنع `showPage` المباشرة. وحجبُ زرٍّ وحدَه بابٌ يبقى مفتوحاً بالعنوان. */
+  T("★★ ct: مفتاح «التعاقدات» في مصدر المفاتيح بتسميته",
+    /contracts:"التعاقدات"/.test(HTML));
+  T("★★ ct: والخريطة تربطه بصفحاته الثلاث (حجبُ showPage المباشر)",
+    /contracts:\s*\["vendors","contract-requests","contracts-list"\]/.test(HTML));
+  T("★ ct: ومجموعتُه الجانبية ضمن المجموعات المُدارة (تختفي حين تُحجب صفحاتُها)",
+    /_PERM_MANAGED_GROUPS = \[[^\]]*"grp-contracts"[^\]]*\]/.test(HTML));
+  if (CTR_PATH) {
+    const cs = fs.readFileSync(CTR_PATH, "utf8");
+    T("★★ ct: و`canView` في الوحدة تشترط الدورَ **والإذنَ** معاً",
+      /function canView\(\)\{\s*return VIEW_ROLES\.indexOf\(_role\(\)\)\s*!== -1 && _permAllows\("contracts"\);/.test(cs));
+    T("★★ ct: والإذنُ **حاجبٌ لا مانح** (المستخدمُ القائمُ لا يفقد شيئاً) والأدمنُ يتجاوز",
+      /function _permAllows\(key\)\{[\s\S]*?if\(u\.role === "admin"\) return true;[\s\S]*?return !p \|\| p\[key\] !== false;/.test(cs));
+    T("★ ct: وبوّابةُ القسم واحدةٌ تقرؤها كلُّ منافذه (الصفحاتُ واللوحةُ والقائمةُ والرابطُ العميق)",
+      (cs.match(/canView\(\)/g) || []).length >= 10);
+  }
   T("★ ce: الحفظ يكتب المانحَ بعلامةٍ صريحة والحاجبَ باصطلاحه",
     (HTML.match(/\(_PERM_GRANT_KEYS\.indexOf\(k\)>=0\) \? \(el\?\.checked===true\) : \(el\?\.checked!==false\)/g) || []).length === 2);
 

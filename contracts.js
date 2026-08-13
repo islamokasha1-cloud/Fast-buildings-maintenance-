@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2623";
+var MODULE_BUILD = "v18.9.2625";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1912,7 +1912,26 @@ var EDIT_ROLES   = ["admin","procurement_officer"];   // إنشاءُ/تعديل
 var BANK_ROLES   = ["admin","finance"];               // الآيبان — ناقلُ الاحتيال الأول
 var STATUS_ROLES = ["admin"];                         // الإيقافُ والحظر
 
-function canView(){   return VIEW_ROLES.indexOf(_role())   !== -1; }
+/* ── الإذنُ الفرديُّ فوق الدور ──
+   الدورُ يقول «هذا النوعُ من المستخدمين قد يرى التعاقدات»، والإذنُ يقول «وهذا
+   المستخدمُ بعينه يراها أو لا». وكلاهما شرطٌ لازم: مديرُ مشاريعَ في مشروعٍ لا
+   تعاقداتِ فيه لا حاجةَ له بالقسم، وحجبُه كان يستلزم تغييرَ دوره كلِّه.
+   **مفتاحٌ حاجبٌ لا مانح** (اصطلاحُ `_PERM_PAGE_MAP` في النواة): الافتراضُ مسموح،
+   وإلغاءُ العلامة يحجب — فالمستخدمُ القائمُ لا يفقد شيئاً بترقيةٍ صامتة.
+   والأدمنُ يتجاوز كما في كل مفاتيح النواة. */
+function _permAllows(key){
+  try{
+    var u = _user();
+    if(!u) return false;
+    if(u.role === "admin") return true;
+    var p = u.permissions;
+    return !p || p[key] !== false;
+  }catch(e){ return true; }
+}
+/* بوّابةُ القسم كلِّه: تقرؤها الصفحاتُ الثلاثُ وبطاقةُ اللوحة و«بانتظار إجراءك»
+   وزرُّ «تفاصيل الطرف» والرابطُ العميق وحقنُ القائمة الجانبية — أحدَ عشرَ موضعاً
+   من مصدرٍ واحد، فلا بابَ يبقى مفتوحاً حين يُغلق الباقي. */
+function canView(){   return VIEW_ROLES.indexOf(_role())   !== -1 && _permAllows("contracts"); }
 function canEdit(){   return EDIT_ROLES.indexOf(_role())   !== -1; }
 function canBank(){   return BANK_ROLES.indexOf(_role())   !== -1; }
 function canStatus(){ return STATUS_ROLES.indexOf(_role()) !== -1; }
