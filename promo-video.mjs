@@ -683,6 +683,15 @@ async function captionIn(main, sub, badge) {
   await tween(FADE + 2, (u) => setAt('caption', u.toFixed(3)));
 }
 async function captionOut() {
+  // الحارسُ ليس تحسيناً بل إصلاحُ خلل: التلاشي يبدأ من العتامة الكاملة مهما كانت
+  // الحالةُ الراهنة، وهذه الدالّةُ تُستدعى مرّتين (نهايةَ الفصل وأوّلَ التالي).
+  // فالنداءُ الثاني كان **يُعيد إشعال التعليق القديم** ثمّ يُطفئه — ومضةٌ بنصّ
+  // الفصل السابق بعد كلّ فصل، بانتظام. مقيسة: ١٦ ومضةً بمعدّل ٠٫٣ث في فيلمٍ واحد.
+  const vis = await page.evaluate(() => {
+    const l = document.getElementById('pv-lower');
+    return l ? parseFloat(l.style.opacity || (l.classList.contains('on') ? '1' : '0')) : 0;
+  }).catch(() => 0);
+  if (!(vis > 0.02)) return;                   // مخفيٌّ أصلاً — لا تُشعله لتُطفئه
   await tween(FADE, (u) => setAt('caption', (1 - u).toFixed(3)));
   await page.waitForTimeout(120);              // لا يبدأ تغيّرُ الشاشة قبل اكتمال الانقشاع
 }
