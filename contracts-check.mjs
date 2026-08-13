@@ -360,6 +360,88 @@ check('★ وجدولُ جهات الاتصال قابلٌ للتحرير (اس�
     return !!t && t.querySelectorAll('[data-cf="phone"]').length === 1 && t.querySelectorAll('[data-cf="name"]').length === 1;
   }));
 
+/* ══ الوثائق: الملفُّ لا يضيع · والبياناتُ تُشتقّ من الأعلى ══   (بلاغُ المالك)
+   يُختار ملفٌّ **بحقل الملفّ الحقيقيّ** (`setInputFiles`) ثمّ تُضاف وثيقةٌ ثانية —
+   وهو بالضبط ما كان يمحو الأولى: إعادةُ الرسم تُتلف `input[type=file]`. */
+await page.evaluate(() => { window.contracts.addDoc(); });
+await page.waitForTimeout(500);
+const docCount0 = await page.evaluate(() => document.querySelectorAll('#ct-docs-tbl tbody tr').length);
+await page.setInputFiles('#ct-docs-tbl input.ct-file', {
+  name: 'cr-cert.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test')
+});
+await page.waitForTimeout(600);
+check('★ الملفُّ المختارُ يُعلَن باسمه في صفّه',
+  (await page.textContent('#ct-docs-tbl')).includes('cr-cert.pdf'));
+
+await page.evaluate(() => { window.contracts.addDoc(); });      // ⇐ اللحظةُ التي كان يضيع فيها
+await page.waitForTimeout(600);
+const afterAdd = await page.evaluate(() => {
+  const d = window.contracts._draftVendor();
+  return {
+    rows: document.querySelectorAll('#ct-docs-tbl tbody tr').length,
+    kept: !!(d.docs || []).some(x => x._file && x._fileName === 'cr-cert.pdf'),
+    shown: document.getElementById('ct-docs-tbl').textContent.includes('cr-cert.pdf')
+  };
+});
+check('★★ إضافةُ وثيقةٍ ثانيةٍ **لا تُضيّع** ملفَ الأولى (بلاغُ المالك)',
+  afterAdd.kept === true && afterAdd.shown === true && afterAdd.rows === docCount0 + 1,
+  JSON.stringify(afterAdd));
+
+// وتبديلُ الصفة يُعيد رسمَ النموذج كلِّه — الملفُّ يصمد له أيضاً
+await page.evaluate(() => { window.contracts.addTrade('civil'); });
+await page.waitForTimeout(500);
+check('★ ويصمد لإعادة رسمٍ من سببٍ آخر (إضافةُ تخصّص)',
+  (await page.textContent('#ct-docs-tbl')).includes('cr-cert.pdf'));
+
+/* الاشتقاقُ من الأعلى: يُكتب تاريخُ انتهاء السجل **في خانته العلوية** ثمّ يُختار
+   نوعُ الوثيقة — فيُملأ رقمُه وانتهاؤه بلا كتابةٍ ثانية (وهو نصُّ طلب المالك). */
+const auto = await page.evaluate(() => {
+  // التاريخُ إزاحةٌ عن اليوم لا رقمٌ محفور (قاعدةُ قوالب الفحص — NOTES §6)
+  const want = new Date(Date.now() + 500 * 86400000).toISOString().slice(0, 10);
+  document.getElementById('ct-f-crexp').value = want;
+  const n = document.querySelectorAll('#ct-docs-tbl tbody tr').length;
+  window.contracts.setDocType(n - 1, 'cr');
+  const r = document.querySelectorAll('#ct-docs-tbl tbody tr');
+  const l = r[r.length - 1];
+  return {
+    want: want,
+    number: l.querySelector('[data-f="number"]').value,
+    expiry: l.querySelector('[data-f="expiry"]').value,
+    tagged: l.textContent.includes('من البيانات الأساسية')
+  };
+});
+check('★★ اختيارُ «السجل التجاري» يملأ رقمَه **وانتهاءَه** ممّا أُدخل في الأعلى — بلا كتابةٍ ثانية',
+  auto.number === '1010234567' && auto.expiry === auto.want && auto.tagged === true, JSON.stringify(auto));
+
+const autoAddr = await page.evaluate(() => {
+  const n = document.querySelectorAll('#ct-docs-tbl tbody tr').length;
+  window.contracts.setDocType(n - 1, 'natAddr');
+  const r = document.querySelectorAll('#ct-docs-tbl tbody tr');
+  const l = r[r.length - 1];
+  return { number: l.querySelector('[data-f="number"]').value, expiry: l.querySelector('[data-f="expiry"]').value };
+});
+check('★★ وتبديلُ النوع يُسقط ما اشتُقّ للنوع السابق ويشتقّ للجديد (لا رقمَ سجلٍّ في خانة عنوان)',
+  autoAddr.number === 'حائل — حي النقرة' && autoAddr.expiry === '', JSON.stringify(autoAddr));
+
+// وما كُتب باليد لا يُمسّ مهما بُدِّل النوع
+const manual = await page.evaluate(() => {
+  const n = document.querySelectorAll('#ct-docs-tbl tbody tr').length;
+  const r = document.querySelectorAll('#ct-docs-tbl tbody tr');
+  r[r.length - 1].querySelector('[data-f="number"]').value = 'رقمٌ كتبتُه بيدي';
+  window.contracts.setDocType(n - 1, 'vat');
+  const r2 = document.querySelectorAll('#ct-docs-tbl tbody tr');
+  return r2[r2.length - 1].querySelector('[data-f="number"]').value;
+});
+check('★★ وما كتبه المستخدمُ بيده يصمد لتبديل النوع (الاشتقاقُ لا يدهس يداً)',
+  manual === 'رقمٌ كتبتُه بيدي', manual);
+
+// تنظيفٌ: تُحذف صفوفُ الفحص فلا تُلوّث بقيةَ الرحلة
+await page.evaluate(() => {
+  const d = window.contracts._draftVendor();
+  while ((d.docs || []).length > 3) window.contracts.delDoc(d.docs.length - 1);
+});
+await page.waitForTimeout(400);
+
 // رقمٌ ثابتٌ في حقلِ جوال: يُمنَع الحفظُ — رقمٌ ناقصٌ محفوظٌ يُقرأ صحيحاً يومَ الحاجة
 await page.evaluate(() => { document.getElementById('ct-f-phone').value = '0165551234'; });
 await page.evaluate(() => window.contracts.saveVendorEdit());

@@ -7003,6 +7003,63 @@ function contractsPhase1() {
   T("★ ووثائقُ الشخص لا تُعرَض لمنشأة (لا رخصةَ عملٍ ولا هوية)",
     !dFirm.includes("workPermit") && !dFirm.includes("identity"));
   T("والوثائقُ العامّة تظهر للصفتين", dIndiv.includes("insurance") && dFirm.includes("insurance"));
+  T("★ والحسابُ البنكيُّ والعنوانُ الوطنيُّ وثيقتان للصفتين معاً (للشخص آيبانٌ وعنوانٌ كذلك)",
+    dIndiv.includes("bank") && dIndiv.includes("natAddr") &&
+    dFirm.includes("bank") && dFirm.includes("natAddr"));
+
+  /* ════════════════════════════════════════════════════════════
+     الوثيقةُ تقرأ بياناتها من فوقها — لا مصدرَ حقيقةٍ ثانياً
+
+     أربعُ وثائقَ بياناتُها مكتوبةٌ أصلاً في البيانات الأساسية. إعادةُ كتابتها في
+     صفّ الوثيقة تُنشئ رقمين للسجل الواحد يفترقان بأوّل تصحيح.
+     ════════════════════════════════════════════════════════════ */
+  const vAuto = {
+    entityType: "establishment",
+    legal: { crNumber: "1010111222", crExpiry: "2027-03-01", vatNumber: "300099", nationalAddress: "حائل — النقرة 1234" },
+    bank: { iban: "SA0380000000608010167519" }
+  };
+  T("★★ السجلُّ التجاريُّ يأخذ رقمَه **وانتهاءَه** من البيانات الأساسية",
+    C._docAutoValue("cr", vAuto).number === "1010111222" &&
+    C._docAutoValue("cr", vAuto).expiry === "2027-03-01");
+  T("★ والبطاقةُ الضريبيةُ والعنوانُ الوطنيُّ كذلك",
+    C._docAutoValue("vat", vAuto).number === "300099" &&
+    C._docAutoValue("natAddr", vAuto).number === "حائل — النقرة 1234");
+  T("★ ووثيقةٌ لا مصدرَ لها في الأعلى لا تُملأ بشيء",
+    C._docAutoValue("insurance", vAuto) === null &&
+    C._docAutoValue("other", vAuto) === null &&
+    C._docAutoValue("cr", { legal: {} }) === null);
+  T("★★ والملءُ يصيب **الفارغَ وحدَه** — ما كتبه المستخدمُ بيده لا يُدهَس",
+    (() => {
+      const d = { ...vAuto, docs: [{ type: "cr", number: "فرعٌ آخر", expiry: "" }, { type: "vat", number: "", expiry: "" }] };
+      C._applyDocAutofill(d);
+      return d.docs[0].number === "فرعٌ آخر" && d.docs[0].expiry === "2027-03-01" &&
+             d.docs[1].number === "300099" && d.docs[1]._auto === true;
+    })());
+  T("★★ والآيبانُ لا يُملأ إلا لمن يراه أصلاً (canBank) — لا كشفَ من بابٍ خلفيّ",
+    /bank:\s*function\(d\)\{\s*return canBank\(\)/.test(src));
+
+  /* ════════════════════════════════════════════════════════════
+     الملفُّ المختارُ لا يضيع عند إعادة رسم النموذج  (بلاغُ المالك)
+     `input[type=file]` لا يُملأ برمجياً، وإعادةُ الرسم تُتلفه. فما لم يُلتقط
+     في المسوّدة ضاع بلا أثرٍ ولا رسالة — والمستخدمُ يحفظ ظانّاً أنه رفعه.
+     ════════════════════════════════════════════════════════════ */
+  T("★★ الملفُّ يُثبَّت في المسوّدة فورَ اختياره (onchange) لا عند الحفظ",
+    /onchange="contracts\.pickDocFile\(/.test(src) &&
+    /function pickDocFile\(i, inp\)\{[\s\S]*?_vEdit\.docs\[i\]\._file = f;/.test(src));
+  T("★★ و`syncDraft` تلتقط الملفّات قبل كل إعادةِ رسم (لا رسمَ بعده يمحوها)",
+    /tbl\.querySelectorAll\("input\.ct-file"\)\.forEach\(function\(inp\)\{[\s\S]*?_vEdit\.docs\[i\]\._file = inp\.files\[0\]/.test(src));
+  T("★★ والحفظُ يقرأ الملفّات من **المسوّدة** لا من الشاشة (الشاشةُ نسيت ما قبل آخر رسم)",
+    /\(d\.docs\|\|\[\]\)\.forEach\(function\(dc,i\)\{ if\(dc && dc\._file\) files\.push/.test(src) &&
+    !/tbl\.querySelectorAll\("input\.ct-file"\)[\s\S]{0,200}files\.push/.test(src));
+  T("★ والصفُّ يُعلن اسمَ الملفّ المختار (حقلٌ يبدو فارغاً والملفُّ محفوظٌ كذبٌ صامت)",
+    /dc\._file\s*\?\s*'<div class="ct-file-chip">/.test(src) && /contracts\.delDocFile\(/.test(src));
+  T("★★ وحقولُ المسوّدة المؤقّتة لا تُكتب في القاعدة (جسمُ ملفٍّ حيٌّ ترفضه Firestore)",
+    /docs:\s*docsForSave\(d\.docs\)/.test(src) &&
+    /if\(k\.charAt\(0\) !== "_"\) out\[k\] = dc\[k\]/.test(src) &&
+    (() => {
+      const out = C._docsForSave([{ type: "cr", number: "1", url: "u", _file: { name: "x" }, _fileName: "x", _auto: true }]);
+      return !("_file" in out[0]) && !("_auto" in out[0]) && out[0].type === "cr" && out[0].url === "u";
+    })());
 
   /* ════════════════════════════════════════════════════════════
      نوعُ الأعمال (تخصّصُ الطرف) — قائمةٌ **أو** كتابةٌ يدوية
