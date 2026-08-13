@@ -8287,13 +8287,29 @@ function purchaseCardsGrid() {
   const a = HTML.indexOf('list.innerHTML = pgItems.map(p=>{');
   const card = a < 0 ? "" : HTML.slice(a, HTML.indexOf('}).join("")', a));
   T("بنيةُ بطاقة الشراء مستخرَجة", !!card && card.includes("po-card"));
-  ["po-row", "po-main", "po-badges", "po-items", "po-meta", "po-actions"].forEach(c =>
+  ["po-row", "po-main", "po-badges", "po-card-items", "po-meta", "po-actions"].forEach(c =>
     T(`★ الترميزُ يحمل الصنف ${c}`, new RegExp(`class="${c}"`).test(card)));
   T("★★ ولا تخطيطَ سطريّاً في هيكل البطاقة — النمطُ السطريُّ يتخطّى media query",
     !/style="[^"]*display:flex/.test(card) && !/style="[^"]*flex-direction/.test(card),
     (card.match(/style="[^"]*(display:flex|flex-direction)[^"]*"/) || [""])[0].slice(0, 90));
   T("★ وسطرُ البنود مقصورٌ على سطرين فلا يُطيل بطاقةً على حساب جاراتها",
-    /\.po-items\{[^}]*-webkit-line-clamp:2/.test(HTML));
+    /\.po-card-items\{[^}]*-webkit-line-clamp:2/.test(HTML));
+
+  /* ★★ حارسُ تصادم الأسماء — العطلُ الذي وقع فعلاً (بلاغُ المالك من آيفون):
+     `po-items` اسمُ **صندوق جدول البنود** في نافذتَي التفاصيل، وسطرُ ملخّص البطاقة
+     أخذ الاسمَ نفسَه ومعه `-webkit-line-clamp:2`. وهو الأدنى في الورقة فيرثه
+     الصندوق: على WebKit يُقصّ إلى سطرين — شريطُ العنوان وصفُّ الترويسة، **وتختفي
+     بنودُ الطلب كلُّها** — ويتجاهله Blink فيبدو الكمبيوتر سليماً.
+     فالعهدُ: **لا قصَّ أسطرٍ ولا `-webkit-box` على `.po-items` أبداً**، وصندوقُ
+     الجدول يبقى صندوقاً. */
+  const poItemsRules = (HTML.match(/(^|\})\s*\.po-items\{[^}]*\}/gm) || []).join(" ");
+  T("★★ صندوقُ جدول البنود (.po-items) بلا قصِّ أسطرٍ ولا -webkit-box — وإلا اختفت البنودُ على آيفون",
+    !/-webkit-line-clamp/.test(poItemsRules) && !/display:-webkit-box/.test(poItemsRules),
+    poItemsRules.slice(0, 160));
+  T("★ ولا يتشارك الصندوقُ وسطرُ البطاقة صنفاً واحداً (مكوّنان لا صلةَ بينهما)",
+    /class="po-card-items"/.test(HTML) &&
+    (HTML.match(/class="po-items"/g) || []).length === 2 &&   // نافذةُ الطلب ونافذةُ أمر الصرف
+    !/class="po-items"[^>]*>\$\{_ic\("package"/.test(HTML));
 }
 
 function contractLetterhead() {
