@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2616";
+var MODULE_BUILD = "v18.9.2618";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1610,6 +1610,117 @@ function identityOf(vendor){
            number:String(lg.crNumber||""), expiry:String(lg.crExpiry||"") };
 }
 
+/* ── أرقامُ التواصل ──
+   رقمٌ واحدٌ يُكتب بعشر صيغٍ ويجب أن يُقرأ واحدة: `0501234567` و`+966 50 123 4567`
+   و`٠٥٠١٢٣٤٥٦٧` كلُّها الرقمُ نفسُه. فالتخزينُ **مطبَّعٌ** (صيغةٌ دوليةٌ بلا `+`)
+   والعرضُ محلّيٌّ مقروء — وإلا صار الطرفُ الواحدُ رقمين لا يلتقيان في بحث.
+
+   ونسخةُ التطبيع هنا **مطابقةٌ عمداً** لـ`normalizeMsisdn` في
+   `functions/lib/whatsapp.js` (يحرسها فحصٌ يقارن السلوكين على المدخلات نفسِها):
+   ما يُحفَظ في السجل هو ما سيصله إشعارُ واتساب حرفاً بحرف — لا صيغةٌ تُقبَل هنا
+   وتُرفَض هناك. والفرقُ الوحيدُ المتعمَّد: الأرقامُ العربيةُ تُطوى هنا قبل كل شيء،
+   لأنّ مَن يكتب في المتصفّح قد تكون لوحتُه عربية، والخادمُ لا يستقبل إلا المطبَّع. */
+var _AR_DIGITS = "٠١٢٣٤٥٦٧٨٩٠١٢٣٤٥٦٧٨٩";   // العربية الهندية والفارسية
+function phoneDigits(raw){
+  var s = String(raw==null?"":raw), out = "";
+  for(var i=0;i<s.length;i++){
+    var c = s.charAt(i), k = _AR_DIGITS.indexOf(c);
+    if(k >= 0) out += String(k % 10);
+    else if(c >= "0" && c <= "9") out += c;
+  }
+  return out;
+}
+function normPhone(raw){
+  var d = phoneDigits(raw);
+  if(!d) return "";
+  if(d.indexOf("00") === 0) d = d.slice(2);                          // بادئةُ الاتصال الدوليّ
+  if(d.indexOf("966") === 0) return d;                               // دوليٌّ سعوديٌّ بالفعل
+  if(d.length === 10 && d.indexOf("05") === 0) return "966"+d.slice(1); // محلّيّ 05XXXXXXXX
+  if(d.length === 9  && d.charAt(0) === "5")   return "966"+d;          // بلا صفرٍ بادئ
+  return d;                                                          // رقمٌ دوليٌّ آخر — كما هو
+}
+
+/* صلاحيةُ الرقم: السعوديُّ **جوّالٌ** لا هاتفٌ ثابت (`9665XXXXXXXX`)، وغيرُه يُقبَل
+   بطولٍ دوليٍّ معقول. والحقلُ اسمُه «جوال» — فرقمُ مقسمٍ أرضيٍّ فيه يعني رسالةً
+   لا تصل وأحداً لا يُبلَّغ، وهو أسوأُ من خانةٍ فارغةٍ تُرى فارغة. */
+function phoneOk(raw){
+  var p = normPhone(raw);
+  if(!p) return false;
+  if(p.indexOf("966") === 0) return /^9665\d{8}$/.test(p);
+  // صفرٌ بادٍ نجا من التطبيع ⇒ رقمٌ محلّيٌّ ليس جوالاً سعودياً (ثابتٌ أو ناقص).
+  // ولو مرّ لظُنّ سليماً حتى يومِ الاتصال به. وغيرُ السعوديّ يُكتب بمفتاح دولته.
+  if(p.charAt(0) === "0") return false;
+  return /^\d{8,15}$/.test(p);
+}
+function phoneHint(raw){
+  var p = normPhone(raw);
+  if(!p) return "";
+  if(phoneOk(p)) return "";
+  if(p.indexOf("966") === 0 || p.charAt(0) === "0")
+    return "رقمُ الجوال السعوديّ يبدأ بـ05 ويتكوّن من عشرة أرقام (والرقمُ غيرُ السعوديّ يُكتب بمفتاح دولته بلا صفرٍ بادئ)";
+  return "رقمٌ غير مكتمل — اكتبه محلياً (05XXXXXXXX) أو دولياً كاملاً بمفتاح الدولة";
+}
+/* العرضُ محلّيٌّ للسعوديّ ودوليٌّ لغيره — القراءةُ بالعين قبل الاتصال. */
+function phoneFmt(raw){
+  var p = normPhone(raw);
+  if(!p) return "";
+  if(/^9665\d{8}$/.test(p)) return "0"+p.slice(3,5)+" "+p.slice(5,8)+" "+p.slice(8);
+  return "+"+p;
+}
+/* صيغُ الرقم التي قد يكتبها الباحث: كما خُزِّن، وبصفرٍ محلّيّ، وبلا مفتاحٍ ولا صفر. */
+function phoneVariants(e164){
+  var p = String(e164||""), out = [p];
+  if(/^9665\d{8}$/.test(p)) out.push("0"+p.slice(3), p.slice(3));
+  return out;
+}
+
+/* كلُّ أرقام الطرف في قائمةٍ واحدة: جوّالُه الرئيسيُّ ثمّ جهاتُ اتصاله.
+   **مصدرُ حقيقةٍ واحدٌ** يقرؤه العرضُ والبحثُ والاتصالُ معاً — فلا تُكرَّر قراءةُ
+   `contacts` في خمسة مواضعَ تفترق. والتكرارُ يُطوى بالمطبَّع: رقمٌ كُتب مرّتين
+   بصيغتين ليس رقمين. */
+function vendorPhones(vendor){
+  var v = vendor || {}, out = [], seen = {};
+  function push(label, raw){
+    var e = normPhone(raw);
+    if(!e || seen[e]) return;
+    seen[e] = 1;
+    out.push({ label:label||"جوال", e164:e, display:phoneFmt(e), valid:phoneOk(e) });
+  }
+  push(v.phoneLabel || "الجوال الرئيسي", v.phone);
+  (Array.isArray(v.contacts) ? v.contacts : []).forEach(function(c){
+    c = c || {};
+    push((c.name || "جهة اتصال") + (c.role ? (" — "+c.role) : ""), c.phone);
+  });
+  return out;
+}
+/* مطابقةُ البحث بالرقم — بأيّ صيغةٍ كتبها الباحث، ومن ثلاثة أرقامٍ فصاعداً
+   (أقلُّ من ذلك يطابق نصفَ السجل فيصير المرشّحُ ضجيجاً). */
+function vendorMatchesPhone(vendor, query){
+  var qd = phoneDigits(query);
+  if(qd.length < 3) return false;
+  var ph = vendorPhones(vendor);
+  for(var i=0;i<ph.length;i++){
+    var vs = phoneVariants(ph[i].e164);
+    for(var j=0;j<vs.length;j++) if(vs[j].indexOf(qd) !== -1) return true;
+  }
+  return false;
+}
+/* مَن يملك هذا الرقمَ غيرَ الطرفِ الذي نحرّره؟ **تنبيهٌ لا منع**: الرقمُ الواحد
+   قد يكون لمكتبٍ يمثّل مقاولين، لكنه في الغالب طرفٌ سُجِّل مرّتين — ورؤيةُ من
+   يملكه الآن هي الفرقُ بين تنبيهٍ يُفهم وتنبيهٍ يُتجاهَل. */
+function phoneOwner(raw, exceptId, pool){
+  var e = normPhone(raw);
+  if(!e) return null;
+  var list = Array.isArray(pool) ? pool : _vendors;
+  for(var i=0;i<list.length;i++){
+    var u = list[i];
+    if(!u || u.id === exceptId) continue;
+    var ph = vendorPhones(u);
+    for(var j=0;j<ph.length;j++) if(ph[j].e164 === e) return u;
+  }
+  return null;
+}
+
 /* وضعُ الضريبة المقترَحُ لعقدٍ مع هذا الطرف.
    الشخصُ غيرُ المسجَّل ⇐ `none`: لا تُضاف ضريبةٌ ولا تُستخرَج من مستحقّه. والاقتراحُ
    **يُقترَح ولا يُفرَض** — يبقى قابلاً للتغيير على العقد، فقد يكون الفردُ مسجَّلاً. */
@@ -2962,7 +3073,9 @@ function vendorListHTML(){
       var hay = normName(v.name) + " " + normName((v.aliases||[]).join(" ")) + " " +
                 normName(identityOf(v).number) + " " + normName((v.legal||{}).vatNumber) + " " +
                 normName(vendorTrades(v).map(tradeLabel).join(" "));
-      if(hay.indexOf(q) === -1) return false;
+      // والرقمُ مسارٌ مستقلٌّ لا حرفٌ في كومة النصّ: مَن يبحث برقمٍ يكتبه بالصيغة
+      // التي حفظها في جوّاله (بصفرٍ أو بمفتاحٍ دوليّ)، وهي غيرُ الصيغة المخزَّنة.
+      if(hay.indexOf(q) === -1 && !vendorMatchesPhone(v, _vFilter.q)) return false;
     }
     return true;
   });
@@ -2989,7 +3102,7 @@ function vendorListHTML(){
   }
 
   var filters = '<div class="ct-filters">'+
-    '<input class="form-input ct-search" id="ct-v-q" placeholder="ابحث باسم الطرف أو رقم السجل" value="'+_esc(_vFilter.q)+'" oninput="contracts.filterVendors(\'q\',this.value)">'+
+    '<input class="form-input ct-search" id="ct-v-q" placeholder="ابحث باسم الطرف أو رقم السجل أو رقم الجوال" value="'+_esc(_vFilter.q)+'" oninput="contracts.filterVendors(\'q\',this.value)">'+
     '<select class="form-input" onchange="contracts.filterVendors(\'kind\',this.value)">'+
       '<option value="">كل الأنواع</option>'+
       Object.keys(VENDOR_KINDS).map(function(k){
@@ -3087,6 +3200,18 @@ function vendorTileHTML(v, today){
       '</div>'
     : '';
 
+  /* الرقمُ على البطاقة **قابلٌ للاتصال من الشبكة نفسِها** — لا فتحَ بطاقةٍ ثم رجوعاً
+     لكلّ مكالمة. و`stopPropagation` لأنّ البطاقةَ كلَّها زرُّ فتحٍ: بدونه يفتح
+     الاتصالُ السجلَّ خلفه فيعود المستخدمُ من المكالمة إلى شاشةٍ لم يطلبها. */
+  var ph = vendorPhones(v);
+  var phHTML = ph.length
+    ? '<div class="ct-tile-ph" onclick="event.stopPropagation()">'+
+        '<a class="ct-link num" href="tel:+'+_esc(ph[0].e164)+'" dir="ltr">'+_icn("phone","ic-sm")+_esc(ph[0].display)+'</a>'+
+        '<a class="ct-link" href="https://wa.me/'+_esc(ph[0].e164)+'" target="_blank" rel="noopener" title="واتساب">'+_icn("messageCircle","ic-sm")+'</a>'+
+        (ph.length>1 ? '<span class="ct-dot">·</span><span style="font-size:10.5px;color:var(--muted);font-weight:700">+'+(ph.length-1)+' رقماً</span>' : '')+
+      '</div>'
+    : '';
+
   var chips = allExpiring(v).slice(0,5).map(function(dc){
     var s = docExpiryState(dc.expiry, today);
     return '<span class="ct-doc s-'+s.state+'" title="'+_esc(DOC_LBL[dc.type]||dc.type)+(dc.expiry?(' — ينتهي '+_esc(dc.expiry)):'')+'">'+
@@ -3103,7 +3228,7 @@ function vendorTileHTML(v, today){
       ' <span class="ct-dot">·</span> '+_icn(kind.icon,"ic-sm")+' '+_esc(kind.lbl)+
       (id.number?' <span class="ct-dot">·</span> <b class="num">'+_esc(id.number)+'</b>':'')+
     '</div>'+
-    trHTML +
+    trHTML + phHTML +
     '<div class="ct-docs">'+chips+'</div>'+
   '</div>';
 }
@@ -3189,6 +3314,7 @@ function vendorCardHTML(id){
       ? infoCell("الجنسية", _esc((v.legal||{}).nationality||"—"))
       : infoCell("الرقم الضريبي", numOrDash((v.legal||{}).vatNumber))) +
     infoCell("وضع الضريبة المقترَح", _esc(vatSug ? vatSug.short : "—")) +
+    infoCell("رقم الجوال", phoneHTML(v.phone)) +
     infoCell("العنوان الوطني", _esc((v.legal||{}).nationalAddress||"—")) +
     infoCell("نوع الأعمال", vendorTradesHTML(v), true) +
   '</div>';
@@ -3231,13 +3357,19 @@ function vendorCardHTML(id){
     '</tr></thead><tbody>'+docRows+'</tbody></table></div>'+
   '</div>';
 
-  var contacts = (Array.isArray(v.contacts)?v.contacts:[]);
-  var contactsSec = contacts.length ? '<div class="card ct-sec">'+
+  /* جهاتُ الاتصال — تُعرَض دائماً ولو كانت فارغة: القسمُ المخفيُّ عند الفراغ لا
+     يُقرأ «لا جهاتَ اتصال» بل «لا مكانَ لها»، فيُكتب الرقمُ في ورقةٍ جانبية. */
+  var contacts = (Array.isArray(v.contacts)?v.contacts:[]).filter(function(c){ return c && (c.name||c.phone||c.role); });
+  var contactsSec = '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("users","ic-sm")+' جهات الاتصال</div>'+
-    '<div class="ct-info">'+contacts.map(function(c){
-      return infoCell(_esc(c.role||"جهة اتصال"), _esc(c.name||"—")+(c.phone?' <span class="num" style="color:var(--muted)">'+_esc(c.phone)+'</span>':''));
-    }).join("")+'</div>'+
-  '</div>' : "";
+    (contacts.length
+      ? '<div class="ct-info">'+contacts.map(function(c){
+          return infoCell(c.role||"جهة اتصال", '<span>'+_esc(c.name||"—")+'</span>'+
+            (c.phone ? '<div style="margin-top:4px">'+phoneHTML(c.phone)+'</div>' : ''));
+        }).join("")+'</div>'
+      : '<div class="ct-note" style="margin:0">'+_icn("alertCircle","ic-sm")+
+        ' لا جهاتِ اتصالٍ مسجّلة — أضِف مسؤولَ التواصل ورقمَه ليُعرف بمن يُتّصل عند تنفيذ العقد.</div>')+
+  '</div>';
 
   return back +
     headHTML(v.name||v.id, '<span class="badge '+st.cls+'">'+_icn(st.icon,"ic-sm")+' '+_esc(st.lbl)+'</span> <span class="ct-id num">'+_esc(v.id)+'</span>', tools, (VENDOR_KINDS[v.kind]||VENDOR_KINDS.subcontractor).icon) +
@@ -3262,6 +3394,19 @@ function sodNoteHTML(mode, owner){
 
 function infoCell(label, valueHtml, wide){
   return '<div class="ct-cell'+(wide?' wide':'')+'"><div class="ct-cell-l">'+_esc(label)+'</div><div class="ct-cell-v">'+valueHtml+'</div></div>';
+}
+
+/* الرقمُ **يُتّصل به** لا يُقرأ فقط: نصٌّ مجرَّدٌ يعني نسخاً يدوياً وخطأً في رقمٍ
+   واحد. فالمعروضُ رابطُ اتصالٍ ورابطُ واتساب — والصيغةُ المطبَّعةُ هي المرسَلة
+   إليهما، فما يُطلَب هو ما خُزِّن لا ما رآه العين. ورقمٌ مخزَّنٌ لا يصلح للجوال
+   (ثابتٌ أو ناقص) يُوسَم بدل أن يُعرَض سليماً كاذباً. */
+function phoneHTML(raw){
+  var e = normPhone(raw);
+  if(!e) return '<span style="color:var(--muted)">—</span>';
+  var bad = phoneOk(e) ? "" : ' <span class="ct-doc s-expired" title="'+_esc(phoneHint(e))+'">يُراجَع</span>';
+  return '<a class="ct-link num" href="tel:+'+_esc(e)+'" dir="ltr">'+_icn("phone","ic-sm")+_esc(phoneFmt(e))+'</a>'+
+    ' <a class="ct-link ct-wa" href="https://wa.me/'+_esc(e)+'" target="_blank" rel="noopener" title="مراسلة على واتساب">'+
+      _icn("messageCircle","ic-sm")+' واتساب</a>'+ bad;
 }
 
 /* شارات تخصّصات الطرف — وحين لا تخصّصَ **يُقال السبب**: الفراغُ هنا ليس «لا شيء»
@@ -3351,6 +3496,16 @@ function vendorEditHTML(v){
     '</tr>';
   }).join("");
 
+  var contactRows = (d.contacts||[]).map(function(c,i){
+    return '<tr>'+
+      '<td><input class="form-input" data-cf="name"  data-ci="'+i+'" value="'+_esc(c.name||"")+'" placeholder="الاسم"></td>'+
+      '<td><input class="form-input" data-cf="role"  data-ci="'+i+'" value="'+_esc(c.role||"")+'" placeholder="المدير · مسؤول التنفيذ"></td>'+
+      // كالحقل الرئيسيّ: المخزَّنُ دوليٌّ والمعروضُ في النموذج محلّيٌّ مقروء
+      '<td><input class="form-input num" data-cf="phone" data-ci="'+i+'" value="'+_esc(phoneFmt(c.phone)||c.phone||"")+'" placeholder="05XXXXXXXX" dir="ltr" inputmode="tel"></td>'+
+      '<td><button class="btn btn-delete" onclick="contracts.delContact('+i+')">'+_icn("trash","ic-sm")+'</button></td>'+
+    '</tr>';
+  }).join("");
+
   var bankBlock = canBank()
     ? '<div class="ct-form-row">'+
         field("الآيبان (IBAN)", '<input class="form-input num" id="ct-f-iban" value="'+_esc((d.bank||{}).iban||"")+'" placeholder="SA…" dir="ltr">') +
@@ -3404,6 +3559,13 @@ function vendorEditHTML(v){
       '</div>'
     ))+
     '<div class="ct-form-row">'+
+      field("رقم الجوال", '<input class="form-input num" id="ct-f-phone" value="'+_esc(phoneFmt(d.phone)||d.phone||"")+'" '+
+        'placeholder="05XXXXXXXX" dir="ltr" inputmode="tel" autocomplete="tel">') +
+      field("صفةُ صاحب الرقم (اختياري)", '<input class="form-input" id="ct-f-phonelbl" value="'+_esc(d.phoneLabel||"")+'" placeholder="المالك · المدير · مسؤول التنفيذ">') +
+    '</div>'+
+    '<div class="ct-note" style="margin:-4px 0 12px">'+_icn("phone","ic-sm")+
+      ' اكتبه محلياً (05XXXXXXXX) أو دولياً بمفتاح دولته — ويُحفَظ بصيغةٍ دوليةٍ موحّدة ليصلح للاتصال وواتساب والبحث معاً.</div>'+
+    '<div class="ct-form-row">'+
       field("مسجَّل في ضريبة القيمة المضافة؟",
         '<select class="form-input" id="ct-f-taxreg">'+
           '<option value=""'+(d.taxRegistered===undefined||d.taxRegistered===null?' selected':'')+'>— يُستنتج من البيانات —</option>'+
@@ -3413,6 +3575,15 @@ function vendorEditHTML(v){
       field("العنوان الوطني", '<input class="form-input" id="ct-f-addr" value="'+_esc((d.legal||{}).nationalAddress||"")+'">') +
     '</div>'+
     '<div class="ct-note">'+_icn("receipt","ic-sm")+' وضع الضريبة المقترَح لعقود هذا الطرف: <b>'+_esc((VAT_MODES[suggestVatMode(d)]||{}).short||"")+'</b> — يبقى قابلاً للتغيير على كل عقد.</div>'+
+  '</div>'+
+  '<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("users","ic-sm")+' جهات الاتصال'+
+      '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.addContact()">'+_icn("plus","ic-sm")+' جهة اتصال</button></div>'+
+    '<div class="ct-table-wrap"><table class="ct-table" id="ct-contacts-tbl"><thead><tr>'+
+      '<th>الاسم</th><th>الصفة</th><th>رقم الجوال</th><th></th>'+
+    '</tr></thead><tbody>'+(contactRows||'<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:14px">لا جهاتِ اتصال — أضِف مسؤولَ التواصل ورقمَه.</td></tr>')+'</tbody></table></div>'+
+    '<div class="ct-note" style="margin:12px 0 0">'+_icn("alertCircle","ic-sm")+
+      ' أرقامُ جهات الاتصال تُبحَث من مربّع البحث في السجل كما يُبحَث الجوالُ الرئيسيّ. والصفُّ الفارغُ تماماً يُهمَل عند الحفظ.</div>'+
   '</div>'+
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("landmark","ic-sm")+' البيانات البنكية</div>'+ bankBlock +
@@ -3453,7 +3624,7 @@ function retry(){ stopSync(); startSync(); paintVendors(); }
 function newVendor(){
   if(!canEdit()) return _toast("⚠ لا صلاحية لإضافة طرف","warn");
   _vOpen = null;
-  _vEdit = { name:"", entityType:"establishment", kind:"subcontractor", legal:{}, bank:{}, docs:[], aliases:[], trades:[], status:"active", taxRegistered:null };
+  _vEdit = { name:"", entityType:"establishment", kind:"subcontractor", legal:{}, bank:{}, docs:[], aliases:[], trades:[], contacts:[], phone:"", phoneLabel:"", status:"active", taxRegistered:null };
   var el = document.getElementById("page-"+PAGE_VENDORS);
   if(el) el.innerHTML = vendorEditHTML(null);
 }
@@ -3468,6 +3639,8 @@ function editVendor(){
     docs:  (Array.isArray(v.docs)?v.docs:[]).map(function(d){ return Object.assign({}, d); }),
     aliases: (Array.isArray(v.aliases)?v.aliases:[]).slice(),
     trades: vendorTrades(v),
+    phone: v.phone||"", phoneLabel: v.phoneLabel||"",
+    contacts: (Array.isArray(v.contacts)?v.contacts:[]).map(function(c){ return Object.assign({}, c); }),
     status: v.status||"active"
   };
   paintVendors();
@@ -3495,6 +3668,10 @@ function syncDraft(){
     if(document.getElementById("ct-f-crexp")) _vEdit.legal.crExpiry = val("ct-f-crexp");
     if(document.getElementById("ct-f-vat"))   _vEdit.legal.vatNumber = val("ct-f-vat");
   }
+  // الرقمُ يبقى في المسوّدة **كما كُتب** ولا يُطبَّع إلا عند الحفظ: تطبيعُه مع كل
+  // إعادةِ رسمٍ يقلب ما تحت الإصبع (`05` تصير `9665`) فيظنّ الكاتبُ الحقلَ عصيّاً.
+  var pv = document.getElementById("ct-f-phone"); if(pv) _vEdit.phone = String(pv.value||"").trim();
+  _vEdit.phoneLabel = val("ct-f-phonelbl");
   var tx = sel("ct-f-taxreg");
   if(tx !== null) _vEdit.taxRegistered = (tx === "yes") ? true : (tx === "no" ? false : null);
   _vEdit.legal.nationalAddress = val("ct-f-addr");
@@ -3512,6 +3689,15 @@ function syncDraft(){
       var i = parseInt(inp.dataset.i,10), f = inp.dataset.f;
       if(!_vEdit.docs[i] || !f) return;
       _vEdit.docs[i][f] = String(inp.value||"").trim();
+    });
+  }
+  var ctb = document.getElementById("ct-contacts-tbl");
+  if(ctb){
+    _vEdit.contacts = _vEdit.contacts || [];
+    ctb.querySelectorAll("[data-cf]").forEach(function(inp){
+      var i = parseInt(inp.dataset.ci,10), f = inp.dataset.cf;
+      if(!_vEdit.contacts[i] || !f) return;
+      _vEdit.contacts[i][f] = String(inp.value||"").trim();
     });
   }
 }
@@ -3543,6 +3729,8 @@ function delTrade(i){
 }
 function addDoc(){ syncDraft(); if(!_vEdit) return; _vEdit.docs.push({ type:(docTypesFor(_vEdit.entityType)[0]||{key:"other"}).key, number:"", expiry:"" }); paintDraft(); }
 function delDoc(i){ syncDraft(); if(!_vEdit) return; _vEdit.docs.splice(i,1); paintDraft(); }
+function addContact(){ syncDraft(); if(!_vEdit) return; _vEdit.contacts = (_vEdit.contacts||[]).concat([{ name:"", role:"", phone:"" }]); paintDraft(); }
+function delContact(i){ syncDraft(); if(!_vEdit) return; (_vEdit.contacts||[]).splice(i,1); paintDraft(); }
 function paintDraft(){
   var el = document.getElementById("page-"+PAGE_VENDORS); if(!el) return;
   el.innerHTML = vendorEditHTML(_vOpen ? vendorById(_vOpen) : null);
@@ -3559,6 +3747,23 @@ function saveVendorEdit(){
   var dup = duplicateOf(d, _vOpen);
   if(dup.block){ _toast("⚠ "+dup.reason,"warn"); return; }
   if(dup.match) _toast("⚠ "+dup.reason,"warn");   // تشابهُ أسماء الأشخاص: تنبيهٌ لا منع
+
+  /* الرقمُ الخاطئ **يُمنَع** لا يُحذَّر منه: خانةٌ فارغةٌ تُرى فارغة، أمّا رقمٌ ناقصٌ
+     محفوظٌ فيُقرأ صحيحاً ويُتّصل به يوم الحاجة. (والفراغُ نفسُه مقبولٌ — كثيرٌ من
+     الأطراف القديمة بلا رقمٍ ولا يجوز أن يقف تعديلُ اسمها على ذلك.) */
+  if(d.phone && !phoneOk(d.phone)){ _toast("⚠ رقم الجوال غير صالح — "+phoneHint(d.phone),"warn"); return; }
+  var badContact = null;
+  (d.contacts||[]).forEach(function(c,i){
+    if(!badContact && c && c.phone && !phoneOk(c.phone)) badContact = { i:i, c:c };
+  });
+  if(badContact){
+    _toast("⚠ رقم جهة الاتصال «"+((badContact.c.name)||("رقم "+(badContact.i+1)))+"» غير صالح — "+phoneHint(badContact.c.phone),"warn");
+    return;
+  }
+  // رقمٌ يملكه طرفٌ آخر: تنبيهٌ لا منع — قد يكون مكتباً يمثّل أكثرَ من مقاول،
+  // وقد يكون الطرفَ نفسَه مسجَّلاً مرّتين. ورؤيةُ **مَن يملكه** هي ما يحسم الأمر.
+  var owner = d.phone ? phoneOwner(d.phone, _vOpen, _vendors) : null;
+  if(owner) _toast("⚠ رقم الجوال مسجَّلٌ أيضاً للطرف «"+(owner.name||owner.id)+"» — تحقّق أنه ليس تكراراً","warn");
 
   var btn = document.getElementById("ct-save-btn");
   if(btn){ btn.disabled = true; btn.textContent = "جارٍ الحفظ…"; }
@@ -3590,6 +3795,12 @@ function saveVendorEdit(){
       var payload = {
         name: d.name, entityType: ent, kind: d.kind, aliases: d.aliases,
         trades: vendorTrades(d),
+        // **التخزينُ مطبَّعٌ دائماً**: صيغةٌ واحدةٌ في القاعدة مهما تعدّدت صيغُ الكتابة،
+        // وإلا صار الرقمُ الواحدُ رقمين لا يلتقيان في بحثٍ ولا في كشفِ تكرار.
+        phone: normPhone(d.phone), phoneLabel: d.phoneLabel||"",
+        contacts: (d.contacts||[]).map(function(c){
+          return { name:(c.name||"").trim(), role:(c.role||"").trim(), phone:normPhone(c.phone) };
+        }).filter(function(c){ return c.name || c.role || c.phone; }),
         taxRegistered: (d.taxRegistered===true||d.taxRegistered===false) ? d.taxRegistered : null,
         legal: d.legal || {}, docs: d.docs || [],
         status: d.status || "active"
@@ -6037,6 +6248,7 @@ function contractPaperHTML(c, opt){
   var o=opt||{};
   var docNo=o.docNo || c.id || "";
   var v=vendorById(c.vendorId), idn=v?identityOf(v):null;
+  var ph2 = v ? ((vendorPhones(v)[0]||{}).display || "") : "";
   var val=contractValue(c), t=linesTotal(c.lines||[], c.vatMode);
   var groups=allClausesOf(c);
   var logo=_printLogo();
@@ -6135,8 +6347,11 @@ function contractPaperHTML(c, opt){
       '<div class="pm">ويُشار إليها بـ«الطرف الأول»</div></div>'+
     '<div class="party"><div class="pl">الطرف الثاني</div>'+
       '<div class="pn">'+_esc(c.vendorName||"—")+'</div>'+
-      '<div class="pm">'+(idn&&idn.number?(_esc(idn.label)+": "+_esc(idn.number)):"—")+
-        '</div><div class="pm">ويُشار إليه بـ«الطرف الثاني»</div></div>'+
+      '<div class="pm">'+(idn&&idn.number?(_esc(idn.label)+": "+_esc(idn.number)):"—")+'</div>'+
+      /* رقمُ التواصل في وثيقة العقد نفسِها: الإشعارُ الرسميُّ والإنذارُ قبل السحب
+         يحتاجان وسيلةَ تواصلٍ **مثبَتةً في العقد**، لا رقماً في شاشةٍ يتغيّر بعده. */
+      (ph2 ? '<div class="pm">جوال: <span dir="ltr">'+_esc(ph2)+'</span></div>' : '')+
+      '<div class="pm">ويُشار إليه بـ«الطرف الثاني»</div></div>'+
   '</div>'+
 
   '<h2>موضوع العقد</h2>'+
@@ -6827,6 +7042,10 @@ function injectCSS(){
 ".ct-table .form-input{font-size:12px;padding:5px 8px;min-width:110px}",
 ".ct-link{color:var(--info);text-decoration:none;font-weight:700;font-size:11.5px;display:inline-flex;align-items:center;gap:4px}",
 ".ct-link:hover{text-decoration:underline}",
+/* رقمُ الجوال: يبقى **يساريَّ الاتجاه** في صفحةٍ عربية — رقمٌ مقلوبٌ يُنسَخ خطأً. */
+".ct-link.num{direction:ltr;unicode-bidi:isolate}",
+".ct-tile-ph{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}",
+".ct-wa{color:var(--sla-ok)}",
 /* التنبيهات */
 ".ct-note{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;padding:9px 13px;border-radius:10px;margin-bottom:12px;background:var(--surface2);color:var(--muted);border:1px solid var(--border)}",
 ".ct-note.warn{background:var(--sla-warn-bg);color:var(--sla-warn);border-color:var(--sla-warn-bd)}",
@@ -6953,6 +7172,7 @@ window.contracts = {
   openVendor: openVendor, backToVendors: backToVendors, filterVendors: filterVendors,
   newVendor: newVendor, editVendor: editVendor, cancelVendorEdit: cancelVendorEdit,
   saveVendorEdit: saveVendorEdit, addDoc: addDoc, delDoc: delDoc, changeStatus: changeStatus,
+  addContact: addContact, delContact: delContact,
   setEntity: setEntity,
   addTrade: addTrade, addTradeText: addTradeText, delTrade: delTrade,
   clearTradeFilter: clearTradeFilter,
@@ -7066,6 +7286,10 @@ window.contracts = {
   _vendorEligibility: vendorEligibility,
   _normName: normName,
   _identityOf: identityOf,
+  // أرقامُ التواصل — الدوالُّ النقيّةُ التي تقرؤها الشاشةُ والبحثُ والفحصُ معاً
+  _phoneDigits: phoneDigits, _normPhone: normPhone, _phoneOk: phoneOk,
+  _phoneFmt: phoneFmt, _phoneHint: phoneHint, _phoneVariants: phoneVariants,
+  _vendorPhones: vendorPhones, _vendorMatchesPhone: vendorMatchesPhone, _phoneOwner: phoneOwner,
   _suggestVatMode: suggestVatMode,
   _allExpiring: allExpiring,
   _duplicateOf: duplicateOf,

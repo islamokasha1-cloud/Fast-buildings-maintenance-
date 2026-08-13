@@ -78,6 +78,9 @@ await page.evaluate(() => {
     bank: { iban: 'SA0380000000608010167519', bankName: 'الأهلي' },
     docs: [{ type: 'cr', number: '1010234567', expiry: _dayOff(265) }, { type: 'vat', number: '3000123456', expiry: _dayOff(160) },
            { type: 'gosi', number: 'G-99', expiry: _dayOff(16) }], // ⇐ توشك
+    // الرقمان **بصيغةٍ محلّيةٍ خام** عمداً: بياناتُ ما قبل التطبيع موجودةٌ في السجل
+    // فعلاً، والعرضُ والبحثُ يجب أن يقرآها كما يقرآن المطبَّع — وإلا اختفى نصفُ السجل.
+    phone: '0501234567', phoneLabel: 'المالك',
     contacts: [{ name: 'خالد العتيبي', role: 'مدير المشاريع', phone: '0555000111' }]
   };
   window.__store[V + '/VND-0002'] = {
@@ -316,10 +319,69 @@ check('بطاقة الطرف فُتحت بوثائقها', cardTxt.includes('ا�
 check('الآيبان ظاهرٌ كاملاً للأدمن', cardTxt.includes('SA0380000000608010167519'));
 await page.screenshot({ path: `${SHOTS}/02-vendor-card.png`, fullPage: true });
 
+/* ══ أرقامُ الجوال: تُقرأ خاماً · تُعرَض روابطَ اتصال · تُبحَث بأيّ صيغة · تُحفَظ مطبَّعة ══ */
+const phoneCard = await page.evaluate(() => {
+  const p = document.getElementById('page-vendors');
+  const tel = Array.from(p.querySelectorAll('a[href^="tel:"]')).map(a => a.getAttribute('href'));
+  const wa  = Array.from(p.querySelectorAll('a[href^="https://wa.me/"]')).map(a => a.getAttribute('href'));
+  return { tel, wa, txt: p.textContent.replace(/\s+/g, ' ') };
+});
+check('★ رقمُ الطرف المحفوظُ محلياً يُعرَض رابطَ اتصالٍ بصيغةٍ دولية',
+  phoneCard.tel.includes('tel:+966501234567'), phoneCard.tel.join(' | '));
+check('★ ورقمُ جهة الاتصال كذلك — ولكلٍّ رابطُ واتساب',
+  phoneCard.tel.includes('tel:+966555000111') &&
+  phoneCard.wa.includes('https://wa.me/966501234567') && phoneCard.wa.includes('https://wa.me/966555000111'),
+  phoneCard.wa.join(' | '));
+check('★ والمعروضُ بالصيغة المحلّية المقروءة لا بالدولية الخام',
+  phoneCard.txt.includes('050 123 4567') && phoneCard.txt.includes('055 500 0111'));
+
+await page.evaluate(() => window.contracts.backToVendors());
+await page.waitForTimeout(600);
+for (const [q, why] of [['0501234567', 'كما كُتب محلياً'], ['966501234567', 'بالصيغة الدولية'], ['501234567', 'بلا صفرٍ ولا مفتاح'], ['0555000111', 'برقم جهة الاتصال']]) {
+  await page.fill('#ct-v-q', q);
+  await page.waitForTimeout(500);
+  const n = await page.evaluate(() => document.querySelectorAll('#page-vendors .ct-tile').length);
+  check(`★ البحثُ بالرقم (${why}) يجد الطرفَ وحدَه`, n === 1, n + ' نتيجة');
+}
+await page.fill('#ct-v-q', '');
+await page.waitForTimeout(600);
+await page.evaluate(() => window.contracts.openVendor('VND-0001'));
+await page.waitForTimeout(800);
+
 // وضعُ التحرير
 await page.evaluate(() => window.contracts.editVendor());
 await page.waitForTimeout(900);
 check('نموذج التحرير ظهر', await page.evaluate(() => !!document.getElementById('ct-f-name')));
+check('★ وحقلُ الجوال يعرض الرقمَ المخزَّن بصيغةٍ محلّيةٍ قابلةٍ للقراءة',
+  await page.evaluate(() => (document.getElementById('ct-f-phone') || {}).value) === '050 123 4567');
+check('★ وجدولُ جهات الاتصال قابلٌ للتحرير (اسمٌ · صفةٌ · رقم)',
+  await page.evaluate(() => {
+    const t = document.getElementById('ct-contacts-tbl');
+    return !!t && t.querySelectorAll('[data-cf="phone"]').length === 1 && t.querySelectorAll('[data-cf="name"]').length === 1;
+  }));
+
+// رقمٌ ثابتٌ في حقلِ جوال: يُمنَع الحفظُ — رقمٌ ناقصٌ محفوظٌ يُقرأ صحيحاً يومَ الحاجة
+await page.evaluate(() => { document.getElementById('ct-f-phone').value = '0165551234'; });
+await page.evaluate(() => window.contracts.saveVendorEdit());
+await page.waitForTimeout(900);
+check('★★ رقمٌ ثابتٌ في حقل الجوال يُرفَض ولا يُحفَظ',
+  await page.evaluate(() => (window.__store['global_vendors/VND-0001'] || {}).phone === '0501234567' &&
+                            !!document.getElementById('ct-f-phone')));
+
+// ورقمٌ صحيحٌ يُحفَظ **مطبَّعاً** لا كما كُتب
+await page.evaluate(() => {
+  document.getElementById('ct-f-phone').value = '٠٥٠٩٨٧٦٥٤٣';    // بأرقامٍ عربيةٍ عمداً
+  const t = document.getElementById('ct-contacts-tbl');
+  t.querySelector('[data-cf="phone"]').value = '+966 55 500 0111';
+});
+await page.evaluate(() => window.contracts.saveVendorEdit());
+await page.waitForTimeout(1400);
+const savedPhones = await page.evaluate(() => {
+  const d = window.__store['global_vendors/VND-0001'] || {};
+  return { phone: d.phone, contact: ((d.contacts || [])[0] || {}).phone };
+});
+check('★★ المحفوظُ مطبَّعٌ مهما كانت صيغةُ الكتابة (وحتى بأرقامٍ عربية)',
+  savedPhones.phone === "966509876543" && savedPhones.contact === "966555000111", JSON.stringify(savedPhones));
 await page.screenshot({ path: `${SHOTS}/03-vendor-edit.png`, fullPage: true });
 
 // الوضع الداكن
