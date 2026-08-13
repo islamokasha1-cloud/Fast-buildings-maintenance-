@@ -2285,6 +2285,56 @@ function auditRound2() {
     T("سِنك اسم البند يستخدم _jsq لا esc", HTML.includes("'${_jsq(item.name"));
     T("سِنك اسم المشروع يستخدم _jsq", HTML.includes("'${_jsq(proj.name"));
     T("سِنك اسم/مورّد الكتالوج يستخدم _jsq", HTML.includes("'${_jsq(c.vendor") && HTML.includes("'${_jsq(c.name"));
+    // بقيّةُ درسِ H5: اسمُ المبنى في مُنتقي الأصول كان بـesc داخل نصِّ JS
+    // بينما جارُه (الاسم) بـ_jsq — والسطرُ الواحد يكفي. أسماءُ المباني تُكتب من إعدادات
+    // المشروع، فيكفي دورٌ غيرُ زائرٍ ليحقنَ شفرةً تعمل في جلسة الأدمن.
+    T("★ سِنك اسم المبنى في مُنتقي الأصول يستخدم _jsq لا esc",
+      HTML.includes("${_jsq(a.building)}')") && !HTML.includes("${esc(a.building)}')"));
+    // ولا يبقى في النواة سِنكٌ نصّيٌّ بـesc داخل نصِّ JS لحقلٍ يحرّره المستخدم.
+    // المعرّفاتُ (…id/Id/ym/idx) مولّدةٌ من النظام لا يحرّرها أحد — فتُستثنى قصداً،
+    // والباقي (اسمٌ · مبنًى · مورّدٌ · وصف) هو ما يفتح البابَ إن وُضع بـesc.
+    const isIdLike = e => /(^|\.)(id|tid|ym|idx|[a-z]+Id)$/i.test(e);
+    const escInJs = (HTML.match(/\('\$\{esc\(([a-zA-Z_$][\w$.]*)\)\}/g) || [])
+      .filter(s => !isIdLike(s.replace(/^\('\$\{esc\(/, "").replace(/\)\}$/, "")));
+    T("★ لا سِنكَ esc داخل نصِّ JS لحقلٍ نصّيٍّ يحرّره المستخدم (النواة)",
+      escInJs.length === 0, escInJs.slice(0, 4).join(" · ") || "نظيف");
+  }
+
+  // ── XSS في تطبيق الفنيين: esc هناك لم تكن تهرّب العلامة المفردة إطلاقاً ──
+  // (أضعفُ من نظيرتها في النواة: لا `'`→`&#39;` أصلاً، فالكسرُ مباشرٌ بلا حاجةٍ
+  //  إلى فكِّ الكِيان.) وأسماءُ الفنيين تُكتب من الإعدادات، ومجموعةُ technicians
+  //  مفتوحةٌ لأيّ مُصادَقٍ مجهول — فالحاقنُ لا يحتاج حساباً أصلاً.
+  {
+    const fsT = require("fs"), pathT = require("path");
+    const tp = pathT.resolve(pathT.dirname(IDX), "tech-app.html");
+    const TA = fsT.existsSync(tp) ? fsT.readFileSync(tp, "utf8") : "";
+    T("tech-app.html مقروء", TA.length > 0);
+    if (TA) {
+      T("★ tech-app: esc تهرّب العلامة المفردة (&#39;)",
+        /function esc\(s\)\{[^}]*replace\(\/'\/g,\s*"&#39;"\)/.test(TA));
+      T("★ tech-app: تحمل _jsq لسِنكات نصِّ JS", TA.includes("function _jsq(s){"));
+      const taEscInJs = TA.match(/\('\$\{esc\([^}]*\)\}/g) || [];
+      T("★ tech-app: لا سِنكَ esc داخل نصِّ JS", taEscInJs.length === 0,
+        taEscInJs.slice(0, 4).join(" · ") || "نظيف");
+      T("★ tech-app: اسمُ الفني في زرّ تغيير الـPIN يستخدم _jsq",
+        TA.includes("changeTechPin('${_jsq(name)}')"));
+      // والدالّةُ نفسُها تعمل: الحمولةُ تصل نصّاً لا شفرةً
+      const ai = TA.indexOf("function _jsq(s){");
+      if (ai > 0) {
+        const asrc = TA.slice(ai, TA.indexOf("\nfunction ", ai + 10));
+        let J = null;
+        try { J = new Function(asrc + "\nreturn _jsq;")(); }
+        catch (e) { T("tech-app: تُبنى _jsq", false, String(e.message).slice(0, 100)); }
+        if (typeof J === "function") {
+          const pl = "x');alert(1)//";
+          const dec = J(pl).replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+          let got = null; try { got = new Function("f", "return f('" + dec + "')")(x => x); } catch (e) {}
+          T("★ tech-app: _jsq تمنع كسر السلسلة (الحمولةُ نصٌّ لا شفرة)",
+            got === pl, "arg=" + JSON.stringify(got));
+          T("tech-app: _jsq تُبقي القيمَ النظيفة كما هي", J("محمد العتيبي") === "محمد العتيبي");
+        }
+      }
+    }
   }
 
   // ── #4 SLA: _closedOnTime يقيس بميزانية ساعات العمل (16 لعادي) لا getSLA (48 تقويمية) ──
@@ -4244,6 +4294,23 @@ function deepReviewV18_9vu() {
   T("★ C4: savePurchaseAwait موجودة وتُستعمل في doInventoryReview",
     /async function savePurchaseAwait\(/.test(HTML) &&
     HTML.includes("const _saved = await savePurchaseAwait(poId);"));
+
+  // ── C4 (امتداد): ربطُ البند الذي دخل بلا رصيد أثرُه لا يُسترجَع كذلك ──
+  // المعاملةُ تُضيف الكميةَ للمخزون وتكتب قيدَ الحركة، ثمّ يُحفَظ الطلبُ بالمرساة.
+  // fire-and-forget هنا يعني: رصيدٌ أُضيف وبندٌ ما زال «بلا رصيد» في قاعدة البيانات
+  // ⇐ ربطٌ ثانٍ يضيف الكميةَ مرّتين. الحارسُ يمنع الارتداد إلى savePurchase المجرّدة.
+  {
+    const fi = HTML.indexOf("async function _applyUnanchoredFix(");
+    const body = fi > 0 ? HTML.slice(fi, HTML.indexOf("\nfunction ", fi + 10)) : "";
+    T("_applyUnanchoredFix موجودة", body.length > 0);
+    if (body) {
+      T("★ C4b: ربطُ البند بلا رصيد ينتظر تأكيد الحفظ (savePurchaseAwait لا savePurchase)",
+        body.includes("await savePurchaseAwait(poId)") &&
+        !/(^|[^.\w])savePurchase\(poId\);/.test(body));
+      T("★ C4b: وعند فشل الحفظ يُحذَّر أن الرصيد أُضيف فلا يُعاد الربط",
+        /_anchored/.test(body) && /أُضيف الرصيد للمخزون لكن تعذّر حفظ ربط البند/.test(body));
+    }
+  }
 
   // ── M4/M5: حركات المخزون الذرّية ──
   T("★ M4/M5: _atomicStockMove معرّفة (سجل + رصيد في معاملة)",

@@ -224,25 +224,31 @@ check('★ خطةٌ بلا استحقاقٍ سابق تُبنى من التار�
 L('\n=== ٦) الطوابع الزمنية ===');
 const stamps = await page.evaluate(() => {
   const now = new Date().toISOString();
-  const t = { id:'TK-PERF', building:'مبنى الإدارة', workType:'كهرباء', desc:'اختبار',
-              priority:'عادي 🟢 (48 ساعة)', status:'مفتوح', createdAt:now, timeline:[] };
-  tickets.push(t);
+  tickets.push({ id:'TK-PERF', building:'مبنى الإدارة', workType:'كهرباء', desc:'اختبار',
+                 priority:'عادي 🟢 (48 ساعة)', status:'مفتوح', createdAt:now, timeline:[] });
+  // مستمعُ المحاكي حيٌّ: أوّلُ كتابةٍ في المجموعة تُعيد بناء `tickets` من المخزن، فالمرجعُ
+  // المحليُّ المُلتقَط قبلها يَبْلى ويبقى عند حاله بينما يمضي التطبيقُ على الوثيقة الحيّة
+  // (درسُ NOTES §5). فالقراءةُ من المصفوفة الحيّة في كلّ مرّة لا من مرجعٍ محفوظ — وإلّا
+  // بدا التطبيقُ ساقطاً وهو سليم.
+  const live = () => tickets.find(x => x.id === 'TK-PERF');
   perfStamp('TK-PERF','respondedAt');
-  const first = t.respondedAt;
+  const first = live().respondedAt;
   perfStamp('TK-PERF','respondedAt');          // محاولةٌ ثانية — يجب أن تُرفض
   perfStamp('TK-PERF','restoredAt');
+  const t = live();
   const pausedBefore = perfClockPaused(t);
   t.clockStops = [{ from: now, to: null, reason:'بانتظار موافقة الجهة' }];
   const pausedAfter = perfClockPaused(t);
   t.clockStops[0].to = now;
   const pausedResumed = perfClockPaused(t);
-  return { first, second: t.respondedAt, restored: !!t.restoredAt, pausedBefore, pausedAfter, pausedResumed,
-           tl: (t.timeline||[]).map(e=>e.event) };
+  return { first, second: live().respondedAt, restored: !!live().restoredAt, pausedBefore, pausedAfter, pausedResumed,
+           tl: (live().timeline||[]).map(e=>e.event), dupes: tickets.filter(x=>x.id==='TK-PERF').length };
 });
 check('★ زمن الاستجابة يُسجَّل', !!stamps.first);
 check('★ لا يُعاد كتابتُه (لا تجميل للرقم)', stamps.first === stamps.second);
 check('عودة الخدمة تُسجَّل مستقلةً', stamps.restored === true);
 check('الخط الزمني يوثّق الفعلين', stamps.tl.includes('وصل الفني للموقع') && stamps.tl.includes('عادت الخدمة للعمل'));
+check('★ ولا تتضاعف الوثيقةُ من تعويض الكمون (نسخةٌ واحدة)', stamps.dupes === 1, 'نسخ=' + stamps.dupes);
 check('★ قارئُ حالة الساعة: مفتوح ⇒ موقوف، مُغلق ⇒ يعمل',
   stamps.pausedBefore === false && stamps.pausedAfter === true && stamps.pausedResumed === false);
 

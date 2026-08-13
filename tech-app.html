@@ -13,7 +13,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js"></script>
 <!-- طابور الرفع المؤجَّل للصور (مشترك مع النظام الرئيسي) -->
-<script src="photo-queue.js?v=18.9.2625"></script>
+<script src="photo-queue.js?v=18.9.2626"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -833,7 +833,23 @@ function fmtH(h){ if(h<1) return Math.round(h*60)+" د"; if(h<24) return Math.ro
 function fmtDate(d){ return new Date(d).toLocaleString("ar-SA-u-ca-gregory",{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
 function fmtDateOnly(d){ return new Date(d).toLocaleDateString("ar-SA-u-ca-gregory",{year:"numeric",month:"long",day:"numeric"}); }
 function fmtTime(d){ return new Date(d).toLocaleTimeString("ar-SA",{hour:"2-digit",minute:"2-digit"}); }
-function esc(s){ if(!s) return ""; return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function esc(s){ if(s==null) return ""; return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+// _jsq: تهريب قيمة تُوضَع داخل نصّ JS بعلامة مفردة داخل معالج HTML بعلامة مزدوجة
+// مثل onclick="fn('...')". esc وحدها لا تكفي هنا: '→&#39; يفكّها مُحلّل HTML إلى '
+// قبل أن يُصرَّف جسم المعالج كـ JS، فتُكسَر السلسلة وتُحقَن شفرة (XSS). نُهرّب \ و '
+// بخطٍّ مائل (طبقة JS)، ونُبقي " & < > كِياناتٍ (طبقة HTML)، ونُحيّد فواصل الأسطر.
+// نسخةٌ مطابقةٌ لِما في index.html — نفسُ الدرس (v18.9vu-H5) ونفسُ العلاج.
+function _jsq(s){
+  if(s==null) return "";
+  return String(s)
+    .replace(/\\/g,"\\\\")
+    .replace(/'/g,"\\'")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/[\r\n\u2028\u2029]/g," ");
+}
 
 function toast(msg, type="info"){
   const el=document.getElementById("toast");
@@ -1245,7 +1261,7 @@ function buildAdminPins(){
     <div class="adm-pin-row" id="pin-row-${name.replace(/\s/g,'_')}">
       <span class="adm-pin-name">${esc(name)}</span>
       <span class="adm-pin-val" id="pin-val-${name.replace(/\s/g,'_')}">••••</span>
-      <button class="adm-pin-btn" onclick="changeTechPin('${esc(name)}')">🔑 تغيير</button>
+      <button class="adm-pin-btn" onclick="changeTechPin('${_jsq(name)}')">🔑 تغيير</button>
     </div>`).join("");
   return `
     <div class="card card-sm">${rows}</div>
@@ -1485,7 +1501,7 @@ function ticketCard(t){
                 t.priority&&t.priority.includes("عاجل")?'<span class="badge badge-priority-m">عاجل</span>':
                 '<span class="badge badge-priority-l">عادي</span>';
 
-  return `<div class="tcard ${statusClass}" onclick="openDetail('${esc(t.id)}')">
+  return `<div class="tcard ${statusClass}" onclick="openDetail('${_jsq(t.id)}')">
     <div class="tcard-header">
       <span class="tcard-id">${esc(t.id)}</span>
       ${badge}
@@ -1560,7 +1576,7 @@ function openDetail(id){
     ${allPhotos.length?`
     <div class="divider"></div>
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">📸 الصور (${allPhotos.length})</div>
-    <div class="photos-grid">${allPhotos.map(u=>`<img src="${esc(u)}" onclick="openLightbox('${esc(u)}')" loading="lazy">`).join("")}</div>`:""}
+    <div class="photos-grid">${allPhotos.map(u=>`<img src="${esc(u)}" onclick="openLightbox('${_jsq(u)}')" loading="lazy">`).join("")}</div>`:""}
     ${tl.length?`
     <div class="divider"></div>
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:10px">📅 السجل الزمني</div>
@@ -1586,9 +1602,9 @@ function openDetail(id){
   const actions=document.getElementById("detail-actions");
   if(t.status!=="مغلق"){
     actions.innerHTML=`
-      ${t.status==="مفتوح"?`<button class="btn btn-warn" onclick="closeModal('modal-detail');openInProg('${esc(t.id)}')">🔧 بدء التنفيذ</button>`:""}
-      ${!t.restoredAt?`<button class="btn btn-ghost" style="color:#0a7c59;border-color:#0a7c59" onclick="markRestored('${esc(t.id)}')">🔌 رجعت الخدمة</button>`:""}
-      <button class="btn btn-success" onclick="closeModal('modal-detail');openTicketAction('${esc(t.id)}')">📸 إغلاق البلاغ</button>
+      ${t.status==="مفتوح"?`<button class="btn btn-warn" onclick="closeModal('modal-detail');openInProg('${_jsq(t.id)}')">🔧 بدء التنفيذ</button>`:""}
+      ${!t.restoredAt?`<button class="btn btn-ghost" style="color:#0a7c59;border-color:#0a7c59" onclick="markRestored('${_jsq(t.id)}')">🔌 رجعت الخدمة</button>`:""}
+      <button class="btn btn-success" onclick="closeModal('modal-detail');openTicketAction('${_jsq(t.id)}')">📸 إغلاق البلاغ</button>
     `;
   } else {
     actions.innerHTML=`<div style="text-align:center;color:var(--accent);font-weight:700;font-size:14px;padding:8px">✅ البلاغ مغلق</div>`;
@@ -2028,7 +2044,7 @@ function renderNotifs(){
   document.getElementById("notif-badge").style.display="none";
 
   el.innerHTML=notifications.map(n=>`
-    <div class="notif-item" onclick="n_click('${esc(n.ticketId)}')">
+    <div class="notif-item" onclick="n_click('${_jsq(n.ticketId)}')">
       <div class="notif-icon">${n.type==="new"?"🔔":n.type==="close"?"✅":"📌"}</div>
       <div class="notif-body">
         <div class="notif-title">${esc(n.title)}</div>
