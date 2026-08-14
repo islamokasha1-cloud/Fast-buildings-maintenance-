@@ -8405,12 +8405,33 @@ function contractsPhase1() {
        ما يُكتب في `wa_outbox` يُرسَل رسالةً رسميةً من رقم الشركة. الكاتبُ الشرعيُّ
        دوالُّ السحابة بـAdmin SDK (يتجاوز القواعد) — فالقفلُ التامُّ لا يعطّل شيئاً.
        والحارسُ يُثبّت **الشقّين**: البلوكَ المغلق والاستثناءَ من العامة. */
-    T("★★★ طابورُ واتساب وأرشيفُه مقفولان تماماً — ومُستثنيان من القاعدة العامة",
-      /match \/wa_outbox\/\{doc\} \{ allow read, write: if false; \}/.test(RUL) &&
-      /match \/wa_log\/\{doc\}\s+\{ allow read, write: if false; \}/.test(RUL) &&
+    T("★★★ الكتابةُ في طابور واتساب وأرشيفِه مقفولةٌ — مع الاستثناء من القاعدة العامة",
+      /match \/wa_outbox\/\{doc\} \{ allow write: if false; \}/.test(RUL) &&
+      /match \/wa_log\/\{doc\}\s+\{ allow write: if false; \}/.test(RUL) &&
       /function srvOnly\(coll\) \{\s*\n\s*return coll in \['wa_outbox', 'wa_log'\];/.test(RUL) &&
-      /allow read:\s+if hasRole\(\) && !srvOnly\(document\[0\]\)/.test(RUL) &&
       /allow write:[\s\S]{0,240}!srvOnly\(document\[0\]\)/.test(RUL));
+    /* ⛔⛔ **الحارسُ الأغلى في الملفّ — ثمنُه انقطاعُ إنتاج (v18.9.2635).**
+       شرطٌ على `document[…]` في قاعدة **القراءة** يُسقط `list` — أي استعلامَ كلّ
+       مجموعةٍ في النظام — بينما `get` يعمل فيبدو كلُّ شيءٍ سليماً في فحصٍ يقرأ
+       مستنداتٍ مفردة. والكتابةُ لا تُصاب (لا `list` فيها) فالنمطُ يبدو مُجرَّباً.
+       فالقاعدةُ العامةُ لقراءةٍ **بلا أيّ شرطِ مسار**، ولا استثناء. */
+    T("⛔ ولا شرطَ مسارٍ في قاعدة القراءة العامة (يُسقط استعلامَ كلّ مجموعة)",
+      /match \/\{document=\*\*\} \{[\s\S]{0,1200}?allow read:\s+if hasRole\(\);/.test(RUL) &&
+      !/allow read:\s+if hasRole\(\)\s*&&/.test(RUL));
+    /* والفحصُ الذي كان غائباً: **الاستعلامُ نفسُه**. ١٣٣ فحصاً مرّت والصنفُ أعمى،
+       لأنّ كلَّها `getDoc`/`setDoc` على مستندٍ واحد. القائمةُ تُشتقّ من الفحص. */
+    {
+      const usesList = (RULES_CHECK.match(/getDocs\(collection\(/g) || []).length;
+      const blk = (RULES_CHECK.match(/const APP_COLLS = \[([\s\S]*?)\];/) || [])[1] || "";
+      const covered = [...blk.matchAll(/"([a-z_0-9]+)"/g)].map(m => m[1]);
+      const must = ["global_purchases", "global_inventory", "global_item_catalog",
+                    "global_hr_payments", "meta", "audit_log", "global_contracts"];
+      const missing = must.filter(c => !covered.includes(c));
+      T("★★★ وفحصُ المحاكي يستعلم المجموعاتِ فعلاً (`list` لا `get` وحدَه)",
+        usesList >= 3 && covered.length >= 15 && missing.length === 0,
+        "مجموعات: " + covered.length + " · getDocs: " + usesList +
+        (missing.length ? " · ناقص: " + missing.join(" ") : ""));
+    }
     /* وقائمةُ المقفول تُشتقّ من إعدادات الدوالّ نفسِها — فمجموعةٌ تُضاف هناك بلا
        قفلٍ هنا تُسقط الفحص، ولا تُكتشف بقراءة القواعد وحدَها. */
     {
