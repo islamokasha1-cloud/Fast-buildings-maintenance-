@@ -23,6 +23,7 @@ on:
       - 'rules-check.mjs'
       - 'wa-routing-check.mjs'
       - 'functions/**'
+      - 'worker/**'
       - 'tech-app.html'
       - '.github/workflows/hail-tests.yml'
   pull_request:
