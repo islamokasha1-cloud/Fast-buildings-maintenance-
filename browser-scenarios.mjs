@@ -70,7 +70,14 @@ window.__store = {};                       // path -> data (Firestore في ال�
   window.firebase={
     initializeApp:function(){ return {}; },
     firestore:firestoreFn,
-    auth:function(){ return { currentUser:{uid:'test'}, onAuthStateChanged:function(cb){ try{cb({uid:'test'});}catch(e){} return function(){}; }, signInAnonymously:function(){return Promise.resolve({});}, signInWithCustomToken:function(){return Promise.resolve({});}, signOut:function(){return Promise.resolve();} }; },
+    // المستخدمُ المُصادَق: يحمل توكِناً وحمولةَ claims كما في Firebase الحقيقي.
+    // الحمولةُ تُقرأ من window.__authClaims فيستطيع الفحصُ ضبطَ الدور — وهو ما
+    // يجعل حارسَ H2 (الدورُ من التوكِن لا من الجلسة) قابلاً للفحص تنفيذاً.
+    auth:function(){
+      var _u={ uid:'test',
+        getIdToken:function(){ return Promise.resolve(window.__authIdToken||'MOCK_ID_TOKEN'); },
+        getIdTokenResult:function(){ return Promise.resolve({ claims: (window.__authClaims||{}) }); } };
+      return { currentUser:_u, onAuthStateChanged:function(cb){ try{cb(_u);}catch(e){} return function(){}; }, signInAnonymously:function(){return Promise.resolve({});}, signInWithCustomToken:function(){return Promise.resolve({});}, signOut:function(){return Promise.resolve();} }; },
     appCheck:Object.assign(function(){ return { activate:function(){} }; }, { ReCaptchaEnterpriseProvider:function(){} }),
     storage:function(){ return { ref:function(){ return { put:function(){return Promise.resolve({ ref:{ getDownloadURL:function(){return Promise.resolve('mock://u');} } });}, getDownloadURL:function(){return Promise.resolve('mock://u');} }; }, refFromURL:function(){ return { delete:function(){return Promise.resolve();} }; } }; }
   };
