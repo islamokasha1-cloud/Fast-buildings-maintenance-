@@ -8277,6 +8277,8 @@ function contractsPhase1() {
      مجموعةٌ أو انتقالُ حالةٍ في الوحدة فتبقى القواعدُ متخلّفةً عنها بصمت.
      ════════════════════════════════════════════════════════════ */
   {
+    const ugcPath = path.resolve(path.dirname(IDX), "users-guard-check.mjs");
+    const UGC = fs.existsSync(ugcPath) ? fs.readFileSync(ugcPath, "utf8") : "";
     const rulesPath = path.resolve(path.dirname(IDX), "firestore.rules");
     const RUL = fs.existsSync(rulesPath) ? fs.readFileSync(rulesPath, "utf8") : "";
     T("ملفُّ قواعد Firestore موجود", RUL.length > 0);
@@ -8397,6 +8399,14 @@ function contractsPhase1() {
         /function _canManageUsers\(\)\{ return !!\(currentUser && currentUser\.role === "admin"\); \}/.test(HTML) &&
         unguarded.length === 0, "بلا حارس: " + unguarded.join(" "));
     }
+    /* ★ وفحصٌ تنفيذيٌّ في متصفّحٍ حقيقيّ — لا مطابقةَ نصٍّ وحدَها.
+       رحلةُ المتصفّح تدخل **أدمن دائماً**، فالمسارُ غيرُ الأدمن — وهو ما غيّرناه —
+       لم يكن يُرسَم في متصفّحٍ قطّ. و`users-guard-check.mjs` يدخل بدورَين ويسأل
+       الشاشةَ نفسَها: أاختفت الأزرار؟ أرفض الكاتبُ حين يُنادى مباشرةً؟ */
+    T("★★ وشاشةُ المستخدمين مفحوصةٌ تنفيذاً بدورَين (لا بمطابقة نصٍّ فقط)",
+      fs.existsSync(path.resolve(path.dirname(IDX), "users-guard-check.mjs")) &&
+      /openAs\('warehouse_manager'/.test(UGC) && /openAs\('admin'/.test(UGC) &&
+      /_adminOnlyUsersGuard/.test(UGC) && /pu-add-form/.test(UGC));
     T("★ ولغيرِ الأدمن قائمةٌ للاطّلاع بلا أزرارٍ ولا نموذجِ إضافة",
       /_form\.style\.display = _mng \? "" : "none"/.test(HTML) &&
       /للاطّلاع فقط — إضافةُ الحسابات وتعديلُها وحذفُها من صلاحية المسؤول وحدَه/.test(HTML));
