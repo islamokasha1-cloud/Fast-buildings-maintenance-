@@ -441,6 +441,50 @@ function predelivery() {
     T("★ st: إرسالُ المراحل بـ if لا بـ [ ] && (عطلٌ صامتٌ مع set -e)",
       /if \[ "\$MODE" != "vault"\s*\]; then layer1_apply/.test(SETUP_C) &&
       /if \[ "\$MODE" != "layer1" \]; then vault_apply/.test(SETUP_C));
+
+    // ── تصديرُ Firestore إلى الخزنة ──────────────────────────────────────
+    // النسخُ المُدارةُ موردٌ **داخلَ المشروع**: تنجو من الخطأ البشريّ وعطلِ الإقليم
+    // ولا تنجو من فقدِ المشروع. والتصديرُ ملفّاتٌ محمولةٌ تُستورَد في أيّ مشروع.
+    const FSET = rd("scripts/firestore-export-setup.sh");
+    const FDRL = rd("scripts/firestore-export-drill.sh");
+    const FCHK = rd("scripts/firestore-export-check.sh");
+
+    T("★ st: سكربتاتُ تصدير Firestore الثلاثة موجودة",
+      !!FSET && !!FDRL && !!FCHK);
+
+    // ★★ جوهرُ البند: حاويةُ التصدير في **مشروع الخزنة** لا في المشروع المصدر.
+    //    لو أُنشئت في المصدر يوماً، عاد العطلُ الذي أنشأنا البندَ لأجله — نسخةٌ
+    //    تموت مع مشروعها — **بلا أن يتغيّر شيءٌ ظاهر**: التصديرُ يعمل والفحصُ أخضر.
+    T("★★ st: حاويةُ التصدير تُنشَأ في مشروع الخزنة لا في المصدر",
+      /buckets create "gs:\/\/\$EXPORT_BUCKET"[\s\S]{0,120}--project="\$VAULT_PROJECT"/.test(FSET));
+    T("★★ st: فحصُ الصحّة يقارن مشروعَ الحاوية بالمصدر رقمياً",
+      FCHK.includes("project_number") && FCHK.includes("projectNumber"));
+
+    // استيرادٌ داخلَ المشروع لا يُثبت العبورَ إلى مشروعٍ آخر — وهو الخطأُ نفسُه
+    // الذي وقعنا فيه مع الملفّات (نجاةُ التوكِن داخلَ الحاوية ≠ عبرَ الحاويتين).
+    T("★ st: البروفةُ تملك وضعَ عبورٍ بين المشاريع",
+      FDRL.includes("--cross-project") && FDRL.includes("TARGET_PROJECT"));
+    T("★ st: البروفةُ تحكم بوجود البيانات لا برسالة «تمّت»",
+      FDRL.includes("global_purchases") && FDRL.includes("pageSize=5"));
+    T("★ st: البروفةُ تستورد إلى قاعدةٍ جديدةٍ لا إلى (default)",
+      FDRL.includes("--database=\"$DRILL_DB\"") && !FDRL.includes("--database='(default)'"));
+
+    // تصديرٌ انقطع في منتصفه يترك مجلّداً بلا فهرس — ويبدو في القائمة سليماً.
+    T("★ st: فحصُ الصحّة يشترط ملفَّ الفهرس (المنقطعُ يبدو سليماً في القائمة)",
+      FCHK.includes("overall_export_metadata"));
+    // مصيدةُ §5: القوائمُ لا تُرتَّب بالتاريخ — الفرزُ إلزاميٌّ في الاثنين.
+    T("★ st: أحدثُ تصديرٍ يُختار بفرزٍ صريح لا بترتيب القائمة",
+      /sort -r/.test(FDRL) && /sort -r/.test(FCHK));
+
+    // دروسُ يومِ الملفّات مطبَّقةٌ في الثلاثة من أوّل سطر.
+    T("★ st: الثلاثةُ غيرُ تفاعلية (سؤالٌ مكتومٌ = تعليقٌ صامت)",
+      [FSET, FDRL, FCHK].every(s => s.includes("CLOUDSDK_CORE_DISABLE_PROMPTS=1")));
+    {
+      const nm = (FSET.match(/--display-name="[^"]*"/g) || []);
+      T("★ st: أسماءُ العرض بمحارفَ تقبلها Google",
+        nm.length > 0 && nm.every(a => /^--display-name="[A-Za-z0-9 '!-]*"$/.test(a)),
+        nm.join(" · "));
+    }
   }
 
   // ── v18.9ww: تجاوب الجوال — حارسان لعطلين رُصدا بفحص Playwright عند 375px ──
