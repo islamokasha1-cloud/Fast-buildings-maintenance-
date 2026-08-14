@@ -37,7 +37,11 @@ const as = (r) => env.authenticatedContext("u_" + r, { role: r }).firestore();
 const PM = as("project_manager"), PROC = as("procurement_officer");
 const FIN = as("finance"), CEO = as("ceo"), ADMIN = as("admin");
 const WH = as("warehouse_manager"), VIEWER = as("viewer");
+const OBS = as("observer"), HR = as("hr_officer");
 const ANON = env.unauthenticatedContext().firestore();
+/* تطبيقُ الفنيين يدخل **مُصادَقاً مجهولاً** (بلا ادّعاء `role`) — لا كزائرٍ بلا مصادقة.
+   فالفرقُ بين السياقين هو الفرقُ بين «يعمل» و«تعطّل الميدانُ كلُّه». */
+const TECH = env.authenticatedContext("tech_anon", {}).firestore();
 
 /** يزرع وثيقةً متجاوزاً القواعد — تهيئةُ الحالة ليست جزءاً مما نختبره */
 async function seed(path, data) {
@@ -303,6 +307,110 @@ await check("★ ودورٌ غيرُ المشتريات لا يمسّ أوامر
 await check("★ والماليةُ ما زالت تُنهي العقد فنّياً (لم نكسر مسارَ المستخلص الختاميّ)",
   assertSucceeds(updateDoc(doc(FIN, `${C}/CG`), { status: "ctr_completed" })));
 await check("ولا يُحذف أمرُ تغييرٍ من العميل", assertFails(deleteDoc(doc(ADMIN, `${G}/G1`))));
+
+/* ═════════ ٧) حساباتُ المستخدمين — البند C1 ═════════
+   مستنداتُ الحسابات ليست بياناتٍ بل **إصدارُ صلاحية**: فيها `hash` و`role`، ومنها
+   يُصادِق الـWorker ويُصدر التوكِن. فمن يكتب فيها يكتب لنفسه دورَ `admin`.
+   والفحصُ هنا **على شكل العملية كما ينفّذها التطبيق** لا على القاعدة مجرّدةً:
+   الوحدةُ تكتب المستندَ **كاملاً** بـ`set({users:[...]},{merge:false})` — لا حقلاً
+   واحداً — لأنها تقرأ المصفوفةَ وتعدّلها وتُعيدها. فبهذا الشكل يجري الفحص. */
+head("٧) حساباتُ المستخدمين — الكتابةُ للأدمن وحدَه (C1)");
+const U_C = "meta/users", U_P = "meta/hail_users";
+const U_CD = "meta/users_dev", U_PD = "meta/hail_users_dev";
+const BASE_USERS = [{ user: "boss", hash: "h1", role: "admin", name: "المالك" },
+                    { user: "obs",  hash: "h2", role: "observer", name: "مراقب" }];
+/** الحمولةُ بشكلها الحقيقيّ: الوثيقةُ كاملةً بمصفوفةِ المستخدمين */
+const uDoc = (extra) => ({ users: extra ? BASE_USERS.concat([extra]) : BASE_USERS.slice() });
+for (const p of [U_C, U_P, U_CD, U_PD]) await seed(p, uDoc());
+
+/* ★★★ الاستغلالُ الموصوفُ في C1 حرفياً: موظّفٌ بأيّ دورٍ يفتح الـConsole ويضيف
+   لنفسه سجلّاً بدور `admin`، ثمّ يدخل به فيُصدر له الـWorker توكِنَ أدمن. */
+const EVIL = { user: "evil", hash: "sha256(x)", role: "admin", name: "مُتسلّق" };
+await check("★★★ مراقبٌ لا يزرع حسابَ أدمن في المستند المركزي (استغلالُ C1 نفسُه)",
+  assertFails(setDoc(doc(OBS, U_C), uDoc(EVIL))));
+await check("★★★ ولا في مستند المشروع (البابُ الثاني إلى الدخول نفسِه)",
+  assertFails(setDoc(doc(OBS, U_P), uDoc(EVIL))));
+await check("★★ ولا في النسختَين التجريبيّتَين (`_dev` بابٌ خلفيٌّ لو نُسي)",
+  assertFails(setDoc(doc(OBS, U_CD), uDoc(EVIL))));
+await check("★★ ولا في مستند مشروعٍ تجريبيّ",
+  assertFails(setDoc(doc(OBS, U_PD), uDoc(EVIL))));
+
+/* والأدوارُ التي كانت تصل إلى شاشة «إدارة مستخدمي المشتريات» — هي بالضبط أخطرُ
+   ما في البند: مسؤولُ مستودعٍ يُنشئ أدمن. */
+await check("★★ ومسؤولُ المستودعات لا يكتب في مستند الحسابات",
+  assertFails(setDoc(doc(WH, U_C), uDoc(EVIL))));
+await check("★★ ولا مسؤولُ المشتريات",
+  assertFails(setDoc(doc(PROC, U_P), uDoc(EVIL))));
+await check("★ ولا مديرُ المشاريع ولا الماليةُ ولا المديرُ التنفيذيّ",
+  assertFails(setDoc(doc(PM, U_C), uDoc(EVIL))));
+await check("★ ولا المالية", assertFails(setDoc(doc(FIN, U_C), uDoc(EVIL))));
+await check("★ ولا المديرُ التنفيذيّ", assertFails(setDoc(doc(CEO, U_C), uDoc(EVIL))));
+await check("★ ولا مسؤولُ الموارد البشرية", assertFails(setDoc(doc(HR, U_C), uDoc(EVIL))));
+await check("★ ولا الزائر", assertFails(setDoc(doc(VIEWER, U_C), uDoc(EVIL))));
+await check("★★ ولا تطبيقُ الفنيين (مُصادَقٌ مجهولاً — أوسعُ بابٍ في القواعد)",
+  assertFails(setDoc(doc(TECH, U_C), uDoc(EVIL))));
+await check("★ ولا غيرُ المُصادَق أصلاً", assertFails(setDoc(doc(ANON, U_C), uDoc(EVIL))));
+
+/* والتعديلُ الجزئيُّ والحذفُ بابان آخران للشيء نفسِه — لا يكفي منعُ `set` */
+await check("★★ ولا يُعدَّل حقلٌ واحدٌ فيه بـupdate (نفسُ الباب بشكلٍ آخر)",
+  assertFails(updateDoc(doc(WH, U_C), { users: uDoc(EVIL).users })));
+await check("★★ ولا يُمحى مستندُ الحسابات فيُعاد بناؤه من الصفر",
+  assertFails(deleteDoc(doc(PROC, U_P))));
+
+/* ── والوجهُ الآخر: قاعدةٌ تمنع المهاجمَ وتمنع المسؤولَ معاً تعطيلٌ لا حراسة ── */
+await check("والأدمن يكتب المستندَ المركزي (شكلُ `_upsertUserCentral` بالضبط)",
+  assertSucceeds(setDoc(doc(ADMIN, U_C), uDoc({ user: "new", hash: "h3", role: "finance" }))));
+await check("ويكتب مستندَ المشروع (شكلُ `saveUsers`)",
+  assertSucceeds(setDoc(doc(ADMIN, U_P), uDoc({ user: "new", hash: "h3", role: "finance" }))));
+await check("وفي النسختَين التجريبيّتَين",
+  assertSucceeds(setDoc(doc(ADMIN, U_CD), uDoc())) );
+await check("★★★ و«إضافةُ مستخدم» كعمليةٍ كاملةٍ: مستندُ المشروع ثمّ المركزيّ (كتابتان متتاليتان كما في الوحدة)",
+  assertSucceeds((async () => {
+    const added = { user: "adm2", hash: "h9", role: "admin", name: "مسؤولٌ ثانٍ" };
+    await setDoc(doc(ADMIN, U_P), uDoc(added), { merge: false });   // saveUsers()
+    await setDoc(doc(ADMIN, U_C), uDoc(added), { merge: false });   // _upsertUserCentral()
+  })()));
+await check("★★ و«حذفُ المشروع» يمحو مستندَ حساباته مع بقيةِ مستنداته (deleteProjectData)",
+  assertSucceeds((async () => {
+    await setDoc(doc(ADMIN, "meta/tmpproj_settings"), { buildings: [] });
+    await setDoc(doc(ADMIN, "meta/tmpproj_users"), uDoc());
+    await setDoc(doc(ADMIN, "meta/tmpproj_counter"), { n: 5 });
+    await deleteDoc(doc(ADMIN, "meta/tmpproj_settings"));
+    await deleteDoc(doc(ADMIN, "meta/tmpproj_users"));
+    await deleteDoc(doc(ADMIN, "meta/tmpproj_counter"));
+  })()));
+
+/* ── والقراءةُ **لم تُمَسّ** (شرطُ المالك): الشاشةُ تعرض القائمةَ لمن يراها ── */
+await check("★★ والقراءةُ كما كانت: كلُّ ذي دورٍ يقرأ مستندَ الحسابات",
+  assertSucceeds(getDoc(doc(WH, U_C))));
+await check("★ ويقرؤها المراقبُ والزائرُ أيضاً (لم نُضيّق القراءة)",
+  assertSucceeds(getDoc(doc(VIEWER, U_P))));
+
+/* ── ولم نُفرِط في القفل: بقيةُ `meta` تبقى تحت القاعدة العامة كما كانت ── */
+await check("★★ ومستندُ العدّاد ما زال يُكتب بغير الأدمن (وإلا تعطّل ترقيمُ البلاغات)",
+  assertSucceeds(setDoc(doc(PROC, "meta/hail_counter"), { n: 12 })));
+await check("★ ومستندُ الإعدادات وقائمةُ المشاريع كذلك",
+  assertSucceeds((async () => {
+    await setDoc(doc(PM, "meta/hail_settings"), { buildings: ["أ"] });
+    await setDoc(doc(PM, "meta/projects"), { projects: [{ id: "hail" }] });
+  })()));
+await check("★ ومستندُ الإشعارات (اسمُه لا يشبه `_users` — والتفريقُ يجب أن يكون دقيقاً)",
+  assertSucceeds(setDoc(doc(WH, "meta/hail_notifications"), { last: 1 })));
+
+/* ── وتطبيقُ الفنيين (يدخل مجهولاً) لم يُمَسّ بشيء ── */
+await check("★★ وتطبيقُ الفنيين يقرأ إعداداتِ مشروعه ويكتب قوائمَ الصيانة كما كان",
+  assertSucceeds((async () => {
+    await getDoc(doc(TECH, "meta/hail_settings"));
+    await getDoc(doc(TECH, "meta/projects"));
+    await setDoc(doc(TECH, "meta/ppm_checklists"), { list: [] });
+  })()));
+await seed("hail_tickets/TK1", { status: "new" });   // البلاغُ يُنشَأ من النظام، والفنّيُّ **يحدّثه**
+await check("★ ويكتب الحضورَ والفنيين ويحدّث البلاغات",
+  assertSucceeds((async () => {
+    await setDoc(doc(TECH, "attendance/A1"), { in: "08:00" });
+    await setDoc(doc(TECH, "technicians/T1"), { pin: "1234" });
+    await setDoc(doc(TECH, "hail_tickets/TK1"), { status: "open" }, { merge: true });
+  })()));
 
 await env.cleanup();
 console.log(results.join("\n"));
