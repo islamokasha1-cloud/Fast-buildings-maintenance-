@@ -8401,6 +8401,64 @@ function contractsPhase1() {
       /_form\.style\.display = _mng \? "" : "none"/.test(HTML) &&
       /للاطّلاع فقط — إضافةُ الحسابات وتعديلُها وحذفُها من صلاحية المسؤول وحدَه/.test(HTML));
 
+    /* ════ M16 — طابورُ واتساب قناةُ إرسالٍ لا مجموعةُ بيانات ════
+       ما يُكتب في `wa_outbox` يُرسَل رسالةً رسميةً من رقم الشركة. الكاتبُ الشرعيُّ
+       دوالُّ السحابة بـAdmin SDK (يتجاوز القواعد) — فالقفلُ التامُّ لا يعطّل شيئاً.
+       والحارسُ يُثبّت **الشقّين**: البلوكَ المغلق والاستثناءَ من العامة. */
+    T("★★★ طابورُ واتساب وأرشيفُه مقفولان تماماً — ومُستثنيان من القاعدة العامة",
+      /match \/wa_outbox\/\{doc\} \{ allow read, write: if false; \}/.test(RUL) &&
+      /match \/wa_log\/\{doc\}\s+\{ allow read, write: if false; \}/.test(RUL) &&
+      /function srvOnly\(coll\) \{\s*\n\s*return coll in \['wa_outbox', 'wa_log'\];/.test(RUL) &&
+      /allow read:\s+if hasRole\(\) && !srvOnly\(document\[0\]\)/.test(RUL) &&
+      /allow write:[\s\S]{0,240}!srvOnly\(document\[0\]\)/.test(RUL));
+    /* وقائمةُ المقفول تُشتقّ من إعدادات الدوالّ نفسِها — فمجموعةٌ تُضاف هناك بلا
+       قفلٍ هنا تُسقط الفحص، ولا تُكتشف بقراءة القواعد وحدَها. */
+    {
+      const cfgPath = path.resolve(path.dirname(IDX), "functions/lib/config.js");
+      const CFG = fs.existsSync(cfgPath) ? fs.readFileSync(cfgPath, "utf8") : "";
+      const waColls = [...new Set([...CFG.matchAll(/^const (?:OUTBOX|LOG)_COLLECTION = "([a-z_]+)";/gm)]
+        .map(m => m[1]))];
+      const notLocked = waColls.filter(c => !new RegExp("'" + c + "'").test(RUL));
+      T("★★ وكلُّ مجموعةٍ يرسل منها الخادمُ مقفولةٌ (القائمةُ من `functions/lib/config.js`)",
+        waColls.length === 2 && notLocked.length === 0, notLocked.join(" "));
+    }
+    T("★ ولم يُقفل معها مستندُ إعدادات واتساب (مفتاحُ التشغيل يبقى للأدمن)",
+      !/'meta\/wa_settings'/.test(RUL) && /wa_settings/.test(RULES_CHECK));
+
+    /* ════ M11 — سجلُّ التدقيق يُضاف ولا يُعدَّل ولا يُمحى ════
+       ★ الوثيقةُ كانت تقول «لا يمكن المحو — إنشاء فقط» **وهذا لم يكن صحيحاً**:
+       `allow read, write: if hasRole()` تشمل التعديلَ والحذف. والحارسُ يمنع عودةَ
+       البلوك المتساهل: بلوكٌ باقٍ في أسفل الملفّ يُبطل التشديدَ في أعلاه بـ«أو». */
+    T("★★★ سجلُّ التدقيق يُضاف ولا يُعدَّل ولا يُمحى — في النسختين",
+      (RUL.match(/allow update, delete: if false;/g) || []).length === 2 &&
+      /match \/audit_log\/\{doc\} \{[\s\S]{0,320}allow update, delete: if false;/.test(RUL) &&
+      /match \/audit_log_dev\/\{doc\} \{[\s\S]{0,320}allow update, delete: if false;/.test(RUL));
+    T("★★★ ولا بلوكَ متساهلٌ باقٍ يُبطلها بـ«أو» (الفخُّ الذي وقعنا فيه فعلاً)",
+      !/match \/audit_log(_dev)?\/\{doc\} \{[\s\S]{0,200}allow read, write:\s+if hasRole\(\);/.test(RUL) &&
+      /allow write:[\s\S]{0,300}!isAuditColl\(document\[0\]\)/.test(RUL));
+    T("★★ والدورُ المكتوبُ في القيد = دورُ التوكِن (لا يوقّع أحدٌ باسم غيرِه)",
+      /function auditRoleOk\(\)[\s\S]{0,220}request\.resource\.data\.get\('role', ''\) in \[tokRole\(\), '-'\]/.test(RUL));
+    /* ⚠ درسٌ رصده الفحصُ لا القراءة: `request.auth.token.role` على توكِنٍ لا يحمل
+       الحقلَ (الفنّيُّ المجهول) **خطأُ تقييم** لا قيمةٌ فارغة، فيسري في التعبير
+       كلِّه ويردّ الطلب — فمنعت القاعدةُ الفنّيَّ من الكتابة وهي تبدو سليمة. */
+    T("★★ وقراءةُ الدور من التوكِن بـ`get` بقيمةٍ افتراضية (وإلا رُدَّ الفنّيُّ المجهول)",
+      /function tokRole\(\)[\s\S]{0,160}request\.auth\.token\.get\('role', ''\)/.test(RUL) &&
+      !/function auditRoleOk\(\)[\s\S]{0,200}!hasRole\(\)/.test(RUL));
+    T("★★ وفحصُ المحاكي يجرّب الطمسَ والتوقيعَ باسم الغير، ويُثبت أنّ الفنّيَّ ما زال يكتب",
+      /طمسُ الأثر/.test(RULES_CHECK) && /توقيعٌ باسم غيرِه/.test(RULES_CHECK) &&
+      /assertSucceeds\(setDoc\(doc\(TECH, "audit_log/.test(RULES_CHECK));
+    /* والإضافةُ تبقى مفتوحةً للفنّيّ — وهو ما تعتمد عليه `logAudit` في تطبيقه.
+       القائمةُ تُشتقّ من `tech-app.html` لا تُكتب هنا. */
+    {
+      const taPath = path.resolve(path.dirname(IDX), "tech-app.html");
+      const TA = fs.existsSync(taPath) ? fs.readFileSync(taPath, "utf8") : "";
+      T("★ وتطبيقُ الفنيين ما زال يكتب في السجلّ ويقرؤه (وإلا عطّلنا الميدان)",
+        /db\.collection\("audit_log"\)\.add\(/.test(TA) &&
+        /db\.collection\("audit_log"\)\.orderBy/.test(TA) &&
+        /match \/audit_log\/\{doc\} \{[\s\S]{0,200}allow read:\s+if isSignedIn\(\);/.test(RUL) &&
+        /allow create:\s+if isSignedIn\(\) && auditRoleOk\(\);/.test(RUL));
+    }
+
     // الفحصُ الحقيقيُّ مربوطٌ بـCI — وإلا فقواعدُ الأمان الوحيدةُ بلا حارسٍ آليّ
     const wfR = fs.readFileSync(path.resolve(path.dirname(IDX), ".github/workflows/hail-tests.yml"), "utf8");
     T("★ وفحصُ القواعد على محاكٍ حقيقيٍّ مربوطٌ بـCI",
