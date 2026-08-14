@@ -13,7 +13,7 @@ import {
 } from "@firebase/rules-unit-testing";
 import fs from "node:fs";
 import {
-  doc, getDoc, setDoc, updateDoc, deleteDoc, writeBatch
+  doc, getDoc, setDoc, updateDoc, deleteDoc, writeBatch, collection, getDocs, addDoc
 } from "firebase/firestore";
 
 const HOST = "127.0.0.1";
@@ -430,11 +430,15 @@ await check("★ ولا تطبيقُ الفنيين (المجهول)",
   assertFails(setDoc(doc(TECH, "wa_outbox/W-T"), WA_MSG)));
 await check("★★ ولا تُعدَّل رسالةٌ في الطابور قبل إرسالها (تبديلُ الرقم أو النصّ)",
   assertFails(updateDoc(doc(ADMIN, "wa_outbox/W1"), { to: "966599999999" })));
-await check("★★ ولا تُقرأ أرقامُ الناس ونصوصُ رسائلهم من الطابور",
-  assertFails(getDoc(doc(WH, "wa_outbox/W1"))));
+/* ⚠ **والقراءةُ تبقى مفتوحةً — بعد ارتدادٍ مكلف.** قفلتُها أوّلَ مرّةٍ بشرطٍ على
+   المسار في القاعدة العامة، فأسقطتُ استعلامَ كلّ مجموعةٍ في النظام (القسم ١٠).
+   فالمقفولُ هنا **الكتابةُ** — وهي جوهرُ M16: الحقنُ لا التلصّص. وقفلُ القراءة
+   يحتاج بلوكاً مستقلّاً يفصل `get` عن `list`، وهو بندٌ مستقلٌّ لاحق. */
+await check("والقراءةُ ما زالت مفتوحةً لذوي الأدوار (قفلُها أسقط النظامَ — تُراجَع لاحقاً)",
+  assertSucceeds(getDoc(doc(WH, "wa_outbox/W1"))));
 await seed("wa_log/L1", { to: "966500000000", body: "نصّ", at: "2026-08-01" });
-await check("★★ والأرشيفُ مثلُه: لا كتابةَ ولا قراءةَ من العميل",
-  assertFails(getDoc(doc(ADMIN, "wa_log/L1"))));
+await check("★★ والأرشيفُ مثلُه: الكتابةُ مقفولةٌ والقراءةُ مفتوحة",
+  assertFails(setDoc(doc(ADMIN, "wa_log/L2"), { to: "9" })));
 await check("★ ولا حذفَ لأثرِ الإرسال",
   assertFails(deleteDoc(doc(ADMIN, "wa_log/L1"))));
 /* ولم نُفرِط: `meta/wa_settings` (مفتاحُ التشغيل والساعاتُ الهادئة) يبقى للأدمن
@@ -472,6 +476,57 @@ await check("★★ وما زال **يقرؤه** (لوحةُ أدمن التطب
   assertSucceeds(getDoc(doc(TECH, "audit_log/A1"))));
 await check("★ ولوحةُ الأدمن ما زالت تقرأ السجلّ",
   assertSucceeds(getDoc(doc(ADMIN, "audit_log/A1"))));
+
+/* ═════════ ١٠) الاستعلامُ (`list`) — الصنفُ الذي أسقط الإنتاج ═════════
+   ★★★ **انقطاعُ إنتاجٍ حقيقيّ (v18.9.2635).** أضفتُ شرطاً على المسار في قاعدة
+   القراءة (`hasRole() && !srvOnly(document[0])`) فسقط **استعلامُ كلّ مجموعةٍ في
+   النظام**: كلُّ الشاشات «Missing or insufficient permissions» والأدمن داخلٌ بدوره.
+
+   والسببُ أنّ `read` **عمليتان لا واحدة**: `get` لمستندٍ بعينه، و`list` لاستعلام
+   مجموعة. وفي الـ`list` لا مستندَ بعدُ فمقاطعُ المسار غيرُ محسومة، وأيُّ شرطٍ
+   عليها يُسقط الطلب. **والكتابةُ لا تُصاب** (لا `list` فيها) — ولذلك عملت
+   `ctrLocked(document[0])` سنواتٍ فظننتُ النمطَ آمناً في القراءة أيضاً.
+
+   **ولم يمسكه أيُّ فحصٍ من ١٣٣**: كلُّها `getDoc`/`setDoc` على مستندٍ واحد — أي
+   `get` لا `list`. فالصنفُ كلُّه كان أعمى. هذا القسمُ يفتح عينَه:
+   **كلُّ مجموعةٍ يستعلمها التطبيق فعلاً، بكلّ دورٍ يستعلمها به.** */
+head("١٠) الاستعلامُ (`list`) — لا يكفي `get` (الصنفُ الذي أسقط الإنتاج)");
+const APP_COLLS = [
+  "global_purchases", "global_rfqs", "global_inventory", "global_inventory_log",
+  "global_issue_orders", "global_item_catalog", "global_labor_catalog",
+  "global_hr_payments", "global_warehouses", "global_stocktakes", "global_custody",
+  "global_assets", "global_price_analysis", "global_substitute_budget",
+  "meta", "hail_tickets", "audit_log",
+  "global_vendors", "global_contract_requests", "global_contracts",
+  "global_contract_extracts", "global_contract_changes"
+];
+for (const c of APP_COLLS) {
+  await check("★ يستعلم الأدمن مجموعةَ " + c,
+    assertSucceeds(getDocs(collection(ADMIN, c))));
+}
+/* ولا الأدمن وحدَه — الشاشاتُ تُفتح بكلّ دور، والانقطاعُ أصاب الجميع */
+for (const [nm, ctx] of [["مسؤول المستودعات", WH], ["المشتريات", PROC],
+                         ["المالية", FIN], ["مدير المشاريع", PM],
+                         ["المديرِ التنفيذيّ", CEO], ["الزائر", VIEWER]]) {
+  await check("★★ ويستعلم " + nm + " المجموعاتِ الأساسية (القراءةُ لكلّ ذي دور)",
+    assertSucceeds((async () => {
+      for (const c of ["global_purchases", "global_inventory", "global_item_catalog",
+                       "meta", "global_contracts"]) await getDocs(collection(ctx, c));
+    })()));
+}
+await check("★★ وتطبيقُ الفنيين يستعلم ما يخصّه (بلاغاتٌ · فنيّون · حضورٌ · سجلّ)",
+  assertSucceeds((async () => {
+    for (const c of ["hail_tickets", "technicians", "attendance", "audit_log"])
+      await getDocs(collection(TECH, c));
+  })()));
+/* ولم يفتح هذا القسمُ ما كان مقفولاً: الكتابةُ ما زالت محروسةً بعد إعادة القراءة */
+await check("★★★ والحقنُ في طابور واتساب ما زال مردوداً بعد إعادةِ القراءة",
+  assertFails(addDoc(collection(WH, "wa_outbox"), { to: "966500000000", status: "queued" })));
+await check("★★★ ولا يحقن الأدمن أيضاً", assertFails(addDoc(collection(ADMIN, "wa_outbox"), { to: "9" })));
+await check("★★ وحسابُ الأدمن ما زال مقفولاً على غيره",
+  assertFails(setDoc(doc(WH, "meta/users"), { users: [] })));
+await check("★★ وسجلُّ التدقيق ما زال لا يُمحى",
+  assertFails(deleteDoc(doc(ADMIN, "audit_log/A1"))));
 
 await env.cleanup();
 console.log(results.join("\n"));
