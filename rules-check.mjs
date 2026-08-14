@@ -412,6 +412,67 @@ await check("★ ويكتب الحضورَ والفنيين ويحدّث الب�
     await setDoc(doc(TECH, "hail_tickets/TK1"), { status: "open" }, { merge: true });
   })()));
 
+/* ═════════ ٨) طابورُ واتساب — للخادم وحدَه (البند M16) ═════════
+   `wa_outbox` قناةُ إرسالٍ لا مجموعةُ بيانات: ما يُكتب فيه يُرسَل رسالةً رسميةً من
+   رقم الشركة. والكاتبُ الشرعيُّ دوالُّ السحابة بـAdmin SDK — وهو يتجاوز القواعد،
+   فالقفلُ التامُّ لا يعطّل شيئاً. */
+head("٨) طابورُ واتساب — قناةُ إرسالٍ لا مجموعةُ بيانات (M16)");
+const WA_MSG = { to: "966500000000", template: "ticket_assigned",
+                 params: ["عاجل: حوّل المبلغ إلى الحساب المرفق"], status: "queued" };
+await seed("wa_outbox/W1", Object.assign({}, WA_MSG, { status: "sent" }));
+await check("★★★ لا يحقن مسؤولُ مستودعٍ رسالةً باسم الشركة (استغلالُ M16 نفسُه)",
+  assertFails(setDoc(doc(WH, "wa_outbox/W-EVIL"), WA_MSG)));
+await check("★★ ولا المشترياتُ ولا الماليةُ ولا مديرُ المشاريع",
+  assertFails(setDoc(doc(PROC, "wa_outbox/W-P"), WA_MSG)));
+await check("★★ ولا الأدمن نفسُه — لا بابَ للعميل إطلاقاً (الإرسالُ فعلُ خادمٍ لا مستخدم)",
+  assertFails(setDoc(doc(ADMIN, "wa_outbox/W-A"), WA_MSG)));
+await check("★ ولا تطبيقُ الفنيين (المجهول)",
+  assertFails(setDoc(doc(TECH, "wa_outbox/W-T"), WA_MSG)));
+await check("★★ ولا تُعدَّل رسالةٌ في الطابور قبل إرسالها (تبديلُ الرقم أو النصّ)",
+  assertFails(updateDoc(doc(ADMIN, "wa_outbox/W1"), { to: "966599999999" })));
+await check("★★ ولا تُقرأ أرقامُ الناس ونصوصُ رسائلهم من الطابور",
+  assertFails(getDoc(doc(WH, "wa_outbox/W1"))));
+await seed("wa_log/L1", { to: "966500000000", body: "نصّ", at: "2026-08-01" });
+await check("★★ والأرشيفُ مثلُه: لا كتابةَ ولا قراءةَ من العميل",
+  assertFails(getDoc(doc(ADMIN, "wa_log/L1"))));
+await check("★ ولا حذفَ لأثرِ الإرسال",
+  assertFails(deleteDoc(doc(ADMIN, "wa_log/L1"))));
+/* ولم نُفرِط: `meta/wa_settings` (مفتاحُ التشغيل والساعاتُ الهادئة) يبقى للأدمن
+   من القاعدة العامة — قفلُ الطابور لا يقفل إعداداتِه. */
+await check("★ وإعداداتُ واتساب ما زالت تُكتب (لم نقفل مفتاحَ التشغيل بلا قصد)",
+  assertSucceeds(setDoc(doc(ADMIN, "meta/wa_settings"), { enabled: true })));
+
+/* ═════════ ٩) سجلُّ التدقيق — يُضاف ولا يُعدَّل ولا يُمحى (البند M11) ═════════
+   ★ الوثيقةُ كانت تقول «لا يمكن المحو — إنشاء فقط». **وهذا لم يكن صحيحاً**:
+   `allow read, write: if hasRole()` تشمل التعديلَ والحذف، والقاعدةُ العامة تمنح
+   المثلَ. فالسجلُّ الذي يشهد على الفعل كان يمحوه فاعلُه. */
+head("٩) سجلُّ التدقيق — يُضاف ولا يُعدَّل ولا يُمحى (M11)");
+const AUD = (r) => ({ id: "AUD-1", action: "حذف مورد", details: "…",
+                      by: "فلان", role: r, at: "2026-08-14T10:00:00Z" });
+await seed("audit_log/A1", AUD("admin"));
+await check("★★★ لا يُعدَّل قيدٌ في السجلّ بعد كتابته (طمسُ الأثر)",
+  assertFails(updateDoc(doc(ADMIN, "audit_log/A1"), { details: "لا شيء" })));
+await check("★★★ ولا يُمحى — ولو من الأدمن (السجلُّ يشهد على الجميع)",
+  assertFails(deleteDoc(doc(ADMIN, "audit_log/A1"))));
+await check("★★ ولا يُستبدَل بالكتابة فوقه بمعرّفه نفسِه (الحذفُ بابٌ آخر)",
+  assertFails(setDoc(doc(WH, "audit_log/A1"), AUD("warehouse_manager"))));
+await check("★★ ولا في النسخة التجريبية",
+  assertFails((async () => { await seed("audit_log_dev/A2", AUD("admin"));
+                             await deleteDoc(doc(ADMIN, "audit_log_dev/A2")); })()));
+/* والإضافةُ تبقى مفتوحةً — وإلا سقط التدقيقُ كلُّه، وهو الغرضُ من وجوده */
+await check("والإضافةُ تعمل لكلّ ذي دورٍ بدوره الحقيقيّ",
+  assertSucceeds(setDoc(doc(WH, "audit_log/A-NEW"), AUD("warehouse_manager"))));
+await check("★★ ولا يوقّع أحدٌ قيداً بدورٍ ليس دورَه (توقيعٌ باسم غيرِه)",
+  assertFails(setDoc(doc(WH, "audit_log/A-FAKE"), AUD("admin"))));
+await check("★ ويُقبل قيدُ النظام بـ`-` (قبل أن يوجد مستخدم)",
+  assertSucceeds(setDoc(doc(PROC, "audit_log/A-SYS"), AUD("-"))));
+await check("★★ وتطبيقُ الفنيين ما زال **يكتب** في السجلّ (بلا دورٍ — يُغلق مع C2)",
+  assertSucceeds(setDoc(doc(TECH, "audit_log/A-TECH"), AUD("فني"))));
+await check("★★ وما زال **يقرؤه** (لوحةُ أدمن التطبيق تعرض آخر ٣٠ قيداً)",
+  assertSucceeds(getDoc(doc(TECH, "audit_log/A1"))));
+await check("★ ولوحةُ الأدمن ما زالت تقرأ السجلّ",
+  assertSucceeds(getDoc(doc(ADMIN, "audit_log/A1"))));
+
 await env.cleanup();
 console.log(results.join("\n"));
 console.log("\n" + "═".repeat(58));
