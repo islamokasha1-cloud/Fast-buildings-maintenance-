@@ -525,6 +525,51 @@
   **ومصيدةٌ متوقَّعة:** مسارُ `/login` في الـWorker نفسِه **يجب أن يبقى بلا تفويض** —
   فهو الذي يُصدر التوكِنَ أصلاً، وقفلُه يُغلق الدخولَ على الجميع.
 
+- **النسخُ الاحتياطي والتعافي — مفحوصٌ باستعادةٍ حقيقيةٍ لا بافتراض (١٤ أغسطس ٢٠٢٦):**
+  **الحالةُ القائمة** (تحقَّقنا منها بالأوامر لا بالذاكرة):
+  · **PITR مُفعَّل** — الرجوعُ لأيّ **دقيقة** خلال آخر ٧ أيام.
+  · **جدولةٌ يوميةٌ** قائمةٌ منذ ٣ يوليو ٢٠٢٦، احتفاظٌ **٩٨ يوماً**، بلا فجوةٍ بين الأيام.
+  · موقعُ القاعدة `nam5` · النوع `FIRESTORE_NATIVE`.
+  ```bash
+  gcloud firestore databases describe --database='(default)' --format="value(pointInTimeRecoveryEnablement)"
+  gcloud firestore backups schedules list --database='(default)'
+  # أحدثُ نسخةٍ وعمرُها — حكمٌ فوريٌّ على حياة الجدولة
+  LAST=$(gcloud firestore backups list --location='-' --format="value(snapshotTime)" | sort -r | head -1)
+  echo "$LAST — منذ $(( ( $(date -u +%s) - $(date -u -d "$LAST" +%s) ) / 3600 )) ساعة"
+  ```
+  **⚠ ومصيدةٌ في القائمة:** `backups list` يُرتِّب **بالاسم (UUID) لا بالتاريخ**، فأحدثُ ما
+  يظهر لك في أوّل الصفحة قد يكون أقدمَ نسخةٍ عندك. **افرزها دائماً** كما في السطر أعلاه،
+  وإلّا حكمتَ بأنّ الجدولةَ متوقّفةٌ وهي تعمل — أو العكس.
+
+  **والاختبارُ الوحيدُ المعتبَر: استعادةٌ فعلية.** نسخةٌ لم تُستعَد ليست نسخةً بل افتراضٌ
+  أنّ الملفَّ سليم. **والاستعادةُ آمنةٌ تماماً**: Firestore يُنشئ **قاعدةً جديدةً منفصلة**
+  ولا يكتب فوق `(default)` بأيّ حال — فلا خطرَ على الإنتاج مهما جرى.
+  ```bash
+  BK=$(gcloud firestore backups list --location='-' \
+        --format="value(snapshotTime,name)" | sort -r | head -1 | awk '{print $2}')
+  gcloud firestore databases restore --source-backup="$BK" --destination-database=restore-test
+  # والحكمُ ليس رسالة «تمّت» بل وجودُ البيانات فعلاً:
+  TOKEN=$(gcloud auth print-access-token)
+  BASE="https://firestore.googleapis.com/v1/projects/fast-buildings/databases/restore-test/documents"
+  for C in global_purchases global_contracts global_vendors global_inventory audit_log; do
+    N=$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE/$C?pageSize=5" | grep -c '"name"')
+    printf "%-22s → %s\n" "$C" "$([ "$N" -gt 0 ] && echo "✅" || echo "❌ فارغة")"
+  done
+  gcloud firestore databases delete --database=restore-test   # **لا تنسَ** — تُحاسَب كتخزين
+  ```
+  **نتيجةُ التشغيل الفعليّ (١٤ أغسطس):** المجموعاتُ الخمسُ كلُّها فيها بيانات، و**زمنُ
+  الاستعادة ≈ ١٥ دقيقة** لقاعدةٍ كاملة. فهذا هو **جوابُ «كم أحتاج لأعود لو ضاع كلُّ شيء»**:
+  ربعُ ساعةٍ — مقيسٌ لا مُقدَّر. أعِد الاختبارَ كلَّ بضعة أشهرٍ وبعد أيّ تغييرٍ بنيويّ.
+  **ومصيدتان صغيرتان:** جلسةُ Cloud Shell جديدةٌ تفقد `core/project` (أضِف `--project` أو
+  أعِد `gcloud config set project`)، و`NOT_FOUND` عند الحذف تعني أنها **حُذفت سلفاً** لا أنّ
+  الأمرَ فشل — تأكّد بـ`gcloud firestore databases list` لا بقراءة سجلّ التمرير.
+
+  **🔴 وثغرةٌ باقيةٌ بقرار: `Cloud Storage` خارجَ كلّ هذا.** نسخُ Firestore تغطّي **البيانات**
+  وحدَها. أمّا **صورُ الفواتير وسنداتُ الاستلام والعقودُ الموقَّعة وصورُ البلاغات** فتعيش في
+  `gs://fast-buildings.firebasestorage.app/` و**لا تلمسها نسخةٌ واحدة**. فلو ضاعت، بقيت
+  الروابطُ في المستندات تشير إلى فراغٍ ولا سبيلَ لاستعادتها. علاجُها نسخٌ مجدولٌ للحاوية —
+  بندٌ مفتوحٌ لم يُنفَّذ بعد.
+
 - **نشرُ القواعد والتحقّقُ الحيُّ منها (خطوةٌ يدويةٌ لا يفعلها الدمج):**
   الملفُّ في المستودع **نصٌّ لا أثرَ له** — قاعدةُ البيانات تحمل نسختَها الخاصةَ على
   خوادم Google. فأيُّ تعديلٍ على `firestore.rules` لا يسري حتى يُنشَر:
