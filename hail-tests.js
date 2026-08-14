@@ -393,6 +393,26 @@ function predelivery() {
     // (٦) §5 يجب أن يحمل المصيدةَ نفسَها — فالمرجعُ هو ما يُقرأ وقتَ الكارثة.
     T("★ st: §5 يوثّق مصيدةَ التوكِن (استعادةٌ بلا ميتاداتا = روابطُ ميتةٌ تقول «تمّت»)",
       NOTES.includes("firebaseStorageDownloadTokens") && NOTES.includes("storage-restore-drill.sh"));
+
+    // (٧) المرحلتان منفصلتان في الثلاثة: المرحلةُ ١ أمران على الحاوية القائمة،
+    //     والمرحلةُ ٢ تحتاج مشروعاً وفوترة. ربطُهما يُبقي ٩٠٪ من الحماية معلّقةً.
+    T("★ st: الثلاثةُ تقبل --layer1-only (المرحلةُ ١ لا تنتظر قراراً إدارياً)",
+      [SETUP, DRILL, CHECK].every(s => s.includes("--layer1-only")));
+
+    // (٨) ★★ والحارسُ الجوهريّ: فحصُ **وجودِ مشروع الخزنة** يجب أن يجري بعد تطبيق
+    //     المرحلة ١ لا قبلها. نقلُه إلى التحقُّق القبليّ يُعيد العطلَ الذي قُسّم
+    //     السكربتُ لأجله: توقُّفٌ مبكّرٌ يترك الحمايةَ ٧ أيامٍ وهو يبدو «تحقُّقاً سليماً».
+    const iLifecycle = SETUP_C.indexOf("--lifecycle-file");
+    const iVaultChk  = SETUP_C.indexOf('projects describe "$VAULT_PROJECT"');
+    T("★★ st: فحصُ مشروع الخزنة بعد تطبيق المرحلة ١ لا قبلها",
+      iLifecycle > 0 && iVaultChk > iLifecycle,
+      `lifecycle@${iLifecycle} · vaultCheck@${iVaultChk}`);
+
+    // (٩) `[ cond ] && func` مع set -e يُنهي السكربتَ عند الشرط الكاذب — فكان
+    //     --vault-only يخرج بلا عملٍ **ويبدو ناجحاً**. الإرسالُ بـ if صراحةً.
+    T("★ st: إرسالُ المراحل بـ if لا بـ [ ] && (عطلٌ صامتٌ مع set -e)",
+      /if \[ "\$MODE" != "vault"\s*\]; then layer1_apply/.test(SETUP_C) &&
+      /if \[ "\$MODE" != "layer1" \]; then vault_apply/.test(SETUP_C));
   }
 
   // ── v18.9ww: تجاوب الجوال — حارسان لعطلين رُصدا بفحص Playwright عند 375px ──

@@ -13,16 +13,29 @@
 #  البروفةُ تعمل على كائنِ اختبارٍ وحدَه تحت restore-drill/ — لا تلمس بياناتِ
 #  الإنتاج بحال، وتحذف أثرَها في النهاية.
 #
-#  التشغيل:  bash scripts/storage-restore-drill.sh
+#  التشغيل:
+#      bash scripts/storage-restore-drill.sh --layer1-only   # بلا خزنة (بعد المرحلة ١)
+#      bash scripts/storage-restore-drill.sh                 # البروفةُ الكاملة
+#
+#  **والقسمُ الأوّلُ يعمل بلا خزنةٍ أصلاً** — فلا تنتظر المرحلةَ ٢ لتعرف الجوابَ على
+#  السؤال الحاسم: هل تعود الروابطُ للعمل بعد الاستعادة؟
 # ============================================================================
 set -uo pipefail
+
+MODE="full"
+case "${1:-}" in
+  --layer1-only|--layer-1|-1) MODE="layer1" ;;
+  ""|--full)                  MODE="full"   ;;
+  -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) echo "وسيطٌ غيرُ معروف: $1   (جرّب --help)" >&2; exit 2 ;;
+esac
 
 SRC_PROJECT="${SRC_PROJECT:-fast-buildings}"
 SRC_BUCKET="${SRC_BUCKET:-fast-buildings.firebasestorage.app}"
 VAULT_PROJECT="${VAULT_PROJECT:-fast-buildings-vault}"
 VAULT_BUCKET="${VAULT_BUCKET:-fast-buildings-storage-vault}"
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIPPED=0
 T() { # T "الوصف" "شرط"  — شرطٌ صفريُّ الخروج = نجاح
   if [ "$2" = "0" ]; then PASS=$((PASS+1)); printf '  \033[0;32m✅ %s\033[0m\n' "$1"
   else FAIL=$((FAIL+1)); printf '  \033[0;31m❌ %s\033[0m\n' "$1"; fi
@@ -85,6 +98,21 @@ T "والمحتوى هو الأصلُ لا التالف" \
   "$(curl -s "$URL" | grep -q "$STAMP" && echo 0 || echo 1)"
 
 # ── (٢) الطبقةُ الخارجية: الاستعادةُ من الخزنة بعد **حذفٍ كامل** ────────────
+# تُتجاوَز إن لم تكن الخزنةُ قائمةً بعد — وتُعلَن **متجاوَزةً** لا ناجحة:
+# بروفةٌ تعدّ ما لم تفحصه نجاحاً أخطرُ من بروفةٍ لم تُشغَّل.
+VAULT_READY=0
+if [ "$MODE" != "layer1" ] && \
+   gcloud storage buckets describe "gs://$VAULT_BUCKET" --project="$VAULT_PROJECT" \
+     --format="value(name)" >/dev/null 2>&1; then
+  VAULT_READY=1
+fi
+
+if [ "$VAULT_READY" = "0" ]; then
+  SKIPPED=1
+  say "(٢) الخزنة — **متجاوَزة**"
+  printf '  \033[0;33m↷ لا خزنةَ بعد (المرحلة ٢ لم تُنفَّذ) — فحصُ نجاةِ التوكِن عبر\n'
+  printf '     النسخ لم يجرِ. أعِد البروفةَ كاملةً بعد إنشاء الخزنة.\033[0m\n'
+else
 say "(٢) نقلٌ إلى الخزنة ثمّ حذفٌ كاملٌ ثمّ استعادةٌ منها"
 gcloud storage cp "gs://$SRC_BUCKET/$OBJ" "gs://$VAULT_BUCKET/$OBJ" \
   --project="$VAULT_PROJECT" >/dev/null 2>&1
@@ -109,6 +137,7 @@ C="$(url_code)"
 T "★★ الاستعادةُ من الخزنة تُعيد **الرابطَ الأصليَّ نفسَه** للعمل (200؛ رُدّ: $C)" \
   "$([ "$C" = "200" ] && echo 0 || echo 1)"
 T "والمحتوى سليم" "$(curl -s "$URL" | grep -q "$STAMP" && echo 0 || echo 1)"
+fi
 
 # ── (٣) الطبقةُ الثالثة: الحذفُ الليّن ─────────────────────────────────────
 say "(٣) الحذفُ الليّن — هل يُرى المحذوفُ ويُستعاد؟"
@@ -119,9 +148,14 @@ T "الكائنُ المحذوفُ يظهر في قائمة المحذوف ال�
   "$([ "${SOFT:-0}" -ge 1 ] && echo 0 || echo 1)"
 
 printf '\n════════════════════════════════════\n'
-printf '  ناجحة: %s   ساقطة: %s\n' "$PASS" "$FAIL"
-if [ "$FAIL" -eq 0 ]; then
+printf '  ناجحة: %s   ساقطة: %s   متجاوَزة: %s\n' "$PASS" "$FAIL" "$SKIPPED"
+if [ "$FAIL" -eq 0 ] && [ "$SKIPPED" -eq 0 ]; then
   printf '  \033[0;32mالنسخُ مُثبَتٌ باستعادةٍ فعلية — قيّد النتيجةَ في NOTES §5.\033[0m\n\n'
+  exit 0
+elif [ "$FAIL" -eq 0 ]; then
+  printf '  \033[0;33mالتعافي داخلَ الحاوية مُثبَت: الحذفُ والاستبدالُ يُستعادان\n'
+  printf '  **والروابطُ تعود للعمل**. أمّا الخزنةُ فلم تُفحَص — لم تُنشأ بعد.\033[0m\n'
+  printf '  قيّد هذا القدرَ في §5 بوصفه جزئياً، ولا تقفل البندَ قبل البروفة الكاملة.\n\n'
   exit 0
 else
   printf '  \033[0;31mسقط فحص — لا تقل «النسخُ يعمل» قبل أن يعود أخضرَ كلَّه.\033[0m\n'

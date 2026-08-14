@@ -6,10 +6,20 @@
 #  ويقيس **المدى الزمنيَّ الفعليّ** ويقارنه بأفق نسخ Firestore (٩٨ يوماً):
 #  فأيُّ انحرافٍ يُعيد الفجوةَ التي سُدّت — بياناتٌ تُستعاد بلا صورِها.
 #
-#  التشغيل:  bash scripts/storage-backup-check.sh
+#  التشغيل:
+#      bash scripts/storage-backup-check.sh --layer1-only   # بعد المرحلة ١ وحدَها
+#      bash scripts/storage-backup-check.sh                 # الفحصُ الكامل
 #  يُرجع 0 إن كان كلُّ شيءٍ سليماً، و1 إن سقط فحص — فيصلح للجدولة.
 # ============================================================================
 set -uo pipefail
+
+MODE="full"
+case "${1:-}" in
+  --layer1-only|--layer-1|-1) MODE="layer1" ;;
+  ""|--full)                  MODE="full"   ;;
+  -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) echo "وسيطٌ غيرُ معروف: $1   (جرّب --help)" >&2; exit 2 ;;
+esac
 
 SRC_PROJECT="${SRC_PROJECT:-fast-buildings}"
 SRC_BUCKET="${SRC_BUCKET:-fast-buildings.firebasestorage.app}"
@@ -53,6 +63,15 @@ T "لا قاعدةَ lifecycle تحذف نسخةً حيّة" \
   "$(printf '%s' "$LC" | grep -q "isLive.*[Tt]rue" && echo 1 || echo 0)"
 
 # ── حاويةُ الخزنة ───────────────────────────────────────────────────────────
+if [ "$MODE" = "layer1" ]; then
+  say "حاويةُ الخزنة — **متجاوَزة** (--layer1-only)"
+  printf '  \033[0;33m↷ المرحلة ٢ لم تُنفَّذ بعد: لا حمايةَ من ضياع الحاوية كلِّها\n'
+  printf '     ولا من حذف المشروع ولا من عطل الإقليم.\033[0m\n'
+  printf '\n════════════════════════════════════\n'
+  printf '  ناجحة: %s   ساقطة: %s   (المرحلة ١ وحدَها)\n' "$PASS" "$FAIL"
+  [ "$FAIL" -eq 0 ] && exit 0 || exit 1
+fi
+
 say "حاويةُ الخزنة — gs://$VAULT_BUCKET (مشروع $VAULT_PROJECT)"
 
 if gcloud storage buckets describe "gs://$VAULT_BUCKET" --project="$VAULT_PROJECT" \
