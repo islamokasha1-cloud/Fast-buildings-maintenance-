@@ -408,6 +408,17 @@ function predelivery() {
       iLifecycle > 0 && iVaultChk > iLifecycle,
       `lifecycle@${iLifecycle} · vaultCheck@${iVaultChk}`);
 
+    // (١٠) اسمُ عرضِ المشروع لاتينيٌّ بسيط: Google تقبل الحروفَ اللاتينيةَ والأرقامَ
+    //      والمسافةَ والشرطةَ العادية فقط. شرطةٌ طويلة «—» في الأمر المقترَح أسقطت
+    //      الإنشاءَ فعلاً بـ INVALID_ARGUMENT — والرسالةُ لا تذكر أيَّ محرفٍ الجاني.
+    {
+      const nameArgs = SETUP.match(/--name="[^"]*"/g) || [];
+      const bad = nameArgs.filter(a => !/^--name="[A-Za-z0-9 '!-]*"$/.test(a)
+                                    && !a.includes("$JOB_NAME"));
+      T("★ st: أسماءُ العرض المقترَحة بمحارفَ تقبلها Google (لا شرطةً طويلةً ولا عربية)",
+        bad.length === 0, bad.join(" · "));
+    }
+
     // (٩) `[ cond ] && func` مع set -e يُنهي السكربتَ عند الشرط الكاذب — فكان
     //     --vault-only يخرج بلا عملٍ **ويبدو ناجحاً**. الإرسالُ بـ if صراحةً.
     T("★ st: إرسالُ المراحل بـ if لا بـ [ ] && (عطلٌ صامتٌ مع set -e)",

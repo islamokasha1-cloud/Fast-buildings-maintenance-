@@ -119,8 +119,13 @@ require_vault_project() {
      أنشئه أوّلاً واربطه بحسابِ فوترة (خطوةٌ يدويةٌ مقصودة — إنشاءُ مشروعٍ
      وربطُ فوترةٍ قرارٌ إداريٌّ لا يُؤتمَت):
 
-       gcloud projects create $VAULT_PROJECT --name="Fast Buildings — Storage Vault"
+       gcloud projects create $VAULT_PROJECT --name="Fast Buildings Storage Vault"
        gcloud billing projects link $VAULT_PROJECT --billing-account=<BILLING_ACCOUNT_ID>
+
+     ⚠ اسمُ العرض لاتينيٌّ بسيطٌ عمداً: Google تقبل فيه الحروفَ اللاتينيةَ والأرقامَ
+       والمسافةَ والشرطةَ العاديةَ فقط — فشرطةٌ طويلة «—» أو حرفٌ عربيٌّ يُردّان بـ
+       INVALID_ARGUMENT: project display name contains invalid characters.
+       (وقعنا فيها فعلاً: الشرطةُ الطويلةُ في الأمر المقترَح أسقطت الإنشاء.)
 
      ثم:  bash scripts/storage-backup-setup.sh --vault-only
 EOF
