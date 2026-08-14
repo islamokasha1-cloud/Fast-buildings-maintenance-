@@ -8337,6 +8337,70 @@ function contractsPhase1() {
     T("★ والآيبانُ لا يتغيّر إلا بيد المالية أو الأدمن",
       /ibanOf\(request\.resource\.data\) == ibanOf\(resource\.data\) \|\| anyRole\(\['finance','admin'\]\)/.test(RUL));
 
+    /* ════ البند C1 — مستنداتُ الحسابات مقفولةٌ على الأدمن ════
+       `meta/users` و`meta/{proj}_users` (و`_dev`) ليست بياناتٍ بل **إصدارُ صلاحية**:
+       فيها `hash` و`role`، ومنها يُصادِق الـWorker ويُصدر التوكِن. فمن يكتب فيها
+       يكتب لنفسه دورَ `admin` ثم يدخل به. وكانت القاعدةُ العامة تمنح ذلك **لكلّ
+       دورٍ غيرِ الزائر** — فمراقبٌ يصير أدمن بسطرٍ في الـConsole.
+       والحارسُ يُثبّت **الشقَّين معاً**: الاستثناءَ من العامة (وبلا ذلك القفلُ زينة)
+       والبلوكَ الذي يقصر الكتابةَ على الأدمن. أحدُهما بلا الآخر لا يعني شيئاً. */
+    T("★★★ القاعدةُ العامة تستثني مستنداتِ الحسابات (وإلا فالقفلُ بلا أثر)",
+      /allow write:[\s\S]{0,160}!isUsersDoc\(document\[0\], document\[1\]\)/.test(RUL));
+    T("★★★ وبلوكُها يقصر الكتابةَ على الأدمن وحدَه — والقراءةُ لم تُمَسّ",
+      /match \/meta\/\{doc\} \{\s*\n\s*allow write: if isAdmin\(\) && doc\.matches\('\(\.\*_\)\?users\(_dev\)\?'\);/.test(RUL) &&
+      // لا شرطَ قراءةٍ أُضيف في البلوك الجديد: القراءةُ تبقى من القاعدة العامة
+      !/allow (read|read, write): if isAdmin\(\) && doc\.matches\('\(\.\*_\)\?users/.test(RUL));
+    /* والنمطُ يجب أن يغطّي المسارات **الأربعةَ التي تكتبها الواجهةُ فعلاً** — تُشتقّ
+       من `index.html` لا تُكتب هنا: لو أضاف تعديلٌ لاحقٌ مساراً خامساً بلا تغطيةٍ
+       عاد البابُ مفتوحاً بلا أن يظهر ذلك في أيّ سطرٍ من القواعد. */
+    {
+      const usersRe = /^(.*_)?users(_dev)?$/;
+      const appPaths = ["users", "users_dev", "hail_users", "hail_users_dev"];
+      T("★★ ونمطُ الأسماء يغطّي مسارات الواجهة الأربعة (مركزيّ · مشروع · ونسختاهما)",
+        appPaths.every(p => usersRe.test(p)) &&
+        /doc\.matches\('\(\.\*_\)\?users\(_dev\)\?'\)/.test(RUL));
+      T("★ ولا يبتلع مستنداتِ meta الأخرى (عدّادٌ · إعداداتٌ · إشعارات — وإلا عطّلناها)",
+        !["hail_counter", "hail_settings", "hail_notifications", "projects", "ppm_checklists"]
+          .some(p => usersRe.test(p)));
+      /* والواجهةُ لا تكتب مستندَ حساباتٍ بمسارٍ خارج النمط — والمساراتُ تُبنى بثلاث
+         طرقٍ في `index.html`، فتُجمع الثلاثُ لا الحرفيّةُ وحدَها (وإلا مرّ المبنيُّ
+         بالتجميع بلا فحصٍ وهو نصفُ المسارات). */
+      const idxUserPaths = [];
+      (HTML.match(/"meta\/[a-z_]*users[a-z_]*"/g) || [])                 // "meta/users"
+        .forEach(x => idxUserPaths.push(x.replace(/"/g, "").slice(5)));
+      (HTML.match(/`meta\/\$\{[A-Za-z.]+\}_users(_dev)?`/g) || [])       // `meta/${projId}_users`
+        .forEach(x => idxUserPaths.push("hail" + x.slice(x.indexOf("}") + 1, -1)));
+      (HTML.match(/"_users(_dev)?"/g) || [])                             // "meta/"+id+"_users"
+        .forEach(x => idxUserPaths.push("hail" + x.replace(/"/g, "")));
+      const idxUnique = [...new Set(idxUserPaths)];
+      T("★★ وكلُّ مسارِ حساباتٍ مكتوبٍ في `index.html` مشمولٌ بالنمط",
+        idxUnique.length >= 4 && idxUnique.every(p => usersRe.test(p)),
+        "خارج النمط: " + idxUnique.filter(p => !usersRe.test(p)).join(" "));
+    }
+    T("★★★ وفحصُ المحاكي يجرّب الاستغلالَ نفسَه (مراقبٌ يزرع حسابَ أدمن) ويجرّب المسارَ الشرعيّ",
+      /مراقبٌ لا يزرع حسابَ أدمن/.test(RULES_CHECK) &&
+      /role: "admin"[\s\S]{0,80}مُتسلّق/.test(RULES_CHECK) &&
+      /assertSucceeds\(setDoc\(doc\(ADMIN, U_C\)/.test(RULES_CHECK));
+    T("★★ ويُثبت أن القراءةَ لم تُمَسّ وأنّ تطبيقَ الفنيين (المجهول) لم يتعطّل",
+      /assertSucceeds\(getDoc\(doc\(WH, U_C\)\)\)/.test(RULES_CHECK) &&
+      /const TECH = env\.authenticatedContext\("tech_anon", \{\}\)/.test(RULES_CHECK) &&
+      /assertFails\(setDoc\(doc\(TECH, U_C\)/.test(RULES_CHECK));
+    /* والشاشةُ تتبع الخادمَ: «إدارةُ مستخدمي المشتريات» يراها المستودعاتُ والمشتريات،
+       فبلا حارسٍ في الواجهة ينقر أحدُهما زرّاً يعدّل النسخةَ المحلّيةَ ثمّ يُردّ
+       بـ`permission-denied` بلا تفسير — قفلٌ صحيحٌ بواجهةٍ كاذبة. */
+    {
+      const uWriters = ["puSaveUserWa", "puAddUser", "puDeleteUser",
+                        "puChangePassword", "puSavePassword", "saveUserPerms"];
+      const unguarded = uWriters.filter(fn =>
+        !new RegExp("function " + fn + "\\([^)]*\\)\\s*\\{[\\s\\S]{0,600}?_adminOnlyUsersGuard\\(\\)").test(HTML));
+      T("★★ وواجهةُ إدارة المستخدمين تتبع القفل: حارسُ أدمنٍ على كلّ كاتبٍ للحسابات",
+        /function _canManageUsers\(\)\{ return !!\(currentUser && currentUser\.role === "admin"\); \}/.test(HTML) &&
+        unguarded.length === 0, "بلا حارس: " + unguarded.join(" "));
+    }
+    T("★ ولغيرِ الأدمن قائمةٌ للاطّلاع بلا أزرارٍ ولا نموذجِ إضافة",
+      /_form\.style\.display = _mng \? "" : "none"/.test(HTML) &&
+      /للاطّلاع فقط — إضافةُ الحسابات وتعديلُها وحذفُها من صلاحية المسؤول وحدَه/.test(HTML));
+
     // الفحصُ الحقيقيُّ مربوطٌ بـCI — وإلا فقواعدُ الأمان الوحيدةُ بلا حارسٍ آليّ
     const wfR = fs.readFileSync(path.resolve(path.dirname(IDX), ".github/workflows/hail-tests.yml"), "utf8");
     T("★ وفحصُ القواعد على محاكٍ حقيقيٍّ مربوطٌ بـCI",
