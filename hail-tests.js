@@ -2357,6 +2357,47 @@ function auditRound2() {
       /const _c = await _authClaims\(5000\);\s*\n\s*if\(_c && _c\.role\) user\.role = _c\.role;/.test(HTML));
   }
 
+  /* ── H3 (الشقُّ الخادميّ): مصدرُ الـWorker محفوظٌ في المستودع ──
+     كان يعيش في لوحة Cloudflare وحدَها — بلا نسخةٍ ولا تاريخٍ ولا مراجعة. وهو يحمل
+     **بوّابةَ الدخول** لا وسيطَ الذكاء فحسب. الحرّاسُ هنا تحفظ ثلاثةَ أشياء:
+     أن الحارسَ مُفعَّلٌ في النسخة المحفوظة، وأنّ `/login` يبقى خارجه، وأن **لا سرَّ
+     يُلصق في الملفّ** يوماً (وهو أسهلُ خطأٍ يقع عند النسخ من اللوحة). */
+  {
+    const fsW = require("fs"), pathW = require("path");
+    const wp = pathW.resolve(pathW.dirname(IDX), "worker/hail-ai-proxy.js");
+    const W = fsW.existsSync(wp) ? fsW.readFileSync(wp, "utf8") : "";
+    T("★ مصدرُ الـWorker محفوظٌ في المستودع (لا يعيش في اللوحة وحدَها)", W.length > 0);
+    if (W) {
+      T("★ الحارسُ مُفعَّلٌ في النسخة المحفوظة (تطابق المنشور)",
+        /const AI_AUTH_ENFORCE\s*=\s*true\s*;/.test(W) &&
+        !/const AI_AUTH_ENFORCE\s*=\s*false\s*;/.test(W));
+      T("★ التحقّقُ بمفاتيح Google العامة لا بسرٍّ مشترك",
+        /async function verifyIdToken\(/.test(W) &&
+        /securetoken@system\.gserviceaccount\.com/.test(W) &&
+        /crypto\.subtle\.verify/.test(W));
+      T("★ يفحص جهةَ الإصدار والمشروع والصلاحية — لا التوقيعَ وحدَه",
+        /securetoken\.google\.com/.test(W) && /claims\.aud !== pid/.test(W) &&
+        /claims\.exp/.test(W));
+      // المصيدةُ الأولى: قفلُ /login يُغلق الدخولَ على الجميع — فهو مصدرُ التوكِن نفسِه
+      T("★★ ‎/login خارج الحارس (يُوجَّه قبل handleAI — وقفلُه يُغلق الدخولَ على الجميع)",
+        /path\.endsWith\("\/login"\)[\s\S]{0,120}?handleLogin/.test(W));
+      T("★ CORS تُدرج Authorization (وإلّا حجب المتصفّحُ الطلبَ قبل وصوله)",
+        /"Access-Control-Allow-Headers":\s*"Content-Type,\s*Authorization"/.test(W));
+      // ★★ ولا سرَّ في الملفّ — كلُّها من env
+      // التمييزُ بين **توثيقِ الشكل** و**المفتاح الحقيقيّ**: ترويسةُ PEM وحدَها لا تكفي
+      // دليلاً (الملفُّ يشرح شكلَ السرّ المتوقَّع بنقاطٍ مكان القيمة) — فالشرطُ وجودُ
+      // **مادّةِ مفتاحٍ فعلية** بعدها. وإلّا كان الحارسُ إنذاراً كاذباً يُدرَّب الناسُ
+      // على تجاهله، وذلك أسوأُ من غيابه.
+      const leaks = [
+        [/sk-ant-[A-Za-z0-9_-]{16,}/, "مفتاح Anthropic"],
+        [/-----BEGIN [A-Z ]*PRIVATE KEY-----[^A-Za-z0-9+/]{0,12}[A-Za-z0-9+/]{40,}/, "مفتاح خاص"],
+        [/(?:const|let|var)\s+(?:ANTHROPIC_KEY|FIREBASE_PRIVATE_KEY|DEBUG_KEY|FIREBASE_CLIENT_EMAIL)\s*=\s*["'][^"']{8,}/, "سرٌّ مكتوبٌ حرفياً"],
+      ].filter(([re]) => re.test(W)).map(([, n]) => n);
+      T("★★ لا سرَّ مكتوبٌ في مصدر الـWorker (كلُّها من env)",
+        leaks.length === 0, leaks.join(" · ") || "نظيف");
+    }
+  }
+
   /* ── H3: نداءُ مُرحِّل الذكاء يحمل هويّةً يتحقّق منها الخادم ── */
   {
     const ai = HTML.indexOf("async function _callAnthropicAPI(");
