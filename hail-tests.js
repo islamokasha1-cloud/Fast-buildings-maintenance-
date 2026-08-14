@@ -2337,6 +2337,46 @@ function auditRound2() {
     }
   }
 
+  /* ── H2: الدورُ من التوكِن لا من تخزين الجلسة ──
+     السلوكُ نفسُه يفحصه `auth-guard-check.mjs` تنفيذاً في متصفّحٍ حقيقيّ (الجلسةُ
+     تُزوَّر فعلاً ثمّ يُسأل النظامُ: بأيّ دورٍ دخل؟). وهذه حرّاسُ بنيةٍ تمنع الارتداد
+     الصامت: عودةُ الفحص إلى «هل يوجد دورٌ؟» بدل «ما الدورُ؟» لا تُسقط أيَّ فحصٍ آخر. */
+  {
+    T("★ H2: _authClaims تُعيد الحمولة (لا مجرّدَ صحيحٍ/خطأ)",
+      /function _authClaims\(/.test(HTML) && HTML.includes("finish(c.role ? { role:c.role } : null)"));
+    T("★ H2: لم تبقَ _ensureRoleClaim (فحصُ «وجودِ» الدور وحدَه)",
+      !/_ensureRoleClaim/.test(HTML));
+    T("★ H2: الاستعادةُ تُمرّر دورَ التوكِن إلى _proceedRestore",
+      HTML.includes("_proceedRestore(claims.role)") &&
+      /function _proceedRestore\(authRole\)/.test(HTML));
+    T("★ H2: و_proceedRestore تُطبّقه على الكائن المستعاد أيّاً كان مصدرُه",
+      /const found=USERS\.find\(x=>x\.user===saved\.user\)\|\|saved;\s*\n\s*if\(authRole\) found\.role = authRole;/.test(HTML));
+    T("★ H2: التباينُ يُسجَّل في التدقيق لا يُبتلع صامتاً",
+      HTML.includes("تباين دور الجلسة مع التوكن"));
+    T("★ H2: والدخولُ يعتمد دورَ التوكِن فتتّحد الواجهةُ مع القواعد",
+      /const _c = await _authClaims\(5000\);\s*\n\s*if\(_c && _c\.role\) user\.role = _c\.role;/.test(HTML));
+  }
+
+  /* ── H3: نداءُ مُرحِّل الذكاء يحمل هويّةً يتحقّق منها الخادم ── */
+  {
+    const ai = HTML.indexOf("async function _callAnthropicAPI(");
+    const body = ai > 0 ? HTML.slice(ai, HTML.indexOf("\n// ── عارض Markdown", ai)) : "";
+    T("_callAnthropicAPI موجودة", body.length > 0);
+    if (body) {
+      T("★ H3: يُرفَق توكِنُ هويّة Firebase (Bearer) لا سرٌّ مشتركٌ في المتصفّح",
+        body.includes('headers["Authorization"] = "Bearer " + token') &&
+        /async function _aiIdToken\(\)/.test(HTML) && /getIdToken\(\)/.test(HTML));
+      T("★ H3: ولا مفتاحَ Anthropic يُرسَل من المتصفّح",
+        !/x-api-key/i.test(body) && !/sk-ant/i.test(HTML));
+      T("★ H3: سقوطٌ آمنٌ إن لم يُحدَّث الـWorker (لا تُعطَّل خصائصُ الذكاء)",
+        body.includes("_aiAuthHeaderOk = false") && body.includes("res = await attempt(false)"));
+      T("★ H3: والمهلةُ الحقيقيةُ لا تُعاد (AbortError يُمرَّر — لا مضاعفةَ استهلاك)",
+        /e\.name !== "AbortError"/.test(body));
+      T("★ H3: مهلةٌ مستقلّةٌ لكلّ محاولة (لا ترث الثانيةُ بقيّةَ الأولى)",
+        /const attempt = async \(withAuth\)=>\{[\s\S]{0,200}?const ctrl = new AbortController\(\)/.test(body));
+    }
+  }
+
   // ── #4 SLA: _closedOnTime يقيس بميزانية ساعات العمل (16 لعادي) لا getSLA (48 تقويمية) ──
   const b = HTML.indexOf("function _closedOnTime(t){");
   if (b < 0) { T("_closedOnTime دالة عليا موحّدة", false); }
