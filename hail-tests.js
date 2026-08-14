@@ -345,6 +345,56 @@ function predelivery() {
   T("★ wk: قيدُ الإصدار الحالي موثَّق في NOTES.md (حدّث NOTES مع كل تغيير)",
     NOTES.includes("**" + VER + " —"), "لا قيد لـ " + VER + " في §6 — أضف سطر التغيير قبل الدفع");
 
+  // ── نسخُ Cloud Storage — حرّاسُ القيودِ الثلاثةِ التي لا تظهر في أيّ سطرِ إعداد ──
+  // هذه حرّاسُ **نصٍّ** لا سلوك (لا gcloud في الفحص) — وهي هنا لأن الثلاثةَ قيودٌ
+  // يسهل «تبسيطُها» لاحقاً بحسن نيّةٍ فتنهار المنظومةُ بلا رسالةِ خطأٍ واحدة.
+  {
+    const ROOT = path.dirname(IDX);
+    const rd = f => { try { return fs.readFileSync(path.join(ROOT, f), "utf8"); } catch { return ""; } };
+    const SETUP = rd("scripts/storage-backup-setup.sh");
+    const DRILL = rd("scripts/storage-restore-drill.sh");
+    const CHECK = rd("scripts/storage-backup-check.sh");
+    // الحارسُ يقرأ **الشفرةَ** لا الشرح: أوّلُ صياغةٍ سقطت على تعليقٍ يشرح القيدَ نفسَه
+    // («بلا --delete-from») — وحارسٌ يكسره توثيقُ سببه حارسٌ يُغري بحذف التوثيق.
+    const code = s => s.split("\n").filter(l => !/^\s*#/.test(l)).join("\n");
+    const SETUP_C = code(SETUP);
+
+    T("★ st: سكربتاتُ نسخ Storage الثلاثة موجودة",
+      !!SETUP && !!DRILL && !!CHECK, "ينقص أحدُها من scripts/");
+    T("★ st: خطّةُ النسخ موثَّقةٌ في docs",
+      !!rd("docs/storage-backup-plan-2026-08.md"));
+
+    // (١) الخزنةُ تُراكم ولا تُطابق: التطبيقُ يحذف ملفّاتٍ في سياقه الطبيعيّ، ومرآةٌ
+    //     حقيقيةٌ (--delete-from) كانت ستنشر ذاك الحذفَ إلى النسخة فتُبطل الغرضَ كلَّه.
+    T("★ st: وظيفةُ النقل بلا حذفٍ في الوجهة (--delete-from يُبطل النسخةَ بنشر الحذف)",
+      !!SETUP && !SETUP_C.includes("--delete-from"));
+
+    // (٢) سياسةُ الاحتجاز على حاويةٍ بلا Versioning تُسقط كلَّ نقلةٍ فيها ملفٌّ تغيّر
+    //     (الاستبدالُ بلا نسخٍ = حذفٌ ثمّ إنشاء، والاحتجازُ يمنع الحذف).
+    T("★ st: Versioning على الخزنة مضبوطٌ مع سياسة الاحتجاز (شرطٌ لا تحسين)",
+      !!SETUP && SETUP.includes("--retention-period") &&
+      /VAULT_BUCKET\"?\s+--project=\"\$VAULT_PROJECT\"\s+--versioning/.test(SETUP));
+
+    // (٣) قاعدةُ lifecycle بلا isLive:false تحذف الملفّاتِ العاملةَ لا النسخَ القديمة.
+    T("★ st: lifecycle مقيَّدةٌ بـ isLive:false (وإلّا حذفت النسخةَ الحيّة)",
+      !!SETUP && /"daysSinceNoncurrentTime"[^}]*"isLive":\s*false/.test(SETUP));
+
+    // (٤) المعيارُ الحاكم: الرابطُ المخزَّن يحمل توكِناً في الميتاداتا — والبروفةُ
+    //     تقيس عودةَ الرابط 200 لا وجودَ البايتات، وإلّا فهي بروفةٌ تُطمئن كاذبةً.
+    T("★ st: البروفةُ تفحص نجاةَ firebaseStorageDownloadTokens لا البايتاتِ وحدَها",
+      !!DRILL && DRILL.includes("firebaseStorageDownloadTokens") &&
+      DRILL.includes("firebasestorage.googleapis.com"));
+
+    // (٥) المدى يُقارَن بأفق Firestore رقمياً — فانحرافُ أيّ طرفٍ يُعيد الفجوة.
+    T("★ st: فحصُ الصحّة يقارن مدى Storage بأفق نسخ Firestore (٩٨ يوماً)",
+      !!CHECK && /FIRESTORE_RETENTION_DAYS=98/.test(CHECK) &&
+      CHECK.includes("daysSinceNoncurrentTime"));
+
+    // (٦) §5 يجب أن يحمل المصيدةَ نفسَها — فالمرجعُ هو ما يُقرأ وقتَ الكارثة.
+    T("★ st: §5 يوثّق مصيدةَ التوكِن (استعادةٌ بلا ميتاداتا = روابطُ ميتةٌ تقول «تمّت»)",
+      NOTES.includes("firebaseStorageDownloadTokens") && NOTES.includes("storage-restore-drill.sh"));
+  }
+
   // ── v18.9ww: تجاوب الجوال — حارسان لعطلين رُصدا بفحص Playwright عند 375px ──
   // كلاهما انحرافٌ عن نمطٍ يطبّقه الملف نفسه في موضعٍ مجاور، فالارتداد وارد.
   {
