@@ -24,6 +24,12 @@
 # ============================================================================
 set -euo pipefail
 
+# ⚠ **بلا أسئلةٍ تفاعلية.** بعضُ أوامر gcloud — و`transfer authorize` منها — تسأل
+#   «هل تريد المتابعة؟» وتنتظر. وفي سكربتٍ يُكتَم فيه المخرَجُ يصير السؤالُ **تعليقاً
+#   صامتاً**: لا رسالةَ ولا خطأَ ولا تقدُّم، والمستخدمُ ينتظر شيئاً لا يأتي.
+#   هذا المتغيّرُ يجعل gcloud كلَّها غيرَ تفاعلية، فتُجيب بالافتراض أو تسقط بخطأ صريح.
+export CLOUDSDK_CORE_DISABLE_PROMPTS=1
+
 # ── الوضع ───────────────────────────────────────────────────────────────────
 MODE="full"
 case "${1:-}" in
@@ -119,8 +125,13 @@ require_vault_project() {
      أنشئه أوّلاً واربطه بحسابِ فوترة (خطوةٌ يدويةٌ مقصودة — إنشاءُ مشروعٍ
      وربطُ فوترةٍ قرارٌ إداريٌّ لا يُؤتمَت):
 
-       gcloud projects create $VAULT_PROJECT --name="Fast Buildings — Storage Vault"
+       gcloud projects create $VAULT_PROJECT --name="Fast Buildings Storage Vault"
        gcloud billing projects link $VAULT_PROJECT --billing-account=<BILLING_ACCOUNT_ID>
+
+     ⚠ اسمُ العرض لاتينيٌّ بسيطٌ عمداً: Google تقبل فيه الحروفَ اللاتينيةَ والأرقامَ
+       والمسافةَ والشرطةَ العاديةَ فقط — فشرطةٌ طويلة «—» أو حرفٌ عربيٌّ يُردّان بـ
+       INVALID_ARGUMENT: project display name contains invalid characters.
+       (وقعنا فيها فعلاً: الشرطةُ الطويلةُ في الأمر المقترَح أسقطت الإنشاء.)
 
      ثم:  bash scripts/storage-backup-setup.sh --vault-only
 EOF
@@ -181,7 +192,9 @@ vault_apply() {
   say "(٤) حسابُ خدمةِ النقل وصلاحياتُه"
   # الوظيفةُ تعيش في **مشروع الخزنة** لا في مشروع التطبيق — فنطاقُ الانفجار أصغر:
   # اختراقُ fast-buildings لا يملك تعديلَ جدولةِ النسخ ولا حذفَ الخزنة.
-  gcloud transfer authorize --project="$VAULT_PROJECT" >/dev/null 2>&1 || true
+  # ولا نكتم مخرَجَ هذا الأمر: كتمُه هو ما حوّل سؤالَه التفاعليَّ إلى تعليقٍ صامت.
+  # `|| true` تكفي لتجاوز فشلٍ غيرِ مؤثّر — أمّا الإخفاءُ فيُعمي عن سببِ التوقّف.
+  gcloud transfer authorize --project="$VAULT_PROJECT" || true
 
   local STS_SA
   STS_SA="$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \

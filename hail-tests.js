@@ -385,6 +385,14 @@ function predelivery() {
       !!DRILL && DRILL.includes("firebaseStorageDownloadTokens") &&
       DRILL.includes("firebasestorage.googleapis.com"));
 
+    // (١٢) ★★ وفحصُ الميتاداتا يتحقّق من نفسِه: قراءةٌ فارغةٌ من الطرفين كانت ستمرّ
+    //      «نجاحاً» وهي عمًى. أوّلُ صياغةٍ سألت عن `metadata.` وحدَها بينما gcloud
+    //      يعرضها تحت `custom_fields` — فأعلنت سقوطاً كاذباً والاستعادةُ تعمل.
+    T("★★ st: فحصُ التوكِن يقرأ الاسمَين ويشترط قراءتَه من المصدر أوّلاً",
+      !!DRILL && DRILL.includes("custom_fields.firebaseStorageDownloadTokens") &&
+      DRILL.includes("metadata.firebaseStorageDownloadTokens") &&
+      /الفحصُ نفسُه صالح/.test(DRILL));
+
     // (٥) المدى يُقارَن بأفق Firestore رقمياً — فانحرافُ أيّ طرفٍ يُعيد الفجوة.
     T("★ st: فحصُ الصحّة يقارن مدى Storage بأفق نسخ Firestore (٩٨ يوماً)",
       !!CHECK && /FIRESTORE_RETENTION_DAYS=98/.test(CHECK) &&
@@ -407,6 +415,26 @@ function predelivery() {
     T("★★ st: فحصُ مشروع الخزنة بعد تطبيق المرحلة ١ لا قبلها",
       iLifecycle > 0 && iVaultChk > iLifecycle,
       `lifecycle@${iLifecycle} · vaultCheck@${iVaultChk}`);
+
+    // (١٠) اسمُ عرضِ المشروع لاتينيٌّ بسيط: Google تقبل الحروفَ اللاتينيةَ والأرقامَ
+    //      والمسافةَ والشرطةَ العادية فقط. شرطةٌ طويلة «—» في الأمر المقترَح أسقطت
+    //      الإنشاءَ فعلاً بـ INVALID_ARGUMENT — والرسالةُ لا تذكر أيَّ محرفٍ الجاني.
+    {
+      const nameArgs = SETUP.match(/--name="[^"]*"/g) || [];
+      const bad = nameArgs.filter(a => !/^--name="[A-Za-z0-9 '!-]*"$/.test(a)
+                                    && !a.includes("$JOB_NAME"));
+      T("★ st: أسماءُ العرض المقترَحة بمحارفَ تقبلها Google (لا شرطةً طويلةً ولا عربية)",
+        bad.length === 0, bad.join(" · "));
+    }
+
+    // (١١) سؤالٌ تفاعليٌّ في سكربتٍ مكتومِ المخرَج = **تعليقٌ صامت**: لا رسالةَ ولا
+    //      خطأَ ولا تقدُّم. `transfer authorize` تسأل «هل تتابع؟» فعلّقت المرحلةَ ٢.
+    //      العلاجُ طبقتان: تعطيلُ الأسئلة عالمياً، **وألّا يُكتَم مخرَجُ ذاك الأمر**.
+    T("★★ st: gcloud غيرُ تفاعلية في السكربت (سؤالٌ مكتومٌ = تعليقٌ صامت)",
+      /export CLOUDSDK_CORE_DISABLE_PROMPTS=1/.test(SETUP_C));
+    T("★ st: مخرَجُ transfer authorize غيرُ مكتوم",
+      /transfer authorize[^\n]*$/m.test(SETUP_C) &&
+      !/transfer authorize[^\n]*>\/dev\/null/.test(SETUP_C));
 
     // (٩) `[ cond ] && func` مع set -e يُنهي السكربتَ عند الشرط الكاذب — فكان
     //     --vault-only يخرج بلا عملٍ **ويبدو ناجحاً**. الإرسالُ بـ if صراحةً.

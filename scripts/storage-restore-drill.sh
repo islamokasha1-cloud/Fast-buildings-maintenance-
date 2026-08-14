@@ -120,10 +120,29 @@ RC=$?
 T "الكائنُ نُسخ إلى الخزنة gs://$VAULT_BUCKET" "$RC"
 
 # الفحصُ الجوهريّ: هل حملت النسخةُ ميتاداتا التوكِن معها؟
-VTOK="$(gcloud storage objects describe "gs://$VAULT_BUCKET/$OBJ" --project="$VAULT_PROJECT" \
-        --format="value(metadata.firebaseStorageDownloadTokens)" 2>/dev/null)"
+#
+# ⚠ **والفحصُ يتحقّق من نفسِه قبل أن يحكم.** أوّلُ صياغةٍ سألت عن `metadata.…`
+#   وحدَها، و`gcloud storage objects describe` يعرض الميتاداتا المخصَّصة تحت
+#   `custom_fields` — فردّ **فارغاً** وأعلن سقوطاً كاذباً بينما التوكِنُ سليمٌ
+#   والاستعادةُ تعمل (الفحصُ ★★ أدناه ردّ 200 في الجولة نفسِها).
+#   فصار يقرأ الاسمَين، **ويشترط أوّلاً أن يقرأ التوكِنَ من المصدر**: قراءةٌ فارغةٌ
+#   من الطرفين كانت ستمرّ «نجاحاً» وهي عمًى. فحصٌ لا يميّز «لا بيانات» من «كلُّ
+#   شيءٍ سليم» لا يفحص شيئاً.
+read_tok() {  # $1=bucket  $2=project
+  local v
+  v="$(gcloud storage objects describe "gs://$1/$OBJ" --project="$2" \
+       --format="value(custom_fields.firebaseStorageDownloadTokens)" 2>/dev/null)"
+  [ -n "$v" ] || v="$(gcloud storage objects describe "gs://$1/$OBJ" --project="$2" \
+       --format="value(metadata.firebaseStorageDownloadTokens)" 2>/dev/null)"
+  printf '%s' "$v"
+}
+STOK="$(read_tok "$SRC_BUCKET" "$SRC_PROJECT")"
+VTOK="$(read_tok "$VAULT_BUCKET" "$VAULT_PROJECT")"
+
+T "الفحصُ نفسُه صالح: التوكِن يُقرأ من المصدر (وإلّا فالحقلُ اسمُه غيرُ ما نسأل عنه)" \
+  "$([ "$STOK" = "$TOKEN" ] && echo 0 || echo 1)"
 T "★ نسخةُ الخزنة تحمل firebaseStorageDownloadTokens (وإلّا فكلُّ استعادةٍ منها روابطُ ميتة)" \
-  "$([ "$VTOK" = "$TOKEN" ] && echo 0 || echo 1)"
+  "$([ -n "$VTOK" ] && [ "$VTOK" = "$TOKEN" ] && echo 0 || echo 1)"
 
 gcloud storage rm --all-versions "gs://$SRC_BUCKET/$OBJ" --project="$SRC_PROJECT" >/dev/null 2>&1
 C="$(url_code)"; T "بعد الحذف الكامل ينكسر الرابط (رُدّ: $C)" \
