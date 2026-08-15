@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2692";
+var MODULE_BUILD = "v18.9.2693";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -3965,7 +3965,7 @@ function changeStatus(next){
 /* ════════════════════════════════════════════════════════════════════
    ٧-ب) طلباتُ التعاقد — الواجهة  [المرحلة ٢]
    ════════════════════════════════════════════════════════════════════ */
-var _rFilter = { q:"", status:"", engagement:"" };
+var _rFilter = { q:"", status:"", engagement:"", project:"" };
 var _rOpen   = null;     // معرّفُ الطلب المفتوح
 var _rDraft  = null;     // مسوّدةُ الطلب الجديد
 var _boqCache = {};      // projId → بنودُ المقايسة (تُقرأ عبر projectMgmt لا بمسارٍ منسوخ)
@@ -4059,10 +4059,34 @@ function paintReqs(){
   el.innerHTML = reqListHTML();
 }
 
+/* ── مجموعاتُ الشريط: ثلاثُ مجموعاتٍ لا تتقاطع، ولكلٍّ فلترُها ──
+   v18.9ub: «مُنجَزة» صارت مجموعةً قائمةً بذاتها. قبلها كان الشريطُ يعرض «قيمتها» تحت
+   «قيد الاعتماد» ويُقصد بها **قيمةُ ما قيد الاعتماد** وحدَه — فالطلبُ الذي صار عقداً أو
+   سُدِّد يخرج من العدّ ومن القيمة معاً، ويقرأ المالكُ «0» بعد سدادِ 1,200 فيظنّها خطأً
+   والرقمُ صحيحٌ بتعريفٍ لا يقوله العنوان. الآن: القيمةُ سطرٌ فرعيٌّ **داخل بطاقةِ
+   مجموعتها** (فلا ضميرَ بلا مرجع)، ولكلِّ حالةٍ نهائيةٍ منجزةٍ بطاقةٌ تعدّها. */
+function crqIsDone(s){ return s==="crq_converted" || s==="crq_paid"; }
+function reqStatSet(r, key){
+  if(key==="__wip__")  return !crqIsFinal(r.status) && !crqIsBounced(r.status);
+  if(key==="__done__") return crqIsDone(r.status);
+  return true;
+}
+
 function reqListHTML(){
   var all=_reqs.slice(), role=_role(), q=normName(_rFilter.q);
-  var list=all.filter(function(r){
-    if(_rFilter.status==="__mine__"){ if(!crqCanAct(r.status, role)) return false; }
+  /* فلترُ المشروع **نطاقٌ** لا تنقيبٌ داخل النطاق: يقرؤه الشريطُ والقائمةُ معاً،
+     بينما الحالةُ والبحثُ والنوعُ تنقّب في القائمة وحدَها — وإلا صار الشريطُ يعدّ
+     ما نقّبتَ عنه لا ما بقي أمامك، وبطاقاتُه (وهي فلاترُ الحالة) تصفّي نفسَها. */
+  var scoped = _rFilter.project ? all.filter(function(r){ return docProjectKey(r)===_rFilter.project; }) : all;
+  /* «بانتظار دورك» يحترم فصلَ المهام كالبطاقة تماماً — عدّادٌ يعدّ ما لا زرَّ له
+     يبعث المستخدمَ يبحث عن عملٍ ليس له. v18.9ub: **والفلترُ يقرأ نفسَ الشرط**؛ كان
+     يكتفي بـ`crqCanAct` فيعرض ما مُنع عنه المستخدمُ لفصل المهام — بطاقةٌ تقول ٢
+     وقائمةٌ تعرض ٣. وما دامت البطاقةُ صارت زرَّ الفلتر، فالفرقُ يظهر بنقرةٍ واحدة. */
+  var meU=_meUser(), meN=_me(), us=_users();
+  var isMine = function(r){ return crqCanAct(r.status, role) && crqActMode(r, r.status, role, meU, meN, us) !== "blocked"; };
+  var list=scoped.filter(function(r){
+    if(_rFilter.status==="__mine__"){ if(!isMine(r)) return false; }
+    else if(_rFilter.status==="__wip__" || _rFilter.status==="__done__"){ if(!reqStatSet(r, _rFilter.status)) return false; }
     else if(_rFilter.status && r.status!==_rFilter.status) return false;
     if(_rFilter.engagement && r.engagement!==_rFilter.engagement) return false;
     if(q){
@@ -4072,32 +4096,60 @@ function reqListHTML(){
     return true;
   });
 
-  /* «بانتظار دورك» يحترم فصلَ المهام كالبطاقة تماماً — عدّادٌ يعدّ ما لا زرَّ له
-     يبعث المستخدمَ يبحث عن عملٍ ليس له. */
-  var meU=_meUser(), meN=_me(), us=_users();
-  var mine   = all.filter(function(r){
-    return crqCanAct(r.status, role) && crqActMode(r, r.status, role, meU, meN, us) !== "blocked";
-  }).length;
-  var wip    = all.filter(function(r){ return !crqIsFinal(r.status) && !crqIsBounced(r.status); });
-  var ready  = all.filter(function(r){ return r.status==="crq_approved"; }).length;
-  var wipVal = wip.reduce(function(s,r){ return s+(Number(r.value)||0); },0);
+  var mine   = scoped.filter(isMine).length;
+  var wip    = scoped.filter(function(r){ return reqStatSet(r, "__wip__"); });
+  var readyL = scoped.filter(function(r){ return r.status==="crq_approved"; });
+  var ready  = readyL.length;
+  var done   = scoped.filter(function(r){ return crqIsDone(r.status); });
+  var sumVal = function(a){ return a.reduce(function(s,r){ return s+(Number(r.value)||0); },0); };
+  var wipVal = sumVal(wip), readyVal = sumVal(readyL), doneVal = sumVal(done);
 
   var actions = canCreateReq()
     ? '<button class="btn btn-primary btn-sm" onclick="contracts.newRequest()">'+_icn("plus")+' طلب تعاقد جديد</button>' : "";
   var head = headHTML("طلبات التعاقد", "من المقايسة إلى عقدٍ ساري — أو أمرِ دفعٍ للاتفاق الصغير.", actions, "fileText");
 
+  /* بطاقةُ الشريط زرٌّ يصفّي القائمةَ على مجموعتها، ونقرُها ثانيةً يُلغي — والقيمةُ
+     سطرٌ فرعيٌّ فيها فلا تُقرأ إجمالياً عاماً. `aria-pressed` يقول أيُّها مُفعَّل. */
+  var curSt = _rFilter.status||"";
+  var stat = function(lbl, val, sub, key, cls){
+    var on = key && curSt===key;
+    var body = '<span class="l">'+lbl+'</span><span class="v">'+val+'</span>'+(sub?'<span class="s">'+sub+'</span>':'');
+    if(!key) return '<div class="ct-stat'+(cls?" "+cls:"")+'">'+body+'</div>';
+    return '<button type="button" class="ct-stat ct-stat-btn'+(cls?" "+cls:"")+(on?" is-on":"")+'"'+
+      ' aria-pressed="'+(on?"true":"false")+'" title="'+_esc("اعرض: "+lbl)+'"'+
+      ' onclick="contracts.filterReqs(\'status\',\''+(on?"":key)+'\')">'+body+'</button>';
+  };
   var strip = '<div class="ct-strip">'+
-    '<div class="ct-stat'+(mine?' warn':'')+'"><span class="l">بانتظار دورك</span><span class="v">'+mine+'</span></div>'+
-    '<div class="ct-stat"><span class="l">قيد الاعتماد</span><span class="v">'+wip.length+'</span></div>'+
-    '<div class="ct-stat"><span class="l">قيمتها (ر.س)</span><span class="v">'+money0(wipVal)+'</span></div>'+
-    '<div class="ct-stat"><span class="l">جاهزٌ للعقد</span><span class="v">'+ready+'</span></div>'+
+    stat("بانتظار دورك", mine, "", "__mine__", mine?"warn":"")+
+    stat("قيد الاعتماد", wip.length, "قيمتها "+money0(wipVal)+" ر.س", "__wip__")+
+    stat("جاهزٌ للعقد", ready, "قيمتها "+money0(readyVal)+" ر.س", "crq_approved")+
+    stat("مُنجَزة — عقدٌ أو سداد", done.length, "قيمتها "+money0(doneVal)+" ر.س", "__done__")+
   '</div>';
 
-  var filters = '<div class="ct-filters">'+
+  /* خياراتُ المشروع **من الطلبات نفسِها** لا من قائمة المشاريع: فكلُّ خيارٍ يقابله
+     طلبٌ واحدٌ على الأقلّ، ولا يسقط طلبُ مشروعٍ حُذف من القائمة أو مشروعٍ يدويٍّ لم
+     يُسجَّل. والمفتاحُ `docProjectKey` نفسُه الذي يميّز اليدويَّ بالاسم — فلا ينطوي
+     مشروعان يدويّان في خيارٍ واحد. */
+  var pOpts=[], pName={};
+  all.forEach(function(r){
+    var k=docProjectKey(r); if(pName[k]!==undefined) return;
+    pName[k]=_projName(r); pOpts.push({ k:k, n:pName[k] });
+  });
+  pOpts.sort(function(a,b){ return String(a.n).localeCompare(String(b.n),"ar"); });
+
+  var filters = '<div class="ct-filters ct-filters-4">'+
     '<input class="form-input ct-search" id="ct-r-q" placeholder="ابحث برقم الطلب أو الطرف أو المشروع" value="'+_esc(_rFilter.q)+'" oninput="contracts.filterReqs(\'q\',this.value)">'+
+    '<select class="form-input" onchange="contracts.filterReqs(\'project\',this.value)">'+
+      '<option value="">كل المشاريع</option>'+
+      pOpts.map(function(o){
+        return '<option value="'+_esc(o.k)+'"'+(_rFilter.project===o.k?' selected':'')+'>'+_esc(o.n)+'</option>';
+      }).join("")+
+    '</select>'+
     '<select class="form-input" onchange="contracts.filterReqs(\'status\',this.value)">'+
       '<option value="">كل الحالات</option>'+
       '<option value="__mine__"'+(_rFilter.status==="__mine__"?" selected":"")+'>بانتظار دوري</option>'+
+      '<option value="__wip__"'+(_rFilter.status==="__wip__"?" selected":"")+'>قيد الاعتماد (كلّها)</option>'+
+      '<option value="__done__"'+(_rFilter.status==="__done__"?" selected":"")+'>مُنجَزة — عقدٌ أو سداد</option>'+
       Object.keys(CRQ_STATUS).map(function(k){
         return '<option value="'+k+'"'+(_rFilter.status===k?' selected':'')+'>'+_esc(CRQ_STATUS[k])+'</option>';
       }).join("")+
@@ -4128,7 +4180,14 @@ function reqListHTML(){
   } else {
     body='<div class="ct-grid">'+list.map(reqTileHTML).join("")+'</div>';
   }
-  return head+strip+filters+body;
+  /* سطرُ النطاق: قائمةٌ أقصرُ بلا تفسيرٍ في الشاشة تُقرأ نقصاً في البيانات لا تصفيةً. */
+  var scopeLine = "";
+  if(_rLoaded && all.length && list.length!==all.length){
+    var lbl = _rFilter.project ? (" — مشروع: "+_esc(pName[_rFilter.project]||"—")) : "";
+    scopeLine = '<div class="ct-scope">عرض '+list.length+' من '+all.length+' طلباً'+lbl+
+      ' <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="contracts.clearReqFilters()">'+_icn("xCircle","ic-sm")+' مسح الفلاتر</button></div>';
+  }
+  return head+strip+filters+scopeLine+body;
 }
 
 function reqTileHTML(r){
@@ -4667,6 +4726,7 @@ function filterReqs(k,v){
   _rFilter[k]=v||""; paintReqs();
   if(k==="q"){ var i=document.getElementById("ct-r-q"); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length,i.value.length); }catch(e){} } }
 }
+function clearReqFilters(){ _rFilter={ q:"", status:"", engagement:"", project:"" }; paintReqs(); }
 function openReq(id){ _rOpen=id; _rDraft=null; _lnEdit=null; _aiLines=null; paintReqs(); }
 function backToReqs(){ _rOpen=null; _rDraft=null; _lnEdit=null; _aiLines=null; paintReqs(); }
 function retryReqs(){ stopReqSync(); startReqSync(); paintReqs(); }
@@ -7060,8 +7120,18 @@ function injectCSS(){
 ".ct-stat .l{font-size:10.5px;color:var(--muted);font-weight:700}",
 ".ct-stat .v{font-size:21px;font-weight:800;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--text);line-height:1.1}",
 ".ct-stat.warn .v{color:var(--sla-warn)}.ct-stat.bad .v{color:var(--sla-crit)}",
+/* v18.9ub: سطرُ القيمة داخل بطاقةِ مجموعتها — «قيمتها» بلا مرجعٍ تُقرأ إجمالياً عاماً */
+".ct-stat .s{font-size:10px;color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums}",
+/* بطاقاتُ الشريط أزرارٌ تصفّي القائمة — زرٌّ حقيقيّ لا div بمستمع (لوحةُ المفاتيح) */
+".ct-stat-btn{font:inherit;text-align:start;cursor:pointer;transition:transform .12s,box-shadow .12s,border-color .12s}",
+".ct-stat-btn:hover{transform:translateY(-1px);border-color:var(--primary);box-shadow:0 4px 12px rgba(0,0,0,.10)}",
+".ct-stat-btn:focus-visible{outline:2px solid var(--primary);outline-offset:2px}",
+".ct-stat-btn.is-on{border-color:var(--primary);background:var(--surface2);box-shadow:inset 0 0 0 1px var(--primary)}",
 /* المرشّحات */
 ".ct-filters{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-bottom:14px}",
+".ct-filters.ct-filters-4{grid-template-columns:2fr 1fr 1fr 1fr}",
+"@media(max-width:1100px){.ct-filters.ct-filters-4{grid-template-columns:1fr 1fr}}",
+".ct-scope{font-size:11.5px;color:var(--muted);font-weight:700;margin:-6px 0 12px}",
 ".ct-filters .form-input{font-size:12.5px}",
 /* شبكةُ الأطراف */
 ".ct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:14px}",
@@ -7190,7 +7260,7 @@ function injectCSS(){
 ".ct-empty-ic svg{width:46px;height:46px;stroke-width:1.5}",
 ".ct-empty-t{font-size:15px;font-weight:800;color:var(--primary);margin-bottom:6px}",
 ".ct-empty-s{font-size:12.5px;color:var(--muted);max-width:420px;margin:0 auto;line-height:1.7}",
-"@media(max-width:760px){.ct-filters{grid-template-columns:1fr}.ct-form-row{grid-template-columns:1fr}.ct-grid{grid-template-columns:1fr}.ct-picks{grid-template-columns:1fr}.ct-trade-add{grid-template-columns:1fr}}",
+"@media(max-width:760px){.ct-filters,.ct-filters.ct-filters-4{grid-template-columns:1fr}.ct-form-row{grid-template-columns:1fr}.ct-grid{grid-template-columns:1fr}.ct-picks{grid-template-columns:1fr}.ct-trade-add{grid-template-columns:1fr}}",
 "@media(prefers-reduced-motion:reduce){.ct-tile{transition:none}.ct-tile:hover{transform:none}.ct-bar>span{transition:none}}"
   ].join("\n");
   document.head.appendChild(st);
@@ -7313,7 +7383,7 @@ window.contracts = {
   setReqProject: setReqProject, setEngagement: setEngagement, setReqVendor: setReqVendor,
   toggleBoqLine: toggleBoqLine, addFreeLine: addFreeLine, delReqLine: delReqLine,
   addCandidate: addCandidate, delCandidate: delCandidate, recalc: recalc,
-  filterReqs: filterReqs, openReq: openReq, backToReqs: backToReqs,
+  filterReqs: filterReqs, clearReqFilters: clearReqFilters, openReq: openReq, backToReqs: backToReqs,
   act: act, doCancel: doCancel, doDelete: doDelete, openPay: openPay,
   openRewind: openRewind, closeRewind: closeRewind, doRewind: doRewind,
   openExtRewind: openExtRewind, doExtRewind: doExtRewind,

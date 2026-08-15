@@ -1209,6 +1209,67 @@ check('القائمةُ تعرض الطلبات وشريطَ «بانتظار د
   await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 6);
 await page.screenshot({ path: `${SHOTS}/12-requests-list.png`, fullPage: true });
 
+/* ── v18.9ub: شريطُ الطلبات — «مُنجَزة» مجموعةٌ لها بطاقة، وفلترُ المشروع نطاقٌ ──
+   البلاغ (المالك): «تمّ سداد 1200 ريال — لماذا لا يظهر في بطاقة (قيمتها)؟» وكان
+   الرقمُ صحيحاً بتعريفٍ لا يقوله العنوان: «قيمتها» = قيمةُ ما **قيد الاعتماد** وحدَه،
+   والمسدَّدُ نهائيٌّ فخرج. فالفحصُ هنا على المعنى لا على الرسم: الرقمُ المرسوم على كل
+   بطاقةٍ = المحسوبُ من الطلبات، ونقرُها يعرض مجموعتَها بعينها. */
+const stripNow = await page.evaluate(() => {
+  const st = [...document.querySelectorAll('#page-contract-requests .ct-stat')];
+  const rs = window.contracts.requests();
+  const done = rs.filter(r => r.status === 'crq_converted' || r.status === 'crq_paid');
+  const m0 = n => (Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  return {
+    labels: st.map(e => (e.querySelector('.l') || {}).textContent || ''),
+    drawnDone: ((st[3] || {}).querySelector('.v') || {}).textContent || '',
+    drawnDoneVal: ((st[3] || {}).querySelector('.s') || {}).textContent || '',
+    calcDone: String(done.length),
+    calcDoneVal: 'قيمتها ' + m0(done.reduce((s, r) => s + (Number(r.value) || 0), 0)) + ' ر.س',
+    btns: st.filter(e => e.tagName === 'BUTTON').length
+  };
+});
+check('★ بطاقةُ «مُنجَزة — عقدٌ أو سداد» موجودةٌ في الشريط',
+  /مُنجَزة/.test(stripNow.labels.join('|')), stripNow.labels.join(' · '));
+check('بطاقاتُ الشريط أزرارٌ حقيقية (لوحةُ المفاتيح تبلغها)', stripNow.btns === 4, stripNow.btns + ' زرّ');
+// أرقامُ «مُنجَزة» تُفحَص بعد التحويل لعقدٍ (لا مُنجَزَ بعدُ هنا) — فحصُ صفرٍ بصفرٍ لا يُثبت شيئاً.
+
+/* فلترُ المشروع — نطاقٌ يقرؤه الشريطُ والقائمةُ معاً */
+const projFilter = await page.evaluate(async () => {
+  const sel = document.querySelectorAll('#page-contract-requests .ct-filters select')[0];
+  const opts = [...sel.options].map(o => ({ v: o.value, t: o.textContent }));
+  const pick = opts.find(o => o.v);
+  window.contracts.filterReqs('project', pick.v);
+  await new Promise(r => setTimeout(r, 500));
+  const rs = window.contracts.requests();
+  const key = r => (r.isCustomProject === true || r.projectId === '__OTHER__') ? '__CUSTOM__:' + String(r.projectName || '') : String(r.projectId || '');
+  return {
+    isProjSel: /كل المشاريع/.test(opts[0].t), nOpts: opts.length - 1,
+    picked: pick.t, shown: document.querySelectorAll('#page-contract-requests .ct-tile').length,
+    want: rs.filter(r => key(r) === pick.v).length,
+    scope: (document.querySelector('#page-contract-requests .ct-scope') || {}).textContent || '',
+    stripWip: (document.querySelectorAll('#page-contract-requests .ct-stat')[1].querySelector('.v') || {}).textContent.trim(),
+    wantWip: String(rs.filter(r => key(r) === pick.v)
+      .filter(r => ['crq_converted', 'crq_paid', 'crq_cancelled', 'crq_pm_rejected', 'crq_proc_returned', 'crq_finance_returned', 'crq_ceo_rejected'].indexOf(r.status) === -1).length)
+  };
+});
+check('★ فلترُ المشروع مضافٌ للصفحة وخياراتُه من الطلبات نفسِها',
+  projFilter.isProjSel && projFilter.nOpts >= 2, projFilter.nOpts + ' مشروعاً');
+check('★★ القائمةُ تُقصَر على مشروعِ الفلتر',
+  projFilter.shown === projFilter.want && projFilter.want > 0,
+  `${projFilter.picked}: عرض=${projFilter.shown} مطلوب=${projFilter.want}`);
+check('★★ والشريطُ يحترم النطاق نفسَه (لا بطاقةٌ أوسعُ من قائمتها)',
+  projFilter.stripWip === projFilter.wantWip, `مرسوم=${projFilter.stripWip} محسوب=${projFilter.wantWip}`);
+check('وسطرُ النطاق يشرح لماذا قصُرت القائمة',
+  /عرض \d+ من \d+/.test(projFilter.scope) && projFilter.scope.includes(projFilter.picked.trim()), projFilter.scope.replace(/\s+/g, ' ').trim().slice(0, 70));
+await page.screenshot({ path: `${SHOTS}/12b-requests-project-filter.png`, fullPage: true });
+const cleared = await page.evaluate(async () => {
+  window.contracts.clearReqFilters();
+  await new Promise(r => setTimeout(r, 500));
+  return { n: document.querySelectorAll('#page-contract-requests .ct-tile').length,
+           scope: !!document.querySelector('#page-contract-requests .ct-scope') };
+});
+check('«مسح الفلاتر» يعيد كلَّ الطلبات ويُخفي سطرَ النطاق', cleared.n === 6 && !cleared.scope, cleared.n + ' بطاقة');
+
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
 await page.waitForTimeout(600);
 await page.screenshot({ path: `${SHOTS}/13-requests-dark.png`, fullPage: true });
@@ -1243,6 +1304,41 @@ check('★ والعقدُ يحمل معرّفَ طلبه (سلسلةُ التو�
 check('★ وورث القيمةَ المعتمَدة كما هي', conv.ctr.val === 33600);
 check('★ والشروطُ التجارية انتقلت من الطلب، والمقدَّمُ اشتُقّ (١٠٪ من 33,600)',
   conv.ctr.ret === 5 && conv.ctr.adv === 3360, JSON.stringify({ ret: conv.ctr.ret, adv: conv.ctr.adv }));
+
+/* ── v18.9ub: «مُنجَزة» بعد أن صار في الشاشة مُنجَزٌ فعلاً ──
+   هنا وحدَه يُثبت الفحصُ شيئاً: طلبٌ خرج من «قيد الاعتماد» إلى عقد. الرقمُ المرسوم
+   على البطاقة وقيمتُها الفرعيةُ = المحسوبُ من الطلبات، ونقرُها يعرض مجموعتَها. */
+await page.evaluate(() => window.contracts.backToReqs());
+await page.waitForTimeout(700);
+const doneStrip = await page.evaluate(async () => {
+  const box = () => [...document.querySelectorAll('#page-contract-requests .ct-stat')][3];
+  const rs = window.contracts.requests();
+  const done = rs.filter(r => r.status === 'crq_converted' || r.status === 'crq_paid');
+  const m0 = n => (Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const drawn = (box().querySelector('.v') || {}).textContent.trim();
+  const drawnVal = (box().querySelector('.s') || {}).textContent.replace(/\s+/g, ' ').trim();
+  box().click();
+  await new Promise(r => setTimeout(r, 600));
+  const shown = document.querySelectorAll('#page-contract-requests .ct-tile').length;
+  const pressed = box().getAttribute('aria-pressed');
+  box().click();
+  await new Promise(r => setTimeout(r, 600));
+  return { drawn, calc: String(done.length), drawnVal,
+           calcVal: 'قيمتها ' + m0(done.reduce((s, r) => s + (Number(r.value) || 0), 0)) + ' ر.س',
+           shown, want: done.length, pressed,
+           offAgain: document.querySelectorAll('#page-contract-requests .ct-tile').length, total: rs.length };
+});
+check('★★ الرقمُ المرسوم على «مُنجَزة» = المحسوبُ من الطلبات',
+  doneStrip.drawn === doneStrip.calc && Number(doneStrip.calc) > 0,
+  `مرسوم=${doneStrip.drawn} محسوب=${doneStrip.calc}`);
+check('★★ وقيمتُها سطرٌ فرعيٌّ داخل بطاقتها = مجموعُ قيمِ مجموعتها',
+  doneStrip.drawnVal === doneStrip.calcVal, `مرسوم=${doneStrip.drawnVal} محسوب=${doneStrip.calcVal}`);
+check('★★ ونقرُها يعرض مجموعتَها بعينها', doneStrip.shown === doneStrip.want && doneStrip.pressed === 'true',
+  `عرض=${doneStrip.shown} مطلوب=${doneStrip.want}`);
+check('ونقرُها ثانيةً يُلغي التصفية', doneStrip.offAgain === doneStrip.total,
+  `${doneStrip.offAgain} من ${doneStrip.total}`);
+await page.evaluate((id) => window.contracts.openReq(id), reqId);
+await page.waitForTimeout(700);
 
 /* ── حذفُ عقدٍ لم يُوقَّع بعد — للأدمن (طلبُ المالك: عقدٌ أُنشئ تجربةً) ──
    يُجرَّب على **عقدٍ ثانٍ** يُنشأ ويُحذف، فلا يُفسد العقدَ الذي تقوم عليه بقيةُ

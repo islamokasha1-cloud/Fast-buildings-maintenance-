@@ -7511,13 +7511,37 @@ function contractsPhase1() {
     T("★★ و«بانتظار إجراءك» لا تَعِد بزرٍّ مُنِع — تحترم القاعدةَ نفسَها",
       /myPendingItems[\s\S]{0,700}crqActMode\(r, r\.status, role, meU, meN, us\) !== "blocked"/.test(src));
     T("★★ وعدّادُ «بانتظار دورك» في الشريط يحترمها كذلك (عدّادٌ بلا زرٍّ يبعثك تبحث عن عملٍ ليس لك)",
-      /var mine   = all\.filter\(function\(r\)\{[\s\S]{0,200}crqActMode\(r, r\.status, role, meU, meN, us\) !== "blocked"/.test(src));
+      /var isMine = function\(r\)\{ return crqCanAct\(r\.status, role\) && crqActMode\(r, r\.status, role, meU, meN, us\) !== "blocked"; \};/.test(src) &&
+      /var mine   = scoped\.filter\(isMine\)\.length;/.test(src));
+    // v18.9ub: والفلترُ يقرأ الشرطَ نفسَه — كان يكتفي بـcrqCanAct فتقول البطاقةُ ٢ وتعرض القائمةُ ٣،
+    // وهي علّةٌ كانت مستورةً حتى صارت البطاقةُ زرَّ الفلتر (تُكشَف بنقرةٍ واحدة).
+    T("★★ وفلترُ «بانتظار دوري» يقرأ الشرطَ نفسَه — لا عدٌّ بقاعدةٍ وعرضٌ بأخرى",
+      /_rFilter\.status==="__mine__"\)\{ if\(!isMine\(r\)\) return false; \}/.test(src));
     T("★ والاعتمادُ نيابةً يُوسَم في الخطّ الزمني ويُخزَّن عَلَمُه",
       /mode === "delegate"\) r\.delegatedApproval = true/.test(src) &&
       /نيابةً — لا يوجد غيرُك يملك هذه البوّابة/.test(src));
     T("★ واسمُ الدخول يُخزَّن مع كلّ اعتمادٍ في المستندات الثلاثة (بلا ذلك تسقط المطابقةُ المستقرّة)",
       (src.match(/ApprovedByUser=_meUser\(\)/g) || []).length === 10,
       "المواضع: " + (src.match(/ApprovedByUser=_meUser\(\)/g) || []).length);
+
+    /* ── v18.9ub: شريطُ طلبات التعاقد — لكلِّ رقمٍ مجموعةٌ يفتحها، ولا قيمةَ بلا مرجع ──
+       بلاغُ المالك: «سُدِّد 1200 — لماذا لا يظهر في (قيمتها)؟» والجذرُ أن «قيمتها» كانت
+       قيمةَ ما قيد الاعتماد وحدَه، والمسدَّدُ نهائيٌّ فخرج من العدّ ومن القيمة معاً. */
+    T("★★ «مُنجَزة» = المحوَّلُ لعقدٍ والمسدَّدُ — والملغيُّ نهائيٌّ لكنه ليس مُنجَزاً",
+      /function crqIsDone\(s\)\{ return s==="crq_converted" \|\| s==="crq_paid"; \}/.test(src) &&
+      !/crqIsDone[\s\S]{0,80}crq_cancelled/.test(src));
+    T("★★ لكلِّ مجموعةٍ بطاقتُها وقيمتُها سطرٌ فرعيٌّ داخلها (لا «قيمتها» بضميرٍ بلا مرجع)",
+      /stat\("قيد الاعتماد", wip\.length, "قيمتها "\+money0\(wipVal\)/.test(src) &&
+      /stat\("جاهزٌ للعقد", ready, "قيمتها "\+money0\(readyVal\)/.test(src) &&
+      /stat\("مُنجَزة — عقدٌ أو سداد", done\.length, "قيمتها "\+money0\(doneVal\)/.test(src));
+    T("★★ فلترُ المشروع نطاقٌ يقرؤه الشريطُ والقائمةُ معاً (لا بطاقةٌ أوسعُ من قائمتها)",
+      /var scoped = _rFilter\.project \? all\.filter\(function\(r\)\{ return docProjectKey\(r\)===_rFilter\.project; \}\) : all;/.test(src) &&
+      /var wip    = scoped\.filter/.test(src) && /var done   = scoped\.filter/.test(src));
+    T("★ وخياراتُ المشروع من الطلبات نفسِها بمفتاح docProjectKey (فلا خيارٌ بلا طلبٍ ولا يدويّان في خيار)",
+      /all\.forEach\(function\(r\)\{\s*var k=docProjectKey\(r\);/.test(src));
+    T("★ وبطاقاتُ الشريط أزرارٌ بـaria-pressed تصفّي مجموعتَها ونقرتان تُلغيان",
+      /class="ct-stat ct-stat-btn/.test(src) && /aria-pressed="/.test(src) &&
+      /contracts\.filterReqs\(\\'status\\',\\''\+\(on\?"":key\)\+'\\'\)/.test(src));
   }
 
   /* ════ الإرجاعُ إلى بوّابةٍ محدّدة — للأدمن ════   (طلبُ المالك)
