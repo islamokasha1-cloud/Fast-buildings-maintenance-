@@ -1952,6 +1952,89 @@ function extrasCardGating() {
   T("الافتراضي يعرض المعلّق فقط (لا يرتدّ لعرض المبتوت)",
     fn.includes("const show = _xCardAll ? all : pend;") &&
     !fn.includes("_xCardAll ? all : (pend.length ? pend : all)"));
+  // v18.9xb: البطاقة تقول **لماذا** وقف البند عند التنفيذي — والسببُ الطلبُ لا البند
+  T("★ البطاقة تشرح سبب وقوف البند عند التنفيذي (إجمالي الطلب لا قيمة البند)",
+    fn.includes('x.it._extraStatus==="pending_ceo"?`<div') && fn.includes("_poExtraCeoWhy(x.po)"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   20ب) v18.9xb — البتُّ في البند الإضافي مرحلتان، وحالةُ الطلب واحدة
+        الجذر: `pending_extra` حالةٌ واحدةٌ تغطّي مرحلتَي البتّ (مدير المشاريع ثم
+        التنفيذي فوق العتبة)، والتوجيهُ الخادميّ لا يرسل إلا حين تتغيّر الحالة.
+        فمديرُ المشاريع — أولُ من يبتّ — لا يُنبَّه إطلاقاً، والتنفيذيُّ يُنبَّه
+        لحظةَ الدخول (وهو لا يملك البتّ) ثم يُترك بلا تنبيهٍ حين يصير الدورُ له.
+        وبلاغُ المالك على PO-202608-0160: «لم يصل تنبيه للمدير التنفيذي».
+   ════════════════════════════════════════════════════════════════════ */
+function extraDecisionStage() {
+  H("20ب) مرحلةُ البتّ في البند الإضافي — تنبيهٌ لكل دورٍ في وقته");
+
+  // ── المرحلة تُشتقّ من البنود المعلّقة: الأقدمُ دوراً أولاً ──
+  const a = HTML.indexOf("function poExtraStage(");
+  const b = HTML.indexOf("\nfunction canDecideExtra(", a);
+  const pa = HTML.indexOf("function poExtras(");
+  let M = null;
+  if (a >= 0 && b > a && pa >= 0) {
+    try {
+      M = new Function(HTML.slice(pa, HTML.indexOf("\nfunction canDecideExtra(", pa)) +
+        "\nreturn {poExtraStage,poPendingExtras};")();
+    } catch (e) { T("تُبنى دالة المرحلة", false, String(e.message).slice(0, 120)); }
+  }
+  T("تُبنى دالة المرحلة (poExtraStage)", !!M);
+  if (M) {
+    const x = (st) => ({ _extra: true, _extraStatus: st });
+    T("★ بندٌ عند مدير المشاريع يُبقي المرحلة عنده",
+      M.poExtraStage({ items: [x("pending_pm")] }) === "pending_pm");
+    T("★★ وبندٌ واحدٌ عنده يمنع استدعاء التنفيذيّ ولو بُتّ في غيره",
+      M.poExtraStage({ items: [x("pending_ceo"), x("pending_pm")] }) === "pending_pm");
+    T("★ فإن لم يبقَ إلا ما عند التنفيذيّ انتقلت المرحلة إليه",
+      M.poExtraStage({ items: [x("approved"), x("pending_ceo")] }) === "pending_ceo");
+    T("★ ولا مرحلةَ بعد البتّ في الكل (تُصفَّر فلا يبقى أثرٌ على طلبٍ مقفل)",
+      M.poExtraStage({ items: [x("approved"), x("rejected")] }) === "" &&
+      M.poExtraStage({ items: [] }) === "");
+  }
+
+  // ── حرّاسُ الكتابة: المرحلة تُكتب على كل مسارٍ يمسّ البتّ ──
+  T("★★ البتُّ يكتب المرحلة قبل التسوية (وهي وحدَها ما يلتقطه التوجيه)",
+    HTML.includes("p.extraStage = poExtraStage(p);") &&
+    HTML.indexOf("p.extraStage = poExtraStage(p);") < HTML.indexOf("_poSettleExtras(p, now);"));
+  T("★ والتدقيق يكتبها على كل المسارات (لا تبقى مرحلةٌ قديمةٌ على طلبٍ أُغلق)",
+    HTML.includes("pCurrent.extraStage = poExtraStage(pCurrent);"));
+  T("★ ودخولُ مرحلة البتّ يبدأ عند مدير المشاريع صراحةً",
+    HTML.includes('pCurrent.extraStage = poExtraStage(pCurrent) || "pending_pm";'));
+
+  // ── الطبقة الخادمية: المفتاحُ المركّب والدورُ الصحيح ──
+  const _fnRead = f => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), f), "utf8"); } catch { return ""; } };
+  const CFG = _fnRead("functions/lib/config.js");
+  const PUR = _fnRead("functions/lib/purchases.js");
+  T("تُقرأ وحدتا التوجيه الخادميّ", !!CFG && !!PUR);
+  T("★★ أولُ البتّ يُوجَّه لمدير المشاريع لا للتنفيذيّ",
+    CFG.includes('"pending_extra:pending_pm": { role: "project_manager"'));
+  T("★★ ومرحلةُ التنفيذيّ لها مفتاحُها",
+    CFG.includes('"pending_extra:pending_ceo": { role: "ceo"'));
+  T("★ والحالةُ المجرّدة ارتدادٌ لمدير المشاريع (طلباتٌ أقدمُ بلا مرحلة)",
+    CFG.includes('pending_extra: { role: "project_manager"') &&
+    !CFG.includes('pending_extra: { role: "ceo", action: "قرارك" }'));
+  T("★★ المقارنةُ على مفتاح التوجيه لا على الحالة (وإلّا صمتَ انتقالُ الدور)",
+    PUR.includes("if (before && prevKey === newKey) return;") &&
+    !PUR.includes("if (before && prevStatus === newStatus) return;"));
+  T("★ المفتاحُ يُركَّب من الحالة والمرحلة، ولا يمسّ بقيةَ المسار",
+    PUR.includes('if (st === "pending_extra" && po.extraStage) return `${st}:${po.extraStage}`;'));
+  T("★ والانتقالُ يُسمّى بمفتاحيه (منعُ التكرار يفرّق المرحلتين)",
+    PUR.includes("const transition = `${prevKey || \"\"}->${newKey}`;"));
+  T("★ ومفتاحٌ غيرُ معروفٍ يرتدّ للحالة المجرّدة لا يسقط بصمت",
+    PUR.includes("cfg.PO_ROUTING[newKey] || cfg.PO_ROUTING[newStatus]"));
+
+  // ── النصّ: العتبة على الطلب لا على البند ──
+  T("★★ سببُ استدعاء التنفيذيّ يُقال برقمه ويُنسب للطلب لا للبند",
+    HTML.includes("function _poExtraCeoWhy(p){") &&
+    HTML.includes("(العتبة على الطلب كلِّه لا على هذا البند وحده.)"));
+  T("★ نافذةُ الاعتماد تعرض السبب كاملاً",
+    HTML.includes("${_poExtraCeoWhy(p0)}\\nسينتقل إليه بعد اعتمادك."));
+  T("★ والقيدُ والإشعار يسمّيان الطلب لا البند",
+    HTML.includes('addNotification("🏢 طلب شراء تخطّى العتبة — بانتظار بتّ المدير التنفيذي"') &&
+    HTML.includes("انتقل للمدير التنفيذي: ${_poExtraCeoWhy(p)}"));
+  T("★ ولم يبقَ النصُّ القديم الموحي بأن البند هو السبب",
+    !HTML.includes("الإجمالي فوق العتبة، انتقل للمدير التنفيذي"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -2146,7 +2229,7 @@ function auditRowAlignment() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   21ج) v18.9xa — اسم البند وكودُه يتبعان مرساة الكتالوج بعد التدقيق
+   21ج) v18.9xb — اسم البند وكودُه يتبعان مرساة الكتالوج بعد التدقيق
         الجذر: أمين المستودع يضيف البند للكتالوج باسم الفاتورة (فيأخذ كوداً)
         ويربطه بصفّ الطلب، فتُكتب المرساة itemId وحدها. itemName/itemCode تبقيان
         كما كُتبتا عند إنشاء الطلب — فالمخزون والسجل يقرآن الاسم الصحيح عبر
@@ -2206,11 +2289,11 @@ function poItemNameFollowsCatalog() {
     !HTML.includes("${esc(it.itemName||'')}${nameBadge}${substBadge}${noteLine}</td>") &&
     !HTML.includes("${it.itemCode?`<span style='font-family:JetBrains Mono,monospace"));
   T("★ التدقيق يثبّت الاسم والكود على بند الطلب (لا المرساة وحدها)",
-    HTML.includes("itemName  : _nm1,          // v18.9xa") &&
-    HTML.includes("itemCode  : _cd1,          // v18.9xa") &&
+    HTML.includes("itemName  : _nm1,          // v18.9xb") &&
+    HTML.includes("itemCode  : _cd1,          // v18.9xb") &&
     HTML.includes("const _nm1   = _anch ? _resolveItemName(_anch, _nm0) : _nm0;"));
   T("★ ما طلبه المشرف يُحفَظ في requestedItemName عند أول دهس",
-    HTML.includes("requestedItemName: _reqNm, // v18.9xa") &&
+    HTML.includes("requestedItemName: _reqNm, // v18.9xb") &&
     HTML.includes("const _reqNm = it.requestedItemName || ((_nm0 && _nm1 && _nm0 !== _nm1) ? _nm0 : \"\");"));
   T("★ صفّ السند يحمل الاسم والكود المعياريَّين (يتّسق مع سجلّ المخزون)",
     HTML.includes("itemName: _anchor ? _resolveItemName(_anchor, it.itemName||\"\") : (it.itemName||\"\"),") &&
@@ -9409,6 +9492,7 @@ function browserCheckTimeBombs() {
   invoiceFileSource();
   closedOrdersCard();
   extrasCardGating();
+  extraDecisionStage();
   adminEditKeepsStatus();
   auditRowAlignment();
   poItemNameFollowsCatalog();

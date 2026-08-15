@@ -26,13 +26,14 @@ function head(t) { out.push("\n=== " + t + " ==="); }
 
 /** يعيد تحميل الوحدات بعد تغيير البيئة — الإعدادُ يُقرأ عند التحميل لا عند الاستدعاء. */
 function fresh() {
-  for (const m of ["config.js", "recipients.js", "contracts.js"]) {
+  for (const m of ["config.js", "recipients.js", "contracts.js", "purchases.js"]) {
     delete require.cache[require.resolve(`${LIB}/${m}`)];
   }
   return {
     cfg: require(`${LIB}/config.js`),
     rec: require(`${LIB}/recipients.js`),
     ctr: require(`${LIB}/contracts.js`),
+    pur: require(`${LIB}/purchases.js`),
   };
 }
 
@@ -170,6 +171,73 @@ head("٤) مفتاحُ القتل العام");
     { id: "EXT-K", status: "ext_pending_finance", projectId: "hail" },
     { db: fakeDb(USERS, sent), logger, isEnabled: async () => false });
   check("★ يوقف رسائلَ التعاقدات أيضاً", sent.length === 0, String(sent.length));
+}
+
+/* ═════════ ٥) البتُّ في البند الإضافي — مرحلتان بحالةٍ واحدة (v18.9xb) ═════════
+   حالةُ الطلب تبقى `pending_extra` من أول البتّ إلى آخره، والمشغّلُ لا يرسل إلا
+   حين يتغيّر شيء. فكان مدير المشاريع — أولُ من يبتّ — لا يُنبَّه إطلاقاً، والتنفيذيُّ
+   يُنبَّه في لحظةٍ لا يملك فيها البتّ، ثم يُترك بلا تنبيهٍ حين يصير الدورُ له.     */
+head("٥) البتُّ في البند الإضافي — مرحلتان بحالةٍ واحدة");
+{
+  const { pur } = fresh();
+  const po = (extra) => Object.assign(
+    { id: "PO-202608-0160", projectId: "hail", projectName: "هايل", createdBy: "محمد", items: [{}] }, extra);
+
+  // مفتاحُ التوجيه: الحالةُ وحدَها لبقية المسار، ومركَّبٌ لـ pending_extra
+  check("★ المفتاحُ = الحالةُ في بقية المسار (لا تغيير في السلوك القائم)",
+    pur.routingKey(po({ status: "pending_ceo" })) === "pending_ceo");
+  check("★★ ومركَّبٌ عند البتّ في البند الإضافي — فتُميَّز المرحلتان رغم ثبات الحالة",
+    pur.routingKey(po({ status: "pending_extra", extraStage: "pending_pm" })) === "pending_extra:pending_pm" &&
+    pur.routingKey(po({ status: "pending_extra", extraStage: "pending_ceo" })) === "pending_extra:pending_ceo");
+  check("★ وطلبٌ أقدمُ بلا extraStage يبقى على الحالة المجرّدة (توافقٌ رجعي)",
+    pur.routingKey(po({ status: "pending_extra" })) === "pending_extra");
+
+  // (أ) دخولُ الطلب مرحلةَ البتّ ⇒ مدير المشاريع لا التنفيذي
+  let sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "wh_receiving" }),
+    po({ status: "pending_extra", extraStage: "pending_pm" }),
+    deps(fakeDb(USERS, sent)));
+  check("★★ أولُ البتّ ⇒ مدير المشاريع (كان يذهب للتنفيذيّ وهو لا يملك البتّ)",
+    sent.length === 1 && sent[0].recipientRef === "role:project_manager",
+    JSON.stringify(sent.map((s) => s.recipientRef)));
+  check("★ ولا نسخةَ للتنفيذيّ في هذه المرحلة",
+    sent.every((s) => s.recipientRef !== "role:ceo"));
+
+  // (ب) انتقالُ الدور للتنفيذي — الحالةُ لم تتغيّر، والرسالةُ يجب أن تُرسَل
+  sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "pending_extra", extraStage: "pending_pm" }),
+    po({ status: "pending_extra", extraStage: "pending_ceo" }),
+    deps(fakeDb(USERS, sent)));
+  check("★★ انتقالُ الدور للتنفيذيّ يُرسِل رغم ثبات الحالة (كان صمتاً تامّاً)",
+    sent.length === 1 && sent[0].recipientRef === "role:ceo",
+    JSON.stringify(sent.map((s) => s.recipientRef)));
+  check("★ والانتقالُ يُسمّى بمفتاحيه في الحدث (منعُ التكرار يفرّق المرحلتين)",
+    sent[0].event.transition === "pending_extra:pending_pm->pending_extra:pending_ceo",
+    sent[0].event.transition);
+
+  // (ج) كتابةٌ أخرى على الطلب بلا انتقالِ دور ⇒ لا رسالة (لا إزعاج)
+  sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "pending_extra", extraStage: "pending_ceo" }),
+    po({ status: "pending_extra", extraStage: "pending_ceo", updatedAt: "x" }),
+    deps(fakeDb(USERS, sent)));
+  check("★ كتابةٌ بلا انتقالِ دورٍ لا تُرسِل شيئاً", sent.length === 0, String(sent.length));
+
+  // (د) المرحلةُ تُصفَّر بعد آخر بتّ ⇒ الإقفالُ يُنبِّه صاحبَ الطلب وحدَه.
+  // صاحبُ الطلب هنا «المالية» — مستخدمٌ حقيقيٌّ في العيّنة له رقمٌ وموافقة، وإلّا
+  // خرجت القائمةُ فارغةً ومرّ الفحصُ خواءً (every على فارغٍ صادقةٌ دائماً).
+  sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "pending_extra", extraStage: "pending_ceo", createdBy: "fin" }),
+    po({ status: "closed", extraStage: "", createdBy: "fin" }),
+    deps(fakeDb(USERS, sent)));
+  check("★ الإقفالُ بعد البتّ يُنبِّه صاحبَ الطلب — ولا يستدعي معتمِداً جديداً",
+    sent.length === 1 && sent[0].event.type === "po_status_update",
+    JSON.stringify(sent.map((s) => s.event.type)));
+  check("★★ ولا رسالةَ اعتمادٍ على الإقفال (لا معتمِدَ بعد البتّ)",
+    sent.every((s) => s.event.type !== "po_approval_needed"));
 }
 
 console.log(out.join("\n"));

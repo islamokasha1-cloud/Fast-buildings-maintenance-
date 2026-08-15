@@ -19,6 +19,26 @@ function itemCount(po) {
 }
 
 /**
+ * v18.9xb — مفتاحُ التوجيه: الحالةُ وحدَها لا تكفي.
+ *
+ * التوجيه كلُّه مبنيٌّ على «تغيّرت الحالة ⇒ انتقل الدورُ لمكتبٍ آخر». وهذا صحيحٌ
+ * في كل المسار **إلا** `pending_extra`: البتُّ في البند الإضافي مرحلتان (مدير
+ * المشاريع ثم التنفيذي فوق العتبة) وحالةُ الطلب واحدةٌ فيهما. فالنتيجة كانت:
+ * رسالةٌ واحدةٌ تُرسَل لحظةَ الدخول — إلى **التنفيذي** بينما الدورُ لمدير المشاريع —
+ * ثم **صمتٌ تام** حين يصير الدورُ للتنفيذي حقاً.
+ *
+ * `extraStage` (يكتبه التطبيق مع كل بتّ) يجعل المفتاحَ يتغيّر مع انتقال الدور،
+ * فيلتقطه المشغّل. وغيابُه يُبقي السلوك على الحالة المجرّدة (توافقٌ رجعي).
+ */
+function routingKey(po) {
+  if (!po) return null;
+  const st = po.status || null;
+  if (!st) return null;
+  if (st === "pending_extra" && po.extraStage) return `${st}:${po.extraStage}`;
+  return st;
+}
+
+/**
  * يوجّه إشعارات تغيّر حالة طلب شراء.
  * @param {object|null} before  الطلب قبل التغيير (null عند الإنشاء).
  * @param {object} after        الطلب بعد التغيير.
@@ -28,9 +48,12 @@ function itemCount(po) {
  */
 async function routePurchase(before, after, { db, logger, isEnabled }) {
   const newStatus = (after && after.status) || null;
-  const prevStatus = (before && before.status) || null;
-  if (!newStatus) return;
-  if (before && prevStatus === newStatus) return; // لم تتغيّر الحالة
+  // v18.9xb: المقارنةُ على مفتاح التوجيه لا على الحالة — فمرحلتا البتّ في البند
+  // الإضافي تُميَّزان رغم ثبات الحالة، وبقيةُ المسار بلا تغيير (المفتاح = الحالة).
+  const newKey = routingKey(after);
+  const prevKey = routingKey(before);
+  if (!newStatus || !newKey) return;
+  if (before && prevKey === newKey) return; // لم ينتقل الدور
 
   if (!(await isEnabled())) {
     logger.info("wa(po): مفتاح القتل مُفعّل — تخطّي");
@@ -40,10 +63,12 @@ async function routePurchase(before, after, { db, logger, isEnabled }) {
   const poId = String(after.id || "");
   const projectId = after.projectId || "";
   const proj = projectName(after);
-  const transition = `${prevStatus || ""}->${newStatus}`;
+  const transition = `${prevKey || ""}->${newKey}`;
 
-  // (١) إشعار المسؤول الذي دوره الآن (حسب الحالة الجديدة).
-  const route = cfg.PO_ROUTING[newStatus];
+  // (١) إشعار المسؤول الذي دوره الآن (حسب مفتاح التوجيه الجديد).
+  // v18.9xb: المفتاحُ المركّب أولاً، ثم الحالةُ المجرّدة ارتداداً — فمرحلةُ بتٍّ
+  // غيرُ معروفةٍ تصل مدير المشاريع بدل أن تسقط بصمت.
+  const route = cfg.PO_ROUTING[newKey] || cfg.PO_ROUTING[newStatus];
   if (route) {
     const recipients = await findByRole(db, route.role, projectId);
     if (!recipients.length) {
@@ -89,4 +114,4 @@ async function routePurchase(before, after, { db, logger, isEnabled }) {
   }
 }
 
-module.exports = { routePurchase };
+module.exports = { routePurchase, routingKey };
