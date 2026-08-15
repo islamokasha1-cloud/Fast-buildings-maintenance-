@@ -6209,6 +6209,110 @@ function aiErrorMessagesGuards() {
   }
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   المقارنة الذكية — ناتجٌ مبتورٌ لا يُسقط التحليل كلَّه (v18.9ua)
+
+   الجذر: جدولُ المقارنة البندية بالعربية يكلّف ~150 رمزاً للبند بمورّدين،
+   وسقفُ max_tokens كان 4000 (والوسيطُ يقصّ عند 4096) — فمع مجموعةٍ من 16 بنداً
+   ينقطع الناتجُ في منتصف بندٍ أو سلسلةٍ نصّية، فيفشل JSON.parse مرّتين وتُرمى
+   «تعذّر تفسير ناتج التحليل» وتضيع كلُّ البنود المكتملة.
+   الحارس: يُنفّذ _pcRepairTruncatedJson و_pcParseAIJson فعلاً على ناتجٍ مبتور.
+   ════════════════════════════════════════════════════════════════════ */
+function pcaiTruncatedOutputGuards() {
+  H("المقارنة الذكية — الناتجُ المبتور يُنقذ بنودَه المكتملة");
+
+  const repSrc = (HTML.match(/function _pcRepairTruncatedJson\(src\)\{[\s\S]*?\n\}/) || [])[0];
+  const parSrc = (HTML.match(/function _pcParseAIJson\(text\)\{[\s\S]*?\n\}/) || [])[0];
+  T("★ pcai: دالّتا الرأب والتفسير موجودتان في index.html", !!repSrc && !!parSrc);
+  if (!repSrc || !parSrc) return;
+  const F = new Function(repSrc + "\n" + parSrc + "\nreturn {rep:_pcRepairTruncatedJson,parse:_pcParseAIJson};")();
+
+  // ناتجٌ واقعيّ: أقواسٌ داخل نصٍّ عربيّ + علامةُ اقتباسٍ مهروبةٌ داخل اسم بند
+  const full = {
+    suppliers: ["المباني السريعة", "شركة المباني السريعة"],
+    items: [
+      { canonicalName: "مسحوق غسيل ٣ كجم", unit: "كيس", unified: true,
+        unifyNote: "نفس المنتج {نفس المقاس} رغم اختلاف التسمية",
+        quotes: [{ supplierIndex: 0, rawName: "مسحوق غسيل", unitPrice: 22.5, qty: 100 },
+                 { supplierIndex: 1, rawName: "صابون بودرة", unitPrice: 24, qty: 100 }] },
+      { canonicalName: 'خرطوم مياه 3" بوصة', unit: "متر", unified: false,
+        quotes: [{ supplierIndex: 0, rawName: 'خرطوم 3"', unitPrice: 35, qty: 20 }] },
+      { canonicalName: "معطر أرضيات", unit: "جالون", unified: false,
+        quotes: [{ supplierIndex: 0, rawName: "معطر", unitPrice: 18, qty: 12 },
+                 { supplierIndex: 1, rawName: "ملمع", unitPrice: 19.75, qty: 12 }] },
+    ],
+    notes: "فروقُ الجودة والضمان",
+  };
+  const S = JSON.stringify(full);
+
+  // (١) الناتجُ السليم يُفسَّر كما هو — بلا رأبٍ ولا فقدان
+  const okR = F.parse(S);
+  T("pcai: ناتجٌ سليمٌ يُفسَّر كاملاً بلا علَم رأب",
+    okR.data && okR.data.items.length === 3 && okR.repaired === false);
+
+  // (٢) نصٌّ قبل JSON وأسوارُ ``` — المسارُ المتسامح القديم يبقى عاملاً
+  const fenced = "إليك الجدول:\n```json\n" + S + "\n```";
+  const fR = F.parse(fenced);
+  T("pcai: أسوارٌ ونصٌّ تمهيديّ لا يمنعان التفسير",
+    fR.data && fR.data.items.length === 3 && fR.repaired === false);
+
+  // (٣) ★ الجذر: انقطاعٌ في منتصف البند الثالث — البندان المكتملان يُنقذان
+  const cut3 = S.slice(0, S.indexOf("معطر أرضيات") + 6);
+  const r3 = F.parse(cut3);
+  T("★ pcai: ناتجٌ مبتورٌ في منتصف بند → البنودُ المكتملةُ تنجو (لا سقوطَ للتحليل)",
+    !!r3.data && Array.isArray(r3.data.items) && r3.data.items.length === 2 && r3.repaired === true,
+    "بنودٌ نجت: " + (r3.data && r3.data.items ? r3.data.items.length : "لا شيء"));
+  T("★ pcai: البنودُ الناجيةُ سليمةٌ حرفياً (الاسم والسعر والكمية)",
+    !!r3.data && JSON.stringify(r3.data.items) === JSON.stringify(full.items.slice(0, 2)));
+  T("★ pcai: علامةُ الاقتباس المهروبةُ داخل اسم البند لا تُربك الرأب",
+    !!r3.data && r3.data.items[1] && r3.data.items[1].canonicalName === 'خرطوم مياه 3" بوصة');
+
+  // (٤) بندٌ يحوي قوسين داخل نصِّه العربيّ ثم ينقطع التالي: عدّادٌ ساذجٌ للأقواس
+  //     كان سيُلحق أقواسَ إغلاقٍ زائدةً هنا. المعيار: يُفسَّر الناتجُ ويطابق البندَ الأول.
+  const cutAfter1 = S.slice(0, S.indexOf("خرطوم مياه") + 5);
+  const r1 = F.parse(cutAfter1);
+  T("★ pcai: أقواسٌ داخل نصٍّ عربيٍّ لا تُحتسب حاويات (الرأبُ يبقى سليماً)",
+    !!r1.data && Array.isArray(r1.data.items) && r1.data.items.length === 1 &&
+    JSON.stringify(r1.data.items[0]) === JSON.stringify(full.items[0]),
+    "بنودٌ نجت: " + (r1.data && r1.data.items ? r1.data.items.length : "لا شيء"));
+
+  // انقطاعٌ داخل النصّ نفسِه: لا بندَ اكتمل، فلا يُختلق شيء — والناتجُ JSON صالح
+  const cutInNote = S.slice(0, S.indexOf("نفس المقاس") + 5);
+  const rN = F.parse(cutInNote);
+  T("★ pcai: الانقطاعُ داخل نصِّ البند لا يختلق بنداً ناقصاً",
+    !!rN.data && !(rN.data.items || []).length && !JSON.stringify(rN.data).includes("مسحوق"),
+    "الناتج: " + JSON.stringify(rN.data));
+
+  // (٥) انقطاعٌ قبل اكتمال أيّ بند → لا بنود، فيرمي المستدعي رسالتَه الصريحة
+  const cut0 = S.slice(0, S.indexOf("مسحوق غسيل ٣") + 4);
+  const r0 = F.parse(cut0);
+  T("pcai: انقطاعٌ قبل أوّل بندٍ مكتمل → بلا بنود (المستدعي يشرح السبب)",
+    !r0.data || !Array.isArray(r0.data.items) || r0.data.items.length === 0);
+
+  T("pcai: نصٌّ فارغٌ أو هراءٌ لا يُسقط الدالّة",
+    F.parse("").data === null && F.parse("لا يوجد جدول").data === null);
+
+  // ── نقاطُ الربط في المستدعي: تمييزُ الانقطاع وإعلانُه بدل رسالةٍ عمياء ──
+  const runSrc = (HTML.match(/async function runPCAIExtract\(\)\{[\s\S]*?\n\}/) || [])[0];
+  T("★ pcai: المستدعي يقرأ stop_reason ويميّز الناتجَ المبتور",
+    /dj\.stop_reason==="max_tokens"/.test(runSrc));
+  T("★ pcai: النتيجةُ الناقصةُ تُعلَن للمستخدم لا تُمرَّر كاملةً",
+    /_meta:\{attached,skipped,partial\}/.test(runSrc) && /التحليل ناقص/.test(runSrc));
+  T("★ pcai: الجدولُ يحمل لافتةَ «تحليلٌ ناقص» حين partial",
+    /data\._meta&&data\._meta\.partial/.test(HTML) && /تحليلٌ ناقص/.test(HTML));
+
+  // ── السقوف: الطلبُ والوسيطُ معاً، وإلّا قصّ الوسيطُ ما رفعه العميل ──
+  const capReq = +((HTML.match(/const PCAI_EXTRACT_MAX_TOKENS = (\d+)/) || [])[1] || 0);
+  T("★ pcai: سقفُ ناتج الاستخراج ≥ 8000 (4000 كانت تبتر ~25 بنداً)", capReq >= 8000, "السقف=" + capReq);
+  const wPath = require("path").resolve(require("path").dirname(IDX), "worker", "hail-ai-proxy.js");
+  const wSrc = require("fs").existsSync(wPath) ? require("fs").readFileSync(wPath, "utf8") : "";
+  const capW = +((wSrc.match(/const MAX_TOKENS_CAP = (\d+)/) || [])[1] || 0);
+  T("★ pcai: سقفُ الوسيط ≥ سقفِ الطلب (وإلّا قُصّ الناتجُ عند الوسيط)",
+    !!wSrc && capW >= capReq, "وسيط=" + capW + " طلب=" + capReq);
+  T("pcai: الطلبُ يستعمل الثابتَ لا رقماً محفوراً",
+    /max_tokens:PCAI_EXTRACT_MAX_TOKENS/.test(runSrc));
+}
+
 function tvWallGuards() {
   H("v18.9ag+ai) مركز العمليات — العرض الموحّد والتدوير التلقائي");
 
@@ -9084,6 +9188,7 @@ function browserCheckTimeBombs() {
   perfContractPhase2();
   tvWallGuards();
   aiErrorMessagesGuards();
+  pcaiTruncatedOutputGuards();
   photoQueueGuards();
   versionStampGuards();
   contractsPhase1();
