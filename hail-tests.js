@@ -1625,6 +1625,51 @@ function financialInvariants() {
     T("★ H6: مؤشّر «زيادة تُستردّ» في تفاصيل الطلب", HTML.includes("_poOverpaid(p)>0.01") && HTML.includes("زيادة تُستردّ"));
   }
 
+  // ── v18.9ua — بطاقاتُ «المالية — السداد» تفاعلية: مجموعةُ الفلتر = مجموعةُ الرقم المرسوم ──
+  {
+    const fs = HTML.indexOf("function _poFinancePayDays(");
+    const fe = HTML.indexOf("\nfunction _poFinanceCardFilter", fs);
+    let F = null;
+    if (fs >= 0 && fe > fs) {
+      try {
+        F = new Function("_poFinanceEnterAt", "PO_WORK_MIN_PER_DAY", "workingMinutesBetween", "normalizePOStatus", "window",
+          HTML.slice(fs, fe) + "\nreturn { _poFinancePayDays, _poFinanceMatch, _PO_FIN_VIEW_LBL };")(
+          p => { const e = (p.timeline || []).filter(x => x && x.code === "pending_finance").pop(); return e ? new Date(e.at).getTime() : null; },
+          480, (a, b) => Math.max(0, (b - a) / 60000), s => s, {});
+      } catch (e) { T("تُبنى دوالّ بطاقة المالية التفاعلية", false, String(e.message).slice(0, 120)); }
+    }
+    T("تُبنى دوالّ بطاقة المالية التفاعلية", !!F);
+    if (F) {
+      const day = 480 * 60000;
+      const mk = (extra) => Object.assign({ timeline: [{ code: "pending_finance", at: new Date(1e12).toISOString() }] }, extra);
+      const paidTimed = mk({ status: "closed", payment: { paid: true, paidAt: new Date(1e12 + 2 * day).toISOString() } });
+      const paidNoStamp = mk({ status: "closed", payment: { paid: true } });                       // قديم بلا paidAt
+      const pendingPO = mk({ status: "pending_finance", payment: { installments: [{ amount: 5 }] } });
+      // زمنُ السداد يُقاس للمسدَّد ذي الطابعَين وحدَه
+      T("★ v18.9ua: زمن السداد = فرقُ الطابعين بأيام العمل", F._poFinancePayDays(paidTimed) === 2);
+      T("★ v18.9ua: بلا طابعِ سدادٍ لا زمنَ (لا صفرٌ يجرّ المتوسّط)", F._poFinancePayDays(paidNoStamp) === null);
+      T("★ v18.9ua: المعلّق ليس له زمنُ سداد", F._poFinancePayDays(pendingPO) === null);
+      // كلُّ بطاقةٍ تصفّي على مجموعتها هي — لا على تقريبٍ لها
+      T("★ v18.9ua: «بانتظار السداد» = حالةُ pending_finance وحدَها",
+        F._poFinanceMatch(pendingPO, "pending") === true && F._poFinanceMatch(paidTimed, "pending") === false);
+      T("★ v18.9ua: «سُدّد (تراكمي)» = payment.paid لا الدفعةُ الجزئية",
+        F._poFinanceMatch(paidNoStamp, "paid") === true && F._poFinanceMatch(pendingPO, "paid") === false);
+      T("★ v18.9ua: «متوسط زمن السداد» يصفّي على الداخل في المتوسّط وحدَه",
+        F._poFinanceMatch(paidTimed, "paid_timed") === true && F._poFinanceMatch(paidNoStamp, "paid_timed") === false);
+      T("★ v18.9ua: لكل معيارٍ اسمٌ يُعرَض في عدّاد القائمة",
+        !!F._PO_FIN_VIEW_LBL.pending && !!F._PO_FIN_VIEW_LBL.paid && !!F._PO_FIN_VIEW_LBL.paid_timed);
+    }
+    // المتوسّطُ المرسوم يقرأ نفسَ الدالّة التي يقرؤها الفلتر (لا حسابَين متوازيين)
+    T("★ v18.9ua: متوسّطُ البطاقة من _poFinancePayDays نفسِها",
+      HTML.includes("paid.forEach(p=>{ const d=_poFinancePayDays(p); if(d!=null) durs.push(d); });"));
+    T("★ v18.9ua: القائمة تحترم فلتر البطاقة",
+      HTML.includes("if(window._poFinanceView && !_poFinanceMatch(p, window._poFinanceView)) return false;"));
+    T("★ v18.9ua: «مسح الفلاتر» يمسح فلتر البطاقة أيضاً",
+      /function clearPOFilters\(\)[\s\S]{0,900}window\._poFinanceView\s*=\s*""/.test(HTML));
+    T("★ v18.9ua: البطاقات أزرارٌ حقيقية (لوحةُ المفاتيح تبلغها)",
+      HTML.includes('class="po-fin-chip') && HTML.includes('aria-pressed='));
+  }
+
   // ── v18.9ts — تنظيف منخفض (L7/L9/L10/L11) ──
   T("L7: تقريب estCost عند إنشاء الطلب (لا تسرّب عائم)",
     HTML.includes("Math.round(currentPurchaseItems.reduce((s,item)=>s+(item.itemCost||0),0)*100)/100"));
