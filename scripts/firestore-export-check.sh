@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# ============================================================================
+#  فحصُ صحّةِ تصدير Firestore إلى الخزنة
+#
+#  يجيب: «لو ضاع المشروعُ اليومَ، هل عندي نسخةٌ خارجَه؟ وكم عمرُها؟»
+#
+#  التشغيل:  bash scripts/firestore-export-check.sh
+#  يُرجع 0 إن كان كلُّ شيءٍ سليماً و1 إن سقط فحص — فيصلح للجدولة.
+# ============================================================================
+set -uo pipefail
+export CLOUDSDK_CORE_DISABLE_PROMPTS=1
+
+SRC_PROJECT="${SRC_PROJECT:-fast-buildings}"
+VAULT_PROJECT="${VAULT_PROJECT:-fast-buildings-vault}"
+EXPORT_BUCKET="${EXPORT_BUCKET:-fast-buildings-firestore-vault}"
+JOB_NAME="firestore-daily-export"
+JOB_LOCATION="${JOB_LOCATION:-us-central1}"
+MAX_AGE_HOURS="${MAX_AGE_HOURS:-48}"
+
+PASS=0; FAIL=0
+T() { if [ "$2" = "0" ]; then PASS=$((PASS+1)); printf '  \033[0;32m✅ %s\033[0m\n' "$1"
+      else FAIL=$((FAIL+1)); printf '  \033[0;31m❌ %s\033[0m\n' "$1"; fi }
+say() { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
+
+command -v gcloud >/dev/null || { echo "لا gcloud — شغّل من Cloud Shell"; exit 1; }
+
+say "حاويةُ التصدير — gs://$EXPORT_BUCKET"
+
+# ★ الفحصُ الجوهريّ: الحاويةُ **خارجَ** المشروع المصدر. لو صارت داخله يوماً، عاد
+#   العطلُ الذي أنشأنا البندَ لأجله — نسخةٌ تموت مع مشروعها — **بلا أن يتغيّر شيءٌ
+#   ظاهر**: التصديرُ يعمل، والفحصُ أخضر، والحمايةُ صفر.
+BPROJ="$(gcloud storage buckets describe "gs://$EXPORT_BUCKET" \
+         --format="value(project_number)" 2>/dev/null)"
+SRCNUM="$(gcloud projects describe "$SRC_PROJECT" --format="value(projectNumber)" 2>/dev/null)"
+T "★ حاويةُ التصدير خارجَ مشروع $SRC_PROJECT (وإلّا فالنسخةُ تموت مع مشروعها)" \
+  "$([ -n "$BPROJ" ] && [ "$BPROJ" != "$SRCNUM" ] && echo 0 || echo 1)"
+
+RP="$(gcloud storage buckets describe "gs://$EXPORT_BUCKET" --project="$VAULT_PROJECT" \
+      --format="value(retention_policy.retentionPeriod)" 2>/dev/null)"
+T "سياسةُ احتجاز $(( ${RP:-0} / 86400 )) يوماً" \
+  "$([ "$(( ${RP:-0} / 86400 ))" -ge 90 ] && echo 0 || echo 1)"
+
+say "أحدثُ تصدير"
+# ⚠ افرز دائماً — القوائمُ لا تُرتَّب بالتاريخ (مصيدةُ §5 نفسُها).
+LATEST="$(gcloud storage ls "gs://$EXPORT_BUCKET/" --project="$VAULT_PROJECT" 2>/dev/null \
+          | grep '/$' | sort -r | head -1)"
+if [ -n "$LATEST" ]; then
+  # اسمُ المجلّد هو زمنُ البدء: 2026-08-14T21:57:33_12345/
+  STAMP="$(printf '%s' "$LATEST" | sed 's#.*/\([0-9-]*T[0-9:]*\)_.*#\1#')"
+  AGE_H="$(( ( $(date -u +%s) - $(date -u -d "${STAMP}Z" +%s 2>/dev/null || echo 0) ) / 3600 ))"
+  printf '  %s\n' "$LATEST"
+  T "عمرُ أحدثِ تصدير ${AGE_H} ساعة (يجب < $MAX_AGE_HOURS)" \
+    "$([ "$AGE_H" -lt "$MAX_AGE_HOURS" ] && [ "$AGE_H" -ge 0 ] && echo 0 || echo 1)"
+
+  # ملفُّ الفهرس دليلُ اكتمال التصدير: تصديرٌ انقطع في منتصفه يترك مجلّداً بلا فهرس
+  # — ويبدو في القائمة **تصديراً سليماً** حتى تحاول استيرادَه.
+  META="$(gcloud storage ls "${LATEST}**overall_export_metadata" --project="$VAULT_PROJECT" 2>/dev/null | head -1)"
+  T "★ التصديرُ مكتمل (فيه ملفُّ الفهرس — والمنقطعُ يبدو سليماً في القائمة)" \
+    "$([ -n "$META" ] && echo 0 || echo 1)"
+else
+  T "يوجد تصديرٌ واحدٌ على الأقلّ" 1
+fi
+
+say "الوظيفةُ المجدولة — $JOB_NAME"
+JSTATE="$(gcloud scheduler jobs describe "$JOB_NAME" --project="$SRC_PROJECT" \
+          --location="$JOB_LOCATION" --format="value(state)" 2>/dev/null)"
+T "الوظيفةُ مفعَّلة (الحالة: ${JSTATE:-غير موجودة})" \
+  "$([ "$JSTATE" = "ENABLED" ] && echo 0 || echo 1)"
+
+printf '\n════════════════════════════════════\n'
+printf '  ناجحة: %s   ساقطة: %s\n' "$PASS" "$FAIL"
+if [ "$FAIL" -eq 0 ]; then
+  printf '  \033[0;32mالإعدادُ سليم — وهذا لا يُغني عن البروفة:\033[0m\n'
+  printf '  bash scripts/firestore-export-drill.sh --cross-project\n\n'
+  exit 0
+fi
+printf '  \033[0;31mسقط فحص — راجع أعلاه قبل أن تطمئنّ.\033[0m\n\n'
+exit 1
