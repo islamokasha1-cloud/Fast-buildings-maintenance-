@@ -29,11 +29,23 @@ say "حاويةُ التصدير — gs://$EXPORT_BUCKET"
 # ★ الفحصُ الجوهريّ: الحاويةُ **خارجَ** المشروع المصدر. لو صارت داخله يوماً، عاد
 #   العطلُ الذي أنشأنا البندَ لأجله — نسخةٌ تموت مع مشروعها — **بلا أن يتغيّر شيءٌ
 #   ظاهر**: التصديرُ يعمل، والفحصُ أخضر، والحمايةُ صفر.
-BPROJ="$(gcloud storage buckets describe "gs://$EXPORT_BUCKET" \
-         --format="value(project_number)" 2>/dev/null)"
-SRCNUM="$(gcloud projects describe "$SRC_PROJECT" --format="value(projectNumber)" 2>/dev/null)"
-T "★ حاويةُ التصدير خارجَ مشروع $SRC_PROJECT (وإلّا فالنسخةُ تموت مع مشروعها)" \
-  "$([ -n "$BPROJ" ] && [ "$BPROJ" != "$SRCNUM" ] && echo 0 || echo 1)"
+#
+# ⚠ والصياغةُ الأولى سألت `buckets describe` عن حقل `project_number` — **حقلٌ لا
+#   تعرضه الأداة**، فرجع فارغاً و**أعلن سقوطاً كاذباً** على إعدادٍ سليم. نفسُ صنفِ
+#   العطل الذي أوقعنا في `metadata` مقابل `custom_fields`: **فحصٌ يقرأ اسمَ حقلٍ
+#   يحكم على الواقع بما لا يعرفه.** فصار السؤالُ عن **انتماءٍ** لا عن حقل: هل يظهر
+#   اسمُ الحاوية في قائمة حاويات المشروع المصدر؟ — سؤالٌ لا يعتمد على تسميةٍ داخلية.
+SRC_BUCKETS="$(gcloud storage buckets list --project="$SRC_PROJECT" \
+               --format="value(name)" 2>/dev/null)"
+if [ -z "$SRC_BUCKETS" ]; then
+  # قائمةٌ فارغةٌ ليست دليلَ براءة: قد تكون صلاحيةً ناقصةً أو عطلاً في النداء.
+  # والحكمُ بالنجاح هنا كان سيُنتج «أخضرَ» لا يعرف شيئاً — وهو ما نحرسه أصلاً.
+  T "★ حاويةُ التصدير خارجَ مشروع $SRC_PROJECT" 1
+  printf '     \033[0;33m(تعذّر سردُ حاويات %s — لا حكمَ بلا معرفة)\033[0m\n' "$SRC_PROJECT"
+else
+  T "★ حاويةُ التصدير خارجَ مشروع $SRC_PROJECT (وإلّا فالنسخةُ تموت مع مشروعها)" \
+    "$(printf '%s\n' "$SRC_BUCKETS" | grep -qx "$EXPORT_BUCKET" && echo 1 || echo 0)"
+fi
 
 RP="$(gcloud storage buckets describe "gs://$EXPORT_BUCKET" --project="$VAULT_PROJECT" \
       --format="value(retention_policy.retentionPeriod)" 2>/dev/null)"
