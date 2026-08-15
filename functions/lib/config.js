@@ -87,7 +87,18 @@ const PO_ROUTING = {
   finance_returned: { role: "procurement_officer", action: "متابعتك" }, // المالية أعادته
   proc_executing: { role: "procurement_officer", action: "بدء التنفيذ" }, // تنفيذ الشراء
   wh_receiving: { role: "warehouse_manager", action: "استلامك" }, // إشعار المستودع بالاستلام
-  pending_extra: { role: "ceo", action: "قرارك" },
+  // v18.9xb: البتُّ في البند الإضافي **مرحلتان** — مدير المشاريع أولاً، ثم المدير
+  // التنفيذي إن كان إجمالي الطلب فوق العتبة — وحالةُ الطلب تبقى `pending_extra`
+  // في كلتيهما. فكان التوجيهُ يُرسل للتنفيذي في لحظةٍ لا يملك فيها البتّ أصلاً
+  // (`canDecideExtra` يشترط مدير المشاريع عند `pending_pm`)، ولا يُرسل شيئاً حين
+  // يصير الدورُ له فعلاً (الحالةُ لم تتغيّر ⇒ لا مشغّل). المفتاح المركّب يفصلهما:
+  // `routingKey` في purchases.js يُلحق `extraStage` بالحالة، فيتغيّر المفتاح مع
+  // انتقال الدور ولو ثبتت الحالة.
+  "pending_extra:pending_pm": { role: "project_manager", action: "قرارك" },
+  "pending_extra:pending_ceo": { role: "ceo", action: "قرارك" },
+  // المجرَّد يبقى ارتداداً للطلبات الأقدم بلا `extraStage` — ولمدير المشاريع
+  // لأنه أولُ من يبتّ دائماً (`_extraStatus:"pending_pm"` عند الإنشاء).
+  pending_extra: { role: "project_manager", action: "قرارك" },
 };
 
 /** حالات يُنبَّه فيها صاحب الطلب (createdBy) — الرفض والإغلاق فقط. */
