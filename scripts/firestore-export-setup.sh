@@ -93,7 +93,19 @@ ok "على $SRC_PROJECT: datastore.importExportAdmin (تصديرٌ فقط لا �
 gcloud storage buckets add-iam-policy-binding "gs://$EXPORT_BUCKET" \
   --project="$VAULT_PROJECT" \
   --member="serviceAccount:$SA_EMAIL" --role="roles/storage.objectAdmin" >/dev/null
-ok "على حاوية التصدير: كتابة"
+ok "على حاوية التصدير: كتابة (للحساب الذي **يطلب** التصدير)"
+
+# ★★ والهويّةُ التي **تنفّذ** التصديرَ غيرُ التي تطلبه.
+#    `firestore export` لا يعمل بحساب الخدمة المنادي، بل **بوكيل خدمة Firestore**
+#    الخاصّ بالمشروع المصدر. ومنحُ الطالبِ وحدَه يُنتج
+#    `PERMISSION_DENIED: Service account does not have access to ... file`
+#    — رسالةٌ تقول «حساب خدمة» فتظنّها حسابَك، وهي تعني وكيلاً آخرَ لم تسمع به.
+SRC_NUM="$(gcloud projects describe "$SRC_PROJECT" --format="value(projectNumber)")"
+FS_AGENT="service-${SRC_NUM}@gcp-sa-firestore.iam.gserviceaccount.com"
+gcloud storage buckets add-iam-policy-binding "gs://$EXPORT_BUCKET" \
+  --project="$VAULT_PROJECT" \
+  --member="serviceAccount:$FS_AGENT" --role="roles/storage.admin" >/dev/null
+ok "على حاوية التصدير: وكيلُ خدمة Firestore ($FS_AGENT) — **المنفِّذُ الفعليّ**"
 
 # ── الجدولة ────────────────────────────────────────────────────────────────
 say "(٣) وظيفةُ التصدير اليومية — $SCHEDULE UTC"

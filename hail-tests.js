@@ -464,6 +464,13 @@ function predelivery() {
     // الذي وقعنا فيه مع الملفّات (نجاةُ التوكِن داخلَ الحاوية ≠ عبرَ الحاويتين).
     T("★ st: البروفةُ تملك وضعَ عبورٍ بين المشاريع",
       FDRL.includes("--cross-project") && FDRL.includes("TARGET_PROJECT"));
+    // ★★ الهويّةُ التي **تنفّذ** غيرُ التي **تطلب**: التصديرُ والاستيرادُ ينفّذهما
+    //    وكيلُ خدمة Firestore (`gcp-sa-firestore`) لا حسابُ الخدمة المنادي. ومنحُ
+    //    الطالبِ وحدَه يردّ PERMISSION_DENIED برسالةٍ تقول «حساب خدمة» فتظنّها حسابَك.
+    T("★★ st: وكيلُ خدمة Firestore ممنوحٌ على حاوية التصدير (المنفِّذُ لا الطالب)",
+      FSET.includes("gcp-sa-firestore.iam.gserviceaccount.com") &&
+      FDRL.includes("gcp-sa-firestore.iam.gserviceaccount.com"));
+
     T("★ st: البروفةُ تحكم بوجود البيانات لا برسالة «تمّت»",
       FDRL.includes("global_purchases") && FDRL.includes("pageSize=5"));
     T("★ st: البروفةُ تستورد إلى قاعدةٍ جديدةٍ لا إلى (default)",
