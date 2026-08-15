@@ -450,6 +450,26 @@ function predelivery() {
 
     // (٧) المرحلتان منفصلتان في الثلاثة: المرحلةُ ١ أمران على الحاوية القائمة،
     //     والمرحلةُ ٢ تحتاج مشروعاً وفوترة. ربطُهما يُبقي ٩٠٪ من الحماية معلّقةً.
+    // ★ الواجهاتُ الثلاثُ تُفعَّل معاً: `transfer authorize` يقرأ سياسةَ صلاحيات
+    //   **المشروع**، فبلا `cloudresourcemanager` يسقط بـSERVICE_DISABLED — ورسالتُه
+    //   تبدأ بـ«does not have permission» فتُرسل التشخيصَ إلى الصلاحيات لا إلى
+    //   واجهةٍ معطَّلة. (نقصٌ ظهر عند رابعِ خطوةٍ بعد إنشاء الحاوية والاحتجاز.)
+    // ★★ `transfer authorize` بلا `--add-missing` **يُبلّغ ولا يُصرِّح**: يطبع
+    //    «Missing roles» وينتهي بنجاح، فيبقى حسابُ الخدمة بلا صلاحيةٍ واحدة.
+    //    أمرٌ اسمُه authorize لا يُفوِّض افتراضياً — والاسمُ نفسُه يُطمئن كاذباً.
+    // ★★ بريدُ حساب الخدمة يُشتقّ من رقم المشروع لا بأنبوبِ curl|grep|cut: مع
+    //    `set -o pipefail` فشلُ أيّ حلقةٍ يُنهي السكربتَ **صامتاً** — الإخفاقُ في
+    //    **إسنادِ** المتغيّر لا في أمرٍ مستقلّ، فلا تُطبع رسالةُ die ولا خطأ.
+    T("★★ st: حسابُ خدمة النقل يُشتقّ من رقم المشروع لا بأنبوبٍ يقتل السكربتَ صامتاً",
+      /project-\$\{VAULT_NUM\}@storage-transfer-service/.test(SETUP_C) &&
+      !/googleServiceAccounts.*\|\s*grep/.test(SETUP_C));
+
+    T("★★ st: transfer authorize بـ --add-missing (بدونها يُبلّغ ولا يُصرِّح)",
+      /transfer authorize[^\n]*--add-missing/.test(SETUP_C));
+
+    T("★ st: مشروعُ الخزنة يُفعِّل cloudresourcemanager مع storage و storagetransfer",
+      /services enable[\s\S]{0,140}cloudresourcemanager\.googleapis\.com/.test(SETUP_C));
+
     T("★ st: الثلاثةُ تقبل --layer1-only (المرحلةُ ١ لا تنتظر قراراً إدارياً)",
       [SETUP, DRILL, CHECK].every(s => s.includes("--layer1-only")));
 
@@ -554,6 +574,15 @@ function predelivery() {
     // بلا أثرٍ مكتوب، لا سبيلَ لأحدٍ أن يعرف متى أُثبتت النسخةُ آخرَ مرّة — والنسخُ
     // يتعفّن بصمت: تتغيّر صلاحيةٌ أو ينكسر مسارٌ فيبقى كلُّ شيءٍ أخضرَ حتى تحتاجَه.
     const HLTH = rd("scripts/backup-health.sh");
+    // ★★ إثباتُ الآلية ليس إثباتَ التشغيل: بروفةُ الاستعادة تنسخ كائنَ اختبارها
+    //    **بنفسها**، فتُثبت النسخَ والاستعادةَ ونجاةَ التوكِن — **ولا تسأل هل
+    //    وظيفةُ النقل موجودةٌ أصلاً**. وقد كانت الخزنةُ فارغةً (٧ كائناتٍ مقابل
+    //    ٣٧١٠) والبروفةُ خضراء. فوجودُ الوظيفة وعمرُ آخر نقلةٍ فحصان **لا غنى عنهما**.
+    T("★★ st: فحصُ الملفّات يسأل عن وجود وظيفة النقل وعمرِ آخر نقلة",
+      CHECK.includes("transfer jobs describe") && CHECK.includes("transfer operations list"));
+    T("★★ st: ويقارن عددَ كائنات الخزنة بالمصدر (خزنةٌ فارغةٌ لا تُرى إلا بالعدّ)",
+      /VN.*-ge.*SN|\$\{VN:-0\}" -ge "\$\{SN:-0\}/.test(CHECK));
+
     T("★ st: فحصُ الصحّة الشامل موجودٌ ويجمع الفحصين",
       !!HLTH && HLTH.includes("storage-backup-check.sh") &&
       HLTH.includes("firestore-export-check.sh"));
