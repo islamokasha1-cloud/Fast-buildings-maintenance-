@@ -107,7 +107,15 @@ printf '  ناجحة: %s   ساقطة: %s   (الوضع: %s)\n' "$PASS" "$FAIL" 
   "$([ "$MODE" = "cross" ] && echo "عبورٌ بين المشاريع" || echo "داخلَ المشروع")"
 if [ "$FAIL" -eq 0 ]; then
   if [ "$MODE" = "cross" ]; then
+    # ★ يُختَم **وضعُ العبور وحدَه**: البروفةُ المحلّيةُ لا تُثبت جوهرَ البند، فختمُها
+    #   كان سيجعل السجلَّ يقول «مُثبَتٌ» عن شيءٍ لم يُثبَت — وهو أسوأُ من غياب السجلّ.
+    gcloud storage cp - "gs://$EXPORT_BUCKET/_drills/firestore-import-$(date -u +%Y%m%dT%H%M%SZ).txt" \
+      --project="$VAULT_PROJECT" >/dev/null 2>&1 <<EOF || true
+بروفةُ استيراد Firestore عبرَ المشاريع — ناجحة $PASS · ساقطة $FAIL
+الهدف: $TARGET_PROJECT · $(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
     printf '  \033[0;32mالتصديرُ مُثبَتٌ باستيرادٍ في مشروعٍ آخر — وهو جوهرُ البند.\033[0m\n'
+    printf '  ✍ خُتم تاريخُ البروفة في gs://%s/_drills/\n' "$EXPORT_BUCKET"
     printf '  قيّد النتيجةَ في NOTES §5.\n\n'
   else
     printf '  \033[0;33mالملفّاتُ سليمةٌ وتُستورَد. لكنّ هذا **داخلَ المشروع** —\033[0m\n'
