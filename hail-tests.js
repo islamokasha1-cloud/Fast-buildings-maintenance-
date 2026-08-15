@@ -2146,7 +2146,7 @@ function auditRowAlignment() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   21ج) v18.9xa — اسم البند وكودُه يتبعان مرساة الكتالوج بعد التدقيق
+   21ج) v18.9xb — اسم البند وكودُه يتبعان مرساة الكتالوج بعد التدقيق
         الجذر: أمين المستودع يضيف البند للكتالوج باسم الفاتورة (فيأخذ كوداً)
         ويربطه بصفّ الطلب، فتُكتب المرساة itemId وحدها. itemName/itemCode تبقيان
         كما كُتبتا عند إنشاء الطلب — فالمخزون والسجل يقرآن الاسم الصحيح عبر
@@ -2206,11 +2206,11 @@ function poItemNameFollowsCatalog() {
     !HTML.includes("${esc(it.itemName||'')}${nameBadge}${substBadge}${noteLine}</td>") &&
     !HTML.includes("${it.itemCode?`<span style='font-family:JetBrains Mono,monospace"));
   T("★ التدقيق يثبّت الاسم والكود على بند الطلب (لا المرساة وحدها)",
-    HTML.includes("itemName  : _nm1,          // v18.9xa") &&
-    HTML.includes("itemCode  : _cd1,          // v18.9xa") &&
+    HTML.includes("itemName  : _nm1,          // v18.9xb") &&
+    HTML.includes("itemCode  : _cd1,          // v18.9xb") &&
     HTML.includes("const _nm1   = _anch ? _resolveItemName(_anch, _nm0) : _nm0;"));
   T("★ ما طلبه المشرف يُحفَظ في requestedItemName عند أول دهس",
-    HTML.includes("requestedItemName: _reqNm, // v18.9xa") &&
+    HTML.includes("requestedItemName: _reqNm, // v18.9xb") &&
     HTML.includes("const _reqNm = it.requestedItemName || ((_nm0 && _nm1 && _nm0 !== _nm1) ? _nm0 : \"\");"));
   T("★ صفّ السند يحمل الاسم والكود المعياريَّين (يتّسق مع سجلّ المخزون)",
     HTML.includes("itemName: _anchor ? _resolveItemName(_anchor, it.itemName||\"\") : (it.itemName||\"\"),") &&

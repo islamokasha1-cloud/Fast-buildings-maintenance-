@@ -15627,7 +15627,7 @@ async function printPurchaseDetail(poId){
     const substBadge = it.substitution ? `<div style="font-size:9px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;padding:1px 6px;margin-top:3px;font-weight:800;display:inline-block">⇄ استُبدل: ${esc(it.substitution.fromName||'')} ← ${esc(it.substitution.toName||'')}${it.substitution.reason?` — سبب: ${esc(it.substitution.reason)}`:''}</div>` : '';
     // v18.9ab: ملاحظة/مواصفة البند تُطبَع مع الطلب — يقرأها المورد والمستودع
     const noteLine  = poItemNote(it) ? `<div style="font-size:9.5px;color:#475569;margin-top:3px;line-height:1.5">📝 ${esc(poItemNote(it))}</div>` : '';
-    // v18.9xa: الاسم والكود من مرساة الكتالوج — والمكتوبُ عند إنشاء الطلب تحتهما إن خالف
+    // v18.9xb: الاسم والكود من مرساة الكتالوج — والمكتوبُ عند إنشاء الطلب تحتهما إن خالف
     const _shCode = _poShownCode(it), _shName = _poShownName(it), _reqNm = _poReqName(it);
     const reqLine = _reqNm ? `<div style="font-size:9px;color:#64748b;margin-top:2px">طُلب باسم: ${esc(_reqNm)}</div>` : '';
     return `<tr style="background:${rowBg}">
@@ -15916,7 +15916,7 @@ function printPurchaseDetailNoPrices(poId){
     const substBadge = it.substitution ? `<div style="font-size:9px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;padding:1px 6px;margin-top:3px;font-weight:800;display:inline-block">⇄ استُبدل: ${esc(it.substitution.fromName||'')} ← ${esc(it.substitution.toName||'')}${it.substitution.reason?` — سبب: ${esc(it.substitution.reason)}`:''}</div>` : '';
     // v18.9ab: ملاحظة/مواصفة البند — أوجبُ ظهوراً في النسخة بلا أسعار (نسخةُ المورد والمستودع)
     const noteLine  = poItemNote(it) ? `<div style="font-size:9.5px;color:#475569;margin-top:3px;line-height:1.5">📝 ${esc(poItemNote(it))}</div>` : '';
-    // v18.9xa: الاسم والكود من مرساة الكتالوج — والمكتوبُ عند إنشاء الطلب تحتهما إن خالف
+    // v18.9xb: الاسم والكود من مرساة الكتالوج — والمكتوبُ عند إنشاء الطلب تحتهما إن خالف
     const _shCode = _poShownCode(it), _shName = _poShownName(it), _reqNm = _poReqName(it);
     const reqLine = _reqNm ? `<div style="font-size:9px;color:#64748b;margin-top:2px">طُلب باسم: ${esc(_reqNm)}</div>` : '';
     return `<tr style="background:${rowBg}">
@@ -29091,7 +29091,7 @@ function _resolveItemCode(itemId, fallbackCode){
   return fallbackCode || "";
 }
 
-// ══ v18.9xa: البند يُربط بالكتالوج عند التدقيق — والطلب يظل يعرض اسمه القديم ══
+// ══ v18.9xb: البند يُربط بالكتالوج عند التدقيق — والطلب يظل يعرض اسمه القديم ══
 // أمين المستودع يقف أمام بندٍ حرٍّ لا كود له، فيضيفه للكتالوج **باسمه كما في الفاتورة**
 // (waOpenNewCatItem) أو يربطه ببندٍ قائم. المرساة itemId تُكتب على بند الطلب — لكن
 // itemName/itemCode لا تُلمسان. فالمخزون والسجل يقرآن الاسم الصحيح (_resolveItemName
@@ -29103,7 +29103,7 @@ function _resolveItemCode(itemId, fallbackCode){
 function _poShownName(it){ return it ? _resolveItemName(it.itemId, it.itemName||"") : ""; }
 function _poShownCode(it){ return it ? _resolveItemCode(it.itemId, it.itemCode||"") : ""; }
 // الاسم كما كُتب عند إنشاء الطلب — يُعاد فقط إن خالف المعروضَ فعلاً.
-// requestedItemName يُثبَّت عند التدقيق (v18.9xa)؛ وللطلبات الأقدم يكفي itemName الخام.
+// requestedItemName يُثبَّت عند التدقيق (v18.9xb)؛ وللطلبات الأقدم يكفي itemName الخام.
 // عند الاستبدال لا يُعاد شيء: شارةُ «⇄ استُبدل: كذا ← كذا» تقول القصة كاملةً.
 function _poReqName(it){
   if(!it || it.substitution) return "";
@@ -30440,7 +30440,7 @@ async function doWarehouseAudit(){
       const row = {
         ...it,
         itemId: _anchor,   // v18.9nw: يدهس ...it — وهو مصدره أصلاً حين يكون موجوداً
-        // v18.9xa: والاسمُ والكودُ من المرساة كذلك — صفُّ السند كان يحمل الاسم الحرّ
+        // v18.9xb: والاسمُ والكودُ من المرساة كذلك — صفُّ السند كان يحمل الاسم الحرّ
         // المُدخَل عند إنشاء الطلب حتى بعد ربطه ببند الكتالوج، فيتناقض مع سجلّ المخزون
         // المكتوب من نفس الصفّ (_resolveItemName/_resolveItemCode أدناه).
         itemName: _anchor ? _resolveItemName(_anchor, it.itemName||"") : (it.itemName||""),
@@ -30720,7 +30720,7 @@ async function doWarehouseAudit(){
       const _cNet  = Math.round(_cUnit*_cumQ*100)/100;
       const _cTot  = Math.round((_cUnit+_cVatU)*_cumQ*100)/100;
       const _cVat  = Math.round((_cTot-_cNet)*100)/100;
-      // ══ v18.9xa: الاسم والكود يتبعان المرساة ══
+      // ══ v18.9xb: الاسم والكود يتبعان المرساة ══
       // المرساة كانت تُثبَّت وحدها: بندٌ حرٌّ يربطه أمين المستودع (أو يضيفه للكتالوج
       // باسم الفاتورة) يبقى في الطلب باسمه القديم وبلا كود. الاسمُ المعياريّ يُثبَّت
       // هنا، والمكتوبُ عند إنشاء الطلب يُحفَظ في requestedItemName فلا يضيع ما طُلب.
@@ -30734,9 +30734,9 @@ async function doWarehouseAudit(){
         // v18.9nw: تُثبَّت المرساة عند أول استلام يربطها. v18.9pi: وتُفضَّل المرساة
         // الجديدة (a.itemId) عند الاستبدال — البند الصحيح يأخذ الرصيد والسعر.
         itemId    : _anch,
-        itemName  : _nm1,          // v18.9xa
-        itemCode  : _cd1,          // v18.9xa
-        requestedItemName: _reqNm, // v18.9xa: ما كتبه الطالب — أثرٌ لا يُمحى
+        itemName  : _nm1,          // v18.9xb
+        itemCode  : _cd1,          // v18.9xb
+        requestedItemName: _reqNm, // v18.9xb: ما كتبه الطالب — أثرٌ لا يُمحى
         substitution: _subst,   // v18.9pi
         unitCost  : a.unitPrice,
         // v18.9nd: التقدير المجمَّد ينجو من الدهس — مرجع ثابت لمقارنة الأسعار
@@ -31360,7 +31360,7 @@ function openAdminEditPurchase(poId){
         const vat       = Math.round((itemCost - lineTotal) * 100)/100;
         // v18.9nd: لا تدهس التقدير المجمَّد؛ عبّئه إن غاب فقط
         const estUnitCost = it.estUnitCost != null ? it.estUnitCost : unitCost;
-        // v18.9xa: البند المربوط بالكتالوج يُفتح باسمه وكوده المعياريَّين — وإلا أعاد
+        // v18.9xb: البند المربوط بالكتالوج يُفتح باسمه وكوده المعياريَّين — وإلا أعاد
         // أوّلُ حفظٍ من هنا تجميدَ الاسم القديم فوق المرساة. (المكتوبُ عند إنشاء الطلب
         // محفوظٌ في requestedItemName ويمرّ مع ...it.)
         const _pnm = it.itemId ? _resolveItemName(it.itemId, it.itemName||"") : (it.itemName||"");
