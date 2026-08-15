@@ -73,12 +73,23 @@ RC=$?
 T "أُنشئت قاعدةُ البروفة $DRILL_DB" "$RC"
 [ "$RC" = "0" ] || { echo "  ⚠ تعذّر الإنشاء — راجع الصلاحياتِ في $TARGET_PROJECT"; exit 1; }
 
-say "(٢) الاستيرادُ الفعليّ"
+say "(٢) صلاحيةُ القراءة لوكيل خدمة Firestore في مشروع الهدف"
+# ★★ العطلُ نفسُه الذي أوقف التصدير، مقلوباً: **الاستيرادَ ينفّذه وكيلُ خدمة
+#    Firestore الخاصُّ بمشروع الهدف** لا أنت ولا حسابُ خدمةٍ أنشأتَه. وبلا هذه
+#    المنحة يردّ PERMISSION_DENIED برسالةٍ تقول «حساب خدمة» فتظنّها حسابَك.
+TGT_NUM="$(gcloud projects describe "$TARGET_PROJECT" --format="value(projectNumber)" 2>/dev/null)"
+TGT_AGENT="service-${TGT_NUM}@gcp-sa-firestore.iam.gserviceaccount.com"
+gcloud storage buckets add-iam-policy-binding "gs://$EXPORT_BUCKET" \
+  --project="$VAULT_PROJECT" \
+  --member="serviceAccount:$TGT_AGENT" --role="roles/storage.admin" >/dev/null 2>&1
+T "مُنح وكيلُ خدمة الهدف قراءةَ الحاوية ($TGT_AGENT)" "$([ -n "$TGT_NUM" ] && echo 0 || echo 1)"
+
+say "(٣) الاستيرادُ الفعليّ"
 gcloud firestore import "$LATEST" --database="$DRILL_DB" --project="$TARGET_PROJECT"
 RC=$?
 T "★ الاستيرادُ انتهى بلا خطأ" "$RC"
 
-say "(٣) والحكمُ ليس رسالة «تمّت» بل وجودُ البيانات فعلاً"
+say "(٤) والحكمُ ليس رسالة «تمّت» بل وجودُ البيانات فعلاً"
 # نفسُ منهج §5 حرفياً: نسأل القاعدةَ المستوردةَ عن مجموعاتها بدل تصديق سجلّ التمرير.
 TOKEN="$(gcloud auth print-access-token)"
 BASE="https://firestore.googleapis.com/v1/projects/$TARGET_PROJECT/databases/$DRILL_DB/documents"
