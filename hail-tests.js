@@ -2957,7 +2957,14 @@ function dateBucketing() {
   T("★ مخطّط إنفاق المشتريات بمفتاح شهر محلّي", HTML.includes("const dateStr=_dt?_ym(new Date(_dt)):"));
   T("poApprovedThisMonth محلّي الطرفين", HTML.includes("_ym(new Date(t)) === (ym || _ym(new Date()))"));
   T("لوحة المشتريات thisMonth محلّي", HTML.includes("const thisMonth = _ym(now);"));
-  T("تأخّر الطلب يحلّل تاريخ-فقط محلياً", HTML.includes("const exp = _parseLocalDate(d)"));
+  /* v18.9xc: تأخّرُ الطلب لم يعد يحوّل التاريخَ إلى Date أصلاً — يقارن "YYYY-MM-DD"
+     نصّاً بنصّ، و«اليوم» يُبنى من الحقول المحلّية (getFullYear/getMonth/getDate).
+     فالحراسةُ على النيّة نفسِها (تاريخ-فقط لا ينزلق ليومٍ سابق في أيّ منطقة زمن)
+     بآليةٍ أقوى: لا تحويلَ منطقةٍ زمنيةٍ يقع في المسار إطلاقاً. */
+  T("★ تأخّر الطلب يقارن تاريخ-فقط نصّاً — بلا تحويل منطقةٍ زمنية",
+    /function isPOOverdue\(p\)\{[\s\S]*?return due < _poTodayYmd\(\);/.test(HTML) &&
+    /function _poTodayYmd\(\)\{ return _poYmd\(new Date\(\)\); \}/.test(HTML) &&
+    /return d\.getFullYear\(\)\+"-"\+p2\(d\.getMonth\(\)\+1\)\+"-"\+p2\(d\.getDate\(\)\);/.test(HTML));
   T("★ فلتر تاريخ قائمة الطلبات باليوم المحلّي", HTML.includes("_ymd(new Date(p.createdAt)) < fFrom"));
   T("مدى فلتر التاريخ يحلّل «من» محلياً", HTML.includes('new Date(from+"T00:00:00")'));
 }
@@ -9491,6 +9498,148 @@ function contractLetterhead() {
     (src.match(/<div class="company">شركة المباني السريعة للمقاولات<\/div>/g) || []).length === 1);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   v18.9xc — موعدُ الحاجة ≠ وعدُ المورّد: ساعةُ التوريد تبدأ عند السداد
+   الارتدادُ المحروس: طلبٌ سُدِّد ثمّ طال توريدُه (تقطيعُ رخام) لا يُوسَم متأخراً
+   ما دام داخلَ وعد المورّد — والطلبُ الذي لم يبلغ المورّدَ بعد لا يُنسَب تأخّرُه إليه.
+   ══════════════════════════════════════════════════════════════════════════ */
+function supplyPromiseDates() {
+  H("موعدُ الحاجة ≠ وعدُ المورّد — ساعةُ التوريد");
+
+  const stat = slice("const PO_STATUS = {", "function poStatusLabel(");
+  const blk  = slice('/* ═══════ v18.9xc: موعدُ الحاجة ≠ وعدُ المورّد', "/* ═══════════ v18.9np:");
+  const fin  = slice("const PO_FINAL_STATUSES = [", "\n");
+  if (!stat || !blk || !fin) {
+    T("كتلةُ مواعيد التوريد مستخرَجة", false, "لم تُعثر — هل تغيّرت العلامات؟");
+    return;
+  }
+  const S = {};
+  const vm = require("vm");
+  const ctx = vm.createContext(S);
+  vm.runInContext(`var _ic=function(){return ""};\n${stat}\n${fin}\n${blk}`, ctx);
+
+  // اليوم — تُبنى منه كلُّ التواريخ فلا يتعفّن الفحصُ بمرور الزمن (لا تاريخَ محفور)
+  const TODAY = S._poTodayYmd();
+  const rel = n => S._poAddDays(TODAY, n);
+
+  // ── ١) أدواتُ التاريخ ──
+  T("_poYmd يقرأ التاريخَ النصّيّ والطابعَ الزمنيّ معاً",
+    S._poYmd("2026-08-10") === "2026-08-10" && S._poYmd("2026-08-10T15:48:00.000Z") === "2026-08-10");
+  T("_poYmd يردّ \"\" للفارغ وللتالف", S._poYmd("") === "" && S._poYmd("ليس تاريخاً") === "");
+  T("★ _poAddDays يعبر حدَّ الشهر والسنة بالبناء لا بالتعديل",
+    S._poAddDays("2026-08-25", 10) === "2026-09-04" && S._poAddDays("2026-12-28", 5) === "2027-01-02");
+  T("_poDaysBetween يعدّ الأيامَ بين تاريخين", S._poDaysBetween("2026-08-10", "2026-08-15") === 5);
+  T("★ ولا مُعدِّلَ Date في الكتلة كلِّها (قاعدة v18.9vt)",
+    !/\.(setHours|setDate|setMonth|setFullYear|setTime)\(/.test(blk),
+    (blk.match(/\.(setHours|setDate|setMonth|setFullYear|setTime)\(/) || [""])[0]);
+
+  // ── ٢) بلاغُ المالك بعينه: PO-202608-0145 ──
+  // أُنشئ قبل ٧ أيام، موعدُ حاجته قبل ٥، سُدِّدت أوّلُ دفعةٍ قبل ٤، ومدّةُ تقطيع الرخام ٢١ يوماً
+  const marble = {
+    status: "pending_finance",
+    expectedDeliveryDate: rel(-5),
+    leadTimeDays: 21,
+    payment: { installments: [{ amount: 28066.13, at: rel(-4) + "T10:05:00.000Z" }] },
+    timeline: [{ event: "تم إنشاء الطلب وتقديمه", at: rel(-7) + "T15:48:00.000Z" }],
+  };
+  T("★★★ بدءُ التوريد = أوّلُ دفعةٍ سُدِّدت لا تاريخُ الطلب",
+    S.poSupplyStartAt(marble) === rel(-4), S.poSupplyStartAt(marble));
+  T("★★★ وعدُ المورّد = بدءُ التوريد + مدّةُ التوريد",
+    S.poPromiseDate(marble) === rel(17), S.poPromiseDate(marble));
+  T("★★★ الطلبُ المسدَّد داخلَ مدّةِ التقطيع ليس متأخراً — بلاغُ المالك",
+    S.isPOOverdue(marble) === false && S.poOverdueDays(marble) === 0);
+  T("★★ ولو تجاوز الوعدَ فهو متأخرٌ عنه هو لا عن موعد الحاجة",
+    (() => { const late = { ...marble, leadTimeDays: 2 };   // وعدٌ انقضى قبل يومين
+      return S.isPOOverdue(late) === true && S.poOverdueDays(late) === 2 && S.poDelayKind(late) === "vendor"; })(),
+    String(S.poOverdueDays({ ...marble, leadTimeDays: 2 })));
+  T("★★ الموعدُ الملزِمُ هو وعدُ المورّد متى وُجد — لا موعدُ الحاجة",
+    S.poDueDate(marble) === S.poPromiseDate(marble) && S.poNeedDate(marble) === rel(-5));
+
+  // ── ٣) التأخّرُ الداخليّ يُسمّى باسمه ولا يُنسَب للمورّد ──
+  const stuck = { status: "pending_ceo", expectedDeliveryDate: rel(-5), leadTimeDays: 21 };
+  T("★★★ طلبٌ عالقٌ في الاعتماد ولم يبلغ المورّدَ: متأخرٌ **داخلياً** لا عن المورّد",
+    S.isPOOverdue(stuck) === true && S.poDelayKind(stuck) === "internal" && S.poPromiseDate(stuck) === "");
+  T("★ ولا يختفي وسمُه — الإعلانُ باقٍ والمسؤوليةُ وحدَها انتقلت",
+    S.poOverdueDays(stuck) === 5);
+
+  // ── ٤) الطلبُ القديم بلا مدّةِ توريد: السلوكُ القديم حرفياً ──
+  const legacy = { status: "wh_receiving", expectedDeliveryDate: rel(-3) };
+  T("★★ طلبٌ قديمٌ بلا مدّةِ توريد يُقاس على موعد الحاجة كما كان",
+    S.isPOOverdue(legacy) === true && S.poOverdueDays(legacy) === 3 && S.poDueDate(legacy) === rel(-3));
+  /* والوسمُ وحدَه يسمّي صاحبَ المشكلة: العدُّ لم يتغيّر، لكنّ طلباً لم يبلغ المورّدَ
+     بعدُ لا يُنسَب تأخّرُه إليه — حتى لو لم تُسجَّل له مدّةُ توريد. */
+  T("★★ والقديمُ الذي لم يُسدَّد بعدُ تأخّرُه داخليٌّ لا تأخّرُ مورّد",
+    S.poDelayKind(legacy) === "internal");
+  T("★★ والقديمُ الذي سُدِّد ثمّ تجاوز الموعدَ تأخّرُه تأخّرُ مورّد",
+    S.poDelayKind({ ...legacy, payment: { installments: [{ at: rel(-10) }] } }) === "vendor");
+  T("طلبٌ بلا أيّ موعدٍ لا يكون متأخراً أبداً",
+    S.isPOOverdue({ status: "pending_pm" }) === false);
+  T("موعدُ حاجةٍ في المستقبل ⇒ غير متأخر",
+    S.isPOOverdue({ status: "pending_pm", expectedDeliveryDate: rel(3) }) === false);
+
+  // ── ٥) الحالةُ النهائية تُطبَّع قبل المقارنة (v18.9xc) ──
+  T("★★★ طلبٌ مغلقٌ حالتُه نصٌّ عربيٌّ قديم («مغلق») لا يبقى «متأخراً» أبداً",
+    S.isPOOverdue({ status: "مغلق", expectedDeliveryDate: rel(-40) }) === false);
+  T("والرمزُ النهائيُّ الصريح يُستثنى كما كان",
+    S.isPOOverdue({ status: "closed", expectedDeliveryDate: rel(-40) }) === false &&
+    S.isPOOverdue({ status: "cancelled", expectedDeliveryDate: rel(-40) }) === false);
+
+  // ── ٦) التمديدُ الموثَّق يقود الموعدَ الملزِم ──
+  const extended = { ...marble, leadTimeDays: 2, vendorPromiseDate: rel(9) };
+  T("★★★ التمديدُ الموثَّق (vendorPromiseDate) يعلو على المدّةِ المشتقّة",
+    S.poPromiseDate(extended) === rel(9) && S.isPOOverdue(extended) === false);
+
+  // ── ٧) بدءُ التوريد يُشتقّ أيضاً من دخول «تنفيذ المشتريات» (طلبٌ بلا سدادٍ مسجّل) ──
+  T("★ بدءُ التوريد يُشتقّ من قيد proc_executing حين لا دفعاتٍ مسجّلة",
+    S.poSupplyStartAt({ timeline: [{ code: "proc_executing", at: rel(-6) + "T09:00:00Z" }] }) === rel(-6));
+  T("★ والختمُ الصريحُ supplyStartAt يعلو على الاشتقاق",
+    S.poSupplyStartAt({ supplyStartAt: rel(-2), payment: { installments: [{ at: rel(-9) }] } }) === rel(-2));
+
+  // ── ٨) عقودُ الربط: ما يقرؤه العرضُ هو ما يقرؤه العدّ ──
+  T("★★ بطاقةُ القائمة ووسمُ التفاصيل يقرآن poLateBadge وحدَه — لا حساباً موازياً",
+    (HTML.match(/\$\{poLateBadge\(p\)\}/g) || []).length >= 2 &&
+    (HTML.match(/class="po-late-badge/g) || []).length === 2,
+    `${(HTML.match(/\$\{poLateBadge\(p\)\}/g)||[]).length} نداء · ${(HTML.match(/class="po-late-badge/g)||[]).length} ترميز`);
+  T("★★ ومؤشّرُ الالتزام (onTime) يُقاس على الموعد الملزِم لا على تاريخ الإنشاء",
+    /const expected = parseTS\(\(typeof poDueDate==="function" \? poDueDate\(p\) : ""\) \|\| p\.expectedDeliveryDate\);/.test(HTML));
+  T("★ ورمزُ قيدِ التمديد خارج STAGE_ORDER فلا يقطع قياسَ أزمنة المراحل",
+    /code: *"delivery_extended"/.test(HTML) &&
+    !/const STAGE_ORDER = \[[^\]]*delivery_extended/.test(HTML));
+
+  // ── ٩) بابُ التمديد: سببٌ إلزاميّ وأثرٌ محفوظ ──
+  const ext = slice("function doPODeliveryExtend(poId){", "\n// ── v18.9oz:");
+  T("دالّةُ التمديد مستخرَجة", !!ext);
+  if (ext) {
+    T("★★★ لا تمديدَ بلا سببٍ مكتوب", /if\(!reason\)\{ toast/.test(ext));
+    T("★★★ و«سبب آخر» يحتاج تفصيلاً — لا يُمرَّر خياراً فارغَ المعنى",
+      /PO_EXTEND_REASONS\[PO_EXTEND_REASONS\.length-1\] && !note/.test(ext));
+    T("★★★ والتمديدُ يمدّ فقط — موعدٌ أقربُ من الملزِم يُرفض",
+      /if\(fromDate && toDate <= fromDate\)/.test(ext));
+    T("★★ وموعدُ الحاجة الأصليّ يُلتقط مرّةً واحدةً ولا يُدهَس",
+      /if\(!p\.originalExpectedDate && poNeedDate\(p\)\) p\.originalExpectedDate = poNeedDate\(p\);/.test(ext));
+    T("★★ وكلُّ تمديدٍ يُقيَّد بسببه وتاريخيه ومَن أجراه",
+      /p\.deliveryExtensions\.push\(\{ at:now, by, reason, note, fromDate: fromDate\|\|"", toDate \}\)/.test(ext));
+    T("★★ وقيدٌ في سجل الأحداث — التمديدُ يُرى في الشاشة وفي PDF",
+      /p\.timeline\.push\(\{[\s\S]*تمديد موعد التوريد/.test(ext));
+    T("★★ والتمديدُ لا يحرّك حالةَ الطلب (ليس انتقالاً في المسار)",
+      !/p\.status *=/.test(ext));
+    T("★ والصلاحيةُ تُفحَص في المنفّذ لا في النافذة وحدَها",
+      /if\(!_poCanExtendDelivery\(p\)\)/.test(ext));
+  }
+  T("★ والتمديدُ لمسؤول المشتريات أو المسؤول — وللطلبات الجارية وحدَها",
+    /function _poCanExtendDelivery\(p\)\{\s*return !!p && poStageIsWip\(p\) && \(isProcurementOfficer\(\) \|\| isAdmin\(\)\);/.test(HTML));
+  T("★★ وتعديلُ موعد الحاجة من نافذة المسؤول يُعلَن في السجل بتاريخيه",
+    /event:`تعديل موعد حاجة المشروع: \$\{_paeOldNeed\|\|"—"\} ← \$\{_paeNewNeed\|\|"—"\}`/.test(HTML));
+
+  // ── ١٠) حقلُ مدّة التوريد يصل من النموذج إلى الوثيقة ──
+  T("★★ حقلُ «مدّة التوريد» في نموذج الإنشاء ويُحفَظ على الطلب",
+    /id="np-lead-time"/.test(HTML) && /^\s*leadTimeDays,/m.test(HTML) &&
+    /const leadTimeDays = Math\.max\(0, Math\.round\(parseFloat/.test(HTML));
+  T("★ ويُمسح مع بقية الحقول ويُحفظ في المسودّة — وإلّا تسرّب لطلبٍ تالٍ",
+    /_NP_DRAFT_FIELDS = \[[^\]]*"np-lead-time"/.test(HTML) &&
+    /"np-expected-delivery","np-lead-time","np-custom-project-name"/.test(HTML));
+}
+
 function browserCheckTimeBombs() {
   H("فحوصُ المتصفّح: بلا تاريخٍ محفورٍ في توقُّعٍ زمنيّ");
 
@@ -9595,6 +9744,7 @@ function browserCheckTimeBombs() {
   contractsPhase1();
   contractLetterhead();
   purchaseCardsGrid();
+  supplyPromiseDates();
   browserCheckTimeBombs();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
