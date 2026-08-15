@@ -345,6 +345,52 @@ function predelivery() {
   T("★ wk: قيدُ الإصدار الحالي موثَّق في NOTES.md (حدّث NOTES مع كل تغيير)",
     NOTES.includes("**" + VER + " —"), "لا قيد لـ " + VER + " في §6 — أضف سطر التغيير قبل الدفع");
 
+  // ── حفظُ المسار مع الرابط في كلّ رفع (§5) ───────────────────────────────
+  // التطبيقُ يخزّن ناتجَ getDownloadURL() — رابطاً يحمل توكِناً في **ميتاداتا
+  // الكائن**. فلو ضاع التوكِنُ في استعادةٍ يوماً، صار الرابطُ ميتاً بلا سبيلٍ
+  // لإحيائه. **وبالمسار يصير فقدانُه إزعاجاً** (نُعيد توليدَ الرابط) لا كارثة.
+  // ولذلك: كلُّ موضعِ رفعٍ يحفظ الرابطَ **يحفظ معه المسار** — وهذه حرّاسُه.
+  {
+    const ROOT2 = path.dirname(IDX);
+    const rd2 = f => { try { return fs.readFileSync(path.join(ROOT2, f), "utf8"); } catch { return ""; } };
+    const TECH = rd2("tech-app.html");
+    const CLEAN = rd2("cleaning-operations.js");
+    const HRP = rd2("hr-payments.js");
+    const CTR = rd2("contracts.js");
+
+    T("★ sp: فاتورةُ الشراء تحفظ invoicePhotoPath مع الرابط",
+      /invoicePhotoUrl: url, invoicePhotoPath: storageRef\.fullPath/.test(HTML));
+    T("★ sp: مرفقُ طلب الشراء يحمل storagePath",
+      /url, storagePath: ref\.fullPath, kind:/.test(HTML));
+    T("★ sp: فاتورةُ التدقيق تحفظ photoPath", /v\.photoPath = storageRef\.fullPath/.test(HTML));
+    T("★ sp: عروضُ الأسعار تحفظ filePath", /tgt\.filePath=storageRef\.fullPath/.test(HTML));
+    T("★ sp: عروضُ RFQ تحفظ photoPath في المستند", /notes: q\.notes, photoUrl, photoPath/.test(HTML));
+    T("★ sp: صورُ البلاغات الأربعة تحفظ storagePath",
+      (HTML.match(/photoObj\.storagePath=_path/g) || []).length === 4);
+    T("★ sp: تطبيقُ الفنيين يحفظ storagePath", /photoObj\.storagePath=_path/.test(TECH));
+    T("★ sp: الوحداتُ الثلاث تحفظ المسار",
+      /rec\.storagePath=ref\.fullPath/.test(CLEAN) &&
+      /storagePath:snap\.ref\.fullPath/.test(HRP) &&
+      /storagePath:snap\.ref\.fullPath/.test(CTR));
+
+    // ★★ صورُ قبل/بعد: `photosBefore` **مصفوفةُ روابطَ** تقرؤها الواجهةُ والمطبوعات،
+    //    وتحويلُها إلى كائناتٍ يمسّ كلَّ قارئ. فالمسارُ في **مصفوفةٍ موازية** —
+    //    إضافةٌ لا تكسر أحداً. وحارسٌ يمنع تحويلَ الشكل لاحقاً بحجّة «التنظيم».
+    T("★★ sp: صورُ قبل/بعد بمصفوفةٍ موازيةٍ لا بتغيير شكل photosBefore",
+      /t\.photosBefore=\[_baPhotos\.before\]/.test(HTML) &&
+      /t\.photosBeforePaths=\[_baPaths\.before\]/.test(HTML) &&
+      /t\.photosAfterPaths=\[_baPaths\.after\]/.test(HTML));
+
+    // ★ حارسُ التغطية: أيُّ رفعٍ جديدٍ يُضاف بلا مسارٍ يُسقط هذا الفحص — فلا يعود
+    //   النمطُ يُنسى مع أوّل شاشةٍ تُضاف. (نعدّ لا نطابق: المواضعُ تتغيّر صياغتُها.)
+    [["index.html", HTML], ["tech-app.html", TECH], ["cleaning-operations.js", CLEAN],
+     ["hr-payments.js", HRP], ["contracts.js", CTR]].forEach(([nm, src]) => {
+      const dl = (src.match(/getDownloadURL/g) || []).length;
+      const pt = (src.match(/fullPath|storagePath|PhotoPath|photoPath|filePath|Paths=/g) || []).length;
+      T(`★ sp: ${nm} — مواضعُ المسار (${pt}) ≥ مواضعُ الرابط (${dl})`, pt >= dl);
+    });
+  }
+
   // ── نسخُ Cloud Storage — حرّاسُ القيودِ الثلاثةِ التي لا تظهر في أيّ سطرِ إعداد ──
   // هذه حرّاسُ **نصٍّ** لا سلوك (لا gcloud في الفحص) — وهي هنا لأن الثلاثةَ قيودٌ
   // يسهل «تبسيطُها» لاحقاً بحسن نيّةٍ فتنهار المنظومةُ بلا رسالةِ خطأٍ واحدة.

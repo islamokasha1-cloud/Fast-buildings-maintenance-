@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9.2661";
+const MODULE_BUILD = "v18.9.2662";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -490,7 +490,7 @@ function _uploadExecPhoto(file){
       _toast("⚠ تأخّر رفع الصورة — يمكنك التسجيل بدونها","warn"); done(); }, 45000);
     ref.put(blob).then(snap=>snap.ref.getDownloadURL()).then(url=>{
       clearTimeout(to); if(timedOut) return;
-      rec.url=url; rec.uploading=false; rec.error=false; done();
+      rec.url=url; rec.storagePath=ref.fullPath; rec.uploading=false; rec.error=false; done();
     }).catch(err=>{
       clearTimeout(to); if(timedOut) return;
       console.warn("cleaningOps/uploadPhoto",err);
@@ -2362,7 +2362,7 @@ function _uploadRoundPhoto(file){
     const ref=st.ref("cleaning-quality/"+id+"/"+Date.now()+".jpg");
     let timedOut=false;
     const to=setTimeout(()=>{ timedOut=true; rec.uploading=false; rec.error=true; _toast("⚠ تأخّر رفع الصورة","warn"); done(); },45000);
-    ref.put(blob).then(s=>s.ref.getDownloadURL()).then(url=>{ clearTimeout(to); if(timedOut) return; rec.url=url; rec.uploading=false; done(); })
+    ref.put(blob).then(s=>s.ref.getDownloadURL()).then(url=>{ clearTimeout(to); if(timedOut) return; rec.url=url; rec.storagePath=ref.fullPath; rec.uploading=false; done(); })
       .catch(err=>{ clearTimeout(to); if(timedOut) return; console.warn("cleaningOps/roundPhoto",err); rec.uploading=false; rec.error=true; _toast("⚠ تعذّر رفع الصورة","warn"); done(); });
   }).catch(()=>{ rec.uploading=false; rec.error=true; done(); });
 }

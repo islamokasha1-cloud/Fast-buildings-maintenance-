@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2661";
+var MODULE_BUILD = "v18.9.2662";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -2086,7 +2086,7 @@ function uploadVendorDoc(vid, file, key){
     return ref.put(file, isPdf ? {contentType:"application/pdf"} : (file.type?{contentType:file.type}:undefined));
   }).then(function(snap){
     return snap.ref.getDownloadURL().then(function(url){
-      return { url:url, name:String(file.name||"").slice(0,120), at:_now(), by:_me() };
+      return { url:url, storagePath:snap.ref.fullPath, name:String(file.name||"").slice(0,120), at:_now(), by:_me() };
     });
   });
 }

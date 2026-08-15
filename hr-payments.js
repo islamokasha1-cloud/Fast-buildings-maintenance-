@@ -56,7 +56,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2661";
+  var MODULE_BUILD = "v18.9.2662";
 
   function COLL(){
     var dev=false;
@@ -390,7 +390,7 @@
     }).then(function(snap){
       return snap.ref.getDownloadURL().then(function(url){
         return {
-          url:url, kind:kind||"doc",
+          url:url, storagePath:snap.ref.fullPath, kind:kind||"doc",
           name:String(file.name||"").slice(0,120),
           contentType:file.type || (file.type==="application/pdf"?"application/pdf":"image/jpeg"),
           by:_me(), at:_now()
