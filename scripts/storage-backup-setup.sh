@@ -148,7 +148,12 @@ EOF
 vault_apply() {
   say "(٢) مشروعُ الخزنة — تفعيلُ الواجهات"
   require_vault_project
+  # ⚠ و`cloudresourcemanager` ليست زائدة: `transfer authorize` يقرأ سياسةَ صلاحيات
+  #   **المشروع** ليمنح وكيلَ النقل، وبدونها يسقط بـSERVICE_DISABLED — **ورسالتُه
+  #   تبدأ بـ«does not have permission»** فتُرسل التشخيصَ إلى الصلاحيات لا إلى واجهةٍ
+  #   معطَّلة. الواجهاتُ الثلاثُ معاً، فلا يُكتشَف النقصُ عند رابعِ خطوة.
   gcloud services enable storage.googleapis.com storagetransfer.googleapis.com \
+    cloudresourcemanager.googleapis.com \
     --project="$VAULT_PROJECT"
   ok "storage + storagetransfer مُفعَّلتان في $VAULT_PROJECT"
 
@@ -194,13 +199,24 @@ vault_apply() {
   # اختراقُ fast-buildings لا يملك تعديلَ جدولةِ النسخ ولا حذفَ الخزنة.
   # ولا نكتم مخرَجَ هذا الأمر: كتمُه هو ما حوّل سؤالَه التفاعليَّ إلى تعليقٍ صامت.
   # `|| true` تكفي لتجاوز فشلٍ غيرِ مؤثّر — أمّا الإخفاءُ فيُعمي عن سببِ التوقّف.
-  gcloud transfer authorize --project="$VAULT_PROJECT" || true
+  #
+  # ★★ و`--add-missing` **ليست تحسيناً**: `transfer authorize` بلا هذه الراية
+  #    **يُبلّغ ولا يُصرِّح** — يطبع «Missing roles: [...]» وينتهي بـexit 0،
+  #    فيبدو نجاحاً وحسابُ الخدمة بلا صلاحيةٍ واحدة (`has roles: []`).
+  #    **أمرٌ اسمُه authorize لا يُفوِّض افتراضياً** — والاسمُ نفسُه يُطمئن كاذباً.
+  #    ومنها `roles/storagetransfer.serviceAgent` على **مستوى المشروع** — ولا تُغني
+  #    عنها منحُ الحاويات، فمنحُ الحاويتين وحدَه يترك الوظيفةَ عاجزةً عن العمل.
+  gcloud transfer authorize --project="$VAULT_PROJECT" --add-missing || true
 
-  local STS_SA
-  STS_SA="$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-    "https://storagetransfer.googleapis.com/v1/googleServiceAccounts/${VAULT_PROJECT}" \
-    | grep -o '"accountEmail": *"[^"]*"' | cut -d'"' -f4)"
-  [ -n "$STS_SA" ] || die "تعذّر استخراجُ حساب خدمة النقل لمشروع $VAULT_PROJECT"
+  # ⚠ الصياغةُ الأولى استخرجته بأنبوب `curl | grep -o | cut` — ومع `set -o pipefail`
+  #   **فشلُ أيّ حلقةٍ يُنهي السكربتَ صامتاً**: لا رسالةَ `die` ولا خطأ، لأن الإخفاقَ
+  #   يقع في **إسنادِ** المتغيّر لا في أمرٍ مستقلّ. فخرج بعد منحٍ ناجحٍ كأنّ شيئاً
+  #   لم يكن. **وأخطرُ الأعطال ما لا يطبع شيئاً.**
+  #   والبريدُ مشتقٌّ من رقم المشروع بصيغةٍ ثابتة — بلا شبكةٍ ولا تحليلِ JSON.
+  local VAULT_NUM STS_SA
+  VAULT_NUM="$(gcloud projects describe "$VAULT_PROJECT" --format='value(projectNumber)' 2>/dev/null || true)"
+  [ -n "$VAULT_NUM" ] || die "تعذّر قراءةُ رقم مشروع $VAULT_PROJECT"
+  STS_SA="project-${VAULT_NUM}@storage-transfer-service.iam.gserviceaccount.com"
   ok "حسابُ الخدمة: $STS_SA"
 
   # على المصدر: قراءةٌ فقط — لا صلاحيةَ كتابةٍ ولا حذفٍ على بيانات الإنتاج.
