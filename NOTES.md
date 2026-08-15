@@ -786,6 +786,20 @@
 
 ## 6) سجل موجز بأهم التعديلات
 
+- **v18.9.2674 — ★★ `transfer authorize` يُبلّغ ولا يُصرِّح: أمرٌ اسمُه «فوِّض» لا يفوّض.**
+  **الاكتشاف.** بعد تفعيل `cloudresourcemanager`، مضى الأمرُ وطبع:
+  `Google-managed transfer account … has roles: []` ·
+  `Missing roles: ['roles/storage.admin','roles/storagetransfer.serviceAgent']` ·
+  `Rerun with --add-missing to add missing roles.` — **وانتهى بنجاح.**
+  **أي أنّ الأمرَ تقريرٌ لا إجراء.** واسمُه `authorize` يوحي بالعكس تماماً، وقد
+  استعملتُه في السكربت بلا الراية فبقي **حسابُ خدمة النقل بلا صلاحيةٍ واحدة** —
+  والسكربتُ يمضي كأنّ شيئاً لم يكن. **هذا هو الصنفُ الأخطر في هذا الملفّ كلِّه:
+  إجراءٌ لم يقع ومخرَجٌ يقول «تمّ».**
+  **ونقصٌ ثانٍ كشفه التقرير:** `roles/storagetransfer.serviceAgent` على **مستوى
+  المشروع** — ومنحُ الحاويتين وحدَه (كما كان السكربت) **يترك الوظيفةَ عاجزةً**.
+  **العلاج:** `--add-missing`، وحارسٌ يشترطها. **والقاعدة: لا تحكم على أمرٍ باسمِه
+  ولا بشفرة خروجه — اقرأ ما طبعه.** hail-tests **2268/2268**.
+
 - **v18.9.2673 — إصلاح: `transfer authorize` يحتاج `cloudresourcemanager`، ورسالتُه تدلّ على الصلاحيات.**
   **البلاغ (المالك).** إعادةُ `--vault-only` بعد كشفِ الخزنةِ الفارغة سقطت عند
   الخطوة (٤): `Cloud Resource Manager API has not been used in project

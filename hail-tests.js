@@ -454,6 +454,12 @@ function predelivery() {
     //   **المشروع**، فبلا `cloudresourcemanager` يسقط بـSERVICE_DISABLED — ورسالتُه
     //   تبدأ بـ«does not have permission» فتُرسل التشخيصَ إلى الصلاحيات لا إلى
     //   واجهةٍ معطَّلة. (نقصٌ ظهر عند رابعِ خطوةٍ بعد إنشاء الحاوية والاحتجاز.)
+    // ★★ `transfer authorize` بلا `--add-missing` **يُبلّغ ولا يُصرِّح**: يطبع
+    //    «Missing roles» وينتهي بنجاح، فيبقى حسابُ الخدمة بلا صلاحيةٍ واحدة.
+    //    أمرٌ اسمُه authorize لا يُفوِّض افتراضياً — والاسمُ نفسُه يُطمئن كاذباً.
+    T("★★ st: transfer authorize بـ --add-missing (بدونها يُبلّغ ولا يُصرِّح)",
+      /transfer authorize[^\n]*--add-missing/.test(SETUP_C));
+
     T("★ st: مشروعُ الخزنة يُفعِّل cloudresourcemanager مع storage و storagetransfer",
       /services enable[\s\S]{0,140}cloudresourcemanager\.googleapis\.com/.test(SETUP_C));
 

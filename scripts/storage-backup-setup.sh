@@ -199,7 +199,14 @@ vault_apply() {
   # اختراقُ fast-buildings لا يملك تعديلَ جدولةِ النسخ ولا حذفَ الخزنة.
   # ولا نكتم مخرَجَ هذا الأمر: كتمُه هو ما حوّل سؤالَه التفاعليَّ إلى تعليقٍ صامت.
   # `|| true` تكفي لتجاوز فشلٍ غيرِ مؤثّر — أمّا الإخفاءُ فيُعمي عن سببِ التوقّف.
-  gcloud transfer authorize --project="$VAULT_PROJECT" || true
+  #
+  # ★★ و`--add-missing` **ليست تحسيناً**: `transfer authorize` بلا هذه الراية
+  #    **يُبلّغ ولا يُصرِّح** — يطبع «Missing roles: [...]» وينتهي بـexit 0،
+  #    فيبدو نجاحاً وحسابُ الخدمة بلا صلاحيةٍ واحدة (`has roles: []`).
+  #    **أمرٌ اسمُه authorize لا يُفوِّض افتراضياً** — والاسمُ نفسُه يُطمئن كاذباً.
+  #    ومنها `roles/storagetransfer.serviceAgent` على **مستوى المشروع** — ولا تُغني
+  #    عنها منحُ الحاويات، فمنحُ الحاويتين وحدَه يترك الوظيفةَ عاجزةً عن العمل.
+  gcloud transfer authorize --project="$VAULT_PROJECT" --add-missing || true
 
   local STS_SA
   STS_SA="$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
