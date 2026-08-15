@@ -483,6 +483,27 @@ function predelivery() {
     T("★ st: أحدثُ تصديرٍ يُختار بفرزٍ صريح لا بترتيب القائمة",
       /sort -r/.test(FDRL) && /sort -r/.test(FCHK));
 
+    // ── ختمُ البروفات: تحويلُ «أعِدها كلَّ ٣ أشهر» من تذكيرٍ إلى رقابة ──────
+    // بلا أثرٍ مكتوب، لا سبيلَ لأحدٍ أن يعرف متى أُثبتت النسخةُ آخرَ مرّة — والنسخُ
+    // يتعفّن بصمت: تتغيّر صلاحيةٌ أو ينكسر مسارٌ فيبقى كلُّ شيءٍ أخضرَ حتى تحتاجَه.
+    const HLTH = rd("scripts/backup-health.sh");
+    T("★ st: فحصُ الصحّة الشامل موجودٌ ويجمع الفحصين",
+      !!HLTH && HLTH.includes("storage-backup-check.sh") &&
+      HLTH.includes("firestore-export-check.sh"));
+    T("★ st: البروفتان تختمان تاريخَهما في الخزنة",
+      DRILL.includes("_drills/storage-restore") && FDRL.includes("_drills/firestore-import"));
+    T("★ st: فحصُ الصحّة يقرأ عمرَ آخر بروفةٍ ويسقط عند الانقطاع",
+      !!HLTH && HLTH.includes("_drills") && /DRILL_FAIL_DAYS/.test(HLTH) &&
+      /DRILL_WARN_DAYS/.test(HLTH));
+
+    // ★★ ويُختَم **وضعُ العبور وحدَه**: البروفةُ المحلّيةُ لا تُثبت جوهرَ البند، فختمُها
+    //    كان سيجعل السجلَّ يقول «مُثبَتٌ» عن شيءٍ لم يُثبَت — أسوأُ من غياب السجلّ.
+    {
+      const localMsg = FDRL.slice(FDRL.indexOf("لكنّ هذا **داخلَ المشروع**"));
+      T("★★ st: البروفةُ المحلّيةُ لا تختم تاريخاً (ختمُها يوثّق ما لم يُثبَت)",
+        localMsg.length > 0 && !localMsg.includes("_drills"));
+    }
+
     // دروسُ يومِ الملفّات مطبَّقةٌ في الثلاثة من أوّل سطر.
     T("★ st: الثلاثةُ غيرُ تفاعلية (سؤالٌ مكتومٌ = تعليقٌ صامت)",
       [FSET, FDRL, FCHK].every(s => s.includes("CLOUDSDK_CORE_DISABLE_PROMPTS=1")));
