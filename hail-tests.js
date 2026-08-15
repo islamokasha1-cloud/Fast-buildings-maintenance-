@@ -9626,8 +9626,28 @@ function supplyPromiseDates() {
     T("★ والصلاحيةُ تُفحَص في المنفّذ لا في النافذة وحدَها",
       /if\(!_poCanExtendDelivery\(p\)\)/.test(ext));
   }
-  T("★ والتمديدُ لمسؤول المشتريات أو المسؤول — وللطلبات الجارية وحدَها",
-    /function _poCanExtendDelivery\(p\)\{\s*return !!p && poStageIsWip\(p\) && \(isProcurementOfficer\(\) \|\| isAdmin\(\)\);/.test(HTML));
+  /* ★★★ بوّابةُ الصلاحية تُشغَّل لا تُقرأ: مصفوفةُ الأدوار كلُّها × (جارٍ/منتهٍ).
+     قرارُ المالك: التمديدُ للمسؤول وحدَه — ومسؤولُ المشتريات صاحبُ مصلحةٍ في تحريك
+     الموعد الذي يُقاس عليه أداؤه، فلا يملك ختمَه. */
+  const gate = slice("function _poCanExtendDelivery(p){", "\nfunction openPODeliveryExtendModal");
+  T("بوّابةُ صلاحية التمديد مستخرَجة", !!gate);
+  if (gate) {
+    const G = {}; const gctx = require("vm").createContext(G);
+    const ROLES = ["admin", "procurement_officer", "project_manager", "ceo", "finance",
+                   "warehouse_manager", "hr_officer", "viewer", ""];
+    require("vm").runInContext(
+      `var _role="", _wip=true;
+       function isAdmin(){ return _role==="admin"; }
+       function poStageIsWip(){ return _wip; }
+       ${gate}
+       function probe(r,w){ _role=r; _wip=w; return _poCanExtendDelivery({id:"x"}); }`, gctx);
+    const allowed = ROLES.filter(r => G.probe(r, true));
+    T("★★★ التمديدُ للمسؤول وحدَه — ولا دورَ آخرَ يملكه (ولا مسؤولُ المشتريات)",
+      allowed.length === 1 && allowed[0] === "admin", "المسموح: " + (allowed.join(",") || "لا أحد"));
+    T("★★ وحتى المسؤولُ لا يمدّد طلباً منتهياً (مغلقاً أو ملغى)",
+      G.probe("admin", false) === false);
+    T("★ وطلبٌ غيرُ موجودٍ لا يُمدَّد", G._poCanExtendDelivery(null) === false);
+  }
   T("★★ وتعديلُ موعد الحاجة من نافذة المسؤول يُعلَن في السجل بتاريخيه",
     /event:`تعديل موعد حاجة المشروع: \$\{_paeOldNeed\|\|"—"\} ← \$\{_paeNewNeed\|\|"—"\}`/.test(HTML));
 
