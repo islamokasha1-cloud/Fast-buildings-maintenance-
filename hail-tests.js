@@ -450,6 +450,13 @@ function predelivery() {
 
     // (٧) المرحلتان منفصلتان في الثلاثة: المرحلةُ ١ أمران على الحاوية القائمة،
     //     والمرحلةُ ٢ تحتاج مشروعاً وفوترة. ربطُهما يُبقي ٩٠٪ من الحماية معلّقةً.
+    // ★ الواجهاتُ الثلاثُ تُفعَّل معاً: `transfer authorize` يقرأ سياسةَ صلاحيات
+    //   **المشروع**، فبلا `cloudresourcemanager` يسقط بـSERVICE_DISABLED — ورسالتُه
+    //   تبدأ بـ«does not have permission» فتُرسل التشخيصَ إلى الصلاحيات لا إلى
+    //   واجهةٍ معطَّلة. (نقصٌ ظهر عند رابعِ خطوةٍ بعد إنشاء الحاوية والاحتجاز.)
+    T("★ st: مشروعُ الخزنة يُفعِّل cloudresourcemanager مع storage و storagetransfer",
+      /services enable[\s\S]{0,140}cloudresourcemanager\.googleapis\.com/.test(SETUP_C));
+
     T("★ st: الثلاثةُ تقبل --layer1-only (المرحلةُ ١ لا تنتظر قراراً إدارياً)",
       [SETUP, DRILL, CHECK].every(s => s.includes("--layer1-only")));
 

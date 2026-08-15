@@ -148,7 +148,12 @@ EOF
 vault_apply() {
   say "(٢) مشروعُ الخزنة — تفعيلُ الواجهات"
   require_vault_project
+  # ⚠ و`cloudresourcemanager` ليست زائدة: `transfer authorize` يقرأ سياسةَ صلاحيات
+  #   **المشروع** ليمنح وكيلَ النقل، وبدونها يسقط بـSERVICE_DISABLED — **ورسالتُه
+  #   تبدأ بـ«does not have permission»** فتُرسل التشخيصَ إلى الصلاحيات لا إلى واجهةٍ
+  #   معطَّلة. الواجهاتُ الثلاثُ معاً، فلا يُكتشَف النقصُ عند رابعِ خطوة.
   gcloud services enable storage.googleapis.com storagetransfer.googleapis.com \
+    cloudresourcemanager.googleapis.com \
     --project="$VAULT_PROJECT"
   ok "storage + storagetransfer مُفعَّلتان في $VAULT_PROJECT"
 
