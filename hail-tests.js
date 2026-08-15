@@ -2146,6 +2146,84 @@ function auditRowAlignment() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   21ج) v18.9xa — اسم البند وكودُه يتبعان مرساة الكتالوج بعد التدقيق
+        الجذر: أمين المستودع يضيف البند للكتالوج باسم الفاتورة (فيأخذ كوداً)
+        ويربطه بصفّ الطلب، فتُكتب المرساة itemId وحدها. itemName/itemCode تبقيان
+        كما كُتبتا عند إنشاء الطلب — فالمخزون والسجل يقرآن الاسم الصحيح عبر
+        _resolveItemName/_resolveItemCode، وطلبُ الشراء وطباعتُه يعرضان الاسم
+        القديم و«—» مكان الكود (PO-202608-0160).
+   ════════════════════════════════════════════════════════════════════ */
+function poItemNameFollowsCatalog() {
+  H("21ج) اسم البند وكودُه من مرساة الكتالوج لا من نصّ الإنشاء");
+
+  const a = HTML.indexOf("function _resolveItemName(");
+  const b = HTML.indexOf("\n// ══ v18.9nr: بنود الطلب غير المكتملة", a);
+  let M = null;
+  if (a >= 0 && b > a) {
+    try {
+      M = new Function("_catalogItems", "_catResolveId", "_catSearchNorm",
+        HTML.slice(a, b) + "\nreturn {_poShownName,_poShownCode,_poReqName};")(
+        [{ id: "C1", name: "محبس PVC بلاستيك 1 بوصة سنامة", code: "PLMB-306" }],
+        id => id || null,
+        s => String(s || "").trim().toLowerCase().replace(/\s+/g, " "));
+    } catch (e) { T("تُبنى دوال العرض", false, String(e.message).slice(0, 120)); }
+  }
+  T("تُبنى دوال العرض (_poShownName/_poShownCode/_poReqName)", !!M);
+  if (M) {
+    // بندٌ حرٌّ رُبط عند التدقيق: المرساة موجودة، والاسم/الكود الخامّان قديمان
+    const linked = { itemId: "C1", itemName: "محبس بلاستيك", itemCode: "" };
+    T("★ الاسم المعروض من الكتالوج لا من نصّ الإنشاء",
+      M._poShownName(linked) === "محبس PVC بلاستيك 1 بوصة سنامة");
+    T("★ الكود يظهر من المرساة (كان «—» رغم وجوده في الكتالوج)",
+      M._poShownCode(linked) === "PLMB-306");
+    T("★ ما كُتب عند إنشاء الطلب لا يضيع (يظهر «طُلب باسم»)",
+      M._poReqName(linked) === "محبس بلاستيك");
+    T("★ الاسم المطابق لا يُنتج سطراً مكرَّراً",
+      M._poReqName({ itemId: "C1", itemName: " محبس PVC بلاستيك 1  بوصة سنامة " }) === "");
+    T("requestedItemName المثبَّت يسبق itemName المدهوس",
+      M._poReqName({ itemId: "C1", itemName: "محبس PVC بلاستيك 1 بوصة سنامة",
+                     requestedItemName: "محبس بلاستيك" }) === "محبس بلاستيك");
+    T("★ الاستبدال لا يُكرَّر سطراً (شارة «⇄ استُبدل» تكفي)",
+      M._poReqName({ itemId: "C1", itemName: "محبس بلاستيك",
+                     substitution: { fromName: "محبس بلاستيك" } }) === "");
+    // بندٌ بلا مرساة: لا تخمين — يبقى نصّه كما هو
+    T("البند بلا مرساة يبقى على نصّه (لا مطابقة بالاسم ولا تخمين)",
+      M._poShownName({ itemName: "تفلون" }) === "تفلون" &&
+      M._poShownCode({ itemName: "تفلون" }) === "" &&
+      M._poReqName({ itemName: "تفلون" }) === "");
+  }
+
+  // ── حرّاس المسار: العرض والطباعة والتخزين ──
+  T("★ تفاصيل الطلب تعرض الاسم والكود من المرساة",
+    HTML.includes("<td class=\"td-r\">${esc(_poShownName(item)||'')}") &&
+    HTML.includes("const _c=_poShownCode(item);"));
+  T("★ لم يعد يُقرأ الحقل الخام في خلية اسم/كود البند بتفاصيل الطلب",
+    !HTML.includes("<td class=\"td-r\">${esc(item.itemName||'')}${statusBadge}") &&
+    !HTML.includes("<td class=\"td-r\">${item.itemCode?`<span class=\"po-code\">"));
+  const prints = (HTML.match(/const _shCode = _poShownCode\(it\), _shName = _poShownName\(it\), _reqNm = _poReqName\(it\);/g) || []).length;
+  T("★ نسختا الطباعة (بأسعار وبلا أسعار) تعرضان الاسم والكود من المرساة", prints === 2);
+  T("★ لم يبقَ في الطباعة قراءةٌ خام لاسم البند/كوده",
+    !HTML.includes("${esc(it.itemName||'')}${nameBadge}${substBadge}${noteLine}</td>") &&
+    !HTML.includes("${it.itemCode?`<span style='font-family:JetBrains Mono,monospace"));
+  T("★ التدقيق يثبّت الاسم والكود على بند الطلب (لا المرساة وحدها)",
+    HTML.includes("itemName  : _nm1,          // v18.9xa") &&
+    HTML.includes("itemCode  : _cd1,          // v18.9xa") &&
+    HTML.includes("const _nm1   = _anch ? _resolveItemName(_anch, _nm0) : _nm0;"));
+  T("★ ما طلبه المشرف يُحفَظ في requestedItemName عند أول دهس",
+    HTML.includes("requestedItemName: _reqNm, // v18.9xa") &&
+    HTML.includes("const _reqNm = it.requestedItemName || ((_nm0 && _nm1 && _nm0 !== _nm1) ? _nm0 : \"\");"));
+  T("★ صفّ السند يحمل الاسم والكود المعياريَّين (يتّسق مع سجلّ المخزون)",
+    HTML.includes("itemName: _anchor ? _resolveItemName(_anchor, it.itemName||\"\") : (it.itemName||\"\"),") &&
+    HTML.includes("itemCode: _anchor ? _resolveItemCode(_anchor, it.itemCode||\"\") : (it.itemCode||\"\"),"));
+  T("★ نافذة تعديل المسؤول تفتح البند باسمه المعياريّ (فلا يعيد الحفظ تجميد القديم)",
+    HTML.includes("const _pnm = it.itemId ? _resolveItemName(it.itemId, it.itemName||\"\") : (it.itemName||\"\");") &&
+    HTML.includes("return {...it, itemName:_pnm, itemCode:_pcd, requestedItemName:_prq,"));
+  // الهوية لا تنكسر: _poItemKey يقدّم itemId، والاسم لا يُلمس إلا مع وجود مرساة
+  T("★ تغيير الاسم لا يكسر اصطفاف صفوف التدقيق (itemId يسبق الاسم في الهوية)",
+    HTML.includes("const id = String(it.itemId   || \"\").trim(); if(id) return \"id:\" + id;"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    22) تدقيق الاستلام: إضافة بند إضافي لا تمحو كميات صفوف الطلب (v18.9sz)
    ════════════════════════════════════════════════════════════════════ */
 function waExtrasPreserveQty() {
@@ -9333,6 +9411,7 @@ function browserCheckTimeBombs() {
   extrasCardGating();
   adminEditKeepsStatus();
   auditRowAlignment();
+  poItemNameFollowsCatalog();
   waExtrasPreserveQty();
   procToFinance();
   poCEOStampBound();
