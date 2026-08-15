@@ -457,6 +457,13 @@ function predelivery() {
     // ★★ `transfer authorize` بلا `--add-missing` **يُبلّغ ولا يُصرِّح**: يطبع
     //    «Missing roles» وينتهي بنجاح، فيبقى حسابُ الخدمة بلا صلاحيةٍ واحدة.
     //    أمرٌ اسمُه authorize لا يُفوِّض افتراضياً — والاسمُ نفسُه يُطمئن كاذباً.
+    // ★★ بريدُ حساب الخدمة يُشتقّ من رقم المشروع لا بأنبوبِ curl|grep|cut: مع
+    //    `set -o pipefail` فشلُ أيّ حلقةٍ يُنهي السكربتَ **صامتاً** — الإخفاقُ في
+    //    **إسنادِ** المتغيّر لا في أمرٍ مستقلّ، فلا تُطبع رسالةُ die ولا خطأ.
+    T("★★ st: حسابُ خدمة النقل يُشتقّ من رقم المشروع لا بأنبوبٍ يقتل السكربتَ صامتاً",
+      /project-\$\{VAULT_NUM\}@storage-transfer-service/.test(SETUP_C) &&
+      !/googleServiceAccounts.*\|\s*grep/.test(SETUP_C));
+
     T("★★ st: transfer authorize بـ --add-missing (بدونها يُبلّغ ولا يُصرِّح)",
       /transfer authorize[^\n]*--add-missing/.test(SETUP_C));
 
