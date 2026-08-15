@@ -254,6 +254,62 @@ const dash = await page.evaluate(async () => {
 check('و) لوحة المعلومات عرضت بيانات', dash.len > 50 && dash.nums > 3, `${dash.len} حرف · ${dash.nums} رقم`);
 await page.screenshot({ path: `${SHOTS}/06-dashboard.png` });
 
+/* ═════════ ٧) بطاقات «المالية — السداد» تفاعلية (v18.9ua) ═════════
+   الوعدُ الذي يُفحَص هنا: **الرقمُ على البطاقة = عددُ الصفوف بعد نقرها**. لا يُفحَص
+   في jsdom لأن التصفية تمرّ بالـDOM كلِّه (بطاقةٌ ← فلاترُ الصفحة ← ترقيمٌ ← قائمة).
+   والطلباتُ تُكتب هنا لا في البذرة الأولى: مستمعو المحاكي أحياء فتصل اللقطةُ كما في
+   Firestore — ولا تنحرف أرقامُ الفحوص السابقة. */
+CURRENT = 'finance-card';
+L('\n=== ٧) بطاقات المالية التفاعلية ===');
+await page.evaluate(async () => {
+  const PC = PURCHASES_COLLECTION();
+  const base = (id, status, cost, extra) => Object.assign({
+    id, status, building: 'مبنى الإدارة', projectId: 'hail', vendor: 'مؤسسة النور', supervisor: 'أسامة السادات',
+    itemName: 'كابل نحاس 2.5', qty: 1, unit: 'متر', createdAt: '2026-07-20T09:00:00.000Z', estCost: cost, actualCost: cost,
+    items: [{ itemName: 'كابل نحاس 2.5', qty: 1, unit: 'متر', unitCost: cost, itemCost: cost, rcvQty: 1 }],
+    timeline: [{ code: 'pending_finance', at: '2026-07-21T09:00:00.000Z' }]
+  }, extra || {});
+  const put = (d) => db.collection(PC).doc(d.id).set(d);
+  await put(base('PO-FIN-1', 'pending_finance', 1000, { payment: { installments: [{ amount: 400 }] } }));
+  await put(base('PO-FIN-2', 'pending_finance', 2000, { projectId: 'riyadh' }));   // مشروعٌ آخر عمداً
+  await put(base('PO-PAID-1', 'closed', 3000, { auditedBy: 'أمين', payment: { paid: true, paidAt: '2026-07-23T09:00:00.000Z' } }));
+  await put(base('PO-PAID-2', 'closed', 4000, { auditedBy: 'أمين', payment: { paid: true } }));   // قديمٌ بلا طابع سداد
+  showPage('purchases');
+  await new Promise(r => setTimeout(r, 900));
+});
+const finChips = await page.evaluate(() => [...document.querySelectorAll('#po-finance-card .po-fin-chip')].map(b => b.innerText.replace(/\s+/g, ' ').trim()));
+check('أ) بطاقات المالية أزرارٌ قابلة للنقر', finChips.length === 4, finChips.join(' | '));
+const finRows = async (n) => page.evaluate(async (i) => {
+  document.querySelectorAll('#po-finance-card .po-fin-chip')[i].click();
+  await new Promise(r => setTimeout(r, 1200));
+  return [...new Set(((document.getElementById('purchases-list') || {}).innerText || '').match(/PO-[A-Z0-9-]+/g) || [])].sort();
+}, n);
+const r1 = await finRows(0);
+check('ب) ★ «بانتظار السداد» ⇐ المعلّقان وحدَهما (عبر المشاريع)',
+  JSON.stringify(r1) === '["PO-FIN-1","PO-FIN-2"]', r1.join(','));
+check('ج) العدّاد يقول على أيّ بطاقةٍ صُفّيت',
+  ((await page.textContent('#po-count')) || '').includes('بطاقة المالية'), ((await page.textContent('#po-count')) || '').trim());
+const r1b = await finRows(0);   // نقرٌ ثانٍ على البطاقة نفسِها
+check('د) نقرُ البطاقة مرّتين يُلغي التصفية', r1b.length > 2, r1b.length + ' طلب');
+const r2 = await finRows(1);
+check('هـ) ★ «سُدّد (تراكمي)» ⇐ المسدَّدان بالكامل',
+  JSON.stringify(r2) === '["PO-PAID-1","PO-PAID-2"]', r2.join(','));
+const r3 = await finRows(2);
+check('و) ★ «متوسط زمن السداد» ⇐ الداخلُ في المتوسّط وحدَه (لا القديمُ بلا طابع)',
+  JSON.stringify(r3) === '["PO-PAID-1"]', r3.join(','));
+const oldestOpened = await page.evaluate(async () => {
+  document.querySelectorAll('#po-finance-card .po-fin-chip')[3].click();
+  await new Promise(r => setTimeout(r, 900));
+  const m = document.getElementById('modal-purchase-detail');
+  if (!m || m.classList.contains('hidden')) return 'لم تُفتح';
+  return /PO-FIN-[12]/.test(m.innerText || '') ? 'ok' : 'بلا رقم الطلب';
+});
+check('ز) ★ «أقدم طلب معلّق» يفتح الطلبَ الذي يقف خلف الرقم', oldestOpened === 'ok', oldestOpened);
+await page.screenshot({ path: `${SHOTS}/07-finance-card.png` });
+await page.evaluate(async () => { try { closeModal('modal-purchase-detail'); } catch (e) { } clearPOFilters(); await new Promise(r => setTimeout(r, 900)); });
+check('ح) «مسح الفلاتر» يمسح فلتر البطاقة أيضاً',
+  await page.evaluate(() => !window._poFinanceView));
+
 CURRENT = 'logout';
 const out = await page.evaluate(async () => {
   try { window.showConfirm = async () => true; logout(); } catch (e) { return 'خطأ: ' + e.message; }
