@@ -4107,8 +4107,9 @@ function cleaningOpsTests() {
       CO._canExecute() === true && CO._canQuality() === false && CO._canEdit() === false);
     sandbox.currentUser = prevUser;
   }
+  // v18.9ub: القائمةُ صارت تحمل مفتاحين (أُضيف ) — والمعيارُ عضويةٌ لا مطابقةٌ حرفية
   T("★ ce: النواة تفصل المفاتيح المانحة عن الحاجبة بمصدرٍ واحدٍ للقراءة",
-    /const _PERM_GRANT_KEYS = \["cleaningEdit"\];/.test(HTML) &&
+    /const _PERM_GRANT_KEYS = \[[^\]]*"cleaningEdit"[^\]]*\];/.test(HTML) &&
     /function _permOn\(perms, k\)\{[\s\S]{0,240}?perms\[k\] === true[\s\S]{0,120}?perms\[k\] !== false;/.test(HTML));
   T("★ ce: الشارات ونافذة التعديل تقرآن _permOn لا المقارنة الحاجبة مباشرةً",
     !/perms\[k\]!==false/.test(HTML) &&
@@ -6327,6 +6328,128 @@ function pcaiTruncatedOutputGuards() {
     !!wSrc && capW >= capReq, "وسيط=" + capW + " طلب=" + capReq);
   T("pcai: الطلبُ يستعمل الثابتَ لا رقماً محفوراً",
     /max_tokens:PCAI_EXTRACT_MAX_TOKENS/.test(runSrc));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   صلاحيةُ «طلب شراء» لمسؤول الموارد البشرية (بلاغ المالك — v18.9ub)
+
+   البلاغ: نافذةُ الصلاحيات تعرض له عشرَ خاناتٍ مؤشَّرة، «لكن فعلياً لا يظهر
+   عنده غير صفحة الموارد البشرية». والجذر: تلك المفاتيحُ تحكم صفحاتِ **وضع
+   المشروع**، ودورُه من أدوار الوضع المركزيّ التي لا ترى شاشةَ مشروعٍ أصلاً —
+   فخاناتُها زينةٌ بلا أثر. والعلاج شقّان: لا تُعرض خانةٌ لا أثرَ لها، ويُضاف
+   مفتاحٌ **مانحٌ** واحدٌ يعمل فعلاً: «طلب شراء».
+   الحارس يُنفّذ الدوالَّ على مستخدمين حقيقيين — لا يقرأ سطورَها.
+   ════════════════════════════════════════════════════════════════════ */
+function hrPurchaseRequestGuards() {
+  H("صلاحية «طلب شراء» لمسؤول الموارد البشرية");
+
+  const grab = re => (HTML.match(re) || [])[0] || "";
+  const parts = {
+    map:    grab(/const _PERM_PAGE_MAP = \{[\s\S]*?\n\};/),
+    labels: grab(/const _PERM_LABELS = \{[\s\S]*?\n\};/),
+    grant:  grab(/const _PERM_GRANT_KEYS = \[[^\]]*\];/),
+    on:     grab(/function _permOn\(perms, k\)\{[\s\S]*?\n\}/),
+    pages:  grab(/const _HRO_PO_PAGES   = \[[^\]]*\];/),
+    okPgs:  grab(/const _HRO_PO_GRANTED = \[[^\]]*\];/),
+    gRole:  grab(/function _isGlobalOnlyRole\(role\)\{[\s\S]*?\n\}/),
+    keys:   grab(/function _permKeysForUser\(u\)\{[\s\S]*?\n\}/),
+    blocked:grab(/function _blockedPagesForUser\(\)\{[\s\S]*?\n\}/),
+    own:    grab(/function _hroOwnPOsOnly\(\)\{[\s\S]*?\n\}/),
+    mine:   grab(/function _poCreatedByMe\(p\)\{[\s\S]*?\n\}/),
+    vis:    grab(/function _poVisibleList\(\)\{[\s\S]*?\n\}/),
+  };
+  const absent = Object.keys(parts).filter(k => !parts[k]);
+  T("★ hrpo: كلُّ دوالّ البوّابة موجودةٌ في index.html", absent.length === 0, absent.join(","));
+  if (absent.length) return;
+
+  const SRC = [parts.map, parts.labels, "const _PERM_KEYS = Object.keys(_PERM_LABELS);",
+    parts.grant, parts.on, parts.pages, parts.okPgs, parts.gRole, parts.keys,
+    parts.blocked, parts.own, parts.mine, parts.vis].join("\n");
+  const mk = (currentUser, purchases) =>
+    new Function("currentUser", "purchases",
+      SRC + "\nreturn {blocked:_blockedPagesForUser,keys:_permKeysForUser,on:_permOn,vis:_poVisibleList};")
+      (currentUser, purchases || []);
+
+  const basePerms = { tickets:true, ppm:true, assets:true, purchases:true, reports:true,
+                      kpi:true, globalPurchases:true, cleaning:true, contracts:true };
+  const hrNo  = { role:"hr_officer", name:"عبدالله آدم", permissions:{ ...basePerms } };
+  const hrYes = { role:"hr_officer", name:"عبدالله آدم", permissions:{ ...basePerms, poRequest:true } };
+  const hrOld = { role:"hr_officer", name:"عبدالله آدم" };            // بلا حقل صلاحياتٍ أصلاً
+  const B = u => [...mk(u).blocked()];
+
+  // ── (١) ★ البلاغ نفسُه: الخاناتُ المعروضةُ هي العاملةُ وحدَها ──
+  T("★★ hrpo: نافذةُ الموارد البشرية لا تعرض إلا «طلب شراء» (لا خانةَ بلا أثر)",
+    JSON.stringify(mk(hrNo).keys(hrNo)) === JSON.stringify(["poRequest"]),
+    JSON.stringify(mk(hrNo).keys(hrNo)));
+  T("★ hrpo: أدوارُ الوضع المركزيّ الأخرى بلا خاناتٍ (صفحاتُها يحكمها دورُها)",
+    ["finance","warehouse_manager","procurement_officer"].every(r =>
+      mk({role:r}).keys({role:r}).length === 0));
+  T("★ hrpo: والدورُ العاديُّ يبقى على مفاتيحه العشرة بلا «طلب شراء»",
+    (() => { const u={role:"supervisor",permissions:{}}; const k=mk(u).keys(u);
+      return k.length === 10 && k.indexOf("poRequest") === -1 && k[0] === "tickets"; })());
+
+  // ── (٢) ★★ البوّابةُ الحقيقية: showPage لا الزرُّ المخفيّ ──
+  const ALL_PO = ["purchases","new-purchase","purchase-reports","substitute-budget","po-audit","finance-audit"];
+  T("★★ hrpo: بلا المفتاح — مسارُ الشراء كلُّه محجوبٌ عن showPage (لا بابَ بالعنوان)",
+    ALL_PO.every(p => B(hrNo).includes(p)), B(hrNo).join(","));
+  T("★★ hrpo: بالمفتاح — يُفتح بابان اثنان فقط: الإنشاءُ والمتابعة",
+    !B(hrYes).includes("purchases") && !B(hrYes).includes("new-purchase"),
+    "المحجوب: " + B(hrYes).join(","));
+  T("★★ hrpo: وما عداهما يبقى مغلقاً وإن مُنح المفتاح (تقارير · تدقيق · رقابة · مستعاض)",
+    ["purchase-reports","substitute-budget","po-audit","finance-audit"].every(p => B(hrYes).includes(p)));
+
+  // ── (٣) ★★ مانحٌ لا حاجب: لا فتحَ بأثرٍ رجعيّ لمن لم يُمنح ──
+  T("★★ hrpo: المفتاحُ مانحٌ — المستخدمُ القديمُ بلا حقل صلاحياتٍ لا يُفتح له شيء",
+    ALL_PO.every(p => B(hrOld).includes(p)));
+  T("★ hrpo: والمفتاحُ مسجَّلٌ في قائمة المانحين (فلا يُقرأ باصطلاح الحاجب)",
+    /_PERM_GRANT_KEYS = \["cleaningEdit","poRequest"\]/.test(HTML) &&
+    mk(hrOld).on(undefined, "poRequest") === false &&
+    mk(hrNo).on(hrNo.permissions, "poRequest") === false &&
+    mk(hrYes).on(hrYes.permissions, "poRequest") === true);
+
+  // ── (٤) الأدوارُ الأخرى لم تتأثّر ──
+  T("★ hrpo: الأدمن لا يُحجب عنه شيء", B({role:"admin",permissions:{}}).length === 0);
+  T("★ hrpo: والمشرفُ يبقى على حجبه القديم وحدَه (لا مسارَ شراءٍ أُقحم عليه)",
+    JSON.stringify(B({role:"supervisor",permissions:{assets:false}})) === JSON.stringify(["assets"]));
+  T("★ hrpo: ومسؤولُ المشتريات لا يمسّه الحجبُ الجديد",
+    B({role:"procurement_officer",permissions:{}}).length === 0);
+
+  // ── (٥) ★★ القائمةُ واللوحةُ من مصدرٍ واحد — لا تضييقٌ هنا وتسريبٌ هناك ──
+  const POS = [
+    { id:"PO-1", createdBy:"عبدالله آدم" },
+    { id:"PO-2", createdBy:"سعد" },
+    { id:"PO-3", createdByName:"عبدالله آدم" },
+    { id:"PO-4", createdBy:"مشتريات" },
+  ];
+  T("★★ hrpo: المُنحُ يرى طلباتِه هو وحدَها (لا مشترياتِ الشركة كلَّها)",
+    JSON.stringify(mk(hrYes, POS).vis().map(p => p.id)) === JSON.stringify(["PO-1","PO-3"]),
+    mk(hrYes, POS).vis().map(p => p.id).join(","));
+  T("★ hrpo: وبقيةُ الأدوار ترى القائمةَ كاملةً بلا تغيير",
+    mk({role:"procurement_officer",permissions:{}}, POS).vis().length === 4 &&
+    mk({role:"admin",permissions:{}}, POS).vis().length === 4);
+  T("★★ hrpo: العدّادُ ولوحةُ المؤشّرات تقرآن نفسَ المصدر (لا بطاقةٌ أوسعُ من القائمة)",
+    /const visible = _poVisibleList\(\);/.test(HTML) &&
+    /\$\{filtered\.length\} طلب من \$\{visible\.length\}/.test(HTML) &&
+    /const _dashBase = _poVisibleList\(\);/.test(HTML) &&
+    !/const dashData = fProject\s*\n\s*\? purchases\.filter/.test(HTML));
+
+  // ── (٦) الحفظ لا يمحو مفتاحاً لم تُعرض خانتُه ──
+  T("★★ hrpo: الحفظُ يُبقي المفاتيحَ غيرَ المعروضة كما هي (لا محوَ ما لم يُرَ)",
+    /const shown=new Set\(_permKeysForUser\(USERS\[idx\]\)\);/.test(HTML) &&
+    /if\(!shown\.has\(k\)\)\{ if\(k in prev\) perms\[k\]=prev\[k\]; return; \}/.test(HTML));
+
+  // ── (٧) السايدبار: القاعدةُ المانحةُ أعلى وزناً، والصنفُ يُرفع ويُنزع ──
+  T("★ hrpo: قاعدةُ CSS تفتح مجموعةَ الشراء بصنفين على body (تغلب قاعدةَ الإخفاء)",
+    /body\.role-hr-officer\.perm-po-request #hdr-grp-po\{display:flex!important\}/.test(HTML) &&
+    /body\.role-hr-officer\.perm-po-request #grp-po\{display:block!important\}/.test(HTML));
+  T("★ hrpo: وأزرارُ التقارير والتدقيق والرقابة والمستعاض تبقى مخفيةً عنه",
+    ["purchase-reports","substitute-budget","po-audit","finance-audit"].every(p =>
+      new RegExp('body\\.role-hr-officer #grp-po \\.sidebar-nav-btn\\[data-page="' + p + '"\\]').test(HTML)));
+  T("★ hrpo: الصنفُ يُضبط من الصلاحية عند تحديث الهيدر ويُنزع عند الخروج",
+    /classList\.toggle\("perm-po-request", !!\(currentUser && _permOn\(currentUser\.permissions,"poRequest"\)\)\)/.test(HTML) &&
+    /classList\.remove\("perm-po-request"\)/.test(HTML));
+  T("★ hrpo: وللمفتاح خانةٌ في «مستخدم جديد» غيرُ مؤشَّرةٍ (مانحٌ لا يُمنح تلقائياً)",
+    /id="perm-poRequest"> طلب شراء/.test(HTML) && !/id="perm-poRequest"\s+checked/.test(HTML));
 }
 
 function tvWallGuards() {
@@ -9205,6 +9328,7 @@ function browserCheckTimeBombs() {
   tvWallGuards();
   aiErrorMessagesGuards();
   pcaiTruncatedOutputGuards();
+  hrPurchaseRequestGuards();
   photoQueueGuards();
   versionStampGuards();
   contractsPhase1();
