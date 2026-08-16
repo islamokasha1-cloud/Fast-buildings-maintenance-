@@ -2242,11 +2242,25 @@ const permStates = await page.evaluate(() => {
     };
   };
   const pm = (perms) => ({ user: 'pm', name: 'مدير المشاريع', role: 'project_manager', permissions: perms });
+  // بلاغُ المالك: «رغده» دورُها المسجَّل «مشرف» — المفتاحُ **مانحٌ** في حقّها
+  const sup = (perms) => ({ user: 'رغده فهيد', name: 'رغده فهيد', role: 'مشرف', permissions: perms });
   const out = {
     allowed: probe(pm({ contracts: true })),
     blockedU: probe(pm({ contracts: false })),
     legacy:  probe({ user: 'old', name: 'قديم', role: 'project_manager' }),   // بلا حقل صلاحيات
-    admin:   probe({ user: 'a', name: 'أدمن', role: 'admin', permissions: { contracts: false } })
+    admin:   probe({ user: 'a', name: 'أدمن', role: 'admin', permissions: { contracts: false } }),
+    supGrant: probe(sup({ contracts: true })),
+    supNone:  probe(sup({ tickets: true })),
+    supLegacy: probe({ user: 's2', name: 'مشرفٌ قديم', role: 'مشرف' })
+  };
+  // ومحاولةُ الممنوحِ فتحَ صفحةٍ فعلاً — لا رؤيةَ زرٍّ فحسب
+  currentUser = sup({ contracts: true });
+  window.contracts.refreshNav();
+  showPage('vendors');
+  out.supLandedOn = (document.querySelector('.page.active') || {}).id || '';
+  out.supCanWrite = {
+    edit: window.contracts.canEdit(), bank: window.contracts.canBank(),
+    status: window.contracts.canStatus(), create: window.contracts.canCreateReq()
   };
   // ومحاولةُ الدخول المباشر بالعنوان وهو محجوب
   currentUser = pm({ contracts: false });
@@ -2273,6 +2287,26 @@ check('★★ ومستخدمٌ قديمٌ بلا حقل صلاحيات يبقى 
 check('★★ والأدمنُ يتجاوز الحجبَ كما في كل مفاتيح النواة',
   permStates.admin.canView === true && permStates.admin.grp === true,
   JSON.stringify(permStates.admin));
+
+/* ── بلاغُ المالك: خانةٌ مؤشَّرةٌ وقسمٌ غائبٌ عن «رغده» (دورُها «مشرف») ──
+   المفتاحُ **مزدوجُ الطبع**: مانحٌ لغير المؤهَّل بطبعه. والفحصُ تنفيذيٌّ في متصفّح:
+   نبدّل المستخدمَ ونسأل النظامَ ماذا يرى ويكتب — لا نقرأ سطراً. */
+check('★★★ المشرفُ الممنوحُ صراحةً يرى القسمَ فعلاً — بلاغُ رغده',
+  permStates.supGrant.canView === true && permStates.supGrant.grp === true &&
+  permStates.supGrant.hdr === true && permStates.supGrant.blocked === 0,
+  JSON.stringify(permStates.supGrant));
+check('★★★ وصفحتُه تُفتح فعلاً لا زرَّها وحدَه',
+  permStates.supLandedOn === 'page-vendors', 'هبط على ' + permStates.supLandedOn);
+check('★★★ والمنحُ اطّلاعٌ لا غير — لا تعديلَ ولا آيبانَ ولا إيقافَ ولا إنشاءَ طلب',
+  Object.values(permStates.supCanWrite).every(v => v === false),
+  JSON.stringify(permStates.supCanWrite));
+check('★★★ ومشرفٌ بلا المفتاح لا يراه (لا يُقرأ المانحُ إلا بعلامةٍ صريحة)',
+  permStates.supNone.canView === false && permStates.supNone.grp === false &&
+  permStates.supNone.blocked === 3,
+  JSON.stringify(permStates.supNone));
+check('★★★ ومشرفٌ قديمٌ بلا حقل صلاحياتٍ لا يرثه بأثرٍ رجعيّ',
+  permStates.supLegacy.canView === false && permStates.supLegacy.grp === false,
+  JSON.stringify(permStates.supLegacy));
 
 check('لا أخطاء جافاسكربت طوال الرحلة', errors.length === 0, errors.slice(0, 2).join(' | '));
 

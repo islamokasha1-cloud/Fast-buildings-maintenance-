@@ -4311,8 +4311,12 @@ function cleaningOpsTests() {
     (HTML.match(/const permKeys=_PERM_KEYS;/g) || []).length === 2);
   T("★ wf: الخريطة تربط cleaning بصفحة cleaning-ops (حجبُ showPage المباشر)",
     /cleaning:\s*\["cleaning-ops"\]/.test(HTML));
-  T("★ wf: تسمية «تشغيل النظافة» في شارات القائمة ونافذة التعديل",
-    (HTML.match(/cleaning:"تشغيل النظافة"/g) || []).length === 2);
+  /* v18.9zg: كانت التسميةُ مكرَّرةً مرّتين — مصدرُ المفاتيح ونسخةٌ يدويّةٌ في
+     الشارات. والنسخةُ انحرفت فأسقطت «التعاقدات» و«طلب شراء». فالحارسُ صار
+     يشترط **نسخةً واحدةً** وأن تقرأ الشاراتُ المصدرَ نفسَه. */
+  T("★ wf: تسمية «تشغيل النظافة» في مصدر المفاتيح وحدَه — والشاراتُ تقرؤه",
+    (HTML.match(/cleaning:"تشغيل النظافة"/g) || []).length === 1 &&
+    /const permLabels=_PERM_LABELS;\n\s*el\.innerHTML = USERS\.map/.test(HTML));
   T("★ wf: زرّ الوحدة يقرأ حاجب النواة بنفسه (يُحقن بعد applyPermissions)",
     src.includes("window._blockedPages.has(PAGE_ID)") &&
     /shouldShow = canView\(\) && isCleaningProject\(\) && !blocked/.test(src));
@@ -4352,10 +4356,10 @@ function cleaningOpsTests() {
   // v18.9ub: القائمةُ صارت تحمل مفتاحين (أُضيف ) — والمعيارُ عضويةٌ لا مطابقةٌ حرفية
   T("★ ce: النواة تفصل المفاتيح المانحة عن الحاجبة بمصدرٍ واحدٍ للقراءة",
     /const _PERM_GRANT_KEYS = \[[^\]]*"cleaningEdit"[^\]]*\];/.test(HTML) &&
-    /function _permOn\(perms, k\)\{[\s\S]{0,240}?perms\[k\] === true[\s\S]{0,120}?perms\[k\] !== false;/.test(HTML));
+    /function _permOn\(perms, k, u\)\{[\s\S]{0,240}?perms\[k\] === true[\s\S]{0,120}?perms\[k\] !== false;/.test(HTML));
   T("★ ce: الشارات ونافذة التعديل تقرآن _permOn لا المقارنة الحاجبة مباشرةً",
     !/perms\[k\]!==false/.test(HTML) &&
-    (HTML.match(/_permOn\(perms,k\)/g) || []).length >= 3);
+    (HTML.match(/_permOn\(perms,k,u\)/g) || []).length >= 3);
   T("★ ce: مربّع المفتاح في نموذج الإضافة غيرُ مؤشَّرٍ افتراضاً",
     HTML.includes('id="perm-cleaningEdit"> إدارة مهام النظافة') &&
     !/id="perm-cleaningEdit"\s+checked/.test(HTML));
@@ -4393,15 +4397,77 @@ function cleaningOpsTests() {
     /_PERM_MANAGED_GROUPS = \[[^\]]*"grp-contracts"[^\]]*\]/.test(HTML));
   if (CTR_PATH) {
     const cs = fs.readFileSync(CTR_PATH, "utf8");
-    T("★★ ct: و`canView` في الوحدة تشترط الدورَ **والإذنَ** معاً",
-      /function canView\(\)\{\s*return VIEW_ROLES\.indexOf\(_role\(\)\)\s*!== -1 && _permAllows\("contracts"\);/.test(cs));
-    T("★★ ct: والإذنُ **حاجبٌ لا مانح** (المستخدمُ القائمُ لا يفقد شيئاً) والأدمنُ يتجاوز",
-      /function _permAllows\(key\)\{[\s\S]*?if\(u\.role === "admin"\) return true;[\s\S]*?return !p \|\| p\[key\] !== false;/.test(cs));
+    T("★★ ct: و`canView` بوّابةٌ واحدةٌ تقرأ المفتاحَ (لا شرطَ دورٍ ثانٍ يسبقه)",
+      /function canView\(\)\{\s*return _permAllows\("contracts"\);/.test(cs));
+    T("★★ ct: والدورُ **يختار طبعَ المفتاح** لا يحجب قبله (مؤهَّلٌ⇒حاجب · غيرُه⇒مانح)",
+      /function _permAllows\(key\)\{[\s\S]*?if\(u\.role === "admin"\) return true;[\s\S]*?roleEligible\(u\.role\) \? \(!p \|\| p\[key\] !== false\)[\s\S]{0,80}?!!\(p && p\[key\] === true\)/.test(cs));
     T("★ ct: وبوّابةُ القسم واحدةٌ تقرؤها كلُّ منافذه (الصفحاتُ واللوحةُ والقائمةُ والرابطُ العميق)",
       (cs.match(/canView\(\)/g) || []).length >= 10);
+
+    /* ══ ★★ zg: بلاغُ المالك — خانةٌ مؤشَّرةٌ وقسمٌ غائب ══
+       رغده دورُها «مشرف»: الخانةُ ✅ لأنّ المفتاحَ حاجبٌ يظهر مؤشَّراً بالافتراض،
+       والقسمُ غائبٌ لأنّ الدورَ يحجب قبل أن يُقرأ المفتاح. الحارسُ **ينفّذ**
+       `canView` على مستخدمين حقيقيين لا يقرأ سطرَها — ويمنع الارتدادَين معاً:
+       (١) عودةَ شرطِ الدورِ السابقِ فتعود الخانةُ كاذبةً،
+       (٢) وأخطرَ منه — قراءةَ المفتاح باصطلاح الحاجب لكلّ الأدوار فينفتح القسمُ
+           لكلّ مشرفٍ وفنيٍّ قائمٍ بأثرٍ رجعيّ لمجرّد أنّ خانتَه كانت مؤشَّرة. */
+    {
+      const sb = { currentUser:null, window:{}, document:{ head:{appendChild(){}}, getElementById(){ return null; },
+                   querySelector(){ return null; }, querySelectorAll(){ return []; }, createElement(){ return {style:{},classList:{add(){},remove(){},toggle(){},contains(){return false}},dataset:{},appendChild(){},setAttribute(){}}; } } };
+      const CT = (() => {
+        try{
+          const vm = require("vm"); const ctx = vm.createContext(sb);
+          vm.runInContext(cs + "\n;globalThis.__ct = window.contracts;", ctx, {timeout:5000});
+          return sb.__ct || sb.window.contracts;
+        }catch(e){ return null; }
+      })();
+      if(!CT || typeof CT.canView !== "function"){
+        T("★★ zg: وحدةُ التعاقدات تُنفَّذ ويُقرأ منها canView", false, "تعذّر التحميل");
+      } else {
+        const as = u => { sb.currentUser = u; };
+        as({ user:"رغده", role:"مشرف", permissions:{ contracts:true } });
+        T("★★ zg: المشرفُ الممنوحُ صراحةً يرى التعاقدات — حالةُ رغده", CT.canView() === true);
+        as({ user:"رغده", role:"مشرف", permissions:{ contracts:false } });
+        T("★★ zg: وبعلامةِ المنع لا يراها", CT.canView() === false);
+        as({ user:"س", role:"مشرف", permissions:{ tickets:true } });
+        T("★★ zg: ومشرفٌ بلا المفتاح لا يراها (لا يُقرأ المانحُ إلا `=== true`)", CT.canView() === false);
+        as({ user:"قديم", role:"مشرف" });
+        T("★★ zg: والمشرفُ القديمُ بلا حقلِ صلاحياتٍ لا يرثها بأثرٍ رجعيّ", CT.canView() === false);
+        as({ user:"t", role:"فني", permissions:{} });
+        T("★★ zg: والفنيُّ كذلك", CT.canView() === false);
+
+        as({ user:"pm", role:"project_manager" });
+        T("★★ zg: ومديرُ المشاريع القديمُ بلا صلاحياتٍ **لم يفقد شيئاً** (الحاجبُ على حاله)", CT.canView() === true);
+        as({ user:"pm2", role:"project_manager", permissions:{ tickets:true } });
+        T("★ zg: وكذلك بحقلِ صلاحياتٍ لا يذكر المفتاح", CT.canView() === true);
+        as({ user:"pm3", role:"project_manager", permissions:{ contracts:false } });
+        T("★★ zg: وحجبُه عنه يبقى بعلامةٍ صريحة (المفتاحُ لم يفقد قدرتَه على الحجب)", CT.canView() === false);
+        ["procurement_officer","finance","ceo"].forEach(r=>{
+          as({ user:r, role:r });
+          T("★ zg: الدورُ المؤهَّل «"+r+"» يرى بلا مفتاح", CT.canView() === true);
+        });
+        as({ user:"a", role:"admin", permissions:{ contracts:false } });
+        T("★ zg: والأدمنُ يتجاوز المفتاحَ كما في كل مفاتيح النواة", CT.canView() === true);
+        as(null);
+        T("★ zg: وبلا مستخدمٍ لا بوّابة", CT.canView() === false);
+
+        T("★★ zg: قائمةُ الأدوار المؤهَّلة مكشوفةٌ **مصدراً واحداً** تقرؤه نافذةُ النواة",
+          Array.isArray(CT.viewRoles) && typeof CT.roleEligible === "function" &&
+          CT.roleEligible("project_manager") === true && CT.roleEligible("مشرف") === false &&
+          /const _PERM_DUAL_KEYS = \{ contracts: "contracts\.roleEligible" \};/.test(HTML),
+          (CT.viewRoles||[]).join(","));
+
+        /* **المنحُ اطّلاعٌ لا غير**: لا يفتح تعديلاً ولا آيباناً ولا اعتماداً —
+           وإلّا صار زرُّ عرضٍ باباً للكتابة. */
+        as({ user:"رغده", role:"مشرف", permissions:{ contracts:true } });
+        T("★★ zg: والمنحُ **اطّلاعٌ لا غير** — لا تعديلَ ولا آيبانَ ولا إيقافَ ولا إنشاءَ طلب",
+          CT.canEdit() === false && CT.canBank() === false &&
+          CT.canStatus() === false && CT.canCreateReq() === false);
+      }
+    }
   }
   T("★ ce: الحفظ يكتب المانحَ بعلامةٍ صريحة والحاجبَ باصطلاحه",
-    (HTML.match(/\(_PERM_GRANT_KEYS\.indexOf\(k\)>=0\) \? \(el\?\.checked===true\) : \(el\?\.checked!==false\)/g) || []).length === 2);
+    (HTML.match(/_permIsGrant\(k,(?:USERS\[idx\]|\{role\})\) \? \(el\?\.checked===true\) : \(el\?\.checked!==false\)/g) || []).length === 2);
 
   // ══ ★ v18.9wg: إعادة تسمية مبنى تُهاجر بيانات النظافة تلقائياً ══
   // الاسم مخزّن نصاً في المهام/السجل/الربط/تقييمات الجولات — تغييره في لوحة
@@ -6590,7 +6656,10 @@ function hrPurchaseRequestGuards() {
     map:    grab(/const _PERM_PAGE_MAP = \{[\s\S]*?\n\};/),
     labels: grab(/const _PERM_LABELS = \{[\s\S]*?\n\};/),
     grant:  grab(/const _PERM_GRANT_KEYS = \[[^\]]*\];/),
-    on:     grab(/function _permOn\(perms, k\)\{[\s\S]*?\n\}/),
+    dual:   grab(/const _PERM_DUAL_KEYS = \{[^}]*\};/),
+    elig:   grab(/function _permRoleEligible\(k, u\)\{[\s\S]*?\n\}/),
+    isGr:   grab(/function _permIsGrant\(k, u\)\{[\s\S]*?\n\}/),
+    on:     grab(/function _permOn\(perms, k, u\)\{[\s\S]*?\n\}/),
     pages:  grab(/const _HRO_PO_PAGES   = \[[^\]]*\];/),
     okPgs:  grab(/const _HRO_PO_GRANTED = \[[^\]]*\];/),
     gRole:  grab(/function _isGlobalOnlyRole\(role\)\{[\s\S]*?\n\}/),
@@ -6605,12 +6674,18 @@ function hrPurchaseRequestGuards() {
   if (absent.length) return;
 
   const SRC = [parts.map, parts.labels, "const _PERM_KEYS = Object.keys(_PERM_LABELS);",
-    parts.grant, parts.on, parts.pages, parts.okPgs, parts.gRole, parts.keys,
-    parts.blocked, parts.own, parts.mine, parts.vis].join("\n");
+    parts.grant, parts.dual, parts.elig, parts.isGr, parts.on, parts.pages, parts.okPgs,
+    parts.gRole, parts.keys, parts.blocked, parts.own, parts.mine, parts.vis].join("\n");
+  /* `window` يُحقن حقناً: المفتاحُ المزدوجُ يقرأ أدوارَه من وحدة التعاقدات، فالحارسُ
+     يمدّها بالقائمة الحقيقية بدل أن ينسخها — ولو غابت لَعاد الاصطلاحُ الحاجبَ صامتاً. */
+  const CTR_ROLES = ((CTR_PATH && (fs.readFileSync(CTR_PATH,"utf8")
+    .match(/var VIEW_ROLES\s*=\s*\[([^\]]*)\]/) || [])[1]) || "")
+    .split(",").map(s=>s.trim().replace(/^"|"$/g,"")).filter(Boolean);
+  const WIN = { contracts:{ viewRoles:CTR_ROLES, roleEligible:r=>CTR_ROLES.indexOf(r)!==-1 } };
   const mk = (currentUser, purchases) =>
-    new Function("currentUser", "purchases",
-      SRC + "\nreturn {blocked:_blockedPagesForUser,keys:_permKeysForUser,on:_permOn,vis:_poVisibleList};")
-      (currentUser, purchases || []);
+    new Function("currentUser", "purchases", "window",
+      SRC + "\nreturn {blocked:_blockedPagesForUser,keys:_permKeysForUser,on:_permOn,grant:_permIsGrant,vis:_poVisibleList};")
+      (currentUser, purchases || [], WIN);
 
   const basePerms = { tickets:true, ppm:true, assets:true, purchases:true, reports:true,
                       kpi:true, globalPurchases:true, cleaning:true, contracts:true };
@@ -6651,8 +6726,26 @@ function hrPurchaseRequestGuards() {
 
   // ── (٤) الأدوارُ الأخرى لم تتأثّر ──
   T("★ hrpo: الأدمن لا يُحجب عنه شيء", B({role:"admin",permissions:{}}).length === 0);
-  T("★ hrpo: والمشرفُ يبقى على حجبه القديم وحدَه (لا مسارَ شراءٍ أُقحم عليه)",
-    JSON.stringify(B({role:"supervisor",permissions:{assets:false}})) === JSON.stringify(["assets"]));
+  /* v18.9zg: المشرفُ صار يُحجب عنه **التعاقداتُ أيضاً** — لا لأنّ حجباً أُقحم عليه
+     بل لأنّ القسمَ كان محجوباً عنه بدوره منذ البداية، وكانت `_blockedPagesForUser`
+     وحدَها تجهله فتترك `showPage` المباشرةَ مفتوحةً. ولا مسارَ شراءٍ أُقحم. */
+  {
+    const sup = B({role:"supervisor",permissions:{assets:false}});
+    T("★ hrpo: والمشرفُ يبقى بلا مسارِ شراءٍ أُقحم عليه (المحجوبُ: أصولُه وتعاقداتُه)",
+      JSON.stringify(sup) === JSON.stringify(["assets","vendors","contract-requests","contracts-list"]),
+      sup.join(","));
+    T("★★ zg: والمشرفُ الممنوحُ صراحةً لا يُحجب عنه إلا ما ألغاه المسؤول",
+      JSON.stringify(B({role:"supervisor",permissions:{assets:false,contracts:true}})) === JSON.stringify(["assets"]));
+    T("★★ zg: ومديرُ المشاريع القديمُ بلا حقلِ صلاحياتٍ لا يُحجب عنه شيء (الحاجبُ على حاله)",
+      B({role:"project_manager"}).length === 0 &&
+      JSON.stringify(B({role:"project_manager",permissions:{contracts:false}}))
+        === JSON.stringify(["vendors","contract-requests","contracts-list"]));
+    T("★★ zg: وخانةُ «التعاقدات» تُقرأ باصطلاحين — مانحةً للمشرف حاجبةً لمدير المشاريع",
+      mk().grant("contracts",{role:"supervisor"}) === true &&
+      mk().grant("contracts",{role:"project_manager"}) === false &&
+      mk().on(undefined,"contracts",{role:"supervisor"}) === false &&
+      mk().on(undefined,"contracts",{role:"project_manager"}) === true);
+  }
   T("★ hrpo: ومسؤولُ المشتريات لا يمسّه الحجبُ الجديد",
     B({role:"procurement_officer",permissions:{}}).length === 0);
 
