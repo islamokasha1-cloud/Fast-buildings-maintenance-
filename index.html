@@ -8569,8 +8569,36 @@ const _PERM_KEYS = Object.keys(_PERM_LABELS);
    القديم بلا حقلِ صلاحياتٍ أصلاً). فالمانحُ لا يُقرأ إلا بعلامةٍ صريحة `=== true`.
    مصدرٌ واحدٌ للقراءة (`_permOn`) تستعمله الشارات ونافذة التعديل معاً. */
 const _PERM_GRANT_KEYS = ["cleaningEdit","poRequest"];
-function _permOn(perms, k){
-  if(_PERM_GRANT_KEYS.indexOf(k) >= 0) return !!(perms && perms[k] === true);
+
+/* ═══ ونوعٌ ثالث: **المفتاحُ المزدوجُ الطبع** ═══
+   بلاغُ المالك (رغده، دورُها المسجَّل «مشرف»): خانةُ «التعاقدات» مؤشَّرةٌ ✅ في
+   نافذة الصلاحيات والقسمُ غائبٌ عنها. والسببُ أنّ القسمَ يشترط **الدورَ والإذنَ
+   معاً**، والمفتاحُ حاجبٌ فيظهر مؤشَّراً بالافتراض بينما الدورُ يحجب قبله —
+   **فالخانةُ تَعِد بما لا تملك**، وهو عيبُ نافذة الموارد البشرية نفسُه.
+
+   فمفتاحُ `contracts` يقرأ الآن باصطلاحين بحسب الدور: **حاجبٌ** لدورٍ مؤهَّلٍ
+   بطبعه (فالقائمُ لا يفقد شيئاً)، **ومانحٌ** لغيره (فلا يُفتح القسمُ لأحدٍ بأثرٍ
+   رجعيٍّ لمجرّد أنّ الخانةَ كانت مؤشَّرةً بالافتراض القديم). وقائمةُ الأدوار
+   المؤهَّلة **لا تُنسَخ هنا**: تُقرأ من الوحدة نفسِها (`contracts.roleEligible`)
+   فلا تفترق النافذةُ عن البوّابة — وهو الخطأُ الذي أنتج البلاغ أصلاً. */
+const _PERM_DUAL_KEYS = { contracts: "contracts.roleEligible" };
+function _permRoleEligible(k, u){
+  try{
+    // مسارٌ يُحلّ حلقةً حلقة — لا اسمُ وحدةٍ يُقرأ وبقيّةُ المسار زينة
+    const fn = _PERM_DUAL_KEYS[k].split(".").reduce((o,seg)=> o ? o[seg] : undefined, window);
+    if(typeof fn === "function") return fn((u && u.role) || "");
+  }catch(e){}
+  return true;   // الوحدةُ لم تُحمَّل: لا قسمَ أصلاً — نُبقي الاصطلاحَ الحاجبَ بلا تغيير
+}
+/* هل يُقرأ هذا المفتاحُ لهذا المستخدم قراءةَ **مانح**؟ مصدرٌ واحدٌ تقرؤه
+   `_permOn` والحفظُ وشبكةُ «مستخدم جديد» — فلا يُكتب باصطلاحٍ ويُقرأ بآخر. */
+function _permIsGrant(k, u){
+  if(_PERM_GRANT_KEYS.indexOf(k) >= 0) return true;
+  if(_PERM_DUAL_KEYS[k]) return !_permRoleEligible(k, u);
+  return false;
+}
+function _permOn(perms, k, u){
+  if(_permIsGrant(k, u)) return !!(perms && perms[k] === true);
   return !perms || perms[k] !== false;
 }
 
@@ -8604,9 +8632,12 @@ function _blockedPagesForUser(){
     });
   }
   const perms = u && u.permissions;
-  if(!perms) return set;                                       // مستخدم قديم بلا صلاحيات = الكل مسموح
+  /* `_permOn` تحمل الاصطلاحين معاً، فلا حاجةَ لخروجٍ مبكِّرٍ عند غياب `permissions`:
+     الحاجبُ يبقى مسموحاً للمستخدم القديم كما كان (`!perms` ⇒ true)، والمانحُ يبقى
+     ممنوعاً بلا علامةٍ صريحة — وهو ما يجعل «التعاقدات» تُحجب فعلاً عن الدور غير
+     المؤهَّل بدل أن يُخفى زرُّها ويبقى بابُها مفتوحاً بـ`showPage` المباشرة. */
   Object.keys(_PERM_PAGE_MAP).forEach(k=>{
-    if(perms[k] === false) _PERM_PAGE_MAP[k].forEach(p=>set.add(p));
+    if(!_permOn(perms, k, u)) _PERM_PAGE_MAP[k].forEach(p=>set.add(p));
   });
   return set;
 }
@@ -12929,7 +12960,7 @@ function renderAdminPanel(){
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
             <input class="form-input" type="password" id="admin-new-user-pass" placeholder="كلمة المرور">
-            <select class="form-select" id="admin-new-user-role">
+            <select class="form-select" id="admin-new-user-role" onchange="_syncNewUserDualPerms()">
               <option value="مشرف">مشرف</option>
               <option value="project_manager">👔 مدير المشاريع</option>
               <option value="ceo">🏢 المدير التنفيذي</option>
@@ -12955,7 +12986,10 @@ function renderAdminPanel(){
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="perm-cleaning" checked> تشغيل النظافة</label>
               <!-- مفتاحٌ مانحٌ: غيرُ مؤشَّرٍ افتراضاً — لا يُفتح تحريرُ مهامّ النظافة إلا بقرارٍ صريح -->
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="perm-cleaningEdit"> إدارة مهام النظافة</label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="perm-contracts" checked> التعاقدات</label>
+              <!-- مفتاحٌ مزدوجُ الطبع: مؤشَّرٌ للدور المؤهَّل (حاجب) وغيرُ مؤشَّرٍ لغيره
+                   (مانح) — يضبطه _syncNewUserDualPerms من الدور المختار، فلا تكذب
+                   الخانةُ على المسؤول كما كذبت في بلاغ رغده. -->
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="perm-contracts"> التعاقدات</label>
               <!-- مفتاحٌ مانح: يخصّ مسؤولَ الموارد البشرية (مسارُ الشراء محجوبٌ عنه بدورِه) -->
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="perm-poRequest"> طلب شراء</label>
             </div>
@@ -13058,6 +13092,7 @@ function renderAdminPanel(){
   loadTechWa().then(renderAdminTechsList); // تحميل أرقام واتساب ثم إعادة العرض
   renderAdminWorkTypesList();
   renderAdminUsersList();
+  _syncNewUserDualPerms();   // خانةُ المفتاح المزدوج تتبع الدورَ المختار منذ أول رسم
   renderAdminProjectsList();
   loadAdminAISettings(); // تحميل إعدادات AI وعرض الحالة
 }
@@ -13118,10 +13153,27 @@ function renderAdminSupervisorsList(){
     </div>`).join("");
 }
 
+/* شبكةُ «مستخدم جديد» تحمل مفتاحاً مزدوجَ الطبع، وطبعُه يتبع الدورَ المختار —
+   فتُضبط خانتُه مع كل تغييرِ دور: مؤشَّرةٌ للمؤهَّل (الافتراضُ مسموح) وغيرُ
+   مؤشَّرةٍ لغيره (الافتراضُ ممنوع). وبلا هذا تُكتب `contracts:true` لكل مشرفٍ
+   جديدٍ بلا قرارٍ من أحد. */
+function _syncNewUserDualPerms(){
+  const sel = document.getElementById("admin-new-user-role");
+  if(!sel) return;
+  Object.keys(_PERM_DUAL_KEYS).forEach(k=>{
+    const box = document.getElementById("perm-"+k);
+    if(box) box.checked = !_permIsGrant(k, {role: sel.value});
+  });
+}
+
 function renderAdminUsersList(){
   const el = document.getElementById("admin-users-list");
   if(!el) return;
-  const permLabels={tickets:"البلاغات",ppm:"PPM",assets:"الأصول",purchases:"المشتريات",reports:"التقارير",kpi:"الأداء",globalPurchases:"المشتريات المركزية",cleaning:"تشغيل النظافة",cleaningEdit:"إدارة مهام النظافة"};
+  /* الشاراتُ تُشتقّ من **مصدر المفاتيح الواحد** لا من نسخةٍ يدويّة: النسخةُ
+     السابقةُ انحرفت فأسقطت «التعاقدات» و«طلب شراء» — فالمسؤولُ يفتح النافذة
+     ويمنح مفتاحاً لا أثرَ له في الصفّ الذي يراه. ولا تُعرض إلا الشاراتُ
+     العاملةُ على الدور (`_permKeysForUser`) كما في النافذة نفسِها. */
+  const permLabels=_PERM_LABELS;
   el.innerHTML = USERS.map((u,i)=>{
     const perms = u.permissions||{tickets:true,ppm:true,assets:true,purchases:true,reports:true,kpi:true};
     const permBadges = u.role==="admin" ? `<span style="font-size:10px;color:var(--accent)">جميع الصلاحيات</span>` :
@@ -13133,8 +13185,8 @@ function renderAdminUsersList(){
       u.role==="hr_officer" ? `<span style="font-size:10px;color:#9d174d;background:#fce7f3;padding:2px 8px;border-radius:6px">ينشئ طلبات سداد أعمال الموارد البشرية</span>` :
       u.role==="viewer" ? `<span style="font-size:10px;color:#334155;background:#e2e8f0;padding:2px 8px;border-radius:6px">عرض فقط — كل المشاريع والمشتريات بدون تعديل</span>` :
       u.role==="observer" ? `<span style="font-size:10px;color:#155e75;background:#cffafe;padding:2px 8px;border-radius:6px">اطلاع على البلاغات + إضافة بلاغ فقط (بدون تعيين فني)</span>` :
-      Object.entries(permLabels).map(([k,lbl])=>
-        `<span style="font-size:10px;padding:2px 6px;border-radius:6px;background:${_permOn(perms,k)?'#dcfce7':'#fee2e2'};color:${_permOn(perms,k)?'#166534':'#991b1b'}">${lbl}</span>`
+      _permKeysForUser(u).map(k=>
+        `<span style="font-size:10px;padding:2px 6px;border-radius:6px;background:${_permOn(perms,k,u)?'#dcfce7':'#fee2e2'};color:${_permOn(perms,k,u)?'#166534':'#991b1b'}">${permLabels[k]}</span>`
       ).join(" ");
     return `
     <div style="background:var(--surface2);border-radius:10px;padding:10px 14px;margin-bottom:8px">
@@ -13301,6 +13353,17 @@ function openEditUserPerms(idx){
         : 'صفحاتُه يحكمها دورُه نفسُه.')
       +'</div>'
     : "";
+  /* «التعاقدات» مفتاحٌ **مزدوجُ الطبع**: حاجبٌ لدورٍ مؤهَّلٍ بطبعه، مانحٌ لغيره.
+     والفرقُ يجب أن يُقال صراحةً — فالمسؤولُ الذي يرى خانةً غيرَ مؤشَّرةٍ لمشرفٍ
+     ظنّها معطوبةً، والذي رآها مؤشَّرةً قبل هذا الإصلاح ظنّ أنه منح شيئاً. */
+  const ctrGrantNote = (shownKeys.indexOf("contracts") >= 0 && _permIsGrant("contracts", u))
+    ? `<div style="font-size:11px;color:var(--muted);margin:-10px 0 16px;line-height:1.6">
+        📁 «التعاقدات» لدورِ «${esc(_PU_ROLES[u.role]||u.role)}» صلاحيةٌ <b>تُمنح</b>
+        (الافتراض: ممنوعة): تفتح <b>الاطّلاع</b> على سجلّ الأطراف وطلبات التعاقد
+        والعقود والمستخلصات — <b>بلا تعديلٍ ولا آيبانَ ولا اعتماد</b>؛ فتلك بأدوارها
+        (المشتريات · المالية · مدير المشاريع). الأدوارُ المؤهَّلةُ بطبعها تملكها بلا تعليم.
+       </div>`
+    : "";
   const html=`
     <div style="background:rgba(0,0,0,0.5);position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center" id="perm-modal-overlay" onclick="if(event.target===this)this.remove()">
       <div style="background:var(--surface);border-radius:16px;padding:24px;min-width:300px;max-width:460px;width:90%;max-height:88vh;overflow:auto">
@@ -13311,10 +13374,11 @@ function openEditUserPerms(idx){
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
           ${shownKeys.map(k=>`
             <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:8px 10px;border-radius:8px;border:1px solid var(--border)">
-              <input type="checkbox" id="ep-${k}" ${_permOn(perms,k)?'checked':''} style="width:16px;height:16px">
+              <input type="checkbox" id="ep-${k}" ${_permOn(perms,k,u)?'checked':''} style="width:16px;height:16px">
               ${permLabels[k]}
             </label>`).join("")}
         </div>` : ""}
+        ${ctrGrantNote}
         ${isHRO ? `
         <div style="font-size:11px;color:var(--muted);margin:-10px 0 16px;line-height:1.6">
           🛒 «طلب شراء» صلاحيةٌ <b>تُمنح</b> (الافتراض: ممنوعة): تفتح له «طلب شراء جديد»
@@ -13361,7 +13425,7 @@ async function saveUserPerms(idx){
   permKeys.forEach(k=>{
     if(!shown.has(k)){ if(k in prev) perms[k]=prev[k]; return; }
     const el=document.getElementById('ep-'+k);
-    perms[k] = (_PERM_GRANT_KEYS.indexOf(k)>=0) ? (el?.checked===true) : (el?.checked!==false); });
+    perms[k] = _permIsGrant(k,USERS[idx]) ? (el?.checked===true) : (el?.checked!==false); });
   USERS[idx].permissions=perms;
   // المشاريع المسموحة — فارغ = كل المشاريع
   const projs=Array.from(document.querySelectorAll('.ep-proj:checked')).map(el=>el.value);
@@ -13643,8 +13707,10 @@ async function adminAddUser(){
   const hashed = await sha256(pass);
   const permKeys=_PERM_KEYS;
   const permissions={};
+  // الطبعُ يُشتقّ من **الدور المختار في النموذج** لا من مستخدمٍ قائم: خانةٌ
+  // مؤشَّرةٌ لمشرفٍ تعني منحاً صريحاً، وللمؤهَّلِ بطبعه تعني بقاءَ الافتراض.
   permKeys.forEach(k=>{ const el=document.getElementById('perm-'+k);
-    permissions[k] = (_PERM_GRANT_KEYS.indexOf(k)>=0) ? (el?.checked===true) : (el?.checked!==false); });
+    permissions[k] = _permIsGrant(k,{role}) ? (el?.checked===true) : (el?.checked!==false); });
   const newUser = {user:login, hash:hashed, name, role, permissions};
   USERS.push(newUser);
   try{
