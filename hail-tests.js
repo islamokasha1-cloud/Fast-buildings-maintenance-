@@ -7115,6 +7115,23 @@ function hrPurchaseRequestGuards() {
 function tvWallGuards() {
   H("v18.9ag+ai) مركز العمليات — العرض الموحّد والتدوير التلقائي");
 
+  // ── مصدرُ المركز صار ملفَّين ──────────────────────────────────────────────
+  // نُقل مركزُ العمليات نقلاً حرفياً من `index.html` إلى `operations-wall.js`.
+  // وحرّاسُ هذا القسم تصف **مصدرَ التطبيق** لا مصدرَ `index.html` — ومصدرُه اليوم
+  // الملفّان معاً: منطقُ المركز في الوحدة، أمّا قواعدُ CSS ووسومُ الأزرار وبوّابةُ
+  // الصلاحية `_canSeeTVWall` ومسارُ الخروج فبقيت في `index.html` عمداً. فيُقرآن
+  // موصولين هنا، فيبقى كلُّ تأكيدٍ أدناه على دلالته قبل النقل **حرفياً** — الموجَبُ
+  // منها والسالبُ سواء — بدل إعادة تصنيف ستّين تأكيداً بيدٍ (وهي فرصةُ خطأٍ بلا مقابل).
+  const WALL_PATH = path.resolve(path.dirname(IDX), "operations-wall.js");
+  if (!fs.existsSync(WALL_PATH)) { T("★ operations-wall.js موجود", false, WALL_PATH); return; }
+  const HTML = fs.readFileSync(IDX, "utf8") + "\n" + fs.readFileSync(WALL_PATH, "utf8");
+  const slice = (from, to, after) => {
+    const a = HTML.indexOf(from, after || 0);
+    if (a < 0) return null;
+    const b = to ? HTML.indexOf(to, a) : -1;
+    return b < 0 ? HTML.slice(a) : HTML.slice(a, b);
+  };
+
   // ── (١) مصدرٌ واحدٌ للتصنيف: tvHealth تُستخرَج وتُنفَّذ فعلاً ──
   const thSrc = (HTML.match(/function tvHealth\(overdue\)\{[\s\S]*?\n\}/) || [])[0];
   T("★ ag: tvHealth موجودة (مصدرٌ واحدٌ لصحّة اللوحة)", !!thSrc);
@@ -7152,7 +7169,9 @@ function tvWallGuards() {
 
   // ── (٣) عزلٌ تام: الجدار لا يكتب حالة المشروع المفتوح ولا يقرأ بياناته ──
   // من أول تعليمةٍ بعد تعليق الرأس (فلا يُحسب نصُّ التعليق شيفرةً في الحرّاس أدناه)
-  const wallSrc = slice("const TVWALL_SYNC_LIMIT", "// تنظيف TV intervals عند تغيير الصفحة");
+  // الفاصلُ السفليّ صار ترويسةَ بصمة البناء في الوحدة (كان تعليقَ «تنظيف TV intervals»
+  // في index.html) — فيبقى المقطوعُ هو الكتلةَ المنقولةَ نفسَها بلا زيادة.
+  const wallSrc = slice("const TVWALL_SYNC_LIMIT", "/* ── بصمةُ البناء");
   T("★ ag: كتلةُ مركز العمليات موجودة في المصدر",
     !!wallSrc && wallSrc.length > 3000 && HTML.includes("██  v18.9ag — مركزُ العمليات"));
   if (wallSrc) {

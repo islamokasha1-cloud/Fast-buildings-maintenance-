@@ -18,6 +18,7 @@ on:
       - 'contracts.js'
       - 'HailNotify.js'
       - 'photo-queue.js'
+      - 'operations-wall.js'
       - 'hail-tests.js'
       - 'sync-version.mjs'
       - 'firestore.rules'
