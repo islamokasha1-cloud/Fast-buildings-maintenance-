@@ -884,7 +884,12 @@ const s13 = await page.evaluate(async ()=>{
 
   // القراءةُ من الجدول المرسوم فعلاً (لا من الحالة)
   const host=document.getElementById('page-inventory-reports');
-  const trs=[...host.querySelectorAll('table.data-table tbody tr')];
+  // الجدولُ مكوّنُ المنصة `.report-table` (له قواعدُ وضعٍ داكنٍ مكتوبةٌ أصلاً) —
+  // والمُنتقي يثبّت ذلك: لو استُبدل بجدولٍ محلّيٍّ سقط الفحصُ لا الشكلُ وحدَه.
+  out.platformTable = !!host.querySelector('table.report-table.ivr-table');
+  out.styleInjected = !!document.getElementById('ivr-css');
+  out.monoNums = !!host.querySelector('.ivr-num');
+  const trs=[...host.querySelectorAll('table.report-table.ivr-table tbody tr')];
   const cells=(trs.find(tr=>tr.textContent.includes('كابل نحاس'))||{querySelectorAll:()=>[]})
     .querySelectorAll('td');
   const txt=i=>(cells[i]?cells[i].textContent.trim():'');
@@ -937,6 +942,12 @@ check('13ز) ★ الراكد: الساكنُ ٢٠٠ يوم يظهر والمت�
   s13.staleHasLmp===true && s13.staleHasCbl===false);
 check('13ح) ★★ التقييم بسعر آخر وارد (15×40=600) لا بسعر وثيقة الصنف (9×40=360)',
   s13.whValue===600, 'القيمة='+s13.whValue+' بلا سعر='+s13.whNoPrice);
+/* الصفحةُ تتبع نظامَ تصميم المنصة — لا شكلاً مستقلاً يُصان وحدَه:
+   جدولُ التقارير `.report-table` (وله قواعدُ الوضع الداكن أصلاً)، والنمطُ محقونٌ
+   مرّةً بمعرّفٍ واحد، والأرقامُ بصنف المونوسبيس الجدوليّ. */
+check('13ط) ★ الجدولُ مكوّنُ المنصة `.report-table` لا جدولٌ محلّيّ', s13.platformTable===true);
+check('13ي) ★ النمطُ محقونٌ مرّةً واحدةً (#ivr-css)', s13.styleInjected===true);
+check('13ك) ★ الأرقامُ بصنف المونوسبيس الجدوليّ كبقيّة شاشات المنصة', s13.monoNums===true);
 
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));

@@ -1305,6 +1305,41 @@ function inventoryReportsTests() {
   T("استعلامٌ واحدٌ بحقلٍ واحدٍ (بلا فهرسٍ مركّب)",
     src.includes('.where("date", ">=", b.fromISO)') && !/where\([^)]*\)\s*\.where\(/.test(src));
   T("الوثائق المدموجة مُستبعَدة (نفس شرط _inventoryFiltered)", src.includes("x.mergedInto"));
+
+  /* ════ الصفحةُ تتبع نظامَ تصميم المنصة — لا هويّةً بصريةً ثانيةً تُصان ════
+     القاعدةُ التي تنصّ عليها `contracts.js` حرفياً: «بلا لونٍ جديدٍ ولا خطٍّ جديد —
+     توكنزُ المنصة وكلاساتُها الجاهزة فقط، فيتبع النمطُ الثيمين معاً بلا صيانةٍ
+     منفصلة». ولونٌ مثبَّتٌ واحدٌ يكفي ليصير النصُّ غيرَ مقروءٍ في الوضع الداكن —
+     ولا يظهر ذلك في أيّ اختبارٍ منطقيّ، فهذه حرّاسُه. */
+  {
+    // الأنماطُ المحقونة وحدَها (لا الورقةُ المطبوعة — لها ألوانُ حِبرٍ على ورقٍ أبيض)
+    const cssBlock = (src.match(/function _injectCSS\(\)\{[\s\S]*?appendChild\(st\);/) || [""])[0];
+    T("★ الوحدة تحقن نمطَها بمعرّفٍ واحدٍ (idempotent) كنمط بقيّة الوحدات",
+      /getElementById\("ivr-css"\)/.test(cssBlock) && /st\.id="ivr-css"/.test(cssBlock));
+    const hex = cssBlock.match(/#[0-9a-fA-F]{3,8}\b/g) || [];
+    T("★ لا لونٌ مثبَّتٌ في نمط الصفحة — توكِنزُ المنصة وحدَها (فيتبع الثيمين)",
+      hex.length === 0, hex.join(" "));
+    T("★ التظليلُ بـcolor-mix على التوكِن لا بلونٍ فاتحٍ مكتوبٍ بيدٍ",
+      /color-mix\(in srgb,var\(--/.test(cssBlock));
+    T("الدلالاتُ من توكِنات المنصة (--sla-ok/--sla-warn/--sla-crit)",
+      /var\(--sla-ok\)/.test(cssBlock) && /var\(--sla-crit\)/.test(cssBlock));
+    T("★ لا خطٌّ جديد — 'JetBrains Mono' للأرقام و'Cairo' موروثٌ للنصّ",
+      !/font-family:(?!'JetBrains Mono')/.test(cssBlock.replace(/font-family:'JetBrains Mono',monospace/g, "")));
+    T("الأرقام tabular-nums بـdirection:ltr كبقيّة شاشات المنصة",
+      /font-variant-numeric:tabular-nums/.test(cssBlock) && /direction:ltr/.test(cssBlock));
+    // ولا ألوانٌ مثبَّتةٌ في الرسم نفسِه (كانت #166534/#b91c1c في خلايا الإشارة)
+    const drawBlock = src.slice(src.indexOf("function _cell("), src.indexOf("function _filtersHTML("));
+    T("★ خلايا الجدول بلا لونٍ مثبَّت (الإشارةُ بصنفٍ يقرأ التوكِن)",
+      !/#[0-9a-fA-F]{6}\b/.test(drawBlock), (drawBlock.match(/#[0-9a-fA-F]{6}\b/g) || []).join(" "));
+    // مكوّناتُ المنصة الجاهزة تُستعمل كما هي بدل نظائرَ محلّية
+    ["page-hero", "report-table", "report-table-wrap", "ast-stat", "info-box", "po-code", "form-select"]
+      .forEach(k => T("يستعمل مكوّن المنصة ." + k, src.includes(k)));
+    T("★ بطاقةُ الإحصاء تحمل أيقونةَ `.si` التي يقيسها نمطُ المنصة",
+      /class="si"/.test(src), "بلا أيقونةٍ تبدو البطاقةُ نصفَ بطاقة");
+    T("الصفحةُ تنضغط على الجوال (استعلامُ وسائط في نمطها)", /@media\(max-width:\d+px\)/.test(cssBlock));
+    T("★ التوكيدُ في نصّ التحفّظ يُهرَّب قبل تحويله (لا وسمَ من البيانات)",
+      src.includes('_esc(s).replace(/\\*\\*([^*]+)\\*\\*/g, "<b>$1</b>")'));
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════

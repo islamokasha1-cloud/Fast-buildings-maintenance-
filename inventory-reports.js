@@ -50,7 +50,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.2713";
+  const MODULE_BUILD = "v18.9.2714";
 
   const HOST_ID   = "page-inventory-reports";
   const READ_CAP  = 5000;    // سقف الحركات المقروءة لكل توليد — يُعلَن عند بلوغه
@@ -92,6 +92,8 @@
   function _toast(m,t){ try{ toast(m,t); }catch(e){ console.log(m); } }
   function _audit(a,d){ try{ if(typeof logAudit==="function") logAudit(a,d); }catch(e){} }
   function _icn(n,c){ try{ return (typeof _ic==="function") ? _ic(n,c) : ""; }catch(e){ return ""; } }
+  // أيقونةٌ عارية (بلا غلاف `.ic`) — لأن `.ast-stat .si svg` و`.ivr-empty svg` يقيسانها مباشرةً
+  function _svg(n){ try{ return (typeof _svgIcon==="function") ? _svgIcon(n) : ""; }catch(e){ return ""; } }
   function _num(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
   function _r3(n){ return Math.round(_num(n)*1000)/1000; }
   function _fmt(n){ return _num(n).toLocaleString("en-US",{maximumFractionDigits:3}); }
@@ -367,7 +369,7 @@
   }
 
   function _capCaveat(capped, caveats){
-    if(capped) caveats.push("⚠ بلغت القراءةُ سقفَ "+_fmt(READ_CAP)+" حركة — الفترةُ أوسعُ من أن تُقرأ كاملةً، فالأرصدةُ الافتتاحيةُ والمجاميعُ **ناقصة**. ضيِّق الفترة أو المستودع.");
+    if(capped) caveats.push("بلغت القراءةُ سقفَ "+_fmt(READ_CAP)+" حركة — الفترةُ أوسعُ من أن تُقرأ كاملةً، فالأرصدةُ الافتتاحيةُ والمجاميعُ **ناقصة**. ضيِّق الفترة أو المستودع.");
   }
 
   // ── ١) بطاقة الصنف ──
@@ -414,11 +416,11 @@
       ],
       rows,
       stats: [
-        {v:_fmt(opening),                  l:"رصيد افتتاحي"},
-        {v:_fmt(roll?roll.inQty:0),        l:"وارد",    cls:"good"},
-        {v:_fmt(roll?roll.outQty:0),       l:"صادر",    cls:"crit"},
-        {v:_fmt(roll?roll.closing:opening),l:"رصيد ختامي"},
-        {v:String(rows.length),            l:"عدد الحركات"}
+        {v:_fmt(opening),                  l:"رصيد افتتاحي", ic:"package"},
+        {v:_fmt(roll?roll.inQty:0),        l:"وارد",    cls:"good", ic:"download"},
+        {v:_fmt(roll?roll.outQty:0),       l:"صادر",    cls:"crit", ic:"packageMinus"},
+        {v:_fmt(roll?roll.closing:opening),l:"رصيد ختامي", ic:"clipboardCheck"},
+        {v:String(rows.length),            l:"عدد الحركات", ic:"activity"}
       ],
       caveats
     };
@@ -466,7 +468,7 @@
       subtitle: "الفترة: "+_periodLabel()+(_f.wh?(" · المستودع: "+_f.wh):"")+(_f.cat?(" · الفئة: "+_f.cat):""),
       cols: [
         {k:"name",    l:"المادة",        al:"right",  w:28},
-        {k:"code",    l:"الكود",         al:"center", w:14},
+        {k:"code",    l:"الكود",         al:"center", f:"code", w:14},
         {k:"wh",      l:"المستودع",      al:"center", w:18},
         {k:"unit",    l:"الوحدة",        al:"center", w:10},
         {k:"opening", l:"افتتاحي",       al:"center", f:"num",  w:12},
@@ -478,11 +480,11 @@
       ],
       rows,
       stats: [
-        {v:String(rows.length),   l:"أصناف"},
-        {v:String(moved),         l:"تحرّكت في الفترة"},
-        {v:_fmt(sum("inQty")),    l:"إجمالي الوارد", cls:"good"},
-        {v:_fmt(sum("outQty")),   l:"إجمالي الصادر", cls:"crit"},
-        {v:_fmtSign(sum("adjNet")), l:"صافي التسويات"}
+        {v:String(rows.length),   l:"أصناف", ic:"package"},
+        {v:String(moved),         l:"تحرّكت في الفترة", ic:"activity"},
+        {v:_fmt(sum("inQty")),    l:"إجمالي الوارد", cls:"good", ic:"download"},
+        {v:_fmt(sum("outQty")),   l:"إجمالي الصادر", cls:"crit", ic:"packageMinus"},
+        {v:_fmtSign(sum("adjNet")), l:"صافي التسويات", ic:"wrench"}
       ],
       caveats
     };
@@ -529,22 +531,22 @@
       subtitle: "لم تتحرّك منذ "+_fmt(_f.staleDays)+" يوماً أو أكثر · حتى "+_dayOnly(b.toISO),
       cols: [
         {k:"name",  l:"المادة",         al:"right",  w:28},
-        {k:"code",  l:"الكود",          al:"center", w:14},
+        {k:"code",  l:"الكود",          al:"center", f:"code", w:14},
         {k:"wh",    l:"المستودع",       al:"center", w:18},
         {k:"qty",   l:"الرصيد",         al:"center", f:"num",   w:12},
         {k:"unit",  l:"الوحدة",         al:"center", w:10},
         {k:"last",  l:"آخر حركة",       al:"center", w:14},
-        {k:"ageSrc",l:"مصدر التاريخ",   al:"center", w:14},
+        {k:"ageSrc",l:"مصدر التاريخ",   al:"center", f:"pill", w:14},
         {k:"age",   l:"أيام السكون",    al:"center", f:"num",   w:12},
         {k:"price", l:"سعر الوحدة",     al:"center", f:"money", w:13},
-        {k:"psrc",  l:"مصدر السعر",     al:"center", w:14},
+        {k:"psrc",  l:"مصدر السعر",     al:"center", f:"pill", w:14},
         {k:"value", l:"القيمة المجمَّدة",al:"center", f:"money", w:15}
       ],
       rows,
       stats: [
-        {v:String(rows.length), l:"أصناف راكدة", cls:"warn"},
-        {v:_money(frozen),      l:"قيمة مجمَّدة (ر.س)"},
-        {v:String(noPrice),     l:"بلا سعر"}
+        {v:String(rows.length), l:"أصناف راكدة", cls:"warn", ic:"hourglass"},
+        {v:_money(frozen),      l:"قيمة مجمَّدة (ر.س)", ic:"banknote"},
+        {v:String(noPrice),     l:"بلا سعر", ic:"alertCircle"}
       ],
       caveats
     };
@@ -584,9 +586,9 @@
       subtitle: "العتبة: ≤ "+_fmt(th)+" · معدّل الاستهلاك من الفترة "+_periodLabel(),
       cols: [
         {k:"name", l:"المادة",              al:"right",  w:28},
-        {k:"code", l:"الكود",               al:"center", w:14},
+        {k:"code", l:"الكود",               al:"center", f:"code", w:14},
         {k:"wh",   l:"المستودع",            al:"center", w:18},
-        {k:"state",l:"الحالة",              al:"center", w:10},
+        {k:"state",l:"الحالة",              al:"center", f:"pill", w:10},
         {k:"qty",  l:"الرصيد",              al:"center", f:"num", w:12},
         {k:"unit", l:"الوحدة",              al:"center", w:10},
         {k:"gap",  l:"النقص عن العتبة",     al:"center", f:"num", w:15},
@@ -596,9 +598,9 @@
       ],
       rows,
       stats: [
-        {v:String(out),                l:"نفد",     cls:"crit"},
-        {v:String(rows.length-out),    l:"منخفض",   cls:"warn"},
-        {v:String(rows.length),        l:"يحتاج إعادة طلب"}
+        {v:String(out),                l:"نفد",     cls:"crit", ic:"alertCircle"},
+        {v:String(rows.length-out),    l:"منخفض",   cls:"warn", ic:"alertTriangle"},
+        {v:String(rows.length),        l:"يحتاج إعادة طلب", ic:"cart"}
       ],
       caveats
     };
@@ -671,15 +673,15 @@
         {k:"unit", l:"الوحدة",        al:"center", w:10},
         {k:"moves",l:"عدد الحركات",   al:"center", f:"num",   w:12},
         {k:"price",l:"سعر الوحدة",    al:"center", f:"money", w:13},
-        {k:"psrc", l:"مصدر السعر",    al:"center", w:14},
+        {k:"psrc", l:"مصدر السعر",    al:"center", f:"pill", w:14},
         {k:"value",l:"القيمة (ر.س)",  al:"center", f:"money", w:15}
       ],
       rows,
       stats: [
-        {v:String(groups),      l:gLabel},
-        {v:String(rows.length), l:"سطور"},
-        {v:_money(total),       l:"إجمالي القيمة (ر.س)"},
-        {v:String(noPrice),     l:"بلا سعر"}
+        {v:String(groups),      l:gLabel, ic:"folderOpen"},
+        {v:String(rows.length), l:"سطور", ic:"scroll"},
+        {v:_money(total),       l:"إجمالي القيمة (ر.س)", ic:"banknote"},
+        {v:String(noPrice),     l:"بلا سعر", ic:"alertCircle"}
       ],
       caveats
     };
@@ -732,10 +734,10 @@
       ],
       rows,
       stats: [
-        {v:String(rows.length),                          l:"مستودعات"},
-        {v:String(rows.reduce((s,r)=>s+_num(r.items),0)),l:"أصناف"},
-        {v:_money(total),                                l:"القيمة الإجمالية (ر.س)"},
-        {v:String(noPriceAll),                           l:"بلا سعر", cls:"warn"}
+        {v:String(rows.length),                          l:"مستودعات", ic:"warehouse"},
+        {v:String(rows.reduce((s,r)=>s+_num(r.items),0)),l:"أصناف", ic:"package"},
+        {v:_money(total),                                l:"القيمة الإجمالية (ر.س)", ic:"banknote"},
+        {v:String(noPriceAll),                           l:"بلا سعر", cls:"warn", ic:"alertCircle"}
       ],
       caveats
     };
@@ -791,11 +793,11 @@
       ],
       rows,
       stats: [
-        {v:String(rows.length), l:"تسويات"},
-        {v:String(up),          l:"بالزيادة", cls:"good"},
-        {v:String(down),        l:"بالنقص",   cls:"crit"},
-        {v:_fmt(absSum),        l:"مجموع الفروقات (مطلق)"},
-        {v:String((takes||[]).length), l:"جرد معتمد في الفترة"}
+        {v:String(rows.length), l:"تسويات", ic:"wrench"},
+        {v:String(up),          l:"بالزيادة", cls:"good", ic:"trendingUp"},
+        {v:String(down),        l:"بالنقص",   cls:"crit", ic:"trendingDown"},
+        {v:_fmt(absSum),        l:"مجموع الفروقات (مطلق)", ic:"activity"},
+        {v:String((takes||[]).length), l:"جرد معتمد في الفترة", ic:"clipboardCheck"}
       ],
       caveats,
       extra: _takesTableHTML(takes||[])
@@ -898,51 +900,131 @@
      ٦) الرسم
      ════════════════════════════════════════════════════════════════════ */
 
+  /* ════════ أنماطُ الصفحة — توكِنزُ المنصة وكلاساتُها الجاهزة فقط ════════
+     **بلا لونٍ جديدٍ ولا خطٍّ جديد** (نفسُ قاعدة contracts.js و finance-audit.js):
+     الأسطحُ والحدودُ من `--surface/--surface2/--border`، والدلالاتُ من
+     `--sla-ok/--sla-warn/--sla-crit`، وكلُّ تظليلٍ بـ`color-mix` على التوكِن —
+     فيتبع النمطُ الثيمين معاً بلا صيانةِ لونٍ منفصلة. والجدولُ يستعمل `.report-table`
+     نفسَها التي تستعملها تقاريرُ المنصة (ولها قواعدُ وضعٍ داكنٍ مكتوبةٌ أصلاً)،
+     فلا جدولَ ثانياً يُصان. **والأرقامُ كلُّها مونوسبيس بـtabular-nums و
+     direction:ltr** — وهي بصمةُ كلِّ شاشةٍ رقميةٍ في المنصة، وأكبرُ ما كان يُنبئ
+     أنّ هذه الصفحة ليست منها.                                                    */
+  function _injectCSS(){
+    if(document.getElementById("ivr-css")) return;
+    const st=document.createElement("style"); st.id="ivr-css";
+    st.textContent=[
+      "#"+HOST_ID+"{direction:rtl}",
+      /* شريطُ المعايير: شبكةٌ تنضغط على الجوال بدل صفٍّ يلتفّ عشوائياً */
+      ".ivr-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px 12px;align-items:end}",
+      ".ivr-fld{min-width:0}",
+      ".ivr-fld>label{display:block;font-size:10.5px;font-weight:800;color:var(--muted);margin-bottom:4px;white-space:nowrap}",
+      ".ivr-fld>select,.ivr-fld>input{width:100%;font-size:12px}",
+      ".ivr-fld.wide{grid-column:span 2}",
+      ".ivr-acts{display:flex;gap:8px;align-items:end;grid-column:span 2}",
+      ".ivr-acts .btn{height:36px;white-space:nowrap}",
+      /* الأرقام — بصمةُ المنصة الرقمية */
+      "#"+HOST_ID+" .ast-stat .sv{direction:ltr;unicode-bidi:isolate}",
+      ".ivr-num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;white-space:nowrap}",
+      ".ivr-up{color:var(--sla-ok);font-weight:700}",
+      ".ivr-dn{color:var(--sla-crit);font-weight:700}",
+      ".ivr-zero{color:var(--muted)}",
+      /* الجدول: `.report-table` كما هي، وهذه تُصحّح محاذاةَ الأعمدة الرقمية فقط */
+      ".ivr-table td.c,.ivr-table th.c{text-align:center}",
+      ".ivr-table td.r{text-align:right;font-weight:600}",
+      ".ivr-table th{color:var(--primary)}",
+      /* رقاقةٌ صغيرةٌ للحالة ومصدرِ السعر — نفسُ أسلوب `.pi-pill` في جدول البنود */
+      ".ivr-pill{display:inline-block;font-size:10px;font-weight:700;border-radius:6px;padding:2px 7px;white-space:nowrap;"
+        +"border:1px solid color-mix(in srgb,var(--pc,var(--muted)) 30%,var(--border));"
+        +"background:color-mix(in srgb,var(--pc,var(--muted)) 12%,var(--surface));color:var(--pc,var(--muted))}",
+      ".ivr-pill.ok{--pc:var(--sla-ok)}.ivr-pill.warn{--pc:var(--sla-warn)}.ivr-pill.crit{--pc:var(--sla-crit)}",
+      /* صندوقُ التحفّظات: `.info-box` بتظليل التحذير من التوكِن */
+      ".ivr-cav{background:color-mix(in srgb,var(--sla-warn) 9%,var(--surface));"
+        +"border:1px solid color-mix(in srgb,var(--sla-warn) 28%,var(--border));color:var(--text);line-height:1.8}",
+      ".ivr-cav ul{margin:0;padding-inline-start:17px}",
+      ".ivr-cav li+li{margin-top:4px}",
+      /* حالةُ الفراغ — دعوةٌ لإجراءٍ لا رسالةُ عدم */
+      ".ivr-empty{text-align:center;padding:44px 20px;color:var(--muted)}",
+      ".ivr-empty .ic{color:var(--border)}",
+      ".ivr-empty svg{width:42px;height:42px}",
+      ".ivr-empty b{display:block;color:var(--text);font-size:14px;margin:8px 0 4px}",
+      "@media(max-width:640px){.ivr-fld.wide{grid-column:span 1}.ivr-acts{grid-column:1/-1}.ivr-acts .btn{flex:1}}"
+    ].join("");
+    document.head.appendChild(st);
+  }
+
+  // خليّةٌ واحدة — الأرقامُ مونوسبيس، والإشاراتُ بتوكِنات الدلالة لا بألوانٍ مثبَّتة
   function _cell(r, c){
     const v=r[c.k];
-    if(v==null || v==="") return '<span style="color:var(--muted)">—</span>';
-    if(c.f==="num")   return _fmt(v);
-    if(c.f==="money") return _money(v);
+    if(v==null || v==="") return '<span class="ivr-zero">—</span>';
+    if(c.f==="num")   return '<span class="ivr-num">'+_fmt(v)+'</span>';
+    if(c.f==="money") return '<span class="ivr-num">'+_money(v)+'</span>';
     if(c.f==="sign"){
       const n=_num(v);
-      if(n===0) return '<span style="color:var(--muted)">0</span>';
-      const col=n>0?"#166534":"#b91c1c";
-      return '<span style="color:'+col+';font-weight:700">'+(n>0?"+":"−")+_fmt(Math.abs(n))+'</span>';
+      if(n===0) return '<span class="ivr-num ivr-zero">0</span>';
+      return '<span class="ivr-num '+(n>0?"ivr-up":"ivr-dn")+'">'+(n>0?"+":"−")+_fmt(Math.abs(n))+'</span>';
     }
+    if(c.f==="code")  return '<span class="po-code">'+_esc(v)+'</span>';
+    if(c.f==="pill")  return '<span class="ivr-pill '+_esc(_pillTone(c.k,v))+'">'+_esc(v)+'</span>';
     return _esc(v);
   }
 
+  // نبرةُ الرقاقة تُشتقّ من معناها — «نفد» أحمرُ لأنه نفد، لا لأن الصفَّ يحتاج لوناً
+  function _pillTone(key, v){
+    const s=String(v);
+    if(key==="state")  return s==="نفد" ? "crit" : "warn";
+    if(key==="psrc")   return s==="آخر وارد" ? "ok" : (s==="—" ? "crit" : "");
+    if(key==="ageSrc") return s==="حركة" ? "" : "warn";
+    return "";
+  }
+
   function _tableHTML(rep){
-    if(!rep.rows.length){
-      return `<div style="text-align:center;padding:40px;color:var(--muted)">لا نتائج مطابقة لهذه المعايير</div>`;
-    }
-    const head=rep.cols.map(c=>`<th style="padding:10px 12px;text-align:${c.al==="right"?"right":"center"};background:var(--surface2);font-size:12px;white-space:nowrap">${_esc(c.l)}</th>`).join("");
-    const body=rep.rows.map(r=>`<tr>`+rep.cols.map(c=>
-      `<td style="padding:9px 12px;text-align:${c.al==="right"?"right":"center"};font-size:12.5px${c.al==="right"?";font-weight:600":""}">${_cell(r,c)}</td>`
-    ).join("")+`</tr>`).join("");
-    return `<div style="overflow-x:auto"><table class="data-table" style="width:100%;border-collapse:collapse">
+    if(!rep.rows.length) return _emptyHTML(true);
+    const cls=c=>(c.al==="right"?"r":"c");
+    const head=rep.cols.map(c=>`<th class="${cls(c)}">${_esc(c.l)}</th>`).join("");
+    const body=rep.rows.map(r=>`<tr>`+rep.cols.map(c=>`<td class="${cls(c)}">${_cell(r,c)}</td>`).join("")+`</tr>`).join("");
+    return `<div class="report-table-wrap"><table class="report-table ivr-table">
       <thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
+  /* شريطُ الإحصاء — `.ast-stat` كما تستعملها شاشاتُ الأصول والمخزون: أيقونةٌ في
+     رقاقةٍ ٣٨px ثم القيمةُ ثم التسمية. وكانت الأيقونةُ ناقصةً فبدت البطاقاتُ
+     نصفَ بطاقة. */
   function _statsHTML(rep){
     if(!rep.stats || !rep.stats.length) return "";
-    const t=rep.stats.map(s=>`<div class="ast-stat ${s.cls||"total"}"><div><div class="sv">${_esc(s.v)}</div><div class="sl">${_esc(s.l)}</div></div></div>`).join("");
-    return `<div class="ast-stats" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));padding:14px 16px;margin-bottom:0;border-bottom:1px solid var(--border)">${t}</div>`;
+    const t=rep.stats.map(s=>
+      `<div class="ast-stat ${s.cls||"total"}">
+         <span class="si">${_svg(s.ic||"barChart")}</span>
+         <div><div class="sv">${_esc(s.v)}</div><div class="sl">${_esc(s.l)}</div></div>
+       </div>`).join("");
+    return `<div class="ast-stats" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));padding:14px 16px;margin-bottom:0;border-bottom:1px solid var(--border)">${t}</div>`;
+  }
+
+  /* التوكيدُ في نصّ التحفّظ يحمل معنى («ناقصة» · «حدٌّ أدنى») فلا يُسطَّح. يُهرَّب
+     النصُّ أولاً ثمّ تُحوَّل أزواجُ `**` — فالوسمُ الناتج وسمُنا وحدَنا لا وسمُ البيانات. */
+  function _emph(s){
+    return _esc(s).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
   }
 
   function _caveatsHTML(rep){
     if(!rep.caveats || !rep.caveats.length) return "";
-    const li=rep.caveats.map(c=>`<li style="margin-bottom:5px">${_esc(c)}</li>`).join("");
-    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:11px 14px;margin:0 16px 14px;font-size:12px;line-height:1.75;color:var(--text-secondary)">
-      <div style="font-weight:800;margin-bottom:5px">حدودُ القراءة وتحفّظاتُها</div>
-      <ul style="margin:0;padding-inline-start:18px">${li}</ul></div>`;
+    const li=rep.caveats.map(c=>`<li>${_emph(c)}</li>`).join("");
+    return `<div class="info-box ivr-cav" style="margin:14px 16px">
+      <div class="section-label" style="margin-bottom:6px">حدودُ القراءة وتحفّظاتُها</div>
+      <ul>${li}</ul></div>`;
+  }
+
+  // فراغٌ يقول ما يُفعَل، لا «لا توجد بيانات»
+  function _emptyHTML(filtered){
+    return `<div class="ivr-empty">
+      <span class="ic">${_svg("package")}</span>
+      <b>${filtered?"لا صفوفَ تطابق هذه المعايير":"اختر تقريراً وفترةً"}</b>
+      ${filtered?"وسِّع الفترة أو أزِل فلترَ المستودع أو الفئة، ثم ولِّد التقرير مرّةً أخرى."
+                :"حدِّد نوعَ التقرير والفترة ثم اضغط «توليد التقرير»."}
+    </div>`;
   }
 
   function _outHTML(){
-    if(!_out) return `<div class="card"><div style="text-align:center;padding:44px;color:var(--muted)">
-      <div style="margin-bottom:8px;font-size:34px">📈</div>
-      اختر نوع التقرير والفترة ثم اضغط «توليد التقرير»
-    </div></div>`;
+    if(!_out) return `<div class="card">${_emptyHTML(false)}</div>`;
     const rep=_out;
     return `<div class="card">
       <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
@@ -962,67 +1044,49 @@
     const catOpts='<option value="">كل الفئات</option>'+_categories()
       .map(c=>`<option value="${_esc(c)}"${c===_f.cat?" selected":""}>${_esc(c)}</option>`).join("");
 
+    const fld=(label, inner, wide)=>`<div class="ivr-fld${wide?" wide":""}"><label>${label}</label>${inner}</div>`;
+    const IR="window.inventoryReports";
+
     // منتقي الصنف — لبطاقة الصنف وحدها (الوثيقة = صنف×مستودع)
     let itemPicker="";
     if(_f.kind==="card"){
-      let items=_filteredItems().slice()
+      const items=_filteredItems().slice()
         .sort((a,b)=>String(a.itemName||"").localeCompare(String(b.itemName||""),"ar"));
       const opts='<option value="">— اختر الصنف —</option>'+items.map(i=>
         `<option value="${_esc(i.id)}"${i.id===_f.docId?" selected":""}>${_esc(i.itemName||"—")}${i.itemCode?" ("+_esc(i.itemCode)+")":""} — ${_esc(i.warehouseName||"—")}</option>`
       ).join("");
-      itemPicker=`<div>
-        <label class="form-label" style="font-size:11px">الصنف <span style="color:var(--danger)">*</span></label>
-        <select class="form-select" style="font-size:12px;min-width:260px" onchange="window.inventoryReports._set('docId',this.value)">${opts}</select>
-      </div>`;
+      itemPicker=fld('الصنف <span style="color:var(--danger)">*</span>',
+        `<select class="form-select" onchange="${IR}._set('docId',this.value)">${opts}</select>`, true);
     }
 
-    const staleBox = _f.kind==="stale" ? `<div>
-      <label class="form-label" style="font-size:11px">حدّ السكون (يوم)</label>
-      <select class="form-select" style="font-size:12px;width:120px" onchange="window.inventoryReports._set('staleDays',this.value)">
-        ${[30,60,90,180,365].map(d=>`<option value="${d}"${_num(_f.staleDays)===d?" selected":""}>${d}</option>`).join("")}
-      </select></div>` : "";
+    const staleBox = _f.kind==="stale" ? fld("حدّ السكون (يوم)",
+      `<select class="form-select" onchange="${IR}._set('staleDays',this.value)">${
+        [30,60,90,180,365].map(d=>`<option value="${d}"${_num(_f.staleDays)===d?" selected":""}>${d}</option>`).join("")
+      }</select>`) : "";
 
-    const thBox = (_f.kind==="reorder"||_f.kind==="warehouse") ? `<div>
-      <label class="form-label" style="font-size:11px">عتبة «منخفض»</label>
-      <input class="form-input" type="number" min="0" step="0.001" value="${_esc(_f.threshold)}"
-        style="font-size:12px;width:110px;font-family:monospace;direction:ltr"
-        onchange="window.inventoryReports._setq('threshold',this.value)"></div>` : "";
+    const thBox = (_f.kind==="reorder"||_f.kind==="warehouse") ? fld("عتبة «منخفض»",
+      `<input class="form-input ivr-num" type="number" min="0" step="0.001" value="${_esc(_f.threshold)}"
+        onchange="${IR}._setq('threshold',this.value)">`) : "";
 
-    const grpBox = _f.kind==="consumption" ? `<div>
-      <label class="form-label" style="font-size:11px">التجميع</label>
-      <select class="form-select" style="font-size:12px;width:170px" onchange="window.inventoryReports._set('groupBy',this.value)">
+    const grpBox = _f.kind==="consumption" ? fld("التجميع",
+      `<select class="form-select" onchange="${IR}._set('groupBy',this.value)">
         <option value="project"${_f.groupBy==="project"?" selected":""}>المشروع / الموقع</option>
         <option value="recipient"${_f.groupBy==="recipient"?" selected":""}>المستلم</option>
         <option value="order"${_f.groupBy==="order"?" selected":""}>أمر الصرف / الطلب</option>
-      </select></div>` : "";
+      </select>`) : "";
 
     return `<div class="card" style="margin-bottom:14px"><div class="card-header">
-      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-        <div>
-          <label class="form-label" style="font-size:11px">نوع التقرير</label>
-          <select class="form-select" style="font-size:12px;min-width:230px" onchange="window.inventoryReports._set('kind',this.value)">${kindOpts}</select>
-        </div>
-        <div>
-          <label class="form-label" style="font-size:11px">من تاريخ</label>
-          <input class="form-input" type="date" value="${_esc(_f.from)}" style="font-size:12px"
-            onchange="window.inventoryReports._setq('from',this.value)">
-        </div>
-        <div>
-          <label class="form-label" style="font-size:11px">إلى تاريخ</label>
-          <input class="form-input" type="date" value="${_esc(_f.to)}" style="font-size:12px"
-            onchange="window.inventoryReports._setq('to',this.value)">
-        </div>
-        <div>
-          <label class="form-label" style="font-size:11px">المستودع</label>
-          <select class="form-select" style="font-size:12px;width:170px" onchange="window.inventoryReports._set('wh',this.value)">${whOpts}</select>
-        </div>
-        <div>
-          <label class="form-label" style="font-size:11px">الفئة</label>
-          <select class="form-select" style="font-size:12px;width:160px" onchange="window.inventoryReports._set('cat',this.value)">${catOpts}</select>
-        </div>
+      <div class="ivr-filters">
+        ${fld("نوع التقرير", `<select class="form-select" onchange="${IR}._set('kind',this.value)">${kindOpts}</select>`, true)}
+        ${fld("من تاريخ", `<input class="form-input" type="date" value="${_esc(_f.from)}" onchange="${IR}._setq('from',this.value)">`)}
+        ${fld("إلى تاريخ", `<input class="form-input" type="date" value="${_esc(_f.to)}" onchange="${IR}._setq('to',this.value)">`)}
+        ${fld("المستودع", `<select class="form-select" onchange="${IR}._set('wh',this.value)">${whOpts}</select>`)}
+        ${fld("الفئة", `<select class="form-select" onchange="${IR}._set('cat',this.value)">${catOpts}</select>`)}
         ${itemPicker}${staleBox}${thBox}${grpBox}
-        <button class="btn btn-primary btn-sm" id="invrep-gen" style="height:36px" onclick="window.inventoryReports.generate()">${_icn("barChart")} توليد التقرير</button>
-        <button class="btn btn-ghost btn-sm" style="height:36px" onclick="window.inventoryReports._reset()">مسح المعايير</button>
+        <div class="ivr-acts">
+          <button class="btn btn-primary btn-sm" id="invrep-gen" onclick="${IR}.generate()">${_icn("barChart")} توليد التقرير</button>
+          <button class="btn btn-ghost btn-sm" onclick="${IR}._reset()">مسح المعايير</button>
+        </div>
       </div>
     </div></div>`;
   }
@@ -1030,6 +1094,7 @@
   function render(){
     const host=document.getElementById(HOST_ID);
     if(!host) return;
+    _injectCSS();
     if(!canView()){
       host.innerHTML=`<div class="card" style="text-align:center;color:var(--muted);padding:40px">🔒 لا تملك صلاحية عرض تقارير المخزون</div>`;
       return;
