@@ -508,6 +508,80 @@ check('أ) الطلب أُزيل من القائمة المحلية', s8.inArray
 check('ب) ★ القصر عند الصفر: 4 − 6 ⇒ 0 لا سالب', s8.after2===0, 'الرصيد='+s8.after2);
 check('ب) دلتا السجل تبقى −6 (الأثر موثّق رغم القصر)', s8.adjDelta2===-6, 'دلتا='+s8.adjDelta2);
 
+/* ══ سيناريو 9 (v18.9xd): إصلاحُ انزياح صفوف التدقيق — في متصفّحٍ حقيقيّ على مخزنٍ حقيقيّ ══
+   البلاغ: عشراتُ قيود «انزياح صفوف التدقيق» على طلبين، تتكرّر من كلِّ جلسة. الشفاءُ كان
+   معلّقاً على «افتح تعديل الطلب واحفظ» فلم يقع أبداً. هنا نُشغّل poFixAlignment الحقيقيّة
+   ونتحقّق أنّ **المخزَّن** شُفي فعلاً — لا أنّ الشريطَ اختفى من الشاشة.                     */
+log('\n=== السيناريو 9: إصلاح انزياح صفوف التدقيق (v18.9xd) ══');
+const s9 = await page.evaluate(async ()=>{
+  const out={}; window.__store={}; purchases=[];
+  const PC = PURCHASES_COLLECTION();
+  const toasts=[]; window.toast=(m,t)=>toasts.push({m:String(m),t});
+  window.showConfirm = async ()=>true;
+  window.logAudit=()=>{}; window.renderPurchases=()=>{}; window.openPurchaseDetail=()=>{};
+  window.captureError=()=>{};
+
+  // طلبٌ مُدقَّقٌ حُذف منه بندٌ بعد التدقيق ⇒ صفُّ تدقيقٍ زائدٌ يزيح كلَّ ما بعده
+  const items=[{itemId:'a',itemName:'دهان',qty:2},{itemId:'b',itemName:'بلاستيك سوبر',qty:3},{itemId:'c',itemName:'فايبروساید',qty:1}];
+  const auditItems=[
+    {itemId:'a',itemName:'دهان',rcvQty:2,unitPrice:10},
+    {itemId:'x',itemName:'مبيد حشري',rcvQty:5,unitPrice:99},   // بندٌ حُذف — صفُّه باقٍ
+    {itemId:'b',itemName:'بلاستيك سوبر',rcvQty:3,unitPrice:20},
+    {itemId:'c',itemName:'فايبروساید',rcvQty:1,unitPrice:30}];
+  const PO={ id:'PO-ALIGN-1', status:'closed', building:'مبنى', auditedBy:'أمين المستودع',
+             items, auditItems, timeline:[{event:'تدقيق'}], createdAt:'2026-01-01T08:00:00' };
+  purchases=[JSON.parse(JSON.stringify(PO))];
+  window.__store[PC+'/PO-ALIGN-1']=JSON.parse(JSON.stringify(PO));
+
+  // الفحصُ الذاتيُّ يرصد الانزياحَ عند التحميل (نفسُ مسار _poHealItems)
+  _poAuditSelfCheck(purchases[0]);
+  out.detected = (_poAlignBreaks.get('PO-ALIGN-1')||[]).length;
+
+  // (أ) دورٌ لا يملك الإصلاح: يُرفَض ولا يُكتب شيء
+  currentUser={name:'محمد', role:'warehouse_manager'};
+  await poFixAlignment('PO-ALIGN-1');
+  out.deniedLen = (window.__store[PC+'/PO-ALIGN-1'].auditItems||[]).length;   // ما زال 4
+  out.deniedToast = toasts.some(t=>t.m.indexOf('صلاحية مدير النظام')!==-1);
+
+  // (ب) مدير النظام: الإصلاحُ يقع على المخزَّن
+  currentUser={name:'مدير النظام', role:'admin'};
+  await poFixAlignment('PO-ALIGN-1');
+  const d = window.__store[PC+'/PO-ALIGN-1'];
+  out.len       = (d.auditItems||[]).length;
+  out.names     = (d.auditItems||[]).map(r=>r.itemName).join('|');
+  out.rcv       = (d.auditItems||[]).map(r=>r.rcvQty).join(',');
+  out.itemsLen  = (d.items||[]).length;
+  out.itemNames = (d.items||[]).map(i=>i.itemName).join('|');   // البنودُ لم تُمَسّ
+  out.preSaved  = Array.isArray(d.auditItemsPreAlign) && d.auditItemsPreAlign.length===4;
+  out.tlFixed   = (d.timeline||[]).some(t=>t.code==='align_fixed');
+  out.tlKept    = (d.timeline||[]).some(t=>t.event==='تدقيق');
+  out.mapCleared= !_poAlignBreaks.has('PO-ALIGN-1');
+  // الفحصُ على المخزَّن الطازج: العيبُ زال فعلاً لا أُسكِت
+  out.rescan    = _poAlignScan({...d, id:'PO-ALIGN-1'}).length;
+
+  // (ج) إعادةُ الإصلاح: idempotent — لا يدهس الدليلَ ولا يُضيف قيداً ثانياً
+  const preRef = JSON.stringify(d.auditItemsPreAlign);
+  await poFixAlignment('PO-ALIGN-1');
+  const d2 = window.__store[PC+'/PO-ALIGN-1'];
+  out.preIntact = JSON.stringify(d2.auditItemsPreAlign)===preRef;
+  out.tlOnce    = (d2.timeline||[]).filter(t=>t.code==='align_fixed').length;
+  return out;
+});
+check('9أ) الفحصُ الذاتيُّ رصد الانزياح عند التحميل', s9.detected>=2, 'مواضع='+s9.detected);
+check('9ب) ★★ دورٌ لا يملك الإصلاح يُرفَض ولا يكتب في المخزَّن',
+  s9.deniedLen===4 && s9.deniedToast===true, 'صفوف='+s9.deniedLen);
+check('9ج) ★★ الإصلاحُ شفى المخزَّن فعلاً — ٣ صفوفٍ بترتيب البنود',
+  s9.len===3 && s9.names==='دهان|بلاستيك سوبر|فايبروساید', s9.names);
+check('9د) ★★ صفُّ البند المحذوف سقط وأرقامُ الاستلام تتبع بندَها', s9.rcv==='2,3,1', 'rcv='+s9.rcv);
+check('9هـ) ★★ البنودُ لم تُمَسّ إطلاقاً (الكتابةُ على صفوف التدقيق وحدَها)',
+  s9.itemsLen===3 && s9.itemNames==='دهان|بلاستيك سوبر|فايبروساید', s9.itemNames);
+check('9و) ★★ الدليلُ محفوظ (auditItemsPreAlign) والسجلُّ يحمل قيدَ الإصلاح',
+  s9.preSaved===true && s9.tlFixed===true && s9.tlKept===true);
+check('9ز) ★★ إعادةُ الفحص على المخزَّن: لا انزياحَ — العيبُ زال لا أُسكِت', s9.rescan===0, 'مواضع='+s9.rescan);
+check('9ح) ★ خريطةُ التشخيص نُظِّفت فيسقط الشريطُ فوراً', s9.mapCleared===true);
+check('9ط) ★★ إعادةُ الإصلاح idempotent: الدليلُ لم يُدهس ولا قيدَ ثانٍ',
+  s9.preIntact===true && s9.tlOnce===1, 'قيود='+s9.tlOnce);
+
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
 if(boot.length) log('(أخطاء إقلاع غير حرجة: '+boot.length+' — متوقّعة من غياب CDN)');
