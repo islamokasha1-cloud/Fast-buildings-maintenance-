@@ -191,11 +191,21 @@ const s3 = await page.evaluate(async ()=>{
   window.__store = {};   // ابدأ نظيفاً
   window.__store[LOG+'/l1'] = { type:'in',       itemId:'A', qty:50, itemName:'صنف', unit:'قطعة' };
   window.__store[LOG+'/l2'] = { type:'transfer', itemId:'A', destItemId:'B', qty:20, itemName:'صنف', unit:'قطعة' };
+  // ★ ووارد يدويّ على صنفٍ ثالث — كان يُسقَط كلَّه فيتلاشى المخزونُ المُدخَل يدوياً
+  window.__store[LOG+'/l3'] = { type:'manual_in', itemId:'C', qty:40, itemName:'يدويّ', unit:'قطعة' };
+  window.__store[LOG+'/l4'] = { type:'in',        itemId:'C', qty:50, itemName:'يدويّ', unit:'قطعة' };
+  window.__store[LOG+'/l5'] = { type:'out',       itemId:'C', qty:12, itemName:'يدويّ', unit:'قطعة' };
   await recalcInventoryFromLog();
-  return { A: (window.__store[INV+'/A']||{}).currentQty, B: (window.__store[INV+'/B']||{}).currentQty };
+  return { A: (window.__store[INV+'/A']||{}).currentQty, B: (window.__store[INV+'/B']||{}).currentQty,
+           C: (window.__store[INV+'/C']||{}).currentQty };
 });
 check('★ المصدر A = 30 (50 − نقل 20، لا 50 وهمية)', s3.A===30, 'A='+s3.A);
 check('★ الوجهة B = 20 (أُضيف النقل)', s3.B===20, 'B='+s3.B);
+/* ★★ الوارد اليدويّ يدخل إعادةَ الحساب — كان الشرطُ `t==="in"` وحدَه فلا يطابق
+   "manual_in" فيسهم بصفر: 40 وحدةً مضافةً يدوياً **تتلاشى** ويخرج 38 بدل 78، بلا
+   رسالةٍ في أيّ مكان. والرقمُ مقصودٌ ليفرّق: 90 لو أُضيفت مرّتين، 38 لو أُسقطت. */
+check('★★ الوارد اليدويّ يُحتسَب في إعادة الحساب (40+50−12=78، لا 38)',
+  s3.C===78, 'C='+s3.C);
 
 /* ══ سيناريو 4: تدفّق اعتماد طلب الشراء (متعدّد الأدوار) ══ */
 log('\n=== السيناريو 4: تدفّق اعتماد طلب الشراء ══');
@@ -857,6 +867,10 @@ const s13 = await page.evaluate(async ()=>{
   _inventoryItems=[cbl, lmp];
   window.__store[IC+'/INV-CBL']={...cbl};
   window.__store[IC+'/INV-LMP']={...lmp};
+  /* وعلَمُ وصول اللقطة يُرفَع كما يرفعه مستمعُ المخزون في السطر نفسِه الذي يُسند
+     `_inventoryItems` — فالوحدةُ ترفض الحسابَ قبله (لئلّا تُبنى أرقامٌ من سجلٍّ بلا
+     أرصدة)، وهذا السيناريو يزرع العالمَ بيده فعليه أن يُعلن ما يُعلنه المستمع. */
+  window._fsLoaded = window._fsLoaded || {}; window._fsLoaded.inventory = true;
 
   const mv = d => db.collection(LC).add(d);
   await mv({ type:'in',         itemId:'INV-CBL', itemName:'كابل نحاس', unit:'متر', qty:30, unitPrice:15,
@@ -948,6 +962,145 @@ check('13ح) ★★ التقييم بسعر آخر وارد (15×40=600) لا ب
 check('13ط) ★ الجدولُ مكوّنُ المنصة `.report-table` لا جدولٌ محلّيّ', s13.platformTable===true);
 check('13ي) ★ النمطُ محقونٌ مرّةً واحدةً (#ivr-css)', s13.styleInjected===true);
 check('13ك) ★ الأرقامُ بصنف المونوسبيس الجدوليّ كبقيّة شاشات المنصة', s13.monoNums===true);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   السيناريو 14: تكافؤُ المصدرين — إعادةُ الحساب وتقريرُ الفترة يقولان الرقمَ نفسَه
+
+   أثرُ الحركة على الرصيد مكتوبٌ في **موضعين**: `recalcInventoryFromLog` في
+   `index.html` و`_effects` في وحدة التقارير. وتوحيدُهما نقلُ منطقٍ قائمٍ لا يُخلط
+   بإصلاح (قاعدةُ CLAUDE.md) — فيبقى الخطر: يُعدَّل أحدُهما ويُنسى الآخر، فيقول
+   التقريرُ رقماً ويقول الرصيدُ غيرَه **بلا رسالةِ خطأ**. وهذا ما وقع فعلاً في
+   `manual_in`. فالحارس: بذرةُ حركاتٍ من الأنواع الستة كلِّها ⇒ تُشغَّل إعادةُ
+   الحساب فتكتب الرصيد ⇒ ثمّ يُولَّد تقريرُ الفترة ⇒ ويُقاس **الافتتاحيُّ قبل أوّل
+   حركة**: يجب أن يكون **صفراً** — فلا شيءَ كان موجوداً قبل أوّل حركةٍ في السجل.
+
+   **ولماذا الافتتاحيُّ لا الختاميّ؟** أوّلُ صياغةٍ لهذا الفحص قاست «الختاميُّ =
+   الرصيدُ المكتوب» فمرّت **رغم الخلل**: الختاميُّ = الرصيدُ الحاليّ − ما بعد النهاية
+   + ما في الفترة، ونهايةُ الفترة اليوم ⇒ فهو **يساوي الرصيدَ الحاليَّ بالبناء** لا
+   بالتطابق — متطابقةٌ تُصادِق نفسَها. أمّا الافتتاحيّ فهو
+   `Σ(حساب index.html) − Σ(حساب الوحدة)`: صفرٌ إن اتّفق الحسابان على **كل نوعٍ**،
+   وغيرُ صفرٍ بمقدار ما أسقطه أحدُهما. (بالخلل: 30 − 50 = −20.)
+   ═══════════════════════════════════════════════════════════════════════════ */
+log('\n=== السيناريو 14: تكافؤُ إعادة الحساب مع تقرير الفترة ══');
+const s14 = await page.evaluate(async ()=>{
+  const out={};
+  window.isAdmin=()=>true; window.showConfirm=async()=>true; window.toast=()=>{};
+  window.logAudit=()=>{}; window.renderInventory=()=>{};
+  currentUser={name:'أمين المستودع', role:'warehouse_manager', user:'wh'};
+  const INV=INVENTORY_COLLECTION(), LOG=INVENTORY_LOG_COLLECTION();
+  window.__store={};
+  const D=n=>{ const d=new Date(); d.setDate(d.getDate()-n); d.setHours(9,0,0,0); return d.toISOString(); };
+
+  // الأنواعُ الستة على ثلاثة أصناف (الوثيقةُ = صنف×مستودع)
+  const L={
+    m1:{ type:'in',         itemId:'X', qty:100, unitPrice:5, itemName:'صنف س', unit:'متر', warehouseName:'و1', date:D(25) },
+    m2:{ type:'manual_in',  itemId:'X', qty:20,  unitPrice:5, itemName:'صنف س', unit:'متر', warehouseName:'و1', date:D(20) },
+    m3:{ type:'out',        itemId:'X', qty:35,  itemName:'صنف س', unit:'متر', date:D(15) },
+    m4:{ type:'adjust',     itemId:'X', qty:0, adjustDelta:-5, itemName:'صنف س', unit:'متر', date:D(10) },
+    m5:{ type:'direct_use', itemId:'X', qty:500, itemName:'صنف س', unit:'متر', date:D(8) },  // صفرٌ على الرصيد
+    m6:{ type:'transfer',   itemId:'X', destItemId:'Y', qty:30, itemName:'صنف س', unit:'متر',
+         fromWarehouse:'و1', toWarehouse:'و2', date:D(5) }
+  };
+  Object.keys(L).forEach(k=>{ window.__store[LOG+'/'+k]=L[k]; });
+
+  // (١) إعادةُ الحساب تكتب الرصيد من السجل
+  await recalcInventoryFromLog();
+  out.recalc = { X:(window.__store[INV+'/X']||{}).currentQty, Y:(window.__store[INV+'/Y']||{}).currentQty };
+
+  // (٢) الأرصدةُ الحيّة تُقرأ من المخزن كما يفعل مستمعُ المخزون
+  _inventoryItems = ['X','Y'].map(id=>({ id, ...(window.__store[INV+'/'+id]||{}),
+    warehouseName: id==='X' ? 'و1' : 'و2' }));
+  window._fsLoaded = window._fsLoaded || {}; window._fsLoaded.inventory = true;
+
+  // (٣) تقريرُ الفترة بفترةٍ تغطّي كلَّ الحركات
+  const IR=window.inventoryReports;
+  const dd=n=>{ const d=new Date(); d.setDate(d.getDate()-n); const z=x=>String(x).padStart(2,'0');
+    return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); };
+  // الفترةُ تبدأ **قبل** أقدمِ حركة (D(25)) — فالافتتاحيُّ يجب أن يكون صفراً
+  IR._set('kind','movement'); IR._setq('from',dd(60)); IR._setq('to',dd(0));
+  showPage('inventory-reports');
+  await IR.generate();
+  const rows=(IR._state().out||{rows:[]}).rows;
+  out.opening={}; out.closing={};
+  ['و1','و2'].forEach(w=>{
+    const r=rows.find(x=>x.wh===w);
+    if(r){ out.opening[w]=r.opening; out.closing[w]=r.closing; }
+  });
+  out.rows=rows.length;
+  return out;
+});
+// X: 100 + 20(يدويّ) − 35 − 5(تسوية) − 30(نقل خارجاً) = 50 · و direct_use 500 بلا أثر
+check('★★ إعادةُ الحساب: 100+20−35−5−30 = 50 (وdirect_use بلا أثر)',
+  s14.recalc && s14.recalc.X===50, 'X='+(s14.recalc||{}).X);
+check('★ وطرفُ النقل الآخر = 30', s14.recalc && s14.recalc.Y===30, 'Y='+(s14.recalc||{}).Y);
+/* ★★ المتطابقةُ التي لا تُصادِق نفسَها: الافتتاحيُّ قبل أوّل حركةٍ = صفر.
+   وهو `Σ(حساب index.html) − Σ(حساب الوحدة)` — فأيُّ نوعٍ يقرؤه أحدُهما ويُسقطه
+   الآخرُ يظهر هنا رقماً غيرَ صفرٍ بمقداره بالضبط. */
+check('★★ تكافؤُ المصدرين: الافتتاحيُّ قبل أوّل حركة = صفر في الطرفين',
+  !!s14.opening && s14.opening['و1']===0 && s14.opening['و2']===0,
+  'الافتتاحي='+JSON.stringify(s14.opening));
+check('★ والختاميُّ يطابق ما كتبته إعادةُ الحساب',
+  !!s14.closing && s14.closing['و1']===s14.recalc.X && s14.closing['و2']===s14.recalc.Y,
+  'ختامي='+JSON.stringify(s14.closing)+' رصيد='+JSON.stringify(s14.recalc));
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   السيناريو 15: لا تقريرَ قبل وصول لقطة الأرصدة
+
+   كلُّ حسابٍ في الوحدة يبدأ من الرصيد الحاليّ ثم يرجع بالحركات. فقبل أوّل لقطةٍ
+   لـ`global_inventory` تكون الأرصدةُ فارغةً، فتُبنى الصفوفُ من السجل وحدَه ويخرج
+   **تقريرٌ كاملُ الشكل كاذبُ الأرقام** (افتتاحيٌّ سالبٌ وختاميٌّ صفر) بلا رسالةٍ في
+   أيّ مكان. الحارسُ يرفض التوليدَ ولا يُخفي السبب — ويجب أن يُثبت الفحصُ أنّه
+   **يمنع ولا يُعطِّل**: يرفض قبل اللقطة، ويسمح بعدها بلا إعادةِ تحميل.
+   ═══════════════════════════════════════════════════════════════════════════ */
+log('\n=== السيناريو 15: حارسُ لقطة الأرصدة ══');
+const s15 = await page.evaluate(async ()=>{
+  const out={};
+  const toasts=[]; window.toast=(m)=>toasts.push(String(m));
+  window.logAudit=()=>{};
+  currentUser={name:'أمين المستودع', role:'warehouse_manager', user:'wh'};
+  const IR=window.inventoryReports;
+  IR._reset();                                        // يمحو أيَّ تقريرٍ من سيناريو سابق
+  const sheetsBefore=(IR._state().sheets||[]).length;  // أوراقُ Excel المتراكمة قبل المحاولة
+  window._fsLoaded = window._fsLoaded || {};
+  window._fsLoaded.inventory = false;                 // ما قبل أوّل لقطة
+  out.readyFalse = IR._invReady()===false;
+
+  const dd=n=>{ const d=new Date(); d.setDate(d.getDate()-n); const z=x=>String(x).padStart(2,'0');
+    return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); };
+  IR._set('kind','movement'); IR._setq('from',dd(30)); IR._setq('to',dd(0));
+  showPage('inventory-reports');
+
+  /* (١) الرسمُ وحدَه: حالةُ المزامنة في مكان المخرَج.
+     يُقاس بـ`render` لا بـ`generate` — فـ`generate` تستدعي `startInventorySync`
+     قبل الرفض، **والمحاكي يبثّ اللقطةَ فوراً** فيرتفع العلَمُ في نفس اللحظة ويُرسَم
+     «اختر تقريراً». (في الإنتاج تأخذ اللقطةُ رحلةَ شبكةٍ فتظهر الحالةُ فعلاً.)
+     فصلُ الادّعاءين يجعل كلَّ فحصٍ يقيس نفسَه لا أثرَ الآخر. */
+  const host=document.getElementById('page-inventory-reports');
+  IR.render();
+  out.syncShown = /fs-sync|جارٍ مزامنة/.test(host.innerHTML);
+
+  // (٢) التوليدُ يُرفَض ولا يُنتج شيئاً
+  window._fsLoaded.inventory = false;
+  await IR.generate();
+  const st1=IR._state();
+  out.noReport = st1.out===null;                      // لا تقرير
+  // ولا **ورقةَ Excel جديدة**: المتراكمُ من توليدٍ سابقٍ ناجحٍ يبقى (وُلّد فعلاً)،
+  // والمقصودُ أنّ تقريراً لم يُحسَب لا يُضيف ورقةً تُصدَّر
+  out.noNewSheet = (st1.sheets||[]).length===sheetsBefore;
+  out.toldUser  = toasts.some(m=>m.indexOf('أرصدة المخزون')>=0);
+
+  // ثمّ تصل اللقطة — التوليدُ ينجح بلا إعادةِ تحميل (يمنع ولا يُعطِّل)
+  window._fsLoaded.inventory = true;
+  await IR.generate();
+  out.afterReady = IR._state().out !== null;
+  return out;
+});
+check('15أ) `_invReady` تقرأ علَم اللقطة نفسَه الذي تقرؤه شاشةُ الرصيد', s15.readyFalse===true);
+check('15ب) ★★ قبل اللقطة: لا تقريرَ إطلاقاً (لا أرقامَ كاذبةً كاملةَ الشكل)', s15.noReport===true);
+check('15ج) ★ ولا ورقةَ Excel تُضاف (فلا أثرَ في الجلسة لتقريرٍ لم يُحسَب)', s15.noNewSheet===true);
+check('15د) ★ وحالةُ المزامنة معروضةٌ في مكان المخرَج (لا فراغٌ صامت)', s15.syncShown===true);
+check('15هـ) ★ والمستخدم يُخبَر بالسبب', s15.toldUser===true);
+check('15و) ★★ وبعد وصول اللقطة يعمل التوليد (الحارسُ يمنع ولا يُعطِّل)', s15.afterReady===true);
 
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
