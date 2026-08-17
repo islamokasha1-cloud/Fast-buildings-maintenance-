@@ -823,6 +823,121 @@ check('12هـ) ★★ وطلبٌ أنشأتُه أنا ⇒ لا إشعار', s12
 check('12و) ★★ وبلاغٌ جديد ⇒ إشعارٌ يصل', s12.notifTicket===true);
 check('12ز) ★★ وتعديلُ وثيقةٍ سابقةٍ لا يُشعِر مرّتين', s12.noDoubleNotify===true);
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   السيناريو 13: تقارير المخزون — **الرقمُ المرسوم = الرقمُ المحسوب**
+
+   الدوالُّ النقيّة تفحصها `hail-tests` في صندوقٍ معزول، وذلك يُثبت الحساب ولا يُثبت
+   أنّ ما **يُرسَم على الشاشة** هو ما حُسِب: بين الحساب والجدول تمرّ الفلاتر والتجميعُ
+   ومُنسّقُ الأرقام والحقلُ المفقود — وكلُّ واحدٍ منها موضعُ انزياحٍ لا يظهر في أيّ خطأ.
+   فهنا: تُزرَع أرصدةٌ وحركاتٌ في Firestore الوهميّ، ثمّ يُوَلَّد التقريرُ **بالمسار
+   الحقيقيّ** (استعلامٌ ← حسابٌ ← رسمٌ)، ثمّ يُقرأ الرقمُ **من خلايا الجدول المرسومة**
+   ويُقارَن بالمحسوب. ومعه المصيدةُ نفسُها في متصفّحٍ حقيقيّ: `direct_use` لا تُنقِص رصيداً.
+   ═══════════════════════════════════════════════════════════════════════════ */
+log('\n=== السيناريو 13: تقارير المخزون — المرسوم = المحسوب ══');
+const s13 = await page.evaluate(async ()=>{
+  const out={};
+  window.toast=()=>{}; window.logAudit=()=>{};
+  currentUser={name:'أمين المستودع', role:'warehouse_manager', user:'wh'};
+  out.moduleLoaded = !!(window.inventoryReports && typeof window.inventoryReports.render==='function');
+  if(!out.moduleLoaded) return out;
+
+  const IC=INVENTORY_COLLECTION(), LC=INVENTORY_LOG_COLLECTION();
+  window.__store={};
+  const D=n=>{ const d=new Date(); d.setDate(d.getDate()-n); d.setHours(10,0,0,0); return d.toISOString(); };
+
+  /* رصيدان في مستودعين + حركاتٌ خلال الشهر (ومنها direct_use بكمّيةٍ ضخمة لا تمسّ الرصيد).
+     البذرةُ في **المصفوفة والمخزن معاً** (نمطُ بقيّة السيناريوهات — §5): الوحدةُ تقرأ
+     الأرصدةَ من `_inventoryItems` الحيّة، وتقرأ السجلَّ باستعلامٍ حقيقيٍّ على المخزن. */
+  const cbl={ id:'INV-CBL', itemId:'INV-CBL', itemName:'كابل نحاس', itemCode:'ELEC-1',
+    category:'مواد كهربائية', unit:'متر', currentQty:40, unitPrice:9,
+    warehouseName:'المستودع الرئيسي', lastUpdated:D(1) };
+  const lmp={ id:'INV-LMP', itemId:'INV-LMP', itemName:'لمبة ليد', itemCode:'ELEC-2',
+    category:'مواد كهربائية', unit:'قطعة', currentQty:5, unitPrice:0,
+    warehouseName:'مستودع فرعي', lastUpdated:D(200) };
+  _inventoryItems=[cbl, lmp];
+  window.__store[IC+'/INV-CBL']={...cbl};
+  window.__store[IC+'/INV-LMP']={...lmp};
+
+  const mv = d => db.collection(LC).add(d);
+  await mv({ type:'in',         itemId:'INV-CBL', itemName:'كابل نحاس', unit:'متر', qty:30, unitPrice:15,
+             relatedPO:'PO-77', warehouseName:'المستودع الرئيسي', performedBy:'أمين', date:D(20) });
+  await mv({ type:'out',        itemId:'INV-CBL', itemName:'كابل نحاس', unit:'متر', qty:12, unitPrice:0,
+             orderRef:'ISS-9', recipient:'فنّي أ', projectId:'hail', performedBy:'أمين', date:D(10) });
+  await mv({ type:'adjust',     itemId:'INV-CBL', itemName:'كابل نحاس', unit:'متر', qty:0, adjustDelta:-3,
+             reason:'جرد', performedBy:'أمين', date:D(5) });
+  // ★ المصيدة: بندٌ سُلّم للموقع مباشرةً — كمّيةٌ ضخمة يجب ألّا تمسّ رصيدَ المستودع
+  await mv({ type:'direct_use', itemId:'INV-CBL', itemName:'كابل نحاس', unit:'متر', qty:500, unitPrice:15,
+             relatedPO:'PO-78', projectId:'hail', location:'موقع أ', performedBy:'مشتريات', date:D(8) });
+
+  const IR=window.inventoryReports;
+  const p=n=>{ const d=new Date(); d.setDate(d.getDate()-n);
+    const z=x=>String(x).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); };
+
+  // ── حركةُ الفترة: يُولَّد بالمسار الحقيقيّ ثمّ يُقرأ من الخلايا المرسومة ──
+  IR._set('kind','movement'); IR._setq('from',p(30)); IR._setq('to',p(0));
+  showPage('inventory-reports');
+  await IR.generate();
+  const st=IR._state();
+  const rowCbl=(st.out.rows||[]).find(r=>r.name==='كابل نحاس')||{};
+  out.calc={ opening:rowCbl.opening, inQty:rowCbl.inQty, outQty:rowCbl.outQty,
+             adjNet:rowCbl.adjNet, closing:rowCbl.closing };
+
+  // القراءةُ من الجدول المرسوم فعلاً (لا من الحالة)
+  const host=document.getElementById('page-inventory-reports');
+  const trs=[...host.querySelectorAll('table.data-table tbody tr')];
+  const cells=(trs.find(tr=>tr.textContent.includes('كابل نحاس'))||{querySelectorAll:()=>[]})
+    .querySelectorAll('td');
+  const txt=i=>(cells[i]?cells[i].textContent.trim():'');
+  const n=s=>parseFloat(String(s).replace(/[^\d.\-]/g,''))||0;
+  out.drawn={ opening:n(txt(4)), inQty:n(txt(5)), outQty:n(txt(6)), closing:n(txt(9)) };
+  out.rowsDrawn=trs.length;
+  out.excelReady=(st.sheets||[]).indexOf('movement')>=0;
+  // ورقةُ Excel تُبنى من نفس cols/rows — نتحقّق أن رقمَها هو نفسُه
+  const sheet=IR._sheetRows(st.out);
+  const shRow=sheet.find(r=>r['المادة']==='كابل نحاس')||{};
+  out.excelClosing=shRow['ختامي'];
+
+  // ── الاستهلاك: direct_use تُحتسَب هنا (وهي صفرٌ في الرصيد أعلاه) ──
+  IR._set('kind','consumption'); IR._setq('from',p(30)); IR._setq('to',p(0));
+  await IR.generate();
+  const c=IR._state().out.rows||[];
+  out.consumeDirect=(c.find(r=>String(r.kind).includes('مباشر'))||{}).qty;
+  out.consumeOut=(c.find(r=>String(r.kind)==='صادر')||{}).qty;
+
+  // ── الراكد: اللمبةُ ساكنةٌ ٢٠٠ يوم (بحقل آخر تحديث) والكابلُ متحرّك ──
+  IR._set('kind','stale'); IR._set('staleDays',90); IR._setq('from',p(30)); IR._setq('to',p(0));
+  await IR.generate();
+  const stale=(IR._state().out.rows||[]).map(r=>r.name);
+  out.staleHasLmp=stale.indexOf('لمبة ليد')>=0;
+  out.staleHasCbl=stale.indexOf('كابل نحاس')>=0;
+
+  // ── التقييم: سعرُ آخر واردٍ (15) لا سعرُ وثيقة الصنف (9) ──
+  IR._set('kind','warehouse'); IR._setq('from',p(30)); IR._setq('to',p(0));
+  await IR.generate();
+  const wh=(IR._state().out.rows||[]).find(r=>r.wh==='المستودع الرئيسي')||{};
+  out.whValue=wh.value; out.whNoPrice=wh.noPrice;
+  return out;
+});
+check('13أ) الوحدة محمَّلةٌ وتعرّض واجهتها', s13.moduleLoaded===true);
+check('13ب) ★★ الأرقامُ المحسوبة: افتتاحي 25 · وارد 30 · صادر 12 · تسوية −3 · ختامي 40',
+  s13.calc && s13.calc.opening===25 && s13.calc.inQty===30 && s13.calc.outQty===12
+  && s13.calc.adjNet===-3 && s13.calc.closing===40, JSON.stringify(s13.calc));
+check('13ج) ★★ الرقمُ المرسوم في الجدول = الرقمُ المحسوب (لا انزياحَ عمود)',
+  s13.drawn && s13.calc && s13.drawn.opening===s13.calc.opening && s13.drawn.inQty===s13.calc.inQty
+  && s13.drawn.outQty===s13.calc.outQty && s13.drawn.closing===s13.calc.closing,
+  JSON.stringify(s13.drawn));
+check('13د) ★★ الختاميُّ = الرصيد الحاليّ (٤٠) مع أنّ direct_use كانت ٥٠٠ وحدة',
+  s13.calc && s13.calc.closing===40);
+check('13هـ) ★ ورقةُ Excel تحمل الرقمَ نفسَه', s13.excelReady===true && s13.excelClosing===40,
+  'ختامي في الورقة='+s13.excelClosing);
+check('13و) ★★ direct_use تُحتسَب في الاستهلاك (٥٠٠) والصادرُ منفصلٌ (١٢)',
+  s13.consumeDirect===500 && s13.consumeOut===12,
+  'مباشر='+s13.consumeDirect+' صادر='+s13.consumeOut);
+check('13ز) ★ الراكد: الساكنُ ٢٠٠ يوم يظهر والمتحرّكُ لا يظهر',
+  s13.staleHasLmp===true && s13.staleHasCbl===false);
+check('13ح) ★★ التقييم بسعر آخر وارد (15×40=600) لا بسعر وثيقة الصنف (9×40=360)',
+  s13.whValue===600, 'القيمة='+s13.whValue+' بلا سعر='+s13.whNoPrice);
+
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
 if(boot.length) log('(أخطاء إقلاع غير حرجة: '+boot.length+' — متوقّعة من غياب CDN)');

@@ -39,6 +39,7 @@ const SB_PATH  = [path.resolve(path.dirname(IDX), "substitute-budget.js")].find(
 const PA_PATH  = [path.resolve(path.dirname(IDX), "price-analysis.js")].find(p => fs.existsSync(p));
 const LC_PATH  = [path.resolve(path.dirname(IDX), "labor-catalog.js")].find(p => fs.existsSync(p));
 const ST_PATH  = [path.resolve(path.dirname(IDX), "stocktake.js")].find(p => fs.existsSync(p));
+const IVR_PATH = [path.resolve(path.dirname(IDX), "inventory-reports.js")].find(p => fs.existsSync(p));
 const FA_PATH  = [path.resolve(path.dirname(IDX), "finance-audit.js")].find(p => fs.existsSync(p));
 const HRP_PATH = [path.resolve(path.dirname(IDX), "hr-payments.js")].find(p => fs.existsSync(p));
 const CTR_PATH = [path.resolve(path.dirname(IDX), "contracts.js")].find(p => fs.existsSync(p));
@@ -1131,6 +1132,179 @@ function stocktakeTests() {
   T("الفشل الجزئي يعود لحالةٍ قابلة للإعادة",
     src.includes('status: meta.auto ? "counting" : "pending_approval"'));
   T("النجاح الكامل وحده يُوسَم «مطبَّق»", src.includes('appliedFailed: 0'));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   13-ب) تقارير المخزون (inventory-reports.js)
+
+   الوحدةُ تُعيد بناء الرصيد من السجل، فأخطرُ ما فيها **أن تخالف
+   `recalcInventoryFromLog`**: حينها يقول التقريرُ رقماً ويقول النظامُ غيرَه، ولا
+   يظهر التعارضُ في أيّ رسالةِ خطأ — يُقرأ رقمٌ خاطئٌ ويُوقَّع عليه. فهذه الحرّاسُ
+   تقيس **الحساب** لا الرسم:
+     • `direct_use` صفرٌ في الرصيد (بندٌ لم يدخل المستودع أصلاً) — وهي المصيدة الأولى.
+     • `transfer` تحرّك **طرفين** (المصدر والوجهة) لا طرفاً واحداً.
+     • `adjust` بلا `adjustDelta` تُقرأ موجبةً — نفسُ افتراض النظام، فلا يُعاد
+       تفسيرُ الماضي بأثرٍ رجعيّ.
+     • المتطابقة المحاسبية: افتتاحي + صافي الفترة = ختامي، والختاميُّ حتى اللحظة
+       = الرصيد الحالي بالضبط.
+   ════════════════════════════════════════════════════════════════════ */
+function inventoryReportsTests() {
+  H("13-ب) تقارير المخزون (inventory-reports.js)");
+  if (!IVR_PATH) { T("inventory-reports.js موجود", false, "لم يُعثر على الملف"); return; }
+  const vm = require("vm");
+  const src = fs.readFileSync(IVR_PATH, "utf8");
+  try { new vm.Script(src); T("صياغة inventory-reports.js سليمة", true); }
+  catch (e) { T("صياغة inventory-reports.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  // ── الوسم والتركيب في index.html (أربعة مواضع: وسم · صفحة · زر · خطّاف) ──
+  T("الوسم موجود في index.html", /<script src="inventory-reports\.js\?v=/.test(HTML));
+  T("حاوية الصفحة موجودة", HTML.includes('<div class="page" id="page-inventory-reports"></div>'));
+  T("زر القائمة الجانبية في مجموعة المخزون",
+    HTML.includes('data-page="inventory-reports" onclick="showPage(\'inventory-reports\')"'));
+  T("خطّاف showPage يستدعي الوحدة",
+    HTML.includes('if(id==="inventory-reports"){ if(window.inventoryReports&&window.inventoryReports.render) window.inventoryReports.render(); }'));
+
+  // ── ختمُ البناء (يرفعه npm run stamp مع APP_VERSION) ──
+  const ivrBuild = (src.match(/const MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
+  T("★ MODULE_BUILD في inventory-reports.js يطابق APP_VERSION (يُرفَعان معاً)",
+    ivrBuild === VER, `MODULE_BUILD=${ivrBuild}  APP_VERSION=${VER}`);
+  T("الوحدة تُصدّر build على واجهتها العامة", /build: MODULE_BUILD/.test(src));
+
+  // ── تحميل الوحدة في صندوقٍ معزول ──
+  const docStub = {
+    getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+    addEventListener: () => {}, createElement: () => ({ style: {}, classList: { add() {}, remove() {} }, appendChild() {}, setAttribute() {} })
+  };
+  const sandbox = { window: {}, document: docStub, console, setTimeout: () => 0, clearTimeout: () => {} };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل inventory-reports", false, String(e.message).slice(0, 120)); return; }
+  const IR = sandbox.window.inventoryReports;
+  T("الدوال النقيّة مكشوفة على الواجهة",
+    !!(IR && typeof IR._effects === "function" && typeof IR._net === "function"
+       && typeof IR._openingMap === "function" && typeof IR._rollup === "function"
+       && typeof IR._priceOf === "function" && typeof IR._bounds === "function"));
+  if (!IR || !IR._effects) return;
+  T("التقارير السبعة معرَّفة", IR.KINDS && Object.keys(IR.KINDS).length === 7,
+    "عددها=" + (IR.KINDS ? Object.keys(IR.KINDS).length : 0));
+
+  // ════ _effects / _net: مطابقة recalcInventoryFromLog حرفاً بحرف ════
+  const L = (t, o) => Object.assign({ type: t, itemId: "A", qty: 10, date: "2026-08-05T09:00:00.000Z" }, o || {});
+  T("_net: وارد شراء = +qty", IR._net(L("in"), "A") === 10);
+  T("_net: وارد يدوي = +qty (recalc تُغفلها — والتقرير لا يُغفلها)", IR._net(L("manual_in"), "A") === 10);
+  T("_net: صادر = −qty", IR._net(L("out"), "A") === -10);
+  T("_net: تسوية بـadjustDelta تُقرأ منه لا من qty",
+    IR._net(L("adjust", { adjustDelta: -4 }), "A") === -4);
+  T("★ تسوية سالبة لا تُقرأ موجبةً (عطلُ عرضٍ قديم لا يتكرّر هنا)",
+    IR._net(L("adjust", { qty: 0, adjustDelta: -7 }), "A") === -7);
+  T("تسوية قديمة بلا adjustDelta تُقرأ موجبةً (توافقُ الماضي كما في recalc)",
+    IR._net(L("adjust"), "A") === 10);
+
+  // ★ المصيدة الأولى: direct_use لم يدخل المستودع — أثرُه على الرصيد صفر
+  T("★ direct_use = صفر على الرصيد (سُلّم للموقع بلا دخول المستودع)",
+    IR._net(L("direct_use"), "A") === 0 && IR._effects(L("direct_use")).length === 0);
+  T("نوعٌ مجهول = صفر (لا يُسمّم الرصيد)", IR._net(L("wat"), "A") === 0);
+
+  // ★ المصيدة الثانية: النقل طرفان
+  const tr = L("transfer", { destItemId: "B", qty: 6 });
+  T("★ نقل: −qty على المصدر و +qty على الوجهة (طرفان لا طرف)",
+    IR._net(tr, "A") === -6 && IR._net(tr, "B") === 6 && IR._effects(tr).length === 2);
+  T("نقل بلا destItemId (سجل قديم): المصدر وحده يُصحَّح",
+    IR._effects(L("transfer", { qty: 6 })).length === 1);
+  T("حركةٌ بلا itemId تُهمَل بلا انفجار", IR._effects(L("in", { itemId: "" })).length === 0);
+  T("qty معطوبة تُقرأ صفراً لا NaN", IR._net(L("in", { qty: "س" }), "A") === 0);
+
+  // ════ الرصيد الافتتاحي: يُبنى بالعكس من الرصيد الحالي ════
+  const items = [{ id: "A", itemName: "كابل", unit: "متر", warehouseName: "الرئيسي", currentQty: 50 }];
+  const logs = [
+    L("in",     { itemId: "A", qty: 30, date: "2026-08-03T05:00:00.000Z" }),
+    L("out",    { itemId: "A", qty: 12, date: "2026-08-10T05:00:00.000Z" }),
+    L("adjust", { itemId: "A", qty: 0, adjustDelta: -3, date: "2026-08-20T05:00:00.000Z" }),
+    L("direct_use", { itemId: "A", qty: 99, date: "2026-08-11T05:00:00.000Z" })  // لا أثر
+  ];
+  const open = IR._openingMap(items, logs);
+  T("★ الافتتاحي = الحالي − صافي كل حركةٍ منذ بداية الفترة", open.A === 35, "=" + open.A);
+  T("★ direct_use لا تُزيح الافتتاحيّ (وإلا نقص 99 وحدة كذباً)", open.A === 35);
+
+  const b = IR._bounds("2026-08-01", "2026-08-31");
+  const acc = IR._rollup(items, logs, b.fromISO, b.toISO);
+  const a = acc.A;
+  T("_rollup: الوارد والصادر والتسويات كلٌّ في عموده",
+    a.inQty === 30 && a.outQty === 12 && a.adjNet === -3 && a.xferNet === 0,
+    JSON.stringify({ i: a.inQty, o: a.outQty, adj: a.adjNet, x: a.xferNet }));
+  T("★ المتطابقة: افتتاحي + وارد − صادر + نقل + تسويات = ختامي",
+    a.closing === a.opening + a.inQty - a.outQty + a.xferNet + a.adjNet, "ختامي=" + a.closing);
+  T("★ الختاميُّ حتى اللحظة = الرصيد الحالي بالضبط", a.closing === 50, "=" + a.closing);
+
+  // النقل داخل الفترة: عمودٌ مستقلٌّ لا يُخلَط بوارد ولا صادر
+  const it2 = [{ id: "A", currentQty: 10, itemName: "ص", warehouseName: "و1" },
+               { id: "B", currentQty: 6,  itemName: "ص", warehouseName: "و2" }];
+  const lg2 = [L("transfer", { itemId: "A", destItemId: "B", qty: 6, date: "2026-08-07T05:00:00.000Z" })];
+  const ac2 = IR._rollup(it2, lg2, b.fromISO, b.toISO);
+  T("★ النقل عمودٌ مستقلّ (ليس شراءً ولا استهلاكاً)",
+    ac2.A.xferNet === -6 && ac2.B.xferNet === 6 &&
+    ac2.A.inQty === 0 && ac2.A.outQty === 0 && ac2.B.inQty === 0 && ac2.B.outQty === 0);
+  T("النقل: افتتاحيُّ المصدر والوجهة يعكسان ما قبل النقل",
+    ac2.A.opening === 16 && ac2.B.opening === 0, JSON.stringify({ a: ac2.A.opening, b: ac2.B.opening }));
+
+  // وثيقةٌ تحرّكت ولا رصيدَ لها الآن (صنفٌ حُذف) — تُدرَج ولا تُبتلع
+  const ac3 = IR._rollup([], [L("out", { itemId: "Z", qty: 4 })], b.fromISO, b.toISO);
+  T("صنفٌ محذوفٌ تحرّك في الفترة يُدرَج بهويّته من السجل",
+    !!ac3.Z && ac3.Z.orphan === true && ac3.Z.opening === 4, JSON.stringify(ac3.Z && { o: ac3.Z.opening }));
+
+  // ════ حدود الفترة بالتوقيت المحلّي لا بقصّ نصّ UTC ════
+  T("_bounds: الحدود لحظتا منتصف الليل المحلّيتان",
+    b.fromISO === new Date("2026-08-01T00:00:00").toISOString() &&
+    b.toISO === new Date("2026-08-31T23:59:59.999").toISOString());
+  T("_bounds: فترةٌ مقلوبةٌ تُرفَض", IR._bounds("2026-08-31", "2026-08-01") === null);
+  T("_bounds: تاريخٌ غير صالح يُرفَض", IR._bounds("", "") === null);
+  T("★ الفترة تُقاس بحقل date كاملاً لا بـslice(0,10) (فرق التوقيت لا يُزحزح يوماً)",
+    !src.includes('slice(0,10) >=') && src.includes('T00:00:00'));
+
+  // ════ ترتيب مصادر السعر — معلَنٌ ومُختبَر ════
+  const lastIn = IR._lastInPrices([
+    L("in", { itemId: "A", unitPrice: 12, date: "2026-08-02T05:00:00.000Z" }),
+    L("in", { itemId: "A", unitPrice: 15, date: "2026-08-09T05:00:00.000Z" }),
+    L("in", { itemId: "A", unitPrice: 0,  date: "2026-08-20T05:00:00.000Z" })   // صفرٌ لا يُعتمد
+  ]);
+  T("_lastInPrices: آخر سعرٍ موجبٍ لا آخر سجلٍ مطلقاً", lastIn.A && lastIn.A.price === 15);
+  const catIdx = { byCode: { "c1": { unitPrice: 7 } }, byName: {} };
+  const itemP = { itemCode: "C1", itemName: "كابل", unitPrice: 9 };
+  T("★ الأولوية لآخر وارد (أطزجُ من سعرٍ يُكتب مرّةً عند الإنشاء)",
+    IR._priceOf("A", itemP, lastIn, catIdx).price === 15 &&
+    IR._priceOf("A", itemP, lastIn, catIdx).src === "آخر وارد");
+  T("بلا واردٍ: سعرُ وثيقة الصنف", IR._priceOf("A", itemP, {}, catIdx).price === 9);
+  T("بلا واردٍ ولا سعرِ صنف: الكتالوج بالكود",
+    IR._priceOf("A", { itemCode: "C1", itemName: "كابل" }, {}, catIdx).price === 7);
+  const noP = IR._priceOf("A", { itemName: "مجهول" }, {}, catIdx);
+  T("★ بلا سعرٍ في أيّ مصدر: null لا صفر (لا تُصفَّر القيمةُ بصمت)",
+    noP.price === null && noP.src === "—");
+
+  // ════ السكون ومعدّل الاستهلاك ════
+  const nowMs = new Date("2026-08-31T00:00:00.000Z").getTime();
+  T("_stale: عمرُ السكون بالأيام",
+    IR._stale("2026-08-01T00:00:00.000Z", nowMs) === 30);
+  T("_stale: بلا تاريخٍ = null (لا صفر — صفرٌ يعني «تحرّك اليوم»)", IR._stale("", nowMs) === null);
+  T("_periodDays: يومٌ واحدٌ لا صفر (لا قسمةَ على صفر)",
+    IR._periodDays(new Date("2026-08-05T00:00:00").toISOString(), new Date("2026-08-05T23:59:59.999").toISOString()) === 1);
+
+  // ════ مصدرٌ واحدٌ للأرقام: Excel يُبنى من نفس cols/rows المرسومة ════
+  const rep = { cols: [{ k: "name", l: "المادة" }, { k: "qty", l: "الكمية", f: "num" }], rows: [{ name: "كابل", qty: 5 }] };
+  const sh = IR._sheetRows(rep);
+  T("★ ورقةُ Excel تُبنى من cols/rows نفسِها (الرقم المصدَّر = المرسوم)",
+    sh.length === 1 && sh[0]["المادة"] === "كابل" && sh[0]["الكمية"] === 5);
+  T("اسمُ ورقة Excel آمنٌ ومقصورٌ على ٣١ حرفاً",
+    IR._safeSheetName("a:b/c\\d?e*f[g]h").indexOf(":") < 0 &&
+    IR._safeSheetName("ط".repeat(60)).length === 31);
+
+  // ════ حرّاسُ نمطٍ: الوحدة قراءةٌ فقط، وسقفُ القراءة معلَن ════
+  T("★ الوحدة لا تكتب على Firestore إطلاقاً",
+    !/\.(set|update|add|delete)\s*\(/.test(src.replace(/\.set\(\s*['"]/g, "")) || !/(runTransaction|writeBatch|db\.batch)/.test(src));
+  T("لا معاملات ولا دفعات كتابة", !/runTransaction|writeBatch|db\.batch\(/.test(src));
+  T("سقفُ القراءة معلَنٌ في وجه التقرير لا في تعليقٍ فحسب",
+    src.includes("بلغت القراءةُ سقفَ") && /READ_CAP\s*=\s*\d+/.test(src));
+  T("استعلامٌ واحدٌ بحقلٍ واحدٍ (بلا فهرسٍ مركّب)",
+    src.includes('.where("date", ">=", b.fromISO)') && !/where\([^)]*\)\s*\.where\(/.test(src));
+  T("الوثائق المدموجة مُستبعَدة (نفس شرط _inventoryFiltered)", src.includes("x.mergedInto"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -10197,6 +10371,7 @@ function hailNotifyFeed() {
   hailNotify();
   writeRaceRoot();
   stocktakeTests();
+  inventoryReportsTests();
   vendorSummary();
   vendorNameUnify();
   actualCostFromItems();
