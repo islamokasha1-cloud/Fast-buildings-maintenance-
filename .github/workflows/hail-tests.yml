@@ -20,6 +20,7 @@ on:
       - 'photo-queue.js'
       - 'operations-wall.js'
       - 'hail-tests.js'
+      - 'global-surface-check.mjs'
       - 'sync-version.mjs'
       - 'firestore.rules'
       - 'rules-check.mjs'
