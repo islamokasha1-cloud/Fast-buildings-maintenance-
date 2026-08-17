@@ -52,6 +52,27 @@ window.__store = {};                       // path -> data (Firestore في ال�
     var ds=paths.map(snap);
     return { empty:ds.length===0, size:ds.length, docs:ds, forEach:function(f){ds.forEach(f);} };
   }
+  /* ── docChanges(): كان غائباً عن المحاكي، فكلُّ منطقٍ يقرأ التغييراتَ (إشعاراتُ سطح
+     المكتب) كان **غيرَ قابلٍ للفحص** — يرمي داخل معالج اللقطة ويُبتلَع صامتاً في الـ
+     try/catch، فيمرّ الفحصُ وهو لا يُشغّل المنطقَ إطلاقاً. v18.9xg: يُحسَب لكلِّ اشتراكٍ
+     على حِدة بمقارنة اللقطة بسابقتها — أوّلُ لقطةٍ كلُّها "added" كما في Firestore. */
+  function _attachChanges(sn, state, coll){
+    var cur = {};
+    sn.docs.forEach(function(d){ cur[d.id] = JSON.stringify(d.data()); });
+    var changes = [];
+    sn.docs.forEach(function(d, i){
+      var was = state.prev[d.id];
+      if(was === undefined)      changes.push({ type:'added',    doc:d, newIndex:i, oldIndex:-1 });
+      else if(was !== cur[d.id]) changes.push({ type:'modified', doc:d, newIndex:i, oldIndex:i });
+    });
+    Object.keys(state.prev).forEach(function(id){
+      // المحذوفُ لم يبقَ في المخزن — نمرّر لقطتَه كما هي (exists:false)، ويكفي للنوع
+      if(cur[id] === undefined) changes.push({ type:'removed', doc:snap(coll+'/'+id), newIndex:-1, oldIndex:0 });
+    });
+    state.prev = cur;
+    sn.docChanges = function(){ return changes; };
+    return sn;
+  }
   function collRef(coll){ var st={ ob:null, lim:0, sa:null }; var q={
     doc:function(id){ return docRef(id? coll+'/'+id : coll+'/auto_'+Math.random().toString(36).slice(2)); },
     add:function(d){ var id='auto_'+Math.random().toString(36).slice(2); window.__store[coll+'/'+id]=d; _emit(coll+'/'+id); return Promise.resolve(docRef(coll+'/'+id)); },
@@ -60,7 +81,12 @@ window.__store = {};                       // path -> data (Firestore في ال�
     limit:function(n){ st.lim=n||0; return q; },
     startAfter:function(v){ st.sa=v; return q; },
     get:function(){ return Promise.resolve(collSnap(coll, st)); },
-    onSnapshot:function(cb){ try{ cb(collSnap(coll)); }catch(e){} return _sub({ coll:coll, cb:cb }); }
+    onSnapshot:function(cb){
+      var state={prev:{}};
+      var wrapped=function(sn){ cb(_attachChanges(sn, state, coll)); };
+      try{ wrapped(collSnap(coll, st)); }catch(e){}
+      return _sub({ coll:coll, cb:wrapped });
+    }
   }; return q; }
   var FieldValue={ serverTimestamp:function(){return {__sv:1};}, increment:function(n){return {__inc:n};}, arrayUnion:function(){return {};}, arrayRemove:function(){return {};}, delete:function(){return {__del:1};} };
   // نمذجة عزل Firestore التسلسلي: كل معاملة تُنفَّذ كاملةً قبل التالية (طابور)،
@@ -724,6 +750,78 @@ check('11ز) ★★ المفصَّلُ لم يُحذَف — ٤١ بطاقةً �
 check('11ح) ★ والرجوعُ للمجمَّع يعمل', s11.backToGrouped===2, 'بطاقات='+s11.backToGrouped);
 check('11ط) ★★ الفلترُ يُطبَّق قبل التجميع — «محمد» له ٩ أحداثٍ في مجموعتين',
   s11.filteredCards===2 && /9/.test(s11.filteredCount), s11.filteredCount.trim().slice(0,50));
+
+/* ══ سيناريو 12 (v18.9xg): الإشعاراتُ من لقطة المستمع الأساسيّ — لا مستمعٌ ثانٍ ══
+   قياسٌ في متصفّحٍ حقيقيّ كشف أنّ startHailNotifications كانت تُركّب مستمعاً ثانياً على
+   نفس مجموعتَي البلاغات والمشتريات — هدفان دائمان وتيّارُ قراءاتٍ مضاعف بلا مقابل.
+   وهذا المسارُ لم يكن قابلاً للفحص قبل اليوم: المحاكي بلا docChanges فكان منطقُ
+   الإشعارات يرمي ويُبتلَع صامتاً. الآن يُفحَص تنفيذاً — ولا يُصلَح ما لا يُقاس.        */
+log('\n=== السيناريو 12: الإشعاراتُ من اللقطة الأساسيّة (v18.9xg) ══');
+const s12 = await page.evaluate(async ()=>{
+  const out={}; window.__store={}; purchases=[]; tickets=[];
+  const PC=PURCHASES_COLLECTION(), TC=COLLECTION();
+  window.toast=()=>{}; window.renderPurchases=()=>{}; window.updatePurchaseBadge=()=>{};
+  window.renderCurrentPage=()=>{}; window.updateHeader=()=>{}; window.logAudit=()=>{};
+  window.checkOverduePurchases=()=>{}; window.captureError=()=>{};
+  currentUser={name:'مدير النظام', role:'admin', user:'admin'};
+
+  // (أ) عدّادُ الاشتراكات: كم مستمعاً يُركَّب على كلِّ مجموعةٍ من الآن؟
+  const subs={};
+  const oc=db.collection.bind(db);
+  db.collection=function(c){
+    const q=oc(c); const os=q.onSnapshot.bind(q);
+    q.onSnapshot=function(){ subs[c]=(subs[c]||0)+1; return os.apply(this,arguments); };
+    return q;
+  };
+
+  // الإشعاراتُ المُطلَقة
+  const pushed=[];
+  if(typeof HailNotify!=="undefined") HailNotify.push=o=>pushed.push(o.code);
+
+  // (ب) استدعاءُ التهيئة ثلاثاً: يجب ألّا يُركَّب مستمعٌ واحد
+  for(let i=0;i<3;i++){ try{ startHailNotifications(); }catch(e){ out.err=String(e.message); } }
+  out.subsAfterInit = JSON.stringify(subs);
+  out.noOwnListeners = !subs[PC] && !subs[TC];
+  out.feedsExist = (typeof _hnFeedTickets==="function") && (typeof _hnFeedPurchases==="function");
+  out.deadVarsGone = (typeof _hnPOUnsub==="undefined") && (typeof _hnTicketsUnsub==="undefined");
+
+  // (ج) المستمعُ الأساسيُّ حيّ؛ وثيقةٌ جديدةٌ تصل ⇒ إشعارٌ عبر التغذية
+  try{ startPurchaseSync(); }catch(e){}
+  try{ startRealtimeSync(); }catch(e){}
+  await new Promise(r=>setTimeout(r,400));
+  out.subsAfterSync = JSON.stringify(subs);   // مستمعٌ واحدٌ لكلِّ مجموعةٍ لا اثنان
+  out.oneEach = (subs[PC]||0) <= 1 && (subs[TC]||0) <= 1;
+
+  const mkPO=(id,by)=>db.collection(PC).doc(id).set({ id, status:'pending_pm', desc:'طلب '+id,
+    createdAt:new Date().toISOString(), createdBy:by, estCost:500, items:[{itemCost:500}] });
+  await mkPO('PO-N1','otherUser'); await new Promise(r=>setTimeout(r,500));
+  out.notifOther = pushed.includes('PO-N1');
+  await mkPO('PO-N2','admin');     await new Promise(r=>setTimeout(r,500));
+  out.notifSelf  = pushed.includes('PO-N2');      // يجب false — لا تُنبّه صاحبَ الطلب
+  await db.collection(TC).doc('BLG-N1').set({ id:'BLG-N1', status:'مفتوح', building:'مبنى',
+    workType:'كهرباء', desc:'انقطاع', createdAt:new Date().toISOString(), createdBy:'otherUser' });
+  await new Promise(r=>setTimeout(r,500));
+  out.notifTicket = pushed.includes('BLG-N1');
+  // (د) التكرارُ لا يُشعِر مرّتين (حارسُ _hnSeen*)
+  const before=pushed.length;
+  await db.collection(PC).doc('PO-N1').set({ desc:'تعديل' }, {merge:true});
+  await new Promise(r=>setTimeout(r,500));
+  out.noDoubleNotify = pushed.length===before;
+  out.pushed=pushed.join(',');
+  db.collection=oc;
+  return out;
+});
+check('12أ) ★★ التهيئةُ لا تُركّب مستمعاً خاصّاً بالإشعارات (٣ استدعاءات ⇒ صفر)',
+  s12.noOwnListeners===true, 'اشتراكات='+s12.subsAfterInit);
+check('12ب) ★★ ومستمعٌ واحدٌ لكلِّ مجموعةٍ بعد المزامنة — لا اثنان',
+  s12.oneEach===true, s12.subsAfterSync);
+check('12ج) ★ دالّتا التغذية موجودتان ومتغيّرا الاشتراك الميّتان أُزيلا',
+  s12.feedsExist===true && s12.deadVarsGone===true);
+check('12د) ★★ طلبٌ جديدٌ من غيري ⇒ إشعارٌ يصل (المسارُ يعمل من اللقطة الأساسيّة)',
+  s12.notifOther===true, 'المُشعَر: '+s12.pushed);
+check('12هـ) ★★ وطلبٌ أنشأتُه أنا ⇒ لا إشعار', s12.notifSelf===false);
+check('12و) ★★ وبلاغٌ جديد ⇒ إشعارٌ يصل', s12.notifTicket===true);
+check('12ز) ★★ وتعديلُ وثيقةٍ سابقةٍ لا يُشعِر مرّتين', s12.noDoubleNotify===true);
 
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));

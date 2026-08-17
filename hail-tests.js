@@ -1832,25 +1832,26 @@ function listenerChurn() {
       upd.includes('catch(e){ console.warn("doUpdatePurchaseStatus: fresh-read error/timeout"'));
   }
 
-  // ── v18.9ub: إتمام §17 لمستمعَي إشعارات سطح المكتب (HailNotify) ──
+  /* ── v18.9ub → v18.9xg: العقدُ صار أقوى من «مستمعٌ idempotent» ──
+     كانت هذه الحرّاسُ تثبّت أنّ مستمعَي HailNotify يُركَّبان مرّةً ويُفكّان عند الخروج.
+     وقياسٌ في متصفّحٍ حقيقيّ كشف أنّ ذلك كان يُخفي العيبَ لا يمنعه: المستمعان كانا
+     **تكراراً** لمستمعَي المزامنة على نفس المجموعتين — هدفان دائمان وتيّارُ قراءاتٍ
+     مضاعف. فالعقدُ الآن: **لا مستمعَ خاصّاً بالإشعارات إطلاقاً** — تُغذَّى من لقطة
+     الأساسيّ. (الحرّاسُ التنفيذيّةُ الكاملةُ في `hailNotifyFeed` وسيناريو ١٢.) */
   {
     const hn = slice("startHailNotifications");
-    // مستمع طلبات الشراء (global_purchases — عام): يُركَّب مرة واحدة، لا يُفكّ ويُعاد التركيب مع كل استدعاء
-    T("★ startHailNotifications: مستمع طلبات الشراء (عام) بحارس idempotent (!_hnPOUnsub)",
-      hn.includes("if(!_hnPOUnsub){") && hn.includes("_hnPOUnsub = db.collection(PURCHASES_COLLECTION())"));
-    T("★ لم يعد يفكّ مستمع طلبات الشراء العام مع كل استدعاء",
-      !hn.includes("if(_hnPOUnsub){ _hnPOUnsub(); _hnPOUnsub=null; }"));
-    // مستمع البلاغات (مرتبط بالمشروع): يُعاد تركيبه فقط عند تغيّر المشروع فعلاً
-    T("★ مستمع البلاغات يُعاد تركيبه فقط عند تغيّر المشروع (_hnTicketsProjKey)",
-      hn.includes("_hnTicketsProjKey === _hnProjKey") && hn.includes("_hnTicketsProjKey = _hnProjKey;"));
+    T("★★ ub→xg: التهيئةُ لا تُركّب مستمعاً — لا تكرارَ لمستمعي المزامنة",
+      !/onSnapshot/.test(hn) && /HailNotify\.init\(/.test(hn));
+    T("★★ ub→xg: ولا أثرَ لمتغيّرَي الاشتراك القديمَين في الملفّ",
+      !/_hnPOUnsub/.test(HTML) && !/_hnTicketsUnsub/.test(HTML));
+    T("★ ub→xg: وأساسُ البلاغات يُصفَّر عند تغيّر المشروع (مِلكيّةُ الحالة باقية)",
+      HTML.includes("_hnTicketsProjKey = _hnProjKey;") && HTML.includes("_hnTicketsProjKey !== _hnProjKey"));
   }
-  // كلا المستمعَين يُفكّان عند الخروج (ليُعاد تركيبهما نظيفَين للجلسة التالية)
-  T("★ logout يفكّ مستمعَي HailNotify (idempotent)",
-    slice("logout").includes("_hnTicketsUnsub(); _hnTicketsUnsub=null; _hnTicketsProjKey=null;") &&
-    slice("logout").includes("_hnPOUnsub(); _hnPOUnsub=null;"));
-  T("logoutToLogin يفكّ مستمعَي HailNotify أيضاً",
-    slice("logoutToLogin").includes("_hnTicketsUnsub(); _hnTicketsUnsub=null; _hnTicketsProjKey=null;") &&
-    slice("logoutToLogin").includes("_hnPOUnsub(); _hnPOUnsub=null;"));
+  // الخروجُ يُصفّر حالةَ الإشعارات — بلا تفكيكِ مستمعٍ لم يعد يوجد
+  T("★ ub→xg: logout يُصفّر أساسَ الإشعارات ومجموعةَ المرئيّ",
+    slice("logout").includes("_hnSeenTickets.clear(); _hnSeenPOs.clear();"));
+  T("ub→xg: logoutToLogin يُصفّرها أيضاً",
+    slice("logoutToLogin").includes("_hnSeenTickets.clear(); _hnSeenPOs.clear();"));
 
   // ── v18.9ub: تحديث وقائي للجلسات الطويلة على الأجهزة الدائمة التشغيل ──
   // يعالج «الجهاز المحدّد» جذرياً: يُصفّر عدّاد targetId بإعادة تحميلٍ صامتٍ عند طول العمر + غياب المستخدم.
@@ -10124,6 +10125,64 @@ function errLogGrouping() {
     HTML.indexOf("let rows=errorsLog.filter") < HTML.indexOf("const _groups = _errGroups(rows)"));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   v18.9xg — الإشعاراتُ تُغذَّى من لقطة المستمع الأساسيّ (تقليلُ أهداف Firestore)
+
+   قياسٌ في متصفّحٍ حقيقيّ (أثرُ النداء عند كلِّ تركيبِ onSnapshot) كشف أنّ
+   `startHailNotifications` تُركّب مستمعاً **ثانياً** على `hail_tickets` و
+   `global_purchases` — نفسُ المجموعة ونفسُ الترتيب، فوق مستمعَي `startRealtimeSync`
+   و`startPurchaseSync`، ويعيشان الجلسةَ كلَّها. والمكرَّرُ يقرأ أحدثَ ٣٠ وثيقةً:
+   مجموعةٌ فرعيةٌ محضةٌ ممّا يستقبله الأساسيُّ (٦٠٠ · ٤٠٠). الثمن: هدفان دائمان
+   (وهما ما نُقلّله لتخفيف سباق ca9) وتيّارُ قراءاتٍ مضاعف — وفاتورةُ Firestore
+   تُحاسب على الوثيقة لكلِّ مستمع.
+   ════════════════════════════════════════════════════════════════════ */
+function hailNotifyFeed() {
+  H("v18.9xg) الإشعاراتُ من اللقطة الأساسيّة — لا مستمعٌ ثانٍ لنفس الاستعلام");
+
+  const a = HTML.indexOf("function startHailNotifications(){");
+  const b = HTML.indexOf("function _hnFeedTickets(snap){", a);
+  const init = a >= 0 && b > a ? HTML.slice(a, b) : "";
+  T("★ xg: كتلةُ startHailNotifications مستخرَجة", !!init);
+  T("★★ xg: لا onSnapshot في التهيئة إطلاقاً — لا مستمعَ خاصّاً بالإشعارات",
+    !!init && !/onSnapshot/.test(init), "التهيئة تُهيّئ HailNotify فقط");
+  T("★★ xg: ومتغيّرا الاشتراك الميّتان أُزيلا من الملفّ كلِّه (لا تفكيكٌ لِما لا يوجد)",
+    !/_hnPOUnsub/.test(HTML) && !/_hnTicketsUnsub/.test(HTML));
+
+  // التغذيةُ مُستدعاةٌ من نهاية معالجَي اللقطة — بعد تحديث الحالة لا قبله
+  const tSync = HTML.slice(HTML.indexOf("function startRealtimeSync(){"),
+                           HTML.indexOf("function renderCurrentPage(){"));
+  T("★★ xg: معالجُ لقطة البلاغات يُغذّي الإشعارات", /_hnFeedTickets\(snap\)/.test(tSync));
+  T("★ xg: وبعد تحديث tickets والرسم — فنقرةُ الإشعار تجد البلاغَ في الحالة",
+    tSync.indexOf("tickets=snap.docs.map") < tSync.indexOf("_hnFeedTickets(snap)")
+      && tSync.indexOf("renderCurrentPage()") < tSync.indexOf("_hnFeedTickets(snap)"));
+  const pSync = HTML.slice(HTML.indexOf("function startPurchaseSync(){"),
+                           HTML.indexOf("// ████  INVENTORY SYSTEM"));
+  T("★★ xg: ومعالجُ لقطة المشتريات يُغذّيها كذلك", /_hnFeedPurchases\(snap\)/.test(pSync));
+  T("★ xg: وبعد استبدال purchases — فـ getPOTotal يقرأ الطلبَ الحاضر",
+    pSync.indexOf("purchases = _deletedPurchaseIds.size") < pSync.indexOf("_hnFeedPurchases(snap)"));
+
+  // التغذيةُ تُصمد أمام لقطةٍ بلا docChanges (محاكٍ/نسخةٌ قديمة) ولا تُسقط المعالج
+  const feeds = HTML.slice(HTML.indexOf("function _hnFeedTickets(snap){"),
+                           HTML.indexOf("<\/script>", HTML.indexOf("function _hnFeedPurchases(snap){")));
+  T("★★ xg: التغذيةُ لا تُسقط معالجَ اللقطة أبداً (حارسٌ + try/catch لكلٍّ منهما)",
+    (feeds.match(/if\(typeof HailNotify==="undefined" \|\| !snap \|\| !snap\.docChanges\) return;/g) || []).length === 2
+      && (feeds.match(/\}catch\(e\)\{ try\{ console\.warn\("hail-notify/g) || []).length === 2);
+  T("★★ xg: تبديلُ المشروع يُعيد ضبطَ الأساس — فلا تنفجر إشعاراتُ مشروعٍ كامل",
+    /_hnTicketsProjKey !== _hnProjKey\)\{[\s\S]{0,160}_hnTicketsBaseline = false; _hnSeenTickets\.clear\(\);/.test(feeds));
+  T("★ xg: والخروجُ يُصفّر حالةَ الإشعارات (بلا تفكيكِ مستمعٍ لم يوجد)",
+    (HTML.match(/try\{ _hnSeenTickets\.clear\(\); _hnSeenPOs\.clear\(\); \}catch\(_e\)\{\}/g) || []).length === 2);
+
+  // المحاكي: بلا docChanges كان منطقُ الإشعارات يرمي ويُبتلَع — فحصٌ لا يُشغّل شيئاً
+  const BS = fs.existsSync(path.resolve(path.dirname(IDX), "browser-scenarios.mjs"))
+    ? fs.readFileSync(path.resolve(path.dirname(IDX), "browser-scenarios.mjs"), "utf8") : "";
+  T("★★ xg: محاكي Firestore صار يُنفّذ docChanges — فالمسارُ قابلٌ للفحص أصلاً",
+    /function _attachChanges\(sn, state, coll\)/.test(BS) && /type:'added'/.test(BS)
+      && /type:'modified'/.test(BS) && /type:'removed'/.test(BS));
+  T("★★ xg: وسيناريو ١٢ يُثبت الإشعارَ تنفيذاً (يصل من غيري · لا يصل مني · لا يتكرّر)",
+    /out\.notifOther = pushed\.includes\('PO-N1'\)/.test(BS)
+      && /s12\.notifSelf===false/.test(BS) && /s12\.noDoubleNotify===true/.test(BS));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -10186,6 +10245,7 @@ function errLogGrouping() {
   fsRecoveryNoDeadEnd();
   poAlignRepair();
   errLogGrouping();
+  hailNotifyFeed();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
