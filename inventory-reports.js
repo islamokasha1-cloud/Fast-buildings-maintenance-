@@ -50,7 +50,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.2718";
+  const MODULE_BUILD = "v18.9.2719";
 
   const HOST_ID   = "page-inventory-reports";
   const READ_CAP  = 5000;    // سقف الحركات المقروءة لكل توليد — يُعلَن عند بلوغه
@@ -804,33 +804,29 @@
     };
   }
 
+  /* جدولُ الجرد المعتمد — يُبنى بنفس مكوّنات المنصة وأصنافها كجدول التقرير أعلاه:
+     لا لونٌ مثبَّت ولا أنماطٌ سطرية، فيتبع الوضعَ الداكن معها بلا صيانةٍ ثانية. */
   function _takesTableHTML(takes){
     if(!takes.length) return "";
+    const cols=[
+      {k:"wh",   l:"المستودع",      al:"right"},
+      {k:"date", l:"تاريخ الاعتماد", al:"center"},
+      {k:"by",   l:"بدأه",           al:"center"},
+      {k:"items",l:"بنود الجرد",     al:"center", f:"num"},
+      {k:"adj",  l:"بنود مُسوّاة",    al:"center", f:"num"},
+      {k:"net",  l:"صافي الفرق",     al:"center", f:"sign"}
+    ];
     const rows=takes.map(t=>{
       const res=(t.results||[]);
-      const adj=res.filter(r=>_num(r.delta)!==0).length;
-      const net=_r3(res.reduce((s,r)=>s+_num(r.delta),0));
-      return `<tr>
-        <td style="padding:8px 12px;font-weight:700;font-size:13px">${_esc(t.warehouseName||"—")}</td>
-        <td style="padding:8px 12px;text-align:center;font-size:12px">${_esc(_shortDate(t.appliedAt||t.createdAt))}</td>
-        <td style="padding:8px 12px;text-align:center;font-size:12px">${_esc(t.createdBy||"—")}</td>
-        <td style="padding:8px 12px;text-align:center;font-size:12px">${_fmt(res.length)}</td>
-        <td style="padding:8px 12px;text-align:center;font-size:12px;font-weight:700">${_fmt(adj)}</td>
-        <td style="padding:8px 12px;text-align:center;font-size:12px;font-weight:700;color:${net<0?"#b91c1c":net>0?"#166534":"inherit"}">${net>0?"+":net<0?"−":""}${_fmt(Math.abs(net))}</td>
-      </tr>`;
-    }).join("");
-    return `<div class="card" style="margin-top:14px">
-      <div style="font-weight:800;font-size:14px;margin-bottom:10px">${_icn("barChart")} عمليات الجرد المعتمدة في الفترة</div>
-      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
-        <thead><tr style="background:var(--surface2)">
-          <th style="padding:8px 12px;text-align:right;font-size:12px">المستودع</th>
-          <th style="padding:8px 12px;text-align:center;font-size:12px">تاريخ الاعتماد</th>
-          <th style="padding:8px 12px;text-align:center;font-size:12px">بدأه</th>
-          <th style="padding:8px 12px;text-align:center;font-size:12px">بنود الجرد</th>
-          <th style="padding:8px 12px;text-align:center;font-size:12px">بنود مُسوّاة</th>
-          <th style="padding:8px 12px;text-align:center;font-size:12px">صافي الفرق</th>
-        </tr></thead><tbody>${rows}</tbody>
-      </table></div>
+      return {
+        wh:t.warehouseName||"—", date:_shortDate(t.appliedAt||t.createdAt), by:t.createdBy||"—",
+        items:res.length, adj:res.filter(r=>_num(r.delta)!==0).length,
+        net:_r3(res.reduce((s,r)=>s+_num(r.delta),0))
+      };
+    });
+    return `<div class="card" style="margin-top:14px;padding:14px 16px">
+      <div class="section-label" style="margin-bottom:10px">${_icn("clipboardCheck")} عمليات الجرد المعتمدة في الفترة</div>
+      ${_tableHTML({cols, rows})}
     </div>`;
   }
 

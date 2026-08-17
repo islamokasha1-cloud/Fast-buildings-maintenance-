@@ -1327,10 +1327,21 @@ function inventoryReportsTests() {
       !/font-family:(?!'JetBrains Mono')/.test(cssBlock.replace(/font-family:'JetBrains Mono',monospace/g, "")));
     T("الأرقام tabular-nums بـdirection:ltr كبقيّة شاشات المنصة",
       /font-variant-numeric:tabular-nums/.test(cssBlock) && /direction:ltr/.test(cssBlock));
-    // ولا ألوانٌ مثبَّتةٌ في الرسم نفسِه (كانت #166534/#b91c1c في خلايا الإشارة)
-    const drawBlock = src.slice(src.indexOf("function _cell("), src.indexOf("function _filtersHTML("));
-    T("★ خلايا الجدول بلا لونٍ مثبَّت (الإشارةُ بصنفٍ يقرأ التوكِن)",
-      !/#[0-9a-fA-F]{6}\b/.test(drawBlock), (drawBlock.match(/#[0-9a-fA-F]{6}\b/g) || []).join(" "));
+    /* ولا ألوانٌ مثبَّتةٌ في **كلّ ما يُرسَم على الشاشة** — لا في المنطقة التي
+       عُدِّلت وحدَها. وهذا درسٌ من الحارس نفسِه: أوّلُ صياغةٍ له كانت تفحص
+       `_cell`…`_filtersHTML` فمرّت بينما جدولُ الجرد المعتمد (`_takesTableHTML`،
+       وهو أعلى في الملفّ) يحمل `#166534`/`#b91c1c` — **حارسٌ مقصورٌ على ما
+       أصلحتَه يُصادق على ما لم تفحصه**. الآن الحدُّ بنيويّ: كلُّ ما قبل
+       `_lhSrc` شاشةٌ (توكِنزُ حصراً)، وما بعده الورقةُ المطبوعة (حِبرٌ على ورقٍ
+       أبيض — فالألوانُ المثبَّتة فيها صحيحةٌ ولا وضعَ داكنَ لها). */
+    const paperAt = src.indexOf("function _lhSrc(");
+    const screenBlock = paperAt > 0 ? src.slice(0, paperAt) : src;
+    const screenHex = screenBlock.match(/#[0-9a-fA-F]{6}\b/g) || [];
+    T("★ لا لونٌ مثبَّتٌ في أيّ شيءٍ يُرسَم على الشاشة (الورقةُ المطبوعة وحدَها مستثناة)",
+      screenHex.length === 0, screenHex.join(" "));
+    T("حدُّ الشاشة/الورقة قائمٌ فعلاً (فلا يصير الفحصُ بلا نطاق)", paperAt > 0);
+    T("★ جدولُ الجرد المعتمد يُبنى بمصدر الأرقام نفسِه (لا جدولاً سطريّاً ثانياً)",
+      /_tableHTML\(\{cols, rows\}\)/.test(src));
     // مكوّناتُ المنصة الجاهزة تُستعمل كما هي بدل نظائرَ محلّية
     ["page-hero", "report-table", "report-table-wrap", "ast-stat", "info-box", "po-code", "form-select"]
       .forEach(k => T("يستعمل مكوّن المنصة ." + k, src.includes(k)));
