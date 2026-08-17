@@ -50,11 +50,13 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.2724";
+  const MODULE_BUILD = "v18.9.2725";
 
   const HOST_ID   = "page-inventory-reports";
   const READ_CAP  = 5000;    // سقف الحركات المقروءة لكل توليد — يُعلَن عند بلوغه
   const LOW_DEF   = 5;       // عتبة «منخفض» الافتراضية (نفس عتبة شاشة الرصيد)
+  const AC_MIN    = 2;       // أقلُّ عددِ حروفٍ يبدأ به البحث (كما في invAddItemSearch)
+  const AC_CAP    = 8;       // سقفُ نتائج المنسدلة — **ويُعلَن الزائدُ عليه** لا يُبتلع
 
   // أنواع التقارير — المفتاح يدخل الحالة، والاسم يظهر في الشاشة وفي ورقة Excel
   const KINDS = {
@@ -75,6 +77,7 @@
   // ── الحالة ──
   let _f = {                         // معايير التقرير
     kind:"movement", from:"", to:"", wh:"", cat:"", docId:"",
+    q:"", qLabel:"",                 // نصُّ بحث الصنف والاسمُ المعروضُ للمختار
     threshold:LOW_DEF, staleDays:90, groupBy:"project"
   };
   let _out    = null;                // التقرير المولَّد حالياً {kind,title,cols,rows,...}
@@ -159,6 +162,40 @@
   function _categories(){
     return [...new Set(_invAll().map(_catOf).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),"ar"));
   }
+  /* ══ تطبيعُ البحث — دالّةُ المنصة نفسُها ══
+     `_catSearchNorm` هي المعتمَدةُ في **كل** بحثٍ في النظام (ألف/همزة · تاء مربوطة ·
+     ياء · تشكيل · تسويةُ المسافات). فمن يبحث هنا يبحث كما تعلّم في بقية الشاشات،
+     ولا يُخترَع تطبيعٌ ثالث. والبديلُ عند غيابها **يُبقي المسافات** — فالبحثُ
+     بالتوكِنات يقوم عليها (تطبيعُ `_norm` أدناه يحذفها، فلا يصلح لهذا). */
+  function _snorm(s){
+    try{ if(typeof _catSearchNorm==="function") return _catSearchNorm(s); }catch(e){}
+    return String(s||"").toLowerCase()
+      .replace(/[أإآا]/g,"ا").replace(/ة/g,"ه").replace(/ى/g,"ي")
+      .replace(/[ً-ْـ]/g,"")
+      .replace(/\s+/g," ").trim();
+  }
+
+  /* مطابقةُ صنفٍ باستعلام — **بالتوكِنات بأيّ ترتيب** (نمطُ `_catTokenMatch`):
+     «نحاس كابل» تُطابق «كابل نحاس»، والبحثُ يشمل الكودَ والمستودعَ لا الاسمَ وحدَه
+     (فالصنفُ الواحد وثيقتان في مستودعين، والمستودعُ هو ما يفرّق بينهما). */
+  function _itemMatch(it, q){
+    if(!it) return false;
+    const nq=_snorm(q);
+    if(!nq) return false;                 // بلا استعلامٍ لا مطابقة — المنسدلةُ تبقى مغلقة
+    const hay=_snorm([it.itemName, it.itemCode, it.warehouseName].filter(Boolean).join(" "));
+    return nq.split(" ").filter(Boolean).every(t=>hay.includes(t));
+  }
+
+  /* نتائجُ المنسدلة: مرتّبةٌ بالاسم ثم المستودع، مقصورةٌ على `cap`،
+     **ويُعاد عددُ الزائد** ليُعلَن في ذيل المنسدلة — فلا يُظنّ أنّ المعروضَ هو الكلّ. */
+  function _pickList(items, q, cap){
+    const c = _num(cap)>0 ? _num(cap) : AC_CAP;
+    const all = (items||[]).filter(it=>_itemMatch(it,q))
+      .sort((a,b)=> String(a.itemName||"").localeCompare(String(b.itemName||""),"ar")
+                 || String(a.warehouseName||"").localeCompare(String(b.warehouseName||""),"ar"));
+    return { hits: all.slice(0,c), total: all.length, more: Math.max(0, all.length-c) };
+  }
+
   // تطبيع عربي للمطابقة بالاسم (نفس تطبيع stocktake.js)
   function _norm(s){
     return String(s==null?"":s)
@@ -358,11 +395,16 @@
     if(typeof db==="undefined" || !db) return [];
     if(typeof STOCKTAKE_COLLECTION!=="function") return [];
     try{
-      const snap = await db.collection(STOCKTAKE_COLLECTION()).get();
+      /* المعتمَدُ وحدَه يُقرأ — **حقلُ مساواةٍ واحدٌ فلا يحتاج فهرساً مركّباً**، وكان
+         الاستعلامُ يجلب كلَّ وثائق الجرد ثم يفلتر في الذاكرة فتنمو القراءةُ بلا سبب.
+         والتاريخُ يبقى فلترَ ذاكرةٍ لأنه **حقلان** (`appliedAt || createdAt`)، ومدًى
+         على أحدهما يُسقط ما يحمل الآخر. */
+      const snap = await db.collection(STOCKTAKE_COLLECTION())
+        .where("status", "==", "applied").get();
       return snap.docs.map(d=>({id:d.id, ...d.data()}))
         .filter(t=>{
           const d = t.appliedAt || t.createdAt || "";
-          return t.status==="applied" && d>=b.fromISO && d<=b.toISO;
+          return d>=b.fromISO && d<=b.toISO;
         });
     }catch(e){ console.warn("inventory-reports/stocktakes:", e); return []; }
   }
@@ -946,6 +988,18 @@
       ".ivr-fld>select,.ivr-fld>input{width:100%;font-size:12px}",
       ".ivr-fld.wide{grid-column:span 2}",
       ".ivr-acts{display:flex;gap:8px;align-items:end;grid-column:span 2}",
+      /* منسدلةُ منتقي الصنف — بتوكِنز المنصة وظلِّها، فتُقرأ في الثيمين معاً
+         (منسدلةُ «إضافة مخزون» تستعمل لوناً مثبَّتاً للتحويم — لا يُنقل هنا) */
+      ".ivr-pickwrap{position:relative}",
+      ".ivr-ac{position:absolute;top:100%;inset-inline:0;z-index:200;margin-top:3px;"
+        +"background:var(--surface);border:1px solid var(--border);border-radius:8px;"
+        +"box-shadow:var(--shadow);max-height:236px;overflow-y:auto}",
+      ".ivr-ac-item{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12.5px}",
+      ".ivr-ac-item:last-child{border-bottom:none}",
+      ".ivr-ac-item:hover,.ivr-ac-item.on{background:var(--surface2)}",
+      ".ivr-ac-sub{font-size:10.5px;color:var(--muted);margin-top:2px}",
+      ".ivr-ac-note{padding:7px 11px;font-size:11px;color:var(--muted);background:var(--surface2)}",
+      ".ivr-pick-ok{border-color:var(--sla-ok)}",
       ".ivr-acts .btn{height:36px;white-space:nowrap}",
       /* الأرقام — بصمةُ المنصة الرقمية */
       "#"+HOST_ID+" .ast-stat .sv{direction:ltr;unicode-bidi:isolate}",
@@ -1075,16 +1129,19 @@
     const fld=(label, inner, wide)=>`<div class="ivr-fld${wide?" wide":""}"><label>${label}</label>${inner}</div>`;
     const IR="window.inventoryReports";
 
-    // منتقي الصنف — لبطاقة الصنف وحدها (الوثيقة = صنف×مستودع)
+    /* منتقي الصنف — لبطاقة الصنف وحدها (الوثيقة = صنف×مستودع).
+       بحثٌ بإكمالٍ لا قائمةٌ منسدلةٌ بكل الأصناف: القائمةُ تصير غيرَ عمليةٍ عند
+       الآلاف، وهذا أهمُّ تقريرٍ في الصفحة فلا يكون أصعبَ ما يُفتَح. والبحثُ داخل
+       `_filteredItems()` فيحترم فلترَي المستودع والفئة القائمين. */
     let itemPicker="";
     if(_f.kind==="card"){
-      const items=_filteredItems().slice()
-        .sort((a,b)=>String(a.itemName||"").localeCompare(String(b.itemName||""),"ar"));
-      const opts='<option value="">— اختر الصنف —</option>'+items.map(i=>
-        `<option value="${_esc(i.id)}"${i.id===_f.docId?" selected":""}>${_esc(i.itemName||"—")}${i.itemCode?" ("+_esc(i.itemCode)+")":""} — ${_esc(i.warehouseName||"—")}</option>`
-      ).join("");
       itemPicker=fld('الصنف <span style="color:var(--danger)">*</span>',
-        `<select class="form-select" onchange="${IR}._set('docId',this.value)">${opts}</select>`, true);
+        `<div class="ivr-pickwrap">
+           <input class="form-input${_f.docId?" ivr-pick-ok":""}" id="ivr-pick" type="text"
+             autocomplete="off" placeholder="ابحث بالاسم أو الكود أو المستودع..."
+             value="${_esc(_f.q||"")}" oninput="${IR}._acSearch()" onkeydown="${IR}._acKey(event)">
+           <div class="ivr-ac" id="ivr-ac" style="display:none"></div>
+         </div>`, true);
     }
 
     const staleBox = _f.kind==="stale" ? fld("حدّ السكون (يوم)",
@@ -1159,6 +1216,73 @@
     return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate());
   }
 
+  /* ════════════════════════════════════════════════════════════════════
+     منتقي الصنف — بحثٌ بإكمالٍ لا قائمةٌ بألفِ صنف
+
+     بطاقةُ الصنف تقريرُ الخلافات الأوّل، وأوّلُ خطوةٍ فيه أن تجد الصنف.
+
+     **والقيدُ الحاسم:** `_set` في هذه الوحدة **يُعيد رسمَ الصفحة كلَّها** — فحقلُ
+     نصٍّ يُعيد الرسمَ على كل حرفٍ **يفقد التركيزَ ومؤشّرَ الكتابة**، فيصير البحثُ
+     غيرَ قابلٍ للاستخدام. ولذلك: النصُّ يُخزَّن في الحالة بلا إعادة رسم، والمنسدلةُ
+     تُحدَّث بكتابة `innerHTML` عليها مباشرةً — نفسُ ما تفعله `invAddItemSearch` في
+     صفحة «إضافة مخزون». وإعادةُ الرسم مرّةً واحدةً عند **الاختيار** (التركيزُ يغادر
+     أصلاً)، ويُستعاد نصُّ الحقل من `_f.qLabel` فلا يبدو الاختيارُ ضائعاً.
+     ════════════════════════════════════════════════════════════════════ */
+
+  function _pickLabel(it){
+    if(!it) return "";
+    return (it.itemName||"—")+(it.itemCode?" ("+it.itemCode+")":"")+" — "+(it.warehouseName||"—");
+  }
+
+  function _acSearch(){
+    const inp=document.getElementById("ivr-pick"), ac=document.getElementById("ivr-ac");
+    if(!inp || !ac) return;
+    const q=(inp.value||"").trim();
+    _f.q=q;
+    // تغيَّر النصُّ عن اسم المختار ⇒ يسقط الاختيار: لا يبقى معرّفٌ لصنفٍ لا يُقرأ اسمُه
+    if(_f.docId && q!==_f.qLabel){ _f.docId=""; _f.qLabel=""; inp.classList.remove("ivr-pick-ok"); }
+    if(q.length < AC_MIN){ ac.innerHTML=""; ac.style.display="none"; return; }
+    const {hits, more} = _pickList(_filteredItems(), q);
+    if(!hits.length){
+      ac.innerHTML=`<div class="ivr-ac-note">لا صنفَ يطابق «${_esc(q)}» — جرّب كلمةً واحدةً أو الكود</div>`;
+      ac.style.display="block"; return;
+    }
+    ac.innerHTML = hits.map((it,i)=>`
+      <div class="ivr-ac-item${i===0?" on":""}" onclick="window.inventoryReports._pick('${_jsqSafe(it.id)}')">
+        <b>${_esc(it.itemName||"—")}</b>
+        <div class="ivr-ac-sub">${_esc(it.warehouseName||"—")}${it.itemCode?" · "+_esc(it.itemCode):""}
+          · الرصيد ${_fmt(it.currentQty)} ${_esc(it.unit||"")}</div>
+      </div>`).join("")
+      + (more ? `<div class="ivr-ac-note">+${_fmt(more)} نتيجةً أخرى — ضيِّق البحث</div>` : "");
+    ac.style.display="block";
+  }
+
+  // Enter يختار المطابقةَ الأولى · Escape يُغلق. (لا تنقّلَ بالأسهم — منتقي المنصة
+  // نفسُه لا يملكه، فإضافتُه هنا وحدَها تُنشئ سلوكاً لا نظيرَ له في بقية الشاشات.)
+  function _acKey(ev){
+    if(!ev) return;
+    const ac=document.getElementById("ivr-ac");
+    if(ev.key==="Escape"){ if(ac){ ac.style.display="none"; } return; }
+    if(ev.key!=="Enter") return;
+    ev.preventDefault();
+    const first=ac && ac.querySelector(".ivr-ac-item");
+    if(first) first.click();
+  }
+
+  function _pick(id){
+    const it=_invAll().find(x=>x.id===id);
+    if(!it){ _toast("⚠ لم يُعثر على الصنف — حدّث الصفحة","warn"); return; }
+    _f.docId=it.id;
+    _f.qLabel=_pickLabel(it);
+    _f.q=_f.qLabel;
+    render();                            // مرّةً واحدةً، والتركيزُ يغادر الحقلَ أصلاً
+  }
+
+  function _jsqSafe(s){
+    try{ if(typeof _jsq==="function") return _jsq(s); }catch(e){}
+    return String(s==null?"":s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+  }
+
   // ── مُعدِّلات الحالة ──
   /* يعيد الرسم — الحقولُ المشروطة (منتقي الصنف · حدُّ السكون · العتبة · التجميع)
      تظهر وتختفي بنوع التقرير، ومنتقي الصنف يتبع فلترَي المستودع والفئة. */
@@ -1170,7 +1294,8 @@
     _f[k] = (k==="threshold") ? _num(v) : v;
   }
   function _reset(){
-    _f={kind:_f.kind, from:"", to:"", wh:"", cat:"", docId:"", threshold:LOW_DEF, staleDays:90, groupBy:"project"};
+    _f={kind:_f.kind, from:"", to:"", wh:"", cat:"", docId:"", q:"", qLabel:"",
+        threshold:LOW_DEF, staleDays:90, groupBy:"project"};
     _defaultPeriod(); _out=null; render();
   }
 
@@ -1374,9 +1499,11 @@ ${on?_lhCSS():""}
   window.inventoryReports = {
     render, generate, exportExcel, exportPDF, canView,
     _set, _setq, _reset,
+    _acSearch, _acKey, _pick,            // منتقي الصنف — يُنادى من الترميز المرسوم
     // دوالُّ نقيّة — مكشوفةٌ لفحوص hail-tests وسيناريوهات المتصفّح
     _invReady,
     _effects, _net, _bounds, _openingMap, _rollup, _priceOf, _lastInPrices,
+    _itemMatch, _pickList, _snorm, _pickLabel,
     _stale, _periodDays, _catalogIndex, _sheetRows, _safeSheetName,
     _state: ()=>({f:{..._f}, out:_out, sheets:Object.keys(_sheets)}),
     KINDS, READ_CAP,

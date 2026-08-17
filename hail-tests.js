@@ -1321,6 +1321,67 @@ function inventoryReportsTests() {
   T("وحالةُ المزامنة مكوّنُ المنصة نفسُه لا نصٌّ محلّيّ", /_syncLoadingHTML/.test(src));
   T("_invReady مكشوفةٌ للفحص على الواجهة العامة", /_invReady,/.test(src));
 
+  /* ════ منتقي الصنف: بحثٌ بإكمالٍ لا قائمةٌ بألفِ صنف ════
+     بطاقةُ الصنف تقريرُ الخلافات الأوّل، وأوّلُ خطوةٍ فيه أن تجد الصنف. والمطابقةُ
+     دالّةٌ نقيّةٌ تُفحَص بلا متصفّح؛ والمسارُ الكامل (اكتب ← اختر ← ولِّد) في سيناريو ١٣. */
+  T("منتقي الصنف يعرّض دوالَّه النقيّة",
+    !!(IR && typeof IR._itemMatch === "function" && typeof IR._pickList === "function"));
+  if (IR && IR._itemMatch) {
+    const mk = (n, c, w, q) => ({ id: n, itemName: n, itemCode: c, warehouseName: w, currentQty: q, unit: "قطعة" });
+    const cbl = mk("كابل نحاس", "ELEC-1", "المستودع الرئيسي", 40);
+    T("_itemMatch: بالاسم", IR._itemMatch(cbl, "كابل") === true);
+    T("_itemMatch: بالكود", IR._itemMatch(cbl, "ELEC-1") === true);
+    T("_itemMatch: بالمستودع (الوثيقةُ صنف×مستودع فهو ما يفرّق)", IR._itemMatch(cbl, "الرئيسي") === true);
+    T("★ _itemMatch: كلمتان بأيّ ترتيب («نحاس كابل» تُطابق)",
+      IR._itemMatch(cbl, "نحاس كابل") === true && IR._itemMatch(cbl, "كابل نحاس") === true);
+    T("_itemMatch: كلمةٌ غيرُ موجودةٍ تُسقط المطابقة", IR._itemMatch(cbl, "كابل ألمنيوم") === false);
+    T("_itemMatch: استعلامٌ فارغٌ لا يُطابق (المنسدلةُ تبقى مغلقة)",
+      IR._itemMatch(cbl, "") === false && IR._itemMatch(cbl, "   ") === false);
+    // ★ تطبيعُ العربية — دالّةُ المنصة نفسُها، فالبحثُ هنا كالبحث في بقية الشاشات
+    const lmp = mk("إضاءة ليد", "ELEC-2", "مستودع فرعي", 5);
+    T("★ تطبيعُ الهمزة والتاء المربوطة («اضاءه» تجد «إضاءة»)", IR._itemMatch(lmp, "اضاءه") === true);
+    T("★ وتطبيعُ الياء («مواسير بلاستيكي» بألفٍ مقصورة)",
+      IR._itemMatch(mk("مواسير بلاستيكى", "PLMB-1", "و1", 3), "بلاستيكي") === true);
+    T("الوحدة تُعيد استخدام تطبيع المنصة (_catSearchNorm) لا تطبيعاً ثالثاً",
+      /_catSearchNorm/.test(src));
+
+    // _pickList: الترتيبُ والسقفُ **وعددُ الزائد** (يُعلَن ولا يُبتلع)
+    const many = Array.from({ length: 11 }, (_, i) => mk("صنف " + String(i).padStart(2, "0"), "C" + i, "و1", i));
+    const pl = IR._pickList(many, "صنف");
+    T("_pickList: يقصُر إلى ٨ نتائج", pl.hits.length === 8, "العدد=" + pl.hits.length);
+    T("★ _pickList: يُعيد عددَ الزائد ليُعلَن (١١−٨=٣)", pl.more === 3 && pl.total === 11,
+      "more=" + pl.more + " total=" + pl.total);
+    T("_pickList: مرتّبٌ بالاسم", pl.hits[0].itemName === "صنف 00" && pl.hits[7].itemName === "صنف 07");
+    T("★ سقفُ المنسدلة مُعلَنٌ في وجه المستخدم لا في تعليق",
+      src.includes("نتيجةً أخرى — ضيِّق البحث"));
+  }
+  /* ★★ حارسُ التركيز — جوهرُ العطل المتوقَّع في هذا الحقل:
+     `_set` يُعيد رسمَ الصفحة كلِّها، فربطُ حقل البحث به يُفقد التركيزَ ومؤشّرَ
+     الكتابة على **كل حرف** فيصير البحثُ غيرَ قابلٍ للاستخدام. الحقلُ يُنادي
+     `_acSearch` (تُحدّث المنسدلةَ وحدَها)، وإعادةُ الرسمِ عند الاختيار فقط. */
+  T("★★ حقلُ البحث يُنادي _acSearch لا _set (وإلا فقد التركيزَ على كل حرف)",
+    /oninput="\$\{IR\}\._acSearch\(\)"/.test(src) && !/oninput="\$\{IR\}\._set\(/.test(src));
+  T("★ زال منتقي الصنف بـ<select> (قائمةٌ بألفِ صنفٍ غيرُ عملية)",
+    !/onchange="\$\{IR\}\._set\('docId'/.test(src));
+  T("المنسدلةُ تُحدَّث بكتابة innerHTML عليها مباشرةً كنمط invAddItemSearch",
+    /getElementById\("ivr-ac"\)/.test(src) && /ac\.innerHTML/.test(src));
+  T("تغيُّرُ النصّ عن اسم المختار يُسقط الاختيار (لا معرّفٌ لصنفٍ لا يُقرأ اسمُه)",
+    /_f\.docId && q!==_f\.qLabel/.test(src));
+  {   // Enter يختار الأولى · Escape يُغلق — يُقاس بجسم الدالّة لا بصياغة الشرط
+    const keyFn = (src.match(/function _acKey\(ev\)\{[\s\S]*?\n  \}/) || [""])[0];
+    T("Enter يختار الأولى وEscape يُغلق",
+      /"Enter"/.test(keyFn) && /"Escape"/.test(keyFn) && /\.click\(\)/.test(keyFn));
+  }
+  T("و_reset يمحو الاختيارَ ونصَّه معاً", /q:"", qLabel:"",/.test(src));
+
+  /* ════ قراءةُ الجرد مقصورةٌ على الخادم ════
+     كانت تقرأ **كلَّ** وثائق الجرد ثم تفلتر في الذاكرة. حقلُ مساواةٍ واحدٌ لا يحتاج
+     فهرساً مركّباً، والتاريخُ يبقى في الذاكرة لأنه حقلان (`appliedAt || createdAt`). */
+  T("★ قراءةُ الجرد تفلتر بالحالة على الخادم لا في الذاكرة",
+    /\.where\("status", "==", "applied"\)/.test(src));
+  T("ولم يبقَ فلترُ الحالة في الذاكرة (مصدرٌ واحدٌ للتصفية)",
+    !/t\.status==="applied" &&/.test(src));
+
   /* ════ الوارد اليدويّ في إعادة حساب الرصيد (index.html) ════
      الأثرُ نفسُه مكتوبٌ في موضعين — `recalcInventoryFromLog` و`_effects` هنا —
      وتوحيدُهما نقلُ منطقٍ قائمٍ لا يُخلط بإصلاح (قاعدةُ CLAUDE.md). فالتطابقُ
