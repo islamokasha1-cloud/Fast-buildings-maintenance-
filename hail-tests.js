@@ -2208,14 +2208,19 @@ function auditRowAlignment() {
   {
     const sa = HTML.indexOf("const _poAlignBreaks   = new Map();");
     const sb = HTML.indexOf("\nfunction renderAlignWarning(", sa);
-    let S = null, logged = [];
-    if (sa >= 0 && sb > sa) {
+    /* v18.9xd: الدورُ صار بُعداً في العقد — القيدُ المركزيّ يُكتب من جلسة من يملك
+       الإصلاح (مدير النظام)، وغيرُه يرى تحذيرَ كونسول. فيُبنى المعملُ بدورٍ صريح. */
+    let logged = [], warned = [];
+    const build = (role) => {
+      if (!(sa >= 0 && sb > sa)) return null;
       try {
-        S = new Function("_poItemKey", "captureError",
+        return new Function("_poItemKey", "captureError", "currentUser", "console",
           HTML.slice(sa, sb) + "\nreturn {_poAlignScan,_poAuditSelfCheck,_poAlignBreaks,_poAlignReported};")(
-          M._poItemKey, (kind, msg) => logged.push({ kind, msg }));
-      } catch (e) { T("تُبنى دوال الفحص الذاتي", false, String(e.message).slice(0, 120)); }
-    }
+          M._poItemKey, (kind, msg) => logged.push({ kind, msg }), { role, name: "ن" },
+          { warn: (...a) => warned.push(a.join(" ")) });
+      } catch (e) { T("تُبنى دوال الفحص الذاتي", false, String(e.message).slice(0, 120)); return null; }
+    };
+    const S = build("admin");
     T("تُبنى دوال الفحص الذاتي (_poAlignScan/_poAuditSelfCheck)", !!S);
     if (S) {
       const broken = { id: "PO-202608-0130", auditedBy: "محمد", items, auditItems };
@@ -2241,6 +2246,18 @@ function auditRowAlignment() {
       // شفاء الطلب لاحقاً يمحو قيده من الخريطة
       S._poAuditSelfCheck({ id: "PO-202608-0130", auditedBy: "محمد", items, auditItems: items.map(x => ({ ...x })) });
       T("★ بعد الشفاء يسقط قيد الطلب من الخريطة", !S._poAlignBreaks.has("PO-202608-0130"));
+      /* ★★ v18.9xd: الجرسُ يُقرَع لمن يستطيع أن يتحرّك. الحقيقةُ صفةُ الوثيقة لا صفةُ
+         الجلسة، فكانت كلُّ جلسةٍ لكلِّ دورٍ تُعيد إعلانَها في السجل المركزيّ (وكلُّ قيدٍ
+         كتابةٌ في Firestore): عشراتُ القيود عن طلبين لا يتحرّكان — البلاغُ المُبلَّغ عنه. */
+      const NA = build("warehouse_manager");
+      const _before = logged.length, _warnBefore = warned.length;
+      NA._poAuditSelfCheck({ id: "PO-202608-0777", auditedBy: "محمد", items, auditItems });
+      T("★★ xd: جلسةُ من لا يملك الإصلاح لا تكتب في السجل المركزيّ (لا إغراق)",
+        logged.length === _before, "قيود جديدة: " + (logged.length - _before));
+      T("★★ xd: لكنّها تُحذّر في الكونسول — الحقيقةُ لا تُخفى، فقط لا تُكرَّر مركزياً",
+        warned.length > _warnBefore && warned.join(" ").includes("PO-202608-0777"));
+      T("★★ xd: والعرضُ يبقى مشفيّاً لكلِّ دور — الخريطةُ تُضبط بلا شرط دور",
+        NA._poAlignBreaks.get("PO-202608-0777").length === 4);
       // الفحص لا يجوز أن يُعطّل التحميل مهما كانت الوثيقة مشوّهة
       let threw = false;
       try { S._poAuditSelfCheck({ id: "Z", auditedBy: "ن", items: null, auditItems: "مشوّهة" }); }
@@ -2252,7 +2269,9 @@ function auditRowAlignment() {
     T("★ شريط الإعلان للمسؤول وحده، ومعروضٌ في تفاصيل الطلب",
       HTML.includes('if(!(currentUser && currentUser.role==="admin")) return "";') &&
       HTML.includes("${renderAlignWarning(p)}"));
-    T("★ لا إصلاح صامت للمخزَّن عند التحميل (الشفاء عند الحفظ فقط)",
+    // v18.9xd: العقدُ ما زال «لا كتابةَ صامتةً عند التحميل» — لكنّ الشفاءَ لم يبقَ
+    // معلّقاً على حفظٍ عابر: صار فعلاً صريحاً بزرٍّ (poFixAlignment) بعد تأكيد.
+    T("★ لا إصلاح صامت للمخزَّن عند التحميل (الإصلاح بفعلٍ صريحٍ لا بأثرٍ جانبيّ)",
       HTML.includes("_poAlignBreaks.delete(poId);   // v18.9wy") &&
       !/_poAuditSelfCheck[\s\S]{0,600}p\.auditItems\s*=/.test(HTML));
   }
@@ -2265,9 +2284,9 @@ function auditRowAlignment() {
     HTML.includes("const _auditRows = _poAuditRows(p);"));
   T("★ صندوق «تغيّر الأسعار» يمرّ على بنود الطلب الحالية مصطفّةً",
     HTML.includes("const _rows = (p.items && p.items.length) ? _poAlignRows(p.items, ai) : ai;"));
+  // v18.9xd: نفسُ العقد، من المصدر الموحّد — الشكلُ الحرفيّ كان مكتوباً في ثلاثة مواضع
   T("★ تعديل المسؤول يعيد اصطفاف auditItems على البنود بعد الحفظ",
-    HTML.includes("const _alignedAI = _poAlignRows(pf.items, pf.auditItems);") &&
-    HTML.includes("pf.auditItems = pf.items.map((it,i)=> _alignedAI[i] || {"));
+    HTML.includes("pf.auditItems = _poAlignedAuditItems(pf.items, pf.auditItems);"));
   T("★ _waPrevRcv يبحث بالهوية حين لا يطابق الفهرس (L9: الكود قبل الاسم محفوظ)",
     HTML.includes("const hits = rows.filter(r=> _poItemKey(r)===key);") &&
     HTML.includes("if(gi.itemCode && it && it.itemCode) return String(gi.itemCode).trim() === String(it.itemCode).trim();"));
@@ -9867,6 +9886,125 @@ function fsRecoveryNoDeadEnd() {
   T("★ xd: وتبقى الدوّارةُ العاديّةُ في الحالة السليمة", /جارٍ مزامنة البيانات/.test(sl));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   v18.9xd — انزياحُ صفوف التدقيق: الإصلاحُ فعلٌ لا إعلانٌ يتكرّر
+
+   البلاغ: عشراتُ القيود في «🐞 سجل الأخطاء» من `_poAuditSelfCheck` على طلبين
+   (PO-202607-0111: ٧ بنود مقابل ٨ صفوف · PO-202607-0113: ٥ مقابل ٦)، تتكرّر من
+   كلِّ مستخدمٍ وكلِّ جهازٍ وكلِّ جلسة. مسارا الكتابة (تدقيقُ الاستلام · تعديلُ
+   المسؤول) يصطفّان بالهوية منذ v18.9wx، فالتلفُ **قديمٌ لا يشفى**: الشفاءُ كان
+   معلّقاً على «افتح تعديل الطلب واحفظ» — إصلاحٌ بلا فاعلٍ يعرفه.
+   الحارس: يُنفّذ منطقَ الإصلاح الحقيقيَّ المستخرجَ من index.html ويثبت أنّه يُنهي
+   الانزياحَ فعلاً (لا يعلنه)، وأنّ الكتابة لا تمسّ البنودَ ولا تمحو الدليل.
+   ════════════════════════════════════════════════════════════════════ */
+function poAlignRepair() {
+  H("v18.9xd) انزياحُ صفوف التدقيق: الإصلاحُ يُنهيه لا يُعلنه");
+
+  // ── استخراجُ منطق الهوية/الاصطفاف/الفحص من index.html وتنفيذُه ──
+  const kA = HTML.indexOf("function _poItemKey(it){");
+  const kB = HTML.indexOf("function _poItemsActual(p){", kA);
+  const sA = HTML.indexOf("function _poAlignScan(p){");
+  const sB = HTML.indexOf("function _poAuditSelfCheck(p){", sA);
+  if (kA < 0 || kB < 0 || sA < 0 || sB < 0) { T("منطقُ الاصطفاف مستخرَج", false, "لم يُعثر على الكتل"); return; }
+  const core = HTML.slice(kA, kB) + "\n" + HTML.slice(sA, sB);
+  let API;
+  try {
+    API = new Function(core + "\n return {_poItemKey,_poAlignRows,_poAlignedAuditItems,_poAlignScan};")();
+  } catch (e) { T("منطقُ الاصطفاف يُنفَّذ", false, String(e.message).slice(0, 140)); return; }
+  T("منطقُ الاصطفاف مستخرَجٌ ويُنفَّذ", typeof API._poAlignedAuditItems === "function");
+
+  const it = (id, name, extra) => ({ itemId: id, itemName: name, qty: 2, ...(extra || {}) });
+  const row = (id, name, rcv) => ({ itemId: id, itemName: name, rcvQty: rcv, unitPrice: 10, itemCost: 10 * rcv });
+
+  // ── (١) الحالةُ المُبلَّغُ عنها: بندٌ حُذف بعد التدقيق ⇒ صفٌّ زائدٌ يزيح ما بعده ──
+  const items = [it("a", "دهان"), it("b", "بلاستيك سوبر"), it("c", "فايبروساید")];
+  const rowsShifted = [row("a", "دهان", 1), row("x", "مبيد حشري", 5), row("b", "بلاستيك سوبر", 2), row("c", "فايبروساید", 3)];
+
+  const preBreaks = API._poAlignScan({ id: "PO-1", auditedBy: "u", items, auditItems: rowsShifted });
+  T("★★ xd: الفحصُ يرى الانزياحَ قبل الإصلاح (٣ بنود مقابل ٤ صفوف)",
+    preBreaks.length >= 2 && /الطول: 3 بنداً مقابل 4/.test(preBreaks[0]), preBreaks.join(" · "));
+
+  const fixed = API._poAlignedAuditItems(items, rowsShifted);
+  const postBreaks = API._poAlignScan({ id: "PO-1", auditedBy: "u", items, auditItems: fixed });
+  T("★★ xd: بعد الإصلاح لا انزياحَ — الفحصُ يسكت لأنّ العيبَ زال لا لأنّه أُسكِت",
+    postBreaks.length === 0, postBreaks.join(" · ") || "نظيف");
+  T("★★ xd: الطولُ صار طولَ البنود، وكلُّ صفٍّ يقابل بندَه بالهوية",
+    fixed.length === items.length && fixed.every((r, i) => API._poItemKey(r) === API._poItemKey(items[i])),
+    fixed.map(r => r.itemName).join(" | "));
+  T("★★ xd: صفُّ البند المحذوف («مبيد حشري») يسقط ولا يستعيره جاره",
+    !fixed.some(r => r.itemName === "مبيد حشري"));
+  T("★ xd: أرقامُ الاستلام تتبع بندَها لا موضعَها (بلاستيك=2 · فايبر=3)",
+    fixed[1].rcvQty === 2 && fixed[2].rcvQty === 3,
+    fixed.map(r => r.itemName + "=" + r.rcvQty).join(" · "));
+
+  // ── (٢) بندٌ أُضيف بعد التدقيق ⇒ صفٌّ صفريٌّ بنفس شكل «المغطّى من المخزون» ──
+  const items2 = [...items, it("d", "سيبرمفوكس")];
+  const fixed2 = API._poAlignedAuditItems(items2, rowsShifted);
+  T("★★ xd: البندُ المُضاف يأخذ صفّاً صفريّاً لا صفَّ غيره",
+    fixed2.length === 4 && API._poItemKey(fixed2[3]) === "id:d" && fixed2[3]._fromStockOnly === true
+      && fixed2[3].rcvQty === 0 && fixed2[3].itemCost === 0,
+    JSON.stringify({ n: fixed2.length, k: fixed2[3] && fixed2[3].itemName, rcv: fixed2[3] && fixed2[3].rcvQty }));
+  T("★ xd: ولا انزياحَ بعده", API._poAlignScan({ id: "P2", auditedBy: "u", items: items2, auditItems: fixed2 }).length === 0);
+
+  // ── (٣) بندان لنفس الصنف: لا يلتهم الأولُ صفَّ الثاني (درس v18.9wx) ──
+  const dup = [it("a", "دهان"), it("a", "دهان")];
+  const dupRows = [row("a", "دهان", 4), row("a", "دهان", 9)];
+  const dupFixed = API._poAlignedAuditItems(dup, dupRows);
+  T("★★ xd: بندان لنفس الصنف يبقيان على صفّيهما (4 ثمّ 9 لا 4 ثمّ 4)",
+    dupFixed.length === 2 && dupFixed[0].rcvQty === 4 && dupFixed[1].rcvQty === 9,
+    dupFixed.map(r => r.rcvQty).join(","));
+
+  // ── (٤) الإصلاحُ لا يعمل إلا حيث هناك ما يُصلَح (idempotent) ──
+  const again = API._poAlignedAuditItems(items, fixed);
+  T("★ xd: إعادةُ الإصلاح على مخزَّنٍ سليمٍ لا تغيّر شيئاً (idempotent)",
+    JSON.stringify(again) === JSON.stringify(fixed));
+
+  // ── (٥) بنيةُ الكتابة: لا تمسّ البنود، ولا تمحو الدليل ──
+  const rA = HTML.indexOf("async function _poRealignStored(poId){");
+  const rB = HTML.indexOf("async function poFixAlignment(poId){", rA);
+  const rs = rA >= 0 && rB > rA ? HTML.slice(rA, rB) : "";
+  T("★ xd: كتلةُ _poRealignStored مستخرَجة", !!rs);
+  T("★★ xd: قراءةٌ طازجةٌ من Firestore قبل الكتابة (لا دهسَ لجلسةٍ أخرى)",
+    /\.doc\(poId\)\.get\(\)/.test(rs) && /_poAlignScan\(\{\s*\.\.\.d, id:poId\s*\}\)/.test(rs));
+  T("★★ xd: الكتابةُ لا تمسّ p.items إطلاقاً — صفوفُ التدقيق وحدَها",
+    !/\bitems:\s/.test(rs.replace(/auditItems:/g, "").replace(/auditItemsPreAlign:/g, "")),
+    "لا مفتاحَ items في الـ patch");
+  T("★★ xd: الدليلُ يُحفَظ (auditItemsPreAlign) ولا يُدهس بنسخةٍ لاحقة",
+    /if\(!Array\.isArray\(d\.auditItemsPreAlign\)\)\s*patch\.auditItemsPreAlign = d\.auditItems;/.test(rs));
+  T("★ xd: والإصلاحُ يُقيّد نفسَه في سجلّ الطلب (timeline بكود align_fixed)",
+    /code:\s*"align_fixed"/.test(rs) && /timeline:\s*\[/.test(rs));
+  T("★ xd: و merge:true فلا تُمحى بقيّةُ الوثيقة", /\{\s*merge:true\s*\}/.test(rs));
+  T("★ xd: ولا شيءَ يُطلق تلقائياً — الإصلاحُ بفعلٍ صريحٍ بعد showConfirm",
+    /showConfirm\(/.test(HTML.slice(rB, HTML.indexOf("async function poFixAllAlignment", rB))));
+
+  // ── (٦) الزرُّ موجودٌ في الشريط (وإلّا فالإصلاحُ بلا فاعلٍ يعرفه — وهو أصلُ العيب) ──
+  const wA = HTML.indexOf("function renderAlignWarning(p){");
+  const wB = HTML.indexOf("function _poItemKey(it){", wA);
+  const wb = wA >= 0 && wB > wA ? HTML.slice(wA, wB) : "";
+  T("★★ xd: شريطُ الإعلان يحمل زرَّ إصلاحٍ فعليّاً لا نصَّ إرشادٍ فقط",
+    /poFixAlignment\('/.test(wb) && !/افتح «تعديل الطلب» واحفظ/.test(wb));
+  T("★ xd: وزرُّ الإصلاح الجماعيّ يظهر حين يزيد المنزاحُ على طلب",
+    /_poAlignBreaks\.size > 1/.test(wb) && /poFixAllAlignment\(\)/.test(wb));
+  T("★ xd: الإصلاحُ محجوزٌ لمدير النظام في الفعل نفسِه لا في العرض وحدَه",
+    (HTML.match(/currentUser\.role==="admin"\)\)\{ toast\("⚠ الإصلاح من صلاحية مدير النظام"/g) || []).length === 2);
+
+  // ── (٧) الجرسُ لا يُغرق السجل: القيدُ المركزيُّ من جلسة من يستطيع الإصلاح ──
+  const cA = HTML.indexOf("function _poAuditSelfCheck(p){");
+  const cB = HTML.indexOf("async function _poRealignStored(poId){", cA);
+  const cs = cA >= 0 && cB > cA ? HTML.slice(cA, cB) : "";
+  T("★★ xd: captureError مشروطةٌ بمن يملك الإصلاح، وغيرُه يرى تحذيرَ كونسول",
+    /_canFix && typeof captureError === "function"/.test(cs) && /console\.warn\("\[align\]"/.test(cs));
+  T("★ xd: والعرضُ يبقى مشفيّاً للجميع (_poAlignBreaks تُضبط قبل أيّ شرط دور)",
+    cs.indexOf("_poAlignBreaks.set(p.id, breaks)") < cs.indexOf("_canFix"));
+
+  // ── (٨) شكلُ الصفِّ الصفريّ مصدرُه واحدٌ لا ثلاثُ نسخٍ تنحرف ──
+  T("★★ xd: لا نسخةَ ثانيةً من شكل الصفِّ الصفريّ خارج _poAlignedAuditItems",
+    (HTML.match(/_fromStockOnly:true, rcvQty:0/g) || []).length === 1,
+    "عدد النسخ: " + (HTML.match(/_fromStockOnly:true, rcvQty:0/g) || []).length);
+  T("★ xd: وكاتبا auditItems يبنيانها من المصدر الموحّد",
+    (HTML.match(/_poAlignedAuditItems\(/g) || []).length >= 3);
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -9927,6 +10065,7 @@ function fsRecoveryNoDeadEnd() {
   supplyPromiseDates();
   browserCheckTimeBombs();
   fsRecoveryNoDeadEnd();
+  poAlignRepair();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
