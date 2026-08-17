@@ -8,6 +8,7 @@ on:
       - 'labor-catalog.js'
       - 'price-analysis.js'
       - 'stocktake.js'
+      - 'inventory-reports.js'
       - 'substitute-budget.js'
       - 'project-management.js'
       - 'cleaning-operations.js'
