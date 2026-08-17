@@ -50,7 +50,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.2719";
+  const MODULE_BUILD = "v18.9.2724";
 
   const HOST_ID   = "page-inventory-reports";
   const READ_CAP  = 5000;    // سقف الحركات المقروءة لكل توليد — يُعلَن عند بلوغه
@@ -131,6 +131,22 @@
       const inv = (typeof _inventoryItems!=="undefined" && _inventoryItems) ? _inventoryItems : [];
       return inv.filter(x=>!(x && x.mergedInto));
     }catch(e){ return []; }
+  }
+
+  /* ══ هل وصلت لقطةُ الأرصدة؟ ══
+     كلُّ حسابٍ في هذه الوحدة يبدأ من الرصيد **الحاليّ** ثم يرجع بالحركات. فلو
+     حُسِب قبل وصول أوّل لقطةٍ لـ`global_inventory` كانت الأرصدةُ فارغةً، فتُبنى
+     الصفوفُ من السجلّ وحدَه ويخرج **تقريرٌ كاملُ الشكل كاذبُ الأرقام**: افتتاحيٌّ
+     سالبٌ وختاميٌّ صفر — بلا رسالةِ خطأٍ في أيّ مكان. (رُصد بهذا الشكل بالضبط في
+     أوّل تشغيلٍ لسيناريو ١٣: افتتاحي −15 وختامي 0 بدل 25 و40.)
+     نفسُ العلَم الذي تفحصه شاشةُ الرصيد قبل أن ترسم جدولَها. */
+  function _invReady(){
+    try{ return !!(window._fsLoaded && window._fsLoaded.inventory); }catch(e){ return false; }
+  }
+  // حالةُ المزامنة — مكوّنُ المنصة نفسُه الذي تعرضه شاشةُ الرصيد
+  function _syncHTML(){
+    try{ if(typeof _syncLoadingHTML==="function") return _syncLoadingHTML(); }catch(e){}
+    return '<div class="ivr-empty"><b>جارٍ مزامنة أرصدة المخزون...</b></div>';
   }
   function _catOf(it){
     try{ if(typeof _invResolvedCat==="function") return _invResolvedCat(it)||""; }catch(e){}
@@ -846,6 +862,19 @@
     if(!b){ _toast("⚠ الفترة غير صالحة — تحقّق من التاريخين","warn"); return; }
     if(_f.kind==="card" && !_f.docId){ _toast("⚠ اختر الصنف أولاً — بطاقة الصنف تلزمها مادةٌ واحدة","warn"); return; }
 
+    /* ── لا تقريرَ قبل وصول لقطة الأرصدة ──
+       الرفضُ خيرٌ من توليدٍ صامتٍ خاطئ — نفسُ منطق «سقف القراءة المعلَن» في هذه
+       الوحدة: رقمٌ ناقصٌ مُعلَنٌ خيرٌ من رقمٍ ناقصٍ صامت. ولا يُكتَب `_out` ولا
+       تُضاف ورقةُ Excel، فلا يبقى في الجلسة أثرٌ لتقريرٍ لم يُحسَب على أرصدة.
+       والمزامنةُ تُستدعى قبل الرفض — دالّتُها idempotent بحارسها الخاصّ، وهو نفسُ
+       ما يفعله زرُّ التحديث في صفحة سجل الحركات. */
+    if(!_invReady()){
+      try{ if(typeof startInventorySync==="function") startInventorySync(); }catch(e){}
+      _toast("⏳ جارٍ تحميل أرصدة المخزون — أعِد المحاولة بعد لحظة","info");
+      render();
+      return;
+    }
+
     _busy=true; _paintBusy(true);
     try{
       const {logs, capped} = await _loadLogs(b);
@@ -1020,6 +1049,9 @@
   }
 
   function _outHTML(){
+    // الأرصدةُ لم تصل بعد: حالةُ المزامنة صريحةٌ في مكان المخرَج، والمعاييرُ تبقى
+    // قابلةً للتعبئة — فينتظر المستخدمُ لحظةً بدل أن يقرأ أصفاراً يظنّها حقيقة
+    if(!_out && !_invReady()) return `<div class="card">${_syncHTML()}</div>`;
     if(!_out) return `<div class="card">${_emptyHTML(false)}</div>`;
     const rep=_out;
     return `<div class="card">
@@ -1343,6 +1375,7 @@ ${on?_lhCSS():""}
     render, generate, exportExcel, exportPDF, canView,
     _set, _setq, _reset,
     // دوالُّ نقيّة — مكشوفةٌ لفحوص hail-tests وسيناريوهات المتصفّح
+    _invReady,
     _effects, _net, _bounds, _openingMap, _rollup, _priceOf, _lastInPrices,
     _stale, _periodDays, _catalogIndex, _sheetRows, _safeSheetName,
     _state: ()=>({f:{..._f}, out:_out, sheets:Object.keys(_sheets)}),
