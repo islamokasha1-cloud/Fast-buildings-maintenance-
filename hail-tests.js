@@ -9800,6 +9800,73 @@ function browserCheckTimeBombs() {
   }
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   v18.9xd — تعافي Firestore من الـ assertion الداخليّ: لا طريقَ مسدودٍ صامت
+
+   الارتداد المحروس: عميلُ Firestore يُنهى عند أوّل assertion (_fsHardHalt)، ثم
+   يقرّر _fsAutoRecover إعادةَ التحميل. الحارسُ القديم كان يصرف النظرَ صامتاً إن كانت
+   آخرُ محاولةٍ أحدثَ من ١٥ ثانية — وسجلُّ المحاولات يعبُر إعادةَ التحميل، فأوّلُ
+   assertion بعد التحميل يقع داخل النافذة نفسها: عميلٌ ميّتٌ ولا تحميلَ ولا رسالة =
+   شاشةٌ مجمّدةٌ على «جارٍ مزامنة البيانات...» إلى الأبد (المُبلَّغ عنه على #p-purchases).
+   الفحصُ يُنفّذ دالّةَ القرار الحقيقيّةَ المستخرجةَ من index.html — لا يقرأ سطراً.
+   ════════════════════════════════════════════════════════════════════ */
+function fsRecoveryNoDeadEnd() {
+  H("v18.9xd) تعافي Firestore: كلُّ مسارٍ ينتهي بتحميلٍ أو برسالة");
+
+  const A = HTML.indexOf("var _FS_RECOVER_WINDOW_MS");
+  const B = HTML.indexOf("// سجلُّ المحاولات", A);
+  if (A < 0 || B < 0) { T("دالّةُ القرار _fsRecoveryDecision مستخرَجة", false, "لم يُعثر على الكتلة"); return; }
+  const src = HTML.slice(A, B);
+  let decide;
+  try {
+    decide = new Function("window", src + "\n return window._fsRecoveryDecision;")({});
+  } catch (e) { T("دالّةُ القرار تُنفَّذ", false, String(e.message).slice(0, 140)); return; }
+  T("دالّةُ القرار _fsRecoveryDecision مستخرَجةٌ وتُنفَّذ", typeof decide === "function");
+
+  const NOW = 1_700_000_000_000;
+  const C = (name, recs, startedInSession, want) => {
+    let got;
+    try { got = decide(recs, NOW, startedInSession).action; } catch (e) { T(name, false, "خطأ: " + e.message); return; }
+    T(name, got === want, "القرار: " + got + (got === want ? "" : " ← المتوقع " + want));
+  };
+
+  C("جلسةٌ نظيفةٌ بلا سجلّ → إعادةُ تحميل", [], false, "reload");
+  // ★ جوهرُ الارتداد: الصفحةُ حُمِّلت قبل لحظاتٍ بفعل تعافٍ سابق، فالسجلُّ حديثٌ جداً.
+  C("★★ xd: assertion بعد تعافٍ قبل ثانيتين (صفحةٌ جديدة) → تحميلٌ لا صمت",
+    [NOW - 2000], false, "reload");
+  C("★ xd: وحتى بعد محاولتين حديثتين جداً → تحميل (لا صمت)",
+    [NOW - 9000, NOW - 3000], false, "reload");
+  C("★ xd: تعافٍ جارٍ في هذه الصفحة نفسها → لا إطلاقَ مزدوج",
+    [NOW - 2000], true, "skip");
+  C("★★ xd: كاسرُ الحلقة — ٣ محاولاتٍ في ٣ دقائق → شريطٌ يدويّ لا حلقةُ تحميل",
+    [NOW - 100000, NOW - 60000, NOW - 20000], false, "manual");
+  C("★ xd: محاولاتٌ أقدمُ من ٣ دقائق تُهمَل → تحميل",
+    [NOW - 400000, NOW - 300000, NOW - 200000], false, "reload");
+  C("سجلٌّ تالفٌ (ليس مصفوفة) لا يُسقط القرار", null, false, "reload");
+  C("قيمٌ غيرُ رقميّةٍ في السجلّ تُهمَل", ["x", null, NaN, NOW + 999999], false, "reload");
+
+  // ── بنيةُ المسارات: لا فرعَ يُنهي العميلَ ثم يصمت ──
+  const a2 = HTML.indexOf("function _fsAutoRecover(){");
+  const b2 = HTML.indexOf("function _handle(kind, msg, detail)", a2);
+  const rec = a2 >= 0 && b2 > a2 ? HTML.slice(a2, b2) : "";
+  T("★ xd: كتلةُ _fsAutoRecover مستخرَجة", !!rec);
+  T("★★ xd: فرعُ «تعذّر تسجيلُ المحاولة» يُبلّغ ولا يصمت",
+    /_fsLedgerWrite\([^)]*\)\)\{\s*_fsShowManualReload\(\);/.test(rec.replace(/\s+/g, " ").replace(/ /g, "")) ||
+    /if\(!_fsLedgerWrite\(d\.recs\)\)\{\s*_fsShowManualReload\(\);\s*return;\s*\}/.test(rec));
+  T("★★ xd: شبكةُ أمانٍ زمنيّةٌ تعرض الشريطَ إن لم تُنفَّذ إعادةُ التحميل",
+    /setTimeout\(\s*_fsShowManualReload\s*,\s*\d+\s*\)/.test(rec));
+  T("★ xd: حارسُ الإطلاق المزدوج في الذاكرة لا في التخزين (لا يعبُر التحميل)",
+    /var _fsRecoverStarted = false/.test(HTML) && !/now - recs\[recs\.length-1\]\) < 15\*1000/.test(HTML));
+
+  // ── الشاشةُ لا تَعِد بمزامنةٍ ميّتة ──
+  T("★★ xd: _fsHardHalt يرفع علَم _fsFatal",
+    /_fsHalted = true;[\s\S]{0,200}window\._fsFatal = true/.test(HTML));
+  const sl = HTML.slice(HTML.indexOf("function _syncLoadingHTML()"), HTML.indexOf("function _syncLoadingHTML()") + 700);
+  T("★★ xd: _syncLoadingHTML يعرض «توقّفت المزامنة» عند _fsFatal بدل دوّارةٍ أبديّة",
+    /window\._fsFatal/.test(sl) && /توقّفت المزامنة/.test(sl));
+  T("★ xd: وتبقى الدوّارةُ العاديّةُ في الحالة السليمة", /جارٍ مزامنة البيانات/.test(sl));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -9859,6 +9926,7 @@ function browserCheckTimeBombs() {
   purchaseCardsGrid();
   supplyPromiseDates();
   browserCheckTimeBombs();
+  fsRecoveryNoDeadEnd();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
