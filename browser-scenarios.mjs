@@ -36,12 +36,30 @@ window.__store = {};                       // path -> data (Firestore في ال�
     collection:function(c){ return collRef(path+'/'+c); },
     onSnapshot:function(cb){ try{ cb(snap(path)); }catch(e){} return _sub({ path:path, cb:cb }); }
   }; }
-  function collSnap(coll){ var ds=docsUnder(coll).map(snap); return { empty:ds.length===0, size:ds.length, docs:ds, forEach:function(f){ds.forEach(f);} }; }
-  function collRef(coll){ var q={
+  /* ── الترتيب/الحدّ/المرساة: مُطبَّقةٌ على استعلامات documentId وحدَها ──
+     v18.9xe: الفحصُ الشامل يقرأ على صفحاتٍ بمرساة documentId، ومحاكٍ يتجاهل
+     limit/startAfter يجعل «فحصُ ٤٥٠ طلباً» يمرّ في صفحةٍ واحدةٍ فلا يُثبت الترقيمَ
+     الذي هو جوهرُ الميزة. وتعميمُها على **كل** استعلامٍ يكسر سيناريوهاتٍ قائمةً
+     تعتمد أنّ المحاكي يُرجع المجموعةَ كاملةً (مستمعو limit(400) مثلاً) — فيصير
+     الفحصُ يقيس المحاكيَ لا النظام. فالنطاقُ مقصودٌ: documentId فقط. */
+  function collSnap(coll, st){
+    var paths=docsUnder(coll);
+    if(st && st.ob==='__id__'){
+      paths.sort();
+      if(st.sa!=null) paths=paths.filter(function(p){ return p.slice(coll.length+1) > st.sa; });
+      if(st.lim>0) paths=paths.slice(0, st.lim);
+    }
+    var ds=paths.map(snap);
+    return { empty:ds.length===0, size:ds.length, docs:ds, forEach:function(f){ds.forEach(f);} };
+  }
+  function collRef(coll){ var st={ ob:null, lim:0, sa:null }; var q={
     doc:function(id){ return docRef(id? coll+'/'+id : coll+'/auto_'+Math.random().toString(36).slice(2)); },
     add:function(d){ var id='auto_'+Math.random().toString(36).slice(2); window.__store[coll+'/'+id]=d; _emit(coll+'/'+id); return Promise.resolve(docRef(coll+'/'+id)); },
-    where:function(){ return q; }, orderBy:function(){ return q; }, limit:function(){ return q; },
-    get:function(){ return Promise.resolve(collSnap(coll)); },
+    where:function(){ return q; },
+    orderBy:function(f){ if(f && f.__docId) st.ob='__id__'; return q; },
+    limit:function(n){ st.lim=n||0; return q; },
+    startAfter:function(v){ st.sa=v; return q; },
+    get:function(){ return Promise.resolve(collSnap(coll, st)); },
     onSnapshot:function(cb){ try{ cb(collSnap(coll)); }catch(e){} return _sub({ coll:coll, cb:cb }); }
   }; return q; }
   var FieldValue={ serverTimestamp:function(){return {__sv:1};}, increment:function(n){return {__inc:n};}, arrayUnion:function(){return {};}, arrayRemove:function(){return {};}, delete:function(){return {__del:1};} };
@@ -66,6 +84,7 @@ window.__store = {};                       // path -> data (Firestore في ال�
              commit:function(){ return Promise.resolve(); } }; }};
   var firestoreFn=function(){ return fs; };
   firestoreFn.FieldValue=FieldValue;
+  firestoreFn.FieldPath={ documentId:function(){ return {__docId:1}; } };
   firestoreFn.Timestamp={ now:function(){return {toDate:function(){return new Date();}};}, fromDate:function(d){return {toDate:function(){return d;}};} };
   window.firebase={
     initializeApp:function(){ return {}; },
@@ -581,6 +600,68 @@ check('9ز) ★★ إعادةُ الفحص على المخزَّن: لا انز�
 check('9ح) ★ خريطةُ التشخيص نُظِّفت فيسقط الشريطُ فوراً', s9.mapCleared===true);
 check('9ط) ★★ إعادةُ الإصلاح idempotent: الدليلُ لم يُدهس ولا قيدَ ثانٍ',
   s9.preIntact===true && s9.tlOnce===1, 'قيود='+s9.tlOnce);
+
+/* ══ سيناريو 10 (v18.9xe): الفحصُ الشامل يعبُر حدَّ الـ ٤٠٠ ══
+   الإصلاحُ الجماعيُّ السابق يرى ما حُمِّل في الجلسة فقط (مستمعٌ بـ limit(400))، فالطلبُ
+   الأقدمُ منزاحٌ ولا أحدَ يعلم. هنا نزرع ٤٥٠ طلباً، ثلاثةٌ منها منزاحة — **واحدٌ بعد
+   الـ ٤٠٠** — ونتحقّق أنّ الفحصَ الشامل يجدها كلَّها ثم يُصلحها.                       */
+log('\n=== السيناريو 10: الفحصُ الشامل يعبُر حدَّ الـ ٤٠٠ (v18.9xe) ══');
+const s10 = await page.evaluate(async ()=>{
+  const out={}; window.__store={}; purchases=[];
+  const PC = PURCHASES_COLLECTION();
+  const toasts=[]; window.toast=(m,t)=>toasts.push({m:String(m),t});
+  window.showConfirm = async ()=>true;
+  window.logAudit=()=>{}; window.renderPurchases=()=>{}; window.captureError=()=>{};
+  currentUser={name:'مدير النظام', role:'admin'};
+
+  const items=[{itemId:'a',itemName:'دهان',qty:1},{itemId:'b',itemName:'بلاستيك',qty:1}];
+  const good=[{itemId:'a',itemName:'دهان',rcvQty:1},{itemId:'b',itemName:'بلاستيك',rcvQty:2}];
+  // صفٌّ يتيمٌ في المنتصف ⇒ انزياحُ كلِّ ما بعده (نفسُ شكل البلاغ)
+  const bad =[{itemId:'a',itemName:'دهان',rcvQty:1},{itemId:'zz',itemName:'صفٌّ يتيم',rcvQty:9},{itemId:'b',itemName:'بلاستيك',rcvQty:2}];
+  const pad = n => String(n).padStart(4,'0');           // معرّفاتٌ تُرتَّب نصّياً كما يرتّب Firestore
+  const BROKEN = [5, 210, 448];                          // ٤٤٨ يقع **بعد** حدّ الـ ٤٠٠
+  for(let i=1;i<=450;i++){
+    const broken = BROKEN.indexOf(i)!==-1;
+    window.__store[PC+'/PO-'+pad(i)] = { id:'PO-'+pad(i), status:'closed', building:'م', auditedBy:'أمين',
+      items: JSON.parse(JSON.stringify(items)),
+      auditItems: JSON.parse(JSON.stringify(broken? bad : good)),
+      timeline:[{event:'تدقيق'}], createdAt:'2026-01-01T08:00:00' };
+  }
+  // مرآةُ الجلسة تحمل ٤٠٠ فقط — كما يفعل المستمعُ الحقيقيّ
+  purchases = Object.keys(window.__store).sort().slice(0,400).map(k=>JSON.parse(JSON.stringify(window.__store[k])));
+  purchases.forEach(p=>_poAuditSelfCheck(p));
+  out.sessionSeen = _poAlignBreaks.size;                 // ٢ فقط — الثالثُ خارج النافذة
+
+  await poScanAllAlignment();
+  const r = _poAlignScanResult || {};
+  out.scanned = r.scanned;
+  out.hitIds  = (r.hits||[]).map(h=>h.id).sort().join(',');
+  out.readOnly = ((window.__store[PC+'/PO-'+pad(448)]||{}).auditItems||[]).length;  // الفحصُ لم يكتب: ما زال 3
+
+  await poFixScannedAlignment();
+  const d448 = window.__store[PC+'/PO-'+pad(448)] || {};
+  const d005 = window.__store[PC+'/PO-'+pad(5)]   || {};
+  const d006 = window.__store[PC+'/PO-'+pad(6)]   || {};
+  out.fixed448 = (d448.auditItems||[]).map(x=>x.itemName).join('|');
+  out.pre448   = Array.isArray(d448.auditItemsPreAlign) && d448.auditItemsPreAlign.length===3;
+  out.tl448    = (d448.timeline||[]).some(t=>t.code==='align_fixed');
+  out.fixed005 = (d005.auditItems||[]).length;
+  out.untouched006 = (d006.auditItems||[]).length===2 && !d006.auditItemsPreAlign;   // السليمُ لم يُمَسّ
+  out.rescan   = _poAlignScan({...d448, id:'PO-'+pad(448)}).length;
+  out.leftover = (_poAlignScanResult.hits||[]).length;
+  return out;
+});
+check('10أ) ★★ الجلسةُ (٤٠٠) لا ترى إلا طلبين — الثالثُ خارج نافذتها', s10.sessionSeen===2, 'رأت='+s10.sessionSeen);
+check('10ب) ★★ الفحصُ الشامل قرأ كلَّ الـ ٤٥٠ عبر الترقيم', s10.scanned===450, 'فُحص='+s10.scanned);
+check('10ج) ★★ ووجد الثلاثة — بما فيها PO-0448 بعد حدّ الـ ٤٠٠',
+  s10.hitIds==='PO-0005,PO-0210,PO-0448', s10.hitIds);
+check('10د) ★★ الفحصُ قراءةٌ محضة — لم يكتب حرفاً قبل زرّ الإصلاح', s10.readOnly===3, 'صفوف=' + s10.readOnly);
+check('10هـ) ★★ الإصلاحُ شفى الطلبَ الأقدم (٣ صفوف ← ٢ بترتيب البنود)',
+  s10.fixed448==='دهان|بلاستيك' && s10.fixed005===2, s10.fixed448);
+check('10و) ★★ الدليلُ محفوظٌ وقيدُ الإصلاح في السجلّ', s10.pre448===true && s10.tl448===true);
+check('10ز) ★★ الطلبُ السليمُ (PO-0006) لم يُمَسّ إطلاقاً', s10.untouched006===true);
+check('10ح) ★★ إعادةُ الفحص على المخزَّن: صفر انزياح', s10.rescan===0, 'مواضع='+s10.rescan);
+check('10ط) ★ الحصيلةُ تُحدَّث بعد الإصلاح فلا تَعِد بما لم يبقَ', s10.leftover===0, 'باقٍ='+s10.leftover);
 
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
