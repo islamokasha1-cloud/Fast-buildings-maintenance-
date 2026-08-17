@@ -916,6 +916,34 @@ const s13 = await page.evaluate(async ()=>{
   const shRow=sheet.find(r=>r['المادة']==='كابل نحاس')||{};
   out.excelClosing=shRow['ختامي'];
 
+  /* ── منتقي الصنف: مسارُ المستخدم الحقيقيّ (اكتب ← اختر ← ولِّد) ──
+     الدوالُّ النقيّةُ تفحصها hail-tests؛ وهذا يفحص **الوسط بين الحقل والتقرير**:
+     أنّ الكتابةَ تُظهر المنسدلةَ، وأنّ النقرَ يُسند المعرّفَ، وأنّ إعادةَ الرسم بعده
+     **لا تمحو** الاختيار (وهو ما يقع لو رُبط الحقلُ بـ`_set`)، وأنّ البطاقةَ
+     المولَّدةَ تنتهي عند الرصيد الحاليّ للصنف نفسِه. */
+  IR._set('kind','card');
+  const inp=document.getElementById('ivr-pick');
+  out.pickInputIsText = !!inp && inp.tagName==='INPUT';
+  out.noSelect = !document.querySelector('#page-inventory-reports select[onchange*="docId"]');
+  inp.value='كابل'; IR._acSearch();
+  const ac=document.getElementById('ivr-ac');
+  out.acOpen = ac.style.display==='block';
+  out.acItems = ac.querySelectorAll('.ivr-ac-item').length;
+  out.acHasCbl = /كابل نحاس/.test(ac.innerHTML);
+  // بحثٌ بكلمتين معكوستين وبتطبيعٍ عربيّ — نفسُ ما يفعله المستخدم فعلاً
+  inp.value='نحاس كابل'; IR._acSearch();
+  out.acReversed = document.getElementById('ivr-ac').querySelectorAll('.ivr-ac-item').length===1;
+  // ثمّ الاختيارُ بالنقر
+  document.getElementById('ivr-ac').querySelector('.ivr-ac-item').click();
+  out.pickedId = IR._state().f.docId;
+  const inp2=document.getElementById('ivr-pick');       // أُعيد الرسمُ ⇒ عنصرٌ جديد
+  out.labelKept = !!inp2 && /كابل نحاس/.test(inp2.value);
+  out.okClass   = !!inp2 && inp2.className.indexOf('ivr-pick-ok')>=0;
+  await IR.generate();
+  const card=IR._state().out;
+  out.cardRows = (card&&card.rows||[]).length;
+  out.cardLastBalance = (card&&card.rows||[]).slice(-1).map(r=>r.balance)[0];
+
   // ── الاستهلاك: direct_use تُحتسَب هنا (وهي صفرٌ في الرصيد أعلاه) ──
   IR._set('kind','consumption'); IR._setq('from',p(30)); IR._setq('to',p(0));
   await IR.generate();
@@ -962,6 +990,18 @@ check('13ح) ★★ التقييم بسعر آخر وارد (15×40=600) لا ب
 check('13ط) ★ الجدولُ مكوّنُ المنصة `.report-table` لا جدولٌ محلّيّ', s13.platformTable===true);
 check('13ي) ★ النمطُ محقونٌ مرّةً واحدةً (#ivr-css)', s13.styleInjected===true);
 check('13ك) ★ الأرقامُ بصنف المونوسبيس الجدوليّ كبقيّة شاشات المنصة', s13.monoNums===true);
+// ── منتقي الصنف: اكتب ← اختر ← ولِّد ──
+check('13ل) منتقي الصنف حقلُ بحثٍ لا قائمةٌ منسدلةٌ بكل الأصناف',
+  s13.pickInputIsText===true && s13.noSelect===true);
+check('13م) ★ الكتابةُ تفتح المنسدلةَ وتعرض الصنفَ المطابق',
+  s13.acOpen===true && s13.acHasCbl===true && s13.acItems>=1, 'نتائج='+s13.acItems);
+check('13ن) ★ كلمتان بأيّ ترتيب («نحاس كابل») تجدان الصنفَ نفسَه', s13.acReversed===true);
+check('13ه) ★★ النقرُ يُسند المعرّف، وإعادةُ الرسم بعده لا تمحو الاختيار',
+  s13.pickedId==='INV-CBL' && s13.labelKept===true && s13.okClass===true,
+  'المعرّف='+s13.pickedId+' النصُّ باقٍ='+s13.labelKept);
+check('13و) ★★ بطاقةُ الصنف تُولَّد وينتهي رصيدُها المتدرّج عند الرصيد الحاليّ (٤٠)',
+  s13.cardRows===3 && s13.cardLastBalance===40,
+  'حركات='+s13.cardRows+' آخرُ رصيد='+s13.cardLastBalance);
 
 /* ═══════════════════════════════════════════════════════════════════════════
    السيناريو 14: تكافؤُ المصدرين — إعادةُ الحساب وتقريرُ الفترة يقولان الرقمَ نفسَه
