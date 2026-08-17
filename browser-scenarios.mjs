@@ -663,6 +663,68 @@ check('10ز) ★★ الطلبُ السليمُ (PO-0006) لم يُمَسّ إط
 check('10ح) ★★ إعادةُ الفحص على المخزَّن: صفر انزياح', s10.rescan===0, 'مواضع='+s10.rescan);
 check('10ط) ★ الحصيلةُ تُحدَّث بعد الإصلاح فلا تَعِد بما لم يبقَ', s10.leftover===0, 'باقٍ='+s10.leftover);
 
+/* ══ سيناريو 11 (v18.9xf): سجلُّ الأخطاء مجمَّعاً — الشاشةُ تقول «عيبٌ واحد» ══
+   البلاغُ الأصليّ: المالكُ تنقّل بين لقطاتٍ فيها عشراتُ صفوفٍ متطابقةٍ ليكتشف أنّها
+   طلبان. هنا نزرع ٤١ حدثاً (٤٠ من عيبٍ واحدٍ + نادرٌ واحد) ونرسم الشاشةَ الحقيقيّة،
+   ونتحقّق أنّ المجمَّعَ يعرض **بطاقتين** والمفصَّلَ يبقى متاحاً بـ٤١.                 */
+log('\n=== السيناريو 11: سجلُّ الأخطاء مجمَّعاً (v18.9xf) ══');
+const s11 = await page.evaluate(async ()=>{
+  const out={};
+  const M111 = "انزياح صفوف التدقيق عن بنود الطلب — PO-202607-0111: الطول: 7 بنداً مقابل 8 صفَّ تدقيق · السطر 4: «بلاستيك سوبر» يقابله صفّ «مبيد حشري 1لتر»";
+  const M113 = "انزياح صفوف التدقيق عن بنود الطلب — PO-202607-0113: الطول: 5 بنداً مقابل 6 صفَّ تدقيق · السطر 3: «ماسورة ديكور» يقابله صفّ «توصيلة كروم»";
+  const users=["مدير النظام","محمد","اسامة السادات","رغده فهيد","ری الجعفانی"];
+  const log=[];
+  for(let i=0;i<40;i++) log.push({ kind:"align", message:(i%2?M111:M113), source:"_poAuditSelfCheck",
+    by:users[i%users.length], role:"admin", version:"v18.9.2700", page:"purchases",
+    at:"2026-08-17T"+String(10+(i%5)).padStart(2,"0")+":00:00.000Z" });
+  log.push({ kind:"error", message:"TypeError: Cannot read properties of undefined (reading 'itemName')",
+    source:"renderInventory", by:"محمد", role:"admin", version:"v18.9.2700", page:"inventory",
+    at:"2026-08-17T12:30:00.000Z" });
+  errorsLog = log;
+  currentUser={name:'مدير النظام', role:'admin'};
+
+  const host = document.getElementById("errors-log-output");
+  const cards = () => host.querySelectorAll(":scope > .card").length;
+
+  // العرضُ الافتراضيّ — بلا أيّ تبديل
+  renderErrorsLog();
+  out.defaultCards = cards();
+  out.countLine    = (document.getElementById("err-count")||{}).textContent || "";
+  out.showsTimes40 = host.textContent.indexOf("×40") !== -1 || host.textContent.indexOf("×40") !== -1;
+  out.rareVisible  = host.textContent.indexOf("reading 'itemName'") !== -1;
+  out.usersShown   = host.textContent.indexOf("اسامة السادات") !== -1;
+  // الصيغُ الكاملةُ متاحةٌ بالتوسيع (لا تُهدَر بالقصر)
+  out.variantsBlock = host.textContent.indexOf("الصيغ الكاملة داخل هذه المجموعة") !== -1;
+  out.bothPOsInside = host.textContent.indexOf("PO-202607-0111") !== -1 && host.textContent.indexOf("PO-202607-0113") !== -1;
+
+  // المفصَّلُ باقٍ بضغطة
+  setErrView("detail");
+  out.detailCards = cards();
+  setErrView("grouped");
+  out.backToGrouped = cards();
+
+  // الفلترُ يُطبَّق قبل التجميع: تصفيةٌ على مستخدمٍ واحد
+  document.getElementById("err-f-user").value = "محمد";
+  renderErrorsLog();
+  out.filteredCards = cards();
+  out.filteredCount = (document.getElementById("err-count")||{}).textContent || "";
+  document.getElementById("err-f-user").value = "";
+  renderErrorsLog();
+  return out;
+});
+check('11أ) ★★ الافتراضيُّ مجمَّع: ٤١ حدثاً تُعرَض في بطاقتين',
+  s11.defaultCards===2, 'بطاقات='+s11.defaultCards);
+check('11ب) ★★ العدّادُ يقول العددين معاً', /41/.test(s11.countLine) && /2/.test(s11.countLine), s11.countLine.trim().slice(0,60));
+check('11ج) ★★ البطاقةُ تُظهر عددَ التكرار (×40) — هو الخبر', s11.showsTimes40===true);
+check('11د) ★★ الخطأُ النادرُ ظاهرٌ ولم يُدفَن تحت الأربعين', s11.rareVisible===true);
+check('11هـ) ★ ويُقال من تأثّر بالاسم', s11.usersShown===true);
+check('11و) ★★ الصيغُ الكاملةُ محفوظةٌ داخل المجموعة (الطلبان كلاهما)',
+  s11.variantsBlock===true && s11.bothPOsInside===true);
+check('11ز) ★★ المفصَّلُ لم يُحذَف — ٤١ بطاقةً بضغطة', s11.detailCards===41, 'بطاقات='+s11.detailCards);
+check('11ح) ★ والرجوعُ للمجمَّع يعمل', s11.backToGrouped===2, 'بطاقات='+s11.backToGrouped);
+check('11ط) ★★ الفلترُ يُطبَّق قبل التجميع — «محمد» له ٩ أحداثٍ في مجموعتين',
+  s11.filteredCards===2 && /9/.test(s11.filteredCount), s11.filteredCount.trim().slice(0,50));
+
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
 if(boot.length) log('(أخطاء إقلاع غير حرجة: '+boot.length+' — متوقّعة من غياب CDN)');

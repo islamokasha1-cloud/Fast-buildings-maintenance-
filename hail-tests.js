@@ -10045,6 +10045,85 @@ function poAlignRepair() {
       && /PO-0005,PO-0210,PO-0448/.test(BS) && /s10\.readOnly===3/.test(BS));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   v18.9xf — سجلُّ الأخطاء مجمَّعاً: «كم عيباً؟» لا «كم حدثاً؟»
+
+   الدرسُ من بلاغ المالك: تنقّل بين لقطاتٍ فيها عشراتُ صفوفٍ متطابقةٍ حرفياً ليكتشف
+   أنّها **طلبان**. عيبٌ واحدٌ يتكرّر أربعين مرّةً كان يبدو أربعين مشكلةً، ويُخفي
+   تحته الخطأَ النادرَ الذي يستحقّ النظر. الحارس: يُنفّذ دالّتَي البصمة والتجميع
+   المستخرجتَين من index.html على **نصِّ البلاغ الحقيقيّ**.
+   ════════════════════════════════════════════════════════════════════ */
+function errLogGrouping() {
+  H("v18.9xf) سجلُّ الأخطاء مجمَّعاً — عيبٌ واحدٌ لا أربعون");
+
+  const a = HTML.indexOf("function _errSignature(e){");
+  const b = HTML.indexOf("function renderErrorsLog(){", a);
+  if (a < 0 || b < 0) { T("دالّتا البصمة والتجميع مستخرجتان", false, "لم يُعثر"); return; }
+  // كتلةُ التجميع وحدَها (بلا بطاقة العرض التي تلمس DOM)
+  const src = HTML.slice(a, HTML.indexOf("function renderErrorsLog(){", a));
+  let API;
+  try { API = new Function(src + "\n return {_errSignature,_errGroups};")(); }
+  catch (e) { T("دالّتا البصمة والتجميع تُنفَّذان", false, String(e.message).slice(0, 140)); return; }
+  T("دالّتا البصمة والتجميع مستخرجتان وتُنفَّذان", typeof API._errGroups === "function");
+
+  // ── نصُّ البلاغ حرفياً: الطلبان اللذان أغرقا السجل ──
+  const M111 = "انزياح صفوف التدقيق عن بنود الطلب — PO-202607-0111: الطول: 7 بنداً مقابل 8 صفَّ تدقيق · السطر 4: «بلاستيك سوبر خارجي داخلي جي ال اي GLE» يقابله صفّ «مبيد حشري 1لتر»";
+  const M113 = "انزياح صفوف التدقيق عن بنود الطلب — PO-202607-0113: الطول: 5 بنداً مقابل 6 صفَّ تدقيق · السطر 3: «ماسورة ديكور بلاصق 16*25 التخصصي» يقابله صفّ «توصيلة كروم 3 بوصة C العايد»";
+  T("★★ xf: الطلبان المختلفان يجتمعان في بصمةٍ واحدة (عيبٌ واحدٌ لا اثنان)",
+    API._errSignature({ kind: "align", message: M111 }) === API._errSignature({ kind: "align", message: M113 }),
+    API._errSignature({ kind: "align", message: M111 }));
+
+  // ٤٠ حدثاً من مستخدمين وأجهزةٍ وأوقاتٍ مختلفة — كما في اللقطات
+  const users = ["مدير النظام", "محمد", "اسامة السادات", "رغده فهيد", "ری الجعفانی"];
+  const flood = [];
+  for (let i = 0; i < 40; i++) {
+    flood.push({
+      kind: "align", message: (i % 2 ? M111 : M113), source: "_poAuditSelfCheck",
+      by: users[i % users.length], version: "v18.9.2700", page: "purchases",
+      at: "2026-08-17T" + String(10 + (i % 5)).padStart(2, "0") + ":00:00.000Z"
+    });
+  }
+  // وخطأٌ نادرٌ واحدٌ — هو ما كان يغرق تحت الأربعين
+  const RARE = "TypeError: Cannot read properties of undefined (reading 'itemName')";
+  flood.push({ kind: "error", message: RARE, source: "renderInventory", by: "محمد",
+               version: "v18.9.2700", page: "inventory", at: "2026-08-17T12:30:00.000Z" });
+
+  const G = API._errGroups(flood);
+  T("★★ xf: ٤١ حدثاً تُقرأ مجموعتين — لا ٤١ سطراً", G.length === 2, "مجموعات=" + G.length);
+  T("★★ xf: الأكثرُ تكراراً أوّلاً، وعددُه صحيحٌ (٤٠)", G[0].count === 40, "العدد=" + G[0].count);
+  T("★★ xf: والخطأُ النادرُ لم يُدفَن — مجموعةٌ قائمةٌ بذاتها",
+    G[1].count === 1 && G[1].sample === RARE);
+  T("★★ xf: المجموعةُ تقول كم مستخدماً تأثّر (٥ لا واحد)", G[0].users.length === 5, "مستخدمون=" + G[0].users.length);
+  T("★★ xf: وتحفظ الصيغَ الكاملةَ المميّزةَ بعددها — فلا تُهدَر التفاصيل بالقصر",
+    G[0].variants.length === 2 && G[0].variants[0].count + G[0].variants[1].count === 40,
+    "صيغ=" + G[0].variants.length);
+  T("★ xf: والمدى الزمنيُّ محسوبٌ (أوّلُ ظهورٍ ≠ آخرُه)",
+    G[0].firstAt === "2026-08-17T10:00:00.000Z" && G[0].lastAt === "2026-08-17T14:00:00.000Z",
+    G[0].firstAt + " ← " + G[0].lastAt);
+
+  // ── البصمةُ تُطبِّع البيانَ لا هويّةَ العيب ──
+  T("★ xf: الأرقامُ المختلفةُ لا تفرّق (معرّفٌ/كميةٌ بيانٌ لا عيب)",
+    API._errSignature({ kind: "e", message: "فشل الطلب 12 من 300" })
+      === API._errSignature({ kind: "e", message: "فشل الطلب 7 من 41" }));
+  T("★★ xf: لكنّ نوعَين مختلفَين لا يجتمعان (لا تجميعٌ يُخفي عيباً آخر)",
+    API._errSignature({ kind: "error", message: "أ" }) !== API._errSignature({ kind: "promise", message: "أ" }));
+  T("★★ xf: ورسالتان مختلفتان فعلاً تبقيان مجموعتين",
+    API._errGroups([{ kind: "error", message: "تعذّر حفظ الطلب" }, { kind: "error", message: "تعذّر رفع الصورة" }]).length === 2);
+  T("★ xf: سجلٌّ فارغٌ أو مشوّهٌ لا يُسقط التجميع",
+    API._errGroups([]).length === 0 && API._errGroups(null).length === 0
+      && API._errGroups([{}, { message: null }]).length >= 1);
+
+  // ── العرضُ: المجمَّعُ افتراضيٌّ، والمفصَّلُ باقٍ بضغطة ──
+  T("★★ xf: العرضُ الافتراضيُّ مجمَّع", /let _errView = "grouped"/.test(HTML));
+  T("★★ xf: والمفصَّلُ لم يُحذَف — زرٌّ يبدّل إليه",
+    /onclick="setErrView\('detail'\)"/.test(HTML) && /onclick="setErrView\('grouped'\)"/.test(HTML)
+      && /_errView === "grouped"\)\{ out\.innerHTML = _groups\.map\(_errGroupCard\)/.test(HTML));
+  T("★★ xf: العدّادُ يقول العددين — أحداثٌ ومجموعات",
+    /عدد الأخطاء: "\+rows\.length\+" في <b>"\+_groups\.length/.test(HTML));
+  T("★ xf: والفلاتر تُطبَّق قبل التجميع (المجموعةُ تصف المعروضَ لا الكلَّ)",
+    HTML.indexOf("let rows=errorsLog.filter") < HTML.indexOf("const _groups = _errGroups(rows)"));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -10106,6 +10185,7 @@ function poAlignRepair() {
   browserCheckTimeBombs();
   fsRecoveryNoDeadEnd();
   poAlignRepair();
+  errLogGrouping();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
