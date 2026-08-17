@@ -9985,8 +9985,9 @@ function poAlignRepair() {
     /poFixAlignment\('/.test(wb) && !/افتح «تعديل الطلب» واحفظ/.test(wb));
   T("★ xd: وزرُّ الإصلاح الجماعيّ يظهر حين يزيد المنزاحُ على طلب",
     /_poAlignBreaks\.size > 1/.test(wb) && /poFixAllAlignment\(\)/.test(wb));
-  T("★ xd: الإصلاحُ محجوزٌ لمدير النظام في الفعل نفسِه لا في العرض وحدَه",
-    (HTML.match(/currentUser\.role==="admin"\)\)\{ toast\("⚠ الإصلاح من صلاحية مدير النظام"/g) || []).length === 2);
+  // v18.9xe: مداخلُ الإصلاح ثلاثة (طلبٌ واحد · جماعيُّ الجلسة · حصيلةُ الفحص الشامل)
+  T("★ xd: الإصلاحُ محجوزٌ لمدير النظام في الفعل نفسِه لا في العرض وحدَه — كلُّ مداخله",
+    (HTML.match(/currentUser\.role==="admin"\)\)\{ toast\("⚠ الإصلاح من صلاحية مدير النظام"/g) || []).length === 3);
 
   // ── (٧) الجرسُ لا يُغرق السجل: القيدُ المركزيُّ من جلسة من يستطيع الإصلاح ──
   const cA = HTML.indexOf("function _poAuditSelfCheck(p){");
@@ -10003,6 +10004,45 @@ function poAlignRepair() {
     "عدد النسخ: " + (HTML.match(/_fromStockOnly:true, rcvQty:0/g) || []).length);
   T("★ xd: وكاتبا auditItems يبنيانها من المصدر الموحّد",
     (HTML.match(/_poAlignedAuditItems\(/g) || []).length >= 3);
+
+  /* ── (٩) v18.9xe: الفحصُ الشامل — «افحص كل الطلبات» لا آخرَ ٤٠٠ (طلبُ المالك) ──
+     الإصلاحُ الجماعيُّ يقرأ `_poAlignBreaks` وهي لا تحمل إلا ما حُمِّل في الجلسة،
+     ومستمعُ المشتريات محدودٌ بـ `limit(400)`. فالطلبُ الأقدمُ منزاحٌ ولا أحدَ يعلم. */
+  const nA = HTML.indexOf("async function poScanAllAlignment(){");
+  const nB = HTML.indexOf("function renderAlignScanResult(){", nA);
+  const ns = nA >= 0 && nB > nA ? HTML.slice(nA, nB) : "";
+  T("★ xe: كتلةُ poScanAllAlignment مستخرَجة", !!ns);
+  T("★★ xe: القراءةُ على صفحاتٍ بمرساة documentId — لا limit واحدةٌ ولا مرساةُ createdAt",
+    /FieldPath\.documentId\(\)/.test(ns) && /\.startAfter\(last\)/.test(ns) && !/createdAt/.test(ns));
+  T("★★ xe: كاسرُ حلقةٍ على عدد الصفحات — لا قراءةٌ لا تنتهي",
+    /_POAL_MAX_PAGES/.test(ns) && /pages < _POAL_MAX_PAGES/.test(ns) && /_POAL_MAX_PAGES = \d+/.test(HTML));
+  T("★★ xe: الفحصُ قراءةٌ محضة — لا كتابةَ فيه إطلاقاً",
+    !/\.set\(|\.update\(|\.delete\(/.test(ns), "لا عملية كتابة في كتلة الفحص");
+  T("★ xe: ويتوقّف عند صفحةٍ ناقصةٍ أو فارغة (لا دورةٌ زائدة)",
+    /if\(!docs\.length\) break;/.test(ns) && /if\(docs\.length < _POAL_PAGE\) break;/.test(ns));
+  T("★ xe: الفحصُ يستعمل _poAlignScan نفسَها على الوثيقة الطازجة (مقياسٌ واحد)",
+    /_poAlignScan\(\{ \.\.\.data, id: d\.id \}\)/.test(ns));
+  T("★★ xe: الإصلاحُ بعد الفحص يمرّ على المسار المحافظ نفسِه (_poRealignStored)",
+    /_poRealignStored\(ids\[i\]\)/.test(HTML));
+  T("★★ xe: والحصيلةُ تُحدَّث بعد الإصلاح فلا تَعِد بما لم يبقَ",
+    /_poAlignScanResult = \{ \.\.\.r, hits: r\.hits\.filter/.test(HTML));
+  T("★ xe: الفحصُ والإصلاحُ محجوزان لمدير النظام (٤ حرّاسِ دورٍ في المسار كلِّه)",
+    (HTML.match(/currentUser\.role==="admin"\)\)\{ toast\("⚠ (الفحص|الإصلاح) من صلاحية مدير النظام"/g) || []).length === 4);
+  // الزرُّ في الصفحة التي يرى فيها المسؤولُ المشكلة — لا دالّةٌ تُنادى من الكونسول
+  T("★★ xe: بطاقةُ الفحص في صفحة «سجل الأخطاء» بزرٍّ حقيقيّ",
+    HTML.includes('id="align-scan-card"') && HTML.includes('onclick="poScanAllAlignment()"')
+      && HTML.includes('id="align-scan-out"'));
+  T("★ xe: وزرُّ إصلاحِ الحصيلة يُرسَم مع النتائج",
+    /onclick="poFixScannedAlignment\(\)"/.test(HTML));
+  // المحاكي: بلا ترقيمٍ حقيقيٍّ فيه يمرّ «٤٥٠ طلباً» في صفحةٍ واحدةٍ فلا يُثبت شيئاً
+  const BS = fs.existsSync(path.resolve(path.dirname(IDX), "browser-scenarios.mjs"))
+    ? fs.readFileSync(path.resolve(path.dirname(IDX), "browser-scenarios.mjs"), "utf8") : "";
+  T("★★ xe: محاكي Firestore يُنفّذ الترتيب/الحدّ/المرساة فعلاً على documentId",
+    /startAfter:function\(v\)\{ st\.sa=v;/.test(BS) && /FieldPath=\{ documentId/.test(BS)
+      && /if\(st\.lim>0\) paths=paths\.slice\(0, st\.lim\);/.test(BS));
+  T("★★ xe: وسيناريو ٤٥٠ طلباً يثبت العبورَ بعد حدّ الـ ٤٠٠",
+    /BROKEN = \[5, 210, 448\]/.test(BS) && /s10\.scanned===450/.test(BS)
+      && /PO-0005,PO-0210,PO-0448/.test(BS) && /s10\.readOnly===3/.test(BS));
 }
 
 /* ══ التشغيل ══ */
