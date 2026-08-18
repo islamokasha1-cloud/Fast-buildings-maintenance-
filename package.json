@@ -4,7 +4,10 @@
     "stamp:check": "node sync-version.mjs --check",
     "stamp:print": "node sync-version.mjs --print",
     "test": "node hail-tests.js",
-    "rules:check": "firebase emulators:exec --only firestore --project hail-rules-check \"node rules-check.mjs\""
+    "rules:check": "firebase emulators:exec --only firestore --project hail-rules-check \"node rules-check.mjs\"",
+    "snyk:code": "npx snyk code test --severity-threshold=high",
+    "snyk:deps": "npx snyk test --all-projects --detection-depth=3 --exclude=.claude --severity-threshold=high",
+    "snyk:monitor": "npx snyk monitor --all-projects --detection-depth=3 --exclude=.claude"
   },
   "dependencies": {
     "jsdom": "^29.1.1"

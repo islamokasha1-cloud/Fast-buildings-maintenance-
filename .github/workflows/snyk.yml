@@ -1,0 +1,189 @@
+name: Snyk Security
+
+# ═══════════════════════════════════════════════════════════════════════════
+# فحصُ Snyk للمنصّة — طبقتان لا طبقةٌ واحدة:
+#   • Snyk Code (SAST) — يقرأ كودَنا نحن: XSS في `innerHTML`، أسرارٌ مكتوبة،
+#     مسارات ملفّات، تعابيرُ نمطية قاتلة. وهذه **الطبقةُ الأهمُّ هنا**، لأن معظم
+#     المنصّة كودٌ مكتوبٌ بيدنا لا حزمٌ مستوردة.
+#   • Snyk Open Source — يقرأ شجرةَ التبعيات (`package.json` الجذر · `functions/`
+#     · `remotion/`).
+#
+# ما لا يراه أيُّهما — مذكورٌ صراحةً كي لا يُظنَّ الفحصُ شاملاً:
+#   وسومُ `<script src="https://cdn…">` في `index.html` و`tech-app.html`
+#   (Chart.js · xlsx · pptxgenjs · Firebase) **ليست تبعياتِ npm**، فلا تدخل
+#   الجردَ إطلاقاً. و`firestore.rules` ليست صيغةَ IaC مدعومة — حارسُها الوحيد
+#   `npm run rules:check`. التفصيل في `docs/snyk-setup-ar.md`.
+#
+# السرُّ المطلوب: `SNYK_TOKEN` في Settings ← Secrets and variables ← Actions.
+# وبغيابه **لا يسقط الفحص**: وظيفةُ preflight تُطفئ الباقي وتكتب سببَ التخطّي —
+# فحصٌ أمنيٌّ يُصبِغ كلَّ PR بالأحمر قبل أن يُربَط يُتجاهَل ثم يُحذَف.
+# ═══════════════════════════════════════════════════════════════════════════
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # ثغرةٌ جديدةٌ تُنشَر في تبعيةٍ **لم تتغيّر**، فالفحصُ عند التعديل وحدَه لا يراها
+    # أبداً. الاثنين ٣:١٧ فجراً بتوقيت UTC — دورةٌ أسبوعيةٌ مستقلّة عن الدفع.
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write   # لرفع تقرير SARIF إلى تبويب Security ← Code scanning
+
+env:
+  # عتبةُ الإبلاغ: low | medium | high | critical
+  SNYK_SEVERITY: high
+  # المفتاحُ الوحيد الذي يحوّل الفحص من **تقريريّ** إلى **مانعٍ للدمج**.
+  # يُترك false حتى تُصفّى القائمةُ الأولى، ثم يُقلَب إلى true عن قصد في PR صريح —
+  # وإلا فالإسقاطُ من اليوم الأول يُعلّم الفريقَ تجاوزَ الفحص لا إصلاحَه.
+  SNYK_FAIL_ON_ISSUES: 'false'
+
+jobs:
+  preflight:
+    name: Token check
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      has_token: ${{ steps.check.outputs.has_token }}
+    steps:
+      - id: check
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          if [ -n "$SNYK_TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Snyk — تخطٍّ مقصود"
+              echo ""
+              echo "السرُّ \`SNYK_TOKEN\` غير مضبوط في هذا المستودع، فلم يُشغَّل الفحص."
+              echo "خطواتُ الربط في \`docs/snyk-setup-ar.md\`."
+              echo ""
+              echo "> ملاحظة: أسرارُ المستودع لا تصل إلى PR قادمٍ من fork — وهذا سببُ"
+              echo "> التخطّي المتوقَّع في تلك الحالة."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  code:
+    name: Snyk Code (SAST)
+    needs: preflight
+    if: needs.preflight.outputs.has_token == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk@1 --silent
+
+      - name: Snyk Code test
+        id: scan
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+          snyk code test \
+            --severity-threshold="$SNYK_SEVERITY" \
+            --sarif-file-output=snyk-code.sarif
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # الرفعُ اختياريُّ النجاح: المستودعُ الخاصّ بلا GitHub Advanced Security يرفض
+      # SARIF، وذلك **ليس فشلَ فحص**. النتائجُ تبقى في سجلّ الخطوة أعلاه وفي لوحة Snyk.
+      - name: Upload SARIF to code scanning
+        if: always() && hashFiles('snyk-code.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk-code.sarif
+          category: snyk-code
+
+      - name: Verdict
+        if: always()
+        run: |
+          code="${{ steps.scan.outputs.exit_code }}"
+          case "$code" in
+            0) echo "### Snyk Code — لا نتائج عند العتبة \`$SNYK_SEVERITY\`" >> "$GITHUB_STEP_SUMMARY" ;;
+            1) echo "### Snyk Code — نتائجُ عند العتبة \`$SNYK_SEVERITY\` (التفصيل في سجلّ الخطوة وفي Security ← Code scanning)" >> "$GITHUB_STEP_SUMMARY" ;;
+            3) echo "### Snyk Code — لا ملفّاتٍ مدعومةً للفحص" >> "$GITHUB_STEP_SUMMARY" ;;
+            *) echo "### Snyk Code — تعذّر الفحص (رمز $code): توكِن غير صالح أو Snyk Code غير مفعَّل في المؤسسة" >> "$GITHUB_STEP_SUMMARY"
+               exit 1 ;;
+          esac
+          if [ "$SNYK_FAIL_ON_ISSUES" = "true" ] && [ "$code" = "1" ]; then
+            echo "SNYK_FAIL_ON_ISSUES=true ⇐ إسقاطُ الفحص." >&2
+            exit 1
+          fi
+
+  deps:
+    name: Snyk Open Source (dependencies)
+    needs: preflight
+    if: needs.preflight.outputs.has_token == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk@1 --silent
+
+      # `functions/` بلا ملفِّ قفل، وبغيره يفحص Snyk نطاقاتِ الإصدارات لا الشجرةَ
+      # المثبَّتة فعلاً. `--package-lock-only` يولّد القفلَ حلّاً للنطاقات بلا تنزيلِ
+      # حزمةٍ واحدة — ولا يُلتزَم به، فهو أثرُ فحصٍ لا تغييرَ مستودع.
+      - name: Resolve lockfile for functions/
+        run: |
+          if [ ! -f functions/package-lock.json ]; then
+            npm install --prefix functions --package-lock-only --ignore-scripts --silent
+          fi
+
+      - name: Snyk test
+        id: scan
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+          snyk test \
+            --all-projects \
+            --detection-depth=3 \
+            --exclude=.claude \
+            --severity-threshold="$SNYK_SEVERITY"
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # `monitor` يودع لقطةَ الشجرة في لوحة Snyk، فتصل تنبيهاتُ الثغرات الجديدة
+      # **بلا انتظار دفعةٍ جديدة**. من `main` وحدَها كي لا تتكاثر مشاريعُ الفروع.
+      - name: Snyk monitor (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          snyk monitor --all-projects --detection-depth=3 --exclude=.claude \
+            --target-reference=main
+
+      - name: Verdict
+        if: always()
+        run: |
+          code="${{ steps.scan.outputs.exit_code }}"
+          case "$code" in
+            0) echo "### Snyk Open Source — لا ثغراتٍ عند العتبة \`$SNYK_SEVERITY\`" >> "$GITHUB_STEP_SUMMARY" ;;
+            1) echo "### Snyk Open Source — ثغراتٌ عند العتبة \`$SNYK_SEVERITY\` (التفصيل في سجلّ الخطوة)" >> "$GITHUB_STEP_SUMMARY" ;;
+            3) echo "### Snyk Open Source — لا مشاريعَ مدعومةً للفحص" >> "$GITHUB_STEP_SUMMARY" ;;
+            *) echo "### Snyk Open Source — تعذّر الفحص (رمز $code)" >> "$GITHUB_STEP_SUMMARY"
+               exit 1 ;;
+          esac
+          if [ "$SNYK_FAIL_ON_ISSUES" = "true" ] && [ "$code" = "1" ]; then
+            echo "SNYK_FAIL_ON_ISSUES=true ⇐ إسقاطُ الفحص." >&2
+            exit 1
+          fi
