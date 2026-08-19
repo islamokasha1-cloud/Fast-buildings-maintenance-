@@ -4854,12 +4854,63 @@ function cleaningOpsTests() {
           /const _PERM_DUAL_KEYS = \{ contracts: "contracts\.roleEligible" \};/.test(HTML),
           (CT.viewRoles||[]).join(","));
 
-        /* **المنحُ اطّلاعٌ لا غير**: لا يفتح تعديلاً ولا آيباناً ولا اعتماداً —
-           وإلّا صار زرُّ عرضٍ باباً للكتابة. */
+        /* المنحُ **اطّلاعٌ إلا في بابٍ واحد**: لا يفتح تعديلاً ولا آيباناً ولا
+           اعتماداً — وإلّا صار زرُّ عرضٍ باباً للكتابة. */
         as({ user:"رغده", role:"مشرف", permissions:{ contracts:true } });
-        T("★★ zg: والمنحُ **اطّلاعٌ لا غير** — لا تعديلَ ولا آيبانَ ولا إيقافَ ولا إنشاءَ طلب",
+        T("★★ zg: والمنحُ لا يفتح تعديلاً ولا آيباناً ولا إيقافاً ولا إنشاءَ طلب",
           CT.canEdit() === false && CT.canBank() === false &&
           CT.canStatus() === false && CT.canCreateReq() === false);
+
+        /* ══ ★★ v18.9.2737: المشرفُ يضيف طرفاً — بلاغُ المالك ══
+           هو أوّلُ من يلقى المقاولَ في الموقع، وحبسُ **الإضافة** في المشتريات يجعل
+           الطرفَ يعمل قبل أن يوجد له سجلّ. والفصلُ بين الإضافة والتعديل هو ما يجعل
+           التوسيعَ آمناً — فيُنفَّذ هنا على مستخدمين حقيقيين لا يُقرأ سطرُه. */
+        T("★★ sv: المشرفُ الممنوحُ **يضيف** طرفاً", CT.canAdd() === true);
+        T("★★ sv: والإضافةُ ليست التعديل — يبقى محجوباً عنه",
+          CT.canEdit() === false && CT.canBank() === false && CT.canStatus() === false);
+        as({ user:"s2", role:"supervisor", permissions:{ contracts:true } });
+        T("★★ sv: والصيغةُ اللاتينية `supervisor` كذلك (الدورُ يُسجَّل بصيغتين)",
+          CT.canAdd() === true);
+        as({ user:"s3", role:"مشرف", permissions:{ tickets:true } });
+        T("★★ sv: ومشرفٌ **بلا** إذن التعاقدات لا يضيف (لا شاشةَ له أصلاً)",
+          CT.canAdd() === false);
+        as({ user:"s4", role:"مشرف" });
+        T("★★ sv: والمشرفُ القديمُ بلا حقلِ صلاحياتٍ لا يضيف بأثرٍ رجعيّ",
+          CT.canAdd() === false);
+        as({ user:"t", role:"فني", permissions:{ contracts:true } });
+        T("★★ sv: والفنيُّ الممنوحُ يرى ولا يضيف (التوسيعُ للمشرف وحدَه)",
+          CT.canView() === true && CT.canAdd() === false);
+        as({ user:"pm", role:"project_manager" });
+        T("★ sv: ومديرُ المشاريع يرى ولا يضيف (كما كان — لم يُوسَّع له)",
+          CT.canView() === true && CT.canAdd() === false);
+        ["procurement_officer","admin"].forEach(r=>{
+          as({ user:r, role:r });
+          T("★ sv: و«"+r+"» يضيف كما كان يفعل", CT.canAdd() === true);
+        });
+        as({ user:"v", role:"viewer", permissions:{ contracts:true } });
+        T("★ sv: والزائرُ لا يضيف", CT.canAdd() === false);
+        as(null);
+        T("★ sv: وبلا مستخدمٍ لا إضافة", CT.canAdd() === false);
+
+        // ── والزرُّ والكتابةُ يقرآن `canAdd` لا `canEdit` (وإلا بوّابةٌ بلا باب) ──
+        T("★★ sv: زرُّ «طرف جديد» وبوّابةُ الإنشاء يقرآن canAdd",
+          /var actions = canAdd\(\)/.test(cs) &&
+          /\(canAdd\(\)\?'<button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="contracts\.newVendor\(\)"/.test(cs) &&
+          /function newVendor\(\)\{\s*\n?\s*if\(!canAdd\(\)\)/.test(cs));
+        T("★★ sv: والبوّابةُ على **الكتابة** نفسِها، والعمليةُ تختارها (إنشاءٌ ⇐ canAdd · تعديلٌ ⇐ canEdit)",
+          /if\(_vOpen \? !canEdit\(\) : !canAdd\(\)\)/.test(cs));
+        // ── وقاعدةُ الخادم تطابق الواجهة: مَن تسمح له هذه تسمح له تلك ──
+        {
+          const RULES = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "firestore.rules"), "utf8"); } catch (e) { return ""; } })();
+          const createLine = (RULES.match(/function vendorCreateOk\(\) \{[\s\S]*?\}/) || [""])[0];
+          const updateLine = (RULES.match(/function vendorUpdateOk\(\) \{[\s\S]*?\}/) || [""])[0];
+          T("★★ sv: `vendorCreateOk` تعرف المشرفَ بصيغتيه (وإلا رُدّت كتابتُه على الخادم)",
+            /'supervisor'/.test(createLine) && /'مشرف'/.test(createLine));
+          T("★★ sv: و`vendorUpdateOk` **لم تُمَسّ** — الإضافةُ وحدَها وُسِّعت",
+            !/supervisor|مشرف/.test(updateLine));
+          T("★★ sv: وشرطُ الآيبان ما زال في قاعدة الإنشاء (لا استثناءَ للدور الأحدث)",
+            /ibanOf\(request\.resource\.data\) == ''/.test(createLine));
+        }
       }
     }
   }

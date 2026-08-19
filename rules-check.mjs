@@ -37,6 +37,9 @@ const as = (r) => env.authenticatedContext("u_" + r, { role: r }).firestore();
 const PM = as("project_manager"), PROC = as("procurement_officer");
 const FIN = as("finance"), CEO = as("ceo"), ADMIN = as("admin");
 const WH = as("warehouse_manager"), VIEWER = as("viewer");
+/* دورُ المشرف بصيغتيه: «مشرف» هو المسجَّلُ في `meta/users` من نافذة الإدارة،
+   و`supervisor` ما يحمله توكِنُ تطبيق الفنيين. قاعدةٌ تعرف واحدةً تردّ نصفَهم. */
+const SUP = as("supervisor"), SUP_AR = as("مشرف");
 const OBS = as("observer"), HR = as("hr_officer");
 const ANON = env.unauthenticatedContext().firestore();
 /* تطبيقُ الفنيين يدخل **مُصادَقاً مجهولاً** (بلا ادّعاء `role`) — لا كزائرٍ بلا مصادقة.
@@ -80,6 +83,23 @@ await check("★ والماليةُ وحدَها (والأدمن) تُبدّل �
 await check("ودورٌ أجنبيٌّ لا يمسّ سجلَّ الأطراف أصلاً",
   assertFails(updateDoc(doc(WH, `${V}/V1`), { name: "x" })));
 await check("والحذفُ للأدمن وحدَه", assertFails(deleteDoc(doc(PROC, `${V}/V1`))));
+
+/* ── المشرفُ يضيف ولا يعدّل (v18.9.2737) ──
+   الإضافةُ دائرةٌ أوسعُ من التعديل عمداً؛ والفصلُ بينهما هو ما يجعل التوسيعَ آمناً.
+   وشرطُ الآيبان يسري عليه كما يسري على المشتريات — بلا استثناءٍ لدورٍ أحدث. */
+await check("★ المشرفُ يُنشئ طرفاً جديداً (وهو أوّلُ من يلقى المقاولَ في الموقع)",
+  assertSucceeds(setDoc(doc(SUP, `${V}/V4`), { name: "مقاول موقع", bank: {} })));
+await check("★★ وبالصيغة العربية «مشرف» كذلك (وهي المسجَّلةُ فعلاً في الإنتاج)",
+  assertSucceeds(setDoc(doc(SUP_AR, `${V}/V4B`), { name: "مقاول موقع ٢", bank: {} })));
+await check("★★ والعربيّةُ لا تعدّل طرفاً قائماً أيضاً (الصيغتان بحكمٍ واحد)",
+  assertFails(updateDoc(doc(SUP_AR, `${V}/V1`), { name: "x" })));
+await check("★★ ولا يُنشئه بآيبانٍ مكتوب (شرطُ الآيبان لم يُستثنَ له)",
+  assertFails(setDoc(doc(SUP, `${V}/V5`), { name: "جديد", bank: { iban: "SA777" } })));
+await check("★★ ولا يعدّل بياناتِ طرفٍ قائم (الإضافةُ ليست التعديل)",
+  assertFails(updateDoc(doc(SUP, `${V}/V1`), { name: "مؤسسة بيد المشرف" })));
+await check("★ ولا يحذف", assertFails(deleteDoc(doc(SUP, `${V}/V4`))));
+await check("★ ولا يفتح له ذلك بابَ العقود ولا طلباتِ التعاقد",
+  assertFails(setDoc(doc(SUP, `${C}/CTR-SUP`), { status: "ctr_active", value: 1 })));
 
 /* ═════════ ٢) طلبُ التعاقد — البوّابات ═════════ */
 head("٢) طلبُ التعاقد — لا اعتمادَ بغير صاحب البوّابة");

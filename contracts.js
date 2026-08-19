@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2735";
+var MODULE_BUILD = "v18.9.2737";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1908,7 +1908,24 @@ function loadConfig(){
    ٤) الصلاحيات
    ════════════════════════════════════════════════════════════════════ */
 var VIEW_ROLES   = ["admin","project_manager","procurement_officer","finance","ceo"];
-var EDIT_ROLES   = ["admin","procurement_officer"];   // إنشاءُ/تعديلُ بيانات الطرف
+var EDIT_ROLES   = ["admin","procurement_officer"];   // تعديلُ بيانات طرفٍ قائم
+/* ── إضافةُ طرفٍ جديد: دائرةٌ أوسعُ من التعديل، وهذا مقصود ──
+   بلاغُ المالك: المشرفُ هو مَن يقف أمام المقاول في الموقع، فهو أوّلُ من يعرف أنّ
+   طرفاً جديداً دخل العمل. وحبسُ **الإضافة** في المشتريات يجعل الطرفَ يعمل أسابيعَ
+   قبل أن يوجد له سجلّ — أو يُسجَّل بأسماءٍ مرتجلةٍ في حقولٍ نصّية، وهو ما بُني سجلُّ
+   الأطراف أصلاً ليمنعه.
+   **والإضافةُ ليست التعديل**، فالفصلُ بينهما هو ما يجعل التوسيعَ آمناً:
+   • الإضافةُ تُنشئ سجلاً **بلا آيبان** (`canBank` تحجبه في الواجهة، و`saveVendor`
+     تُسقطه من الحمولة، و`vendorCreateOk` في `firestore.rules` تردّه على الخادم).
+   • والتعديلُ على طرفٍ قائم — تغييرُ اسمٍ أو سجلٍّ أو حالة — يبقى لـ`EDIT_ROLES`
+     وحدَها: مَن يضيف لا يعيد كتابةَ ما اعتمده غيرُه.
+   نفسُ الفصل الذي طُبِّق في كتالوج البنود (`canAddCatalogItem` مقابل التعديل الكامل).
+   **ودورُ المشرف مكتوبٌ بصيغتيه**: المسجَّلُ في `meta/users` من نافذة الإدارة هو
+   «مشرف» بالعربية (قيمةُ الخيار في القائمة)، بينما توكِنُ تطبيق الفنيين يحمل
+   `supervisor`. وقائمةٌ بإحداهما وحدَها تُنتج **ميزةً ميتةً بلا خطأ**: الزرُّ لا
+   يظهر لأحدٍ في الإنتاج وكلُّ سطرٍ يبدو صحيحاً. (نفسُ ما تحرسه `_isSupRole` في
+   وحدة النظافة، وما يفعله كاشفُ إشعارات الواتساب في النواة.) */
+var ADD_ROLES    = ["admin","procurement_officer","supervisor","مشرف"];
 var BANK_ROLES   = ["admin","finance"];               // الآيبان — ناقلُ الاحتيال الأول
 var STATUS_ROLES = ["admin"];                         // الإيقافُ والحظر
 
@@ -1928,10 +1945,10 @@ var STATUS_ROLES = ["admin"];                         // الإيقافُ وال
      ممنوع، ولا يفتح إلا `true` صريح. فلا يُفتح القسمُ لأحدٍ بأثرٍ رجعيّ لمجرّد
      أنّ خانتَه كانت مؤشَّرةً بالافتراض القديم.
 
-   **والمنحُ اطّلاعٌ لا غير**: `canEdit`/`canBank`/`canStatus`/`canCreateReq` تبقى
-   على أدوارها، وكلُّ كتابةٍ في `firestore.rules` مقيّدةٌ بالدور (`vendorCreateOk`
-   و`crqGate` و`ctrTransitOk` …) — فالممنوحُ يقرأ ولا يكتب، والقراءةُ مسموحةٌ
-   أصلاً لكلّ ذي دورٍ (`allow read: if hasRole()`) فلا قاعدةَ تحتاج تغييراً. */
+   **والمنحُ اطّلاعٌ إلا في بابٍ واحد**: `canEdit`/`canBank`/`canStatus`/`canCreateReq`
+   تبقى على أدوارها، وكلُّ كتابةٍ في `firestore.rules` مقيّدةٌ بالدور (`vendorCreateOk`
+   و`crqGate` و`ctrTransitOk` …). والبابُ الوحيدُ المفتوحُ للممنوح هو **إضافةُ طرف**
+   لمن دورُه في `ADD_ROLES` (المشرف) — وله قاعدتُه على الخادم لا في المتصفّح وحدَه. */
 function roleEligible(r){
   return VIEW_ROLES.indexOf(r === undefined ? _role() : (r || "")) !== -1;
 }
@@ -1952,6 +1969,9 @@ function _permAllows(key){
    تقرّر، فلا يبقى في الترميز موضعان يحكمان الشيءَ نفسَه باصطلاحين. */
 function canView(){   return _permAllows("contracts"); }
 function canEdit(){   return EDIT_ROLES.indexOf(_role())   !== -1; }
+/* الإضافةُ تشترط **الاطّلاعَ والدورَ معاً**: بلا اطّلاعٍ لا شاشةَ يُضاف منها، ولولا
+   اشتراطُه لكان كلُّ مشرفٍ في المنصّة مضيفاً وإن لم يُمنح القسمَ أصلاً. */
+function canAdd(){    return canView() && ADD_ROLES.indexOf(_role()) !== -1; }
 function canBank(){   return BANK_ROLES.indexOf(_role())   !== -1; }
 function canStatus(){ return STATUS_ROLES.indexOf(_role()) !== -1; }
 
@@ -3174,7 +3194,7 @@ function vendorListHTML(){
   var expired=0, soon=0;
   all.forEach(function(v){ var c=vendorComplianceState(v,today); expired+=c.expired?1:0; soon+=(!c.expired&&c.soon)?1:0; });
 
-  var actions = canEdit()
+  var actions = canAdd()
     ? '<button class="btn btn-primary btn-sm" onclick="contracts.newVendor()">'+_icn("plus")+' طرف جديد</button>'
     : "";
 
@@ -3231,7 +3251,7 @@ function vendorListHTML(){
       '<div class="ct-empty-ic">'+_svg("hardHat")+'</div>'+
       '<div class="ct-empty-t">لا أطراف في السجل بعد</div>'+
       '<div class="ct-empty-s">أضِف أول مقاول باطنٍ أو مورّد لتبدأ التعاقد معه، وسجّل وثائقه ليُنبّهك النظام قبل انتهائها.</div>'+
-      (canEdit()?'<button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="contracts.newVendor()">'+_icn("plus")+' طرف جديد</button>':'')+
+      (canAdd()?'<button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="contracts.newVendor()">'+_icn("plus")+' طرف جديد</button>':'')+
     '</div>';
   } else if(!list.length){
     body = '<div class="card" style="text-align:center;padding:26px 18px;color:var(--muted);font-size:13px">لا نتائج تطابق البحث.</div>';
@@ -3726,7 +3746,7 @@ function backToVendors(){ _vOpen = null; _vEdit = null; paintVendors(); }
 function retry(){ stopSync(); startSync(); paintVendors(); }
 
 function newVendor(){
-  if(!canEdit()) return _toast("⚠ لا صلاحية لإضافة طرف","warn");
+  if(!canAdd()) return _toast("⚠ لا صلاحية لإضافة طرف","warn");
   _vOpen = null;
   _vEdit = { name:"", entityType:"establishment", kind:"subcontractor", legal:{}, bank:{}, docs:[], aliases:[], trades:[], contacts:[], phone:"", phoneLabel:"", status:"active", taxRegistered:null };
   var el = document.getElementById("page-"+PAGE_VENDORS);
@@ -3885,6 +3905,12 @@ function paintDraft(){
 function saveVendorEdit(){
   syncDraft();
   if(!_vEdit) return;
+  /* البوّابةُ على **الكتابة** لا على الزرّ وحدَه: الزرُّ يُخفى، والدالّةُ معروضةٌ على
+     `window.contracts` فتُنادى من أيّ مكان. والعمليةُ هي التي تختار بوّابتَها —
+     `_vOpen` فارغٌ ⇐ إنشاءٌ (`canAdd`)، ومملوءٌ ⇐ تعديلٌ على قائم (`canEdit`) —
+     فلا يُعدّل بياناتِ طرفٍ قائمٍ مَن لا يملك إلا الإضافة. */
+  if(_vOpen ? !canEdit() : !canAdd())
+    return _toast(_vOpen ? "⚠ لا صلاحية للتعديل" : "⚠ لا صلاحية لإضافة طرف","warn");
   var d = _vEdit;
   var ent = normEntity(d.entityType);
   if(!d.name){ _toast(ent==="individual" ? "⚠ اسم الشخص مطلوب" : "⚠ اسم المنشأة مطلوب","warn"); return; }
@@ -7487,7 +7513,7 @@ window.contracts = {
   // الصلاحيات
   // الرابطُ العميق من رسالة واتساب [المرحلة ٩]
   openById: openById, ownsId: ctrOwnsId, _idKind: ctrIdKind,
-  canView: canView, canEdit: canEdit, canBank: canBank, canStatus: canStatus, canCreateReq: canCreateReq,
+  canView: canView, canEdit: canEdit, canAdd: canAdd, canBank: canBank, canStatus: canStatus, canCreateReq: canCreateReq,
   /* طبعُ مفتاح «التعاقدات» بحسب الدور — **مصدرٌ واحد** تقرؤه نافذةُ الصلاحيات في
      النواة، فلا تُنسَخ `VIEW_ROLES` في ملفٍّ ثانٍ ينحرف عنها بصمت. */
   viewRoles: VIEW_ROLES.slice(), roleEligible: roleEligible,
