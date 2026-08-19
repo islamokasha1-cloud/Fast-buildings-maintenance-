@@ -98,8 +98,15 @@ await check("★★ وبالصيغة العربية «مشرف» كذلك (وه�
   assertSucceeds(setDoc(doc(SUP_AR, `${V}/V4B`), { name: "مقاول موقع ٢", bank: {} })));
 await check("★★ والعربيّةُ لا تعدّل طرفاً قائماً أيضاً (الصيغتان بحكمٍ واحد)",
   assertFails(updateDoc(doc(SUP_AR, `${V}/V1`), { name: "x" })));
-await check("★★ ولا يُنشئه بآيبانٍ مكتوب (شرطُ الآيبان لم يُستثنَ له)",
-  assertFails(setDoc(doc(SUP, `${V}/V5`), { name: "جديد", bank: { iban: "SA777" } })));
+/* ── الآيبانُ عند الإنشاء وحدَه (v18.9.2745) ──
+   الخطرُ في **التبديل** لا في الكتابة الأولى: طرفٌ عمل شهوراً ثم يتغيّر آيبانُه قبل
+   الصرف. فالمشرفُ يكتبه مع بقيةِ بيانات الطرف الجديد، ولا يبدّله بعدها أبداً. */
+await check("★★ المشرفُ يُنشئ طرفاً **بآيبان** (يلقى المقاولَ ومعه بياناتُه)",
+  assertSucceeds(setDoc(doc(SUP, `${V}/V5`), { name: "جديد", bank: { iban: "SA777" } })));
+await check("★★ وبالصيغة العربية كذلك",
+  assertSucceeds(setDoc(doc(SUP_AR, `${V}/V5B`), { name: "جديد ٢", bank: { iban: "SA778" } })));
+await check("★★★ ومسؤولُ المشتريات ما زال ممنوعاً (لم يُطلَب توسيعُه)",
+  assertFails(setDoc(doc(PROC, `${V}/V5C`), { name: "جديد ٣", bank: { iban: "SA779" } })));
 await check("★★ ولا يعدّل بياناتِ طرفٍ قائم (الإضافةُ ليست التعديل)",
   assertFails(updateDoc(doc(SUP, `${V}/V1`), { name: "مؤسسة بيد المشرف" })));
 await check("★ ولا يحذف", assertFails(deleteDoc(doc(SUP, `${V}/V4`))));
@@ -120,8 +127,10 @@ await check("★★ ولا طرفاً قديماً بلا `createdByUser` (ال�
   assertFails(updateDoc(doc(SUP_RGD, `${V}/V-OLD`), { name: "x" })));
 await check("★★★ ولا ينتحل المِلكيّة (كتابةُ اسمه على مستندِ غيره ثم تعديلُه)",
   assertFails(updateDoc(doc(SUP_OTHER, `${V}/V-RGD`), { createdByUser: "خالد", name: "x" })));
-await check("★★★ ولا يكتب آيباناً على مستنده هو",
+await check("★★★ ولا يبدّل آيبانَ مستنده هو بعد الحفظ (الخطرُ في التبديل)",
   assertFails(updateDoc(doc(SUP_RGD, `${V}/V-RGD`), { bank: { iban: "SA555" } })));
+await check("★★★ ولا يكتب آيباناً على طرفٍ قائمٍ لم يكن له آيبان",
+  assertFails(updateDoc(doc(SUP_RGD, `${V}/V-OLD`), { bank: { iban: "SA556" } })));
 await check("★★ ولا يفكّ إيقافاً وضعه الأدمن (status في unchanged)",
   assertFails(updateDoc(doc(SUP_RGD, `${V}/V-RGD`), { status: "stopped" })));
 await check("★★ ولا يحذف مستنده هو", assertFails(deleteDoc(doc(SUP_RGD, `${V}/V-RGD`))));
