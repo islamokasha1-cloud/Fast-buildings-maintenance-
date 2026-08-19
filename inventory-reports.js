@@ -50,7 +50,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.2739";
+  const MODULE_BUILD = "v18.9.2741";
 
   const HOST_ID   = "page-inventory-reports";
   const READ_CAP  = 5000;    // سقف الحركات المقروءة لكل توليد — يُعلَن عند بلوغه
@@ -1394,8 +1394,16 @@
   }
   function _lhAssets(){ return {head:_lhSrc("_lh_head_"), foot:_lhSrc("_lh_foot_"), mark:_lhSrc("_lh_mark_")}; }
   function _lhOn(l){ return !!(l && l.head && l.foot); }
+  /* ── الورقةُ **طوليّة** (portrait) — والهندسةُ كانت كذلك من أوّل يوم ──
+     مقاساتُ الترويسة والتذييل أدناه منقولةٌ حرفياً عن `contracts.js`، وهي محسوبةٌ
+     على ورقةٍ **عرضُها ٢١٠مم**: الترويسةُ ٢٠٢٫٥مم والتذييلُ ١٩١٫٨مم والعلامةُ
+     المائيةُ تبدأ عند ٤٨٫٩٥مم فتتوسّط الورقة. لكنّ الإعلانَ هنا كان
+     `size:A4 landscape` — ورقةً عرضُها ٢٩٧مم. فبقيت الصورُ على أعرضها المحسوب
+     للطوليّ ملتصقةً بحافةٍ واحدة، ويبقى نحوُ ٩٥مم بياضاً في الجهة الأخرى،
+     والعلامةُ المائيةُ منزاحةٌ عن المركز. **الأرقامُ لم تكن خاطئة، الورقةُ كانت.**
+     فتوافق الإعلانُ مع هندسته: `size:A4` (طوليّ) كما في `contracts.js` حرفاً بحرف. */
   function _lhCSS(){
-    return '@page{size:A4 landscape;margin:3mm 0 11.5mm}'
+    return '@page{size:A4;margin:3mm 0 11.5mm}'
       +'html,body{margin:0;padding:0}'
       +'.lh{position:absolute;z-index:3}'
       +'.lh img{display:block;width:100%;height:auto}'
@@ -1416,6 +1424,19 @@
       +'<table class="pg"><thead><tr><td><div class="sp-h"></div></td></tr></thead>'
       +'<tfoot><tr><td><div class="sp-f"></div></td></tr></tfoot>'
       +'<tbody><tr><td>'+inner+'</td></tr></tbody></table>';
+  }
+
+  /* ── أعمدةُ الورقة الطوليّة: نسبٌ صريحةٌ لا عرضٌ يقرّره المحتوى ──
+     الطوليُّ يعطي ١٨٦مم بدل ٢٧٣مم، وأعرضُ تقريرٍ أحدَ عشرَ عموداً. وبلا نسبٍ صريحة
+     يوزّع المتصفّحُ العرضَ **بحسب أطول محتوى**، فعمودُ «المادة» يبتلع الورقةَ ويخرج
+     الباقي عنها — والخارجُ عن الورقة **يُقصّ في الطباعة بلا رسالة**. فالنسبُ تُشتقّ
+     من `c.w` نفسِها التي تُبنى منها أعمدةُ Excel: **مصدرٌ واحدٌ للعرض النسبيّ** فلا
+     يتّسع عمودٌ في الملفّ ويضيق في الورقة. و`table-layout:fixed` تُلزم المتصفّحَ بها. */
+  function _pdfColGroup(cols){
+    const list = Array.isArray(cols) ? cols : [];
+    const tot  = list.reduce((a,c)=>a+(_num(c&&c.w)||16),0) || 1;
+    return "<colgroup>"+list.map(c=>
+      '<col style="width:'+(Math.round(((_num(c&&c.w)||16)/tot)*10000)/100)+'%">').join("")+"</colgroup>";
   }
 
   function _pdfCell(r,c){
@@ -1458,7 +1479,7 @@
       <div class="params">${params}</div>
       ${stats?`<div class="stats">${stats}</div>`:""}
       ${caveats}
-      <table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+      <table class="tbl${rep.cols.length>=10?" dense":""}">${_pdfColGroup(rep.cols)}<thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
       <div class="foot">شركة المباني السريعة للمقاولات — تقارير المخزون · ${_esc(rep.kindName)} · ${_esc(String(rep.rows.length))} سطراً</div>`;
 
     const html=`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">
@@ -1467,7 +1488,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-@page{size:A4 landscape;margin:12mm}
+@page{size:A4;margin:12mm}
 body{font-family:'Cairo','Tajawal','Segoe UI',Tahoma,sans-serif;direction:rtl;background:#fff;color:#0f172a;font-size:11px}
 .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1b3a6b;padding-bottom:10px;margin-bottom:10px}
 .hr{display:flex;align-items:center;gap:12px}
@@ -1487,9 +1508,13 @@ body{font-family:'Cairo','Tajawal','Segoe UI',Tahoma,sans-serif;direction:rtl;ba
 .cav{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:7px 12px;margin-bottom:9px;font-size:9.5px;color:#78350f;line-height:1.65}
 .cav-t{font-weight:800;margin-bottom:3px}
 .cav ul{margin:0;padding-inline-start:15px}
-.tbl{width:100%;border-collapse:collapse;font-size:10px}
-.tbl thead th{background:#1b3a6b;color:#fff;padding:6px 7px;font-weight:700;border:1px solid #1b3a6b}
+.tbl{width:100%;table-layout:fixed;border-collapse:collapse;font-size:10px}
+.tbl thead th{background:#1b3a6b;color:#fff;padding:6px 7px;font-weight:700;border:1px solid #1b3a6b;word-break:break-word}
 .tbl tbody td{padding:5px 7px;border:1px solid #e2e8f0;word-break:break-word}
+/* عشرةُ أعمدةٍ فأكثر على ورقةٍ طوليّة: تكثيفٌ محسوبٌ بدل قصٍّ صامتٍ عند الحافّة */
+.tbl.dense{font-size:9px}
+.tbl.dense thead th{padding:5px 4px}
+.tbl.dense tbody td{padding:4px 4px}
 .tbl tbody tr:nth-child(even){background:#f8fafc}
 thead{display:table-header-group}
 tr{page-break-inside:avoid}
