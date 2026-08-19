@@ -1519,6 +1519,80 @@ function extCanAct(status, role){ var g=EXT_GATES[status]; return !!g && g.roles
 var EXT_FINAL = ["ext_paid","ext_cancelled"];
 function extIsFinal(s){ return EXT_FINAL.indexOf(s)!==-1; }
 
+/* ════ توقيعُ المقاول على المستخلص ════   (طلبُ المالك)
+
+   **الفجوة.** كان المستخلصُ مستنداً من طرفٍ واحد: نحن نقيس ونخصم ونعتمد
+   ونصرف، والمقاولُ يستلم المال بلا ورقةٍ تُثبت أنّه أقرّ الكمياتِ التي نُسبت إليه ولا
+   الخصوماتِ التي أُخذت منه. وأوّلُ نزاعٍ على «كم نُفّذ» أو «لماذا خُصم» يقع بلا
+   دليلٍ يُحتجّ به: لا مقياسَ موقّعاً ولا إقرارَ استلام.
+
+   **العلاجُ ورقةٌ وشرط.** ورقةٌ تُطبَع بالأرقام نفسِها (`extractPaperHTML`) يوقّعُها
+   المقاول، و**نسختُها الموقّعةُ شرطٌ في السداد** — والشرطُ في ثلاثة مواضعَ لا
+   واحد: الشاشةُ تحجب الزرّ، و`payExtract` ترفض، و`firestore.rules` تحرس الكتابةَ نفسَها.
+   والواحدُ منها لا يكفي: منعٌ في الشاشة وحدَها يُدار من وحدة تحكمٍ، وفي القواعد وحدَها
+   يُنتج زرّاً يعِد ثمّ يفشل برسالةٍ لا تدلّ على العلاج.
+
+   **والتوقيعُ على رقمٍ بعينه** — كبصمتَي الطلب: يُحفَظ مع النسخة **صافي المستخلص
+   وقتَ التوقيع**، فإن تغيّر بعده (تعديلُ شروطٍ · أمرُ تغييرٍ يمسّ المحتجَز أو
+   المقدّم) سقط التوقيعُ وحدَه ولزمت نسخةٌ على الرقم الجديد. ورقةٌ وُقّعت على ٢٥,٠٠٠
+   لا تُجيز صرفَ ٢٢,٠٠٠. */
+function extSignature(ext){
+  var s = (ext||{}).signature;
+  return (s && s.url) ? s : null;
+}
+/* التوقيعُ صالحٌ ما دام الصافي هو الذي وُقّع عليه — بهامش قرشٍ للتقريب. */
+function extSigValid(ext, net){
+  var s = extSignature(ext); if(!s) return false;
+  var signed = Number(s.net); if(!isFinite(signed)) return false;
+  var now = Number(net); if(!isFinite(now)) now = 0;
+  return Math.abs(r2(signed) - r2(now)) <= 0.011;
+}
+/* حارسُ السداد نقيّاً — نصُّه واحدٌ للشاشة وللكتابة، فلا تقول إحداهما غيرَ الأخرى. */
+function extPayGuard(ext, net){
+  var s = extSignature(ext);
+  if(!s) return { ok:false, why:"لا سدادَ قبل رفع نسخة المستخلص موقّعةً من المقاول" };
+  if(!extSigValid(ext, net))
+    return { ok:false, why:"تغيّر صافي المستخلص بعد توقيع المقاول ("+money(s.net)+" ⇐ "+money(net)+" ر.س) — تلزم نسخةٌ موقّعةٌ على الرقم الجديد" };
+  return { ok:true, why:"" };
+}
+/* بوّاباتُ المستخلص موقّعةً — مشتقّةٌ من حقول الاعتماد نفسِها ومن `EXT_GATES`،
+   فلا تطبع الورقةُ بوّابةً لم يمرّ بها ولا تُسمّيها باسمٍ غيرِ اسمها على الشاشة.
+   (وبوّابةُ التنفيذيّ تظهر إن اعتمد فعلاً أو كان الصافي يبلغ سقفَه — بقاعدة
+   `extNextStage` نفسِها التي توقِفُ المستخلصَ عندها.) */
+function extSignoffs(ext, net, ceoTh){
+  var e = ext||{}, p = e.payment||{};
+  var amt = Number(net);   if(!isFinite(amt)) amt = 0;
+  var th  = Number(ceoTh); if(!isFinite(th))  th  = 0;
+  var out = [{ key:"pm", lbl:EXT_GATES.ext_pending_pm.lbl, by:e.pmApprovedBy||"", at:e.pmApprovedAt||"" }];
+  if(e.ceoApprovedAt || (th > 0 && amt >= th))
+    out.push({ key:"ceo", lbl:EXT_GATES.ext_pending_ceo.lbl, by:e.ceoApprovedBy||"", at:e.ceoApprovedAt||"" });
+  out.push({ key:"pay", lbl:EXT_GATES.ext_pending_finance.lbl, by:p.by||"", at:p.at||"" });
+  return out;
+}
+/* وسمُ الورقة — بمنطق `payOrderPrintState` نفسِه: ورقةٌ تخرج من المنصّة تقول عن
+   نفسها الصدقَ بلا وسيط، فلا تُقرأ نسخةُ مراجعةٍ مطالبةً معتمَدة. */
+function extPrintState(ext, net){
+  var e = ext||{}, st = e.status;
+  if(st === "ext_paid")
+    return { key:"paid", cls:"ok", lbl:"مسدَّد — مغلق",
+             note:"سُدّد هذا المستخلصُ وأُغلق. هذه نسخةٌ للحفظ لا مطالبةٌ جديدة." };
+  if(st === "ext_cancelled")
+    return { key:"void", cls:"bad", lbl:"ملغى — لا يُصرَف",
+             note:"أُلغي هذا المستخلصُ على المنصّة، فأيُّ نسخةٍ منه لاغيةٌ." };
+  if(st === "ext_pm_rejected" || st === "ext_returned")
+    return { key:"void", cls:"bad", lbl:(EXT_STATUS[st]||"مُعاد للتصحيح")+" — لا يُصرَف",
+             note:"أُعيد هذا المستخلصُ إلى مُعِدّه للتصحيح، فلا يُصرَف بصيغته هذه." };
+  if(st === "ext_pending_finance"){
+    if(extSigValid(e, net))
+      return { key:"due", cls:"ok", lbl:"معتمَدٌ وموقّع — صالحٌ للسداد",
+               note:"اكتملت بوّاباتُ الاعتماد ووُقّعت نسختُه من المقاول على هذا الصافي." };
+    return { key:"sign", cls:"warn", lbl:"معتمَد — بانتظار توقيع المقاول",
+             note:"يوقّع المقاولُ هذه الورقةَ إقراراً بالكميات والخصومات، ثمّ تُرفع نسختُها الموقّعة — ولا سدادَ قبلها." };
+  }
+  return { key:"draft", cls:"warn", lbl:"قيد الاعتماد — غيرُ صالحٍ للصرف",
+           note:"لم تكتمل بوّاباتُ اعتماد المستخلص بعد. هذه نسخةُ مراجعةٍ لا مطالبةٌ معتمَدة." };
+}
+
 /* ════ الربطُ بالموازنة ════   [المرحلة ٥]
 
    الموازنةُ اليوم ثلاثيةٌ (مصروف / مرتبط / متبقٍّ) من طلبات الشراء وحدَها. والتعاقدُ
@@ -2904,6 +2978,41 @@ function actOnExtract(id, action, note){
   });
 }
 
+/* رفعُ نسخة المستخلص موقّعةً من المقاول — **بابُ السداد**.
+
+   تُقبَل في أيّ مرحلةٍ غيرِ نهائية لا عند المالية وحدَها: المقاولُ يوقّع حين يستلم
+   الورقةَ من مدير المشروع، لا حين تصل الماليةَ. ويُحفَظ مع النسخة **صافي وقتِ
+   التوقيع** — فما وُقّع عليه رقمٌ لا مستند. */
+function signExtract(id, att){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  if(!att || !att.url) return Promise.reject(new Error("نسخةُ المستخلص الموقّعة إلزامية"));
+  if(["project_manager","finance","admin"].indexOf(_role()) === -1)
+    return Promise.reject(new Error("رفعُ النسخة الموقّعة لمدير المشروع أو المالية أو الأدمن"));
+  var ref=database.collection(EXTRACTS_COL()).doc(id);
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("المستخلص غير موجود");
+      var e=s.data()||{}; e.id=id;
+      if(extIsFinal(e.status)) throw new Error("المستخلص في حالةٍ نهائية — لا تُرفع له نسخةٌ موقّعة");
+      var c=contractById(e.contractId);
+      if(!c) throw new Error("عقد المستخلص غير محمَّل");
+      var calc=extCalc(e, c);
+      e.signature={ url:att.url, name:att.name||"", storagePath:att.storagePath||"",
+                    net:r2(calc.net), at:_now(), by:_me() };
+      _pushTimeline(e, "استلامُ نسخة المستخلص موقّعةً من المقاول", "signed", money(calc.net)+" ر.س");
+      e.updatedAt=_now(); e.updatedBy=_me();
+      var out=Object.assign({},e); delete out.id;
+      t.set(ref, out, { merge:true });
+      return e;
+    });
+  }).then(function(e){
+    var i=_exts.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _exts[i]=e;
+    _audit("توقيعُ مقاولٍ على مستخلص", id+" — "+money((e.signature||{}).net)+" ر.س");
+    return e;
+  });
+}
+
 /* سدادُ المستخلص — **المالية وبإيصالٍ إلزاميّ**. والمستخلصُ الختاميُّ يُنهي العقد
    فنّياً في المعاملة نفسِها، ويستهلك ما استُردّ من الدفعة المقدمة على العقد. */
 function payExtract(id, payload){
@@ -2928,6 +3037,10 @@ function payExtract(id, payload){
         if(!cs.exists) throw new Error("العقد غير موجود");
         var fresh=cs.data()||{}; fresh.id=e.contractId;
         var calc=extCalc(e, fresh);
+        /* **لا مالَ بلا إقرارِ المقاول** — والحارسُ هنا لا في الزرّ وحدَه، وعلى
+           الصافي الطازج لا على المخزَّن: توقيعٌ على رقمٍ قديمٍ ليس توقيعاً على هذا. */
+        var sgOk=extPayGuard(e, calc.net);
+        if(!sgOk.ok) throw new Error(sgOk.why);
         e.payment={ amount:r2(calc.net), ref:payload.ref||"", receiptUrl:payload.receiptUrl, at:_now(), by:_me() };
         e.settled=calc;                      // لقطةُ السلّم وقت السداد — دليلٌ لا يُعاد حسابه
         e.status="ext_paid";
@@ -5625,10 +5738,17 @@ function extCardHTML(c, id){
   var calc = e.settled || extCalc(e,c);
   var owner=extGateOwner(e.status), mine=extCanAct(e.status,_role());
   var mode=extActMode(e, e.status, _role(), _meUser(), _me(), _users());
-  var tools="";
+  /* **زرُّ السداد يختفي بلا نسخةٍ موقّعة** — لا يظهر ثمّ يفشل: زرٌّ يعِد ولا يفي
+     أسوأُ من زرٍّ غائبٍ بجانبه سببُ غيابه (والنصُّ واحدٌ من `extPayGuard`). */
+  var pguard = extPayGuard(e, calc.net);
+  var canSign = !extIsFinal(e.status) && ["project_manager","finance","admin"].indexOf(_role())!==-1;
+  var tools='<button class="btn btn-ghost btn-sm" onclick="contracts.printExt()">'+_icn("printer","ic-sm")+' طباعة المستخلص</button> ';
+  if(canSign)
+    tools+='<button class="btn btn-primary btn-sm" onclick="contracts.openExtSign()">'+_icn("save","ic-sm")+' '+
+           (extSignature(e)?'استبدال النسخة الموقّعة':'رفع النسخة الموقّعة')+'</button> ';
   if(mine && e.status==="ext_pending_finance"){
-    if(mode!=="blocked")
-      tools='<button class="btn btn-success btn-sm" onclick="contracts.openExtPay()">'+_icn("banknote","ic-sm")+' تسجيل السداد</button>';
+    if(mode!=="blocked" && pguard.ok)
+      tools+='<button class="btn btn-success btn-sm" onclick="contracts.openExtPay()">'+_icn("banknote","ic-sm")+' تسجيل السداد</button>';
   } else if(mine){
     if(mode!=="blocked")
       tools='<button class="btn btn-success btn-sm" onclick="contracts.extAct(\'approve\')">'+_icn("checkCircle","ic-sm")+
@@ -5651,11 +5771,25 @@ function extCardHTML(c, id){
     (e.payment.ref?(' — '+_esc(e.payment.ref)):'')+
     (e.payment.receiptUrl?' · <a class="ct-link" href="'+_esc(e.payment.receiptUrl)+'" target="_blank" rel="noopener">'+_icn("paperclip","ic-sm")+' الإيصال</a>':'')+'</div>' : "";
 
+  /* توقيعُ المقاول على الورقة — يُرى حيث يُعمَل به: بطاقةُ المستخلص نفسُها. */
+  var sgd = extSignature(e);
+  var sigNote = "";
+  if(sgd)
+    sigNote='<div class="ct-note'+(extSigValid(e, calc.net)?'':' warn')+'">'+
+      _icn(extSigValid(e, calc.net)?"checkCircle":"alertTriangle","ic-sm")+
+      ' وقّع المقاولُ نسخةَ هذا المستخلص في '+_esc(String(sgd.at||"").slice(0,10))+' على صافي '+money(sgd.net)+' ر.س · '+_esc(sgd.by||"")+
+      ' · <a class="ct-link" href="'+_esc(sgd.url)+'" target="_blank" rel="noopener">'+_icn("paperclip","ic-sm")+' '+_esc(sgd.name||"النسخة الموقّعة")+'</a>'+
+      (extSigValid(e, calc.net)?'':' — <b>تغيّر الصافي بعد التوقيع ('+money(calc.net)+' ر.س) فلا يُصرَف عليه: اطبع المستخلصَ ووقّعه على الرقم الجديد.</b>')+
+      '</div>';
+  else if(!extIsFinal(e.status))
+    sigNote='<div class="ct-note warn">'+_icn("alertTriangle","ic-sm")+
+      ' لم تُرفع نسخةُ هذا المستخلص موقّعةً من المقاول — <b>ولا سدادَ قبلها</b>. اطبع المستخلصَ ووقّعه معه إقراراً بالكميات والخصومات، ثمّ ارفع النسخة.</div>';
+
   return '<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.backToExts()">'+_icn("rotateCcw")+' كل المستخلصات</button>'+
   '<div class="ct-head"><div><h2 class="ct-title">'+_icn("banknote")+' '+_esc(e.id)+(e.isFinal?' <span class="ct-doc s-ok">ختاميّ</span>':'')+'</h2>'+
     '<div class="ct-sub">'+extBadge(e.status)+(owner&&!extIsFinal(e.status)?' <span class="ct-id">بانتظار '+_esc(owner.lbl)+'</span>':'')+' <span class="ct-id">'+_esc(e.period||"")+'</span></div></div>'+
     '<div class="ct-actions">'+tools+'</div></div>'+
-  extSod + pay+
+  extSod + pay + sigNote+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("pieChart","ic-sm")+' سُلَّم الحساب'+
     (e.settled?'<span class="ct-sec-lock">لقطةٌ محفوظةٌ وقت السداد</span>':'')+'</div>'+ladderHTML(calc,c)+'</div>'+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود المنفَّذة</div>'+
@@ -5922,8 +6056,12 @@ function myPendingItems(role){
     if(e && !extIsFinal(e.status) && extCanAct(e.status, role) &&
        extActMode(e, e.status, role, meU, meN, us) !== "blocked"){
       var c=contractById(e.contractId);
+      /* والماليةُ التي ينقصها ورقةٌ موقّعةٌ تقرأ **ما ينقصها** لا اسمَ البوّابة:
+         «بانتظار السداد» على مستخلصٍ لا يُصرَف رسالةٌ تُضيّع اليومَ في البحث عن زرّ. */
+      var egate=(extGateOwner(e.status)||{}).lbl||"";
+      if(e.status==="ext_pending_finance" && !extSignature(e)) egate="بانتظار نسخةٍ موقّعةٍ من المقاول";
       out.push({ kind:"ext", id:e.id, lbl:"مستخلص", title:(c&&(c.title||c.vendorName))||e.contractId||"",
-                 value:r2((e.settled||{}).net), gate:(extGateOwner(e.status)||{}).lbl||"",
+                 value:r2((e.settled||{}).net), gate:egate,
                  at:e.updatedAt||e.createdAt||"", ctr:e.contractId });
     }
   });
@@ -6888,6 +7026,207 @@ function printPayOrder(id){
 function printPay(){ printPayOrder(_rOpen); }
 
 
+/* ════ المخرَجُ الورقيُّ للمستخلص — الورقةُ التي يوقّعها المقاول ════   (طلبُ المالك)
+
+   **لماذا ورقةٌ للمستخلص وحدَه؟** لأنّه المستندُ الذي **يخرج إلى الطرف الآخر**:
+   المقاولُ لا يرى شاشتَنا، ولا يوقّع على قاعدة بيانات. فحتّى تُطبَع كان الإقرارُ
+   بالكميات والخصومات شفهياً — ثمّ يُنكَر عند أوّل خلاف.
+
+   **وثلاثةُ قراراتٍ تحكمها** (بدرسِ سند صرف أمر الدفع نفسِه):
+   (١) **كلُّ أرقامها من `extNet` وحدَها** — سلّمُ الحساب هنا هو سلّمُ الشاشة حرفياً،
+       ولا حسبةَ واحدةً في الترميز. والمسدَّدُ يُطبَع من **لقطته المحفوظة** (`settled`)
+       لا من حسابٍ جديد: ورقةُ ما مضى تُظهر ما صُرف فعلاً لا ما كان يُصرف اليوم.
+   (٢) **تعلن حالتَها بصراحة** من `extPrintState`: نسخةُ مراجعةٍ قبل اكتمال الاعتماد،
+       و«بانتظار توقيع المقاول» بعده، و«صالحٌ للسداد» متى وُقّع على هذا الصافي.
+   (٣) **إقرارٌ منصوصٌ لا خانةُ توقيعٍ صامتة**: ما يوقّع عليه المقاولُ مكتوبٌ فوق
+       توقيعه — الكمياتُ والخصوماتُ وأنّ الصافيَ كاملُ استحقاقه عن هذه الفترة. */
+function extractPaperHTML(e, c, opt){
+  var o=opt||{};
+  var v=vendorById(c.vendorId), idn=v?identityOf(v):null;
+  var calc=e.settled || extCalc(e, c);
+  var st=extPrintState(e, calc.net);
+  var sig=extSignoffs(e, calc.net, ceoThreshold());
+  var sg=extSignature(e);
+  var floor=prevCumByLine(_exts, c, e.id);
+  var logo=_printLogo();
+  var lh=letterheadAssets(), lhOn=letterheadOn(lh);
+  var vm=VAT_MODES[normVatMode(c.vatMode)] || {};
+  var dt=function(x){ return String(x||"").slice(0,16).replace("T"," ") || "—"; };
+
+  var lineRows=(e.lines||[]).map(function(l,i){
+    var max=contractLineQty(c, l.lineId), was=Number(floor[l.lineId])||0;
+    var cum=Number(l.cumQty)||0;
+    var val=r2(vatSplit(l.unitPrice, c.vatMode).base * cum);
+    return '<tr><td style="text-align:center">'+(i+1)+'</td>'+
+      '<td style="text-align:right">'+_esc(l.desc||"—")+'</td>'+
+      '<td style="text-align:center">'+_esc(l.unit||"—")+'</td>'+
+      '<td style="text-align:center">'+money0(max)+'</td>'+
+      '<td style="text-align:center">'+money0(was)+'</td>'+
+      '<td style="text-align:center;font-weight:700">'+money0(cum)+'</td>'+
+      '<td style="text-align:center">'+(max>0?Math.round(cum/max*100):0)+'%</td>'+
+      '<td style="text-align:center">'+money(l.unitPrice)+'</td>'+
+      '<td style="text-align:center;font-weight:700">'+money(val)+'</td></tr>';
+  }).join("") || '<tr><td colspan="9" style="text-align:center;padding:14px">—</td></tr>';
+
+  /* سلّمُ الحساب ورقةً — الصفوفُ نفسُها التي يرسمها `ladderHTML` على الشاشة،
+     وقيمُها من `calc` وحدَها. وما كان صفراً يُطبَع أيضاً: الخصمُ الغائبُ خبرٌ
+     للمقاول كالخصم الحاضر — يقرأ أنّه لم يُخصَم منه شيءٌ بهذا الباب. */
+  function rung(lbl, val, sign, cls){
+    return '<tr'+(cls?' class="'+cls+'"':'')+'><td>'+(sign<0?'− ':(sign>0?'+ ':''))+_esc(lbl)+'</td>'+
+      '<td class="n">'+money(val)+'</td></tr>';
+  }
+  var ladder='<table class="sum lad">'+
+    rung("المنجَز التراكميّ منذ بداية العقد", calc.gross, 0, "")+
+    rung("المستخلَص المعتمَد سابقاً", calc.prevGross, -1, "")+
+    rung("أعمال الفترة", calc.period, 0, "mid")+
+    (calc.mode==="none" ? "" : rung("ض.ق.م "+Math.round(VAT_RATE*100)+"٪ على أعمال الفترة", calc.vat, 1, ""))+
+    rung("محتجز الضمان "+(Number((c.retention||{}).pct)||0)+"٪", calc.retention, -1, "")+
+    rung("استرداد الدفعة المقدمة "+(Number((c.advance||{}).recoveryPct)||0)+"٪", calc.advanceRecovery, -1, "")+
+    rung("غرامة التأخير", calc.penalty, -1, "")+
+    rung("مواد مصروفة له من مستودعنا", calc.materials, -1, "")+
+    rung("خصم عدم مطابقة / جودة", calc.nonConformity, -1, "")+
+    rung("صافي المستحق (ر.س)", calc.net, 0, "net")+
+  '</table>';
+
+  var sigCells=sig.map(function(g){
+    return '<div class="sg">'+
+      '<div class="sg-l">'+_esc(g.lbl)+'</div>'+
+      '<div class="sg-n">'+(g.by?_esc(g.by):'<span class="sg-w">لم يعتمد بعد</span>')+'</div>'+
+      '<div class="sg-d">'+(g.at?_esc(dt(g.at)):'—')+'</div>'+
+      '<div class="sg-x">التوقيع</div></div>';
+  }).join("");
+
+  var signedNote = sg
+    ? '<div class="note ok">نسخةٌ موقّعةٌ من المقاول مسجَّلةٌ على المنصّة — '+_esc(dt(sg.at))+
+      ' · سجّلها '+_esc(sg.by||"—")+' · على صافي '+money(sg.net)+' ر.س'+
+      (extSigValid(e, calc.net) ? '' : ' <b>(تغيّر الصافي بعدها — تلزم نسخةٌ جديدة)</b>')+'</div>'
+    : "";
+
+  var paidBox = (e.payment && e.payment.at) ? '<h2>بيانُ السداد</h2><table class="kv">'+
+      '<tr><td>المبلغ المسدَّد</td><td class="n">'+money(e.payment.amount)+' ر.س</td></tr>'+
+      '<tr><td>مرجع التحويل</td><td class="n">'+_esc(e.payment.ref||"—")+'</td></tr>'+
+      '<tr><td>سجّله</td><td class="t">'+_esc(e.payment.by||"—")+'</td></tr>'+
+      '<tr><td>تاريخ السداد</td><td class="n">'+_esc(dt(e.payment.at))+'</td></tr>'+
+    '</table>' : "";
+
+  var html='<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'+
+  '<title>مستخلص '+_esc(e.id)+'</title><style>'+
+  '*{box-sizing:border-box}'+
+  'body{font-family:"Segoe UI",Tahoma,Arial,sans-serif;margin:0;padding:26px;color:#111827;direction:rtl;font-size:13px;line-height:1.9}'+
+  '.header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1b3a6b;padding-bottom:12px}'+
+  '.header-right{display:flex;align-items:center;gap:12px}'+
+  '.company-logo{width:56px;height:56px;object-fit:contain}'+
+  '.company{font-size:18px;font-weight:800}.subtitle{font-size:13px;color:#1b3a6b;font-weight:700}'+
+  '.doc-no{background:#eef2f7;color:#1b3a6b;border-radius:8px;padding:8px 14px;font-weight:800;font-family:monospace}'+
+  '.band{margin-top:14px;border-radius:8px;padding:9px 13px;font-weight:800;font-size:13px;border:2px solid}'+
+  '.band .bn{display:block;font-weight:600;font-size:11.5px;margin-top:2px}'+
+  '.band.ok{background:#ecfdf5;border-color:#059669;color:#065f46}'+
+  '.band.warn{background:#fffbeb;border-color:#d97706;color:#92400e}'+
+  '.band.bad{background:#fef2f2;border-color:#dc2626;color:#991b1b}'+
+  'h2{font-size:15px;color:#1b3a6b;margin:20px 0 8px;border-bottom:1px solid #dde3ed;padding-bottom:5px}'+
+  '.parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px}'+
+  '.party{border:1px solid #dde3ed;border-radius:8px;padding:11px 13px}'+
+  '.party .pl{font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px}'+
+  '.party .pn{font-size:14px;font-weight:800}'+
+  '.party .pm{font-size:12px;color:#374151;margin-top:3px}'+
+  'table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12.5px}'+
+  'th{background:#1b3a6b;color:#fff;padding:8px;font-weight:700}'+
+  'td{padding:7px 8px;border-bottom:1px solid #e5e7eb}'+
+  'tbody tr:nth-child(even){background:#f8fafc}'+
+  '.kv{width:100%;max-width:520px}.kv td{border-bottom:1px solid #eef2f7}'+
+  '.kv td:first-child{width:150px;color:#64748b}'+
+  '.kv .n{text-align:left;font-family:monospace;font-weight:700}'+
+  '.kv .t{text-align:right;font-weight:700}'+
+  '.sum{width:420px;margin-inline-start:auto;margin-top:10px}'+
+  '.sum td{border-bottom:1px solid #eef2f7}.sum .n{text-align:left;font-family:monospace;font-weight:700}'+
+  '.lad tr.mid td{background:#f1f5f9;font-weight:800;border-top:1px solid #cbd5e1}'+
+  '.lad tr.net td{border-top:2px solid #1b3a6b;font-weight:800;font-size:14px;background:#eef2f7}'+
+  '.words{margin-top:10px;border:1px solid #1b3a6b;border-radius:8px;padding:10px 13px;background:#f8fafc;break-inside:avoid}'+
+  '.words .wl{font-size:11px;color:#64748b;font-weight:700}'+
+  '.words .wv{font-size:14px;font-weight:800;color:#1b3a6b}'+
+  '.note{margin-top:10px;border-radius:8px;padding:8px 12px;font-size:11.5px;border:1px solid}'+
+  '.note.ok{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}'+
+  '.ack{margin-top:14px;border:1px solid #1b3a6b;border-radius:8px;padding:12px 14px;background:#f8fafc;break-inside:avoid;font-size:12.5px}'+
+  '.ack .al{font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px}'+
+  '.sign{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:16px;break-inside:avoid}'+
+  '.sg{border:1px solid #dde3ed;border-radius:8px;padding:10px;min-height:104px;text-align:center}'+
+  '.sg-l{font-size:11px;color:#64748b;font-weight:700}'+
+  '.sg-n{font-size:12.5px;font-weight:800;margin-top:4px}'+
+  '.sg-w{color:#b45309;font-weight:700}'+
+  '.sg-d{font-size:11px;color:#64748b;font-family:monospace}'+
+  '.sg-x{margin-top:26px;border-top:1px solid #9ca3af;padding-top:5px;font-size:11px;color:#374151}'+
+  '.ctr-sign{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-top:18px;break-inside:avoid;font-size:12px}'+
+  '.ctr-sign div{border-top:1px solid #9ca3af;padding-top:8px;text-align:center;color:#374151;min-height:64px}'+
+  '.foot{margin-top:22px;font-size:10.5px;color:#94a3b8;text-align:center;border-top:1px solid #e5e7eb;padding-top:8px}'+
+  '@media print{body{padding:14px}@page{margin:14mm;size:A4}}'+
+  (lhOn?letterheadCSS():"")+
+  '</style></head><body>'+
+
+  letterheadWrap(
+  docHeadHTML({ on:lhOn, logo:logo, docNo:e.id,
+                subtitle:"مستخلص أعمال — "+(e.isFinal?"ختاميّ":"دوريّ") })+
+
+  '<div class="band '+_esc(st.cls)+'">'+_esc(st.lbl)+
+    (st.note?'<span class="bn">'+_esc(st.note)+'</span>':'')+'</div>'+
+
+  '<h2>أطراف المستخلص</h2><div class="parties">'+
+    '<div class="party"><div class="pl">مالك العمل</div>'+
+      '<div class="pn">شركة المباني السريعة للمقاولات</div>'+
+      '<div class="pm">المشروع: '+_esc(_projName(c))+'</div></div>'+
+    '<div class="party"><div class="pl">المقاول</div>'+
+      '<div class="pn">'+_esc(c.vendorName||"—")+'</div>'+
+      '<div class="pm">'+(idn&&idn.number?(_esc(idn.label)+": "+_esc(idn.number)):"—")+'</div></div>'+
+  '</div>'+
+
+  '<h2>بيانات المستخلص</h2><table class="kv">'+
+    '<tr><td>رقم العقد</td><td class="t">'+_esc(c.id||"—")+' — '+_esc(c.title||"")+'</td></tr>'+
+    '<tr><td>قيمة العقد</td><td class="n">'+money(contractValue(c))+' ر.س</td></tr>'+
+    '<tr><td>الفترة</td><td class="t">'+_esc(e.period||"—")+'</td></tr>'+
+    '<tr><td>نوع المستخلص</td><td class="t">'+(e.isFinal?"ختاميّ — يُنهي العقد فنّياً":"دوريّ")+'</td></tr>'+
+    '<tr><td>تاريخ الإعداد</td><td class="n">'+_esc(dt(e.createdAt))+'</td></tr>'+
+    '<tr><td>أعدّه</td><td class="t">'+_esc(e.createdBy||"—")+'</td></tr>'+
+    '<tr><td>وضع الضريبة</td><td class="t">'+_esc(vm.short||"—")+'</td></tr>'+
+  '</table>'+
+
+  '<h2>الأعمال المنفَّذة — قياسٌ تراكميٌّ منذ بداية العقد</h2>'+
+  '<table><thead><tr><th style="width:32px">#</th><th style="text-align:right">البند</th>'+
+  '<th>الوحدة</th><th>كمية العقد</th><th>سبق اعتماده</th><th>المنفَّذ تراكمياً</th><th>%</th>'+
+  '<th>سعر الوحدة</th><th>القيمة التراكمية</th></tr></thead>'+
+  '<tbody>'+lineRows+'</tbody></table>'+
+
+  '<h2>سُلَّم الحساب</h2>'+ladder+
+  '<div class="words"><div class="wl">صافي المستحق كتابةً</div><div class="wv">'+_esc(amountWords(calc.net))+'</div></div>'+
+
+  paidBox+
+
+  '<h2>إقرارُ المقاول وتوقيعه</h2>'+
+  '<div class="ack"><div class="al">يُوقَّع من المقاول أو مَن يمثّله قانوناً</div>'+
+    'أقرّ أنا الموقّع أدناه بأنّ الكميات المبيَّنة في هذا المستخلص مطابقةٌ لما نفّذتُه فعلاً '+
+    'حتى تاريخه، وأنّني اطّلعتُ على الخصومات الواردة فيه ووافقتُ عليها، وأنّ صافي المستحق '+
+    'المبيَّن أعلاه يمثّل كاملَ استحقاقي عن الأعمال المنفَّذة حتى تاريخ هذا المستخلص، '+
+    'ولا مطالبةَ لي بغيره عنها.'+
+    '<div class="ctr-sign"><div>اسم المقاول / الممثّل</div><div>التاريخ</div><div>التوقيع والختم</div></div>'+
+  '</div>'+
+  signedNote+
+
+  '<h2>الاعتمادات الداخلية</h2><div class="sign">'+sigCells+'</div>'+
+
+  '<div class="foot">صدر هذا المستخلص من نظام إدارة المشتريات — شركة المباني السريعة للمقاولات · '+
+    _esc(e.id)+' · عقد '+_esc(c.id||"")+' · طُبع في '+_esc(dt(_now()))+'</div>'
+  , lh)+
+  '</body></html>';
+
+  return html;
+}
+function printExtract(id){
+  var e=extractById(id); if(!e) return _toast("⚠ المستخلص غير موجود","warn");
+  var c=contractById(e.contractId);
+  if(!c) return _toast("⚠ عقد المستخلص غير محمَّل","warn");
+  _emitPrint(extractPaperHTML(e, c, {}), "طباعة مستخلص", e.id);
+}
+function printExt(){ printExtract(_extOpen); }
+
+
 /* ── تبويبُ شروط العقد ── */
 var _clEdit = null;
 function ctrClausesHTML(c){
@@ -7198,6 +7537,46 @@ function doExtPay(){
     console.warn("contracts/doExtPay",err);
     if(btn){ btn.disabled=false; btn.innerHTML=_icn("save","ic-sm")+" تسجيل السداد"; }
     _toast("⚠ "+(err&&err.message?err.message:"تعذّر السداد")+" — لم يُسجَّل سدادٌ بلا إيصال","warn");
+  });
+}
+
+/* ── رفعُ نسخة المستخلص موقّعةً من المقاول — بنيةُ صندوق توقيع العقد نفسُها ── */
+function openExtSign(){
+  var e=extractById(_extOpen), c=contractById(_cOpen); if(!e||!c) return;
+  var calc=e.settled || extCalc(e,c);
+  var el=document.getElementById("page-"+PAGE_CTRS); if(!el) return;
+  var old=document.getElementById("ct-esign"); if(old) old.remove();
+  var box=document.createElement("div");
+  box.className="card ct-sec"; box.id="ct-esign";
+  box.innerHTML='<div class="ct-sec-h">'+_icn("save","ic-sm")+' رفع نسخة '+_esc(e.id)+' موقّعةً من المقاول</div>'+
+    '<div class="ct-note">'+_icn("alertCircle","ic-sm")+' يوقّع المقاولُ على صافي <b>'+money(calc.net)+' ر.س</b> إقراراً بالكميات والخصومات — '+
+      'ويُحفَظ الرقمُ مع النسخة، فإن تغيّر بعده لزمت نسخةٌ جديدة.</div>'+
+    '<div class="ct-form-row">'+
+      field("صورة المستخلص الموقَّع * (صورة أو PDF)", '<input type="file" class="form-input ct-file" id="ct-es-file" accept="image/*,application/pdf">')+
+      '<div></div>'+
+    '</div>'+
+    '<div class="ct-save-bar" style="position:static">'+
+      '<button class="btn btn-ghost btn-sm" onclick="contracts.closeExtSign()">إلغاء</button>'+
+      '<button class="btn btn-success btn-sm" id="ct-es-btn" onclick="contracts.doExtSign()">'+_icn("checkCircle","ic-sm")+' حفظ النسخة الموقّعة</button>'+
+    '</div>';
+  el.insertBefore(box, el.children[2]||null);
+  box.scrollIntoView({behavior:"smooth",block:"center"});
+}
+function closeExtSign(){ var b=document.getElementById("ct-esign"); if(b) b.remove(); }
+function doExtSign(){
+  var e=extractById(_extOpen); if(!e) return;
+  var f=(document.getElementById("ct-es-file")||{}).files;
+  if(!f||!f[0]){ _toast("⚠ نسخةُ المستخلص الموقّعة إلزامية","warn"); return; }
+  var btn=document.getElementById("ct-es-btn"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الرفع…"; }
+  uploadVendorDoc(e.id, f[0], "ext_signed").then(function(att){
+    if(!att||!att.url) throw new Error("تعذّر رفع النسخة الموقّعة");
+    return signExtract(e.id, att);
+  }).then(function(){
+    closeExtSign(); paintCtrs(); _toast("✅ حُفظت النسخة الموقّعة — صار المستخلصُ صالحاً للسداد","success");
+  }).catch(function(err){
+    console.warn("contracts/doExtSign",err);
+    if(btn){ btn.disabled=false; btn.innerHTML=_icn("checkCircle","ic-sm")+" حفظ النسخة الموقّعة"; }
+    _toast("⚠ "+(err&&err.message?err.message:"تعذّر الحفظ")+" — لا سدادَ بلا نسخةٍ موقّعة","warn");
   });
 }
 
@@ -7571,6 +7950,11 @@ window.contracts = {
   extRecalc: extRecalc, applyPenalty: applyPenalty,
   openExt: openExt, backToExts: backToExts, extAct: extAct,
   openExtPay: openExtPay, closeExtPay: closeExtPay, doExtPay: doExtPay,
+  // ورقةُ المستخلص وتوقيعُ المقاول عليها
+  printExt: printExt, printExtract: printExtract, _extractPaperHTML: extractPaperHTML,
+  openExtSign: openExtSign, closeExtSign: closeExtSign, doExtSign: doExtSign,
+  _signExt: signExtract, _extSignature: extSignature, _extSigValid: extSigValid,
+  _extPayGuard: extPayGuard, _extSignoffs: extSignoffs, _extPrintState: extPrintState,
   extractsList: extractsList, extractById: extractById, extractsFor: extractsFor,
   _createExt: createExtract, _actExt: actOnExtract, _payExt: payExtract, _extCalc: extCalc,
   _extDraftOf: function(){ return _extDraft; },

@@ -399,9 +399,14 @@ service cloud.firestore {
         && unchanged(['createdAt','contractId'])
         && ( request.resource.data.status == resource.data.status
              || anyRole(extGate(resource.data.status)) )
+        // نسخةُ المستخلص موقّعةً من المقاول — يكتبها مَن يستلمها منه
+        && ( request.resource.data.get(['signature','url'], '') == resource.data.get(['signature','url'], '')
+             || anyRole(['project_manager','finance','admin']) )
+        // ولا سدادَ بلا إيصالٍ **وبلا تلك النسخة**: الشاشةُ تحجب الزرّ، وهذه تحرس الكتابة
         && ( request.resource.data.status != 'ext_paid'
              || ( anyRole(['finance','admin'])
-                  && request.resource.data.get(['payment','receiptUrl'], '') != '' ) );
+                  && request.resource.data.get(['payment','receiptUrl'], '') != ''
+                  && request.resource.data.get(['signature','url'], '') != '' ) );
     }
     match /global_contract_extracts/{id} {
       allow read:   if hasRole();
