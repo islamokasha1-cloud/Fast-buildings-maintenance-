@@ -363,8 +363,15 @@ function predelivery() {
   {
     /* v18.9.2735: رُفع من 39600 إلى 39640 — ‏٢٤ سطراً لحارسٍ **لا يمكن أن يعيش في
        وحدة**: `_moduleMissingPage` تعمل بالضبط حين لا تصل وحدةٌ إلى المتصفّح، فوضعُها
-       في ملفٍّ خارجيٍّ يجعلها غائبةً في الحالة التي وُجدت لها. لا استثناءَ للقاعدة. */
-    const IDX_CEILING = 39640;   // ← خفِّضه بعد كل استخراج (الهدف: ٢٠–٢٥ ألفاً)
+       في ملفٍّ خارجيٍّ يجعلها غائبةً في الحالة التي وُجدت لها. لا استثناءَ للقاعدة.
+
+       رُفع من 39640 إلى 39680 — ‏٤٠ سطراً لمرفقاتٍ **متعدّدة** في «طلب شراء جديد»
+       (`npAttachPick`/`renderNPAttachList` + حلقةُ الرفع في `submitPurchase`). ليست
+       ميزةً جديدةً في مجالٍ جديد بل **تعديلٌ على منطقٍ قائم**: حقلُ `np-attach` وحلقةُ
+       إنشاء الطلب نفسها. وCLAUDE.md صريحةٌ في أن نقلَ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة
+       تعديله ممنوع (يُخفي التغييرَ الحقيقيَّ داخل كتلةٍ منقولة)، ولا وحدةَ مشترياتٍ
+       قائمةً تستضيفه. فالمكانُ الصحيح هو موضعُه، والسقفُ يتبع. */
+    const IDX_CEILING = 39680;   // ← خفِّضه بعد كل استخراج (الهدف: ٢٠–٢٥ ألفاً)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = HTML.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -10987,6 +10994,97 @@ function hailNotifyFeed() {
       && /s12\.notifSelf===false/.test(BS) && /s12\.noDoubleNotify===true/.test(BS));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   مرفقاتٌ متعدّدة في «طلب شراء جديد» — الملفُّ الثاني لا يبتلعه الأوّل
+
+   كان الحقلُ يقرأ `files[0]` وحده: يختار المستخدمُ صورةَ الموقع ومخطّطاً
+   وكتالوجَ PDF فيُرفع **واحدٌ** ويُفقد الباقي بلا خطأٍ ولا تنبيه. والارتدادُ
+   هنا صامتٌ بطبعه — لا مترجمَ يُنذر إن سقطت سمةُ `multiple` أو عاد الحفظُ إلى
+   `[_npAtt]`. فالحارس يُنفّذ دوالَّ القائمة المستخرجةَ من index.html على ملفاتٍ
+   مصطنعة، ويثبّت العقدَ الثلاثة: الاختيارُ يُراكم · الحذفُ فرديّ · الحفظُ للكلّ.
+   ════════════════════════════════════════════════════════════════════ */
+function npMultiAttach() {
+  H("مرفقاتٌ متعدّدة في «طلب شراء جديد»");
+
+  // ــ ١) وسمُ الحقل: بلا `multiple` يعود المتصفّح لملفٍ واحدٍ بصمت ــ
+  const inp = slice('<input class="form-input" type="file" id="np-attach"', ">") || "";
+  T("★★ حقلُ المرفق يقبل أكثر من ملف (multiple)", / multiple/.test(inp), inp.slice(0, 160));
+  T("★ والاختيارُ يمرّ بـnpAttachPick لا بقراءةٍ مباشرةٍ من files",
+    /onchange="npAttachPick\(this\)"/.test(inp));
+  T("★ وله مضيفٌ لعرض المختار", HTML.includes('id="np-attach-list"'));
+
+  // ــ ٢) دوالُّ القائمة تُنفَّذ فعلاً ــ
+  const a = HTML.indexOf("const NP_ATTACH_MAX=8, NP_ATTACH_MAX_MB=10;");
+  const b = HTML.indexOf("async function submitPurchase(){", a);
+  if (a < 0 || b < 0) { T("كتلةُ المرفقات المتعدّدة مستخرجة", false, "لم يُعثر"); return; }
+  const src = HTML.slice(a, b);
+
+  const warns = [];
+  const host = { innerHTML: "" }, el = { value: "x", files: [] };
+  const doc = { getElementById: id => id === "np-attach-list" ? host : (id === "np-attach" ? el : null) };
+  const esc = t => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  let API;
+  try {
+    API = new Function("document", "toast", "esc",
+      src + "\n return {npAttachPick,npAttachRemove,npAttachReset,renderNPAttachList,files:()=>_npAttachFiles,MAX:NP_ATTACH_MAX};"
+    )(doc, (m) => warns.push(String(m)), esc);
+  } catch (e) { T("دوالُّ قائمة المرفقات تُنفَّذ", false, String(e.message).slice(0, 140)); return; }
+  T("دوالُّ قائمة المرفقات مستخرجةٌ وتُنفَّذ", typeof API.npAttachPick === "function");
+
+  const F = (name, size, type, lm) => ({ name, size: size, type: type || "image/jpeg", lastModified: lm || 1 });
+  const pick = arr => API.npAttachPick({ value: "y", files: arr });
+  const names = () => API.files().map(f => f.name);
+
+  API.npAttachReset();
+  pick([F("site-1.jpg", 1000), F("site-2.jpg", 2000)]);
+  T("★★ اختيارُ ملفين يحفظهما معاً (لا الأوّلَ وحده)",
+    names().length === 2 && names()[1] === "site-2.jpg", names().join("+"));
+
+  pick([F("catalog.pdf", 3000, "application/pdf")]);
+  T("★★ الاختيارُ الثاني **يُضيف** ولا يستبدل — صورةٌ وPDF معاً",
+    names().join("+") === "site-1.jpg+site-2.jpg+catalog.pdf", names().join("+"));
+
+  pick([F("site-1.jpg", 1000)]);
+  T("★ الملفُّ نفسه لا يتكرّر", names().length === 3, names().join("+"));
+
+  warns.length = 0;
+  pick([F("huge.jpg", 11 * 1024 * 1024), F("ok.jpg", 4000)]);
+  T("★★ الملفُّ الأكبرُ من 10 MB يُرفض ومن بعده يمرّ (continue لا break)",
+    names().length === 4 && names().includes("ok.jpg") && !names().includes("huge.jpg"), names().join("+"));
+  T("★ ورفضُه يُقال للمستخدم", warns.some(w => w.includes("huge.jpg")), warns.join(" | ").slice(0, 120));
+
+  warns.length = 0;
+  pick([F("x1.jpg", 10), F("x2.jpg", 10), F("x3.jpg", 10), F("x4.jpg", 10), F("x5.jpg", 10), F("x6.jpg", 10)]);
+  T("★★ الحدُّ الأقصى " + API.MAX + " ملفات لا يُتجاوَز", API.files().length === API.MAX, String(API.files().length));
+  T("★ وبلوغُ الحدّ يُقال", warns.some(w => w.includes("الحد الأقصى")));
+
+  const before = names();
+  API.npAttachRemove(1);
+  T("★★ الحذفُ الفرديُّ يزيل المقصودَ وحدَه",
+    API.files().length === before.length - 1 && !names().includes(before[1]) && names().includes(before[0]),
+    names().join("+"));
+  API.npAttachRemove(99); API.npAttachRemove(-1);
+  T("★ فهرسٌ خارجُ المدى لا يحذف شيئاً", API.files().length === before.length - 1);
+
+  API.renderNPAttachList();
+  T("★ الرسمُ يذكر كلَّ ملفٍ مختار",
+    names().every(n => host.innerHTML.includes(esc(n))) && host.innerHTML.includes("npAttachRemove("));
+  T("★ ويُظهر عدّاداً بالإجمالي", /من \d+ —/.test(host.innerHTML));
+
+  API.npAttachReset();
+  T("★★ المسحُ يُفرغ القائمةَ والحقلَ والعرض",
+    API.files().length === 0 && el.value === "" && host.innerHTML === "");
+
+  // ــ ٣) الإرسال: كلُّ المرفوعات تُحفَظ، وفشلُ ملفٍ لا يُسقط البقية ــ
+  const sub = slice("async function submitPurchase(){", "\nfunction clearPurchaseForm(){");
+  T("★★ الحفظُ لكلِّ المرفقات لا لأوّلها", /attachments:\s*_npAtts,/.test(sub) && !/_npAtt\s*\?\s*\[_npAtt\]/.test(sub));
+  T("★★ الرفعُ في حلقةٍ وtry داخلَها — فشلُ ملفٍ لا يُسقط البقيةَ ولا الطلب",
+    /for\s*\(let _i=0;_i<_npWanted\.length;_i\+\+\)\s*\{[\s\S]{0,120}try\s*\{/.test(sub));
+  T("★ وما سقط يُقال بعدده", /تعذّر رفع/.test(sub) && /_npWanted\.length-_npAtts\.length/.test(sub));
+  T("★ ومسحُ النموذج يُفرغ قائمةَ المرفقات",
+    /npAttachReset\(\);/.test(slice("function clearPurchaseForm(){", "\n}") || ""));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -11051,6 +11149,7 @@ function hailNotifyFeed() {
   poAlignRepair();
   errLogGrouping();
   hailNotifyFeed();
+  npMultiAttach();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));

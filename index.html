@@ -3797,9 +3797,10 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
           <textarea class="form-textarea" id="np-notes" placeholder="أي تفاصيل أو مواصفات إضافية..."></textarea>
         </div>
         <div class="form-group">
-          <label class="form-label"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span> مرفق توضيحي (اختياري — صورة أو PDF)</label>
-          <input class="form-input" type="file" id="np-attach" accept="image/*,application/pdf" style="font-size:12px;padding:8px">
-          <div style="font-size:11px;color:var(--muted);margin-top:4px">ملف واحد يوضّح المطلوب — يُرفع مع الطلب ويظهر في تفاصيله</div>
+          <label class="form-label"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span> مرفقات توضيحية (اختياري — صور و/أو PDF)</label>
+          <input class="form-input" type="file" id="np-attach" accept="image/*,application/pdf" multiple onchange="npAttachPick(this)" style="font-size:12px;padding:8px">
+          <div id="np-attach-list" style="margin-top:6px"></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">أكثر من ملف — صور و/أو PDF معاً (حتى 8 ملفات، 10 MB للملف). تُرفع مع الطلب وتظهر في تفاصيله. الاختيار مرّةً أخرى <b>يُضيف</b> إلى القائمة ولا يستبدلها.</div>
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:4px">
           <button class="btn btn-ghost" onclick="clearPurchaseForm()"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></span> مسح</button>
@@ -25339,6 +25340,39 @@ function _poSubstituteLabel(p){
   return "⚠ حساب غير موجود";
 }
 
+// ══ مرفقات توضيحية متعدّدة في «طلب شراء جديد» ══
+// كان الحقل يقرأ files[0] وحده، فطلبٌ يحتاج صورةَ الموقع ومخطّطاً وكتالوجَ PDF معاً
+// يفقد اثنين بصمت. المصدرُ الآن قائمةٌ في الذاكرة لا عنصرُ <input> — فالـinput يُستبدل
+// محتواه كلّياً عند كل اختيار ولا يسمح بحذف ملفٍ من اختيارٍ سابق: كلُّ اختيارٍ **يُضيف**،
+// والحذفُ فرديٌّ قبل الإرسال، والرفعُ ملفاً ملفاً فلا يُسقط فشلُ أحدها البقيةَ ولا الطلبَ.
+const NP_ATTACH_MAX=8, NP_ATTACH_MAX_MB=10;
+let _npAttachFiles=[];
+const _npAttachKey=f=>((f&&f.name)||"")+"|"+((f&&f.size)||0)+"|"+((f&&f.lastModified)||0);
+const _npAttachSize=b=>b<1024?b+" بايت":b<1024*1024?(b/1024).toFixed(1)+" KB":(b/1024/1024).toFixed(2)+" MB";
+function npAttachPick(el){
+  const picked=(el&&el.files)?Array.from(el.files):[];
+  if(el) el.value="";   // ليقبل إعادةَ اختيار الملف نفسه بعد حذفه
+  for(const f of picked){
+    if(_npAttachFiles.length>=NP_ATTACH_MAX){ toast("⚠ بلغت الحد الأقصى للمرفقات ("+NP_ATTACH_MAX+")","warn"); break; }
+    if((f.size||0)>NP_ATTACH_MAX_MB*1024*1024){ toast('⚠ "'+(f.name||"ملف")+'" يتجاوز '+NP_ATTACH_MAX_MB+' MB',"warn"); continue; }
+    if(_npAttachFiles.some(x=>_npAttachKey(x)===_npAttachKey(f))) continue;   // مُختارٌ سلفاً
+    _npAttachFiles.push(f);
+  }
+  renderNPAttachList();
+}
+function npAttachRemove(i){ if(i>=0&&i<_npAttachFiles.length){ _npAttachFiles.splice(i,1); renderNPAttachList(); } }
+function npAttachReset(){ _npAttachFiles=[]; const el=document.getElementById("np-attach"); if(el) el.value=""; renderNPAttachList(); }
+function renderNPAttachList(){
+  const host=document.getElementById("np-attach-list"); if(!host) return;
+  const chips=_npAttachFiles.map((f,i)=>'<span style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:4px 8px;font-size:11.5px;max-width:100%">'
+    +(((f.type==="application/pdf")||/\.pdf$/i.test(f.name||""))?"📄":"🖼")
+    +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px" title="'+esc(f.name||"")+'">'+esc(f.name||"ملف")+'</span>'
+    +'<span style="color:var(--muted)">'+_npAttachSize(f.size||0)+'</span>'
+    +'<button type="button" class="btn btn-ghost btn-sm" onclick="npAttachRemove('+i+')" title="حذف المرفق" style="color:var(--danger);padding:0 5px;line-height:1.7">✕</button></span>').join("");
+  host.innerHTML=!_npAttachFiles.length?"":'<div style="display:flex;flex-wrap:wrap;gap:6px">'+chips+'</div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-top:4px">'+_npAttachFiles.length+' من '+NP_ATTACH_MAX+' — الإجمالي '+_npAttachSize(_npAttachFiles.reduce((a,f)=>a+(f.size||0),0))+'</div>';
+}
+
 async function submitPurchase(){
   const projSelEl  = document.getElementById("np-project");
   const projId     = projSelEl ? projSelEl.value : (CURRENT_PROJECT&&CURRENT_PROJECT.id)||"";
@@ -25454,14 +25488,19 @@ async function submitPurchase(){
   // المورد: أول مورد مذكور في البنود أو فارغ
   const vendor = currentPurchaseItems.map(i=>i.vendor).filter(Boolean)[0]||"";
 
-  // v18.9pl: مرفق توضيحي اختياري من نموذج الإنشاء — يُرفع لـ Storage تحت po/<id>/ ويُضاف لمرفقات الطلب.
-  // فشل الرفع لا يُسقط إنشاء الطلب (الطلب أهم من المرفق) — تنبيه ثم متابعة بلا مرفق.
-  let _npAtt=null;
-  try{
-    const _npFileEl=document.getElementById("np-attach");
-    const _npFile=_npFileEl&&_npFileEl.files&&_npFileEl.files[0];
-    if(_npFile){ _npAtt=await _poUploadFile(poId,_npFile,"attachment"); if(_npAtt) _npAtt.label="مرفق توضيحي — مع الطلب"; }
-  }catch(_e){ console.warn("np attach upload failed",_e); toast("⚠ تعذّر رفع المرفق — سيُنشأ الطلب بدونه","warn"); }
+  // v18.9pl: مرفقاتٌ توضيحيةٌ اختيارية من نموذج الإنشاء — تُرفع لـ Storage تحت po/<id>/
+  // وتُضاف لمرفقات الطلب. فشلُ رفع ملفٍ لا يُسقط البقيةَ ولا يُسقط إنشاءَ الطلب (الطلبُ
+  // أهمّ من المرفق). و_npAttachFiles هي المصدر، وقراءةُ input.files احتياطٌ لا أكثر.
+  const _npAttEl=document.getElementById("np-attach");
+  const _npWanted=(_npAttachFiles.length?_npAttachFiles:((_npAttEl&&_npAttEl.files)?Array.from(_npAttEl.files):[])).slice(0,NP_ATTACH_MAX);
+  const _npAtts=[];
+  for(let _i=0;_i<_npWanted.length;_i++){
+    try{
+      const _a=await _poUploadFile(poId,_npWanted[_i],"attachment");
+      if(_a){ _a.label="مرفق توضيحي — مع الطلب"+(_npWanted.length>1?" ("+(_i+1)+"/"+_npWanted.length+")":""); _npAtts.push(_a); }
+    }catch(_e){ console.warn("np attach upload failed",(_npWanted[_i]&&_npWanted[_i].name)||"",_e); }
+  }
+  if(_npAtts.length<_npWanted.length) toast("⚠ تعذّر رفع "+(_npWanted.length-_npAtts.length)+" من "+_npWanted.length+" مرفقاً — سيُنشأ الطلب بالباقي","warn");
 
   const po = {
     id: poId,
@@ -25497,7 +25536,7 @@ async function submitPurchase(){
     createdBy: (currentUser&&currentUser.name)||"النظام",
     submittedBy: (currentUser&&currentUser.name)||"النظام",
     submittedByUser: (currentUser&&currentUser.user)||"",
-    attachments: _npAtt ? [_npAtt] : [],
+    attachments: _npAtts,
     // v18.9od: الرمز صريحٌ في code لا مخبوءٌ في event. وهذا القيد وحده كان
     // يُحلّ في كل طلب — فأفشل اشتقاق v1.2 وأبقى البطاقة تكذب.
     timeline: [{event:"تم إنشاء الطلب وتقديمه",by:(currentUser&&currentUser.name)||"النظام",at:now,icon:"📤"},
@@ -25534,6 +25573,7 @@ function clearPurchaseForm(){
     if(el) el.value="";
   });
   ["np-in-contract","np-in-boq"].forEach(id=>{ const c=document.getElementById(id); if(c) c.checked=false; });
+  npAttachReset();   // قائمة المرفقات التوضيحية — تفريغ العنصر وحده لا يكفي
   const customProjRow=document.getElementById("np-custom-project-row");
   const buildingGroup=document.getElementById("np-building-group");
   const ticketRow=document.getElementById("np-ticket-row");
