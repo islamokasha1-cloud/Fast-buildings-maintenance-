@@ -1242,9 +1242,10 @@ function inventoryReportsTests() {
       /class="num ct-g-after"/.test(cs2) && /class="num ct-g-delta"/.test(cs2) &&
       /class="num ct-e-pct"/.test(cs2)  && /class="num ct-e-val"/.test(cs2) &&
       /tr\.querySelector\("\.ct-g-after"\)/.test(cs2) && /tr\.querySelector\("\.ct-e-pct"\)/.test(cs2));
-    /* والورقتان المطبوعتان كانتا مرقَّمتين أصلاً — فالشاشةُ لحقت بهما لا العكس */
-    T("★ ln: والورقتان المطبوعتان ما زالتا ترقّمان بالترتيب نفسِه (`(i+1)` على `lines`)",
-      (cs2.match(/<td style="text-align:center">'\+\(i\+1\)\+'<\/td>'/g) || []).length === 2);
+    /* والمطبوعاتُ كانت مرقَّمةً أصلاً — فالشاشةُ لحقت بها لا العكس. وورقةُ المستخلص
+       ثالثتُها: تُرقّم بالترتيب نفسِه فيتطابق «البند ٤» في الثلاث. */
+    T("★ ln: والمطبوعاتُ الثلاث ما زالت ترقّم بالترتيب نفسِه (`(i+1)` على `lines`)",
+      (cs2.match(/<td style="text-align:center">'\+\(i\+1\)\+'<\/td>'/g) || []).length === 3);
   }
 
   /* ══ ★★ v18.9.2743: عمودُ «م» في تقارير المخزون — مرّةً واحدةً لا سبعاً ══ */
