@@ -1811,17 +1811,24 @@ check('★ كميةٌ سليمةٌ تُعيد تفعيل الإرسال', ladder
 // النسبةُ تُقاس بالكمية المتعاقَد عليها **بعد أوامر التغيير** — فلا تُثبَّت في
 // الفحص برقمٍ حرفيّ: أمرُ تغييرٍ يرفع الكميةَ يخفض النسبةَ بحقّ.
 const rowLive = await page.evaluate(() => {
-  const tds = document.querySelectorAll('#ct-e-lines tbody tr td');
+  /* v18.9.2743: القراءةُ **بصنف الخليّة** لا بفهرسها. كانت `tds[4]`/`tds[5]`، فأزاحها
+     عمودُ «م» المضاف — والفحصُ حينها يقيس نفسَه لا النظام. والصنفُ هو نفسُه الذي
+     يكتب به `syncExtRow`، فصار الفحصُ يقرأ من حيث تكتب الشاشةُ بالضبط. */
+  const tr = document.querySelector('#ct-e-lines tbody tr');
   const d = window.contracts._extDraftOf();
   const c = window.contracts.contractById(d.contractId);
   const l = d.lines[0];
   const max = window.contracts._contractLineQty(c, l.lineId);
-  return { pct: tds[4].textContent.trim(), val: tds[5].textContent.trim(),
+  return { pct: tr.querySelector('.ct-e-pct').textContent.trim(),
+           val: tr.querySelector('.ct-e-val').textContent.trim(),
+           seq: (tr.querySelector('.ct-seq')||{textContent:''}).textContent.trim(),
            wantPct: Math.round((Number(l.cumQty) || 0) / max * 100) + '%',
            wantVal: (Math.round(window.contracts._vatSplit(l.unitPrice, c.vatMode).base * (Number(l.cumQty) || 0) * 100) / 100).toFixed(2) };
 });
 check('★ وخلايا «%» و«القيمة» تُحدَّث مع الإدخال لا عند إعادة الرسم (المرسوم = المحسوب)',
   rowLive.pct === rowLive.wantPct && rowLive.val.replace(/,/g, '') === rowLive.wantVal, JSON.stringify(rowLive));
+check('★★ وأوّلُ بندٍ في المستخلص يحمل الرقم ١ (ترقيمُ العقد نفسُه — v18.9.2743)',
+  rowLive.seq === '1', rowLive.seq);
 const netDrawn = (ladder.drawn.find(r => r[0].includes('صافي')) || [])[1] || '';
 check('★ سُلَّمُ الخصومات: الرقمُ المرسوم = المحسوب',
   netDrawn.replace(/,/g, '') === ladder.calc.net.toFixed(2),

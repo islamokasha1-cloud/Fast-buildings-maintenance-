@@ -906,9 +906,23 @@ const s13 = await page.evaluate(async ()=>{
   const trs=[...host.querySelectorAll('table.report-table.ivr-table tbody tr')];
   const cells=(trs.find(tr=>tr.textContent.includes('كابل نحاس'))||{querySelectorAll:()=>[]})
     .querySelectorAll('td');
-  const txt=i=>(cells[i]?cells[i].textContent.trim():'');
+  /* ── القراءةُ **بعنوان العمود** لا برقمه ──
+     v18.9.2743: كانت الفهارسُ مثبَّتةً (4·5·6·9)، فإضافةُ عمود «م» أزاحتها كلَّها
+     وسقط الفحصُ وهو **يقيس نفسَه لا النظام**: الأرقامُ المرسومةُ كانت صحيحةً تماماً.
+     والقراءةُ بالعنوان تحفظ غرضَ الفحص (المرسومُ = المحسوب · لا انزياحَ عمود) وتزيده:
+     لو انزاح عمودٌ فعلاً لَقرأنا قيمةَ عمودٍ آخرَ تحت عنوانه فسقط الفحصُ — وهو
+     المطلوب — بينما إضافةُ عمودٍ مشروعةٍ لا تُسقطه. */
+  const ths=[...host.querySelectorAll('table.report-table.ivr-table thead th')]
+    .map(t=>t.textContent.trim());
+  const at=lbl=>ths.indexOf(lbl);
+  out.headers=ths.join('|');
+  const txt=i=>(i>=0&&cells[i]?cells[i].textContent.trim():'');
   const n=s=>parseFloat(String(s).replace(/[^\d.\-]/g,''))||0;
-  out.drawn={ opening:n(txt(4)), inQty:n(txt(5)), outQty:n(txt(6)), closing:n(txt(9)) };
+  out.drawn={ opening:n(txt(at('افتتاحي'))), inQty:n(txt(at('وارد'))),
+              outQty:n(txt(at('صادر'))),     closing:n(txt(at('ختامي'))) };
+  // وعمودُ التسلسل نفسُه: أوّلُ عمودٍ، وأوّلُ صفٍّ يحمل ١
+  out.seqFirst = ths[0]==='م';
+  out.seqCell1 = (trs[0]&&trs[0].children[0]) ? trs[0].children[0].textContent.trim() : '';
   out.rowsDrawn=trs.length;
   out.excelReady=(st.sheets||[]).indexOf('movement')>=0;
   // ورقةُ Excel تُبنى من نفس cols/rows — نتحقّق أن رقمَها هو نفسُه
@@ -973,6 +987,8 @@ check('13ج) ★★ الرقمُ المرسوم في الجدول = الرقمُ
   s13.drawn && s13.calc && s13.drawn.opening===s13.calc.opening && s13.drawn.inQty===s13.calc.inQty
   && s13.drawn.outQty===s13.calc.outQty && s13.drawn.closing===s13.calc.closing,
   JSON.stringify(s13.drawn));
+check('13ج٢) ★★ وعمودُ «م» أوّلُ الأعمدة وأوّلُ صفٍّ يحمل ١ (v18.9.2743)',
+  s13.seqFirst===true && s13.seqCell1==='1', s13.headers);
 check('13د) ★★ الختاميُّ = الرصيد الحاليّ (٤٠) مع أنّ direct_use كانت ٥٠٠ وحدة',
   s13.calc && s13.calc.closing===40);
 check('13هـ) ★ ورقةُ Excel تحمل الرقمَ نفسَه', s13.excelReady===true && s13.excelClosing===40,
