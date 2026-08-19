@@ -361,7 +361,10 @@ function predelivery() {
      السقفُ رقمٌ **يُحرَّر بيدٍ عن قصد** — لا يُشتقّ ولا يُختَم. وتعديلُه في PR
      محادثةٌ صريحة: «لماذا كبر الملفّ؟» أو «ماذا استُخرج؟». وذلك هو الغرض. */
   {
-    const IDX_CEILING = 39600;   // ← خفِّضه بعد كل استخراج (الهدف: ٢٠–٢٥ ألفاً)
+    /* v18.9.2735: رُفع من 39600 إلى 39640 — ‏٢٤ سطراً لحارسٍ **لا يمكن أن يعيش في
+       وحدة**: `_moduleMissingPage` تعمل بالضبط حين لا تصل وحدةٌ إلى المتصفّح، فوضعُها
+       في ملفٍّ خارجيٍّ يجعلها غائبةً في الحالة التي وُجدت لها. لا استثناءَ للقاعدة. */
+    const IDX_CEILING = 39640;   // ← خفِّضه بعد كل استخراج (الهدف: ٢٠–٢٥ ألفاً)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = HTML.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -1188,7 +1191,50 @@ function inventoryReportsTests() {
   T("زر القائمة الجانبية في مجموعة المخزون",
     HTML.includes('data-page="inventory-reports" onclick="showPage(\'inventory-reports\')"'));
   T("خطّاف showPage يستدعي الوحدة",
-    HTML.includes('if(id==="inventory-reports"){ if(window.inventoryReports&&window.inventoryReports.render) window.inventoryReports.render(); }'));
+    HTML.includes('if(id==="inventory-reports"){ if(window.inventoryReports&&window.inventoryReports.render) window.inventoryReports.render(); else _moduleMissingPage("page-inventory-reports","تقارير المخزون","inventory-reports.js"); }'));
+
+  /* ══ ★ v18.9.2735: «تقارير المخزون لا تظهر» — ثلاثةُ أبوابٍ للبياض الصامت ══
+     كلُّها تنتهي بالشكل نفسِه عند المستخدم: يضغط «التقارير» فلا يرى شيئاً، بلا خطأٍ
+     ولا رسالةٍ ولا شيءٍ يُبلَّغ به. فكلٌّ منها يُغلَق بحارسٍ يمنع عودتَه صامتاً. */
+  // (١) حاويةُ الوحدة فارغةٌ في المستند — فملفٌّ لم يصل = صفحةٌ بيضاءُ بلا حرف
+  T("★ صفحةٌ بلا وحدةٍ تُعلن سببَها وتعرض تحديثاً قسرياً (لا بياضٌ صامت)",
+    /function _moduleMissingPage\(hostId, title, file\)\{/.test(HTML) &&
+    /تعذّر تحميل شاشة/.test(HTML) &&
+    /window\._forceReloadApp = clearAndReload;/.test(HTML) &&
+    /onclick="_forceReloadApp\(\)"/.test(HTML));
+  // (٢) كاشفُ الوحدات القديمة: وحدةٌ تعرض build ولا سطرَ لها في السجلّ = تقادُمٌ صامت
+  {
+    const reg = (HTML.match(/var REG=\[[\s\S]*?\}\}\];/) || [""])[0];
+    const stamped = ["inventory-reports.js", "cleaning-operations.js", "finance-audit.js",
+                     "hr-payments.js", "performance-contract.js", "photo-queue.js",
+                     "operations-wall.js"];
+    const missing = stamped.filter(f => !reg.includes('"' + f + '"'));
+    T("★ كلُّ وحدةٍ موسومةٍ ببصمةٍ مسجّلةٌ في كاشف الوحدات القديمة",
+      missing.length === 0, missing.length ? "غائبة: " + missing.join("، ") : "السجلّ مكتمل");
+    // وحارسٌ عكسيّ: اسمٌ في السجلّ لا يعرض build يعني شريطاً أحمرَ دائماً للجميع
+    const NAME2GLOBAL = { "inventory-reports.js":"inventoryReports", "cleaning-operations.js":"cleaningOps",
+      "finance-audit.js":"financeAudit", "hr-payments.js":"hrPayments",
+      "performance-contract.js":"performanceContract", "photo-queue.js":"photoQueue",
+      "operations-wall.js":"operationsWall" };
+    const liars = Object.keys(NAME2GLOBAL).filter(f => {
+      if (!reg.includes('"' + f + '"')) return false;
+      const body = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), f), "utf8"); } catch (e) { return ""; } })();
+      return body && !/build\s*:\s*MODULE_BUILD/.test(body);
+    });
+    T("★ ولا اسمَ في السجلّ بلا build على واجهته (وإلا شريطٌ أحمرُ دائمٌ للجميع)",
+      liars.length === 0, liars.length ? "بلا build: " + liars.join("، ") : "كلُّها تعرض build");
+  }
+  // (٣) مجموعةُ القائمة لا تُفتح تلقائياً فيبقى الزرُّ مخفياً داخل مجموعةٍ مطويّة
+  T("★ inventory-reports في خريطة مجموعات السايدبار (كبقيّة صفحات المخزون)",
+    HTML.includes('"inventory-reports":"grp-inventory"'));
+  // (٤) لقطةُ الأرصدة تصل بعد فتح الصفحة — ولا أحدَ يوقظ المخرَج المعلّق
+  T("★ مستمعُ المخزون يوقظ شاشةَ التقارير عند وصول اللقطة",
+    /window\.inventoryReports\._onInvSnapshot\(\)/.test(HTML));
+  T("★ والإيقاظُ جرّاحيٌّ لصندوق المخرَج وحدَه (لا يمحو ما يكتبه المستخدم في المنتقي)",
+    /id="ivr-out"/.test(src) &&
+    /function _onInvSnapshot\(\)\{/.test(src) &&
+    /if\(_out \|\| !_invReady\(\)\) return;/.test(src) &&
+    /box\.innerHTML=_outHTML\(\)/.test(src));
 
   // ── ختمُ البناء (يرفعه npm run stamp مع APP_VERSION) ──
   const ivrBuild = (src.match(/const MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];

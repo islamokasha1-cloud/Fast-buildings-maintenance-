@@ -50,7 +50,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.2733";
+  const MODULE_BUILD = "v18.9.2735";
 
   const HOST_ID   = "page-inventory-reports";
   const READ_CAP  = 5000;    // سقف الحركات المقروءة لكل توليد — يُعلَن عند بلوغه
@@ -1203,7 +1203,24 @@
         </div>
       </div>
       ${_filtersHTML()}
-      ${_outHTML()}`;
+      <div id="ivr-out">${_outHTML()}</div>`;
+  }
+
+  /* ══ وصلت لقطةُ الأرصدة والصفحةُ مفتوحة ══
+     مستمعُ `global_inventory` كان يُعيد رسمَ شاشة الرصيد وحدَها. فمن يفتح التقارير
+     قبل وصول أوّل لقطة يرى «جارٍ مزامنة أرصدة المخزون…» **ولا يتحرّك أبداً**: العلَم
+     يرتفع بلا أن يُعيد أحدٌ الرسمَ، فتبقى الشاشةُ معلّقةً حتى يغادرها ويعود — وهذا
+     أحدُ أشكال «التقارير لا تظهر». وهو تحديثٌ **جرّاحيّ لصندوق المخرَج وحدَه**: لو
+     أعدنا رسمَ الصفحة كلَّها لمحونا ما يكتبه المستخدمُ في منتقي الصنف تلك اللحظةَ
+     بالذات. ولا نلمس مخرَجاً مرسوماً (`_out`) — لا يُمحى تقريرٌ لم يُطلب محوُه. */
+  function _onInvSnapshot(){
+    try{
+      const host=document.getElementById(HOST_ID);
+      if(!host || !host.classList.contains("active")) return;
+      if(_out || !_invReady()) return;
+      const box=document.getElementById("ivr-out");
+      if(box) box.innerHTML=_outHTML();
+    }catch(e){ console.warn("inventory-reports/_onInvSnapshot:", e); }
   }
 
   function _defaultPeriod(){
@@ -1497,7 +1514,7 @@ ${on?_lhCSS():""}
      ════════════════════════════════════════════════════════════════════ */
 
   window.inventoryReports = {
-    render, generate, exportExcel, exportPDF, canView,
+    render, generate, exportExcel, exportPDF, canView, _onInvSnapshot,
     _set, _setq, _reset,
     _acSearch, _acKey, _pick,            // منتقي الصنف — يُنادى من الترميز المرسوم
     // دوالُّ نقيّة — مكشوفةٌ لفحوص hail-tests وسيناريوهات المتصفّح
