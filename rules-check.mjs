@@ -40,6 +40,11 @@ const WH = as("warehouse_manager"), VIEWER = as("viewer");
 /* دورُ المشرف بصيغتيه: «مشرف» هو المسجَّلُ في `meta/users` من نافذة الإدارة،
    و`supervisor` ما يحمله توكِنُ تطبيق الفنيين. قاعدةٌ تعرف واحدةً تردّ نصفَهم. */
 const SUP = as("supervisor"), SUP_AR = as("مشرف");
+/* سياقان يحملان الادّعاءَ `u` (اسمُ الدخول) كما يصدره الـWorker — به تُقاس مِلكيّةُ
+   المستند في `vendorOwnUpdateOk`. وسياقُ `SUP_AR` أعلاه **بلا `u` عمداً** فيثبت أنّ
+   توكِناً قديماً لا ادّعاءَ فيه لا يفتح باباً. */
+const supAs = (u) => env.authenticatedContext("uid_" + u, { role: "مشرف", u }).firestore();
+const SUP_RGD = supAs("رغده"), SUP_OTHER = supAs("خالد");
 const OBS = as("observer"), HR = as("hr_officer");
 const ANON = env.unauthenticatedContext().firestore();
 /* تطبيقُ الفنيين يدخل **مُصادَقاً مجهولاً** (بلا ادّعاء `role`) — لا كزائرٍ بلا مصادقة.
@@ -100,6 +105,49 @@ await check("★★ ولا يعدّل بياناتِ طرفٍ قائم (الإض
 await check("★ ولا يحذف", assertFails(deleteDoc(doc(SUP, `${V}/V4`))));
 await check("★ ولا يفتح له ذلك بابَ العقود ولا طلباتِ التعاقد",
   assertFails(setDoc(doc(SUP, `${C}/CTR-SUP`), { status: "ctr_active", value: 1 })));
+
+/* ── المضيفُ يصحّح ما أضافه وحدَه (v18.9.2739) ──
+   الإضافةُ بلا تصحيحٍ تُنتج سجلاً خاطئاً لا يملك صاحبُه إصلاحَه. والمِلكيّةُ
+   **باسم الدخول** لا بالاسم المعروض — وهذه فحوصُها على المحاكي لا بقراءة السطر. */
+await seed(`${V}/V-RGD`, { name: "مقاول رغده", createdBy: "رغده", createdByUser: "رغده",
+                           createdAt: "2026-08-01", status: "active" });
+await seed(`${V}/V-OLD`, { name: "طرف قديم", createdBy: "المشتريات", status: "active" });
+await check("★★ المشرفُ يعدّل الطرفَ الذي أضافه هو",
+  assertSucceeds(updateDoc(doc(SUP_RGD, `${V}/V-RGD`), { name: "مقاول رغده — مصحَّح" })));
+await check("★★ ولا يعدّل طرفاً أضافه مشرفٌ آخر",
+  assertFails(updateDoc(doc(SUP_OTHER, `${V}/V-RGD`), { name: "انتحال" })));
+await check("★★ ولا طرفاً قديماً بلا `createdByUser` (الشرطُ لا يجد ما يطابقه)",
+  assertFails(updateDoc(doc(SUP_RGD, `${V}/V-OLD`), { name: "x" })));
+await check("★★★ ولا ينتحل المِلكيّة (كتابةُ اسمه على مستندِ غيره ثم تعديلُه)",
+  assertFails(updateDoc(doc(SUP_OTHER, `${V}/V-RGD`), { createdByUser: "خالد", name: "x" })));
+await check("★★★ ولا يكتب آيباناً على مستنده هو",
+  assertFails(updateDoc(doc(SUP_RGD, `${V}/V-RGD`), { bank: { iban: "SA555" } })));
+await check("★★ ولا يفكّ إيقافاً وضعه الأدمن (status في unchanged)",
+  assertFails(updateDoc(doc(SUP_RGD, `${V}/V-RGD`), { status: "stopped" })));
+await check("★★ ولا يحذف مستنده هو", assertFails(deleteDoc(doc(SUP_RGD, `${V}/V-RGD`))));
+await check("★★ وتوكِنٌ بلا ادّعاءِ اسمِ الدخول لا يفتح باباً",
+  assertFails(updateDoc(doc(SUP_AR, `${V}/V-RGD`), { name: "y" })));
+await check("★ والمشترياتُ تعدّل ما أضافه المشرفُ كما تعدّل غيرَه (لم تُقيَّد)",
+  assertSucceeds(updateDoc(doc(PROC, `${V}/V-RGD`), { name: "مراجَعٌ من المشتريات" })));
+
+/* ★★★ الحمولةُ الحقيقيةُ التي يرسلها `saveVendor` — لا حمولةٌ مصغَّرةٌ للفحص.
+   الدالّةُ تكتب `set(merge:true)` بـ`Object.assign({}, cur, data)`: فتُعيد كتابةَ
+   `createdByUser`/`createdAt`/`createdBy` **بقيمها نفسِها**، وتضيف `bank:{}` حين لا
+   يكون للمستند بنكٌ أصلاً (`next.bank = cur.bank || {}` لمن لا يملك `canBank`).
+   ولو حسِبت القاعدةُ إعادةَ كتابةِ القيمة نفسِها «تغييراً»، أو حسِبت `bank:{}`
+   آيباناً، لَرُدّ كلُّ حفظٍ من الشاشة بينما تمرّ فحوصُ `updateDoc` المصغَّرة كلُّها.
+   فالفحصُ يُرسل ما تُرسله الشاشةُ بالضبط. */
+const savePayload = (over) => Object.assign({
+  name: "مقاول رغده", createdBy: "رغده", createdByUser: "رغده",
+  createdAt: "2026-08-01", status: "active", bank: {},
+  updatedAt: "2026-08-20T10:00:00.000Z", updatedBy: "رغده"
+}, over || {});
+await check("★★★ وحفظُ الشاشة بحمولته الكاملة يمرّ (إعادةُ كتابةِ القيمة نفسِها ليست تغييراً)",
+  assertSucceeds(setDoc(doc(SUP_RGD, `${V}/V-RGD`), savePayload({ name: "اسمٌ مصحَّح" }), { merge: true })));
+await check("★★★ وبنفس الحمولة لا يمرّ تغييرُ اسمِ الدخول المالك",
+  assertFails(setDoc(doc(SUP_OTHER, `${V}/V-RGD`), savePayload({ createdByUser: "خالد" }), { merge: true })));
+await check("★★★ ولا تمرّ الحمولةُ نفسُها بآيبانٍ مدسوس",
+  assertFails(setDoc(doc(SUP_RGD, `${V}/V-RGD`), savePayload({ bank: { iban: "SA9" } }), { merge: true })));
 
 /* ═════════ ٢) طلبُ التعاقد — البوّابات ═════════ */
 head("٢) طلبُ التعاقد — لا اعتمادَ بغير صاحب البوّابة");

@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2737";
+var MODULE_BUILD = "v18.9.2739";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1972,6 +1972,24 @@ function canEdit(){   return EDIT_ROLES.indexOf(_role())   !== -1; }
 /* الإضافةُ تشترط **الاطّلاعَ والدورَ معاً**: بلا اطّلاعٍ لا شاشةَ يُضاف منها، ولولا
    اشتراطُه لكان كلُّ مشرفٍ في المنصّة مضيفاً وإن لم يُمنح القسمَ أصلاً. */
 function canAdd(){    return canView() && ADD_ROLES.indexOf(_role()) !== -1; }
+
+/* ── تعديلُ **هذا** الطرف: بوّابةٌ على المستند لا على الدور وحدَه ──
+   `canEdit` تقول «هذا الدورُ يعدّل الأطراف»، وهي تبقى لـ`EDIT_ROLES`. وهذه تقول
+   «هذا المستخدمُ يعدّل **هذا** الطرف» — فالمضيفُ يصحّح ما أدخله (رقمُ سجلٍّ نُقل
+   خطأً · اسمٌ ناقص · وثيقةٌ نُسيت)، ولا يمتدّ إلى ما أدخله غيرُه.
+
+   **والمِلكيّةُ باسم الدخول لا بالاسم المعروض** (`createdByUser` لا `createdBy`):
+   الأسماءُ المعروضةُ تتكرّر وتتغيّر، وهذه **بوّابةُ كتابةٍ لا سطرُ عرض** — فمطابقةُ
+   اسمٍ معروضٍ تمنح التعديلَ لمن وافق اسمُه اسمَ المُنشئ. ولذلك **لا ارتدادَ** إليه
+   هنا خلافاً لخانات الاعتماد في الوثائق: هناك يُقرأ، وهنا يُؤذَن.
+   ونتيجتُه المعلَنة: طرفٌ أُنشئ قبل هذا التغيير لا يحمل `createdByUser` فلا يعدّله
+   مشرفٌ أبداً — وأصحابُه أدمنُ ومشترياتٌ يعدّلونه كما كانوا. */
+function canEditVendor(v){
+  if(canEdit()) return true;                 // أدمن ومشتريات: كلُّ طرف كما كان
+  if(!canAdd() || !v) return false;          // ومَن لا يملك الإضافةَ لا يملك التصحيح
+  var me = _meUser();
+  return !!me && String(v.createdByUser || "") === me;
+}
 function canBank(){   return BANK_ROLES.indexOf(_role())   !== -1; }
 function canStatus(){ return STATUS_ROLES.indexOf(_role()) !== -1; }
 
@@ -2086,7 +2104,11 @@ function saveVendor(data, id){
         // الآيبان لا يُكتب إلا من مخوَّل — ولو وصل في الحمولة من واجهةٍ قديمة
         if(!canBank()) next.bank = cur.bank || { };
         next.updatedAt = _now(); next.updatedBy = _me();
-        if(!s.exists){ next.createdAt=_now(); next.createdBy=_me(); }
+        /* **المِلكيّةُ تُكتب باسم الدخول**: `createdBy` اسمٌ معروضٌ للعرض، و
+           `createdByUser` هو ما تُطابقه بوّابةُ `canEditVendor` وقاعدةُ الخادم —
+           نفسُ ما تفعله طلباتُ التعاقد وأوامرُ التغيير (`createdByUser`). وبدونه
+           لا يعدّل المضيفُ ما أضافه: الشرطُ لا يجد ما يطابقه. */
+        if(!s.exists){ next.createdAt=_now(); next.createdBy=_me(); next.createdByUser=_meUser(); }
         t.set(ref, next, { merge:true });
         return next;
       });
@@ -3396,7 +3418,7 @@ function vendorCardHTML(id){
   var back = '<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.backToVendors()">'+_icn("rotateCcw")+' كل الأطراف</button>';
 
   var tools = "";
-  if(canEdit()) tools += '<button class="btn btn-primary btn-sm" onclick="contracts.editVendor()">'+_icn("edit")+' تعديل</button> ';
+  if(canEditVendor(v)) tools += '<button class="btn btn-primary btn-sm" onclick="contracts.editVendor()">'+_icn("edit")+' تعديل</button> ';
   if(canStatus()){
     tools += (v.status==="blacklisted")
       ? '<button class="btn btn-ghost btn-sm" onclick="contracts.changeStatus(\'active\')">'+_icn("checkCircle")+' رفع الحظر</button>'
@@ -3753,8 +3775,10 @@ function newVendor(){
   if(el) el.innerHTML = vendorEditHTML(null);
 }
 function editVendor(){
-  if(!canEdit()) return _toast("⚠ لا صلاحية للتعديل","warn");
   var v = vendorById(_vOpen); if(!v) return;
+  if(!canEditVendor(v)) return _toast(canAdd()
+    ? "⚠ تعديلُ هذا الطرف لمن أضافه أو للمشتريات — يمكنك تعديل ما تضيفه أنت"
+    : "⚠ لا صلاحية للتعديل","warn");
   _vEdit = {
     name: v.name||"", entityType: normEntity(v.entityType), kind: v.kind||"subcontractor",
     taxRegistered: (v.taxRegistered===true||v.taxRegistered===false) ? v.taxRegistered : null,
@@ -3909,8 +3933,8 @@ function saveVendorEdit(){
      `window.contracts` فتُنادى من أيّ مكان. والعمليةُ هي التي تختار بوّابتَها —
      `_vOpen` فارغٌ ⇐ إنشاءٌ (`canAdd`)، ومملوءٌ ⇐ تعديلٌ على قائم (`canEdit`) —
      فلا يُعدّل بياناتِ طرفٍ قائمٍ مَن لا يملك إلا الإضافة. */
-  if(_vOpen ? !canEdit() : !canAdd())
-    return _toast(_vOpen ? "⚠ لا صلاحية للتعديل" : "⚠ لا صلاحية لإضافة طرف","warn");
+  if(_vOpen ? !canEditVendor(vendorById(_vOpen)) : !canAdd())
+    return _toast(_vOpen ? "⚠ لا صلاحية لتعديل هذا الطرف" : "⚠ لا صلاحية لإضافة طرف","warn");
   var d = _vEdit;
   var ent = normEntity(d.entityType);
   if(!d.name){ _toast(ent==="individual" ? "⚠ اسم الشخص مطلوب" : "⚠ اسم المنشأة مطلوب","warn"); return; }
@@ -7513,7 +7537,8 @@ window.contracts = {
   // الصلاحيات
   // الرابطُ العميق من رسالة واتساب [المرحلة ٩]
   openById: openById, ownsId: ctrOwnsId, _idKind: ctrIdKind,
-  canView: canView, canEdit: canEdit, canAdd: canAdd, canBank: canBank, canStatus: canStatus, canCreateReq: canCreateReq,
+  canView: canView, canEdit: canEdit, canAdd: canAdd, canEditVendor: canEditVendor,
+  canBank: canBank, canStatus: canStatus, canCreateReq: canCreateReq,
   /* طبعُ مفتاح «التعاقدات» بحسب الدور — **مصدرٌ واحد** تقرؤه نافذةُ الصلاحيات في
      النواة، فلا تُنسَخ `VIEW_ROLES` في ملفٍّ ثانٍ ينحرف عنها بصمت. */
   viewRoles: VIEW_ROLES.slice(), roleEligible: roleEligible,

@@ -4892,13 +4892,62 @@ function cleaningOpsTests() {
         as(null);
         T("★ sv: وبلا مستخدمٍ لا إضافة", CT.canAdd() === false);
 
+        /* ══ ★★ v18.9.2739: المضيفُ يصحّح ما أضافه — بوّابةٌ على **المستند** ══
+           إضافةٌ بلا تصحيحٍ تُنتج سجلاً خاطئاً لا يملك صاحبُه إصلاحَه (رقمُ سجلٍّ
+           نُقل خطأً في السطر التالي). والمِلكيّةُ **باسم الدخول** لا بالاسم المعروض:
+           الأسماءُ تتكرّر وتتغيّر، وهذه بوّابةُ كتابةٍ لا سطرُ عرض. */
+        const MINE  = { id:"V1", name:"مقاولي", createdBy:"رغده",  createdByUser:"رغده" };
+        const HERS  = { id:"V2", name:"مقاولُه", createdBy:"خالد",  createdByUser:"خالد" };
+        const OLD   = { id:"V3", name:"طرفٌ قديم", createdBy:"رغده" };   // بلا createdByUser
+        as({ user:"رغده", role:"مشرف", permissions:{ contracts:true } });
+        T("★★ ov: المشرفُ يعدّل الطرفَ الذي أضافه هو", CT.canEditVendor(MINE) === true);
+        T("★★ ov: ولا يعدّل ما أضافه غيرُه", CT.canEditVendor(HERS) === false);
+        T("★★★ ov: ولا طرفاً قديماً بلا `createdByUser` — **ولا يُطابَق بالاسم المعروض**",
+          CT.canEditVendor(OLD) === false);
+        T("★ ov: ولا طرفاً غيرَ موجود", CT.canEditVendor(null) === false);
+        as({ user:"خالد", role:"مشرف", permissions:{ contracts:true } });
+        T("★★ ov: ومشرفٌ آخرُ يعدّل مستنده هو لا مستندَ زميله",
+          CT.canEditVendor(HERS) === true && CT.canEditVendor(MINE) === false);
+        as({ user:"س", role:"مشرف", permissions:{ tickets:true } });
+        T("★★ ov: ومشرفٌ بلا إذن التعاقدات لا يعدّل ولو حمل المستندُ اسمَه",
+          CT.canEditVendor({ createdByUser:"س" }) === false);
+        as({ user:"p", role:"procurement_officer" });
+        T("★ ov: والمشترياتُ تعدّل كلَّ طرفٍ كما كانت (بمِلكيّةٍ أو بلا)",
+          CT.canEditVendor(MINE) === true && CT.canEditVendor(OLD) === true);
+        as({ user:"pm", role:"project_manager" });
+        T("★ ov: ومديرُ المشاريع لا يعدّل شيئاً (لم يُمَسّ)",
+          CT.canEditVendor(MINE) === false && CT.canEditVendor(OLD) === false);
+        as({ user:"a", role:"admin" });
+        T("★ ov: والأدمنُ يعدّل كلَّ شيء", CT.canEditVendor(OLD) === true);
+
+        // ── والمِلكيّةُ تُكتب أصلاً، وإلا لم يجد الشرطُ ما يطابقه ──
+        T("★★★ ov: `saveVendor` تكتب `createdByUser` عند الإنشاء (باسم الدخول)",
+          /if\(!s\.exists\)\{ next\.createdAt=_now\(\); next\.createdBy=_me\(\); next\.createdByUser=_meUser\(\); \}/.test(cs));
+        // ── والزرُّ والبوّابتان يقرأن الدالّةَ نفسَها (لا زرٌّ يظهر وبابٌ يُغلق) ──
+        T("★★ ov: زرُّ «تعديل» وفتحُ النموذج وحفظُه — ثلاثتُها canEditVendor",
+          /if\(canEditVendor\(v\)\) tools \+=/.test(cs) &&
+          /function editVendor\(\)\{[\s\S]{0,120}?if\(!canEditVendor\(v\)\)/.test(cs) &&
+          /if\(_vOpen \? !canEditVendor\(vendorById\(_vOpen\)\) : !canAdd\(\)\)/.test(cs));
+        {
+          const RULES2 = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "firestore.rules"), "utf8"); } catch (e) { return ""; } })();
+          const own = (RULES2.match(/function vendorOwnUpdateOk\(\) \{[\s\S]*?\n    \}/) || [""])[0];
+          T("★★★ ov: وقاعدةُ الخادم تطابق الواجهة — مِلكيّةٌ باسم الدخول من ادّعاء التوكِن",
+            /request\.auth\.token\.get\('u', ''\)/.test(own) &&
+            /resource\.data\.get\('createdByUser', ''\) == request\.auth\.token\.get\('u', ''\)/.test(own));
+          T("★★★ ov: ولا تُنتحَل المِلكيّة ولا يُمَسّ الآيبانُ ولا الحالة",
+            /unchanged\(\['createdByUser', 'createdBy', 'createdAt', 'status'\]\)/.test(own) &&
+            /ibanOf\(request\.resource\.data\) == ibanOf\(resource\.data\)/.test(own));
+          T("★★ ov: والقاعدةُ موصولةٌ بالمجموعتين (الإنتاج والتطوير)",
+            (RULES2.match(/allow update: if vendorUpdateOk\(\) \|\| vendorOwnUpdateOk\(\);/g) || []).length === 2);
+        }
+
         // ── والزرُّ والكتابةُ يقرآن `canAdd` لا `canEdit` (وإلا بوّابةٌ بلا باب) ──
         T("★★ sv: زرُّ «طرف جديد» وبوّابةُ الإنشاء يقرآن canAdd",
           /var actions = canAdd\(\)/.test(cs) &&
           /\(canAdd\(\)\?'<button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="contracts\.newVendor\(\)"/.test(cs) &&
           /function newVendor\(\)\{\s*\n?\s*if\(!canAdd\(\)\)/.test(cs));
-        T("★★ sv: والبوّابةُ على **الكتابة** نفسِها، والعمليةُ تختارها (إنشاءٌ ⇐ canAdd · تعديلٌ ⇐ canEdit)",
-          /if\(_vOpen \? !canEdit\(\) : !canAdd\(\)\)/.test(cs));
+        T("★★ sv: والبوّابةُ على **الكتابة** نفسِها، والعمليةُ تختارها (إنشاءٌ ⇐ canAdd · تعديلٌ ⇐ canEditVendor)",
+          /if\(_vOpen \? !canEditVendor\(vendorById\(_vOpen\)\) : !canAdd\(\)\)/.test(cs));
         // ── وقاعدةُ الخادم تطابق الواجهة: مَن تسمح له هذه تسمح له تلك ──
         {
           const RULES = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "firestore.rules"), "utf8"); } catch (e) { return ""; } })();

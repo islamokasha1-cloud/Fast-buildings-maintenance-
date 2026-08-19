@@ -221,16 +221,35 @@ service cloud.firestore {
       return anyRole(['procurement_officer','finance','admin'])
         && (ibanOf(request.resource.data) == ibanOf(resource.data) || anyRole(['finance','admin']));
     }
+    /* ── المضيفُ يصحّح ما أضافه — ومِلكيّةٌ لا تُنتحَل ──
+       المشرفُ يُنشئ طرفاً (`vendorCreateOk`)، فمن العبث أن يعجز عن تصحيح رقمِ سجلٍّ
+       نقله خطأً في السطر التالي. لكنّ التصحيحَ **مقصورٌ على مستنده**، وأربعةُ قيودٍ
+       تجعل ذلك محكَماً:
+       • **المطابقةُ باسم الدخول** (`createdByUser` مقابل الادّعاء `u` في التوكِن) —
+         لا بالاسم المعروض: الأسماءُ تتكرّر وتتغيّر، وهذه بوّابةُ كتابةٍ لا سطرُ عرض.
+       • **ولا تُنتحَل المِلكيّة**: `createdByUser` و`createdBy` و`createdAt` في
+         `unchanged` — فلا يكتب أحدٌ اسمَه على مستندِ غيره ثمّ يعدّله.
+       • **ولا يُمَسّ الآيبان** (الشرطُ نفسُه الذي يحكم المشتريات).
+       • **ولا الحالةُ** (`status`): الإيقافُ والحظرُ للأدمن، فلا يُلغيه المضيف.
+       ونتيجتُه المعلَنة: طرفٌ بلا `createdByUser` (ما أُنشئ قبل هذا التغيير) لا
+       يعدّله مشرفٌ أبداً — الشرطُ لا يجد ما يطابقه، وهو الوضعُ الآمن. */
+    function vendorOwnUpdateOk() {
+      return anyRole(['supervisor','مشرف'])
+        && request.auth.token.get('u', '') != ''
+        && resource.data.get('createdByUser', '') == request.auth.token.get('u', '')
+        && ibanOf(request.resource.data) == ibanOf(resource.data)
+        && unchanged(['createdByUser', 'createdBy', 'createdAt', 'status']);
+    }
     match /global_vendors/{id} {
       allow read:   if hasRole();
       allow create: if vendorCreateOk();
-      allow update: if vendorUpdateOk();
+      allow update: if vendorUpdateOk() || vendorOwnUpdateOk();
       allow delete: if isAdmin();
     }
     match /global_vendors_dev/{id} {
       allow read:   if hasRole();
       allow create: if vendorCreateOk();
-      allow update: if vendorUpdateOk();
+      allow update: if vendorUpdateOk() || vendorOwnUpdateOk();
       allow delete: if isAdmin();
     }
 
