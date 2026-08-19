@@ -1931,6 +1931,74 @@ await page.screenshot({ path: `${SHOTS}/22b-extract-rewind.png`, fullPage: true 
 await page.evaluate(async (eid) => { await window.contracts._actExt(eid, 'approve', ''); }, ext1.id);
 await page.waitForTimeout(900);
 
+/* ══ توقيعُ المقاول على المستخلص — الورقةُ وشرطُ النسخة الموقّعة ══   (طلبُ المالك)
+   كان المستخلصُ مستنداً من طرفٍ واحد: نقيس ونخصم ونعتمد ونصرف، والمقاولُ يستلم
+   بلا ورقةٍ تُثبت أنّه أقرّ الكمياتِ ولا الخصومات. والفحصُ يُثبت الشرطَ حيث يقع:
+   البياناتُ ترفض، والشاشةُ لا تَعِد بزرّ، والورقةُ تخرج بالأرقام نفسِها. */
+const noSig = await page.evaluate(async (eid) => {
+  try { await window.contracts._payExt(eid, { ref: 'x', receiptUrl: 'https://example.test/r.pdf' }); return 'مرّ بلا توقيع'; }
+  catch (e) { return e.message; }
+}, ext1.id);
+check('★★ سدادُ المستخلص يُرفض بلا نسخةٍ موقّعةٍ من المقاول — في طبقة البيانات',
+  /موقّعةً من المقاول/.test(noSig), noSig);
+
+await page.evaluate((eid) => window.contracts.openExtFrom(eid, window.contracts.extractById(eid).contractId), ext1.id);
+await page.waitForTimeout(900);
+const extCardPreSign = await page.evaluate(() => {
+  const t = document.getElementById('page-contracts-list').textContent;
+  return { pay: t.includes('تسجيل السداد'), warn: t.includes('ولا سدادَ قبلها'),
+           print: t.includes('طباعة المستخلص'), up: t.includes('رفع النسخة الموقّعة') };
+});
+check('★★ وزرُّ السداد غائبٌ حتى تُرفع النسخة — ومكانَه سببُ غيابه',
+  extCardPreSign.pay === false && extCardPreSign.warn === true, JSON.stringify(extCardPreSign));
+check('★ وزرّا الطباعة ورفعِ النسخة حاضران', extCardPreSign.print && extCardPreSign.up, JSON.stringify(extCardPreSign));
+
+const extPaper = await page.evaluate((eid) => {
+  const e = window.contracts.extractById(eid), c = window.contracts.contractById(e.contractId);
+  const calc = window.contracts._extCalc(e, c);
+  const m = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return { html: window.contracts._extractPaperHTML(e, c, {}), net: m(calc.net), gross: m(calc.gross),
+           ret: m(calc.retention), state: window.contracts._extPrintState(e, calc.net).key };
+}, ext1.id);
+check('★★★ ورقةُ المستخلص: الرقمُ المرسوم = الرقمُ المحسوب (المنجَز · المحتجَز · الصافي)',
+  extPaper.html.includes(extPaper.net) && extPaper.html.includes(extPaper.gross) &&
+  extPaper.html.includes(extPaper.ret),
+  `صافي=${extPaper.net} · منجَز=${extPaper.gross}`);
+check('★★ وتُعلن أنّها بانتظار توقيع المقاول قبل رفع النسخة',
+  extPaper.state === 'sign' && /بانتظار توقيع المقاول/.test(extPaper.html), extPaper.state);
+check('★★ وفوق التوقيع إقرارٌ منصوصٌ بالكميات والخصومات لا خانةٌ صامتة',
+  /إقرارُ المقاول وتوقيعه/.test(extPaper.html) && /كاملَ استحقاقي/.test(extPaper.html) &&
+  /التوقيع والختم/.test(extPaper.html));
+check('★ وتخرج على الورقة الرسمية بطبقاتها الثلاث كبقيّة مطبوعاتنا',
+  /class="lh lh-h"/.test(extPaper.html) && /class="lh lh-f"/.test(extPaper.html) &&
+  /<table class="pg">/.test(extPaper.html));
+fs.writeFileSync(`${SHOTS}/extract-print.html`, extPaper.html);
+
+const sigRes = await page.evaluate(async (eid) => {
+  const noDoc = await window.contracts._signExt(eid, {}).then(() => 'مرّ بلا نسخة', e => e.message);
+  await window.contracts._signExt(eid, { url: 'https://example.test/ext-signed.pdf', name: 'مستخلص موقّع' });
+  const e = window.contracts.extractById(eid), c = window.contracts.contractById(e.contractId);
+  const calc = window.contracts._extCalc(e, c);
+  return { noDoc, net: e.signature.net, calc: calc.net,
+           ok: window.contracts._extPayGuard(e, calc.net).ok,
+           stale: window.contracts._extPayGuard(e, calc.net + 1000).why,
+           state: window.contracts._extPrintState(e, calc.net).key,
+           tl: ((e.timeline || []).slice(-1)[0] || {}).code || '' };
+}, ext1.id);
+check('★ ورفعُ النسخة يُرفض بلا ملف', /إلزامية/.test(sigRes.noDoc), sigRes.noDoc);
+check('★★ والنسخةُ حُفظت على **صافي وقتِ التوقيع** فصار السدادُ جائزاً',
+  sigRes.net === sigRes.calc && sigRes.ok === true && sigRes.state === 'due' && sigRes.tl === 'signed',
+  JSON.stringify(sigRes));
+check('★★ ولو تغيّر الصافي بعدها سقط التوقيعُ ولزمت نسخةٌ على الرقم الجديد',
+  /تلزم نسخةٌ موقّعةٌ على الرقم الجديد/.test(sigRes.stale), sigRes.stale);
+
+await page.evaluate((eid) => window.contracts.openExtFrom(eid, window.contracts.extractById(eid).contractId), ext1.id);
+await page.waitForTimeout(900);
+const afterSign = await page.evaluate(() => document.getElementById('page-contracts-list').textContent);
+check('★★ وبعد الرفع ظهر زرُّ السداد وقُرئ توقيعُ المقاول في البطاقة',
+  afterSign.includes('تسجيل السداد') && afterSign.includes('وقّع المقاولُ نسخةَ هذا المستخلص'));
+await page.screenshot({ path: `${SHOTS}/22c-extract-signed.png`, fullPage: true });
+
 const paid = await page.evaluate(async (eid) => {
   await window.contracts._payExt(eid, { ref: 'TRX-1', receiptUrl: 'https://example.test/r.pdf' });
   const e = window.contracts.extractById(eid);
@@ -1959,6 +2027,7 @@ const finalPay = await page.evaluate(async (eid) => {
   await window.contracts._actExt(eid, 'approve', '');
   const st1 = window.contracts.extractById(eid).status;
   if (st1 === 'ext_pending_ceo') await window.contracts._actExt(eid, 'approve', '');
+  await window.contracts._signExt(eid, { url: 'https://example.test/ext2-signed.pdf', name: 'المستخلص الختاميّ موقّعاً' });
   await window.contracts._payExt(eid, { ref: 'TRX-2', receiptUrl: 'https://example.test/r2.pdf' });
   const e = window.contracts.extractById(eid);
   return { st: e.status, cst: window.contracts.contractById(e.contractId).status };

@@ -277,7 +277,7 @@ await check("★ ولا الملغى",
   assertFails(updateDoc(doc(ADMIN, `${R}/RUN3`), { status: "crq_approved", contractId: "" })));
 
 /* ═════════ ٤) المستخلص — البوّابةُ والإيصال ═════════ */
-head("٤) المستخلص — لا سدادَ بلا إيصال");
+head("٤) المستخلص — لا سدادَ بلا إيصال ولا بلا نسخةٍ موقّعةٍ من المقاول");
 const EXT = { status: "ext_pending_pm", contractId: "C2", createdAt: "2026-02-01" };
 await seed(`${E}/E1`, EXT);
 await check("مديرُ المشاريع يُنشئ مستخلصاً",
@@ -292,7 +292,13 @@ await check("ومديرُ المشاريع يعتمد فينتقل",
   assertSucceeds(updateDoc(doc(PM, `${E}/E1`), { status: "ext_pending_finance" })));
 await check("★★ والسدادُ يُرفض بلا إيصال — على الخادم لا في الشاشة وحدَها",
   assertFails(updateDoc(doc(FIN, `${E}/E1`), { status: "ext_paid", payment: { amount: 100 } })));
-await check("ويُقبل بإيصال",
+await check("★★ ويُرفض بإيصالٍ بلا نسخةٍ موقّعةٍ من المقاول — لا مالَ بلا إقراره",
+  assertFails(updateDoc(doc(FIN, `${E}/E1`), { status: "ext_paid", payment: { amount: 100, receiptUrl: "po/r.jpg" } })));
+await check("★ والنسخةُ الموقّعةُ لا يكتبها التنفيذيّ — يكتبها من يستلمها من المقاول",
+  assertFails(updateDoc(doc(CEO, `${E}/E1`), { signature: { url: "po/s.jpg", net: 100 } })));
+await check("ومديرُ المشاريع يرفعها",
+  assertSucceeds(updateDoc(doc(PM, `${E}/E1`), { signature: { url: "po/s.jpg", net: 100 } })));
+await check("ويُقبل السدادُ بإيصالٍ ونسخةٍ موقّعة",
   assertSucceeds(updateDoc(doc(FIN, `${E}/E1`), { status: "ext_paid", payment: { amount: 100, receiptUrl: "po/r.jpg" } })));
 await check("★ والمسدَّدُ لا يُعدَّل بعدها", assertFails(updateDoc(doc(ADMIN, `${E}/E1`), { status: "ext_pending_pm" })));
 await seed(`${E}/E2`, EXT);
