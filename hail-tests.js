@@ -1242,9 +1242,10 @@ function inventoryReportsTests() {
       /class="num ct-g-after"/.test(cs2) && /class="num ct-g-delta"/.test(cs2) &&
       /class="num ct-e-pct"/.test(cs2)  && /class="num ct-e-val"/.test(cs2) &&
       /tr\.querySelector\("\.ct-g-after"\)/.test(cs2) && /tr\.querySelector\("\.ct-e-pct"\)/.test(cs2));
-    /* والورقتان المطبوعتان كانتا مرقَّمتين أصلاً — فالشاشةُ لحقت بهما لا العكس */
-    T("★ ln: والورقتان المطبوعتان ما زالتا ترقّمان بالترتيب نفسِه (`(i+1)` على `lines`)",
-      (cs2.match(/<td style="text-align:center">'\+\(i\+1\)\+'<\/td>'/g) || []).length === 2);
+    /* والمطبوعاتُ كانت مرقَّمةً أصلاً — فالشاشةُ لحقت بها لا العكس. وورقةُ المستخلص
+       ثالثتُها: تُرقّم بالترتيب نفسِه فيتطابق «البند ٤» في الثلاث. */
+    T("★ ln: والمطبوعاتُ الثلاث ما زالت ترقّم بالترتيب نفسِه (`(i+1)` على `lines`)",
+      (cs2.match(/<td style="text-align:center">'\+\(i\+1\)\+'<\/td>'/g) || []).length === 3);
   }
 
   /* ══ ★★ v18.9.2743: عمودُ «م» في تقارير المخزون — مرّةً واحدةً لا سبعاً ══ */
@@ -9207,6 +9208,60 @@ function contractsPhase1() {
     /الكميات بلا تكلفة/.test(src));
 
   /* ════════════════════════════════════════════════════════════
+     ورقةُ المستخلص وتوقيعُ المقاول عليها — لا مالَ بلا إقراره
+     كان المستخلصُ مستنداً من طرفٍ واحد: نقيس ونخصم ونعتمد ونصرف، والمقاولُ
+     يستلم بلا ورقةٍ تُثبت أنّه أقرّ الكمياتِ ولا الخصومات. والحرّاسُ هنا على
+     الشرط في مواضعه الثلاثة (الزرّ · الكتابة · القاعدة) وعلى **سقوط التوقيع
+     إن تغيّر الرقمُ الذي وُقّع عليه**.
+     ════════════════════════════════════════════════════════════ */
+  {
+    const RULE_EXT = (() => {
+      const q = path.resolve(path.dirname(IDX), "firestore.rules");
+      return fs.existsSync(q) ? fs.readFileSync(q, "utf8") : "";
+    })();
+    const ESG = { status: "ext_pending_finance", lines: [{ cumQty: 1000, unitPrice: 30 }],
+                  signature: { url: "po/s.jpg", net: 25000, at: "2026-03-01T09:00", by: "أحمد" } };
+    T("★★ لا سدادَ بلا نسخةٍ موقّعةٍ من المقاول — الحارسُ نقيٌّ ونصُّه واحدٌ للشاشة وللكتابة",
+      !C._extPayGuard(Object.assign({}, ESG, { signature: null }), 25000).ok &&
+      /نسخة المستخلص موقّعةً من المقاول/.test(C._extPayGuard(Object.assign({}, ESG, { signature: null }), 25000).why));
+    T("★ وبالنسخة يمرّ", C._extPayGuard(ESG, 25000).ok);
+    T("★★ والتوقيعُ على **رقمٍ بعينه**: تغيّرُ الصافي يُسقطه (كبصمتَي الطلب)",
+      C._extSigValid(ESG, 25000) && !C._extSigValid(ESG, 22000) && !C._extPayGuard(ESG, 22000).ok);
+    T("ويثبت أمام فروق التقريب وحدَها",
+      C._extSigValid(ESG, 25000.01) && !C._extSigValid(ESG, 25000.5));
+    T("★★ والمنعُ في `payExtract` نفسِها وعلى الصافي الطازج — لا في الزرّ وحدَه",
+      /function payExtract[\s\S]{0,1600}var calc=extCalc\(e, fresh\);[\s\S]{0,420}extPayGuard\(e, calc\.net\)[\s\S]{0,140}throw new Error\(sgOk\.why\)/.test(src));
+    T("★★ وفي `firestore.rules` أيضاً — الشاشةُ تُدار من وحدة تحكّم، والقاعدةُ لا",
+      /ext_paid'[\s\S]{0,340}signature','url'\], ''\) != ''/.test(RULE_EXT));
+    T("★ وزرُّ السداد يغيب بلا توقيعٍ صالح (زرٌّ يعِد ولا يفي أسوأُ من زرٍّ غائب)",
+      /pguard = extPayGuard\(e, calc\.net\)/.test(src) &&
+      /mode!=="blocked" && pguard\.ok[\s\S]{0,220}openExtPay\(\)/.test(src));
+    T("★★ وورقةُ المستخلص أرقامُها من `extNet` وحدَها — والمسدَّدُ من لقطته المحفوظة",
+      /function extractPaperHTML\(e, c, opt\)/.test(src) &&
+      /var calc=e\.settled \|\| extCalc\(e, c\);/.test(src));
+    T("★ وتُعلن حالتَها كسند الصرف: مراجعةٌ · بانتظار التوقيع · صالحٌ للسداد · مسدَّد · لاغٍ",
+      C._extPrintState({ status: "ext_pending_pm" }, 100).cls === "warn" &&
+      C._extPrintState({ status: "ext_pending_finance" }, 25000).key === "sign" &&
+      C._extPrintState(ESG, 25000).key === "due" &&
+      C._extPrintState(ESG, 22000).key === "sign" &&
+      C._extPrintState({ status: "ext_paid" }, 100).key === "paid" &&
+      C._extPrintState({ status: "ext_returned" }, 100).cls === "bad");
+    T("★ وتوقيعاتُها الداخليةُ مشتقّةٌ من البوّابات نفسِها لا مكتوبةً في الورقة",
+      C._extSignoffs({ pmApprovedBy: "س" }, 10, 100000).length === 2 &&
+      C._extSignoffs({ pmApprovedBy: "س" }, 200000, 100000).length === 3 &&
+      C._extSignoffs({ pmApprovedBy: "س" }, 10, 100000)[0].by === "س");
+    T("★★ وفوق توقيع المقاول **إقرارٌ منصوص** لا خانةٌ صامتة",
+      /إقرارُ المقاول وتوقيعه/.test(src) && /كاملَ استحقاقي عن الأعمال المنفَّذة/.test(src));
+    T("★ والنسخةُ الموقّعةُ تُحفَظ ومعها صافيها وقتَ التوقيع",
+      /function signExtract[\s\S]{0,1200}net:r2\(calc\.net\)/.test(src));
+    T("★ ورفعُها ليس لكلّ دور، ولا تُرفع لمستخلصٍ في حالةٍ نهائية",
+      /function signExtract[\s\S]{0,700}\["project_manager","finance","admin"\]\.indexOf\(_role\(\)\) === -1/.test(src) &&
+      /function signExtract[\s\S]{0,1100}extIsFinal\(e\.status\)\) throw/.test(src));
+    T("★ و«بانتظار إجراءك» تقول للمالية ما ينقصها لا اسمَ البوّابة",
+      /ext_pending_finance" && !extSignature\(e\)\) egate="بانتظار نسخةٍ موقّعةٍ من المقاول"/.test(src));
+  }
+
+  /* ════════════════════════════════════════════════════════════
      الوثيقةُ التعاقدية — شروطٌ نصّية · حالةُ توقيع · مخرَجٌ ورقيّ
      ════════════════════════════════════════════════════════════ */
   const CT5 = { id: "CTR-1", value: 100000, vatMode: "excl", lines: [{ id: "L1", qty: 1000, unitPrice: 100 }],
@@ -10219,8 +10274,8 @@ function contractLetterhead() {
 
   // ── المطبوعاتُ الثلاث كلُّها تمرّ بالإطار الواحد ──
   const wraps = (src.match(/letterheadWrap\(/g) || []).length;
-  T("★★ المطبوعتان (ورقةُ العقد ومسودتُها · سندُ الصرف) تلفّان بالإطار نفسِه لا بنسختين",
-    wraps === 3 && /function letterheadWrap\(/.test(src),
+  T("★★ المطبوعاتُ الثلاث (ورقةُ العقد ومسودتُها · سندُ الصرف · ورقةُ المستخلص) تلفّ بالإطار نفسِه لا بنسخٍ منه",
+    wraps === 4 && /function letterheadWrap\(/.test(src),
     `letterheadWrap ×${wraps}`);
   T("★ ولا ترويسةَ شركةٍ مكرّرةً فوق ترويسة الورقة",
     (src.match(/<div class="company">شركة المباني السريعة للمقاولات<\/div>/g) || []).length === 1);
