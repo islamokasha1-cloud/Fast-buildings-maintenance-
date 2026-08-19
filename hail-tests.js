@@ -1193,6 +1193,73 @@ function inventoryReportsTests() {
   T("خطّاف showPage يستدعي الوحدة",
     HTML.includes('if(id==="inventory-reports"){ if(window.inventoryReports&&window.inventoryReports.render) window.inventoryReports.render(); else _moduleMissingPage("page-inventory-reports","تقارير المخزون","inventory-reports.js"); }'));
 
+  /* ══ ★★ v18.9.2743: رقمُ البند — الشاشةُ تُرقّم كما تُرقّم الورقةُ الموقَّعة ══
+     العقدُ والطلبُ المطبوعان يرقّمان بنودَهما بترتيب `lines` منذ اليوم الأول، وشاشاتُ
+     البنود كانت **بلا رقم**: فمن يُراسَل بـ«البند ٤» يعدّ بإصبعه على الشاشة. والحارسُ
+     يمنع الارتدادَين معاً: عمودٌ يسقط من جدول، أو `colspan` لا يتبع العمودَ المضاف
+     (فيلتوي صفُّ «لا بنود» على عمودٍ ناقص). */
+  if (CTR_PATH) {
+    const cs2 = fs.readFileSync(CTR_PATH, "utf8");
+    T("★★ ln: ترويسةُ الرقم وخليّتُه **مصدرٌ واحد** لا نصٌّ مكرَّرٌ في كل جدول",
+      /var LN_TH = '<th class="ct-seq">م<\/th>';/.test(cs2) &&
+      /function lnSeq\(i\)\{ return '<td class="ct-seq">'\+\(i\+1\)\+'<\/td>'; \}/.test(cs2));
+    {
+      const ths  = (cs2.match(/LN_TH/g) || []).length - 1;      // ناقصَ سطرِ التعريف
+      const tds  = (cs2.match(/lnSeq\(i\)/g) || []).length - 1;
+      T("★★ ln: تسعةُ جداولِ بنودٍ مرقَّمةٌ كلُّها — والترويسةُ والخليّةُ متساويتان",
+        ths === 9 && tds === 9, `ترويسة=${ths} خليّة=${tds}`);
+    }
+    /* ★★★ الحارسُ البنيويّ: كلُّ ترويسةِ بنودٍ قانونيةٍ (الوصف+الوحدة) مسبوقةٌ
+       بعمود الرقم. عدٌّ مجرَّدٌ قد يمرّ ولو وُضع الرقمُ في جدولٍ آخر. */
+    {
+      const canon = "'<th>الوصف</th><th>الوحدة</th>";
+      let i = 0, miss = 0, seen = 0;
+      while ((i = cs2.indexOf(canon, i)) !== -1) {
+        seen++;
+        if (cs2.slice(Math.max(0, i - 60), i).indexOf("LN_TH") === -1) miss++;
+        i += canon.length;
+      }
+      T("★★★ ln: وكلُّ ترويسةِ «الوصف/الوحدة» مسبوقةٌ بعمود الرقم (لا جدولَ نُسي)",
+        seen > 0 && miss === 0, `ترويسات=${seen} بلا رقم=${miss}`);
+    }
+    T("★ ln: وللعمود صنفُه في الأنماط (عرضٌ ضيّقٌ وتوسيطٌ صريح)",
+      /\.ct-table th\.ct-seq,\.ct-table td\.ct-seq\{width:34px;text-align:center/.test(cs2));
+    /* ولا `colspan` بقي على عدده القديم: صفُّ «لا بنود» يجب أن يتمدّد على العمود المضاف */
+    T("★★ ln: و`colspan` صفوفِ الفراغ تبعت العمودَ المضاف",
+      !/colspan="5"[^>]*>—<\/td><\/tr>';\s*\n\s*var lineRows/.test(cs2) &&
+      (cs2.match(/colspan="7"/g) || []).length >= 3 &&
+      (cs2.match(/colspan="6"[^"]*"text-align:center;color:var\(--muted\)/g) || []).length >= 3);
+    /* ══ ★★★ العلّةُ التي كشفها العمودُ الجديد: كتابةٌ حيّةٌ **بفهرس الخليّة** ══
+       `chgRecalc` و`syncExtRow` كانتا تكتبان في `tds[4]`/`tds[5]`. فعمودٌ يُضاف في
+       المقدّمة يُزيحهما خليّةً: يُكتب «الكمية بعد» في خانة الإدخال و«أثرُ القيمة» في
+       خانة «الكمية بعد» — **بلا خطأِ جافاسكربت ولا رسالة**، وأرقامٌ صحيحةٌ في أماكنَ
+       خاطئة. (وقد وقع فعلاً: سقط `contracts-check` عند أوّل تشغيل.) فالكتابةُ الآن
+       **بصنف الخليّة**، والحارسُ يمنع عودةَ الفهرس — لا يحرس العمودَ الجديد وحدَه
+       بل كلَّ عمودٍ يُضاف بعده. */
+    T("★★★ ln: لا كتابةَ حيّةً بفهرس الخليّة في الوحدة كلِّها (`tds[n]`)",
+      !/\btds\[\d+\]/.test(cs2.replace(/\/\*[\s\S]*?\*\//g, "")));
+    T("★★★ ln: والكتابةُ الحيّةُ بأصنافٍ صريحةٍ تُكتب وتُقرأ من المكان نفسِه",
+      /class="num ct-g-after"/.test(cs2) && /class="num ct-g-delta"/.test(cs2) &&
+      /class="num ct-e-pct"/.test(cs2)  && /class="num ct-e-val"/.test(cs2) &&
+      /tr\.querySelector\("\.ct-g-after"\)/.test(cs2) && /tr\.querySelector\("\.ct-e-pct"\)/.test(cs2));
+    /* والورقتان المطبوعتان كانتا مرقَّمتين أصلاً — فالشاشةُ لحقت بهما لا العكس */
+    T("★ ln: والورقتان المطبوعتان ما زالتا ترقّمان بالترتيب نفسِه (`(i+1)` على `lines`)",
+      (cs2.match(/<td style="text-align:center">'\+\(i\+1\)\+'<\/td>'/g) || []).length === 2);
+  }
+
+  /* ══ ★★ v18.9.2743: عمودُ «م» في تقارير المخزون — مرّةً واحدةً لا سبعاً ══ */
+  {
+    const ivr2 = IVR_PATH ? fs.readFileSync(IVR_PATH, "utf8") : "";
+    T("★★ ln: العمودُ يُضاف على المخرَج لا في كل بانٍ (سبعةُ مواضعَ تُنسى إحداها)",
+      /const SEQ_COL = \{k:"_n", l:"م", al:"center", w:5\};/.test(ivr2) &&
+      /function _withSeq\(rep\)\{/.test(ivr2) &&
+      /const rep = _withSeq\(BUILDERS\[_f\.kind\]\(\{logs, capped, b, takes\}\)\);/.test(ivr2));
+    T("★★★ ln: و**بعد** فراغِ البانِي من الفرز — فالرقمُ يتبع الترتيبَ المعروض",
+      /rep\.rows\.forEach\(function\(r,i\)\{ if\(r\) r\._n = i\+1; \}\);/.test(ivr2));
+    T("★ ln: وهو idempotent (توليدٌ ثانٍ لا يُضاعف العمود)",
+      /if\(rep\.cols\.length && rep\.cols\[0\]\.k === SEQ_COL\.k\) return rep;/.test(ivr2));
+  }
+
   /* ══ ★★ v18.9.2741: ورقةُ التقرير **طوليّة** — والهندسةُ كانت كذلك دائماً ══
      مقاساتُ الترويسة والتذييل منقولةٌ حرفياً عن `contracts.js` ومحسوبةٌ على ورقةٍ
      عرضُها ٢١٠مم (ترويسةٌ ٢٠٢٫٥مم · تذييلٌ ١٩١٫٨مم · علامةٌ مائيةٌ تبدأ عند ٤٨٫٩٥مم).
@@ -1294,6 +1361,22 @@ function inventoryReportsTests() {
   if (!IR || !IR._effects) return;
   T("التقارير السبعة معرَّفة", IR.KINDS && Object.keys(IR.KINDS).length === 7,
     "عددها=" + (IR.KINDS ? Object.keys(IR.KINDS).length : 0));
+
+  /* ══ ★★ v18.9.2743: عمودُ «م» — يُنفَّذ على مخرَجٍ وهميٍّ لا يُقرأ سطرُه ══ */
+  if (typeof IR._withSeq === "function") {
+    const out1 = IR._withSeq({ cols:[{k:"name",l:"المادة"}], rows:[{name:"أ"},{name:"ب"},{name:"ج"}] });
+    T("★★ ln: التنفيذُ يعطي عموداً أوّلَ «م» وترقيماً ١٬٢٬٣",
+      out1.cols[0].l === "م" && out1.rows.map(r => r._n).join(",") === "1,2,3");
+    T("★★ ln: وإعادةُ تطبيقه لا تُضاعف شيئاً (idempotent)", IR._withSeq(out1).cols.length === 2);
+    T("★ ln: ومخرَجٌ فارغٌ أو مشوَّهٌ لا يُسقط التوليد",
+      IR._withSeq(null) === null && !!IR._withSeq({}) && IR._withSeq({cols:[],rows:[]}).cols.length === 1);
+    /* ★★★ والرقمُ يتبع **ترتيبَ المخرَج** لا ترتيبَ الإدخال: هو صفةُ عرضٍ لا صفةُ صنف */
+    const sorted = IR._withSeq({ cols:[{k:"n",l:"م.اسم"}], rows:[{n:"ج"},{n:"أ"},{n:"ب"}] });
+    T("★★★ ln: الرقمُ لصفِّ العرض لا للصنف (أوّلُ صفٍّ = ١ مهما كان محتواه)",
+      sorted.rows[0]._n === 1 && sorted.rows[0].n === "ج");
+  } else {
+    T("★★ ln: `_withSeq` مكشوفةٌ على الواجهة للفحص", false, "غير مكشوفة");
+  }
 
   // ════ _effects / _net: مطابقة recalcInventoryFromLog حرفاً بحرف ════
   const L = (t, o) => Object.assign({ type: t, itemId: "A", qty: 10, date: "2026-08-05T09:00:00.000Z" }, o || {});

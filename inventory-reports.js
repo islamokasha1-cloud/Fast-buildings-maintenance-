@@ -50,7 +50,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.2741";
+  const MODULE_BUILD = "v18.9.2743";
 
   const HOST_ID   = "page-inventory-reports";
   const READ_CAP  = 5000;    // سقف الحركات المقروءة لكل توليد — يُعلَن عند بلوغه
@@ -921,7 +921,7 @@
     try{
       const {logs, capped} = await _loadLogs(b);
       const takes = (_f.kind==="adjust") ? await _loadStocktakes(b) : [];
-      const rep = BUILDERS[_f.kind]({logs, capped, b, takes});
+      const rep = _withSeq(BUILDERS[_f.kind]({logs, capped, b, takes}));
       rep.kind      = _f.kind;
       rep.kindName  = KINDS[_f.kind];
       rep.params    = _paramsList();
@@ -1432,6 +1432,23 @@
      الباقي عنها — والخارجُ عن الورقة **يُقصّ في الطباعة بلا رسالة**. فالنسبُ تُشتقّ
      من `c.w` نفسِها التي تُبنى منها أعمدةُ Excel: **مصدرٌ واحدٌ للعرض النسبيّ** فلا
      يتّسع عمودٌ في الملفّ ويضيق في الورقة. و`table-layout:fixed` تُلزم المتصفّحَ بها. */
+  /* ══ عمودُ «م» — يُضاف **مرّةً واحدة** لا سبعَ مرّات ══
+     التقاريرُ السبعةُ تُنتج `{cols, rows}`، ومنها وحدَها يُرسم الجدولُ ويُبنى ملفُّ
+     Excel وتُطبَع الورقة. فلو أُضيف الرقمُ في كل بانٍ على حِدة لَكان سبعةَ مواضعَ
+     تُنسى إحداها، **ولاختلف الترقيمُ بين الشاشة والملفّ إن رتّب أحدُهما غيرَ ترتيب
+     الآخر**. فيُضاف هنا على المخرَج بعد أن يفرغ البانِي من الفرز — فالرقمُ يتبع
+     **الترتيبَ المعروض** في المخارج الثلاثة معاً.
+     ⛔ ولا يُكتب في `rows` قبل الفرز ولا يُخزَّن: الرقمُ صفةُ العرض لا صفةُ الصنف —
+     فالصنفُ نفسُه رقمُه ٣ في تقريرٍ و١٧ في آخر. */
+  const SEQ_COL = {k:"_n", l:"م", al:"center", w:5};
+  function _withSeq(rep){
+    if(!rep || !Array.isArray(rep.cols) || !Array.isArray(rep.rows)) return rep;
+    if(rep.cols.length && rep.cols[0].k === SEQ_COL.k) return rep;   // idempotent
+    rep.cols = [SEQ_COL].concat(rep.cols);
+    rep.rows.forEach(function(r,i){ if(r) r._n = i+1; });
+    return rep;
+  }
+
   function _pdfColGroup(cols){
     const list = Array.isArray(cols) ? cols : [];
     const tot  = list.reduce((a,c)=>a+(_num(c&&c.w)||16),0) || 1;
@@ -1546,7 +1563,7 @@ ${on?_lhCSS():""}
     _invReady,
     _effects, _net, _bounds, _openingMap, _rollup, _priceOf, _lastInPrices,
     _itemMatch, _pickList, _snorm, _pickLabel,
-    _stale, _periodDays, _catalogIndex, _sheetRows, _safeSheetName,
+    _stale, _periodDays, _catalogIndex, _sheetRows, _safeSheetName, _withSeq,
     _state: ()=>({f:{..._f}, out:_out, sheets:Object.keys(_sheets)}),
     KINDS, READ_CAP,
     build: MODULE_BUILD
