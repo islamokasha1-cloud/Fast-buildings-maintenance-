@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2741";
+var MODULE_BUILD = "v18.9.2743";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1984,6 +1984,19 @@ function canAdd(){    return canView() && ADD_ROLES.indexOf(_role()) !== -1; }
    هنا خلافاً لخانات الاعتماد في الوثائق: هناك يُقرأ، وهنا يُؤذَن.
    ونتيجتُه المعلَنة: طرفٌ أُنشئ قبل هذا التغيير لا يحمل `createdByUser` فلا يعدّله
    مشرفٌ أبداً — وأصحابُه أدمنُ ومشترياتٌ يعدّلونه كما كانوا. */
+/* ══ رقمُ البند — عمودٌ واحدٌ من مصدرٍ واحد ══
+   العقدُ المطبوع يرقّم بنودَه بترتيبها في `lines` منذ اليوم الأول (`(i+1)` في
+   `contractPaperHTML`)، وشاشاتُ البنود كانت **بلا رقم**: فمن يُراسَل بـ«البند ٤»
+   يعدّ بإصبعه على الشاشة ليعرف أيَّ بندٍ يقصد، ومن يناقش مستخلصاً يصف البندَ بنصّه
+   لا برقمه. والترقيمُ هنا **بترتيب مستندِ العرض نفسِه**، وهو ما يجعله متّسقاً بلا
+   حيلة: بنودُ المستخلص وبنودُ العقد في أمر التغيير **مبنيّةٌ من `c.lines` واحداً
+   بواحدٍ وبترتيبها** (`_extDraft.lines = (c.lines||[]).map(…)`)، فرقمُها هو رقمُ
+   بند العقد عينُه؛ وبنودُ أمر التغيير الجديدةُ ترقيمُ مستندِها هي.
+   ⛔ ولا يُخزَّن الرقمُ في الوثيقة: البنودُ تُحذف وتُضاف قبل الإرسال، ورقمٌ محفوظٌ
+   يصير كاذباً عند أوّل حذف. المرجعُ ترتيبُ المصفوفة — وهو ما تطبعه الورقةُ أصلاً. */
+var LN_TH = '<th class="ct-seq">م</th>';
+function lnSeq(i){ return '<td class="ct-seq">'+(i+1)+'</td>'; }
+
 function canEditVendor(v){
   if(canEdit()) return true;                 // أدمن ومشتريات: كلُّ طرف كما كان
   if(!canAdd() || !v) return false;          // ومَن لا يملك الإضافةَ لا يملك التصحيح
@@ -4419,7 +4432,7 @@ function reqFormHTML(){
   // البنودُ المختارة (قابلةٌ للتحرير)
   var lineRows = d.lines.length ? d.lines.map(function(l,i){
     var t=lineTotal(l.qty,l.unitPrice,d.vatMode);
-    return '<tr>'+
+    return '<tr>'+lnSeq(i)+
       '<td><input class="form-input" data-lf="desc" data-i="'+i+'" value="'+_esc(l.desc)+'" placeholder="وصف البند">'+
         (l.boqLineId?'':' <span class="ct-doc s-soon">خارج المقايسة</span>')+'</td>'+
       '<td><input class="form-input" data-lf="unit" data-i="'+i+'" value="'+_esc(l.unit)+'" style="min-width:70px"></td>'+
@@ -4428,7 +4441,7 @@ function reqFormHTML(){
       '<td class="num">'+money(t.total)+'</td>'+
       '<td><button class="btn btn-delete" onclick="contracts.delReqLine('+i+')">'+_icn("trash","ic-sm")+'</button></td>'+
     '</tr>';
-  }).join("") : '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:14px">لم تُختَر بنودٌ بعد.</td></tr>';
+  }).join("") : '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">لم تُختَر بنودٌ بعد.</td></tr>';
 
   // تحذيرُ الموازنة
   var budWarn="";
@@ -4522,7 +4535,7 @@ function reqFormHTML(){
     '<div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود المطلوبة'+
       '<span style="margin-inline-start:auto"></span>'+aiBtnHTML()+
       '<button class="btn btn-ghost btn-sm" onclick="contracts.addFreeLine()">'+_icn("plus","ic-sm")+' بند حرّ</button></div>'+
-    '<div class="ct-table-wrap"><table class="ct-table" id="ct-r-lines"><thead><tr>'+
+    '<div class="ct-table-wrap"><table class="ct-table" id="ct-r-lines"><thead><tr>'+LN_TH+
       '<th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th><th></th>'+
     '</tr></thead><tbody>'+lineRows+'</tbody></table></div>'+
     '<div class="ct-total" id="ct-r-total">'+totalsHTML(tot, d.vatMode)+'</div>'+
@@ -4692,12 +4705,12 @@ function reqCardHTML(id){
     infoCell("أنشأه", _esc(r.createdBy||"—"))+
   '</div>';
 
-  var lineRows=(r.lines||[]).map(function(l){
+  var lineRows=(r.lines||[]).map(function(l,i){
     var lt=lineTotal(l.qty,l.unitPrice,r.vatMode);
-    return '<tr><td>'+_esc(l.desc||"—")+'</td><td>'+_esc(l.unit||"")+'</td>'+
+    return '<tr>'+lnSeq(i)+'<td>'+_esc(l.desc||"—")+'</td><td>'+_esc(l.unit||"")+'</td>'+
       '<td class="num">'+money0(l.qty)+'</td><td class="num">'+money(l.unitPrice)+'</td>'+
       '<td class="num">'+money(lt.total)+'</td></tr>';
-  }).join("") || '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
+  }).join("") || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
 
   var termsRow = r.engagement==="pay_order" ? "" :
     '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("shield","ic-sm")+' الشروط التجارية</div><div class="ct-info">'+
@@ -4747,7 +4760,7 @@ function reqCardHTML(id){
       '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود'+
         (canEditLines(r) ? '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.editLines()">'+_icn("edit","ic-sm")+' تعديل البنود</button>' : '')+
       '</div>'+
-      '<div class="ct-table-wrap"><table class="ct-table"><thead><tr><th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>'+
+      '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+LN_TH+'<th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>'+
       '<tbody>'+lineRows+'</tbody></table></div>'+
       '<div class="ct-total">'+totalsHTML(t, r.vatMode)+'</div>'+
     '</div>')+
@@ -5050,7 +5063,7 @@ function editLinesRecalc(){
 function linesEditHTML(r){
   var rows=_lnEdit.map(function(l,i){
     var lt=lineTotal(l.qty,l.unitPrice,r.vatMode);
-    return '<tr>'+
+    return '<tr>'+lnSeq(i)+
       '<td><input class="form-input" data-ef="desc" data-i="'+i+'" value="'+_esc(l.desc||"")+'" placeholder="وصف البند"></td>'+
       '<td><input class="form-input" data-ef="unit" data-i="'+i+'" value="'+_esc(l.unit||"")+'" style="min-width:70px"></td>'+
       '<td><input class="form-input num" data-ef="qty" data-i="'+i+'" type="number" step="any" value="'+_esc(l.qty||0)+'" style="min-width:80px" oninput="contracts.editLinesRecalc()"></td>'+
@@ -5064,7 +5077,7 @@ function linesEditHTML(r){
     '<div class="ct-note">'+_icn("shield","ic-sm")+
       ' تغيّرُ القيمة يُسقط اعتمادَ المالية والتنفيذيِّ ويعيد الطلبَ إلى بوّابتهما — '+
       'فلا يمرّ رقمٌ جديدٌ على توقيعٍ قديم. واعتمادُ مدير المشاريع والمشتريات يبقى.</div>'+
-    '<div class="ct-table-wrap" id="ct-ln-rows"><table class="ct-table"><thead><tr>'+
+    '<div class="ct-table-wrap" id="ct-ln-rows"><table class="ct-table"><thead><tr>'+LN_TH+
       '<th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th><th></th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="contracts.addEditLine()">'+_icn("plus","ic-sm")+' بند جديد</button></div>'+
@@ -5389,16 +5402,16 @@ function ctrOverviewHTML(c){
 }
 
 function ctrLinesHTML(c){
-  var rows=(c.lines||[]).map(function(l){
+  var rows=(c.lines||[]).map(function(l,i){
     var lt=lineTotal(l.qty,l.unitPrice,c.vatMode);
-    return '<tr><td>'+_esc(l.desc||"—")+(l.boqLineId?'':' <span class="ct-doc s-soon">خارج المقايسة</span>')+'</td>'+
+    return '<tr>'+lnSeq(i)+'<td>'+_esc(l.desc||"—")+(l.boqLineId?'':' <span class="ct-doc s-soon">خارج المقايسة</span>')+'</td>'+
       '<td>'+_esc(l.unit||"")+'</td><td class="num">'+money0(contractLineQty(c,l.id))+'</td>'+
       '<td class="num">'+money(l.unitPrice)+'</td><td class="num">'+money(lt.total)+'</td></tr>';
-  }).join("") || '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
+  }).join("") || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
   var t=linesTotal(c.lines||[], c.vatMode);
   return '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' بنود العقد'+
       '<span class="ct-sec-lock">الكميةُ تشمل أوامرَ التغيير المعتمدة</span></div>'+
-    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+
+    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+LN_TH+
       '<th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>'+
       '<tbody>'+rows+'</tbody></table></div>'+
     '<div class="ct-total">'+totalsHTML(t, c.vatMode)+'</div>'+
@@ -5503,13 +5516,13 @@ function extFormHTML(c){
     var max=contractLineQty(c,l.lineId), was=Number(floor[l.lineId])||0;
     var bad=(Number(l.cumQty)||0)>max+1e-9 || (Number(l.cumQty)||0)<was-1e-9;
     var pct=max>0?Math.round((Number(l.cumQty)||0)/max*100):0;
-    return '<tr'+(bad?' class="ct-bad"':'')+'>'+
+    return '<tr'+(bad?' class="ct-bad"':'')+'>'+lnSeq(i)+
       '<td>'+_esc(l.desc||"—")+'</td>'+
       '<td class="num">'+money0(max)+' '+_esc(l.unit||"")+'</td>'+
       '<td class="num">'+money0(was)+'</td>'+
       '<td><input class="form-input num" data-ef="cumQty" data-i="'+i+'" type="number" step="any" value="'+_esc(l.cumQty)+'" style="min-width:90px" oninput="contracts.extRecalc()"></td>'+
-      '<td class="num">'+pct+'%</td>'+
-      '<td class="num">'+money(r2(vatSplit(l.unitPrice,c.vatMode).base*(Number(l.cumQty)||0)))+'</td>'+
+      '<td class="num ct-e-pct">'+pct+'%</td>'+
+      '<td class="num ct-e-val">'+money(r2(vatSplit(l.unitPrice,c.vatMode).base*(Number(l.cumQty)||0)))+'</td>'+
     '</tr>';
   }).join("");
 
@@ -5528,7 +5541,7 @@ function extFormHTML(c){
         '<option value="1"'+(d.isFinal?' selected':'')+'>نعم — يُنهي العقد فنّياً</option>'+
       '</select>')+
     '</div>'+
-    '<div class="ct-table-wrap"><table class="ct-table" id="ct-e-lines"><thead><tr>'+
+    '<div class="ct-table-wrap"><table class="ct-table" id="ct-e-lines"><thead><tr>'+LN_TH+
       '<th>البند</th><th>كمية العقد</th><th>سبق اعتماده</th><th>المنفَّذ تراكمياً</th><th>%</th><th>القيمة</th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     warn+lateNote+
@@ -5575,10 +5588,10 @@ function extCardHTML(c, id){
     tools+=' <button class="btn btn-ghost btn-sm" onclick="contracts.openExtRewind()">'+_icn("rotateCcw","ic-sm")+' إرجاع لمرحلة</button>';
   }
   var extSod = sodNoteHTML(mode, owner);
-  var lineRows=(e.lines||[]).map(function(l){
-    return '<tr><td>'+_esc(l.desc||"—")+'</td><td class="num">'+money0(contractLineQty(c,l.lineId))+'</td>'+
+  var lineRows=(e.lines||[]).map(function(l,i){
+    return '<tr>'+lnSeq(i)+'<td>'+_esc(l.desc||"—")+'</td><td class="num">'+money0(contractLineQty(c,l.lineId))+'</td>'+
       '<td class="num">'+money0(l.cumQty)+'</td><td class="num">'+money(l.unitPrice)+'</td></tr>';
-  }).join("") || '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
+  }).join("") || '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
   var tl=(e.timeline||[]).map(function(x){
     return '<div class="ct-tl-row"><span class="d"></span><div><div class="t">'+_esc(x.event)+'</div>'+
       '<div class="m">'+_esc(x.by||"")+' · '+_esc(String(x.at||"").slice(0,16).replace("T"," "))+(x.note?' — '+_esc(x.note):'')+'</div></div></div>';
@@ -5595,7 +5608,7 @@ function extCardHTML(c, id){
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("pieChart","ic-sm")+' سُلَّم الحساب'+
     (e.settled?'<span class="ct-sec-lock">لقطةٌ محفوظةٌ وقت السداد</span>':'')+'</div>'+ladderHTML(calc,c)+'</div>'+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود المنفَّذة</div>'+
-    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr><th>البند</th><th>كمية العقد</th><th>المنفَّذ تراكمياً</th><th>سعر الوحدة</th></tr></thead>'+
+    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+LN_TH+'<th>البند</th><th>كمية العقد</th><th>المنفَّذ تراكمياً</th><th>سعر الوحدة</th></tr></thead>'+
     '<tbody>'+lineRows+'</tbody></table></div></div>'+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' السجل</div><div class="ct-timeline">'+tl+'</div></div>';
 }
@@ -6073,18 +6086,18 @@ function chgFormHTML(c){
     var executed=Number(done[ln.id])||0;
     var after=r2(cur+delta);
     var bad=delta<0 && after<executed-1e-9;
-    return '<tr'+(bad?' class="ct-bad"':'')+'>'+
+    return '<tr'+(bad?' class="ct-bad"':'')+'>'+lnSeq(i)+
       '<td>'+_esc(ln.desc||"—")+'</td>'+
       '<td class="num">'+money0(cur)+' '+_esc(ln.unit||"")+'</td>'+
       '<td class="num">'+money0(executed)+'</td>'+
       '<td><input class="form-input num" data-cf="qty" data-line="'+_esc(ln.id)+'" data-price="'+_esc(ln.unitPrice)+'" data-desc="'+_esc(ln.desc||"")+'" data-unit="'+_esc(ln.unit||"")+'" type="number" step="any" value="'+_esc(delta||"")+'" placeholder="0" style="min-width:90px" oninput="contracts.chgRecalc()"></td>'+
-      '<td class="num">'+money0(after)+'</td>'+
-      '<td class="num">'+money(lineTotal(delta, ln.unitPrice, c.vatMode).total)+'</td>'+
+      '<td class="num ct-g-after">'+money0(after)+'</td>'+
+      '<td class="num ct-g-delta">'+money(lineTotal(delta, ln.unitPrice, c.vatMode).total)+'</td>'+
     '</tr>';
-  }).join("") || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:14px">لا بنودَ في العقد.</td></tr>';
+  }).join("") || '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">لا بنودَ في العقد.</td></tr>';
 
   var news=(d.newLines||[]).map(function(l,i){
-    return '<tr>'+
+    return '<tr>'+lnSeq(i)+
       '<td><input class="form-input" data-nf="desc" data-i="'+i+'" value="'+_esc(l.desc||"")+'" oninput="contracts.chgRecalc()" placeholder="وصف العمل"></td>'+
       '<td><input class="form-input" data-nf="unit" data-i="'+i+'" value="'+_esc(l.unit||"")+'" oninput="contracts.chgRecalc()" placeholder="م٢"></td>'+
       '<td><input class="form-input num" data-nf="qty" data-i="'+i+'" type="number" step="any" value="'+_esc(l.qty||"")+'" oninput="contracts.chgRecalc()"></td>'+
@@ -6092,7 +6105,7 @@ function chgFormHTML(c){
       '<td class="num">'+money(lineTotal(l.qty,l.unitPrice,c.vatMode).total)+'</td>'+
       '<td><button class="btn btn-ghost btn-sm" onclick="contracts.chgDelNew('+i+')">'+_icn("trash","ic-sm")+'</button></td>'+
     '</tr>';
-  }).join("") || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:14px">لا بنودَ جديدة.</td></tr>';
+  }).join("") || '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">لا بنودَ جديدة.</td></tr>';
 
   var warn='<div id="ct-g-warn">'+(g.ok||g.empty ? "" : '<div class="ct-note crit">'+_icn("alertTriangle","ic-sm")+' '+_esc(_chgGuardMsg(g))+'</div>')+'</div>';
 
@@ -6100,14 +6113,14 @@ function chgFormHTML(c){
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("repeat","ic-sm")+' أمرُ تغييرٍ على '+_esc(c.id)+
       '<span class="ct-sec-lock">أدخِل <b>فارقَ</b> الكمية لا الكميةَ الجديدة — بالسالب للخفض</span></div>'+
-    '<div class="ct-table-wrap"><table class="ct-table" id="ct-g-lines"><thead><tr>'+
+    '<div class="ct-table-wrap"><table class="ct-table" id="ct-g-lines"><thead><tr>'+LN_TH+
       '<th>البند</th><th>كمية العقد</th><th>المنفَّذ</th><th>فارق الكمية (±)</th><th>الكمية بعد</th><th>أثر القيمة</th>'+
     '</tr></thead><tbody>'+exist+'</tbody></table></div>'+
   '</div>'+
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("plus","ic-sm")+' بنودٌ جديدة'+
       '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.chgAddNew()">'+_icn("plus","ic-sm")+' إضافة بند</button></div>'+
-    '<div class="ct-table-wrap"><table class="ct-table" id="ct-g-new"><thead><tr>'+
+    '<div class="ct-table-wrap"><table class="ct-table" id="ct-g-new"><thead><tr>'+LN_TH+
       '<th>الوصف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th><th></th>'+
     '</tr></thead><tbody>'+news+'</tbody></table></div>'+
     '<div class="ct-note">'+_icn("alertCircle","ic-sm")+' وضعُ الضريبة يُورَث من العقد ('+_esc((VAT_MODES[normVatMode(c.vatMode)]||{}).short||"—")+') — عقدٌ بلا ضريبةٍ لا يصير بعضُه خاضعاً لها بأمرِ تغيير.</div>'+
@@ -6169,7 +6182,11 @@ function syncChgDraft(){
 }
 
 /* إعادةُ الحساب الحيّة — الأثرُ والتحذيرُ وزرُّ الإرسال تتحرّك مع الإدخال، فلا يبقى
-   زرٌّ معطَّلٌ بلا سببٍ ظاهرٍ على الشاشة (درسُ المستخلص نفسُه). */
+   زرٌّ معطَّلٌ بلا سببٍ ظاهرٍ على الشاشة (درسُ المستخلص نفسُه).
+   ⛔ **والكتابةُ في الخلايا بصنفها لا بفهرسها.** كانت بالفهرس، فعمودٌ يُضاف في مقدّمة
+   الجدول يُزيحه خليّةً: يُكتب «الكمية بعد» في خانة الإدخال و«أثرُ القيمة» في خانة
+   «الكمية بعد» — **بلا خطأِ جافاسكربت ولا رسالة**، وأرقامٌ صحيحةٌ في أماكنَ خاطئة.
+   (وقع فعلاً عند إضافة عمود «م» — v18.9.2743.) ويحرسه فحصٌ يمنع عودةَ الفهرس. */
 function chgRecalc(){
   var c=contractById(_cOpen); if(!c || !_chgDraft) return;
   syncChgDraft();
@@ -6183,9 +6200,10 @@ function chgRecalc(){
     var id=inp.getAttribute("data-line"), delta=Number(inp.value)||0;
     var after=r2(contractLineQty(c,id)+delta), executed=Number(done[id])||0;
     var tr=inp.closest("tr"); if(!tr) return;
-    var tds=tr.querySelectorAll("td");
-    if(tds[4]) tds[4].textContent=money0(after);
-    if(tds[5]) tds[5].textContent=money(lineTotal(delta, Number(inp.getAttribute("data-price"))||0, c.vatMode).total);
+    // ⛔ بالصنف لا بالفهرس (§3-ب/١١)
+    var elA=tr.querySelector(".ct-g-after"), elE=tr.querySelector(".ct-g-delta");
+    if(elA) elA.textContent=money0(after);
+    if(elE) elE.textContent=money(lineTotal(delta, Number(inp.getAttribute("data-price"))||0, c.vatMode).total);
     tr.classList.toggle("ct-bad", delta<0 && after<executed-1e-9);
   });
   var btn=document.getElementById("ct-g-send");
@@ -6251,12 +6269,12 @@ function chgCardHTML(c, id){
   if(!chgIsFinal(g.status) && (_role()==="admin" || g.createdByUser===_meUser())){
     tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.doCancelChange()">'+_icn("ban","ic-sm")+' إلغاء</button>';
   }
-  var rows=(g.lines||[]).map(function(l){
-    return '<tr><td>'+_esc(l.desc||"—")+'</td><td>'+_esc(l.unit||"")+'</td>'+
+  var rows=(g.lines||[]).map(function(l,i){
+    return '<tr>'+lnSeq(i)+'<td>'+_esc(l.desc||"—")+'</td><td>'+_esc(l.unit||"")+'</td>'+
       '<td class="num">'+((Number(l.qty)||0)>=0?"+":"")+money0(l.qty)+'</td>'+
       '<td class="num">'+money(l.unitPrice)+'</td>'+
       '<td class="num">'+money(lineTotal(l.qty,l.unitPrice,c.vatMode).total)+'</td></tr>';
-  }).join("") || '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
+  }).join("") || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
   var tl=(g.timeline||[]).map(function(x){
     return '<div class="ct-tl-row"><span class="d"></span><div><div class="t">'+_esc(x.event)+'</div>'+
       '<div class="m">'+_esc(x.by||"")+' · '+_esc(String(x.at||"").slice(0,16).replace("T"," "))+(x.note?' — '+_esc(x.note):'')+'</div></div></div>';
@@ -6279,7 +6297,7 @@ function chgCardHTML(c, id){
     (g.durationDaysDelta?'<div class="ct-note">'+_icn("timer","ic-sm")+' تمديدُ المدة '+money0(g.durationDaysDelta)+' يوماً</div>':'')+
   '</div>'+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' بنود التغيير</div>'+
-    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr><th>الوصف</th><th>الوحدة</th><th>فارق الكمية</th><th>سعر الوحدة</th><th>أثر القيمة</th></tr></thead>'+
+    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+LN_TH+'<th>الوصف</th><th>الوحدة</th><th>فارق الكمية</th><th>سعر الوحدة</th><th>أثر القيمة</th></tr></thead>'+
     '<tbody>'+rows+'</tbody></table></div></div>'+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' السجل</div>'+
     '<div class="ct-timeline">'+tl+'</div></div>';
@@ -6986,9 +7004,10 @@ function extRecalc(){
     var l=_extDraft.lines[i]; if(!l) return;
     var cum=Number(l.cumQty)||0, max=contractLineQty(c,l.lineId), was=Number(floor[l.lineId])||0;
     tr.classList.toggle("ct-bad", cum>max+1e-9 || cum<was-1e-9);
-    var tds=tr.querySelectorAll("td");
-    if(tds[4]) tds[4].textContent = (max>0?Math.round(cum/max*100):0)+"%";
-    if(tds[5]) tds[5].textContent = money(r2(vatSplit(l.unitPrice,c.vatMode).base*cum));
+    // بصنف الخليّة لا بفهرسها — نفسُ سبب `ct-g-after`/`ct-g-delta` أعلاه
+    var elP=tr.querySelector(".ct-e-pct"), elV=tr.querySelector(".ct-e-val");
+    if(elP) elP.textContent = (max>0?Math.round(cum/max*100):0)+"%";
+    if(elV) elV.textContent = money(r2(vatSplit(l.unitPrice,c.vatMode).base*cum));
   });
 }
 function applyPenalty(){
@@ -7300,6 +7319,9 @@ function injectCSS(){
 ".ct-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:520px}",
 ".ct-table th{text-align:right;font-size:11px;color:var(--muted);font-weight:800;padding:7px 9px;border-bottom:1px solid var(--border);white-space:nowrap}",
 ".ct-table td{padding:8px 9px;border-bottom:1px solid var(--border);vertical-align:middle}",
+/* عمودُ رقم البند: أضيقُ ما يكفي رقمين، ورماديٌّ فلا يزاحم الوصفَ في القراءة.
+   `text-align:center` صراحةً — الجدولُ يُحاذي لليمين افتراضاً فيلتصق الرقمُ بالحدّ. */
+".ct-table th.ct-seq,.ct-table td.ct-seq{width:34px;text-align:center;color:var(--muted);font-weight:700;padding-inline:4px}",
 ".ct-table tbody tr:last-child td{border-bottom:none}",
 ".ct-table .form-input{font-size:12px;padding:5px 8px;min-width:110px}",
 ".ct-link{color:var(--info);text-decoration:none;font-weight:700;font-size:11.5px;display:inline-flex;align-items:center;gap:4px}",
@@ -7482,6 +7504,7 @@ window.contracts = {
   // الوثيقة التعاقدية [المرحلة ٤-ب]
   printCtr: printCtr, printContract: printContract,
   _contractPaperHTML: contractPaperHTML,
+  _ctrLinesHTML: ctrLinesHTML,     // جدولُ بنود العقد — يُنفَّذ في فحص المتصفّح
   _letterheadAssets: letterheadAssets, _letterheadOn: letterheadOn,
   editClauses: editClauses, addClause: addClause, delClause: delClause,
   cancelClauses: cancelClauses, saveClauses: saveClauses,
