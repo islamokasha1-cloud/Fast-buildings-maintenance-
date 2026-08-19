@@ -398,7 +398,11 @@ service cloud.firestore {
         // المستخلصُ لا يُنقل إلى عقدٍ آخر بعد إنشائه
         && unchanged(['createdAt','contractId'])
         && ( request.resource.data.status == resource.data.status
-             || anyRole(extGate(resource.data.status)) )
+             || anyRole(extGate(resource.data.status))
+             // تعديلُ المستخلص يسحبه إلى بوّابته الأولى — وهو **أقلُّ** صلاحيةً من
+             // الاعتماد لا أكثر: يُسقط الاعتماداتِ ولا يتخطّى واحدةً منها
+             || ( request.resource.data.status == 'ext_pending_pm'
+                  && anyRole(['project_manager','admin']) ) )
         // نسخةُ المستخلص موقّعةً من المقاول — يكتبها مَن يستلمها منه
         && ( request.resource.data.get(['signature','url'], '') == resource.data.get(['signature','url'], '')
              || anyRole(['project_manager','finance','admin']) )

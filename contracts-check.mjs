@@ -1819,10 +1819,10 @@ const rowLive = await page.evaluate(() => {
   const c = window.contracts.contractById(d.contractId);
   const l = d.lines[0];
   const max = window.contracts._contractLineQty(c, l.lineId);
-  return { pct: tr.querySelector('.ct-e-pct').textContent.trim(),
+  return { pct: tr.querySelector('.ct-e-pct').value.trim() + '%',
            val: tr.querySelector('.ct-e-val').textContent.trim(),
            seq: (tr.querySelector('.ct-seq')||{textContent:''}).textContent.trim(),
-           wantPct: Math.round((Number(l.cumQty) || 0) / max * 100) + '%',
+           wantPct: (Math.round((Number(l.cumQty) || 0) / max * 10000) / 100) + '%',
            wantVal: (Math.round(window.contracts._vatSplit(l.unitPrice, c.vatMode).base * (Number(l.cumQty) || 0) * 100) / 100).toFixed(2) };
 });
 check('★ وخلايا «%» و«القيمة» تُحدَّث مع الإدخال لا عند إعادة الرسم (المرسوم = المحسوب)',
@@ -1837,6 +1837,47 @@ check('★ والسلّمُ يعرض الخصوماتِ المفعَّلةَ و�
   ladder.drawn.some(r => r[0].includes('محتجز')) && ladder.drawn.some(r => r[0].includes('مواد')) &&
   !ladder.drawn.some(r => r[0].includes('عدم مطابقة')),
   ladder.drawn.map(r => r[0]).join(' | '));
+/* ⛔ **بلاغُ المالك: «المستخلص نهائيّ فلماذا يخرج دوريّاً في الـPDF؟»**
+   الجذرُ أنّ «الفترة» و«ختاميّ؟» كانا بلا `oninput`، وأيُّ لقطةٍ من Firestore تستدعي
+   `paintCtrs` فتُعيد بناء النموذج من المسوّدة — فيرتدّ الاختيارُ بلا رسالة. الفحصُ
+   يحاكي اللقطةَ حرفياً: يختار «ختاميّ»، ثمّ يستدعي إعادةَ الرسم، ثمّ يقرأ المسوّدة. */
+await page.selectOption('#ct-e-final', '1');
+await page.fill('#ct-e-period', 'أغسطس 2026 — الدفعة الأولى');
+const survive = await page.evaluate(() => {
+  window.contracts._paint();                        // ما تفعله كلُّ لقطةٍ واردة
+  const d = window.contracts._extDraftOf();
+  const sel = document.getElementById('ct-e-final');
+  return { isFinal: !!d.isFinal, period: d.period, drawn: sel ? sel.value : '' };
+});
+check('★★★ «ختاميّ» و«الفترة» ينجوان من إعادة الرسم (لقطةُ Firestore لا تبتلع اختياراً)',
+  survive.isFinal === true && /الدفعة الأولى/.test(survive.period) && survive.drawn === '1',
+  JSON.stringify(survive));
+await page.selectOption('#ct-e-final', '');          // يعود دوريّاً — بقيةُ الرحلة تعتمده
+await page.fill('#ct-e-period', 'أغسطس 2026');
+await page.waitForTimeout(400);
+
+/* ★ ونسبةُ الإنجاز **تُكتب** لا تُقرأ وحدَها (بلاغ: «لا توجد نِسَبُ تنفيذ عند الإنشاء») */
+const pctIn = await page.evaluate(async () => {
+  const d0 = window.contracts._extDraftOf();
+  const c = window.contracts.contractById(d0.contractId);
+  const max = window.contracts._contractLineQty(c, d0.lines[0].lineId);
+  const p = document.querySelector('#ct-e-lines input[data-ef="pct"][data-i="0"]');
+  const q = document.querySelector('#ct-e-lines input[data-ef="cumQty"][data-i="0"]');
+  p.value = '50'; p.dispatchEvent(new Event('input', { bubbles: true }));
+  const afterPct = { qty: Number(q.value), want: max / 2, draft: window.contracts._extDraftOf().lines[0].cumQty };
+  q.value = String(max); q.dispatchEvent(new Event('input', { bubbles: true }));
+  const afterQty = { pct: Number(p.value) };
+  return { max, afterPct, afterQty };
+});
+check('★★ نسبةٌ تُكتب ⇒ الكميةُ تتبعها (والمخزَّنُ كميةٌ لا نسبة)',
+  Math.abs(pctIn.afterPct.qty - pctIn.afterPct.want) < 0.011 &&
+  Math.abs(pctIn.afterPct.draft - pctIn.afterPct.want) < 0.011, JSON.stringify(pctIn.afterPct));
+check('★★ وكميةٌ تُكتب ⇒ النسبةُ تتبعها — وجهان لرقمٍ واحد',
+  Math.abs(pctIn.afterQty.pct - 100) < 0.011, JSON.stringify(pctIn.afterQty));
+// وتُعاد الكميةُ إلى نصف العقد — بقيةُ الرحلة مبنيّةٌ عليها
+await page.fill('#ct-e-lines [data-ef="cumQty"]', '600');
+await page.waitForTimeout(500);
+
 await page.screenshot({ path: `${SHOTS}/21-extract-form.png` });
 await page.evaluate(() => { const a = document.querySelector('.main-area'); if (a) a.scrollTop = a.scrollHeight; });
 await page.waitForTimeout(500);
@@ -1974,7 +2015,7 @@ check('★★★ ورقةُ المستخلص: الرقمُ المرسوم = ال
 check('★★ وتُعلن أنّها بانتظار توقيع المقاول قبل رفع النسخة',
   extPaper.state === 'sign' && /بانتظار توقيع المقاول/.test(extPaper.html), extPaper.state);
 check('★★ وفوق التوقيع إقرارٌ منصوصٌ بالكميات والخصومات لا خانةٌ صامتة',
-  /إقرارُ المقاول وتوقيعه/.test(extPaper.html) && /كاملَ استحقاقي/.test(extPaper.html) &&
+  /إقرارُ المقاول — يُوقَّع منه/.test(extPaper.html) && /كاملَ استحقاقي/.test(extPaper.html) &&
   /التوقيع والختم/.test(extPaper.html));
 check('★ وتخرج على الورقة الرسمية بطبقاتها الثلاث كبقيّة مطبوعاتنا',
   /class="lh lh-h"/.test(extPaper.html) && /class="lh lh-f"/.test(extPaper.html) &&
@@ -2005,6 +2046,93 @@ const afterSign = await page.evaluate(() => document.getElementById('page-contra
 check('★★ وبعد الرفع ظهر زرُّ السداد وقُرئ توقيعُ المقاول في البطاقة',
   afterSign.includes('تسجيل السداد') && afterSign.includes('وقّع المقاولُ نسخةَ هذا المستخلص'));
 await page.screenshot({ path: `${SHOTS}/22c-extract-signed.png`, fullPage: true });
+
+/* ══ تعديلُ المستخلص — البابُ الذي طلبه المالك، وحارسُه ══
+   أخطرُ لحظةٍ للتعديل هي هذه بالضبط: مستخلصٌ **اعتُمد ووُقّع** وينتظر الصرف. فإن
+   مرّ التعديلُ صامتاً صُرف رقمٌ لم يعتمده أحدٌ ولم يُقرّ به المقاول. */
+const editGuards = await page.evaluate(async (eid) => {
+  const e0 = window.contracts.extractById(eid);
+  const cp = (e0.lines || []).map(l => ({ lineId: l.lineId, desc: l.desc, unit: l.unit, unitPrice: l.unitPrice, cumQty: l.cumQty }));
+  const base = { period: e0.period, isFinal: false, materialsIssued: e0.materialsIssued,
+                 penaltyAmount: e0.penaltyAmount, ncDeduction: e0.ncDeduction };
+  const noWhy = await window.contracts._editExt(eid, Object.assign({ lines: cp }, base), '  ')
+    .then(() => 'مرّ بلا سبب', err => err.message);
+  const before = { pm: !!e0.pmApprovedAt, ceo: !!e0.ceoApprovedAt, sig: !!window.contracts._extSignature(e0), st: e0.status };
+  // تعديلٌ حقيقيّ: يخفض كميةَ بندِه هو — والحارسُ لا يقيسه على نفسِه
+  const lower = cp.map(l => Object.assign({}, l, { cumQty: Number(l.cumQty) - 100 }));
+  await window.contracts._editExt(eid, Object.assign({ lines: lower }, base), 'إعادةُ قياسٍ بعد زيارة الموقع');
+  const e1 = window.contracts.extractById(eid);
+  const c = window.contracts.contractById(e1.contractId);
+  const after = { st: e1.status, pm: !!e1.pmApprovedAt, ceo: !!e1.ceoApprovedAt,
+                  sig: !!window.contracts._extSignature(e1),
+                  code: ((e1.timeline || []).slice(-1)[0] || {}).code || '',
+                  note: ((e1.timeline || []).slice(-1)[0] || {}).note || '',
+                  net: window.contracts._extCalc(e1, c).net };
+  // ثمّ تُعاد الكميةُ كما كانت — وهذا نفسُه يُثبت أنّ المستخلصَ لا يُقاس على نفسِه
+  await window.contracts._editExt(eid, Object.assign({ lines: cp }, base), 'إعادةُ الكمية بعد إعادة القياس');
+  const e2 = window.contracts.extractById(eid);
+  return { noWhy, before, after, restored: window.contracts._extCalc(e2, c).net, was: window.contracts._extCalc(e0, c).net };
+}, ext1.id);
+check('★ تعديلُ المستخلص يُرفض بلا سبب', /سبب التعديل إلزامي/.test(editGuards.noWhy), editGuards.noWhy);
+check('★★★ والتعديلُ يُسقط الاعتماداتِ **وتوقيعَ المقاول** ويعيد المستخلصَ لبوّابته الأولى',
+  editGuards.before.sig === true && editGuards.after.sig === false &&
+  editGuards.after.pm === false && editGuards.after.ceo === false &&
+  editGuards.after.st === 'ext_pending_pm', JSON.stringify(editGuards));
+check('★★ والسببُ والرقمان (قبل ← بعد) في الخطّ الزمنيّ',
+  editGuards.after.code === 'edited' && /إعادةُ قياسٍ بعد زيارة الموقع/.test(editGuards.after.note) &&
+  /←/.test(editGuards.after.note), editGuards.after.note);
+check('★★ والمستخلصُ لا يُقاس على نفسِه: يخفض كميتَه ثمّ يعيدها',
+  editGuards.after.net < editGuards.was && Math.abs(editGuards.restored - editGuards.was) < 0.011,
+  JSON.stringify({ was: editGuards.was, low: editGuards.after.net, back: editGuards.restored }));
+
+// وتُستأنف الدورةُ من بوّابتها الأولى: اعتمادٌ ⇐ اعتمادٌ ⇐ توقيعٌ جديد
+await page.evaluate(async (eid) => {
+  await window.contracts._actExt(eid, 'approve', '');
+  if (window.contracts.extractById(eid).status === 'ext_pending_ceo')
+    await window.contracts._actExt(eid, 'approve', '');
+  await window.contracts._signExt(eid, { url: 'https://example.test/ext-signed-2.pdf', name: 'نسخةٌ موقّعةٌ بعد التعديل' });
+}, ext1.id);
+await page.waitForTimeout(900);
+check('★ وبعد إعادة الاعتماد وتوقيعٍ جديدٍ يعود صالحاً للسداد',
+  await page.evaluate((eid) => {
+    const e = window.contracts.extractById(eid), c = window.contracts.contractById(e.contractId);
+    return e.status === 'ext_pending_finance' && window.contracts._extPayGuard(e, window.contracts._extCalc(e, c).net).ok;
+  }, ext1.id));
+
+/* ══ ورقةُ المستخلص: بندان ⇒ صفحةٌ واحدة، والعنوانُ لا يُفارق فقرتَه ══ */
+const extPaperHtml = await page.evaluate((eid) => {
+  const e = window.contracts.extractById(eid), c = window.contracts.contractById(e.contractId);
+  return window.contracts._extractPaperHTML(e, c, {});
+}, ext1.id);
+fs.writeFileSync(`${SHOTS}/extract-print.html`, extPaperHtml);
+const extPage = await browser.newPage();
+await extPage.goto('file://' + `${SHOTS}/extract-print.html`, { waitUntil: 'networkidle' });
+const extPdf = await extPage.pdf({ printBackground: true, preferCSSPageSize: true });
+await extPage.close();
+fs.writeFileSync(`${SHOTS}/extract-print.pdf`, extPdf);
+const extPages = ((extPdf.toString('latin1').match(/\/Type \/Page(?!s)/g) || []).length);
+check('★★★ ورقةُ مستخلصٍ ببندٍ واحدٍ تخرج في **صفحةٍ واحدة** (طلبُ المالك)',
+  extPages === 1, `صفحات=${extPages}`);
+check('★★ والعنوانُ لا يبقى وحيداً في قاع الورقة (`break-after:avoid` على كل عنوان)',
+  /h2\{[^}]*break-after:avoid/.test(extPaperHtml) && /page-break-after:avoid/.test(extPaperHtml));
+
+/* ══ بلاغُ المالك: «العقدُ لا يُظهر أنّ له مستخلصاً ولا عند مَن يقف» ══ */
+await page.evaluate(() => window.contracts.backToCtrs());
+await page.waitForTimeout(900);
+const tileExt = await page.evaluate((eid) => {
+  const t = document.getElementById('page-contracts-list').textContent;
+  const e = window.contracts.extractById(eid);
+  return { hasId: t.includes(e.id), hasGate: /بانتظار/.test(t),
+           strip: /مستخلصاتٌ مفتوحة/.test(t), st: e.status };
+}, ext1.id);
+check('★★★ وبطاقةُ العقد في القائمة تقول: له مستخلصٌ، وعند مَن يقف',
+  tileExt.hasId === true && tileExt.hasGate === true, JSON.stringify(tileExt));
+check('★★ وشريطُ الصفحة يعدّ المستخلصاتِ المفتوحة', tileExt.strip === true);
+await page.screenshot({ path: `${SHOTS}/22d-contract-tile-extract.png`, fullPage: true });
+await page.evaluate((cid) => { window.contracts.openCtr(cid); window.contracts.ctrTab('extracts'); }, conv.cid);
+await page.waitForTimeout(800);
+await page.evaluate((eid) => window.contracts.openExtFrom(eid, window.contracts.extractById(eid).contractId), ext1.id);
+await page.waitForTimeout(800);
 
 const paid = await page.evaluate(async (eid) => {
   await window.contracts._payExt(eid, { ref: 'TRX-1', receiptUrl: 'https://example.test/r.pdf' });

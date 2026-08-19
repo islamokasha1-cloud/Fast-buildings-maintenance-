@@ -1240,7 +1240,7 @@ function inventoryReportsTests() {
       !/\btds\[\d+\]/.test(cs2.replace(/\/\*[\s\S]*?\*\//g, "")));
     T("★★★ ln: والكتابةُ الحيّةُ بأصنافٍ صريحةٍ تُكتب وتُقرأ من المكان نفسِه",
       /class="num ct-g-after"/.test(cs2) && /class="num ct-g-delta"/.test(cs2) &&
-      /class="num ct-e-pct"/.test(cs2)  && /class="num ct-e-val"/.test(cs2) &&
+      /num ct-e-pct"/.test(cs2)  && /class="num ct-e-val"/.test(cs2) &&
       /tr\.querySelector\("\.ct-g-after"\)/.test(cs2) && /tr\.querySelector\("\.ct-e-pct"\)/.test(cs2));
     /* والمطبوعاتُ كانت مرقَّمةً أصلاً — فالشاشةُ لحقت بها لا العكس. وورقةُ المستخلص
        ثالثتُها: تُرقّم بالترتيب نفسِه فيتطابق «البند ٤» في الثلاث. */
@@ -9323,7 +9323,7 @@ function contractsPhase1() {
       C._extSignoffs({ pmApprovedBy: "س" }, 200000, 100000).length === 3 &&
       C._extSignoffs({ pmApprovedBy: "س" }, 10, 100000)[0].by === "س");
     T("★★ وفوق توقيع المقاول **إقرارٌ منصوص** لا خانةٌ صامتة",
-      /إقرارُ المقاول وتوقيعه/.test(src) && /كاملَ استحقاقي عن الأعمال المنفَّذة/.test(src));
+      /إقرارُ المقاول — يُوقَّع منه/.test(src) && /كاملَ استحقاقي عن الأعمال المنفَّذة/.test(src));
     T("★ والنسخةُ الموقّعةُ تُحفَظ ومعها صافيها وقتَ التوقيع",
       /function signExtract[\s\S]{0,1200}net:r2\(calc\.net\)/.test(src));
     T("★ ورفعُها ليس لكلّ دور، ولا تُرفع لمستخلصٍ في حالةٍ نهائية",
@@ -9331,6 +9331,68 @@ function contractsPhase1() {
       /function signExtract[\s\S]{0,1100}extIsFinal\(e\.status\)\) throw/.test(src));
     T("★ و«بانتظار إجراءك» تقول للمالية ما ينقصها لا اسمَ البوّابة",
       /ext_pending_finance" && !extSignature\(e\)\) egate="بانتظار نسخةٍ موقّعةٍ من المقاول"/.test(src));
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     بلاغاتُ المالك على المستخلص (v18.9.2751+): الاختيارُ الذي ابتلعته
+     إعادةُ الرسم · النسبةُ مُدخَلاً · بابُ التعديل · ورقةُ الصفحة الواحدة ·
+     والعقدُ يُظهر مستخلصَه.
+     ════════════════════════════════════════════════════════════ */
+  {
+    const RULE_EXT2 = (() => {
+      const q = path.resolve(path.dirname(IDX), "firestore.rules");
+      return fs.existsSync(q) ? fs.readFileSync(q, "utf8") : "";
+    })();
+    /* ⛔ «المستخلص نهائيّ فلماذا يخرج دوريّاً؟» — الحقلُ غيرُ المزامَن يرتدّ عند
+       أوّل لقطةٍ من Firestore. والحارسُ على **البنية** لا على الحقلين. */
+    T("★★★ إعادةُ الرسم تُزامن المسوّدةَ أوّلاً — فلا تبتلع لقطةٌ اختياراً لم يُكتب بعد",
+      /function paintCtrs\(\)\{[\s\S]{0,200}_syncOpenDrafts\(\);[\s\S]{0,120}innerHTML/.test(src) &&
+      /function _syncOpenDrafts\(\)[\s\S]{0,320}syncExtDraft\(\)[\s\S]{0,160}syncChgDraft\(\)/.test(src));
+    T("★★ وحزامٌ ثانٍ: «الفترة» و«ختاميّ؟» يُزامَنان فورَ تغيّرهما",
+      /id="ct-e-period"[^>]*oninput="contracts\.extRecalc\(\)"/.test(src) &&
+      /id="ct-e-final" onchange="contracts\.extRecalc\(\)"/.test(src));
+    /* ⛔ والنسبةُ تشارك الكميةَ الصفَّ والفهرس — فلو قُرئ كلُّ `data-ef` كتبت النسبةُ
+       نفسَها في الكمية وسقط حارسُ تجاوز العقد بصمت (وقع فعلاً في أوّل صياغة). */
+    T("★★★ والمزامنةُ تقرأ حقلَ الكمية وحدَه لا كلَّ `data-ef` (النسبةُ لا تُكتب مكانها)",
+      /function syncExtDraft\(\)[\s\S]{0,1400}querySelectorAll\('\[data-ef="cumQty"\]'\)/.test(src) &&
+      !/function syncExtDraft\(\)[\s\S]{0,1400}querySelectorAll\("\[data-ef\]"\)/.test(src));
+    T("★★ ونسبةُ الإنجاز **حقلٌ يُكتب فيه** والكميةُ تتبعه (والمخزَّنُ كميةٌ لا نسبة)",
+      /data-ef="pct"/.test(src) &&
+      /if\(from==="p"\)\{[\s\S]{0,420}qIn\.value = r2\(contractLineQty\(c, ln\.lineId\) \* pv \/ 100\)/.test(src));
+    T("★ ولا يُكتَب في الحقل الذي يكتب فيه المستخدمُ الآن",
+      /!\(from==="p" && idx===i\)/.test(src));
+
+    /* ── بابُ تعديل المستخلص وحارسُه ── */
+    T("★★ تعديلُ المستخلص لمدير المشروع أو الأدمن، وبسببٍ إلزاميّ، ولا يمسّ منتهياً",
+      /function editExtract[\s\S]{0,700}\["project_manager","admin"\]\.indexOf\(_role\(\)\) === -1/.test(src) &&
+      /function editExtract[\s\S]{0,800}!why\) return Promise\.reject/.test(src) &&
+      /function editExtract[\s\S]{0,1500}extIsFinal\(e\.status\)\) throw/.test(src));
+    T("★★★ وتُسقط الاعتماداتُ **وتوقيعُ المقاول** ثمّ `extNextStage` تقرّر من جديد",
+      /function editExtract[\s\S]{0,3000}"ceoApprovedAmount","delegatedApproval","signature"\]\.forEach[\s\S]{0,220}next\.status = extNextStage/.test(src));
+    T("★★ والسببُ والرقمان (قبل ← بعد) في الخطّ الزمنيّ",
+      /_pushTimeline\(next, "تعديل المستخلص", "edited",[\s\S]{0,140}money\(was\)\+" ← "\+money\(calc\.net\)/.test(src));
+    T("★★ والمستخلصُ لا يُقاس على نفسِه عند تعديله (يُستثنى من «سابقاً» في الحساب والنموذج)",
+      /function editExtract[\s\S]{0,2400}prevGross:prevGrossOf\(_exts, c, id\)/.test(src) &&
+      /var xid=d\.editOf\|\|null;\s*\n\s*var floor=prevCumByLine\(_exts, c, xid\)/.test(src));
+    T("★★ وفي القواعد: سحبُ المستخلص إلى بوّابته الأولى لمُعِدّه — وهو أقلُّ صلاحيةً لا أكثر",
+      /request\.resource\.data\.status == 'ext_pending_pm'\s*\n\s*&& anyRole\(\['project_manager','admin'\]\)/.test(RULE_EXT2));
+
+    /* ── الورقةُ: صفحةٌ واحدةٌ للقليل، وعنوانٌ لا يُفارق فقرتَه ── */
+    T("★★ العنوانُ لا يبقى وحيداً في قاع الورقة — في المطبوعات الثلاث",
+      (src.match(/break-after:avoid;page-break-after:avoid/g) || []).length === 3);
+    T("★★ وورقةُ المستخلص تعرض الخصوماتِ المفعَّلةَ وحدَها — كسلّم الشاشة حرفياً",
+      /function rung\(lbl, val, sign, cls\)\{\s*\n\s*if\(!cls && !val\) return "";/.test(src) &&
+      /rung\("المستخلَص المعتمَد سابقاً", calc\.prevGross, -1, "keep"\)/.test(src));
+    T("★ والبياناتُ شبكةٌ لا جدولَ صفوف، والإقرارُ والاعتماداتُ عمودان",
+      /'\.meta\{display:grid/.test(src) && /'\.signs\{display:grid/.test(src) &&
+      /'\.calc\{display:flex/.test(src));
+
+    /* ── العقدُ يُظهر مستخلصَه ── */
+    T("★★★ وبطاقةُ العقد تقول: له مستخلصٌ وعند مَن يقف — من البوّابات نفسِها",
+      /function ctrTileHTML[\s\S]{0,900}openExtractOf\(_exts, c\.id\)[\s\S]{0,700}extGateOwner\(openE\.status\)/.test(src) &&
+      /ct-tile-ext/.test(src));
+    T("★ وشريطُ صفحة العقود يعدّ المستخلصاتِ المفتوحة",
+      /مستخلصاتٌ مفتوحة/.test(src) && /openExts=all\.filter/.test(src));
   }
 
   /* ════════════════════════════════════════════════════════════

@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2751";
+var MODULE_BUILD = "v18.9.2753";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -2978,6 +2978,78 @@ function actOnExtract(id, action, note){
   });
 }
 
+/* تعديلُ المستخلص — **بالقاعدة التي حكمت تعديلَ بنود الطلب**: البابُ يُفتَح،
+   وما وُقّع على رقمٍ قديمٍ يُبطَل.
+
+   **لماذا كان مغلقاً ولماذا يُفتَح.** المستخلصُ كان يُنشأ مرّةً ثمّ لا يُمسّ: من
+   أخطأ كميةً أو نسي خصماً أو اختار «دوريّ» وهو ختاميٌّ **لا سبيلَ له إلا الرفض
+   وإعداد مستخلصٍ جديد** — فيُلوّث الخطُّ الزمنيُّ للعقد بمستخلصٍ مرفوضٍ سببُه خطأٌ
+   كتابيّ. والحاجةُ حقيقيةٌ ويوميّة.
+
+   **والخطرُ الحقيقيُّ ليس التعديلَ بل التعديلَ الصامت:** رقمٌ اعتمده مديرُ
+   المشاريع ووقّع المقاولُ على صافيه يتغيّر بعده بلا أن يعلم أحد. ولذلك:
+   • **تسقط الاعتماداتُ كلُّها** — لا واحدةٌ منها: الكمياتُ هي عينُ ما يعتمدونه.
+   • **ويسقط توقيعُ المقاول** — أقرّ بكمياتٍ لم تعد هي.
+   • ثمّ `extNextStage` تقرّر من الصفر، فيعود المستخلصُ إلى بوّابته الأولى.
+   • **والسببُ إلزاميّ**، ويُكتب في الخطّ الزمنيّ مع الصافي قبلَه وبعدَه — فمن سقط
+     اعتمادُه يقرأ لماذا وبكم تغيّر. */
+function editExtract(id, patch, reason){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  if(["project_manager","admin"].indexOf(_role()) === -1)
+    return Promise.reject(new Error("تعديلُ المستخلص لمدير المشروع أو الأدمن"));
+  var why=String(reason||"").trim();
+  if(!why) return Promise.reject(new Error("سبب التعديل إلزامي"));
+  var ref=database.collection(EXTRACTS_COL()).doc(id);
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("المستخلص غير موجود");
+      var e=s.data()||{}; e.id=id;
+      if(extIsFinal(e.status)) throw new Error("المستخلصُ في حالةٍ نهائية — لا يُعدَّل");
+      var c=contractById(e.contractId);
+      if(!c) throw new Error("عقد المستخلص غير محمَّل");
+      var was=r2(extCalc(e, c).net);
+      var d=patch||{};
+      /* الحقولُ القابلةُ للتعديل وحدَها تُنسَخ — لا عقدٌ ولا حالةٌ ولا خطٌّ زمنيٌّ
+         ولا سدادٌ يُكتب من الشاشة (وإلا صار «التعديل» باباً خلفياً لكل حقل). */
+      var next=Object.assign({}, e);
+      next.period = String(d.period||"");
+      next.isFinal = !!d.isFinal;
+      next.materialsIssued = r2(Math.max(0, Number(d.materialsIssued)||0));
+      next.penaltyAmount   = r2(Math.max(0, Number(d.penaltyAmount)||0));
+      next.ncDeduction     = r2(Math.max(0, Number(d.ncDeduction)||0));
+      next.lines = (Array.isArray(d.lines)?d.lines:[]).map(function(l){
+        return { lineId:l.lineId, desc:l.desc||"", unit:l.unit||"",
+                 unitPrice:Number(l.unitPrice)||0, cumQty:Number(l.cumQty)||0 };
+      });
+      if(!next.lines.length) throw new Error("لا بنودَ في المستخلص");
+      var g=extCumGuard(next, c, _exts);
+      if(!g.ok) throw new Error(_guardMsg(g));
+      var calc=extNet(next, c, { prevGross:prevGrossOf(_exts, c, id),
+        materialsIssued:next.materialsIssued, penaltyAmount:next.penaltyAmount,
+        ncDeduction:next.ncDeduction });
+      if(calc.period < 0) throw new Error("قيمة الفترة سالبة — التراكميُّ أقلُّ ممّا اعتُمد سابقاً");
+      /* ما وُقّع على الأرقام القديمة يسقط — الاعتماداتُ وتوقيعُ المقاول معاً */
+      ["pmApprovedAt","pmApprovedBy","pmApprovedByUser","ceoApprovedAt","ceoApprovedBy",
+       "ceoApprovedByUser","ceoApprovedAmount","delegatedApproval","signature"].forEach(function(k){
+        next[k] = null;   // `null` لا `delete`: الكتابةُ بالدمج لا تمحو حقلاً محذوفاً
+      });
+      next.status = extNextStage(next, calc.net, ceoThreshold());
+      _pushTimeline(next, "تعديل المستخلص", "edited",
+        money(was)+" ← "+money(calc.net)+" ر.س — "+why+" · سقطت الاعتماداتُ وتوقيعُ المقاول");
+      next.updatedAt=_now(); next.updatedBy=_me();
+      var out=Object.assign({}, next); delete out.id;
+      t.set(ref, out, { merge:true });
+      return next;
+    });
+  }).then(function(next){
+    var i=_exts.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _exts[i]=next;
+    _audit("تعديل مستخلص", id+" — "+why);
+    _notify("مستخلص "+id, "عُدِّل وأُعيد للاعتماد", id);
+    return next;
+  });
+}
+
 /* رفعُ نسخة المستخلص موقّعةً من المقاول — **بابُ السداد**.
 
    تُقبَل في أيّ مرحلةٍ غيرِ نهائية لا عند المالية وحدَها: المقاولُ يوقّع حين يستلم
@@ -5387,8 +5459,22 @@ function renderCtrs(){
   hookMyTasks(); hookDash();
   paintCtrs();
 }
+/* ⛔ **تُزامَن المسوّدةُ قبل كلّ إعادة رسم.** بلاغُ المالك: «المستخلص نهائيّ فلماذا
+   يخرج دوريّاً في الـPDF؟» — والجوابُ أنّ اختيارَه لم يصل المسوّدةَ أصلاً. فحقولُ
+   الكميات تُزامَن مع كل ضغطة (`oninput`)، أمّا «الفترة» و«ختاميّ؟» فلا؛ **وأيُّ لقطةٍ
+   من Firestore** (مستخلصٌ أو عقدٌ أو أمرُ تغييرٍ يتحرّك عند أيّ مستخدم) تستدعي
+   `paintCtrs` فتُعيد بناء النموذج من `_extDraft` — فيرتدّ الحقلُ غيرُ المزامَن إلى
+   قيمته الأولى **بلا خطأٍ ولا رسالة**، ويُرسَل المستخلصُ دوريّاً وقد اختير ختاميّاً.
+   والعلاجُ بنيويٌّ لا حقلٌ بحقل: تُقرأ المسوّداتُ المفتوحةُ من الشاشة **قبل** هدمها،
+   فيحمي ذلك كلَّ حقلٍ يُضاف لاحقاً لا الحقلَين وحدَهما. */
+function _syncOpenDrafts(){
+  try{ if(_extDraft) syncExtDraft(); }catch(e){}
+  try{ if(_chgDraft) syncChgDraft(); }catch(e){}
+  try{ if(_clEdit)   syncClauses();  }catch(e){}
+}
 function paintCtrs(){
   var el=document.getElementById("page-"+PAGE_CTRS); if(!el) return;
+  _syncOpenDrafts();
   el.innerHTML = _cOpen ? ctrCardHTML(_cOpen) : ctrListHTML();
 }
 
@@ -5405,11 +5491,13 @@ function ctrListHTML(){
   var live=all.filter(function(c){ return c.status==="ctr_active"; });
   var liveVal=live.reduce(function(s,c){ return s+contractValue(c); },0);
   var susp=all.filter(function(c){ return c.status==="ctr_suspended"; }).length;
+  var openExts=all.filter(function(c){ return !!openExtractOf(_exts, c.id); }).length;
 
   var head=headHTML("العقود","الالتزاماتُ النافذة — قيمتُها ومدّتُها ومستخلصاتُها.","", "briefcase");
   var strip='<div class="ct-strip">'+
     '<div class="ct-stat"><span class="l">عقودٌ سارية</span><span class="v">'+live.length+'</span></div>'+
     '<div class="ct-stat"><span class="l">قيمتُها (ر.س)</span><span class="v">'+money0(liveVal)+'</span></div>'+
+    '<div class="ct-stat'+(openExts?' warn':'')+'"><span class="l">مستخلصاتٌ مفتوحة</span><span class="v">'+openExts+'</span></div>'+
     '<div class="ct-stat'+(susp?' warn':'')+'"><span class="l">موقوفة</span><span class="v">'+susp+'</span></div>'+
     '<div class="ct-stat"><span class="l">الإجمالي</span><span class="v">'+all.length+'</span></div>'+
   '</div>';
@@ -5442,8 +5530,28 @@ function ctrListHTML(){
   return head+strip+filters+body;
 }
 
+/* بلاغُ المالك: «العقدُ لا يُظهر أنّ له مستخلصاً ولا عند مَن يقف». وكان المستخلصُ
+   مدفوناً في تبويبٍ داخل بطاقة العقد: لا تعرفه إلا بفتح العقد ثمّ التبويب. وهو
+   **حالةُ العقد الحيّةُ الوحيدة** التي تتحرّك شهرياً — فمن يفتح صفحةَ العقود يريد
+   أن يعرف أيُّها ينتظره الآن. فيظهر السطرُ حيث تُتَّخذ القرارُ: على البطاقة نفسِها،
+   ومن `openExtractOf`/`extGateOwner` — البوّاباتِ نفسِها التي تحرس الأزرار لا وصفاً
+   ثانياً ينحرف عنها. */
 function ctrTileHTML(c){
   var v=contractValue(c);
+  var openE=openExtractOf(_exts, c.id);
+  var allE=extractsFor(c.id);
+  var paidE=allE.filter(function(e){ return e.status==="ext_paid"; });
+  var extLine="";
+  if(openE){
+    var og=extGateOwner(openE.status);
+    var needSig = openE.status==="ext_pending_finance" && !extSignature(openE);
+    extLine='<div class="ct-tile-ext'+(needSig?' warn':'')+'">'+_icn("banknote","ic-sm")+
+      ' <span class="num">'+_esc(openE.id)+'</span> — '+
+      _esc(needSig ? "بانتظار نسخةٍ موقّعةٍ من المقاول" : ("بانتظار "+((og||{}).lbl||"إجراء")))+'</div>';
+  } else if(allE.length){
+    extLine='<div class="ct-tile-ext done">'+_icn("checkCircle","ic-sm")+' '+allE.length+
+      ' مستخلصات · '+paidE.length+' مسدَّد</div>';
+  }
   return '<div class="ct-tile" style="--rail:'+(_CTR_RAIL[c.status]||"var(--muted)")+'" onclick="contracts.openCtr(\''+_jq(c.id)+'\')">'+
     '<div class="ct-tile-top">'+
       '<div class="ct-tile-name">'+_esc(c.title||c.id)+'</div>'+ctrBadge(c.status)+
@@ -5451,6 +5559,7 @@ function ctrTileHTML(c){
     '<div class="ct-tile-kind"><span class="num">'+_esc(c.id)+'</span>'+
       ' <span class="ct-dot">·</span> '+_esc(_projName(c))+
       (c.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':'')+'</div>'+
+    extLine+
     '<div class="ct-tile-foot">'+
       '<div class="ct-money"><span class="num">'+money(v)+'</span> <small>ر.س</small></div>'+
       '<div class="ct-tile-who">'+_esc(c.vendorName||"—")+'</div>'+
@@ -5669,8 +5778,12 @@ function ladderHTML(calc, c){
 
 function extFormHTML(c){
   var d=_extDraft;
-  var floor=prevCumByLine(_exts, c, null);
-  var ctx={ prevGross:prevGrossOf(_exts,c,null), materialsIssued:d.materialsIssued,
+  /* **المستخلصُ لا يُقاس على نفسِه.** في وضع التعديل يُستثنى من «سبق اعتمادُه» ومن
+     «المستخلَص سابقاً» — وإلا قرأ المُعدِّلُ كمياتِه هو أرضيةً لا يجوز النزولُ تحتها،
+     فامتنع عليه تصحيحُ الخطأ الذي فتح البابَ من أجله. */
+  var xid=d.editOf||null;
+  var floor=prevCumByLine(_exts, c, xid);
+  var ctx={ prevGross:prevGrossOf(_exts,c,xid), materialsIssued:d.materialsIssued,
             penaltyAmount:d.penaltyAmount, ncDeduction:d.ncDeduction };
   var calc=extNet(d, c, ctx);
   var g=extCumGuard(d, c, _exts);
@@ -5684,8 +5797,8 @@ function extFormHTML(c){
       '<td>'+_esc(l.desc||"—")+'</td>'+
       '<td class="num">'+money0(max)+' '+_esc(l.unit||"")+'</td>'+
       '<td class="num">'+money0(was)+'</td>'+
-      '<td><input class="form-input num" data-ef="cumQty" data-i="'+i+'" type="number" step="any" value="'+_esc(l.cumQty)+'" style="min-width:90px" oninput="contracts.extRecalc()"></td>'+
-      '<td class="num ct-e-pct">'+pct+'%</td>'+
+      '<td><input class="form-input num" data-ef="cumQty" data-i="'+i+'" type="number" step="any" value="'+_esc(l.cumQty)+'" style="min-width:90px" oninput="contracts.extRecalc(\'q\','+i+')"></td>'+
+      '<td><input class="form-input num ct-e-pct" data-ef="pct" data-i="'+i+'" type="number" step="any" min="0" max="100" value="'+_esc(pct)+'" style="min-width:74px" oninput="contracts.extRecalc(\'p\','+i+')"></td>'+
       '<td class="num ct-e-val">'+money(r2(vatSplit(l.unitPrice,c.vatMode).base*(Number(l.cumQty)||0)))+'</td>'+
     '</tr>';
   }).join("");
@@ -5696,19 +5809,24 @@ function extFormHTML(c){
 
   return '<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.cancelExtract()">'+_icn("rotateCcw")+' إلغاء</button>'+
   '<div class="card ct-sec">'+
-    '<div class="ct-sec-h">'+_icn("banknote","ic-sm")+' مستخلص جديد — '+_esc(c.id)+
-      '<span class="ct-sec-lock">أدخِل المنفَّذ <b>تراكمياً منذ بداية العقد</b> لا كميةَ الفترة</span></div>'+
+    '<div class="ct-sec-h">'+_icn("banknote","ic-sm")+' '+(d.editOf?('تعديل المستخلص '+_esc(d.editOf)):('مستخلص جديد — '+_esc(c.id)))+
+      '<span class="ct-sec-lock">أدخِل المنفَّذ <b>تراكمياً منذ بداية العقد</b> — بالكمية أو بالنسبة، وكلٌّ يتبع الآخر</span></div>'+
     '<div class="ct-form-row">'+
-      field("الفترة", '<input class="form-input" id="ct-e-period" value="'+_esc(d.period||"")+'" placeholder="مثال: أغسطس 2026">')+
-      field("مستخلصٌ ختاميّ؟", '<select class="form-input" id="ct-e-final">'+
+      field("الفترة", '<input class="form-input" id="ct-e-period" value="'+_esc(d.period||"")+'" placeholder="مثال: أغسطس 2026" oninput="contracts.extRecalc()">')+
+      field("مستخلصٌ ختاميّ؟", '<select class="form-input" id="ct-e-final" onchange="contracts.extRecalc()">'+
         '<option value=""'+(!d.isFinal?' selected':'')+'>لا — مستخلصٌ دوريّ</option>'+
         '<option value="1"'+(d.isFinal?' selected':'')+'>نعم — يُنهي العقد فنّياً</option>'+
       '</select>')+
     '</div>'+
     '<div class="ct-table-wrap"><table class="ct-table" id="ct-e-lines"><thead><tr>'+LN_TH+
-      '<th>البند</th><th>كمية العقد</th><th>سبق اعتماده</th><th>المنفَّذ تراكمياً</th><th>%</th><th>القيمة</th>'+
+      '<th>البند</th><th>كمية العقد</th><th>سبق اعتماده</th><th>المنفَّذ تراكمياً</th><th>نسبة الإنجاز %</th><th>القيمة</th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     warn+lateNote+
+    (d.editOf ? '<div class="ct-form-row">'+
+      field("سبب التعديل <b>(إلزاميّ)</b>", '<input class="form-input" id="ct-e-why" value="'+_esc(d.reason||"")+'" placeholder="مثال: تصحيحُ كمية البند الأول بعد إعادة القياس" oninput="contracts.extRecalc()">')+
+      '<div></div></div>'+
+      '<div class="ct-note warn">'+_icn("alertTriangle","ic-sm")+' بحفظ التعديل <b>تسقط الاعتماداتُ كلُّها وتوقيعُ المقاول</b> ويعود المستخلصُ إلى بوّابته الأولى — فلا يُصرَف على رقمٍ لم يُعتمد.</div>'
+      : '')+
   '</div>'+
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("trendingDown","ic-sm")+' خصوماتٌ تُدخَل يدوياً</div>'+
@@ -5728,7 +5846,8 @@ function extFormHTML(c){
   '</div>'+
   '<div class="ct-save-bar">'+
     '<button class="btn btn-ghost btn-sm" onclick="contracts.cancelExtract()">إلغاء</button>'+
-    '<button class="btn btn-success btn-sm" id="ct-e-send"'+(g.ok?'':' disabled')+' onclick="contracts.submitExtract()">'+_icn("send","ic-sm")+' إرسال للاعتماد</button>'+
+    '<button class="btn btn-success btn-sm" id="ct-e-send"'+((g.ok && (!d.editOf || d.reason))?'':' disabled')+' onclick="contracts.submitExtract()">'+
+      _icn(d.editOf?"save":"send","ic-sm")+' '+(d.editOf?'حفظ التعديل':'إرسال للاعتماد')+'</button>'+
   '</div>';
 }
 
@@ -5743,6 +5862,8 @@ function extCardHTML(c, id){
   var pguard = extPayGuard(e, calc.net);
   var canSign = !extIsFinal(e.status) && ["project_manager","finance","admin"].indexOf(_role())!==-1;
   var tools='<button class="btn btn-ghost btn-sm" onclick="contracts.printExt()">'+_icn("printer","ic-sm")+' طباعة المستخلص</button> ';
+  if(!extIsFinal(e.status) && ["project_manager","admin"].indexOf(_role())!==-1)
+    tools+='<button class="btn btn-ghost btn-sm" onclick="contracts.openExtEdit()">'+_icn("edit","ic-sm")+' تعديل المستخلص</button> ';
   if(canSign)
     tools+='<button class="btn btn-primary btn-sm" onclick="contracts.openExtSign()">'+_icn("save","ic-sm")+' '+
            (extSignature(e)?'استبدال النسخة الموقّعة':'رفع النسخة الموقّعة')+'</button> ';
@@ -5760,9 +5881,12 @@ function extCardHTML(c, id){
   }
   var extSod = sodNoteHTML(mode, owner);
   var lineRows=(e.lines||[]).map(function(l,i){
-    return '<tr>'+lnSeq(i)+'<td>'+_esc(l.desc||"—")+'</td><td class="num">'+money0(contractLineQty(c,l.lineId))+'</td>'+
-      '<td class="num">'+money0(l.cumQty)+'</td><td class="num">'+money(l.unitPrice)+'</td></tr>';
-  }).join("") || '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
+    var max=contractLineQty(c,l.lineId), cum=Number(l.cumQty)||0;
+    return '<tr>'+lnSeq(i)+'<td>'+_esc(l.desc||"—")+'</td><td class="num">'+money0(max)+'</td>'+
+      '<td class="num">'+money0(cum)+'</td>'+
+      '<td class="num">'+(max>0?Math.round(cum/max*100):0)+'%</td>'+
+      '<td class="num">'+money(l.unitPrice)+'</td></tr>';
+  }).join("") || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
   var tl=(e.timeline||[]).map(function(x){
     return '<div class="ct-tl-row"><span class="d"></span><div><div class="t">'+_esc(x.event)+'</div>'+
       '<div class="m">'+_esc(x.by||"")+' · '+_esc(String(x.at||"").slice(0,16).replace("T"," "))+(x.note?' — '+_esc(x.note):'')+'</div></div></div>';
@@ -5793,7 +5917,7 @@ function extCardHTML(c, id){
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("pieChart","ic-sm")+' سُلَّم الحساب'+
     (e.settled?'<span class="ct-sec-lock">لقطةٌ محفوظةٌ وقت السداد</span>':'')+'</div>'+ladderHTML(calc,c)+'</div>'+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود المنفَّذة</div>'+
-    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+LN_TH+'<th>البند</th><th>كمية العقد</th><th>المنفَّذ تراكمياً</th><th>سعر الوحدة</th></tr></thead>'+
+    '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+LN_TH+'<th>البند</th><th>كمية العقد</th><th>المنفَّذ تراكمياً</th><th>نسبة الإنجاز</th><th>سعر الوحدة</th></tr></thead>'+
     '<tbody>'+lineRows+'</tbody></table></div></div>'+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' السجل</div><div class="ct-timeline">'+tl+'</div></div>';
 }
@@ -6770,7 +6894,7 @@ function contractPaperHTML(c, opt){
   '.ap-n{font-size:12.5px;font-weight:800;margin-top:4px}'+
   '.ap-w{color:#b45309;font-weight:700}'+
   '.ap-d{font-size:11px;color:#64748b;font-family:monospace}'+
-  'h2{font-size:15px;color:#1b3a6b;margin:22px 0 8px;border-bottom:1px solid #dde3ed;padding-bottom:5px}'+
+  'h2{font-size:15px;color:#1b3a6b;margin:22px 0 8px;border-bottom:1px solid #dde3ed;padding-bottom:5px;break-after:avoid;page-break-after:avoid}'+
   '.parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px}'+
   '.party{border:1px solid #dde3ed;border-radius:8px;padding:11px 13px}'+
   '.party .pl{font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px}'+
@@ -6946,7 +7070,7 @@ function printPayOrder(id){
   '.band.ok{background:#ecfdf5;border-color:#059669;color:#065f46}'+
   '.band.warn{background:#fffbeb;border-color:#d97706;color:#92400e}'+
   '.band.bad{background:#fef2f2;border-color:#dc2626;color:#991b1b}'+
-  'h2{font-size:15px;color:#1b3a6b;margin:20px 0 8px;border-bottom:1px solid #dde3ed;padding-bottom:5px}'+
+  'h2{font-size:15px;color:#1b3a6b;margin:20px 0 8px;border-bottom:1px solid #dde3ed;padding-bottom:5px;break-after:avoid;page-break-after:avoid}'+
   '.parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px}'+
   '.party{border:1px solid #dde3ed;border-radius:8px;padding:11px 13px}'+
   '.party .pl{font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px}'+
@@ -7068,18 +7192,21 @@ function extractPaperHTML(e, c, opt){
       '<td style="text-align:center;font-weight:700">'+money(val)+'</td></tr>';
   }).join("") || '<tr><td colspan="9" style="text-align:center;padding:14px">—</td></tr>';
 
-  /* سلّمُ الحساب ورقةً — الصفوفُ نفسُها التي يرسمها `ladderHTML` على الشاشة،
-     وقيمُها من `calc` وحدَها. وما كان صفراً يُطبَع أيضاً: الخصمُ الغائبُ خبرٌ
-     للمقاول كالخصم الحاضر — يقرأ أنّه لم يُخصَم منه شيءٌ بهذا الباب. */
+  /* سلّمُ الحساب ورقةً — **الصفوفُ نفسُها التي يرسمها `ladderHTML` على الشاشة**
+     بالقاعدة نفسِها: خصمٌ قيمتُه صفرٌ لا يُطبَع. (وكان يُطبَع أوّلَ مرّة بحجّة أنّ
+     الخصمَ الغائبَ خبر — فأكل خمسةَ صفوفٍ من ورقةٍ يريدها المالكُ صفحةً واحدة،
+     وخالف الشاشةَ في الوقت نفسِه. والورقةُ والشاشةُ لا تختلفان في ما تعرضان.) */
   function rung(lbl, val, sign, cls){
+    if(!cls && !val) return "";
     return '<tr'+(cls?' class="'+cls+'"':'')+'><td>'+(sign<0?'− ':(sign>0?'+ ':''))+_esc(lbl)+'</td>'+
       '<td class="n">'+money(val)+'</td></tr>';
   }
   var ladder='<table class="sum lad">'+
     rung("المنجَز التراكميّ منذ بداية العقد", calc.gross, 0, "")+
-    rung("المستخلَص المعتمَد سابقاً", calc.prevGross, -1, "")+
+    /* «سابقاً» يُطبَع ولو كان صفراً — بدونه لا تُقرأ المعادلةُ (منجَزٌ − سابقاً = فترة) */
+    rung("المستخلَص المعتمَد سابقاً", calc.prevGross, -1, "keep")+
     rung("أعمال الفترة", calc.period, 0, "mid")+
-    (calc.mode==="none" ? "" : rung("ض.ق.م "+Math.round(VAT_RATE*100)+"٪ على أعمال الفترة", calc.vat, 1, ""))+
+    (calc.mode==="none" ? "" : rung("ض.ق.م "+Math.round(VAT_RATE*100)+"٪ على أعمال الفترة", calc.vat, 1, "vat"))+
     rung("محتجز الضمان "+(Number((c.retention||{}).pct)||0)+"٪", calc.retention, -1, "")+
     rung("استرداد الدفعة المقدمة "+(Number((c.advance||{}).recoveryPct)||0)+"٪", calc.advanceRecovery, -1, "")+
     rung("غرامة التأخير", calc.penalty, -1, "")+
@@ -7112,53 +7239,75 @@ function extractPaperHTML(e, c, opt){
   var html='<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'+
   '<title>مستخلص '+_esc(e.id)+'</title><style>'+
   '*{box-sizing:border-box}'+
-  'body{font-family:"Segoe UI",Tahoma,Arial,sans-serif;margin:0;padding:26px;color:#111827;direction:rtl;font-size:13px;line-height:1.9}'+
-  '.header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1b3a6b;padding-bottom:12px}'+
-  '.header-right{display:flex;align-items:center;gap:12px}'+
-  '.company-logo{width:56px;height:56px;object-fit:contain}'+
-  '.company{font-size:18px;font-weight:800}.subtitle{font-size:13px;color:#1b3a6b;font-weight:700}'+
-  '.doc-no{background:#eef2f7;color:#1b3a6b;border-radius:8px;padding:8px 14px;font-weight:800;font-family:monospace}'+
-  '.band{margin-top:14px;border-radius:8px;padding:9px 13px;font-weight:800;font-size:13px;border:2px solid}'+
-  '.band .bn{display:block;font-weight:600;font-size:11.5px;margin-top:2px}'+
+  /* **الورقةُ مضغوطةٌ عمداً** (بلاغُ المالك: «صغّر البطاقات ليكون بندان صفحةً واحدة»).
+     المستخلصُ ورقةُ عملٍ شهريةٌ تُوقَّع وتُصوَّر وتُرسَل — لا كرّاسةَ عقد. فالمقاساتُ
+     هنا أضيقُ من ورقة العقد بمقدارٍ محسوب: ٣٫٥مم هامشُ صفحةٍ أقلّ · سطرٌ أقصرُ
+     (1.5 بدل 1.9) · وحشواتُ الجداول والبطاقات إلى النصف تقريباً. */
+  'body{font-family:"Segoe UI",Tahoma,Arial,sans-serif;margin:0;padding:18px;color:#111827;direction:rtl;font-size:11.5px;line-height:1.5}'+
+  '.header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #1b3a6b;padding-bottom:8px}'+
+  '.header-right{display:flex;align-items:center;gap:10px}'+
+  '.company-logo{width:44px;height:44px;object-fit:contain}'+
+  '.company{font-size:15px;font-weight:800}.subtitle{font-size:12px;color:#1b3a6b;font-weight:700}'+
+  '.doc-no{background:#eef2f7;color:#1b3a6b;border-radius:7px;padding:5px 11px;font-weight:800;font-family:monospace;font-size:11.5px}'+
+  '.band{margin-top:7px;border-radius:7px;padding:4px 9px;font-weight:800;font-size:11px;border:1.5px solid}'+
+  '.band .bn{display:block;font-weight:600;font-size:10.5px;margin-top:1px}'+
   '.band.ok{background:#ecfdf5;border-color:#059669;color:#065f46}'+
   '.band.warn{background:#fffbeb;border-color:#d97706;color:#92400e}'+
   '.band.bad{background:#fef2f2;border-color:#dc2626;color:#991b1b}'+
-  'h2{font-size:15px;color:#1b3a6b;margin:20px 0 8px;border-bottom:1px solid #dde3ed;padding-bottom:5px}'+
-  '.parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px}'+
-  '.party{border:1px solid #dde3ed;border-radius:8px;padding:11px 13px}'+
-  '.party .pl{font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px}'+
-  '.party .pn{font-size:14px;font-weight:800}'+
-  '.party .pm{font-size:12px;color:#374151;margin-top:3px}'+
-  'table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12.5px}'+
-  'th{background:#1b3a6b;color:#fff;padding:8px;font-weight:700}'+
-  'td{padding:7px 8px;border-bottom:1px solid #e5e7eb}'+
+  /* **العنوانُ لا يُفارق فقرتَه**: `break-after:avoid` يرحّل العنوانَ إلى الصفحة
+     التالية مع أوّل سطرٍ من محتواه، بدل أن يبقى وحيداً في قاع الورقة. */
+  'h2{font-size:12.5px;color:#1b3a6b;margin:8px 0 4px;border-bottom:1px solid #dde3ed;padding-bottom:3px;break-after:avoid;page-break-after:avoid}'+
+  /* والكتلُ القصيرةُ لا تُشقّ أصلاً — أمّا جدولُ البنود فيُشقّ وترويسةُ أعمدته تتكرّر */
+  '.parties,.kv,.meta,.calc,.lad,.words,.ack,.sign,.signs{break-inside:avoid}'+
+  'thead{display:table-header-group}'+
+  '.parties{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:7px}'+
+  '.party{border:1px solid #dde3ed;border-radius:7px;padding:7px 9px}'+
+  '.party .pl{font-size:10px;color:#64748b;font-weight:700;margin-bottom:2px}'+
+  '.party .pn{font-size:12.5px;font-weight:800}'+
+  '.party .pm{font-size:11px;color:#374151;margin-top:2px}'+
+  'table{width:100%;border-collapse:collapse;margin-top:5px;font-size:11px}'+
+  'th{background:#1b3a6b;color:#fff;padding:5px 4px;font-weight:700}'+
+  'td{padding:3px 6px;border-bottom:1px solid #e5e7eb}'+
   'tbody tr:nth-child(even){background:#f8fafc}'+
-  '.kv{width:100%;max-width:520px}.kv td{border-bottom:1px solid #eef2f7}'+
-  '.kv td:first-child{width:150px;color:#64748b}'+
+  '.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:5px 8px;margin-top:6px}'+
+  '.mf{border:1px solid #eef2f7;border-radius:6px;padding:3px 6px;background:#fbfdff;min-width:0}'+
+  '.mf .ml{display:block;font-size:9.5px;color:#64748b;font-weight:700}'+
+  '.mf .mv{display:block;font-size:11px;font-weight:800;overflow-wrap:anywhere}'+
+  '.mf .ms{display:block;font-size:9.5px;color:#374151;margin-top:1px;overflow-wrap:anywhere}'+
+  '.mf.w2{grid-column:span 2}'+
+  '.calc{display:flex;gap:10px;align-items:flex-start;margin-top:5px}'+
+  '.calc .words{flex:1;margin-top:0;align-self:stretch}'+
+  '.calc .sum{margin-top:0}'+
+  '.lad td{padding:2.5px 6px}'+
+  '.kv{width:100%;max-width:470px}.kv td{border-bottom:1px solid #eef2f7}'+
+  '.kv td:first-child{width:125px;color:#64748b}'+
   '.kv .n{text-align:left;font-family:monospace;font-weight:700}'+
   '.kv .t{text-align:right;font-weight:700}'+
-  '.sum{width:420px;margin-inline-start:auto;margin-top:10px}'+
+  '.sum{width:355px;margin-inline-start:auto;margin-top:6px}'+
   '.sum td{border-bottom:1px solid #eef2f7}.sum .n{text-align:left;font-family:monospace;font-weight:700}'+
   '.lad tr.mid td{background:#f1f5f9;font-weight:800;border-top:1px solid #cbd5e1}'+
-  '.lad tr.net td{border-top:2px solid #1b3a6b;font-weight:800;font-size:14px;background:#eef2f7}'+
-  '.words{margin-top:10px;border:1px solid #1b3a6b;border-radius:8px;padding:10px 13px;background:#f8fafc;break-inside:avoid}'+
-  '.words .wl{font-size:11px;color:#64748b;font-weight:700}'+
-  '.words .wv{font-size:14px;font-weight:800;color:#1b3a6b}'+
-  '.note{margin-top:10px;border-radius:8px;padding:8px 12px;font-size:11.5px;border:1px solid}'+
+  '.lad tr.net td{border-top:2px solid #1b3a6b;font-weight:800;font-size:12.5px;background:#eef2f7}'+
+  '.words{margin-top:7px;border:1px solid #1b3a6b;border-radius:7px;padding:6px 10px;background:#f8fafc}'+
+  '.words .wl{font-size:10px;color:#64748b;font-weight:700}'+
+  '.words .wv{font-size:12.5px;font-weight:800;color:#1b3a6b}'+
+  '.note{margin-top:7px;border-radius:7px;padding:6px 10px;font-size:10.5px;border:1px solid}'+
   '.note.ok{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}'+
-  '.ack{margin-top:14px;border:1px solid #1b3a6b;border-radius:8px;padding:12px 14px;background:#f8fafc;break-inside:avoid;font-size:12.5px}'+
-  '.ack .al{font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px}'+
-  '.sign{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:16px;break-inside:avoid}'+
-  '.sg{border:1px solid #dde3ed;border-radius:8px;padding:10px;min-height:104px;text-align:center}'+
-  '.sg-l{font-size:11px;color:#64748b;font-weight:700}'+
-  '.sg-n{font-size:12.5px;font-weight:800;margin-top:4px}'+
+  '.ack{border:1px solid #1b3a6b;border-radius:7px;padding:6px 8px;background:#f8fafc;font-size:10px;line-height:1.45;text-align:justify}'+
+  '.ack .al{font-size:10px;color:#64748b;font-weight:700;margin-bottom:3px}'+
+  /* **الإقرارُ والاعتماداتُ عمودان لا كتلتان**: الورقةُ شهريةٌ تُوقَّع وتُصوَّر،
+     وكلُّ ٣٠مم تُوفَّر تعني بنداً إضافياً يبقى في الصفحة الأولى. */
+  '.signs{display:grid;grid-template-columns:1.3fr 1fr;gap:9px;margin-top:5px;break-inside:avoid}'+
+  '.sign{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:7px;align-content:start}'+
+  '.sg{border:1px solid #dde3ed;border-radius:7px;padding:6px 5px;min-height:58px;text-align:center}'+
+  '.sg-l{font-size:10px;color:#64748b;font-weight:700}'+
+  '.sg-n{font-size:11px;font-weight:800;margin-top:2px}'+
   '.sg-w{color:#b45309;font-weight:700}'+
-  '.sg-d{font-size:11px;color:#64748b;font-family:monospace}'+
-  '.sg-x{margin-top:26px;border-top:1px solid #9ca3af;padding-top:5px;font-size:11px;color:#374151}'+
-  '.ctr-sign{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-top:18px;break-inside:avoid;font-size:12px}'+
-  '.ctr-sign div{border-top:1px solid #9ca3af;padding-top:8px;text-align:center;color:#374151;min-height:64px}'+
-  '.foot{margin-top:22px;font-size:10.5px;color:#94a3b8;text-align:center;border-top:1px solid #e5e7eb;padding-top:8px}'+
-  '@media print{body{padding:14px}@page{margin:14mm;size:A4}}'+
+  '.sg-d{font-size:10px;color:#64748b;font-family:monospace}'+
+  '.sg-x{margin-top:14px;border-top:1px solid #9ca3af;padding-top:4px;font-size:10px;color:#374151}'+
+  '.ctr-sign{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:12px;break-inside:avoid;font-size:11px}'+
+  '.ctr-sign div{border-top:1px solid #9ca3af;padding-top:4px;text-align:center;color:#374151;min-height:30px}'+
+  '.foot{margin-top:12px;font-size:9.5px;color:#94a3b8;text-align:center;border-top:1px solid #e5e7eb;padding-top:6px}'+
+  '@media print{body{padding:8px}@page{margin:10mm;size:A4}}'+
   (lhOn?letterheadCSS():"")+
   '</style></head><body>'+
 
@@ -7169,24 +7318,26 @@ function extractPaperHTML(e, c, opt){
   '<div class="band '+_esc(st.cls)+'">'+_esc(st.lbl)+
     (st.note?'<span class="bn">'+_esc(st.note)+'</span>':'')+'</div>'+
 
-  '<h2>أطراف المستخلص</h2><div class="parties">'+
-    '<div class="party"><div class="pl">مالك العمل</div>'+
-      '<div class="pn">شركة المباني السريعة للمقاولات</div>'+
-      '<div class="pm">المشروع: '+_esc(_projName(c))+'</div></div>'+
-    '<div class="party"><div class="pl">المقاول</div>'+
-      '<div class="pn">'+_esc(c.vendorName||"—")+'</div>'+
-      '<div class="pm">'+(idn&&idn.number?(_esc(idn.label)+": "+_esc(idn.number)):"—")+'</div></div>'+
-  '</div>'+
+  '<h2>أطراف المستخلص وبياناته</h2>'+
 
-  '<h2>بيانات المستخلص</h2><table class="kv">'+
-    '<tr><td>رقم العقد</td><td class="t">'+_esc(c.id||"—")+' — '+_esc(c.title||"")+'</td></tr>'+
-    '<tr><td>قيمة العقد</td><td class="n">'+money(contractValue(c))+' ر.س</td></tr>'+
-    '<tr><td>الفترة</td><td class="t">'+_esc(e.period||"—")+'</td></tr>'+
-    '<tr><td>نوع المستخلص</td><td class="t">'+(e.isFinal?"ختاميّ — يُنهي العقد فنّياً":"دوريّ")+'</td></tr>'+
-    '<tr><td>تاريخ الإعداد</td><td class="n">'+_esc(dt(e.createdAt))+'</td></tr>'+
-    '<tr><td>أعدّه</td><td class="t">'+_esc(e.createdBy||"—")+'</td></tr>'+
-    '<tr><td>وضع الضريبة</td><td class="t">'+_esc(vm.short||"—")+'</td></tr>'+
-  '</table>'+
+  /* بياناتُ المستخلص **شبكةً لا جدولَ صفوف**: سبعةُ صفوفٍ كانت تأكل ٤٧مم من ورقةٍ
+     ارتفاعُها ٢٢٢مم — ثلثَ الصفحة لسبع كلمات. والشبكةُ تعرضها في ١٤مم. */
+  '<div class="meta">'+
+    '<div class="mf w2"><span class="ml">مالك العمل</span>'+
+      '<span class="mv">شركة المباني السريعة للمقاولات</span>'+
+      '<span class="ms">المشروع: '+_esc(_projName(c))+'</span></div>'+
+    '<div class="mf w2"><span class="ml">المقاول</span>'+
+      '<span class="mv">'+_esc(c.vendorName||"—")+'</span>'+
+      '<span class="ms">'+(idn&&idn.number?(_esc(idn.label)+": "+_esc(idn.number)):"—")+'</span></div>'+
+    '<div class="mf"><span class="ml">رقم العقد</span><span class="mv">'+_esc(c.id||"—")+'</span></div>'+
+    '<div class="mf"><span class="ml">قيمة العقد</span><span class="mv num">'+money(contractValue(c))+' ر.س</span></div>'+
+    '<div class="mf"><span class="ml">الفترة</span><span class="mv">'+_esc(e.period||"—")+'</span></div>'+
+    '<div class="mf"><span class="ml">نوع المستخلص</span><span class="mv">'+(e.isFinal?"ختاميّ — يُنهي العقد فنّياً":"دوريّ")+'</span></div>'+
+    '<div class="mf"><span class="ml">تاريخ الإعداد</span><span class="mv num">'+_esc(dt(e.createdAt))+'</span></div>'+
+    '<div class="mf"><span class="ml">أعدّه</span><span class="mv">'+_esc(e.createdBy||"—")+'</span></div>'+
+    '<div class="mf"><span class="ml">وضع الضريبة</span><span class="mv">'+_esc(vm.short||"—")+'</span></div>'+
+    '<div class="mf"><span class="ml">موضوع العقد</span><span class="mv">'+_esc(c.title||"—")+'</span></div>'+
+  '</div>'+
 
   '<h2>الأعمال المنفَّذة — قياسٌ تراكميٌّ منذ بداية العقد</h2>'+
   '<table><thead><tr><th style="width:32px">#</th><th style="text-align:right">البند</th>'+
@@ -7194,22 +7345,26 @@ function extractPaperHTML(e, c, opt){
   '<th>سعر الوحدة</th><th>القيمة التراكمية</th></tr></thead>'+
   '<tbody>'+lineRows+'</tbody></table>'+
 
-  '<h2>سُلَّم الحساب</h2>'+ladder+
-  '<div class="words"><div class="wl">صافي المستحق كتابةً</div><div class="wv">'+_esc(amountWords(calc.net))+'</div></div>'+
+  '<h2>سُلَّم الحساب</h2>'+
+  '<div class="calc">'+
+    '<div class="words"><div class="wl">صافي المستحق كتابةً</div><div class="wv">'+_esc(amountWords(calc.net))+'</div></div>'+
+    ladder+
+  '</div>'+
 
   paidBox+
 
-  '<h2>إقرارُ المقاول وتوقيعه</h2>'+
-  '<div class="ack"><div class="al">يُوقَّع من المقاول أو مَن يمثّله قانوناً</div>'+
+  '<h2>التوقيعات — إقرارُ المقاول والاعتماداتُ الداخلية</h2>'+
+  '<div class="signs">'+
+  '<div class="ack"><div class="al">إقرارُ المقاول — يُوقَّع منه أو ممّن يمثّله قانوناً</div>'+
     'أقرّ أنا الموقّع أدناه بأنّ الكميات المبيَّنة في هذا المستخلص مطابقةٌ لما نفّذتُه فعلاً '+
     'حتى تاريخه، وأنّني اطّلعتُ على الخصومات الواردة فيه ووافقتُ عليها، وأنّ صافي المستحق '+
     'المبيَّن أعلاه يمثّل كاملَ استحقاقي عن الأعمال المنفَّذة حتى تاريخ هذا المستخلص، '+
     'ولا مطالبةَ لي بغيره عنها.'+
     '<div class="ctr-sign"><div>اسم المقاول / الممثّل</div><div>التاريخ</div><div>التوقيع والختم</div></div>'+
   '</div>'+
+  '<div class="sign">'+sigCells+'</div>'+
+  '</div>'+
   signedNote+
-
-  '<h2>الاعتمادات الداخلية</h2><div class="sign">'+sigCells+'</div>'+
 
   '<div class="foot">صدر هذا المستخلص من نظام إدارة المشتريات — شركة المباني السريعة للمقاولات · '+
     _esc(e.id)+' · عقد '+_esc(c.id||"")+' · طُبع في '+_esc(dt(_now()))+'</div>'
@@ -7354,7 +7509,27 @@ function newExtract(){
     }) };
   paintCtrs();
 }
-function cancelExtract(){ _extDraft=null; paintCtrs(); }
+/* فتحُ مستخلصٍ قائمٍ في **النموذج نفسِه** — لا نموذجَ تحريرٍ ثانٍ يفترق عنه عند
+   أوّل تعديلٍ على أيّهما (درسُ `contractPaperHTML` للعقد ومسودّته). */
+function openExtEdit(){
+  var e=extractById(_extOpen), c=contractById(_cOpen); if(!e||!c) return;
+  if(["project_manager","admin"].indexOf(_role())===-1) return _toast("⚠ تعديلُ المستخلص لمدير المشروع أو الأدمن","warn");
+  if(extIsFinal(e.status)) return _toast("⚠ المستخلصُ في حالةٍ نهائية — لا يُعدَّل","warn");
+  _extDraft={ editOf:e.id, id:e.id, contractId:c.id, period:e.period||"", isFinal:!!e.isFinal,
+    reason:"",
+    materialsIssued:Number(e.materialsIssued)||0, penaltyAmount:Number(e.penaltyAmount)||0,
+    ncDeduction:Number(e.ncDeduction)||0,
+    lines:(e.lines||[]).map(function(l){
+      return { lineId:l.lineId, desc:l.desc||"", unit:l.unit||"",
+               unitPrice:Number(l.unitPrice)||0, cumQty:Number(l.cumQty)||0 };
+    }) };
+  _extOpen=null; paintCtrs();
+}
+function cancelExtract(){
+  var back=_extDraft && _extDraft.editOf;
+  _extDraft=null; if(back) _extOpen=back;
+  paintCtrs();
+}
 function openExt(id){ _extOpen=id; _extDraft=null; paintCtrs(); }
 function backToExts(){ _extOpen=null; paintCtrs(); }
 
@@ -7364,39 +7539,68 @@ function syncExtDraft(){
   function n(id){ var e=document.getElementById(id); return e?(Number(e.value)||0):0; }
   var p=document.getElementById("ct-e-period"); if(p) d.period=String(p.value||"").trim();
   var f=document.getElementById("ct-e-final"); if(f) d.isFinal = f.value==="1";
+  var w=document.getElementById("ct-e-why"); if(w) d.reason=String(w.value||"").trim();
   if(document.getElementById("ct-e-pen")) d.penaltyAmount=n("ct-e-pen");
   if(document.getElementById("ct-e-mat")) d.materialsIssued=n("ct-e-mat");
   if(document.getElementById("ct-e-nc"))  d.ncDeduction=n("ct-e-nc");
   var t=document.getElementById("ct-e-lines");
-  if(t) t.querySelectorAll("[data-ef]").forEach(function(inp){
+  /* **الكميةُ وحدَها تُقرأ** — لا كلُّ ما يحمل `data-ef`. فحقلُ النسبة يشاركها
+     الصفَّ والفهرس، ولو قُرئ الاثنان لكتب الثاني قيمتَه في الكمية (وهو ما وقع
+     فعلاً: صار «٥٠٪» كميةً فسقط حارسُ تجاوز العقد بلا أن يظهر خطأ). والنسبةُ
+     مُدخَلٌ يُترجَم في `extRecalc` ثمّ يُنسى — لا تُخزَّن ولا تُقرأ هنا. */
+  if(t) t.querySelectorAll('[data-ef="cumQty"]').forEach(function(inp){
     var i=parseInt(inp.dataset.i,10);
     if(d.lines[i]) d.lines[i].cumQty=Number(inp.value)||0;
   });
 }
 /* إعادةُ رسم السلّم وحدَه — فلا يقفز مؤشّرُ الكتابة أثناء الإدخال. */
-function extRecalc(){
-  syncExtDraft();
+/* إعادةُ الحساب الحيّة — وفيها **الكميةُ والنسبةُ وجهان لرقمٍ واحد**.
+
+   بلاغُ المالك: «لا توجد نِسَبُ تنفيذٍ في المستخلص عند إنشائه». وكانت النسبةُ
+   **تُعرَض ولا تُكتَب**: يُدخِل المُعِدُّ كميةً فتُحسب النسبةُ عرَضاً. وهذا يقلب عُرفَ
+   المقاولات: البندُ بالمقطوعية (كميتُه ١) إنجازُه **٣٥٪** لا «٠٫٣٥ مقطوعية»، وبندُ
+   المتر الطوليّ يُتابَع أسبوعياً بنسبته.
+
+   **والمخزَّنُ كميةٌ لا نسبة** — بها يُحسب السلّمُ وتُقاس ضدّ العقد. فالنسبةُ مُدخَلٌ
+   يُشتقّ منه فوراً (`qty = كميةُ العقد × النسبة`)، ثمّ يُنسى: مصدرُ حقيقةٍ واحدٌ
+   ورقمان يقودان إليه. و`from` تقول أيُّهما كتب المستخدمُ الآن، فلا يُعاد كتابةُ
+   الحقل الذي بين يديه فيقفز مؤشّرُه. */
+function extRecalc(from, i){
   var c=contractById(_cOpen); if(!c||!_extDraft) return;
-  var ctx={ prevGross:prevGrossOf(_exts,c,null), materialsIssued:_extDraft.materialsIssued,
+  /* النسبةُ تُترجَم إلى كميةٍ **قبل** المزامنة — فما يُقرأ إلى المسوّدة كميةٌ دائماً */
+  if(from==="p"){
+    var pIn=document.querySelector('#ct-e-lines input[data-ef="pct"][data-i="'+i+'"]');
+    var qIn=document.querySelector('#ct-e-lines input[data-ef="cumQty"][data-i="'+i+'"]');
+    var ln=_extDraft.lines[i];
+    if(pIn && qIn && ln){
+      var pv=Number(pIn.value); if(!isFinite(pv)) pv=0;
+      qIn.value = r2(contractLineQty(c, ln.lineId) * pv / 100);
+    }
+  }
+  syncExtDraft();
+  var xid=_extDraft.editOf||null;
+  var ctx={ prevGross:prevGrossOf(_exts,c,xid), materialsIssued:_extDraft.materialsIssued,
             penaltyAmount:_extDraft.penaltyAmount, ncDeduction:_extDraft.ncDeduction };
   var box=document.getElementById("ct-e-ladder");
   if(box) box.innerHTML=ladderHTML(extNet(_extDraft,c,ctx), c);
   var g=extCumGuard(_extDraft,c,_exts);
-  var btn=document.getElementById("ct-e-send"); if(btn) btn.disabled=!g.ok;
+  var btn=document.getElementById("ct-e-send");
+  if(btn) btn.disabled = !g.ok || (!!_extDraft.editOf && !_extDraft.reason);
   // التحذيرُ يُحدَّث مع الإدخال لا عند إعادة الرسم الكاملة — زرٌّ معطَّلٌ بلا سببٍ ظاهر
   // يترك المستخدمَ عالقاً لا يعرف ماذا يصلح.
   var wbox=document.getElementById("ct-e-warn");
   if(wbox) wbox.innerHTML = g.ok ? "" : '<div class="ct-note crit">'+_icn("alertTriangle","ic-sm")+' '+_esc(_guardMsg(g))+'</div>';
   // خلايا «%» و«القيمة» تُحدَّث مع الإدخال أيضاً — وإلا بقيت صفراً بينما السلّم يتغيّر
-  var floor=prevCumByLine(_exts,c,null);
+  var floor=prevCumByLine(_exts,c,xid);
   var lt=document.getElementById("ct-e-lines");
-  if(lt) lt.querySelectorAll("tbody tr").forEach(function(tr,i){
-    var l=_extDraft.lines[i]; if(!l) return;
+  if(lt) lt.querySelectorAll("tbody tr").forEach(function(tr,idx){
+    var l=_extDraft.lines[idx]; if(!l) return;
     var cum=Number(l.cumQty)||0, max=contractLineQty(c,l.lineId), was=Number(floor[l.lineId])||0;
     tr.classList.toggle("ct-bad", cum>max+1e-9 || cum<was-1e-9);
     // بصنف الخليّة لا بفهرسها — نفسُ سبب `ct-g-after`/`ct-g-delta` أعلاه
     var elP=tr.querySelector(".ct-e-pct"), elV=tr.querySelector(".ct-e-val");
-    if(elP) elP.textContent = (max>0?Math.round(cum/max*100):0)+"%";
+    // ولا يُكتَب في الحقل الذي يكتب فيه المستخدمُ الآن — وإلا قفز مؤشّرُه وهو يُدخِل
+    if(elP && !(from==="p" && idx===i)) elP.value = max>0 ? r2(cum/max*100) : 0;
     if(elV) elV.textContent = money(r2(vatSplit(l.unitPrice,c.vatMode).base*cum));
   });
 }
@@ -7409,13 +7613,18 @@ function applyPenalty(){
 function submitExtract(){
   syncExtDraft();
   var c=contractById(_cOpen), d=_extDraft; if(!c||!d) return;
-  var btn=document.getElementById("ct-e-send"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الإرسال…"; }
-  createExtract(c, d).then(function(id){
-    _extDraft=null; _extOpen=id; paintCtrs(); _toast("✅ أُرسل المستخلص "+id,"success");
+  var edit=d.editOf||null;
+  if(edit && !d.reason){ _toast("⚠ سبب التعديل إلزامي","warn"); return; }
+  var btn=document.getElementById("ct-e-send"); if(btn){ btn.disabled=true; btn.textContent=edit?"جارٍ الحفظ…":"جارٍ الإرسال…"; }
+  var job = edit ? editExtract(edit, d, d.reason).then(function(){ return edit; })
+                 : createExtract(c, d);
+  job.then(function(id){
+    _extDraft=null; _extOpen=id; paintCtrs();
+    _toast(edit ? "✅ حُفظ التعديل — عاد المستخلصُ للاعتماد" : ("✅ أُرسل المستخلص "+id),"success");
   }).catch(function(e){
     console.warn("contracts/submitExtract",e);
-    if(btn){ btn.disabled=false; btn.innerHTML=_icn("send","ic-sm")+" إرسال للاعتماد"; }
-    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الإرسال"),"warn");
+    if(btn){ btn.disabled=false; btn.innerHTML=_icn(edit?"save":"send","ic-sm")+(edit?" حفظ التعديل":" إرسال للاعتماد"); }
+    _toast("⚠ "+(e&&e.message?e.message:"تعذّر الحفظ"),"warn");
   });
 }
 function extAct(action){
@@ -7660,6 +7869,10 @@ function injectCSS(){
 ".ct-tile-name{font-size:14.5px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary);line-height:1.35}",
 ".ct-tile-kind{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:10px}",
 ".ct-dot{opacity:.5}",
+/* سطرُ المستخلص على بطاقة العقد — بألوان SLA نفسِها: منتظِرٌ (تنبيه) · منجَزٌ (سلامة) */
+".ct-tile-ext{font-size:11px;font-weight:700;display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:-4px 0 10px;padding:4px 8px;border-radius:8px;background:var(--sla-warn-bg);color:var(--sla-warn);border:1px solid var(--sla-warn-bd)}",
+".ct-tile-ext.warn{background:var(--sla-crit-bg);color:var(--sla-crit);border-color:var(--sla-crit-bd)}",
+".ct-tile-ext.done{background:var(--sla-ok-bg);color:var(--sla-ok);border-color:var(--sla-ok-bd)}",
 /* شريطُ سريان الوثائق — العنصرُ المميّز: يرمّز محتوًى حقيقياً (تواريخَ فعلية) لا زينة */
 ".ct-docs{display:flex;flex-wrap:wrap;gap:5px}",
 ".ct-doc{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;border:1px solid;white-space:nowrap}",
@@ -7953,6 +8166,7 @@ window.contracts = {
   // ورقةُ المستخلص وتوقيعُ المقاول عليها
   printExt: printExt, printExtract: printExtract, _extractPaperHTML: extractPaperHTML,
   openExtSign: openExtSign, closeExtSign: closeExtSign, doExtSign: doExtSign,
+  openExtEdit: openExtEdit, _editExt: editExtract, _paint: paintCtrs,
   _signExt: signExtract, _extSignature: extSignature, _extSigValid: extSigValid,
   _extPayGuard: extPayGuard, _extSignoffs: extSignoffs, _extPrintState: extPrintState,
   extractsList: extractsList, extractById: extractById, extractsFor: extractsFor,
