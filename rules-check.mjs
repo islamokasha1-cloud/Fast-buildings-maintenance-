@@ -310,6 +310,17 @@ await check("ومديرُ المشاريع يرفعها",
 await check("ويُقبل السدادُ بإيصالٍ ونسخةٍ موقّعة",
   assertSucceeds(updateDoc(doc(FIN, `${E}/E1`), { status: "ext_paid", payment: { amount: 100, receiptUrl: "po/r.jpg" } })));
 await check("★ والمسدَّدُ لا يُعدَّل بعدها", assertFails(updateDoc(doc(ADMIN, `${E}/E1`), { status: "ext_pending_pm" })));
+
+/* تعديلُ المستخلص: يسحبه إلى بوّابته الأولى ويُسقط اعتماداتِه — لمُعِدّه لا لكلّ دور */
+await seed(`${E}/E3`, Object.assign({}, EXT, { status: "ext_pending_ceo", pmApprovedAt: "2026-02-02",
+  signature: { url: "po/s.jpg", net: 100 } }));
+await check("★★ ومُعِدُّ المستخلص يسحبه من بوّابة التنفيذيّ إلى بوّابته الأولى (تعديلٌ يُسقط الاعتمادات)",
+  assertSucceeds(updateDoc(doc(PM, `${E}/E3`), { status: "ext_pending_pm", pmApprovedAt: null, signature: null })));
+await seed(`${E}/E4`, Object.assign({}, EXT, { status: "ext_pending_ceo", pmApprovedAt: "2026-02-02" }));
+await check("★★ ولا تسحبه الماليةُ (السحبُ لمن يُعدّه لا لمن ينتظره)",
+  assertFails(updateDoc(doc(FIN, `${E}/E4`), { status: "ext_pending_pm", pmApprovedAt: null })));
+await check("★★ ولا يقفز أحدٌ به إلى الأمام بحجّة التعديل",
+  assertFails(updateDoc(doc(PM, `${E}/E4`), { status: "ext_pending_finance" })));
 await seed(`${E}/E2`, EXT);
 await check("★ ولا يُنقل مستخلصٌ إلى عقدٍ آخر",
   assertFails(updateDoc(doc(PM, `${E}/E2`), { contractId: "C-OTHER" })));
