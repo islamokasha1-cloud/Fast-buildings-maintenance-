@@ -5012,6 +5012,38 @@ function cleaningOpsTests() {
         as(null);
         T("★ sv: وبلا مستخدمٍ لا إضافة", CT.canAdd() === false);
 
+        /* ══ ★★★ v18.9.2745: الآيبانُ — المضيفُ يكتبه **عند الإنشاء وحدَه** ══
+           الآيبانُ ناقلُ الاحتيال الأوّل، والخطرُ فيه **التبديلُ لا الكتابةُ الأولى**:
+           طرفٌ عمل شهوراً ثم يتغيّر آيبانُه قبل الصرف. فالمضيفُ يكتبه مع بقيةِ بيانات
+           الطرف الجديد ولا يبدّله بعدها أبداً — ولا حتى على ما أضافه هو. */
+        as({ user:"رغده", role:"مشرف", permissions:{ contracts:true } });
+        T("★★★ ib: المضيفُ يكتب الآيبانَ عند الإنشاء", CT.canWriteIban(true) === true);
+        T("★★★ ib: ولا يكتبه على طرفٍ قائم (ولو كان الذي أضافه)", CT.canWriteIban(false) === false);
+        T("★★ ib: و**لا يقرؤه**: العرضُ يبقى مقنَّعاً بـ`canBank` (كتابةٌ لا اطّلاع)",
+          CT.canBank() === false);
+        as({ user:"f", role:"finance" });
+        T("★ ib: والماليةُ تكتبه في الحالتين", CT.canWriteIban(true) === true && CT.canWriteIban(false) === true);
+        as({ user:"a", role:"admin" });
+        T("★ ib: والأدمنُ كذلك", CT.canWriteIban(false) === true);
+        as({ user:"p", role:"procurement_officer" });
+        T("★★★ ib: ومسؤولُ المشتريات ما زال ممنوعاً في الحالتين (لم يُطلَب توسيعُه)",
+          CT.canWriteIban(true) === false && CT.canWriteIban(false) === false);
+        as({ user:"s", role:"مشرف", permissions:{ tickets:true } });
+        T("★★ ib: ومشرفٌ بلا إذن التعاقدات لا يكتبه ولو كان إنشاءً",
+          CT.canWriteIban(true) === false);
+        as({ user:"pm", role:"project_manager" });
+        T("★ ib: ومديرُ المشاريع لا يكتبه (ليس في ADD_ROLES)", CT.canWriteIban(true) === false);
+        /* ── والصيغةُ تُفحَص على الحفظ: رقمٌ ناقصٌ يُقرأ صحيحاً ويُحوَّل إليه ── */
+        T("★★ ib: `SA` + ٢٢ رقماً تُقبَل، والفراغُ يُقبَل (طرفٌ بلا حساب)",
+          CT._ibanOk("SA" + "1".repeat(22)) === true && CT._ibanOk("") === true &&
+          CT._ibanOk("  sa" + "1".repeat(22) + " ") === true);
+        T("★★★ ib: والناقصُ والزائدُ وغيرُ السعوديّ تُردّ",
+          CT._ibanOk("SA" + "1".repeat(21)) === false &&
+          CT._ibanOk("SA" + "1".repeat(23)) === false &&
+          CT._ibanOk("EG" + "1".repeat(22)) === false && CT._ibanOk("SA777") === false);
+        T("★ ib: والتخزينُ مطبَّعٌ (بلا فراغاتٍ ولا شرطات، وبحروفٍ كبيرة)",
+          CT._ibanClean(" sa-12 34 ") === "SA1234");
+
         /* ══ ★★ v18.9.2739: المضيفُ يصحّح ما أضافه — بوّابةٌ على **المستند** ══
            إضافةٌ بلا تصحيحٍ تُنتج سجلاً خاطئاً لا يملك صاحبُه إصلاحَه (رقمُ سجلٍّ
            نُقل خطأً في السطر التالي). والمِلكيّةُ **باسم الدخول** لا بالاسم المعروض:
@@ -5039,6 +5071,12 @@ function cleaningOpsTests() {
           CT.canEditVendor(MINE) === false && CT.canEditVendor(OLD) === false);
         as({ user:"a", role:"admin" });
         T("★ ov: والأدمنُ يعدّل كلَّ شيء", CT.canEditVendor(OLD) === true);
+        /* ★★★ v18.9.2745: والماليةُ كذلك — `vendorUpdateOk` تسمح لها على الخادم منذ
+           اليوم الأول، وهي **الجهةُ الوحيدةُ التي تبدّل الآيبان**، لكنّ الشاشةَ لم
+           تكن تفتح لها النموذجَ أصلاً. فوعدُ «تصحيحُه يمرّ بالمالية» كان بلا باب. */
+        as({ user:"f", role:"finance" });
+        T("★★★ ov: والماليةُ تفتح نموذجَ أيّ طرف (وإلا فوعدُ «تصحيحُه يمرّ بالمالية» بلا باب)",
+          CT.canEditVendor(MINE) === true && CT.canEditVendor(OLD) === true);
 
         // ── والمِلكيّةُ تُكتب أصلاً، وإلا لم يجد الشرطُ ما يطابقه ──
         T("★★★ ov: `saveVendor` تكتب `createdByUser` عند الإنشاء (باسم الدخول)",
@@ -5068,6 +5106,40 @@ function cleaningOpsTests() {
           /function newVendor\(\)\{\s*\n?\s*if\(!canAdd\(\)\)/.test(cs));
         T("★★ sv: والبوّابةُ على **الكتابة** نفسِها، والعمليةُ تختارها (إنشاءٌ ⇐ canAdd · تعديلٌ ⇐ canEditVendor)",
           /if\(_vOpen \? !canEditVendor\(vendorById\(_vOpen\)\) : !canAdd\(\)\)/.test(cs));
+        /* ★★★ والآيبانُ تحرسه البوّابةُ نفسُها في **أربعة مواضع**: الحقلُ في النموذج ·
+           قراءتُه إلى المسوّدة · الحمولةُ عند الحفظ · ومسارُ الكتابة في `saveVendor`.
+           موضعٌ يُنسى = حقلٌ يظهر ولا يُحفَظ، أو حمولةٌ تُرسَل فيردّها الخادم. */
+        T("★★★ ib: `canWriteIban` تحرس المواضعَ الأربعة كلَّها",
+          /var bankBlock = canWriteIban\(isNew\)/.test(cs) &&
+          /if\(canWriteIban\(!_vOpen\)\)\{\s*\n\s*_vEdit\.bank/.test(cs) &&
+          /if\(canWriteIban\(!_vOpen\)\) payload\.bank/.test(cs) &&
+          /if\(!canWriteIban\(!s\.exists\)\) next\.bank = cur\.bank/.test(cs));
+        /* ★★★ و«جديد» في مسار الكتابة `!s.exists` **لا `!id`**: المعرّفُ يُولَّد قبل
+           الحفظ فيصل مملوءاً في الحالتين، فلو قيس بـ`!id` لَما مرّ آيبانُ إنشاءٍ أبداً. */
+        T("★★★ ib: و«جديد» في `saveVendor` تُقاس بوجود الوثيقة لا بوجود المعرّف",
+          /if\(!canWriteIban\(!s\.exists\)\)/.test(cs) && !/canWriteIban\(isNew\)\) next\.bank/.test(cs));
+        T("★★ ib: والصيغةُ تُفحَص على الحفظ قبل أيّ كتابة",
+          /if\(canWriteIban\(!_vOpen\) && !ibanOk\(\(d\.bank\|\|\{\}\)\.iban\)\)/.test(cs));
+        T("★★ ib: وللمضيف تنبيهٌ صريحٌ أنّها فرصةٌ واحدة",
+          /تُدخِله مرّةً واحدة/.test(cs));
+        {
+          const RULES3 = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "firestore.rules"), "utf8"); } catch (e) { return ""; } })();
+          const cr = (RULES3.match(/function vendorCreateOk\(\) \{[\s\S]*?\n    \}/) || [""])[0];
+          const up = (RULES3.match(/function vendorUpdateOk\(\) \{[\s\S]*?\n    \}/) || [""])[0];
+          const own = (RULES3.match(/function vendorOwnUpdateOk\(\) \{[\s\S]*?\n    \}/) || [""])[0];
+          T("★★★ ib: وقاعدةُ الإنشاء تسمح للمشرف بآيبانٍ (بصيغتيه)",
+            /anyRole\(\['finance','admin','supervisor','مشرف'\]\)/.test(cr));
+          /* ★★★ والقائمتان **متطابقتان**: قائمةُ الواجهة (`BANK_ROLES` + `IBAN_NEW_ROLES`)
+             = القائمةُ الثانيةُ في `vendorCreateOk`. اختلافُهما يُظهر الحقلَ لدورٍ يردّ
+             الخادمُ حفظَه — عطلٌ لا يُفهم سببُه (وقد وقع فعلاً مع مسؤول المشتريات). */
+          T("★★★ ib: وقائمةُ الواجهة = قائمةُ القاعدة حرفاً بحرف (لا حقلٌ يظهر ويُردّ حفظُه)",
+            /var IBAN_NEW_ROLES = \["supervisor","مشرف"\];/.test(cs) &&
+            /var BANK_ROLES   = \["admin","finance"\];/.test(cs) &&
+            /anyRole\(\['finance','admin','supervisor','مشرف'\]\)/.test(cr));
+          T("★★★ ib: وقاعدتا التعديل تُجمّدان الآيبانَ عليه (الخطرُ في التبديل)",
+            !/supervisor/.test(up) &&
+            /ibanOf\(request\.resource\.data\) == ibanOf\(resource\.data\)/.test(own));
+        }
         // ── وقاعدةُ الخادم تطابق الواجهة: مَن تسمح له هذه تسمح له تلك ──
         {
           const RULES = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "firestore.rules"), "utf8"); } catch (e) { return ""; } })();

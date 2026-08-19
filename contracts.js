@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2747";
+var MODULE_BUILD = "v18.9.2751";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -2072,12 +2072,52 @@ var LN_TH = '<th class="ct-seq">م</th>';
 function lnSeq(i){ return '<td class="ct-seq">'+(i+1)+'</td>'; }
 
 function canEditVendor(v){
-  if(canEdit()) return true;                 // أدمن ومشتريات: كلُّ طرف كما كان
+  /* ★ والماليةُ معهم: `vendorUpdateOk` على الخادم تسمح لها منذ اليوم الأول
+     (`['procurement_officer','finance','admin']`)، و`BANK_ROLES` تجعلها **الجهةَ
+     الوحيدةَ التي تبدّل الآيبان** — لكنّ الشاشةَ لم تكن تفتح لها النموذجَ أصلاً،
+     فكانت صلاحيتُها على الورق بلا بابٍ تدخل منه. وظهر ذلك حين صار المضيفُ يكتب
+     الآيبانَ مرّةً ويُقال له «تصحيحُه يمرّ بالمالية» — وعدٌ لا تملك المالية الوفاءَ
+     به. فالواجهةُ لحقت بالقاعدة، لا العكس. */
+  if(canEdit() || canBank()) return true;    // أدمن ومشتريات ومالية: كلُّ طرف
   if(!canAdd() || !v) return false;          // ومَن لا يملك الإضافةَ لا يملك التصحيح
   var me = _meUser();
   return !!me && String(v.createdByUser || "") === me;
 }
 function canBank(){   return BANK_ROLES.indexOf(_role())   !== -1; }
+
+/* ══ كتابةُ الآيبان: المالية دائماً، والمضيفُ **عند الإنشاء وحدَه** ══
+   الآيبانُ ناقلُ الاحتيال الأوّل، ولذلك كان لـ`BANK_ROLES` وحدَها. والحاجةُ التي
+   فتحته: المشرفُ يلقى المقاولَ في الموقع ومعه بياناتُه البنكية، فيسجّلها معه في
+   السطر نفسِه — لا أن يمرّرها برسالةٍ إلى المالية لتُدخلها.
+
+   **والحدُّ مقصودٌ عند الإنشاء لأنّ الخطرَ ليس في الكتابة الأولى بل في التبديل:**
+   سيناريو الاحتيال الحقيقيُّ هو **تحويلُ مستحقِّ مقاولٍ قائمٍ إلى حسابٍ آخر** —
+   طرفٌ عمل شهوراً ثم يتغيّر آيبانُه فجأةً قبل الصرف. أمّا طرفٌ جديدٌ فآيبانُه
+   يُدخَل مرّةً مع بقيةِ بياناته ويمرّ على بوّابات الاعتماد كلِّها قبل أن يُصرف
+   له ريال. فالمضيفُ يكتبه عند الإنشاء، **ولا يملك تعديلَه بعدها أبداً** — ولا
+   حتى على الطرف الذي أضافه هو (`vendorOwnUpdateOk` تُجمّد الآيبانَ صراحةً).
+
+   ⛔ **ولا يُقرأ هذا كإذنِ اطّلاع**: العرضُ يبقى بـ`canBank` — مقنَّعٌ في كل شاشةٍ
+   وورقةٍ لغير المالية. مَن يكتبه مرّةً لا يصير مخوَّلاً برؤية حسابات المورّدين. */
+var IBAN_NEW_ROLES = ["supervisor","مشرف"];   // يكتبونه عند الإنشاء وحدَه
+function canWriteIban(isNew){
+  if(canBank()) return true;
+  /* ⛔ **`canAdd()` وحدَها لا تكفي**: مسؤولُ المشتريات فيها وهو ممنوعٌ من الآيبان
+     في `vendorCreateOk` (لم يُطلَب توسيعُه). ولو قيست البوّابةُ به لَظهر الحقلُ
+     له ثمّ **ردّ الخادمُ الحفظَ كلَّه** بعد أن يملأ النموذج — عطلٌ لا يُفهم سببُه.
+     فالقائمةُ هنا **نسخةٌ من القائمة الثانية في القاعدة** حرفاً بحرف، ويحرس
+     تطابقَهما فحصٌ في hail-tests. و`canAdd()` تبقى شرطاً ثانياً: مَن لا يملك
+     إضافةَ الطرف أصلاً لا يكتب آيبانَه. */
+  return !!isNew && canAdd() && IBAN_NEW_ROLES.indexOf(_role()) !== -1;
+}
+/* صيغةُ الآيبان السعوديّ — `SA` ثمّ ٢٢ رقماً. والفحصُ **على الحفظ لا على الحقل**:
+   رقمٌ ناقصٌ يُحفَظ يُقرأ صحيحاً ويُحوَّل إليه يومَ الصرف. (نفسُ قاعدة `_iban` في
+   `hr-payments.js` — وهي هناك على مسار السداد نفسِه.) */
+function ibanClean(raw){ return String(raw==null?"":raw).replace(/[\s-]/g,"").toUpperCase(); }
+function ibanOk(raw){
+  var v=ibanClean(raw);
+  return v==="" || /^SA\d{22}$/.test(v);
+}
 function canStatus(){ return STATUS_ROLES.indexOf(_role()) !== -1; }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -2188,8 +2228,10 @@ function saveVendor(data, id){
       return t.get(ref).then(function(s){
         var cur = (s.exists ? (s.data()||{}) : {});
         var next = Object.assign({}, cur, data);
-        // الآيبان لا يُكتب إلا من مخوَّل — ولو وصل في الحمولة من واجهةٍ قديمة
-        if(!canBank()) next.bank = cur.bank || { };
+        /* الآيبان لا يُكتب إلا من مخوَّل — ولو وصل في الحمولة من واجهةٍ قديمة.
+           و«جديد» هنا **`!s.exists` لا `!id`**: المعرّفُ يُولَّد قبل الحفظ فيصل
+           مملوءاً في الحالتين، ووجودُ الوثيقة في المعاملة هو الفيصلُ الوحيد. */
+        if(!canWriteIban(!s.exists)) next.bank = cur.bank || { };
         next.updatedAt = _now(); next.updatedBy = _me();
         /* **المِلكيّةُ تُكتب باسم الدخول**: `createdBy` اسمٌ معروضٌ للعرض، و
            `createdByUser` هو ما تُطابقه بوّابةُ `canEditVendor` وقاعدةُ الخادم —
@@ -3778,7 +3820,7 @@ function vendorEditHTML(v){
     '</tr>';
   }).join("");
 
-  var bankBlock = canBank()
+  var bankBlock = canWriteIban(isNew)
     ? '<div class="ct-form-row">'+
         field("الآيبان (IBAN)", '<input class="form-input num" id="ct-f-iban" value="'+_esc((d.bank||{}).iban||"")+'" placeholder="SA…" dir="ltr">') +
         field("اسم البنك", '<input class="form-input" id="ct-f-bank" value="'+_esc((d.bank||{}).bankName||"")+'">') +
@@ -3787,6 +3829,9 @@ function vendorEditHTML(v){
         field("اسم صاحب الحساب", '<input class="form-input" id="ct-f-holder" value="'+_esc((d.bank||{}).holder||"")+'" placeholder="'+(ent==="individual"?"يجب أن يطابق اسم الشخص في هويته":"كما في خطاب البنك")+'">') +
         '<div></div>'+
       '</div>'+
+      (canBank() ? '' :
+        '<div class="ct-note crit" style="margin-top:2px">'+_icn("alertTriangle","ic-sm")+
+        ' <b>تُدخِله مرّةً واحدة.</b> بعد الحفظ لا تملك تعديلَه — تصحيحُه يمرّ بالمالية. تحقّق من الرقم قبل الحفظ.</div>')+
       '<div class="ct-note warn" style="margin-top:2px">'+_icn("shield","ic-sm")+' تغيير الآيبان يُقيَّد في سجل التدقيق باسمك وبالقيمة قبل وبعد.'+
         (ent==="individual"?' والحسابُ للشخص يجب أن يكون <b>باسمه</b> — التحويلُ لحساب طرفٍ ثالثٍ يُفقد الإثبات.':'')+'</div>'
     : '<div class="ct-note">'+_icn("lock","ic-sm")+' البيانات البنكية تُعدَّل من المالية أو الأدمن فقط.</div>';
@@ -3951,7 +3996,7 @@ function syncDraft(){
   _vEdit.legal.nationalAddress = val("ct-f-addr");
   var al = val("ct-f-aliases");
   _vEdit.aliases = al ? al.split(/[،,]/).map(function(s){ return s.trim(); }).filter(Boolean) : [];
-  if(canBank()){
+  if(canWriteIban(!_vOpen)){
     _vEdit.bank = _vEdit.bank || {};
     _vEdit.bank.iban = val("ct-f-iban");
     _vEdit.bank.bankName = val("ct-f-bank");
@@ -4074,6 +4119,12 @@ function saveVendorEdit(){
      محفوظٌ فيُقرأ صحيحاً ويُتّصل به يوم الحاجة. (والفراغُ نفسُه مقبولٌ — كثيرٌ من
      الأطراف القديمة بلا رقمٍ ولا يجوز أن يقف تعديلُ اسمها على ذلك.) */
   if(d.phone && !phoneOk(d.phone)){ _toast("⚠ رقم الجوال غير صالح — "+phoneHint(d.phone),"warn"); return; }
+  /* الآيبانُ **يُمنَع ناقصاً لا يُحذَّر منه**: خانةٌ فارغةٌ تُرى فارغة، أمّا رقمٌ
+     ناقصٌ محفوظٌ فيُقرأ صحيحاً ويُحوَّل إليه يومَ الصرف — ولا أحدَ يراجعه بعد أن
+     صار المضيفُ هو مَن يكتبه. (نفسُ منطق فحص الجوال في هذه الدالّة.) */
+  if(canWriteIban(!_vOpen) && !ibanOk((d.bank||{}).iban)){
+    _toast("⚠ صيغة الآيبان غير صحيحة — يبدأ بـ SA ويتبعه ٢٢ رقماً","warn"); return;
+  }
   var badContact = null;
   (d.contacts||[]).forEach(function(c,i){
     if(!badContact && c && c.phone && !phoneOk(c.phone)) badContact = { i:i, c:c };
@@ -4123,7 +4174,7 @@ function saveVendorEdit(){
         legal: d.legal || {}, docs: docsForSave(d.docs),
         status: d.status || "active"
       };
-      if(canBank()) payload.bank = d.bank || {};
+      if(canWriteIban(!_vOpen)) payload.bank = Object.assign({}, d.bank||{}, { iban: ibanClean((d.bank||{}).iban) });
       return saveVendor(payload, _vOpen || vid);
     }).then(function(){ return vid; });
   }).then(function(vid){
@@ -7945,7 +7996,8 @@ window.contracts = {
   // الرابطُ العميق من رسالة واتساب [المرحلة ٩]
   openById: openById, ownsId: ctrOwnsId, _idKind: ctrIdKind,
   canView: canView, canEdit: canEdit, canAdd: canAdd, canEditVendor: canEditVendor,
-  canBank: canBank, canStatus: canStatus, canCreateReq: canCreateReq,
+  canBank: canBank, canWriteIban: canWriteIban, canStatus: canStatus, canCreateReq: canCreateReq,
+  _ibanOk: ibanOk, _ibanClean: ibanClean,
   /* طبعُ مفتاح «التعاقدات» بحسب الدور — **مصدرٌ واحد** تقرؤه نافذةُ الصلاحيات في
      النواة، فلا تُنسَخ `VIEW_ROLES` في ملفٍّ ثانٍ ينحرف عنها بصمت. */
   viewRoles: VIEW_ROLES.slice(), roleEligible: roleEligible,
