@@ -1105,6 +1105,35 @@ function substituteBudget() {
     /window\.substituteBudget\.filter\('kind',this\.value\)/.test(SBSRC) &&
     /window\.substituteBudget\.filterDoc\('state',this\.value\)/.test(SBSRC));
   T("★ وفلترُ حالة الرصيد محجوبٌ عمّن لا يرى المال", /var stateOpts = money \? _selHtml\(/.test(SBSRC));
+
+  /* ── vNEXT: حالةُ التحميل — «لا حسابات» قبل وصول اللقطة كذبةٌ كاملةُ الشكل ──
+     الشاشةُ كانت ترسم «لا توجد حسابات بند مستعاض بعد» مع زرِّ إنشاء أوّل حساب
+     بينما في الخادم حساباتٌ بملايين الريالات (رُصد بهذا الشكل بالضبط). ولا يكفي
+     وصولُ الحسابات: كلُّ عمودِ مالٍ محسوبٌ من `purchases`، فالرسمُ قبل لقطتها
+     يُظهر «٠ مصروف · المتبقي = كامل الرصيد» — أرقامٌ كاملةُ الشكل كاذبة. */
+  T("★★ الفراغُ لا يُرسَم قبل وصول اللقطة (بوّابةُ حالةٍ في render)",
+    /if\(!_ready\(\)\)\{ host\.innerHTML = _headHtml\(false\) \+ _stateCardHtml\(\); return; \}/.test(SBSRC));
+  T("★★ و«جاهزة» = الحساباتُ **وطلباتُ الشراء** معاً (لا أرقامَ مالٍ قبل مصدرها)",
+    /function _ready\(\)\{ return _loaded && _poSynced\(\); \}/.test(SBSRC) &&
+    /window\._fsLoaded && window\._fsLoaded\.purchases/.test(SBSRC));
+  T("★ والعلَمُ يُرفَع من لقطة الحسابات وحدَها لا من تركيب المشترِك",
+    /_accounts = \(d && Array\.isArray\(d\.accounts\)\) \? d\.accounts : \[\];\s*\n\s*_loaded = true;/.test(SBSRC));
+  T("★ وعطلُ المزامنة يُقال في الشاشة ومعه إعادةُ محاولة (لا دوّامةَ أبد)",
+    /_syncing=false; _error="تعذّر تحميل حسابات البند المستعاض/.test(SBSRC) &&
+    /window\.substituteBudget\.retry\(\)/.test(SBSRC) && /retry: retry,/.test(SBSRC));
+  T("★★ وعطلٌ **بعد** وصول البيانات لا يمحوها — شريطُ تحذيرٍ لا شاشةُ خطأ",
+    /_error \? '' \+\s*\n\s*'<div class="card" style="margin-bottom:12px;border-right:3px solid var\(--warn/.test(SBSRC) &&
+    /آخرُ ما وصل/.test(SBSRC));
+  T("★ وغيابُ قاعدة البيانات يُقال أيضاً (كان `return` صامتاً)",
+    /_syncing=false; _error="تعذّر الاتصال بقاعدة البيانات\."/.test(SBSRC));
+  T("★ وفتحُ الشاشة بلا مشترِكٍ يُركّبه (لا انتظارَ بلا سبب)",
+    /if\(!_loaded && !_syncing && !_error\)\{ startSync\(\); \}/.test(SBSRC));
+  T("★ وشاشةُ الانتظار تستعمل مكوّنَ المزامنة نفسَه الذي تستعمله بقيةُ الشاشات",
+    /_syncLoadingHTML/.test(SBSRC) && /class="skeleton"/.test(SBSRC));
+  T("★ وزرُّ «إضافة حساب» محجوبٌ حتى تصل القائمة (فحصُ الازدواج يقرؤها)",
+    /host\.innerHTML = _headHtml\(false\)/.test(SBSRC) && /var head = _headHtml\(true\)/.test(SBSRC));
+  T("★ ورسالةُ «لا حسابات» باقيةٌ لحالتها الحقيقية (وصلت اللقطةُ وكانت فارغة)",
+    /لا توجد حسابات بند مستعاض بعد/.test(SBSRC));
 }
 
 /* ════════════════════════════════════════════════════════════════════

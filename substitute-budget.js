@@ -51,6 +51,12 @@
   // فحالةٌ محفوظةٌ في حقلٍ معروضٍ تُمحى مع أول تحديثٍ يصل من الخادم.
   var _lf = { q:"", kind:"", state:"" };   // شاشة القائمة (الحسابات)
   var _df = { q:"", state:"" };            // شاشة الحساب (الطلبات + التعاقدات)
+  /* حالةُ المزامنة — «لا حسابات» قبل وصول اللقطة **كذبةٌ كاملةُ الشكل**: الشاشةُ
+     تقول «لا توجد حسابات بند مستعاض بعد» وتعرض زرَّ إنشاء أوّل حساب، بينما في
+     الخادم حساباتٌ بملايين الريالات. فيُفصَل «لم يصل بعد» عن «وصل وكان فارغاً». */
+  var _loaded   = false; // وصلت أوّل لقطةٍ للحسابات؟
+  var _syncing  = false; // اشتراكٌ مركَّبٌ الآن؟ (حارسٌ من انتظارٍ أبديٍّ بلا مشترِك)
+  var _error    = "";    // نصُّ عطلِ التحميل (إن وقع)
 
   // ════════ أدوات مساعدة داخلية ════════
   function _now(){ return new Date().toISOString(); }
@@ -266,20 +272,49 @@
   }
 
   // ════════ الاشتراك الفوري ════════
+  function _repaint(){
+    var pg = document.getElementById("page-substitute-budget");
+    if(pg && pg.classList.contains("active")) render();
+  }
   function startSync(){
-    if(typeof db==="undefined" || !db) return;
+    if(typeof db==="undefined" || !db){
+      // بلا قاعدةِ بيانات: قُل ذلك بدل انتظارٍ أبديٍّ أو «لا حسابات» كاذبة.
+      _syncing=false; _error="تعذّر الاتصال بقاعدة البيانات."; _repaint(); return;
+    }
     // حمّل الأسماء اليدوية من meta (أفضل جهد) حتى تكتمل قائمة المشاريع للربط والعرض
     try{ if(typeof _loadManualProjectNames==="function") _loadManualProjectNames(); }catch(e){}
     if(_unsub) _unsub();
+    _syncing = true; _error = "";
     _unsub = db.doc(DOC()).onSnapshot(function(snap){
       var d = snap.exists ? snap.data() : null;
       _accounts = (d && Array.isArray(d.accounts)) ? d.accounts : [];
+      _loaded = true; _error = "";
       window._substituteAccounts = _accounts; // للوصول من نموذج طلب الشراء
-      var pg = document.getElementById("page-substitute-budget");
-      if(pg && pg.classList.contains("active")) render();
+      _repaint();
       // تحديث القائمة المنسدلة في نموذج طلب شراء مفتوح (إن وُجد)
       try{ if(typeof window._sbRefreshPOSelect==="function") window._sbRefreshPOSelect(); }catch(e){}
-    }, function(e){ console.warn("substitute-budget sync error:", e); });
+    }, function(e){
+      console.warn("substitute-budget sync error:", e);
+      // العطلُ يُقال في الشاشة لا في وحدة التحكّم — وإلا بقيت دوّامةٌ إلى الأبد.
+      _syncing=false; _error="تعذّر تحميل حسابات البند المستعاض — تحقّق من الاتصال.";
+      _repaint();
+    });
+  }
+  // إعادةُ المحاولة بعد عطل — يستدعيها زرُّ الشاشة.
+  function retry(){ _error=""; _loaded=false; _syncing=false; startSync(); render(); }
+
+  /* «جاهزة» ليست وصولَ الحسابات وحدَه: كلُّ عمودِ مالٍ في الجدول محسوبٌ من
+     `purchases`، فالرسمُ قبل أوّل لقطةٍ لها يُظهر لحسابٍ حقيقيٍّ «٠ مستندات · ٠
+     مصروف · المتبقي = كامل الرصيد» — أرقامٌ كاملةُ الشكل كاذبةُ الحقيقة، وهي
+     الغلطةُ نفسُها التي حرسها `inventory-reports` بعلَم `_fsLoaded`. */
+  function _poSynced(){
+    try{ return !!(window._fsLoaded && window._fsLoaded.purchases); }catch(e){ return false; }
+  }
+  function _ready(){ return _loaded && _poSynced(); }
+  // مكوّنُ المزامنة من المنصة (نفسُه في شاشة الرصيد والتقارير) — بديلٌ آمنٌ إن غاب.
+  function _syncHTML(){
+    try{ if(typeof _syncLoadingHTML==="function") return _syncLoadingHTML(); }catch(e){}
+    return '<div style="text-align:center;padding:38px 20px;font-weight:700;color:var(--primary)">جارٍ مزامنة البيانات...</div>';
   }
 
   // ════════ الحفظ الذرّي ════════
@@ -315,6 +350,11 @@
   function render(){
     var host = document.getElementById("page-substitute-budget");
     if(!host) return;
+    // فُتحت الشاشةُ ولا مشترِك؟ رَكِّبه — لا انتظارَ بلا سببٍ ولا فراغَ صامت.
+    if(!_loaded && !_syncing && !_error){ startSync(); }
+    /* العطلُ يحجب الشاشةَ حين لا شيءَ وصل بعد؛ أمّا عطلٌ **بعد** وصول البيانات
+       فلا يمحوها — بياناتٌ قائمةٌ مع شريطِ تحذيرٍ أنفعُ من شاشةِ خطأٍ فارغة. */
+    if(!_ready()){ host.innerHTML = _headHtml(false) + _stateCardHtml(); return; }
     if(_curId){
       var acc = _accounts.find(function(a){ return a.id===_curId; });
       if(!acc){ _curId=null; return render(); }
@@ -346,12 +386,13 @@
     '</div>';
   }
 
-  function _listHtml(){
-    var money = _canSeeMoney();
-    var addBtn = _canManage()
+  /* ترويسةُ الصفحة — مشتركةٌ بين شاشة الحالة والقائمة، فتظهر الشاشةُ **بهويّتها**
+     أثناء التحميل لا كصفحةٍ بيضاءَ مجهولة. وزرُّ الإضافة يُخفى حتى تصل الحسابات:
+     فحصُ «مشروعٌ له حسابٌ آخر» يقرأ القائمةَ التي لم تصل بعد. */
+  function _headHtml(showAdd){
+    var addBtn = (showAdd && _canManage())
       ? '<button class="btn btn-primary btn-sm" onclick="window.substituteBudget.openAdd()">➕ إضافة حساب</button>' : "";
-
-    var head = '' +
+    return '' +
       '<div class="card" style="margin-bottom:12px">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">' +
           '<div>' +
@@ -361,6 +402,41 @@
           '</div>' + addBtn +
         '</div>' +
       '</div>';
+  }
+
+  /* شاشةُ الحالة: عطلٌ يُقال ويُعاد المحاولةُ منه، أو مزامنةٌ تُرى — وهيكلٌ عظميٌّ
+     بشكل الجدول القادم كي يعرف القارئُ **ما الذي يُحمَّل**، لا شريطاً معلّقاً. */
+  function _skelRow(){
+    return '<div style="display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--border)">' +
+      '<div class="skeleton" style="height:14px;border-radius:5px;flex:2 1 180px"></div>' +
+      '<div class="skeleton" style="height:14px;border-radius:5px;flex:1 1 70px"></div>' +
+      '<div class="skeleton" style="height:14px;border-radius:5px;flex:1 1 70px"></div>' +
+      '<div class="skeleton" style="height:14px;border-radius:5px;flex:1 1 70px"></div>' +
+    '</div>';
+  }
+  function _stateCardHtml(){
+    if(_error){
+      return '<div class="card" style="text-align:center;padding:34px 18px">' +
+        '<div style="color:var(--danger);font-weight:800;font-size:13.5px">'+_icn("alertTriangle")+' '+_esc(_error)+'</div>' +
+        '<div style="font-size:12px;color:var(--muted);margin-top:6px">لم تُعرَض أيُّ أرصدة — فلا يُقرأ نقصُ الاتصال رصيداً فارغاً.</div>' +
+        '<button class="btn btn-ghost btn-sm" style="margin-top:14px" onclick="window.substituteBudget.retry()">'+_icn("rotateCcw")+' إعادة المحاولة</button>' +
+      '</div>';
+    }
+    var what = !_loaded ? "جارٍ تحميل حسابات البند المستعاض…"
+                        : "وصلت الحسابات — بانتظار طلبات الشراء لحساب المصروف والمتبقي…";
+    return '<div class="card">' + _syncHTML() +
+      '<div style="text-align:center;font-size:12px;color:var(--muted);margin:-14px 0 18px">'+_esc(what)+'</div>' +
+      _skelRow() + _skelRow() + _skelRow() + _skelRow() +
+    '</div>';
+  }
+
+  function _listHtml(){
+    var money = _canSeeMoney();
+    var head = _headHtml(true) + (_error ? '' +
+      '<div class="card" style="margin-bottom:12px;border-right:3px solid var(--warn,#b45309);font-size:12.5px">' +
+        _icn("alertTriangle","ic-sm")+' '+_esc(_error)+' الأرقامُ المعروضة آخرُ ما وصل — قد لا تكون محدَّثة. ' +
+        '<button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="window.substituteBudget.retry()">'+_icn("rotateCcw","ic-sm")+' إعادة المزامنة</button>' +
+      '</div>' : "");
 
     if(!_accounts.length){
       return head +
@@ -848,7 +924,7 @@
     startSync: startSync,
     render: render,
     open: open, back: back,
-    filter: filter, filterDoc: filterDoc,
+    filter: filter, filterDoc: filterDoc, retry: retry,
     openAdd: openAdd, openEdit: openEdit, remove: remove,
     _kindToggle: _kindToggle,
     optionsHtml: optionsHtml, accounts: accounts, accountForProject: accountForProject,
