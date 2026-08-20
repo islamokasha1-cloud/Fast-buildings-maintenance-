@@ -370,8 +370,13 @@ function predelivery() {
        ميزةً جديدةً في مجالٍ جديد بل **تعديلٌ على منطقٍ قائم**: حقلُ `np-attach` وحلقةُ
        إنشاء الطلب نفسها. وCLAUDE.md صريحةٌ في أن نقلَ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة
        تعديله ممنوع (يُخفي التغييرَ الحقيقيَّ داخل كتلةٍ منقولة)، ولا وحدةَ مشترياتٍ
-       قائمةً تستضيفه. فالمكانُ الصحيح هو موضعُه، والسقفُ يتبع. */
-    const IDX_CEILING = 39680;   // ← خفِّضه بعد كل استخراج (الهدف: ٢٠–٢٥ ألفاً)
+       قائمةً تستضيفه. فالمكانُ الصحيح هو موضعُه، والسقفُ يتبع.
+
+       رُفع من 39680 إلى 39700 — ‏٢٠ سطراً لـ`vendorMergeMap`: **إصلاحُ** «توحيد
+       المحدَّد لا يفعل شيئاً» في أداةٍ قائمة، لا ميزةً جديدة. والدالّةُ نقيّةٌ عن قصدٍ
+       ليفحصها هذا الملفُّ بلا متصفّح (قاعدةُ CLAUDE.md ٥)، وموضعُها بجوار بقيّة دوالّ
+       المرادفات — ونقلُ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة إصلاحه ممنوع. */
+    const IDX_CEILING = 39700;   // ← خفِّضه بعد كل استخراج (الهدف: ٢٠–٢٥ ألفاً)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = HTML.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -1803,7 +1808,7 @@ function vendorNameUnify() {
   let V;
   try {
     V = new Function("IS_DEV", src +
-      "\nreturn { vendorMatchKey, vendorFuzzyKey, vendorCanonical, vendorCanonParts, _poVendorFilterName, vendorSplitNames," +
+      "\nreturn { vendorMatchKey, vendorFuzzyKey, vendorCanonical, vendorCanonParts, _poVendorFilterName, vendorSplitNames, vendorMergeMap," +
       "\n         setAliases:m=>{ _vendorAliases=m; }, getAliases:()=>_vendorAliases };")(false);
   } catch (e) { T("تُبنى دوالّ التوحيد وتُنفَّذ", false, String(e.message).slice(0, 140)); return; }
   T("تُبنى دوالّ التوحيد وتُنفَّذ", typeof V.vendorCanonical === "function");
@@ -1897,7 +1902,7 @@ function vendorNameUnify() {
   T("والقرارُ يُسجَّل في سجل التدقيق (اعتماداً وتراجعاً)",
     /logAudit\("توحيد أسماء مورّد"/.test(HTML) && /logAudit\("تراجع عن توحيد أسماء مورّد"/.test(HTML));
   T("★ ولا سلاسلَ مرادفات: تبعيّاتُ الصيغة المدموجة تُحوَّل للاسم النهائي",
-    /Object\.keys\(next\)\.forEach\(k=>\{ if\(others\.indexOf\(next\[k\]\)!==-1\) next\[k\]=canon; \}\);/.test(HTML));
+    /Object\.keys\(map\)\.forEach\(k=>\{ if\(merged\.indexOf\(map\[k\]\)!==-1\) map\[k\]=c; \}\);/.test(HTML));
   T("الأداةُ للمسؤول وحدَه (فتحاً وتنفيذاً وتراجعاً)",
     (HTML.match(/currentUser\.role!=="admin"\)\{ toast\("⚠ صلاحية المسؤول فقط","warn"\); return; \}/g) || []).length >= 3);
 
@@ -1962,6 +1967,43 @@ function vendorNameUnify() {
   T("★ ودمجٌ يدويٌّ متاحٌ لأي اسمَين خارج الترشيح الآليّ",
     /دمجٌ يدويّ — اختر أيَّ أسماءٍ ووحِّدها/.test(HTML) && /id="vm-search"/.test(HTML) &&
     /_vmAllNames\.map\(e=>row\(e,"all",false\)\)/.test(HTML) && /function _vmFilterAll\(q\)\{/.test(HTML));
+
+  /* (د) v18.9vNEXT — «توحيد المحدَّد لا يفعل شيئاً» ثانيةً: صيغتان يُطبِّعهما
+     vendorMatchKey إلى مفتاحٍ واحد (تاءٌ مربوطة · همزة · مسافةٌ زائدة · ترقيم) كانت
+     الخريطةُ تُكتَب ثم يمحوها سطرُ «الاسم المعتمد لا يكون مرادفاً لنفسه»، فتُحفَظ
+     كما كانت والصيغتان تبقيان صفَّين. الحارسُ يفحص الدالّة النقيّة مباشرةً. */
+  T("تُعرَض دالّةُ خريطة التوحيد النقيّة", typeof V.vendorMergeMap === "function");
+  if (typeof V.vendorMergeMap === "function") {
+    const N1 = "مؤسسة النور", N2 = "مؤسسه النور";   // مفتاحُ المطابقة واحدٌ للاثنين
+    T("مقدّمة: الصيغتان تشتركان في مفتاح المطابقة", V.vendorMatchKey(N1) === V.vendorMatchKey(N2));
+    const p1 = V.vendorMergeMap({}, [N1, N2], N1);
+    T("★ صيغتان بمفتاحٍ واحدٍ تُوحَّدان فعلاً (لا خريطةٌ فارغةٌ صامتة)",
+      !!p1 && Object.keys(p1.map).length === 1 && p1.map[V.vendorMatchKey(N1)] === N1,
+      p1 ? JSON.stringify(p1.map) : "null");
+    if (p1) {
+      V.setAliases(p1.map);
+      T("★ والصيغتان تصيران صفّاً واحداً في المؤشّرات بعد التوحيد",
+        V.vendorCanonical(N1) === N1 && V.vendorCanonical(N2) === N1 &&
+        V.vendorCanonParts([{ vendor: N1, cost: 5000 }, { vendor: N2, cost: 4000 }]).length === 1);
+      T("★ وإعادةُ الضغط تُعلن «موحّدةٌ فعلاً» بدل وعدٍ كاذبٍ بالنجاح",
+        V.vendorMergeMap(p1.map, [N1, N2], N1) === null);
+      V.setAliases({});
+    }
+    // الاسمُ المعتمد لا يبقى مرادفاً لنفسه حين لا تشاركه صيغةٌ أخرى مفتاحَه
+    const p2 = V.vendorMergeMap({}, [V2, V3], V3);
+    T("★ ومفتاحُ الاسم المعتمد يُحذَف إن لم تشاركه صيغةٌ مدموجة",
+      !!p2 && p2.map[V.vendorMatchKey(V3)] === undefined && p2.map[V.vendorMatchKey(V2)] === V3);
+    // فكُّ السلاسل ما زال قائماً: مرادفٌ يشير لصيغةٍ دُمجت يتحوّل للاسم النهائي
+    const chain = {}; chain[V.vendorMatchKey(V1)] = V2;
+    const p3 = V.vendorMergeMap(chain, [V2, V3], V3);
+    T("★ وفكُّ السلاسل قائم (لا مرادفَ يشير إلى اسمٍ لم يعد معتمداً)",
+      !!p3 && p3.map[V.vendorMatchKey(V1)] === V3 && p3.map[V.vendorMatchKey(V2)] === V3);
+    T("★ والاسمُ المعتمد يجب أن يكون من المحدَّد (وإلا فلا خريطة)",
+      V.vendorMergeMap({}, [V1, V2], "اسمٌ خارج القائمة") === null);
+    T("★ ودالّةُ الحفظ تستعمل الخريطة النقيّة لا حساباً موازياً",
+      /const plan = vendorMergeMap\(_vendorAliases, picked, canon\);/.test(HTML) &&
+      /const next = plan\.map;/.test(HTML) && !/if\(selfKey\) delete next\[selfKey\];/.test(HTML));
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════
