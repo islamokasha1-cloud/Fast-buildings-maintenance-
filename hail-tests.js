@@ -901,6 +901,18 @@ function substituteBudget() {
   T("يقرأ المصدر الموحّد للمشاريع (رسمية + يدوية)", src.includes("_allProjectOptions"));
   T("الترشيح التلقائي بالمفتاح الموحّد", HTML.includes("function _npProjKeyForSub()") && HTML.includes("__CUSTOM__:"));
 
+  /* v18.9.2766 — شارةُ «مستعاض» في كل بطاقةٍ يظهر فيها الطلب.
+     كان العلَمُ في نسختَي الطباعة وحدَهما، فالمعتمِدُ في القائمة أو في «بانتظار
+     إجراءك» لا يعرف أن الطلب يُخصَم من رصيد المستعاض. الحارسُ يُثبّت **الدالّةَ
+     الواحدة ومواضعَ ندائها** — إذ حذفُ نداءٍ واحدٍ لا يكسر شيئاً ولا يُنذر. */
+  T("شارةُ المستعاض دالّةٌ واحدة معروضة", /function poSubstituteChip\(/.test(HTML) && HTML.includes("window.poSubstituteChip"));
+  T("★ تظهر في بطاقة قائمة المشتريات", /\$\{poLateBadge\(p\)\}\s*\n\s*\$\{poSubstituteChip\(p\)\}/.test(HTML));
+  T("★ وفي هيدر نافذة التفاصيل", /\$\{poPriBadge\(p\.priority\)\}\s*\n\s*\$\{poSubstituteChip\(p\)\}/.test(HTML));
+  T("★ وفي شبكة «بيانات الطلب» باسم الحساب", HTML.includes('البند المستعاض (الحساب المخصوم منه)'));
+  T("★★ وفي «بانتظار إجراءك» — حيث يقف المعتمِد", /_poMyTaskProjName\(p\)\)\}\$\{p\.isSubstitute\?" "\+poSubstituteChip\(p,true\)/.test(HTML));
+  T("★ وفي بطاقة لوحة المعلومات (أحدث الطلبات المعلقة)", /\$\{poStatusBadge\(p\.status\)\}\$\{poSubstituteChip\(p,true\)\}/.test(HTML));
+  T("★ ولا تُرسم لطلبٍ غير مستعاض", /function poSubstituteChip\(p, compact\)\{\s*\n\s*if\(!p \|\| !p\.isSubstitute\) return "";/.test(HTML));
+
   // تحميل الوحدة فعلياً واختبار دالة الحساب النقية _calcStats
   const sandbox = { window: {}, console };
   vm.createContext(sandbox);
