@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9.2759";
+const MODULE_BUILD = "v18.9.2762";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -283,7 +283,7 @@ let _tasks   = [];      // مهام المشروع الحالي
 let _loaded  = false;   // اكتمل تحميل هذا المشروع؟
 let _loadedFor = "";    // معرّف المشروع المحمَّل
 let _loading = false;
-let _view    = "board"; // board | all | sup | quality
+let _view    = "board"; // board | all | sup | quality | archive
 /* «كل المهام»: عرضٌ ببطاقات المباني (افتراضي) أو جدول، ومرشِّحُ حالةٍ جدوليّ.
    العرض البطاقي يُظهر **المجدولة القادمة** أيضاً (التي تبدأ غداً وما بعده) — فلوحةُ
    اليوم لا تعرض إلا المستحقّ اليوم، والمستخدم يحتاج أن يرى القادم ويتصرّف فيه. */
@@ -520,6 +520,7 @@ async function executeTask(task, checkedItems, note){
     const patch = { id:task.id, lastExecuted: now, lastExecutedDate: _today(), lastExecutedBy: _userName(), nextDueDate: _advanceDue(_today(), days) };   // v18.9ac — M20: اليوم المحلّي صريحاً
     await saveTask(patch);
     _audit("تنفيذ مهمة نظافة", (task.name||"")+" — "+(task.building||"")+" ("+doneCount+"/"+list.length+" بند)");
+    archInvalidateToday();   // كاشُ شهرِ اليوم في الأرشيف لم يعد صحيحاً بعد هذا السطر
     return true;
   }catch(e){ console.warn("cleaningOps/executeTask",e); _toast("⚠ تعذّر تسجيل التنفيذ","warn"); return false; }
 }
@@ -584,7 +585,7 @@ function _render(){
   if(_execFor)   { renderExec(el);   return; }
   if(_detailFor) { renderDetail(el); return; }
   el.innerHTML = heroHTML() + (_genForm ? genFormHTML() : "") + (_launchForm ? launchFormHTML() : "") +
-                 (_view==="quality" ? qualityHTML() : _view==="sup" ? supMapHTML() : _view==="board" ? boardHTML() : allTasksHTML());
+                 (_view==="archive" ? archiveHTML() : _view==="quality" ? qualityHTML() : _view==="sup" ? supMapHTML() : _view==="board" ? boardHTML() : allTasksHTML());
 }
 function _onPage(){ const pg=document.getElementById("page-"+PAGE_ID); return !!pg && pg.classList.contains("active"); }
 
@@ -604,6 +605,7 @@ function heroHTML(){
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.addTask()">${_svg('plus')} مهمة جديدة</button>`:""}
         ${canEdit()?`<button class="btn btn-sm ${_view==='sup'?'co-seg-on':''}" onclick="cleaningOps.setView('sup')">${_svg('users')} المشرفون والمناطق</button>`:""}
         ${canQuality()?`<button class="btn btn-sm ${_view==='quality'?'co-seg-on':''}" onclick="cleaningOps.setView('quality')">${_svg('award')} جولات الجودة</button>`:""}
+        <button class="btn btn-sm ${_view==='archive'?'co-seg-on':''}" onclick="cleaningOps.setView('archive')">${_svg('archive')} الأرشيف الشهري</button>
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.toggleGen()">${_svg('sparkles')} توليد بالذكاء الاصطناعي</button>`:""}
         ${canEdit()?`<button class="btn btn-sm" onclick="cleaningOps.toggleLaunch()">${_svg('calendar')} إطلاق المهام</button>`:""}
         <button class="btn btn-sm" onclick="cleaningOps.refresh()">${_svg('rotateCcw')} تحديث</button>
@@ -3202,6 +3204,553 @@ function _prefetch(){
   _afterLoad();
 }
 
+/* ════════════════════════════════════════════════════════════════════════════
+   الأرشيف الشهريّ لأعمال النظافة — مرآةُ «أرشيف البلاغات الشهري» في الصيانة
+   ────────────────────────────────────────────────────────────────────────────
+   ── المشكلة ──
+   سجلُّ التنفيذ (`{proj}_cleaning_log`) ينمو بلا سقف: مشروعٌ بمئةِ مهمةٍ يوميةٍ يكتب
+   ~٢٥٠٠ سطرٍ في الشهر. ولم يكن يُقرأ منه إلا **شهرُ اليوم** (`loadMonthLog`) وستّون
+   سطراً لمهمةٍ بعينها في تفاصيلها. فما مضى من عملٍ — وهو **إثباتُ الخدمة أمام العميل** —
+   لا سبيلَ لرؤيته في التطبيق إطلاقاً: لا شهرٌ سابق، ولا تغطيةُ منطقةٍ فيه، ولا صورُه.
+
+   ── المبدأ (نفسُ منطق أرشيف البلاغات حرفاً) ──
+   ١) **التقسيمُ بالشهر الميلادي**: مفتاحُ «YYYY-MM» من `date` — كما `archiveMonth`
+      في البلاغات. لا حقلَ جديدَ على السجلّات القائمة ولا ترحيلَ: الشهرُ مشتقٌّ من
+      تاريخِها الموجود، فكلُّ سجلٍّ كُتب قبل هذه الدفعة يدخل الأرشيفَ بلا لمسة.
+   ٢) **الختمُ التلقائيُّ للشهر المنصرم** (`autoSealPastMonths`) كما `autoArchiveByMonth`،
+      و**ختمٌ يدويٌّ** لشهرٍ بعينه (`sealCleanMonth`) كما `archiveMonth(ym)`.
+   ٣) **ملخّصاتٌ شهريةٌ مسبقة** (rollups) في `{proj}_cleaning_rollups` — نفسُ فكرة
+      `ROLLUPS_COLLECTION` في البلاغات: يبقى كشفُ الأشهر وأعدادُها بتكلفةٍ ثابتةٍ مهما
+      طال التاريخ، فلا نُحمّل سنواتِ سجلٍّ لنعرف أنّ في مايو ٢٤٠٠ تنفيذاً.
+
+   ── الفرقُ الواحدُ عن البلاغات، وسببُه ──
+   البلاغُ يُوسَم `archived:true` **في وثيقته**، لأنّه يخرج بذلك من قائمةٍ حيّةٍ تُقرأ
+   كلَّها في كل جلسة. وسجلُّ التنفيذ لا يُقرأ حيّاً أصلاً (لا يُقرأ إلا شهرُ اليوم)،
+   فوسمُ آلافِ السجلّات كتابةٌ بلا فائدةٍ واحدة، وخطرُ نصفِ ترحيلٍ قائم. لذلك
+   **الأرشفةُ هنا ختمُ شهرٍ لا وسمُ سطر**: وجودُ ملخّصِ الشهر = الشهرُ مؤرشف. وهو آمنٌ
+   لأنّ الشهرَ المنصرمَ **لا يتغيّر**: التنفيذُ يُكتب بتاريخ اليوم دائماً (`date:_today()`).
+
+   ── النطاق (نفسُ انضباط `visibleLog`) ──
+   الملخّصُ المخزَّنُ للمشروع كلِّه (يكتبه من يملك صلاحية التحرير)، أمّا **المعروضُ**
+   للمشرف فمن سجلّات الشهر بعد ترشيحها بمبانيه — فلا يرى في بلاطةٍ واحدةٍ رقمَ نطاقه
+   ورقمَ المشروع معاً. ولذلك تُحسَب أرقامُ الشهر المعروضِ من السجلّات لا من الملخّص.
+   ════════════════════════════════════════════════════════════════════════════ */
+function rollupsCol(){ const id=_projId(); if(!id) return ""; return id+"_cleaning_rollups"+(_isDev()?"_dev":""); }
+
+const ARCH_FV        = 1;    // نسخةُ صيغة الملخّص — يُعاد ختمُ ما حُسب بصيغةٍ أقدم
+const ARCH_PAGE      = 40;   // سطورُ التنفيذ المعروضة دفعةً («عرض المزيد» يزيدها)
+const ARCH_MAX_SEAL  = 24;   // سقفُ الأشهر التي تُختم تلقائياً في الجلسة الواحدة
+
+let _arRollups     = {};     // { "2026-07": {ملخّص} }
+let _arRollupsFor  = "";     // المشروعُ المحمَّلةُ ملخّصاتُه
+let _arRollupsLoaded = false;
+let _arRollupsPromise = null;
+let _arSealedFor   = "";     // المشروعُ الذي خُتمت أشهرُه الفائتة في هذه الجلسة
+let _arMonth       = null;   // الشهرُ المعروض
+let _arLog         = {};     // { ym: [سجلّات] } — كاشُ الشهر المعروض
+let _arLoading     = {};     // { ym: true } حارسُ جلبٍ متكرّر
+let _arLimit       = ARCH_PAGE;
+let _arF           = { q:"", building:"", workType:"", supervisor:"" };
+
+/* ════════ دوالٌّ نقيّة (يفحصها hail-tests بلا متصفّح) ════════ */
+// شهرُ سطرِ التنفيذ — من `date` وإلا من طابع `at`، كما يعود أرشيفُ البلاغات إلى createdAt
+function recMonth(r){ return String((r && (r.date || r.at)) || "").slice(0,7); }
+function recDay(r){   return String((r && (r.date || r.at)) || "").slice(0,10); }
+function _prevMonthOf(ym){
+  const y=parseInt(String(ym).slice(0,4),10), m=parseInt(String(ym).slice(5,7),10);
+  if(!y||!m) return "";
+  return m===1 ? (y-1)+"-12" : y+"-"+String(m-1).padStart(2,"0");
+}
+function _nextMonthOf(ym){
+  const y=parseInt(String(ym).slice(0,4),10), m=parseInt(String(ym).slice(5,7),10);
+  if(!y||!m) return "";
+  return m===12 ? (y+1)+"-01" : y+"-"+String(m+1).padStart(2,"0");
+}
+// كلُّ الأشهر من الأوّل إلى الآخِر شاملةً — قائمةٌ تصاعدية (وفارغةٌ إن انعكس الترتيب)
+function monthsBetween(fromYm, toYm){
+  const out=[];
+  if(!/^\d{4}-\d{2}$/.test(String(fromYm)) || !/^\d{4}-\d{2}$/.test(String(toYm))) return out;
+  let cur=fromYm, guard=0;
+  while(cur<=toYm && guard++<600){ out.push(cur); cur=_nextMonthOf(cur); }
+  return out;
+}
+// حدَّا استعلامِ الشهر — مساواةٌ على حقلٍ واحدٍ بمدًى (فهرسٌ مفردٌ تلقائيّ، لا مركّب)
+function monthRange(ym){ return { from: ym+"-01", to: ym+"-31" }; }
+
+function _emptyCleanRollup(ym){
+  return {
+    ym, projectId:_projId(),
+    runs:0, days:0, taskCount:0,
+    doneItems:0, totalItems:0, withPhotos:0, photoCount:0,
+    firstDate:"", lastDate:"",
+    buildings:{}, workTypes:{}, supervisors:{},
+    sealedAt:null, sealedBy:"", v:1, fv:ARCH_FV
+  };
+}
+
+/* ملخّصُ شهرٍ من سجلّاته — نقيّةٌ وحتميّة: نفسُ المدخلات ⇒ نفسُ المخرجات.
+   تتجاهل ما ليس من الشهر (كحارس `k===ym` في `_computeRollupForMonth` للبلاغات). */
+function computeCleanRollup(ym, recs){
+  const r=_emptyCleanRollup(ym);
+  const days={}, tasks={}, bDays={};
+  (Array.isArray(recs)?recs:[]).forEach(rec=>{
+    if(!rec || recMonth(rec)!==ym) return;
+    const d=recDay(rec);
+    r.runs++;
+    if(d){
+      days[d]=1;
+      if(!r.firstDate || d<r.firstDate) r.firstDate=d;
+      if(!r.lastDate  || d>r.lastDate)  r.lastDate=d;
+    }
+    if(rec.taskId) tasks[rec.taskId]=1;
+    const done=Number(rec.doneItems)||0, total=Number(rec.totalItems)||0;
+    r.doneItems+=done; r.totalItems+=total;
+    const ph=(Array.isArray(rec.photos)?rec.photos:[]).filter(Boolean);
+    r.photoCount+=ph.length;
+    if(ph.length) r.withPhotos++;
+    const b=rec.building||"—";
+    const e=r.buildings[b] || (r.buildings[b]={ runs:0, days:0, doneItems:0, totalItems:0, photos:0 });
+    e.runs++; e.doneItems+=done; e.totalItems+=total; e.photos+=ph.length;
+    const bd=bDays[b] || (bDays[b]={}); if(d) bd[d]=1;
+    const w=rec.workType||"—"; r.workTypes[w]=(r.workTypes[w]||0)+1;
+    const s=logSupervisor(rec) || SUP_UNASSIGNED; r.supervisors[s]=(r.supervisors[s]||0)+1;
+  });
+  r.days=Object.keys(days).length;
+  r.taskCount=Object.keys(tasks).length;
+  Object.keys(bDays).forEach(b=>{ if(r.buildings[b]) r.buildings[b].days=Object.keys(bDays[b]).length; });
+  return r;
+}
+
+// نِسبُ الملخّص المشتقّة — لا تُخزَّن (تُشتقّ عند العرض فلا تكذب بعد تغيّر الصيغة)
+function rollupStats(r){
+  const o=r||_emptyCleanRollup("");
+  return {
+    runs:o.runs||0, days:o.days||0, taskCount:o.taskCount||0,
+    zones:Object.keys(o.buildings||{}).length,
+    itemsPct: (o.totalItems>0) ? Math.round(o.doneItems/o.totalItems*100) : null,
+    photoPct: (o.runs>0) ? Math.round((o.withPhotos||0)/o.runs*100) : null,
+    perDay:   (o.days>0) ? Math.round((o.runs||0)/o.days*10)/10 : null,
+    photoCount:o.photoCount||0
+  };
+}
+
+// مجموعُ كلِّ الملخّصات — كما `archivedAggregates()` في البلاغات: أرقامُ التاريخ كلِّه
+// بلا تحميلِ سطرٍ واحدٍ من سجلّاته. الأشهرُ الخاليةُ (runs=0) تُختَم ولا تُعَدُّ شهراً.
+function archivedTotals(map){
+  const src=(map && typeof map==="object") ? map : _arRollups;
+  const t={ months:0, runs:0, days:0, doneItems:0, totalItems:0, withPhotos:0, photoCount:0, buildings:{} };
+  Object.keys(src).forEach(ym=>{
+    const r=src[ym]; if(!r || !(r.runs>0)) return;
+    t.months++; t.runs+=r.runs||0; t.days+=r.days||0;
+    t.doneItems+=r.doneItems||0; t.totalItems+=r.totalItems||0;
+    t.withPhotos+=r.withPhotos||0; t.photoCount+=r.photoCount||0;
+    Object.keys(r.buildings||{}).forEach(b=>{ t.buildings[b]=(t.buildings[b]||0)+(r.buildings[b].runs||0); });
+  });
+  t.zones=Object.keys(t.buildings).length;
+  t.itemsPct=(t.totalItems>0)?Math.round(t.doneItems/t.totalItems*100):null;
+  t.photoPct=(t.runs>0)?Math.round(t.withPhotos/t.runs*100):null;
+  return t;
+}
+
+/* ترشيحُ سجلّات الشهر — نقيّةٌ ليفحصها الاختبار، وهي **مصدرُ الصفوف والعدّ معاً**
+   فلا يختلف رقمُ «كذا من كذا» عن القائمة تحته (وهو الخطأ الذي وقع في أرشيف البلاغات
+   حين حُسب الملخّصُ من قائمةٍ والعدّ من أخرى). */
+function archFilterRecs(recs, f){
+  const o=f||{};
+  const q=String(o.q||"").trim().toLowerCase();
+  return (Array.isArray(recs)?recs:[]).filter(r=>{
+    if(!r) return false;
+    if(o.building && (r.building||"")!==o.building) return false;
+    if(o.workType && (r.workType||"")!==o.workType) return false;
+    if(o.supervisor && (logSupervisor(r)||SUP_UNASSIGNED)!==o.supervisor) return false;
+    if(!q) return true;
+    const hay=[r.taskName, r.building, r.floor, r.workType, r.by, r.supervisor, r.note, recDay(r)]
+      .map(x=>String(x==null?"":x).toLowerCase()).join(" ");
+    return hay.indexOf(q)!==-1;
+  });
+}
+// ترتيبُ العرض: الأحدثُ أوّلاً (طابعُ `at` أدقُّ من اليوم عند تعدّد التنفيذات)
+function archSortRecs(recs){
+  return (Array.isArray(recs)?recs:[]).slice()
+    .sort((a,b)=>String((b&&b.at)||recDay(b)).localeCompare(String((a&&a.at)||recDay(a))));
+}
+
+/* ════════ التحميل والختم ════════ */
+async function loadCleanRollups(force){
+  const database=_db(), col=rollupsCol();
+  if(!database || !col){ _arRollups={}; _arRollupsLoaded=true; return _arRollups; }
+  if(_arRollupsLoaded && _arRollupsFor===_projId() && !force) return _arRollups;
+  if(_arRollupsPromise) return _arRollupsPromise;                 // شارك النداء الجاري
+  _arRollupsPromise=(async()=>{
+    try{
+      const snap=await database.collection(col).get();
+      const map={}; snap.docs.forEach(d=>{ map[d.id]=Object.assign({ym:d.id}, d.data()||{}); });
+      _arRollups=map; _arRollupsFor=_projId(); _arRollupsLoaded=true;
+    }catch(e){
+      console.warn("cleaningOps/loadCleanRollups",e);
+      _arRollups={}; _arRollupsFor=_projId(); _arRollupsLoaded=true;
+    }finally{ _arRollupsPromise=null; }
+    return _arRollups;
+  })();
+  return _arRollupsPromise;
+}
+
+/* سجلّاتُ شهرٍ بعينه — مدًى على `date` وحدَه (فهرسٌ مفردٌ تلقائيّ، فلا يلزم فهرسٌ مركّب
+   لكلّ مشروعٍ جديد — نفسُ سبب تجنّب orderBy الخادميّ في `_fetchExtraArchivedTickets`).
+
+   **ولا قصَّ صامت.** رحلةٌ واحدةٌ بسقفٍ تكفي كلَّ شهرٍ واقعيّ (مئةُ مهمةٍ يوميةٍ =
+   ~٢٥٠٠ سطر)، لكنّ السقفَ لو بلغ لكان الشهرُ المعروضُ **ناقصاً بلا أن يظهر ذلك في
+   رقمٍ واحد**. فإن بلغه أُعيدت القراءةُ أثلاثاً (١-١٠ · ١١-٢٠ · ٢١-٣١) وجُمعت بلا
+   تكرار — فالحالةُ النادرةُ تُقرأ كاملةً، والحالةُ الشائعةُ تبقى رحلةً واحدة. وإن
+   تجاوز ثلثٌ سقفَه أيضاً وُسم الشهرُ ناقصاً **وقيل ذلك في الشاشة** لا في الـconsole وحدَه. */
+const ARCH_READ_CAP = 3000;
+let _arTrunc = {};           // { ym: true } شهرٌ لم يُقرأ كاملاً
+async function _fetchMonthRecs(ym){
+  const database=_db(), col=logCol();
+  const rg=monthRange(ym);
+  const q=(from,to)=>database.collection(col).where("date",">=",from).where("date","<=",to).limit(ARCH_READ_CAP).get();
+  // الترشيحُ بالشهر يُعاد محلّياً ولا يُترك للاستعلام وحدَه: حدُّ المدى نصّيّ (`-31`
+  // لشهرٍ من ثلاثين)، وسطرٌ بتاريخٍ مشوَّهٍ قد يمرّ — والشهرُ المعروضُ يجب أن يكون شهرَه.
+  const snap=await q(rg.from, rg.to);
+  if(snap.size < ARCH_READ_CAP){
+    _arTrunc[ym]=false;
+    return snap.docs.map(d=>d.data()||{}).filter(r=>recMonth(r)===ym);
+  }
+  const parts=[[ym+"-01",ym+"-10"],[ym+"-11",ym+"-20"],[ym+"-21",ym+"-31"]];
+  const out=[], seen={}; let over=false;
+  for(const [f,t] of parts){
+    const s2=await q(f,t);
+    if(s2.size>=ARCH_READ_CAP){ over=true; console.warn("[CleanArchive] ثلثُ شهرٍ تجاوز سقفَ القراءة: "+f+" ← "+t); }
+    s2.docs.forEach(d=>{ if(seen[d.id]) return; seen[d.id]=1;
+      const r=d.data()||{}; if(recMonth(r)===ym) out.push(r); });
+  }
+  _arTrunc[ym]=over;
+  return out;
+}
+async function loadArchiveMonth(ym, force){
+  const database=_db(), col=logCol();
+  if(!database || !col || !ym){ _arLog[ym]=[]; return _arLog[ym]; }
+  if(_arLog[ym] && !force) return _arLog[ym];
+  if(_arLoading[ym]) return null;
+  _arLoading[ym]=true;
+  try{ _arLog[ym]=await _fetchMonthRecs(ym); }
+  catch(e){ console.warn("cleaningOps/loadArchiveMonth",e); _arLog[ym]=[]; }
+  finally{ _arLoading[ym]=false; }
+  return _arLog[ym];
+}
+
+/* ختمُ شهر — يقرأ من Firestore لا من الكاش، ليكون الملخّصُ من المصدر الموثوق
+   (نفسُ قرار `writeRollupForMonth` في البلاغات: كاشٌ صُفِّر للتوّ يُنتج عدّاً ناقصاً). */
+async function sealCleanMonth(ym){
+  const database=_db(), lcol=logCol(), rcol=rollupsCol();
+  if(!database || !lcol || !rcol || !ym) return null;
+  try{
+    const recs=await _fetchMonthRecs(ym);             // نفسُ قراءةِ العرض: بلا قصٍّ صامت
+    const r=computeCleanRollup(ym, recs);
+    r.sealedAt=new Date().toISOString(); r.sealedBy=_userName();
+    r.partial=!!_arTrunc[ym];                          // ملخّصٌ من قراءةٍ ناقصةٍ يقول ذلك عن نفسه
+    await database.collection(rcol).doc(ym).set(r,{merge:false});
+    _arRollups[ym]=r;
+    _arLog[ym]=recs;                                  // كُتبت القراءةُ مرّةً — لا نُعِدها
+    console.info("[CleanArchive] خُتم "+ym+": "+r.runs+" تنفيذاً في "+r.days+" يوم");
+    return r;
+  }catch(e){ console.warn("cleaningOps/sealCleanMonth "+ym,e); return null; }
+}
+
+// أوّلُ تاريخِ تنفيذٍ في المشروع — ترتيبٌ على حقلٍ واحدٍ وسطرٌ واحد (رحلةٌ رخيصة)
+async function _firstLogDate(){
+  const database=_db(), col=logCol();
+  if(!database || !col) return "";
+  try{
+    const snap=await database.collection(col).orderBy("date","asc").limit(1).get();
+    if(snap.empty) return "";
+    return recDay(snap.docs[0].data()||{});
+  }catch(e){ console.warn("cleaningOps/_firstLogDate",e); return ""; }
+}
+
+/* الختمُ التلقائيُّ للأشهر الفائتة — مرآةُ `autoArchiveByMonth`، بفارقين مقصودين:
+   (أ) لا يعمل إلا عند فتح شاشة الأرشيف لا عند كل دخول: الملخّصاتُ لا يقرؤها إلا هو،
+       فختمُها في كل جلسةٍ رحلاتٌ لا يطلبها أحد.
+   (ب) لا يعمل إلا لمن يملك صلاحية التحرير: الختمُ **كتابة**، والمراقبُ ممنوعٌ منها
+       في قواعد الخادم — فمحاولتُه تُنتج أخطاءَ صلاحيةٍ متكرّرةً بلا طائل.
+   والشهرُ الذي له ملخّصٌ بالصيغة الحالية لا يُعاد حسابُه أبداً (الماضي لا يتغيّر). */
+async function autoSealPastMonths(){
+  if(!_db() || !canEdit()) return 0;
+  if(_arSealedFor===_projId()) return 0;              // مرّةٌ واحدةٌ لكل مشروعٍ في الجلسة
+  _arSealedFor=_projId();
+  const first=await _firstLogDate();
+  if(!first) return 0;
+  const lastClosed=_prevMonthOf(_ymL(new Date()));
+  const all=monthsBetween(first.slice(0,7), lastClosed);
+  const missing=all.filter(ym=>!_arRollups[ym] || (_arRollups[ym].fv||0)!==ARCH_FV);
+  if(!missing.length) return 0;
+  const batch=missing.slice(-ARCH_MAX_SEAL);          // الأحدثُ أولاً بالأهمية
+  if(missing.length>batch.length)
+    console.info("[CleanArchive] "+(missing.length-batch.length)+" شهراً أقدمَ لم تُختم في هذه الجولة — تُختم في الجولة التالية");
+  let n=0;
+  for(const ym of batch){ if(await sealCleanMonth(ym)) n++; }
+  if(n) _audit("ختمُ أشهرِ أرشيف النظافة", n+" شهراً: "+batch.join("، "));
+  return n;
+}
+
+// أشهرُ الأرشيف للعرض: كلُّ شهرٍ مختومٍ فيه عمل + الشهرُ الجاري (حيٌّ لم يُختم بعد)
+function archiveMonths(){
+  const cur=_ymL(new Date()), set={};
+  Object.keys(_arRollups).forEach(ym=>{ if((_arRollups[ym]||{}).runs>0) set[ym]=1; });
+  Object.keys(_arLog).forEach(ym=>{ if((_arLog[ym]||[]).length) set[ym]=1; });
+  set[cur]=1;
+  return Object.keys(set).sort((a,b)=>b.localeCompare(a));
+}
+function archIsSealed(ym){ return !!_arRollups[ym]; }
+// سجلّاتُ الشهر في نطاق المستخدم — نفسُ انضباط `visibleLog`
+function archScoped(recs){
+  const mine=myBuildings();
+  return mine ? (recs||[]).filter(r=>mine.indexOf(r&&r.building)!==-1) : (recs||[]);
+}
+
+/* ════════ العرض ════════ */
+function archiveHTML(){
+  // تبديلُ المشروع يُبطل كاشَ الشهر كما يُبطل الملخّصات — وإلا عُرضت أرقامُ مشروعٍ
+  // تحت اسم آخر (نفسُ حارس `_loadedFor` في تحميل المهام).
+  if(_arRollupsFor!==_projId()){ _arLog={}; _arLoading={}; _arTrunc={}; _arMonth=null; _arLimit=ARCH_PAGE; }
+  if(!_arRollupsLoaded || _arRollupsFor!==_projId()){
+    loadCleanRollups().then(()=>autoSealPastMonths()).then(()=>{ if(_onPage()) render(); })
+      .catch(e=>console.warn("cleaningOps/archive init",e));
+    return `<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ تحميل أرشيف النظافة…</div></div></div>`;
+  }
+  const cur=_ymL(new Date());
+  const months=archiveMonths();
+  if(!_arMonth || months.indexOf(_arMonth)===-1) _arMonth=months[0]||cur;
+  const ym=_arMonth;
+
+  const chips=months.map(m=>{
+    const r=_arRollups[m];
+    const n=(m===cur) ? ((_arLog[m]||[]).length || (r?r.runs:0)) : (r?r.runs:(_arLog[m]||[]).length);
+    return `<button class="btn btn-sm co-chip ${m===ym?'on':''}" onclick="cleaningOps.archSelect('${_esc(m)}')">
+        ${_svg('calendar',13)} ${_esc(_monthName(m))}${m===cur?' <small style="opacity:.75">(جارٍ)</small>':''} <b>${n||0}</b>
+      </button>`;
+  }).join("");
+
+  const recsRaw=_arLog[ym];
+  const head=`<div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('archive')} الأرشيف الشهريّ</div>
+        <span class="co-sec-c">${months.length} شهراً${archIsSealed(ym)?" • هذا الشهر مختوم":(ym===cur?" • الشهر الجاري يُختم تلقائياً بعد انتهائه":" • لم يُختم بعد")}</span></div>
+      <div class="co-chips">${chips}</div>
+      ${archTotalsHTML()}
+    </div>`;
+
+  if(recsRaw===undefined){
+    loadArchiveMonth(ym).then(()=>{ if(_onPage()) render(); }).catch(e=>console.warn("cleaningOps/archive month",e));
+    return head+`<div class="card"><div class="co-empty"><div class="co-empty-t">جارٍ تحميل تنفيذات ${_esc(_monthName(ym))}…</div></div></div>`;
+  }
+
+  const recs=archScoped(recsRaw);
+  if(!recs.length){
+    return head+`<div class="card"><div class="co-empty">${_svg('archive')}
+      <div class="co-empty-t">لا تنفيذاتِ نظافةٍ في ${_esc(_monthName(ym))}</div>
+      <div class="co-empty-s">كلُّ تنفيذِ مهمةٍ يُحفظ بتاريخه، ويظهر هنا في شهره بعد ذلك.</div></div></div>`;
+  }
+
+  const r=computeCleanRollup(ym, recs), st=rollupStats(r);
+  // السقفُ يُقال ولا يُخفى: شهرٌ لم يُقرأ كاملاً يُعلن ذلك بجوار أرقامه
+  const truncBanner=(_arTrunc[ym] || (_arRollups[ym]&&_arRollups[ym].partial))
+    ? `<div class="ppm-overdue-banner"><span class="co-bnr-ic">${_svg('alertTriangle')}</span>
+        <span>هذا الشهر أكبرُ من سقف القراءة — الأرقامُ أدناه لجزءٍ منه لا لكلِّه. صدِّر الشهرَ على فتراتٍ أضيق.</span></div>`
+    : "";
+  const tile=(icon,val,lbl,c)=>`<div class="stat-tile" style="--_c:${c}">
+      <div class="st-ico">${_svg(icon)}</div><div class="st-val" style="color:${c}">${val}</div><div class="st-lbl">${lbl}</div></div>`;
+  const pctC=p=>p==null?"var(--muted)":(p>=85?"var(--sla-ok)":(p>=60?"var(--sla-warn)":"var(--sla-crit)"));
+  const tiles=`<div class="co-tiles">
+      ${tile('checkCircle', st.runs,  "تنفيذاً هذا الشهر", "var(--primary)")}
+      ${tile('calendar',    st.days,  "يوم عملٍ فيه تنفيذ", "var(--primary)")}
+      ${tile('building2',   st.zones, "منطقةً مغطّاة",      "var(--primary)")}
+      ${tile('clipboardCheck', st.itemsPct==null?"—":st.itemsPct+"%", "اكتمال بنود الفحص", pctC(st.itemsPct))}
+      ${tile('camera',      st.photoPct==null?"—":st.photoPct+"%",    "توثيقٌ بالصور",     pctC(st.photoPct))}
+      ${tile('clipboardList', st.taskCount, "مهمةً مختلفة",  "var(--primary)")}
+    </div>`;
+
+  return head + `<div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('activity')} ${_esc(_monthName(ym))}</div>
+        <span class="co-sec-c">${r.firstDate?_esc(r.firstDate)+" ← "+_esc(r.lastDate):"—"}${st.perDay!=null?" • "+st.perDay+" تنفيذاً/يوم":""}</span></div>
+      ${truncBanner}
+      ${tiles}
+      ${archFiltersHTML(recs)}
+      <div id="co-ar-list">${archListHTML(recs)}</div>
+    </div>
+    ${archByBuildingHTML(r)}`;
+}
+
+// شريطُ إجمالي الأرشيف — من الملخّصات وحدها (بلا تحميل سطرٍ واحد). يُخفى عمّن له نطاقٌ
+// مقيَّد، فالإجماليُّ للمشروع كلِّه ولا يجوز عرضُه بجوار أرقامِ نطاقٍ أضيق.
+function archTotalsHTML(){
+  if(myBuildings()) return "";
+  const t=archivedTotals();
+  if(!t.months) return "";
+  const it=(v,l)=>`<div class="co-sup-m"><span class="l">${l}</span><span class="v">${v}</span></div>`;
+  return `<div class="co-sup-ms" style="margin-top:12px">
+      ${it(t.months, "شهراً مختوماً")}
+      ${it(t.runs,   "إجمالي التنفيذات")}
+      ${it(t.days,   "أيامَ عملٍ موثَّقة")}
+      ${it(t.zones,  "منطقةً في الأرشيف")}
+      ${it(t.itemsPct==null?"—":t.itemsPct+"%", "اكتمالُ البنود تاريخياً")}
+      ${it(t.photoCount, "صورةً محفوظة")}
+    </div>`;
+}
+
+function archFiltersHTML(recs){
+  const uniq=(arr)=>Object.keys(arr.reduce((a,k)=>{ if(k) a[k]=1; return a; },{})).sort((a,b)=>String(a).localeCompare(String(b),"ar"));
+  const blds=uniq(recs.map(r=>r.building));
+  const wts =uniq(recs.map(r=>r.workType));
+  const sups=uniq(recs.map(r=>logSupervisor(r)||SUP_UNASSIGNED));
+  const opt=(list,cur)=>list.map(v=>`<option value="${_esc(v)}" ${v===cur?"selected":""}>${_esc(v)}</option>`).join("");
+  return `<div class="co-filters">
+      <input class="form-input" id="co-ar-q" type="search" placeholder="ابحث باسم المهمة أو المنطقة أو المنفِّذ أو الملاحظة…"
+             value="${_esc(_arF.q)}" oninput="cleaningOps.archFilter()">
+      <select class="form-select" id="co-ar-b" onchange="cleaningOps.archFilter()">
+        <option value="">كل المناطق</option>${opt(blds,_arF.building)}</select>
+      <select class="form-select" id="co-ar-w" onchange="cleaningOps.archFilter()">
+        <option value="">كل أنواع العمل</option>${opt(wts,_arF.workType)}</select>
+      <select class="form-select" id="co-ar-s" onchange="cleaningOps.archFilter()">
+        <option value="">كل المشرفين</option>${opt(sups,_arF.supervisor)}</select>
+      <button class="btn btn-ghost btn-sm" onclick="cleaningOps.archReset()">${_svg('rotateCcw',13)} مسح الفلاتر</button>
+      <button class="btn btn-ghost btn-sm" onclick="cleaningOps.archExport()">${_svg('fileText',13)} تصدير Excel</button>
+      ${canEdit()?`<button class="btn btn-ghost btn-sm" onclick="cleaningOps.archSeal()">${_svg('archive',13)} ختمُ الشهر الآن</button>`:""}
+    </div>`;
+}
+
+/* قائمةُ التنفيذات — الترشيحُ والعدُّ من مصدرٍ واحد، والسقفُ معلَنٌ لا صامت
+   («عرض المزيد» يقول كم بقي، فلا يُقرأ الجزءُ على أنه الكلّ). */
+function archListHTML(recs){
+  const filtered=archSortRecs(archFilterRecs(recs, _arF));
+  const shown=filtered.slice(0, _arLimit);
+  const hasF=!!(_arF.q||_arF.building||_arF.workType||_arF.supervisor);
+  const count=`<div class="co-sec" style="margin:12px 0 9px"><div class="co-sec-t">${_svg('clipboardList')} سجلُّ التنفيذ</div>
+      <span class="co-sec-c">${hasF?`<b>${filtered.length}</b> من ${recs.length} تنفيذ`:`<b>${recs.length}</b> تنفيذ`}</span></div>`;
+  if(!filtered.length)
+    return count+`<div class="co-empty" style="padding:24px">${_svg('search')}
+      <div class="co-empty-t">لا تنفيذاتٍ مطابقةً للفلاتر</div>
+      <div class="co-empty-s">امسح الفلاتر أو اختر شهراً آخر.</div></div>`;
+  const rows=shown.map(rec=>{
+    const ph=(Array.isArray(rec.photos)?rec.photos:[]).filter(Boolean);
+    const done=Number(rec.doneItems)||0, total=Number(rec.totalItems)||0;
+    return `<div class="co-logrow">
+      <div class="co-logrow-h">
+        <span class="d">${_svg('calendar',13)} ${_esc(recDay(rec))}</span>
+        <span class="b">${_svg('building2',13)} ${_esc(rec.building||"—")}${rec.floor?" / "+_esc(rec.floor):""}</span>
+        <span class="b">${_svg(iconOf(rec.workType),13)} ${_esc(rec.workType||"—")}</span>
+        <span class="b">${_svg('user',13)} ${_esc(rec.by||"—")}</span>
+        <span class="ppm-due-badge ${total&&done>=total?'ok':'today'}">${done}/${total} بند</span>
+      </div>
+      <div class="co-lognote">${_svg('clipboardList',13)} ${_esc(rec.taskName||"مهمة نظافة")}${rec.supervisor?" — المشرف: "+_esc(rec.supervisor):""}</div>
+      ${rec.note?`<div class="co-lognote">${_svg('fileText',13)} ${_esc(rec.note)}</div>`:""}
+      ${ph.length?`<div class="co-logphotos">${ph.map(u=>`<a href="${_esc(u)}" target="_blank" rel="noopener"><img src="${_esc(u)}" alt="صورة تنفيذ" loading="lazy"></a>`).join("")}</div>`:""}
+    </div>`;
+  }).join("");
+  const more = filtered.length>shown.length
+    ? `<button class="btn btn-ghost btn-sm" style="width:100%;margin-top:10px" onclick="cleaningOps.archMore()">
+         عرض المزيد — بقي ${filtered.length-shown.length} تنفيذاً</button>`
+    : "";
+  return count+rows+more;
+}
+
+// التغطية حسب المنطقة في الشهر — نفسُ جدول «التغطية حسب المنطقة» بلغةِ الشهر لا اليوم
+function archByBuildingHTML(r){
+  const names=Object.keys(r.buildings||{}).sort((a,b)=>r.buildings[b].runs-r.buildings[a].runs);
+  if(!names.length) return "";
+  const max=Math.max.apply(null,[1].concat(names.map(b=>r.buildings[b].runs)));
+  const rows=names.map(b=>{
+    const e=r.buildings[b];
+    const pct=e.totalItems>0?Math.round(e.doneItems/e.totalItems*100):null;
+    const w=Math.round(e.runs/max*100);
+    return `<tr><td class="co-td-name">${_esc(b)}</td>
+      <td class="co-num">${e.runs}</td>
+      <td><div class="meter-track" style="min-width:90px"><div class="meter-fill" style="width:${w}%;background:var(--primary)"></div></div></td>
+      <td class="co-num">${e.days}</td>
+      <td class="co-num">${pct==null?"—":pct+"%"}</td>
+      <td class="co-num">${e.photos}</td></tr>`;
+  }).join("");
+  return `<div class="card">
+      <div class="co-sec"><div class="co-sec-t">${_svg('building2')} تنفيذات الشهر حسب المنطقة</div>
+        <span class="co-sec-c">الأكثرُ تنفيذاً أولاً</span></div>
+      <div class="co-table-wrap"><table class="co-table" style="min-width:620px">
+        <thead><tr><th>المنطقة</th><th>تنفيذات</th><th>الحجم النسبي</th><th>أيام</th><th>بنود الفحص</th><th>صور</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+    </div>`;
+}
+
+/* ════════ معالِجاتُ الأرشيف ════════ */
+function goArchive(){ try{ showPage(PAGE_ID); setView("archive"); }catch(e){} }
+function archSelect(ym){ _arMonth=ym; _arLimit=ARCH_PAGE; _arF={q:"",building:"",workType:"",supervisor:""}; render(); }
+function archMore(){ _arLimit+=ARCH_PAGE; _archRepaintList(); }
+function archReset(){ _arF={q:"",building:"",workType:"",supervisor:""}; _arLimit=ARCH_PAGE; render(); }
+/* تحديثُ القائمة وحدَها لا الصفحةِ كلِّها: إعادةُ رسمِ الصفحة تُعيد بناءَ حقل البحث
+   فيفقد التركيزَ عند كل حرف. (نفسُ سبب `renderArchiveFiltered` في أرشيف البلاغات.) */
+function archFilter(){
+  const g=id=>{ const el=document.getElementById(id); return el?el.value:""; };
+  _arF={ q:g("co-ar-q"), building:g("co-ar-b"), workType:g("co-ar-w"), supervisor:g("co-ar-s") };
+  _arLimit=ARCH_PAGE;
+  _archRepaintList();
+}
+function _archRepaintList(){
+  const box=document.getElementById("co-ar-list");
+  if(!box){ render(); return; }
+  try{ box.innerHTML=archListHTML(archScoped(_arLog[_arMonth]||[])); }
+  catch(e){ console.warn("cleaningOps/archRepaint",e); render(); }
+}
+async function archSeal(){
+  if(!canEdit()){ _toast("⚠ ختمُ الشهر لمن يملك صلاحية التحرير","warn"); return; }
+  const ym=_arMonth; if(!ym) return;
+  const cur=_ymL(new Date());
+  if(ym===cur){
+    const ok=await _confirm("ختمُ الشهر الجاري",
+      "الشهرُ الجاري لم ينتهِ بعد، وسيُعاد ختمُه تلقائياً بعد انتهائه. الختمُ الآن يحفظ ملخّصاً بما نُفِّذ حتى هذه اللحظة. متابعة؟");
+    if(!ok) return;
+  }
+  const r=await sealCleanMonth(ym);
+  if(r){
+    _audit("ختمُ شهرِ أرشيف النظافة", _monthName(ym)+" — "+r.runs+" تنفيذاً");
+    _toast("📦 خُتم "+_monthName(ym)+": "+r.runs+" تنفيذاً","success");
+  }else _toast("⚠ تعذّر ختمُ الشهر","warn");
+  render();
+}
+function _confirm(title,msg){
+  try{ if(typeof showConfirm==="function") return showConfirm({title, msg, icon:"📦", okText:"متابعة"}); }catch(e){}
+  return Promise.resolve(true);
+}
+/* تصديرُ الشهر إلى Excel — نفسُ `exportArchiveToExcel` في البلاغات: الصفوفُ **المعروضةُ
+   بعد الفلاتر** لا الشهرُ كلُّه، فما يراه المستخدمُ هو ما يُصدَّر. */
+function archExport(){
+  const recs=archSortRecs(archFilterRecs(archScoped(_arLog[_arMonth]||[]), _arF));
+  if(!recs.length){ _toast("⚠ لا تنفيذاتٍ لتصديرها","warn"); return; }
+  let XL=null; try{ XL=(typeof XLSX!=="undefined")?XLSX:null; }catch(e){}
+  if(!XL){ _toast("⚠ مكتبةُ Excel غير محمَّلة","warn"); return; }
+  try{
+    const rows=recs.map(r=>({
+      "التاريخ": recDay(r),
+      "المهمة": r.taskName||"",
+      "المنطقة": r.building||"",
+      "الدور/الموقع": r.floor||"",
+      "نوع العمل": r.workType||"",
+      "المشرف": logSupervisor(r)||"",
+      "المنفِّذ": r.by||"",
+      "بنودٌ منجزة": Number(r.doneItems)||0,
+      "إجمالي البنود": Number(r.totalItems)||0,
+      "عدد الصور": (Array.isArray(r.photos)?r.photos.filter(Boolean).length:0),
+      "ملاحظة": r.note||""
+    }));
+    const ws=XL.utils.json_to_sheet(rows);
+    ws['!cols']=Object.keys(rows[0]).map(()=>({wch:18}));
+    const wb=XL.utils.book_new();
+    XL.utils.book_append_sheet(wb, ws, String(_arMonth||"أرشيف"));
+    XL.writeFile(wb, "أرشيف_النظافة_"+_arMonth+".xlsx");
+    _audit("تصدير أرشيف نظافة Excel", _monthName(_arMonth)+" — "+rows.length+" تنفيذاً");
+    _toast("✅ صُدِّر أرشيفُ "+_monthName(_arMonth),"success");
+  }catch(e){ console.warn("cleaningOps/archExport",e); _toast("⚠ تعذّر تصديرُ الملف","warn"); }
+}
+// بعد تسجيلِ تنفيذٍ جديد: كاشُ شهرِ اليوم لم يعد صحيحاً
+function archInvalidateToday(){ delete _arLog[_ymL(new Date())]; }
+
+
 /* ════════════════════════════════════════════════════════════
    التركيب الذاتي: صفحة + زرّ قائمة جانبية + لفّ showPage
    ════════════════════════════════════════════════════════════ */
@@ -3449,6 +3998,11 @@ function injectCSS(){
 /* شريطُ مرشِّحات «كل المهام» + مبدّل العرض — أزرارُ المنصة نفسها بحالة on واحدة.
    .co-chips-sp يدفع مبدّل العرض لطرف الشريط فينفصل بصرياً عن مرشِّحات الحالة. */
 .co-chips{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+/* شريطُ فلاتر الأرشيف: حقولُ المنصة نفسُها (.form-input/.form-select) في شبكةٍ تلتفّ
+   على الشاشات الضيّقة — لا مفرداتٍ بصريةً جديدة، فقط ترتيبُها في سطر. */
+.co-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:2px}
+.co-filters .form-input,.co-filters .form-select{flex:1 1 190px;min-width:150px;margin:0}
+.co-filters .btn{flex:0 0 auto}
 .co-chips-sp{flex:1 1 auto;min-width:8px}
 .co-chip b{font-family:'JetBrains Mono',monospace;margin-inline-start:4px}
 .co-chip.on{background:color-mix(in srgb,var(--primary) 12%,var(--surface));border-color:var(--primary);color:var(--primary);font-weight:800}
@@ -3632,6 +4186,7 @@ window.cleaningOps = {
   exec, toggleItem, cancelExec, confirmExec, pickPhoto, delPhoto:delExecPhoto,
   openDetail, closeDetail,
   saveSupMap, goSupMap,
+  goArchive, archSelect, archFilter, archReset, archMore, archSeal, archExport,
   newRound, cancelRound, toggleRoundBuilding, setStar, saveRoundForm, openRound, closeRound, removeRound,
   pickRoundPhoto, delRoundPhoto, goQuality, exportClientReport, printRound,
   mountExec, unmountExec, refreshExec, goOps,
@@ -3649,6 +4204,11 @@ window.cleaningOps = {
   _supervisorPerf: supervisorPerf, _logSupervisor: logSupervisor,
   _unassignedBuildings: unassignedBuildings,
   _roundScore: roundScore, _qualityTrend: qualityTrend, _QUALITY_STARS: QUALITY_STARS,
+  // الأرشيف الشهريّ — دوالٌّ نقيّةٌ يفحصها hail-tests بلا متصفّح
+  _recMonth: recMonth, _recDay: recDay, _monthsBetween: monthsBetween, _monthRange: monthRange,
+  _computeCleanRollup: computeCleanRollup, _rollupStats: rollupStats, _archivedTotals: archivedTotals,
+  _archFilterRecs: archFilterRecs, _archSortRecs: archSortRecs, _prevMonthOf: _prevMonthOf, _nextMonthOf: _nextMonthOf,
+  _ARCH_FV: ARCH_FV, _ARCH_PAGE: ARCH_PAGE,
   _buildClientReportHTML: buildClientReportHTML, _monthName: _monthName,
   _buildRoundReportHTML: buildRoundReportHTML,
   _SUP_WEIGHTS: SUP_WEIGHTS, _SUP_UNASSIGNED: SUP_UNASSIGNED,
