@@ -11564,6 +11564,101 @@ function npMultiAttach() {
     /npAttachReset\(\);/.test(slice("function clearPurchaseForm(){", "\n}") || ""));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   نظامُ ألوان شاشة المشتريات — لونٌ واحدٌ لكلِّ معنى
+   ────────────────────────────────────────────────────────────────────
+   يحرس أربعةَ ارتداداتٍ لا يُنذر بها مترجمٌ ولا وحدةُ تحكّم:
+   (١) رقمٌ سداسيٌّ يعود نصّاً إلى مصدرٍ دلاليّ — فلا ينقلب في الوضع الليليّ.
+   (٢) رمزٌ يُستعمل ولم يُعرَّف في الوضعين معاً — فيسقط اللونُ صامتاً في أحدهما.
+   (٣) سلّمُ الرتبة يدور بدل أن يثبت عند طرفيه — فالمشروعُ الثامنُ يعود بلون
+       الأوّل فيبدو أكبرَ ممّا هو.
+   (٤) المفتاحُ يكرّر ألوانَ الشرائح نصّاً — فيكذب بلا خطأٍ يُنذر عند تغييرها.
+   ════════════════════════════════════════════════════════════════════ */
+function poColorSystemGuards() {
+  H("نظامُ ألوان شاشة المشتريات");
+  const semantic = slice("const PO_COLORS = {", "const _PO_STAGE_OF");
+  T("مصدرُ الألوان PO_COLORS موجودٌ قبل PO_STAGES", !!semantic);
+  if (!semantic) return;
+  const hexIn = t => (t.match(/#[0-9a-fA-F]{3,8}\b/g) || []);
+
+  // ── (١) لا رقمَ سداسياً في أيِّ مصدرٍ دلاليّ ──
+  const ageSrc = slice("const PO_AGE_BUCKETS = [", "];") || "";
+  T("PO_COLORS وPO_RANK وPO_STAGES بلا رقمٍ سداسيٍّ نصّيّ",
+    hexIn(semantic).length === 0, hexIn(semantic).join(" ") || undefined);
+  T("PO_AGE_BUCKETS بلا رقمٍ سداسيٍّ نصّيّ",
+    hexIn(ageSrc).length === 0, hexIn(ageSrc).join(" ") || undefined);
+
+  // ── (٢) كلُّ رمزٍ مستعملٍ معرَّفٌ في النهاريِّ والليليِّ معاً ──
+  const used = [...new Set((semantic.match(/var\(--[a-z0-9-]+\)/g) || [])
+    .map(v => v.slice(4, -1)))];
+  T("PO_COLORS/PO_RANK تشير إلى رموزٍ لا أرقام", used.length >= 10, `${used.length} رمزاً`);
+  const rootBlock = slice(":root{", "}") || "";
+  const darkBlock = slice('html[data-theme="dark"]{', "}") || "";
+  const missLight = used.filter(t => !rootBlock.includes(t + ":"));
+  const missDark  = used.filter(t => !darkBlock.includes(t + ":"));
+  T("كلُّ رمزٍ مستعملٍ معرَّفٌ في :root", missLight.length === 0, missLight.join(" ") || undefined);
+  T("★★ وكلٌّ منها معرَّفٌ في الوضع الليليِّ أيضاً — وإلا سقط اللونُ صامتاً",
+    missDark.length === 0, missDark.join(" ") || undefined);
+
+  // ── (٣) سلّمُ الرتبة يثبت عند طرفيه ولا يدور ──
+  let rank = null;
+  try {
+    const body = semantic.slice(semantic.indexOf("const PO_RANK"),
+                                semantic.indexOf("const PO_STAGES"));
+    rank = new Function(body + "\n; return { PO_RANK, poRankColor };")();
+  } catch (e) { /* يُبلَّغ في الفحص التالي */ }
+  T("poRankColor دالّةٌ نقيّةٌ تُستخرج وتُنفَّذ بلا متصفّح", !!(rank && rank.poRankColor));
+  if (rank && rank.poRankColor) {
+    const { PO_RANK, poRankColor } = rank;
+    const last = PO_RANK.length - 1;
+    T("سلّمُ الرتبة سبعُ مراتب", PO_RANK.length === 7, `${PO_RANK.length}`);
+    T("الرتبةُ صفر تأخذ الأغمق", poRankColor(0) === PO_RANK[0]);
+    T("★★ ما تجاوز السلّمَ يثبت عند الأفتح ولا يدور إلى الأغمق",
+      poRankColor(PO_RANK.length) === PO_RANK[last] && poRankColor(99) === PO_RANK[last],
+      `poRankColor(${PO_RANK.length})=${poRankColor(PO_RANK.length)}`);
+    T("الرتبةُ السالبةُ أو التالفة تأخذ الأغمق لا undefined",
+      poRankColor(-3) === PO_RANK[0] && poRankColor(NaN) === PO_RANK[0] &&
+      poRankColor(undefined) === PO_RANK[0]);
+  }
+
+  // ── (٤) مخطّطا المشاريع تركا لوحةَ الأطياف إلى سلّم الرتبة ──
+  const projSrc = slice('const projChartEl = document.getElementById("po-chart-projects")',
+                        "const statusChartEl") || "";
+  const amtSrc  = slice('const projAmountEl = document.getElementById("po-chart-proj-amount")',
+                        "// ── مخطط الإجمالي الشهري") || "";
+  T("مخطّطُ توزيع الطلبات على المشاريع يرسم بسلّم الرتبة",
+    projSrc.includes("poRankColor(i)") && hexIn(projSrc).length === 0,
+    hexIn(projSrc).join(" ") || undefined);
+  T("مخطّطُ قيمة المشتريات بالمشروع يرسم بسلّم الرتبة",
+    amtSrc.includes("poRankColor(i)") && hexIn(amtSrc).length === 0,
+    hexIn(amtSrc).join(" ") || undefined);
+  T("★ الوحدةُ تُحذف من الرقم المرسوم لا من تلميح السطر",
+    !/nowrap[^"]*">\$\{cnt\} طلب/.test(projSrc) && !amtSrc.includes('+" ر.س"') &&
+    projSrc.includes("طلب") && amtSrc.includes("ر.س"));
+
+  // ── (٥) الشهرُ الحاليُّ ليس «مكتملاً» ──
+  const moSrc = slice("// ── مخطط الإجمالي الشهري", "function renderExtrasCard") || "";
+  T("★ الشهرُ الحاليُّ يتميّز بالإشباع لا بالأخضر (الأخضرُ = مكتمل)",
+    hexIn(moSrc).length === 0 && !moSrc.includes("var(--accent)"),
+    hexIn(moSrc).join(" ") || undefined);
+
+  // ── (٥ب) الصفرُ لا يُلوَّن دلالياً — لا شيءَ لا يستحقّ «انظر إليّ» ──
+  const sumSrc = slice("function renderPOOpenSummary(dashData){", "\n}") || "";
+  T("★ بطاقتا المفتوحة/المتأخّرة: الصفرُ يخفت ولا يُرسم بلون الحالة",
+    /openN\?'var\(--warn\)':'var\(--zero\)'/.test(sumSrc) &&
+    /overdue\.length\?'var\(--danger\)':'var\(--zero\)'/.test(sumSrc));
+  T("★ وشريحةُ عمرٍ فارغةٌ تخفت رقماً ونقطةً",
+    /buckets\[b\.k\]\?b\.color:'var\(--zero\)'/.test(sumSrc));
+
+  // ── (٦) مفتاحُ عمر التوقّف يُشتقّ ولا يُكرَّر ──
+  const legend = slice('<div class="pof-legend"', "</div>") || "";
+  T("★★ مفتاحُ عمر التوقّف لا يكرّر ألوانَ PO_AGE_BUCKETS نصّاً",
+    hexIn(legend).length === 0, hexIn(legend).join(" ") || undefined);
+  T("★★ وrenderPOStageFlow هو من يملؤه من المصدر نفسِه",
+    /getElementById\("po-flow-legend"\)/.test(HTML) &&
+    /PO_AGE_BUCKETS\.map\(b=>`<span><i style="background:\$\{b\.color\}"/.test(HTML));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -11629,6 +11724,7 @@ function npMultiAttach() {
   errLogGrouping();
   hailNotifyFeed();
   npMultiAttach();
+  poColorSystemGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
