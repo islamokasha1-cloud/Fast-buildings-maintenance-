@@ -43,7 +43,7 @@
 
 const PAGE_ID      = "performance";
 const VERSION      = "0.1";
-const MODULE_BUILD = "v18.9.2789";
+const MODULE_BUILD = "v18.9.2792";
 
 /* ════════════ خدمات النواة (قراءة بالاسم مع بدائل آمنة) ════════════ */
 function _esc(s){ try{ return (typeof esc==="function") ? esc(s) : String(s==null?"":s); }catch(e){ return String(s==null?"":s); } }
@@ -165,7 +165,7 @@ function coverageHTML(){
   const c=coverage();
   const row=(label, o, hint)=>{
     const has=o.pct!=null;
-    const col=!has?"var(--muted)":(o.pct>=80?"#0a7c59":o.pct>=40?"#d97706":"#b92c2c");
+    const col=!has?"var(--muted)":(o.pct>=80?"var(--stage-done)":o.pct>=40?"var(--stage-wait)":"var(--danger)");
     return `<div class="pf-cov">
       <div class="pf-cov-top">
         <div class="pf-cov-l">${_esc(label)}</div>
@@ -243,7 +243,7 @@ function heroHTML(cfg, y, m, minS, grace){
     </div>
     <div class="stat-tile">
       <div class="st-label">الحد الأدنى للنجاح</div>
-      <div class="st-value" style="color:var(--warn,#d97706)">${minS!=null?_pct(minS)+"%":"—"}</div>
+      <div class="st-value" style="color:var(--stage-wait)">${minS!=null?_pct(minS)+"%":"—"}</div>
       <div class="st-sub">النزول تحته ثلاث مراتٍ متتالية ⇒ حقُّ الفسخ</div>
     </div>
     <div class="stat-tile">
@@ -355,8 +355,8 @@ function injectCSS(){
   st.textContent=`
   #page-${PAGE_ID} .pf-note{display:flex;gap:9px;align-items:flex-start;border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.9;margin-bottom:14px}
   #page-${PAGE_ID} .pf-note svg{flex:0 0 auto;margin-top:3px}
-  #page-${PAGE_ID} .pf-note-ok{background:color-mix(in srgb,#0a7c59 8%,var(--surface));border:1px solid color-mix(in srgb,#0a7c59 25%,var(--border));color:var(--text)}
-  #page-${PAGE_ID} .pf-note-warn{background:color-mix(in srgb,#d97706 8%,var(--surface));border:1px solid color-mix(in srgb,#d97706 25%,var(--border));color:var(--text)}
+  #page-${PAGE_ID} .pf-note-ok{background:color-mix(in srgb,var(--stage-done) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--stage-done) 25%,var(--border));color:var(--text)}
+  #page-${PAGE_ID} .pf-note-warn{background:color-mix(in srgb,var(--warn) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 25%,var(--border));color:var(--text)}
   #page-${PAGE_ID} .pf-hint{font-size:11.5px;color:var(--muted);line-height:1.95;padding:0 4px 12px}
   #page-${PAGE_ID} .pf-muted{color:var(--muted);font-weight:400}
   #page-${PAGE_ID} .pf-grps{display:flex;flex-direction:column;gap:11px}
@@ -371,7 +371,7 @@ function injectCSS(){
   #page-${PAGE_ID} .pf-bar-fill{height:100%;border-radius:99px;background:var(--primary);max-width:100%}
   #page-${PAGE_ID} .pf-grp-src,#page-${PAGE_ID} .pf-grp-gap{display:flex;gap:7px;align-items:flex-start;font-size:11.5px;line-height:1.8}
   #page-${PAGE_ID} .pf-grp-src{color:var(--muted)}
-  #page-${PAGE_ID} .pf-grp-gap{color:#a06010;margin-top:3px}
+  #page-${PAGE_ID} .pf-grp-gap{color:var(--warn);margin-top:3px}
   #page-${PAGE_ID} .pf-grp-src svg,#page-${PAGE_ID} .pf-grp-gap svg{flex:0 0 auto;margin-top:3px}
   #page-${PAGE_ID} .pf-tbl-wrap{overflow-x:auto;margin-top:14px}
   #page-${PAGE_ID} .pf-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:420px}
@@ -380,15 +380,15 @@ function injectCSS(){
   #page-${PAGE_ID} .pf-th-now,#page-${PAGE_ID} .pf-td-now{background:color-mix(in srgb,var(--primary) 10%,var(--surface));color:var(--primary);font-weight:900}
   #page-${PAGE_ID} .pf-steps{display:flex;flex-direction:column;gap:9px}
   #page-${PAGE_ID} .pf-step{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--border);border-radius:11px;padding:11px 12px}
-  #page-${PAGE_ID} .pf-step-done{background:color-mix(in srgb,#0a7c59 6%,var(--surface));border-color:color-mix(in srgb,#0a7c59 22%,var(--border))}
+  #page-${PAGE_ID} .pf-step-done{background:color-mix(in srgb,var(--stage-done) 6%,var(--surface));border-color:color-mix(in srgb,var(--stage-done) 22%,var(--border))}
   #page-${PAGE_ID} .pf-step-n{width:25px;height:25px;flex:0 0 auto;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:11.5px;background:var(--surface2);color:var(--muted);border:1px solid var(--border)}
-  #page-${PAGE_ID} .pf-step-done .pf-step-n{background:#0a7c59;color:#fff;border-color:#0a7c59}
+  #page-${PAGE_ID} .pf-step-done .pf-step-n{background:var(--stage-done);color:var(--surface);border-color:var(--stage-done)}
   #page-${PAGE_ID} .pf-step-t{font-weight:800;font-size:13px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
   #page-${PAGE_ID} .pf-step-d{font-size:11.5px;color:var(--muted);line-height:1.85;margin-top:3px}
-  #page-${PAGE_ID} .pf-badge-ok{font-size:9.5px;font-weight:800;color:#0a7c59;background:color-mix(in srgb,#0a7c59 12%,var(--surface));border:1px solid color-mix(in srgb,#0a7c59 30%,var(--border));border-radius:99px;padding:2px 8px}
+  #page-${PAGE_ID} .pf-badge-ok{font-size:9.5px;font-weight:800;color:var(--stage-done);background:color-mix(in srgb,var(--stage-done) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--stage-done) 30%,var(--border));border-radius:99px;padding:2px 8px}
   #page-${PAGE_ID} .pf-badge-wait{font-size:9.5px;font-weight:800;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:99px;padding:2px 8px}
-  #page-${PAGE_ID} .pf-note-trial{background:color-mix(in srgb,#d97706 12%,var(--surface));border:1px solid color-mix(in srgb,#d97706 38%,var(--border));color:var(--text)}
-  #page-${PAGE_ID} .pf-tag{font-size:9px;font-weight:800;color:#7a4a06;background:#fef3c7;border:1px solid #fcd34d;border-radius:99px;padding:1px 7px;vertical-align:middle}
+  #page-${PAGE_ID} .pf-note-trial{background:color-mix(in srgb,var(--warn) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 38%,var(--border));color:var(--text)}
+  #page-${PAGE_ID} .pf-tag{font-size:9px;font-weight:800;color:var(--warn);background:color-mix(in srgb,var(--warn) 16%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 38%,var(--border));border-radius:99px;padding:1px 7px;vertical-align:middle}
   #page-${PAGE_ID} .pf-covs{display:flex;flex-direction:column;gap:13px}
   #page-${PAGE_ID} .pf-cov-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px}
   #page-${PAGE_ID} .pf-cov-l{font-weight:800;font-size:12.5px}

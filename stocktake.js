@@ -198,8 +198,8 @@
     const openCards = open.length ? open.map(t=>{
       const sm = _summarize(t, t.counts||{});
       const badge = t.status==="pending_approval"
-        ? `<span style="background:#fef3c7;color:#92400e;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">⏳ ${_esc(STATUS[t.status])}</span>`
-        : `<span style="background:#dbeafe;color:#1e40af;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">${_icn("edit")} ${_esc(STATUS[t.status])}</span>`;
+        ? `<span style="background:color-mix(in srgb,var(--stage-wait) 14%,var(--surface));color:var(--stage-wait);padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">⏳ ${_esc(STATUS[t.status])}</span>`
+        : `<span style="background:color-mix(in srgb,var(--stage-move) 12%,var(--surface));color:var(--stage-move);padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">${_icn("edit")} ${_esc(STATUS[t.status])}</span>`;
       return `
       <div class="card" style="margin-bottom:10px;cursor:pointer" onclick="window.stocktake.open('${t.id}')">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
@@ -209,7 +209,7 @@
           </div>
           <div style="text-align:left">
             ${badge}
-            <div style="font-size:11px;color:var(--muted);margin-top:5px">عُدّ ${sm.counted}/${sm.total}${sm.bigCount?` — <span style="color:#b91c1c;font-weight:700">${sm.bigCount} فرق كبير</span>`:""}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:5px">عُدّ ${sm.counted}/${sm.total}${sm.bigCount?` — <span style="color:var(--danger);font-weight:700">${sm.bigCount} فرق كبير</span>`:""}</div>
             ${_admDel?`<div style="margin-top:6px">${_delBtn(t)}</div>`:""}
           </div>
         </div>
@@ -218,7 +218,7 @@
 
     const doneRows = done.slice(0,50).map(t=>{
       const st = t.status==="applied"
-        ? `<span style="color:#166534;font-weight:700">✅ ${_esc(STATUS[t.status])}</span>`
+        ? `<span style="color:var(--stage-done);font-weight:700">✅ ${_esc(STATUS[t.status])}</span>`
         : `<span style="color:var(--muted)">🚫 ${_esc(STATUS[t.status])}</span>`;
       const res = (t.results||[]);
       const adj = res.filter(r=>_num(r.delta)!==0).length;
@@ -279,10 +279,10 @@
 
     // ترويسة الحالة
     let statusBadge;
-    if(t.status==="counting")              statusBadge=`<span style="background:#dbeafe;color:#1e40af;padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">${_icn("edit")} ${_esc(STATUS[t.status])}</span>`;
-    else if(t.status==="pending_approval") statusBadge=`<span style="background:#fef3c7;color:#92400e;padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">⏳ ${_esc(STATUS[t.status])}</span>`;
-    else if(t.status==="applied")          statusBadge=`<span style="background:#dcfce7;color:#166534;padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">✅ ${_esc(STATUS[t.status])}</span>`;
-    else                                   statusBadge=`<span style="background:#f3f4f6;color:#374151;padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">🚫 ${_esc(STATUS[t.status])}</span>`;
+    if(t.status==="counting")              statusBadge=`<span style="background:color-mix(in srgb,var(--stage-move) 12%,var(--surface));color:var(--stage-move);padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">${_icn("edit")} ${_esc(STATUS[t.status])}</span>`;
+    else if(t.status==="pending_approval") statusBadge=`<span style="background:color-mix(in srgb,var(--stage-wait) 14%,var(--surface));color:var(--stage-wait);padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">⏳ ${_esc(STATUS[t.status])}</span>`;
+    else if(t.status==="applied")          statusBadge=`<span style="background:color-mix(in srgb,var(--stage-done) 12%,var(--surface));color:var(--stage-done);padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">✅ ${_esc(STATUS[t.status])}</span>`;
+    else                                   statusBadge=`<span style="background:var(--surface2);color:var(--muted);padding:3px 11px;border-radius:12px;font-size:12px;font-weight:700">🚫 ${_esc(STATUS[t.status])}</span>`;
 
     // صفوف البنود
     const applied = (t.status==="applied");
@@ -293,11 +293,11 @@
       const cls  = hasC ? _classify(_baseQty(s), cVal) : null;   // v18.9ad — H7
       let vCell = `<span style="color:var(--muted)">—</span>`;
       if(cls){
-        if(cls.delta===0) vCell=`<span style="color:#166534;font-weight:700">مطابق</span>`;
+        if(cls.delta===0) vCell=`<span style="color:var(--stage-done);font-weight:700">مطابق</span>`;
         else{
           const sign = cls.delta>0?"+":"−";
-          const col  = cls.delta>0?"#166534":"#b91c1c";
-          const bigT = cls.big?` <span style="background:#fee2e2;color:#b91c1c;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700">كبير</span>`:"";
+          const col  = cls.delta>0?"var(--stage-done)":"var(--danger)";
+          const bigT = cls.big?` <span style="background:color-mix(in srgb,var(--danger) 12%,var(--surface));color:var(--danger);padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700">كبير</span>`:"";
           vCell=`<span style="color:${col};font-weight:800">${sign}${_fmt(Math.abs(cls.delta))}</span>${bigT}`;
         }
       }
@@ -343,20 +343,20 @@
     // شريط الملخّص
     const summaryBar = `
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
-        ${_stat("عُدّ", sm.counted+"/"+sm.total, "#1e40af")}
-        ${_stat("زيادة", sm.surplus, "#166534")}
-        ${_stat("عجز", sm.shortage, "#b91c1c")}
-        ${_stat("مطابق", sm.matched, "#374151")}
-        ${sm.bigCount?_stat("فرق كبير ⚠", sm.bigCount, "#b91c1c"):""}
+        ${_stat("عُدّ", sm.counted+"/"+sm.total, "var(--stage-move)")}
+        ${_stat("زيادة", sm.surplus, "var(--stage-done)")}
+        ${_stat("عجز", sm.shortage, "var(--danger)")}
+        ${_stat("مطابق", sm.matched, "var(--muted)")}
+        ${sm.bigCount?_stat("فرق كبير ⚠", sm.bigCount, "var(--danger)"):""}
       </div>`;
 
     const bigNote = (editable && sm.bigCount) ? `
-      <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#92400e">
+      <div style="background:color-mix(in srgb,var(--stage-wait) 14%,var(--surface));border:1px solid color-mix(in srgb,var(--stage-wait) 34%,var(--border));border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--stage-wait)">
         ⚠ يوجد <b>${sm.bigCount}</b> بند بفرق كبير (نسبته ≥ ${ST_BIG_PCT}%). عند الاعتماد سيُحوَّل الجرد لاعتماد المدير التنفيذي قبل تطبيق التسويات.
       </div>` : "";
 
     const pendingNote = (t.status==="pending_approval") ? `
-      <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#92400e">
+      <div style="background:color-mix(in srgb,var(--stage-wait) 14%,var(--surface));border:1px solid color-mix(in srgb,var(--stage-wait) 34%,var(--border));border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--stage-wait)">
         ⏳ هذا الجرد بانتظار اعتماد المدير التنفيذي لوجود فروقات كبيرة. رفعه ${_esc(t.submittedBy||"—")} — ${_esc(_shortDate(t.submittedAt))}.
       </div>` : "";
 
@@ -402,7 +402,7 @@
       inner = `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <a href="${_safeUrl(t.signedFileUrl)}" target="_blank" rel="noopener"
-             style="display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#166534;padding:8px 14px;border-radius:10px;font-weight:800;font-size:13px;text-decoration:none">
+             style="display:inline-flex;align-items:center;gap:6px;background:color-mix(in srgb,var(--stage-done) 12%,var(--surface));color:var(--stage-done);padding:8px 14px;border-radius:10px;font-weight:800;font-size:13px;text-decoration:none">
             📎 عرض الملف الموقّع${t.signedIsPdf?" (PDF)":""}
           </a>
           <span style="font-size:11px;color:var(--muted)">رفعه ${meta}</span>
@@ -456,10 +456,10 @@
         if(raw===""){ cell.innerHTML=`<span style="color:var(--muted)">—</span>`; }
         else{
           const c=_classify(_baseQty(s), _num(raw));   // v18.9ad — H7
-          if(c.delta===0) cell.innerHTML=`<span style="color:#166534;font-weight:700">مطابق</span>`;
+          if(c.delta===0) cell.innerHTML=`<span style="color:var(--stage-done);font-weight:700">مطابق</span>`;
           else{
-            const sign=c.delta>0?"+":"−", col=c.delta>0?"#166534":"#b91c1c";
-            const bigT=c.big?` <span style="background:#fee2e2;color:#b91c1c;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700">كبير</span>`:"";
+            const sign=c.delta>0?"+":"−", col=c.delta>0?"var(--stage-done)":"var(--danger)";
+            const bigT=c.big?` <span style="background:color-mix(in srgb,var(--danger) 12%,var(--surface));color:var(--danger);padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700">كبير</span>`:"";
             cell.innerHTML=`<span style="color:${col};font-weight:800">${sign}${_fmt(Math.abs(c.delta))}</span>${bigT}`;
           }
         }
@@ -794,7 +794,7 @@
       const cnt=has?_num(counts[s.itemId]):null;
       const c=has?_classify(_baseQty(s),cnt):null;   // v18.9ad — H7: الطباعة كالشاشة
       const dTxt=c?(c.delta===0?"مطابق":(c.delta>0?"+":"−")+_fmt(Math.abs(c.delta))+(c.big?" (كبير)":"")):"—";
-      const dCol=c?(c.delta===0?"#166534":(c.delta>0?"#166534":"#b91c1c")):"#999";
+      const dCol=c?(c.delta===0?"var(--stage-done)":(c.delta>0?"var(--stage-done)":"var(--danger)")):"#999";
       return `<tr>
         <td style="text-align:right">${_esc(s.itemName)}${s.itemCode?` <span style="color:#94a3b8">(${_esc(s.itemCode)})</span>`:""}</td>
         <td style="text-align:center">${_fmt(s.systemQty)} ${_esc(s.unit||"")}</td>

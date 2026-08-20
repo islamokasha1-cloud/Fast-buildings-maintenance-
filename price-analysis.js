@@ -157,7 +157,7 @@
         </div>
       </div>
       <div class="card-body">
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;font-size:12px;color:#1e40af;margin-bottom:14px">
+        <div style="background:color-mix(in srgb,var(--info) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--info) 28%,var(--border));border-radius:8px;padding:10px 14px;font-size:12px;color:var(--infoe40af;margin-bottom:14px">
           ℹ️ يبني سعر الوحدة لكل بند من مكوّناته: خامات (من كتالوج البنود أو يدوياً) + مصنعيات (من كتالوج المصنعيات أو يدوياً)، مع نسبة هدر على الخامات ومصاريف إدارية. البنود المحلَّلة مكتبة عامة مشتركة تُستخدم لاحقاً كأسعار تقديرية في طلبات التسعير.
         </div>
         <div class="ast-stats" id="pa-stat-grid" style="margin-bottom:14px"></div>
@@ -245,7 +245,7 @@
           </div>
 
           <div style="margin-bottom:12px">
-            <button class="btn btn-primary btn-sm" id="pa-ai-btn" style="width:100%;background:linear-gradient(90deg,#7c3aed,#2563eb);border:none" onclick="window.priceAnalysis.aiSuggest()">🤖 اقتراح المعاملات والأسعار بالذكاء الاصطناعي</button>
+            <button class="btn btn-primary btn-sm" id="pa-ai-btn" style="width:100%;background:linear-gradient(90deg,var(--ai),var(--primary));border:none" onclick="window.priceAnalysis.aiSuggest()">🤖 اقتراح المعاملات والأسعار بالذكاء الاصطناعي</button>
             <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:4px">يقترح معدلات الفرد والتشغيل وأسعاراً استرشادية — راجعها قبل الحفظ</div>
           </div>
 
@@ -360,10 +360,10 @@
     const body = rows.map(function(r,i){
       const line = num(r.qty)*num(r[pf]); sum += line;
       const badge = r.source==="catalog"
-        ? `<span style="font-size:9px;background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 5px">\u{1F4E6} كتالوج</span>`
+        ? `<span style="font-size:9px;background:color-mix(in srgb,var(--stage-move) 12%,var(--surface));color:var(--stage-move);border-radius:4px;padding:1px 5px">\u{1F4E6} كتالوج</span>`
         : r.source==="ai"
-        ? `<span style="font-size:9px;background:#f3e8ff;color:#7c3aed;border-radius:4px;padding:1px 5px">\u{1F916} استرشادي</span>`
-        : `<span style="font-size:9px;background:#f1f5f9;color:#64748b;border-radius:4px;padding:1px 5px">يدوي</span>`;
+        ? `<span style="font-size:9px;background:color-mix(in srgb,var(--ai) 12%,var(--surface));color:var(--ai);border-radius:4px;padding:1px 5px">\u{1F916} استرشادي</span>`
+        : `<span style="font-size:9px;background:var(--surface2);color:var(--muted);border-radius:4px;padding:1px 5px">يدوي</span>`;
       return `<tr>
         <td style="text-align:center;color:var(--muted)">${i+1}</td>
         <td style="font-weight:600">${E(r.name||"")}${r.refCode?` <span style="font-size:9px;font-family:monospace;color:var(--muted)">${E(r.refCode)}</span>`:""}<div style="margin-top:2px">${badge}</div></td>

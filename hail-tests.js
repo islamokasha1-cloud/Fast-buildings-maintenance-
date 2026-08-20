@@ -11645,7 +11645,7 @@ function poColorSystemGuards() {
   // ── (٥ب) الصفرُ لا يُلوَّن دلالياً — لا شيءَ لا يستحقّ «انظر إليّ» ──
   const sumSrc = slice("function renderPOOpenSummary(dashData){", "\n}") || "";
   T("★ بطاقتا المفتوحة/المتأخّرة: الصفرُ يخفت ولا يُرسم بلون الحالة",
-    /openN\?'var\(--po-wait\)':'var\(--zero\)'/.test(sumSrc) &&
+    /openN\?'var\(--stage-wait\)':'var\(--zero\)'/.test(sumSrc) &&
     /overdue\.length\?'var\(--danger\)':'var\(--zero\)'/.test(sumSrc));
   T("★ وشريحةُ عمرٍ فارغةٌ تخفت رقماً ونقطةً",
     /buckets\[b\.k\]\?b\.color:'var\(--zero\)'/.test(sumSrc));
@@ -11684,9 +11684,9 @@ function poColorSystemGuards() {
   T("★★ شاراتُ الحالة بلا رقمٍ سداسيٍّ نصّيّ — وإلا لم تنقلب ليلاً",
     hexIn(badgeCss).length === 0, hexIn(badgeCss).join(" ") || undefined);
   T("★★ والشاراتُ على سلّم الحالة نفسِه الذي يرسمه المخطّط",
-    /\.b-po-ordered\{[^}]*var\(--po-move\)/.test(badgeCss) &&
-    /\.b-po-ceo\{[^}]*var\(--po-wait\)/.test(badgeCss) &&
-    /\.b-po-approved\{[^}]*var\(--po-move\)/.test(badgeCss));
+    /\.b-po-ordered\{[^}]*var\(--stage-move\)/.test(badgeCss) &&
+    /\.b-po-ceo\{[^}]*var\(--stage-wait\)/.test(badgeCss) &&
+    /\.b-po-approved\{[^}]*var\(--stage-move\)/.test(badgeCss));
 
   // ── (٥ح) لا أخضرَ ولا بنّيَّ في سلّم حالة الطلب — الدرجةُ تحمل الحالة، والأحمرُ وحدَه استثناء ──
   // مرساةُ النهاية تأتي **بعد** البداية دائماً — وإلا اقتطع slice حتى آخر الملفّ
@@ -11707,16 +11707,39 @@ function poColorSystemGuards() {
       .map(v => v <= 0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4));
     return 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
   };
-  const stepHex = k => { const m = new RegExp("--po-"+k+":\\s*(#[0-9a-fA-F]{6})").exec(rootBlock); return m && m[1]; };
+  const stepHex = k => { const m = new RegExp("--stage-"+k+":\\s*(#[0-9a-fA-F]{6})").exec(rootBlock); return m && m[1]; };
   const steps = ["done","move","wait"].map(stepHex);
   T("★★ اتّجاهُ السلّم: المكتملُ أغمقُ من الماضي، والماضي أغمقُ من المنتظِر",
     steps.every(Boolean) && lum(steps[0]) < lum(steps[1]) && lum(steps[1]) < lum(steps[2]),
     steps.every(Boolean) ? steps.map((h,i)=>`${["done","move","wait"][i]}=${h}(${lum(h).toFixed(3)})`).join(" < ") : "رمزٌ مفقود");
   T("★ ومساحةُ المنتظِر أفتحُ من حبره — وإلا لم تكن تهدئةً",
-    (()=>{ const f = /--po-wait-fill:\s*(#[0-9a-fA-F]{6})/.exec(rootBlock);
+    (()=>{ const f = /--stage-wait-fill:\s*(#[0-9a-fA-F]{6})/.exec(rootBlock);
            return !!(f && stepHex("wait") && lum(f[1]) > lum(stepHex("wait"))); })());
+  // ── (٥ط) السلّمُ عابرٌ للوحدات: ما ينتظر ينتظر أياً كان المنتظَر ──
+  const RAILS = [
+    ["contracts.js",   "_RAIL = {",  "};"],
+    ["hr-payments.js", "_RAIL = {",  "};"],
+  ];
+  RAILS.forEach(([f, from, to]) => {
+    let src = "";
+    try { src = require("fs").readFileSync(__dirname + "/" + f, "utf8"); } catch (e) {}
+    const i = src.indexOf(from), j = i < 0 ? -1 : src.indexOf(to, i);
+    const rail = i < 0 || j < 0 ? "" : src.slice(i, j);
+    T(`★★ ${f}: شريطُ الحالة على السلّم — بلا رقمٍ سداسيٍّ ولا --warn/--accent`,
+      !!rail && hexIn(rail).length === 0 && !/var\(--(warn|accent)\)/.test(rail),
+      rail ? (hexIn(rail).concat(rail.match(/var\(--(warn|accent)\)/g) || []).join(" ") || undefined)
+           : "تعذّر قراءةُ الخريطة");
+    T(`★ و${f}: المنتظِرُ يستعمل --stage-wait فعلاً`,
+      /var\(--stage-wait\)/.test(rail));
+  });
+
+  // الوحداتُ التي حُوّلت: لا رقمَ سداسيَّ حالةٍ فيها خارجَ قوالب الطباعة
+  T("★★ عقودُ الأداء بلا رقمٍ سداسيٍّ نصّيٍّ إطلاقاً (وحدةٌ بلا قالبِ طباعة)",
+    (() => { let x = ""; try { x = require("fs").readFileSync(__dirname + "/performance-contract.js", "utf8"); } catch (e) { return false; }
+             return hexIn(x).length === 0; })());
+
   T("★ ودرجاتُ السلّم الثلاثُ متمايزةٌ لا تكرارَ فيها",
-    new Set(["--po-wait","--po-move","--po-done"].map(k=>{
+    new Set(["--stage-wait","--stage-move","--stage-done"].map(k=>{
       const m = new RegExp("\\" + k.slice(1) + ":\\s*(#[0-9a-fA-F]{6})").exec(rootBlock);
       return m && m[1];
     })).size === 3);
