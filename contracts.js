@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2762";
+var MODULE_BUILD = "v18.9.2764";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -7962,6 +7962,16 @@ function injectCSS(){
 ".ct-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:520px}",
 ".ct-table th{text-align:right;font-size:11px;color:var(--muted);font-weight:800;padding:7px 9px;border-bottom:1px solid var(--border);white-space:nowrap}",
 ".ct-table td{padding:8px 9px;border-bottom:1px solid var(--border);vertical-align:middle}",
+  /* ★ الرقمُ يقف تحت رأسِ عموده.
+     `.num` تضبط `direction:ltr` ليُقرأ الرقمُ بترتيب خاناته الصحيح — وحين تُوضع على
+     **الخليّة** نفسِها (لا على `span` داخلها) ينقلب معها معنى `text-align:start` من
+     اليمين إلى اليسار، فيلتصق الرقمُ بالحافّة اليسرى للعمود ورأسُه (`th` بـ
+     `text-align:right`) بالحافّة اليمنى — عمودٌ واحدٌ يُقرأ عمودين، والانزياحُ قِيس
+     ١٢٩–١٥٩ بكسلاً. (بلاغُ المالك: «البيانات غير مظبوطة تحت رأس العنوان… وكذلك في
+     المستخلصات».) والعلّةُ صامتةٌ بطبعها: لا مترجمَ يُنذر ولا خطأَ جافاسكربت.
+     التصحيحُ يفصل الأمرين في الخليّة: **يمينٌ** للمحاذاة، وLTR لترتيب الخانات —
+     كما تفعل `.co-num` في وحدة النظافة و`.ivr-num` في تقارير المخزون. */
+  ".ct-table td.num,.ct-table th.num{text-align:right}",
 /* عمودُ رقم البند: أضيقُ ما يكفي رقمين، ورماديٌّ فلا يزاحم الوصفَ في القراءة.
    `text-align:center` صراحةً — الجدولُ يُحاذي لليمين افتراضاً فيلتصق الرقمُ بالحدّ. */
 ".ct-table th.ct-seq,.ct-table td.ct-seq{width:34px;text-align:center;color:var(--muted);font-weight:700;padding-inline:4px}",
