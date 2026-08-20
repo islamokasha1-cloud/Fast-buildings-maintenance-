@@ -30,6 +30,13 @@
   --info:#1f5fa6;--text:#1a202c;--muted:#64748b;
   --ai:#3f3d8f;--ai-ink:#2f2d6e;
   --shadow:0 1px 4px rgba(0,0,0,0.07);
+  /* ── الصفر يخفت ── لونٌ أفتحُ من --muted لِما قيمتُه صفر. الصفرُ ليس معلومةً
+     تُقرأ، بل غيابُها؛ فحملُه حبراً مساوياً لِما فيه عملٌ يُغرق العينَ في لا شيء. */
+  --zero:#a3b0c2;
+  /* ── سلّمُ الرتبة ── للكميّات التي لا حالةَ فيها: مشروعٌ أكبرُ من مشروعٍ ليس
+     «أسوأَ» منه، فلا يستحقّ لوناً دلالياً. درجةٌ واحدةٌ بسبع مراتب: الأغمقُ الأكبر. */
+  --rank1:#1b3a6b;--rank2:#2c518c;--rank3:#4269a3;--rank4:#5f85b8;
+  --rank5:#85a4cc;--rank6:#a9c0dd;--rank7:#c9d8ea;
 }
 html[data-theme="dark"]{
   --bg:#0f1722;--surface:#1a2433;--surface2:#202c40;
@@ -38,6 +45,10 @@ html[data-theme="dark"]{
   --info:#60a5fa;--text:#e6edf7;--muted:#94a3b8;
   --ai:#a5a3e8;--ai-ink:#c3c1f2;
   --shadow:0 1px 4px rgba(0,0,0,0.4);
+  --zero:#5b6b83;
+  /* السلّمُ ينقلب في الداكن: الأغمقُ يختفي على خلفيةٍ داكنة، فالأبرزُ هو الأفتح. */
+  --rank1:#7aa6ff;--rank2:#6690e2;--rank3:#547ac4;--rank4:#4566a6;
+  --rank5:#3a5386;--rank6:#314468;--rank7:#2b3950;
 }
 html[data-theme="dark"] body{background:var(--bg);color:var(--text)}
 html[data-theme="dark"] #header{background:var(--surface);border-bottom:1px solid var(--border)}
