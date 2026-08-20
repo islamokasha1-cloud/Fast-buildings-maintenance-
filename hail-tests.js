@@ -11645,7 +11645,7 @@ function poColorSystemGuards() {
   // ── (٥ب) الصفرُ لا يُلوَّن دلالياً — لا شيءَ لا يستحقّ «انظر إليّ» ──
   const sumSrc = slice("function renderPOOpenSummary(dashData){", "\n}") || "";
   T("★ بطاقتا المفتوحة/المتأخّرة: الصفرُ يخفت ولا يُرسم بلون الحالة",
-    /openN\?'var\(--po-move\)':'var\(--zero\)'/.test(sumSrc) &&
+    /openN\?'var\(--po-wait\)':'var\(--zero\)'/.test(sumSrc) &&
     /overdue\.length\?'var\(--danger\)':'var\(--zero\)'/.test(sumSrc));
   T("★ وشريحةُ عمرٍ فارغةٌ تخفت رقماً ونقطةً",
     /buckets\[b\.k\]\?b\.color:'var\(--zero\)'/.test(sumSrc));
@@ -11660,10 +11660,10 @@ function poColorSystemGuards() {
   T("poFill دالّةٌ نقيّةٌ تُستخرج وتُنفَّذ بلا متصفّح", !!(fill && fill.poFill));
   if (fill && fill.poFill) {
     const { PO_COLORS: C, poFill } = fill;
-    T("★★ مساحةُ المكتمل تهدأ ولا تبقى بحبره", poFill(C.done) !== C.done,
-      `${C.done} ⇐ ${poFill(C.done)}`);
-    T("★★ والمنتظِرُ والحَرِجُ يبقيان بكامل قوّتهما — وإلا ضاع ما يستدعي عملاً",
-      poFill(C.wait) === C.wait && poFill(C.late) === C.late);
+    T("★★ مساحةُ المنتظِر تهدأ ولا تبقى بحبره", poFill(C.wait) !== C.wait,
+      `${C.wait} ⇐ ${poFill(C.wait)}`);
+    T("★★ والمكتملُ والحَرِجُ يبقيان بكامل قوّتهما — الأوّلُ أغمقُ السلّم والثاني خارجَه",
+      poFill(C.done) === C.done && poFill(C.late) === C.late);
     T("لونٌ مجهولٌ يعود كما هو لا undefined", poFill("#123456") === "#123456");
   }
 
@@ -11699,6 +11699,22 @@ function poColorSystemGuards() {
     strayHue.length === 0, [...new Set(strayHue)].join(" ") || undefined);
   T("★★ والأحمرُ باقٍ استثناءً وحيداً — بلا ما يصرخ لا تبقى للسلّم فائدة",
     /late:\s*"var\(--danger\)"/.test(semantic) && /var\(--danger\)/.test(badgeCss));
+  /* اتّجاهُ السلّم قرارُ المالك: الأغمقُ ما اكتمل والأفتحُ ما توقّف. يُقاس بالسطوع
+     النسبيّ لا يوُصَف، فانقلابُه لا يظهر في أيّ سطرٍ يُقرأ. ويُقاس على :root وحدَه
+     لأن الداكن يقلبه عمداً (البروزُ هناك سطوعٌ لا عتمة). */
+  const lum = hex => {
+    const c = [1,3,5].map(i => parseInt(hex.slice(i,i+2),16)/255)
+      .map(v => v <= 0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4));
+    return 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
+  };
+  const stepHex = k => { const m = new RegExp("--po-"+k+":\\s*(#[0-9a-fA-F]{6})").exec(rootBlock); return m && m[1]; };
+  const steps = ["done","move","wait"].map(stepHex);
+  T("★★ اتّجاهُ السلّم: المكتملُ أغمقُ من الماضي، والماضي أغمقُ من المنتظِر",
+    steps.every(Boolean) && lum(steps[0]) < lum(steps[1]) && lum(steps[1]) < lum(steps[2]),
+    steps.every(Boolean) ? steps.map((h,i)=>`${["done","move","wait"][i]}=${h}(${lum(h).toFixed(3)})`).join(" < ") : "رمزٌ مفقود");
+  T("★ ومساحةُ المنتظِر أفتحُ من حبره — وإلا لم تكن تهدئةً",
+    (()=>{ const f = /--po-wait-fill:\s*(#[0-9a-fA-F]{6})/.exec(rootBlock);
+           return !!(f && stepHex("wait") && lum(f[1]) > lum(stepHex("wait"))); })());
   T("★ ودرجاتُ السلّم الثلاثُ متمايزةٌ لا تكرارَ فيها",
     new Set(["--po-wait","--po-move","--po-done"].map(k=>{
       const m = new RegExp("\\" + k.slice(1) + ":\\s*(#[0-9a-fA-F]{6})").exec(rootBlock);
