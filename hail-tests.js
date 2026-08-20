@@ -11642,6 +11642,14 @@ function poColorSystemGuards() {
     hexIn(moSrc).length === 0 && !moSrc.includes("var(--accent)"),
     hexIn(moSrc).join(" ") || undefined);
 
+  // ── (٥ب) الصفرُ لا يُلوَّن دلالياً — لا شيءَ لا يستحقّ «انظر إليّ» ──
+  const sumSrc = slice("function renderPOOpenSummary(dashData){", "\n}") || "";
+  T("★ بطاقتا المفتوحة/المتأخّرة: الصفرُ يخفت ولا يُرسم بلون الحالة",
+    /openN\?'var\(--warn\)':'var\(--zero\)'/.test(sumSrc) &&
+    /overdue\.length\?'var\(--danger\)':'var\(--zero\)'/.test(sumSrc));
+  T("★ وشريحةُ عمرٍ فارغةٌ تخفت رقماً ونقطةً",
+    /buckets\[b\.k\]\?b\.color:'var\(--zero\)'/.test(sumSrc));
+
   // ── (٦) مفتاحُ عمر التوقّف يُشتقّ ولا يُكرَّر ──
   const legend = slice('<div class="pof-legend"', "</div>") || "";
   T("★★ مفتاحُ عمر التوقّف لا يكرّر ألوانَ PO_AGE_BUCKETS نصّاً",
