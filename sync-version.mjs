@@ -104,6 +104,11 @@ function targets(ver){
       re:new RegExp(`(id="login-version-footer">نظام صيانة المباني — )${VER_RE}`, "g"), to:`$1${ver}` },
     { file:"index.html",    what:"cache-busters",
       re:new RegExp(`(<script src="(?!https?:)[^"]+\\.js\\?v=)[^"]+(")`, "g"),          to:`$1${bare}$2` },
+    // v18.9: أنماطُ المنصّة صارت ملفاً (app.css). ووسمُها <link> لا <script>، فلولا
+    // هذه القاعدة لبقي `?v=` جامداً وشُحنت أنماطٌ قديمةٌ من الكاش — والأنماطُ القديمةُ
+    // تعني شاشةً مشوّهةً كاملة، لا خللاً في زاوية.
+    { file:"index.html",    what:"cache-busters (CSS)",
+      re:new RegExp(`(<link rel="stylesheet" href="(?!https?:)[^"]+\\.css\\?v=)[^"]+(")`, "g"), to:`$1${bare}$2` },
     { file:"tech-app.html", what:"cache-busters",
       re:new RegExp(`(<script src="(?!https?:)[^"]+\\.js\\?v=)[^"]+(")`, "g"),          to:`$1${bare}$2` },
     { file:"*",             what:"MODULE_BUILD",
@@ -174,7 +179,9 @@ function readStamps(){
   for(const f of ["index.html", "tech-app.html"]){
     const p = path.join(REPO, f);
     if(!fs.existsSync(p)) continue;
-    push(f, "cache-buster", /<script src="(?!https?:)[^"]+\.js\?v=([^"]+)"/, fs.readFileSync(p, "utf8"));
+    const src = fs.readFileSync(p, "utf8");
+    push(f, "cache-buster", /<script src="(?!https?:)[^"]+\.js\?v=([^"]+)"/, src);
+    push(f, "cache-buster (CSS)", /<link rel="stylesheet" href="(?!https?:)[^"]+\.css\?v=([^"]+)"/, src);
   }
   for(const f of stampedFiles()){
     push(f, "MODULE_BUILD", new RegExp(`(?:const|var) MODULE_BUILD = "(${VER_RE})"`), fs.readFileSync(path.join(REPO, f), "utf8"));

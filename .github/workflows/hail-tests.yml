@@ -5,6 +5,7 @@ on:
     paths:
       # كل ملفٍ يفحصه hail-tests — أي إغفال يعني أن push مباشراً له لا يُشغّل CI.
       - 'index.html'
+      - 'app.css'
       - 'labor-catalog.js'
       - 'price-analysis.js'
       - 'stocktake.js'
@@ -21,6 +22,7 @@ on:
       - 'operations-wall.js'
       - 'hail-tests.js'
       - 'global-surface-check.mjs'
+      - 'css-surface-check.mjs'
       - 'sync-version.mjs'
       - 'firestore.rules'
       - 'rules-check.mjs'

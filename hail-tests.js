@@ -22,7 +22,29 @@ const CANDIDATES = [
 ];
 const IDX = CANDIDATES.find(p => fs.existsSync(p));
 if (!IDX) { console.error("❌ لم يُعثر على index.html في:\n   " + CANDIDATES.join("\n   ")); process.exit(1); }
-const HTML = fs.readFileSync(IDX, "utf8");
+const IDX_RAW = fs.readFileSync(IDX, "utf8");
+
+/* ── `HTML` = مصدرُ التطبيق كما يراه المتصفّح، لا محتوى index.html وحده ──────────
+   خرجت أنماطُ المنصّة إلى `app.css`، وفي هذا الملفّ عشراتُ الحرّاس على قواعد CSS.
+   ولو قُرئ `index.html` وحدَه لسقط بعضُها صراحةً — **وهذا أهونُ الضررين**؛ أمّا
+   الأخطرُ فالتأكيداتُ **السالبة** (`!/…/.test(HTML)`: «هذه القاعدةُ غائبة»): تلك
+   تمرّ مجّاناً بعد النقل، فيتحوّل الحارسُ إلى **صمتٍ يُقرأ نجاحاً**. وهو الدرسُ
+   نفسُه الذي كشفه استخراجُ مركز العمليات (٨٨ فحصاً تخطّاها `if` صامتاً).
+   فتُعاد الورقةُ إلى **موضعها الأصليّ بالضبط** — لا مُلحقةً في الذيل — كي تبقى
+   الفحوصُ الموضعيّة (`indexOf`/`slice`) والعدّيّة (`match(/…/g).length`) على
+   دلالتها حرفياً. والنتيجةُ نصٌّ مطابقٌ لما كان قبل النقل.
+   وقياسُ حجم الملفّ (سقّاطةُ index.html) يقرأ `IDX_RAW` لا هذا — وإلا قاس نفسه. */
+const HTML = (() => {
+  const m = /^<link rel="stylesheet" href="(?!https?:)([^"]+\.css)\?v=[^"]*">$/m.exec(IDX_RAW);
+  if (!m) return IDX_RAW;
+  const cssPath = path.resolve(path.dirname(IDX), m[1]);
+  if (!fs.existsSync(cssPath)) return IDX_RAW;
+  const css = fs.readFileSync(cssPath, "utf8")
+    .replace(/^\/\* [\s\S]*?\*\/\n\n/, "");   // ترويسةُ الوحدة ليست قاعدةَ أنماط
+  return IDX_RAW.replace(m[0], "<style>\n" + css.replace(/\n$/, "") + "\n</style>");
+})();
+// اسمٌ ثابتٌ لمصدر التطبيق — يُستعمل حيث يُظلَّل `HTML` داخل دالةٍ (tvWallGuards)
+const APP_SRC = HTML;
 const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.v2.js"), path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
 // v18.9ti: وحدة المؤشرات صارت مدموجةً داخل index.html بين علامتين — تُقرأ منها مباشرةً.
 // (احتياطياً: إن وُجد ملفٌ خارجي قديم يُقرأ منه.) فلا يعود يُخدَم ملفٌ منفصلٌ قديماً من الكاش.
@@ -337,6 +359,21 @@ function predelivery() {
     cb.length >= 1 && cb.length === localMods && cb.every(([, v]) => v === want),
     `${cb.length}/${localMods} موسومة — ` + (cb.map(([f2, v]) => `${f2}?v=${v}`).join("، ") || "لا وسوم"));
 
+  /* ── أنماطُ المنصّة ملفٌّ خارجيّ: وسمُها <link> لا <script> ──────────────────
+     فحصُ cache-busters أعلاه يقرأ `<script src=…js?v=>` وحدَه، فوسمُ CSS كان
+     سيمرّ **غيرَ مفحوص**. والأنماطُ القديمةُ من الكاش لا تكسر زاويةً بل تُظهر
+     الشاشةَ **بلا أنماطٍ إطلاقاً** — أظهرُ الأعطال للعين وأقبحُها. */
+  {
+    const cssTags = [...IDX_RAW.matchAll(/<link rel="stylesheet" href="(?!https?:)([^"]+\.css)\?v=([^"]+)"/g)];
+    const cssAll  = [...IDX_RAW.matchAll(/<link rel="stylesheet" href="(?!https?:)([^"]+\.css)(?:\?v=[^"]*)?"/g)];
+    T("★ css: كلُّ ورقة أنماطٍ محلّيةٍ موسومةٌ بـ?v= مطابقٍ للإصدار",
+      cssTags.length >= 1 && cssTags.length === cssAll.length && cssTags.every(m => m[2] === want),
+      `${cssTags.length}/${cssAll.length} موسومة — ` + (cssTags.map(m => `${m[1]}?v=${m[2]}`).join("، ") || "لا وسوم"));
+    T("★ css: الملفُّ موجودٌ فعلاً (وسمٌ يشير إلى لا شيء = شاشةٌ بلا أنماط)",
+      cssTags.every(m => fs.existsSync(path.resolve(path.dirname(IDX), m[1]))),
+      cssTags.map(m => m[1]).join("، "));
+  }
+
   // ── v18.9wk: NOTES.md يُحدَّث مع كل تغيير — حارسٌ يمنع النسيان ──
   // القاعدة (CLAUDE.md): كل رفعِ إصدارٍ يرافقه قيدٌ في «سجل أهم التعديلات» (§6).
   // الحارس يطابق قيدَ الإصدار الحالي حرفياً — فيسقط الفحص إن دُفع تعديلٌ بلا توثيق.
@@ -376,9 +413,9 @@ function predelivery() {
        المحدَّد لا يفعل شيئاً» في أداةٍ قائمة، لا ميزةً جديدة. والدالّةُ نقيّةٌ عن قصدٍ
        ليفحصها هذا الملفُّ بلا متصفّح (قاعدةُ CLAUDE.md ٥)، وموضعُها بجوار بقيّة دوالّ
        المرادفات — ونقلُ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة إصلاحه ممنوع. */
-    const IDX_CEILING = 39700;   // ← خفِّضه بعد كل استخراج (الهدف: ٢٠–٢٥ ألفاً)
+    const IDX_CEILING = 37200;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
-    const idxLines = HTML.split("\n").length;
+    const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
       idxLines <= IDX_CEILING,
       `${idxLines} سطراً والسقف ${IDX_CEILING} — انقل الإضافة إلى ملفِّ وحدةٍ مستقلّ (CLAUDE.md)`);
@@ -7756,7 +7793,9 @@ function tvWallGuards() {
   // منها والسالبُ سواء — بدل إعادة تصنيف ستّين تأكيداً بيدٍ (وهي فرصةُ خطأٍ بلا مقابل).
   const WALL_PATH = path.resolve(path.dirname(IDX), "operations-wall.js");
   if (!fs.existsSync(WALL_PATH)) { T("★ operations-wall.js موجود", false, WALL_PATH); return; }
-  const HTML = fs.readFileSync(IDX, "utf8") + "\n" + fs.readFileSync(WALL_PATH, "utf8");
+  // يُبنى من HTML المُعاد تركيبه (الذي يشمل app.css) لا من الملفّ الخام — فحرّاسُ
+  // المركز فيها قواعدُ CSS أيضاً، وهي في `app.css` اليوم.
+  const HTML = APP_SRC + "\n" + fs.readFileSync(WALL_PATH, "utf8");
   const slice = (from, to, after) => {
     const a = HTML.indexOf(from, after || 0);
     if (a < 0) return null;
