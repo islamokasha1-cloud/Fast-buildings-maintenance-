@@ -11645,7 +11645,7 @@ function poColorSystemGuards() {
   // ── (٥ب) الصفرُ لا يُلوَّن دلالياً — لا شيءَ لا يستحقّ «انظر إليّ» ──
   const sumSrc = slice("function renderPOOpenSummary(dashData){", "\n}") || "";
   T("★ بطاقتا المفتوحة/المتأخّرة: الصفرُ يخفت ولا يُرسم بلون الحالة",
-    /openN\?'var\(--warn\)':'var\(--zero\)'/.test(sumSrc) &&
+    /openN\?'var\(--po-move\)':'var\(--zero\)'/.test(sumSrc) &&
     /overdue\.length\?'var\(--danger\)':'var\(--zero\)'/.test(sumSrc));
   T("★ وشريحةُ عمرٍ فارغةٌ تخفت رقماً ونقطةً",
     /buckets\[b\.k\]\?b\.color:'var\(--zero\)'/.test(sumSrc));
@@ -11683,10 +11683,27 @@ function poColorSystemGuards() {
   const badgeCss = (HTML.match(/\.b-po-[a-z]+\{[^}]*\}/g) || []).join("\n");
   T("★★ شاراتُ الحالة بلا رقمٍ سداسيٍّ نصّيّ — وإلا لم تنقلب ليلاً",
     hexIn(badgeCss).length === 0, hexIn(badgeCss).join(" ") || undefined);
-  T("★★ ولا بنفسجيَّ فيها: «تنفيذ المشتريات» كحليٌّ كالمخطّط، و«اعتماد التنفيذيّ» كهرمانيّ",
-    /\.b-po-ordered\{[^}]*var\(--primary\)/.test(badgeCss) &&
-    /\.b-po-ceo\{[^}]*var\(--warn\)/.test(badgeCss) &&
-    /\.b-po-approved\{[^}]*var\(--primary\)/.test(badgeCss));
+  T("★★ والشاراتُ على سلّم الحالة نفسِه الذي يرسمه المخطّط",
+    /\.b-po-ordered\{[^}]*var\(--po-move\)/.test(badgeCss) &&
+    /\.b-po-ceo\{[^}]*var\(--po-wait\)/.test(badgeCss) &&
+    /\.b-po-approved\{[^}]*var\(--po-move\)/.test(badgeCss));
+
+  // ── (٥ح) لا أخضرَ ولا بنّيَّ في سلّم حالة الطلب — الدرجةُ تحمل الحالة، والأحمرُ وحدَه استثناء ──
+  // مرساةُ النهاية تأتي **بعد** البداية دائماً — وإلا اقتطع slice حتى آخر الملفّ
+  // فالتقط ألواناً من شاشاتٍ أخرى وأبلغ عن خللٍ ليس هنا.
+  const statusSurfaces = semantic + "\n" + badgeCss + "\n" + sumSrc + "\n" +
+    (slice('<div id="po-dashboard"', '<div id="po-flow-row">') || "") + "\n" +
+    (slice('<div id="po-charts-row">', '<div id="purchases-list"') || "");
+  const strayHue = (statusSurfaces.match(/var\(--(accent|warn|ok-fill|sla-ok|sla-warn)\)/g) || []);
+  T("★★ سلّمُ حالة الطلب بلا --accent ولا --warn — لا أخضرَ ولا بنّيَّ فيه",
+    strayHue.length === 0, [...new Set(strayHue)].join(" ") || undefined);
+  T("★★ والأحمرُ باقٍ استثناءً وحيداً — بلا ما يصرخ لا تبقى للسلّم فائدة",
+    /late:\s*"var\(--danger\)"/.test(semantic) && /var\(--danger\)/.test(badgeCss));
+  T("★ ودرجاتُ السلّم الثلاثُ متمايزةٌ لا تكرارَ فيها",
+    new Set(["--po-wait","--po-move","--po-done"].map(k=>{
+      const m = new RegExp("\\" + k.slice(1) + ":\\s*(#[0-9a-fA-F]{6})").exec(rootBlock);
+      return m && m[1];
+    })).size === 3);
 
   // ── (٥و) بطاقةُ الطلب: عنصرٌ صاخبٌ واحدٌ لا أربعة ──
   const cardSrc = slice('return `<div class="po-card ${cls}"',
