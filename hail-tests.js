@@ -428,6 +428,51 @@ function predelivery() {
     });
   }
 
+  /* ══ ★ صنفٌ يقلب اتجاه **الخليّة** يجب أن يُثبّت محاذاتَها ══
+     الجذر: `direction:ltr` يُوضع على الأرقام لتُقرأ خاناتُها بترتيبها الصحيح. فإن
+     وُضع على `<td>` نفسِها — لا على `span` داخلها — **انقلب معه معنى
+     `text-align:start`** من اليمين إلى اليسار في صفحةٍ عربية، فيلتصق الرقمُ بالحافّة
+     المقابلة لرأس عموده (`th` بـ`text-align:right`): عمودٌ واحدٌ يُقرأ عمودين.
+     وقع فعلاً في `.num` بوحدة التعاقدات — انزياحٌ قِيس ١٢٩–١٥٩ بكسلاً في جدولَي
+     «الوثائق وسريانها» و«بنود المستخلص» (بلاغُ المالك). والعلّةُ **صامتةٌ بطبعها**:
+     لا مترجمَ يُنذر ولا خطأَ جافاسكربت ولا فحصَ نصٍّ يلتقطها — تُرى بالعين وحدَها.
+     فالحارسُ عامٌّ لا موضعيّ: أيُّ صنفٍ يُستعمل على خليّةِ جدولٍ ويضبط `direction`،
+     يلزمه `text-align` صريحٌ في مكانٍ ما من أنماط الملف نفسِه. */
+  {
+    const ROOT3 = path.dirname(IDX);
+    const FILES3 = ["index.html", "tech-app.html", "cleaning-operations.js", "contracts.js",
+      "project-management.js", "inventory-reports.js", "performance-contract.js", "hr-payments.js",
+      "finance-audit.js", "stocktake.js", "operations-wall.js", "price-analysis.js", "substitute-budget.js"];
+    let scanned = 0;
+    FILES3.forEach(f => {
+      const fp = path.join(ROOT3, f);
+      if (!fs.existsSync(fp)) return;
+      const src3 = fs.readFileSync(fp, "utf8");
+      // أصنافُ الخلايا المكتوبةُ حرفياً في المصدر (المبنيّةُ ديناميكياً لا تُفحَص نصّاً)
+      const cells = new Set();
+      for (const m of src3.matchAll(/<t[dh][^>]*class="([^"]+)"/g))
+        String(m[1]).split(/[\s+'"]+/).forEach(c => { if (/^[A-Za-z][\w-]*$/.test(c)) cells.add(c); });
+      if (!cells.size) return;
+      scanned++;
+      const rules = [...src3.matchAll(/([^{}();]+)\{([^{}]*:[^{}]*)\}/g)].map(m => ({ sel: m[1], body: m[2] }));
+      const bad = [];
+      cells.forEach(c => {
+        const re = new RegExp("\\." + c + "(?![\\w-])");
+        const hasDir = rules.some(r => re.test(r.sel) && /direction\s*:/.test(r.body));
+        if (!hasDir) return;
+        const hasAlign = rules.some(r => re.test(r.sel) && /text-align\s*:/.test(r.body));
+        if (!hasAlign) bad.push("." + c);
+      });
+      T(`★ محاذاة: ${f} — لا صنفَ خليّةٍ يقلب الاتجاه بلا محاذاةٍ صريحة`,
+        bad.length === 0, bad.join("، ") || `${cells.size} صنفَ خليّةٍ مفحوصاً`);
+    });
+    T("★ الحارسُ فحص ملفاتِ الجداول فعلاً (لا يمرّ بصمتٍ على لا شيء)", scanned >= 4, "ملفات=" + scanned);
+    // والموضعُ الذي وُلد منه الحارس: خلايا `.num` في وحدة التعاقدات محاذاتُها صريحة
+    const CTR3 = fs.existsSync(path.join(ROOT3, "contracts.js")) ? fs.readFileSync(path.join(ROOT3, "contracts.js"), "utf8") : "";
+    T("★ خلايا `.num` في جداول التعاقدات محاذاتُها يمينٌ صريح (تحت رأس العمود)",
+      /\.ct-table td\.num,\.ct-table th\.num\{text-align:right\}/.test(CTR3));
+  }
+
   // ── نسخُ Cloud Storage — حرّاسُ القيودِ الثلاثةِ التي لا تظهر في أيّ سطرِ إعداد ──
   // هذه حرّاسُ **نصٍّ** لا سلوك (لا gcloud في الفحص) — وهي هنا لأن الثلاثةَ قيودٌ
   // يسهل «تبسيطُها» لاحقاً بحسن نيّةٍ فتنهار المنظومةُ بلا رسالةِ خطأٍ واحدة.

@@ -33,6 +33,35 @@ const CDN_STUBS = `
 let pass = 0, fail = 0;
 const check = (n, ok, d) => { if (ok) { pass++; console.log('  ✅', n, d ? '— ' + d : ''); } else { fail++; console.log('  ❌', n, d ? '— ' + d : ''); } };
 
+/* ── حارسٌ هندسيّ: الرقمُ يقف تحت رأسِ عموده ──
+   لا يُقاس بالنصّ المصدريّ بل بالصناديق المرسومة فعلاً: يُقارَن **مدى نصِّ** الخليّة
+   الرقمية بمدى نصِّ رأسِ عمودها في نفس الجدول. وسببُ وجوده أنّ العلّة صنفٌ كامل لا
+   سطرٌ واحد: كلُّ صنفٍ يضبط `direction:ltr` على **الخليّة** يقلب معنى `text-align:start`
+   فيهرب الرقمُ إلى الحافّة المقابلة لرأسِه — ولا مترجمَ يُنذر ولا خطأَ جافاسكربت.
+   (بلاغُ المالك: «البيانات غير مظبوطة تحت رأس العنوان في الجدول وكذلك في المستخلصات».) */
+const numColMisaligned = (tol = 3) => page.evaluate((tol) => {
+  const bad = [];
+  const textBox = (el) => { const r = document.createRange(); r.selectNodeContents(el); const b = r.getBoundingClientRect(); return b.width ? b : el.getBoundingClientRect(); };
+  document.querySelectorAll('.ct-table').forEach((tbl) => {
+    if (!tbl.offsetParent) return;                       // جدولٌ غيرُ معروضٍ لا يُقاس
+    const ths = Array.from(tbl.querySelectorAll('thead th'));
+    if (!ths.length) return;
+    Array.from(tbl.querySelectorAll('tbody tr')).forEach((tr) => {
+      const tds = Array.from(tr.children);
+      if (tds.length !== ths.length) return;             // صفُّ colspan (حالةٌ فارغة)
+      tds.forEach((td, ci) => {
+        if (!td.classList.contains('num')) return;
+        if (!td.textContent.trim()) return;
+        if (td.querySelector('input,select,textarea')) return;   // حقلُ إدخالٍ لا نصّ
+        const t = textBox(td), h = textBox(ths[ci]);
+        const d = Math.abs(t.right - h.right);
+        if (d > tol) bad.push({ col: ths[ci].textContent.trim(), val: td.textContent.trim().slice(0, 22), off: Math.round(d) });
+      });
+    });
+  });
+  return bad;
+}, tol);
+
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 980 } });
 await page.addInitScript(MOCK_FIREBASE);
@@ -171,6 +200,9 @@ check('★ وتعرض الجنسية بدل الرقم الضريبي',
   indivTxt.includes('الجنسية') && indivTxt.includes('هندي') && !indivTxt.includes('الرقم الضريبي'));
 check('★ ووضعُ الضريبة المقترَح «بلا ضريبة»', indivTxt.includes('بلا ضريبة'));
 check('★ وإقامتُه الموشكةُ على الانتهاء تُنبَّه', /توشك|تنتهي بعد/.test(indivTxt));
+const docsGeom = await numColMisaligned();
+check('★ جدولُ «الوثائق وسريانها»: كلُّ رقمٍ تحت رأسِ عموده (قياسُ صناديقَ لا نصّ)',
+  docsGeom.length === 0, docsGeom.map(b => `${b.col}: «${b.val}» بفارق ${b.off}px`).join(' · ') || 'لا انزياح');
 await page.screenshot({ path: `${SHOTS}/07-individual-card.png`, fullPage: true });
 
 // نموذجُ الشخص: حقولُ الهوية حاضرةٌ وحقولُ المنشأة غائبة
@@ -1580,6 +1612,9 @@ await page.evaluate(() => window.contracts.ctrTab('extracts'));
 await page.waitForTimeout(600);
 check('تبويبُ المستخلصات يعرض شريطَ الإنجاز وجدولَه',
   /المنجَز التراكميّ/.test((await page.textContent('#page-contracts-list')) || ''));
+const extGeom0 = await numColMisaligned();
+check('★ وأعمدةُ جدول المستخلصات الرقمية تحت رؤوسها',
+  extGeom0.length === 0, extGeom0.map(b => `${b.col}: «${b.val}» بفارق ${b.off}px`).join(' · ') || 'لا انزياح');
 await page.evaluate(() => window.contracts.ctrTab('log'));
 await page.waitForTimeout(600);
 check('تبويبُ السجل يعرض قيدَ الإنشاء',
@@ -1946,10 +1981,18 @@ check('★★ و«بانتظار إجراءك» لا تَعِد بزرٍّ مُ�
 // والإرجاعُ لمرحلة: من الشاشة، ووجهاتُه مشتقّةٌ من **صافيه**
 await page.evaluate((cid) => { window.contracts.openCtr(cid); window.contracts.ctrTab('extracts'); }, conv.cid);
 await page.waitForTimeout(700);
+// جدولُ المستخلصات **وفيه صفٌّ فعليّ** — هو الجدولُ الذي جاء منه بلاغُ المالك
+const extListGeom = await numColMisaligned();
+check('★★ جدولُ المستخلصات بصفٍّ حقيقيّ: أعمالُ الفترة والخصوماتُ والصافي تحت رؤوسها',
+  extListGeom.length === 0, extListGeom.map(b => `${b.col}: «${b.val}» بفارق ${b.off}px`).join(' · ') || 'لا انزياح');
+await page.screenshot({ path: `${SHOTS}/33-extracts-align.png`, fullPage: true });
 await page.evaluate((eid) => window.contracts.openExtFrom(eid, window.contracts.extractById(eid).contractId), ext1.id);
 await page.waitForTimeout(900);
 check('★★ وزرُّ «إرجاع لمرحلة» يظهر في المستخلص للأدمن',
   ((await page.textContent('#page-contracts-list')) || '').includes('إرجاع لمرحلة'));
+const extGeom1 = await numColMisaligned();
+check('★ وجداولُ ورقة المستخلص (البنود والحساب) بلا انزياحٍ في أعمدتها الرقمية',
+  extGeom1.length === 0, extGeom1.map(b => `${b.col}: «${b.val}» بفارق ${b.off}px`).join(' · ') || 'لا انزياح');
 await page.evaluate(() => window.contracts.openExtRewind());
 await page.waitForTimeout(700);
 const extRwBox = await page.evaluate(() => {
