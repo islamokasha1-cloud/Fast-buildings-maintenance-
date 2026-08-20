@@ -23849,20 +23849,55 @@ function poLateBadge(p){
    الآن المخطط والبطاقات والتصفية تقرأ PO_STAGES وحدها، فلا يمكن أن تفترق بصمت.
    ثابتٌ محكوم يحرسه _poStagesSelfCheck: مراحل !done تساوي تماماً مكمّل PO_FINAL_STATUSES
    داخل PO_STATUS — أي أن «جارٍ» في المخطط هو «غير نهائي» في بقية النظام، بلا اجتهاد ثانٍ. */
+/* ══════════════════════════════════════════════════════════════════════════
+   لوحةُ ألوان شاشة المشتريات — مصدرٌ واحدٌ لكلِّ لونٍ دلاليّ
+   ──────────────────────────────────────────────────────────────────────────
+   ── المشكلة ── اللونُ فقد دلالتَه. في بطاقةٍ واحدةٍ كان الأخضرُ يعني شيئين
+   (مرحلةً مكتملةً · طلباً طازجاً)، والأحمرُ ثلاثةً (أولويةً عاجلةً · حافّةَ
+   البطاقة · زرَّ الحذف). وحين يحمل اللونُ ثلاثةَ معانٍ تتوقّف العينُ عن قراءته
+   وتقرأ النصَّ — فيبطُل الغرضُ من التلوين أصلاً. وكانت مراحلُ PO_STAGES تُلوَّن
+   بستّةِ أطياف (كهرمانيّ · سماويّ · بنفسجيّ · تركوازيّ) لِما هو في حقيقته
+   ثلاثُ حالاتٍ لا أكثر.
+
+   ── المبدأ ── لونٌ واحدٌ لكلِّ معنى، ومعنىً واحدٌ لكلِّ لون. وما لا حالةَ فيه
+   لا يُلوَّن دلالياً بل يُرتَّب على سلّمِ درجةٍ واحدة (--rank1..7).
+
+   ── القرار ── القيمُ رموزُ CSS لا أرقامٌ سداسية، فينقلب الوضعُ الليليُّ معها
+   بلا قاعدةِ تجاوزٍ واحدة. و`var()` يُحلّ في سماتِ SVG (stroke/fill) كما يُحلّ
+   في الأنماط، فمصدرٌ واحدٌ يكفي الرسمَ والنصَّ معاً.
+   ══════════════════════════════════════════════════════════════════════════ */
+const PO_COLORS = {
+  wait: "var(--warn)",     // بانتظار قرارٍ أو إجراءٍ من أحد — هنا يقف العمل
+  move: "var(--primary)",  // اعتُمد ومضى — عملٌ جارٍ لا ينتظر أحداً
+  done: "var(--accent)",   // مكتمل
+  out:  "var(--zero)",     // خارج المسار — مرفوضٌ أو ملغىً، لا إجراءَ عليه
+  late: "var(--danger)",   // حَرِج — تجاوز حدَّ الانتظار
+};
+
+/* سلّمُ الرتبة — للكميّات التي لا حالةَ فيها. الرتبةُ هي المعلومة: الأغمقُ
+   الأكبر. دالّةٌ نقيّةٌ تُثبّت الطرفين: ما دون الصفر يأخذ الأغمق، وما تجاوز
+   السلّمَ يأخذ الأفتحَ بدل أن يدور فيبدأ من الأغمق مرّةً أخرى. */
+const PO_RANK = ["var(--rank1)","var(--rank2)","var(--rank3)","var(--rank4)",
+                 "var(--rank5)","var(--rank6)","var(--rank7)"];
+function poRankColor(i){
+  const n = Number.isFinite(+i) ? Math.floor(+i) : 0;
+  return PO_RANK[Math.min(Math.max(n,0), PO_RANK.length-1)];
+}
+
 const PO_STAGES = [
-  {key:"pending_pm",     lbl:"بانتظار مدير المشاريع",    icon:"send",        color:"#f59e0b", st:["pending_pm","submitted","draft","in_review","new_request","approving"]},
-  {key:"pm_approved",    lbl:"معتمد من مدير المشاريع",   icon:"checkCircle", color:"#0369a1", st:["pm_approved"]},
-  {key:"wh_review",      lbl:"مراجعة المستودع",          icon:"warehouse",   color:"#f59e0b", st:["wh_review"]},
-  {key:"wh_reviewed",    lbl:"تمت مراجعة المستودع",      icon:"checkCircle", color:"#0369a1", st:["wh_reviewed","wh_approved"]},
-  {key:"pending_proc",   lbl:"اعتماد المشتريات",         icon:"cart",        color:"#f59e0b", st:["pending_proc","finance_returned"]},
-  {key:"pending_ceo",    lbl:"اعتماد المدير التنفيذي",   icon:"building2",   color:"#7c3aed", st:["pending_ceo"]},
-  {key:"pending_finance",lbl:"سداد المالية",             icon:"banknote",    color:"#0891b2", st:["pending_finance"]},
-  {key:"proc_executing", lbl:"تنفيذ المشتريات",          icon:"repeat",      color:"#7c3aed", st:["proc_executing","ordered","approved","approved_old"]},
-  {key:"wh_receiving",   lbl:"استلام المستودع",          icon:"truck",       color:"#0369a1", st:["wh_receiving","ready_pickup"]},
-  {key:"wh_auditing",    lbl:"تدقيق المستودعات",         icon:"search",      color:"#0369a1", st:["wh_auditing","wh_audit_wait"]},
-  {key:"pending_extra",  lbl:"بتّ بند إضافي",            icon:"alertTriangle", color:"#b45309", st:["pending_extra"]},
-  {key:"closed",         lbl:"مكتمل / مغلق",             icon:"lock",        color:"#0a7c59", st:["closed","closed_after_receipt","delivered","executed"], done:true},
-  {key:"out",            lbl:"خارج المسار",              icon:"ban",         color:"#94a3b8", st:["pm_rejected","wh_rejected","ceo_rejected","rejected","rejected_final","cancelled","deleted"], done:true},
+  {key:"pending_pm",     lbl:"بانتظار مدير المشاريع",    icon:"send",        color:PO_COLORS.wait, st:["pending_pm","submitted","draft","in_review","new_request","approving"]},
+  {key:"pm_approved",    lbl:"معتمد من مدير المشاريع",   icon:"checkCircle", color:PO_COLORS.move, st:["pm_approved"]},
+  {key:"wh_review",      lbl:"مراجعة المستودع",          icon:"warehouse",   color:PO_COLORS.wait, st:["wh_review"]},
+  {key:"wh_reviewed",    lbl:"تمت مراجعة المستودع",      icon:"checkCircle", color:PO_COLORS.move, st:["wh_reviewed","wh_approved"]},
+  {key:"pending_proc",   lbl:"اعتماد المشتريات",         icon:"cart",        color:PO_COLORS.wait, st:["pending_proc","finance_returned"]},
+  {key:"pending_ceo",    lbl:"اعتماد المدير التنفيذي",   icon:"building2",   color:PO_COLORS.wait, st:["pending_ceo"]},
+  {key:"pending_finance",lbl:"سداد المالية",             icon:"banknote",    color:PO_COLORS.wait, st:["pending_finance"]},
+  {key:"proc_executing", lbl:"تنفيذ المشتريات",          icon:"repeat",      color:PO_COLORS.move, st:["proc_executing","ordered","approved","approved_old"]},
+  {key:"wh_receiving",   lbl:"استلام المستودع",          icon:"truck",       color:PO_COLORS.move, st:["wh_receiving","ready_pickup"]},
+  {key:"wh_auditing",    lbl:"تدقيق المستودعات",         icon:"search",      color:PO_COLORS.move, st:["wh_auditing","wh_audit_wait"]},
+  {key:"pending_extra",  lbl:"بتّ بند إضافي",            icon:"alertTriangle", color:PO_COLORS.wait, st:["pending_extra"]},
+  {key:"closed",         lbl:"مكتمل / مغلق",             icon:"lock",        color:PO_COLORS.done, st:["closed","closed_after_receipt","delivered","executed"], done:true},
+  {key:"out",            lbl:"خارج المسار",              icon:"ban",         color:PO_COLORS.out, st:["pm_rejected","wh_rejected","ceo_rejected","rejected","rejected_final","cancelled","deleted"], done:true},
 ];
 const _PO_STAGE_OF = (function(){ const m={}; PO_STAGES.forEach(g=>g.st.forEach(k=>{ m[k]=g.key; })); return m; })();
 function poStageOf(status){ return _PO_STAGE_OF[normalizePOStatus(status)] || null; }
@@ -23877,9 +23912,9 @@ function _poInStage(p,key){ return key==="wip" ? poStageIsWip(p) : poStageOf(p&&
 const PO_WORK_MIN_PER_DAY = (SLA_CONFIG.workEndMin - SLA_CONFIG.workStartMin) - (SLA_CONFIG.breakEndMin - SLA_CONFIG.breakStartMin);
 const PO_STALE_WORK_MIN   = 2 * PO_WORK_MIN_PER_DAY;
 const PO_AGE_BUCKETS = [
-  {k:"a", lbl:"≤ يومَي عمل",       color:"#0a7c59", max: PO_STALE_WORK_MIN},
-  {k:"b", lbl:"2–5 أيام عمل",      color:"#f59e0b", max: 5 * PO_WORK_MIN_PER_DAY},
-  {k:"c", lbl:"أكثر من 5 أيام عمل", color:"#dc2626", max: Infinity},
+  {k:"a", lbl:"≤ يومَي عمل",       color:PO_COLORS.done, max: PO_STALE_WORK_MIN},
+  {k:"b", lbl:"2–5 أيام عمل",      color:PO_COLORS.wait, max: 5 * PO_WORK_MIN_PER_DAY},
+  {k:"c", lbl:"أكثر من 5 أيام عمل", color:PO_COLORS.late, max: Infinity},
 ];
 function poIdleWorkMin(p){
   const t = p && (p.updatedAt || p.createdAt);
@@ -24071,9 +24106,9 @@ function renderPOStageFlow(dashData){
   // النِّسَب تُحسب من dashData نفسها التي تُغذّي الأشرطة، فلا يمكن أن يفترق الرسمان.
   const wipTotal = stages.reduce((n,g)=>n+acc[g.key].total,0);
   const parts = [
-    {k:"wip",    lbl:"قيد التنفيذ",  v:wipTotal,    c:"#f59e0b"},
-    {k:"closed", lbl:"مكتمل / مغلق", v:foot.closed, c:"#0a7c59"},
-    {k:"out",    lbl:"خارج المسار",  v:foot.out,    c:"#94a3b8"},
+    {k:"wip",    lbl:"قيد التنفيذ",  v:wipTotal,    c:PO_COLORS.wait},
+    {k:"closed", lbl:"مكتمل / مغلق", v:foot.closed, c:PO_COLORS.done},
+    {k:"out",    lbl:"خارج المسار",  v:foot.out,    c:PO_COLORS.out},
   ];
   const total = dashData.length;
   const pctOf = v => total ? Math.round(v/total*100) : 0;
@@ -24404,7 +24439,7 @@ function renderPurchasesDashboard(){
     const entries=[];
     order.forEach(o=>{ if(stMap[o.k]>0){ entries.push({label:o.k,color:o.color,cnt:stMap[o.k]}); delete stMap[o.k]; } });
     // أي حالة غير منسوبة لمرحلة (بيانات قديمة أو حقل تالف) — تُعرض حمراء لا تُبتلع
-    Object.keys(stMap).forEach(k=>entries.push({label:k,color:"#dc2626",cnt:stMap[k]}));
+    Object.keys(stMap).forEach(k=>entries.push({label:k,color:PO_COLORS.late,cnt:stMap[k]}));
     if(entries.length===0){
       statusChartEl.innerHTML=`<div style="text-align:center;color:var(--muted);font-size:12px;padding:20px">لا توجد بيانات</div>`;
     } else {
