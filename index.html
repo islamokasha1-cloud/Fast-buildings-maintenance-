@@ -915,11 +915,9 @@
         <div style="font-size:12px;font-weight:800;color:var(--primary)"><span class="mini-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span>مسار الطلبات — العمل الجاري عند كل مرحلة</div>
         <div style="font-size:10px;color:var(--muted);font-weight:700">اضغط المرحلة أو شريحة اللون لتصفية القائمة</div>
       </div>
-      <div class="pof-legend">
-        <span><i style="background:#0a7c59"></i>واقف ≤ يومَي عمل</span>
-        <span><i style="background:#f59e0b"></i>2–5 أيام عمل</span>
-        <span><i style="background:#dc2626"></i>أكثر من 5 أيام عمل</span>
-      </div>
+      <!-- v18.9: يُملأ من PO_AGE_BUCKETS في renderPOStageFlow. كان يكرّر ألوانَها
+           نصّاً، فأيُّ تغييرٍ في الشرائح يترك المفتاحَ يكذب بلا خطأٍ يُنذر. -->
+      <div class="pof-legend" id="po-flow-legend"></div>
       <div class="pof-grid">
         <div id="po-stage-flow"></div>
         <div id="po-stage-donut"></div>
@@ -24055,6 +24053,10 @@ function _poStatusFilter(st){
 function renderPOStageFlow(dashData){
   const el = document.getElementById("po-stage-flow");
   if(!el) return;
+  // المفتاحُ من مصدر الشرائح نفسِه — فلا يمكن أن يفترق عن الأشرطة التي يشرحها.
+  const lg = document.getElementById("po-flow-legend");
+  if(lg) lg.innerHTML = `<span style="color:var(--muted);font-weight:700">مدّة التوقّف</span>`
+    + PO_AGE_BUCKETS.map(b=>`<span><i style="background:${b.color}"></i>${esc(b.lbl)}</span>`).join("");
   const stages = PO_STAGES.filter(g=>!g.done);
   const acc = {}; stages.forEach(g=>{ acc[g.key]={total:0,a:0,b:0,c:0,oldest:null,oldestMin:-1}; });
   const foot = {closed:0, out:0};
@@ -24097,7 +24099,7 @@ function renderPOStageFlow(dashData){
       <div class="pof-track${on}" data-tipk="${g.key}" onclick="_poStageFilter('${g.key}','')">
         <div class="pof-fill" style="width:${w}%">${segs}</div>
       </div>
-      <div class="pof-cnt" style="color:${a.total?g.color:"var(--muted)"}">${a.total}</div>
+      <div class="pof-cnt" style="color:${a.total?g.color:"var(--zero)"}">${a.total}</div>
     </div>`;
   }).join("");
 
@@ -24412,15 +24414,15 @@ function renderPurchasesDashboard(){
       });
       const entries = Object.entries(projMap).sort((a,b)=>b[1]-a[1]);
       const maxV = Math.max(...entries.map(e=>e[1]),1);
-      const colors=["#1b3a6b","#0a7c59","#f59e0b","#7c3aed","#dc2626","#0369a1"];
+      // الوحدةُ في عنوان البطاقة («توزيع الطلبات على المشاريع») فلا تُكرَّر في كل سطر.
       projChartEl.innerHTML = entries.map(([name,cnt],i)=>`
-        <div style="margin-bottom:10px">
+        <div style="margin-bottom:10px" title="${esc(name)}: ${cnt} طلب">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-            <div style="font-size:11px;font-weight:700;color:var(--text);word-break:break-word;line-height:1.3">${esc(name)}</div>
-            <div style="font-size:12px;font-weight:800;color:${colors[i%colors.length]};margin-right:8px;white-space:nowrap">${cnt} طلب</div>
+            <div style="font-size:11px;font-weight:700;color:${cnt?'var(--text)':'var(--zero)'};word-break:break-word;line-height:1.3">${esc(name)}</div>
+            <div style="font-size:12px;font-weight:800;color:${cnt?'var(--primary)':'var(--zero)'};margin-right:8px;white-space:nowrap;font-family:'JetBrains Mono',monospace;direction:ltr">${cnt}</div>
           </div>
           <div style="background:var(--surface2);border-radius:4px;height:10px;overflow:hidden">
-            <div style="height:100%;width:${Math.round(cnt/maxV*100)}%;background:${colors[i%colors.length]};border-radius:4px;transition:width .4s"></div>
+            <div style="height:100%;width:${Math.round(cnt/maxV*100)}%;background:${poRankColor(i)};border-radius:4px;transition:width .4s"></div>
           </div>
         </div>`).join("");
       if(entries.length===0) projChartEl.innerHTML=`<div style="text-align:center;color:var(--muted);font-size:12px;padding:20px">لا توجد بيانات</div>`;
@@ -24488,15 +24490,15 @@ function renderPurchasesDashboard(){
         projAmountEl.innerHTML=`<div style="text-align:center;color:var(--muted);font-size:12px;padding:20px">لا توجد مشاريع</div>`;
       } else {
         const maxA=Math.max(...amtEntries.map(e=>e[1]),1);
-        const cols=["#1b3a6b","#0a7c59","#f59e0b","#7c3aed","#dc2626","#0369a1"];
+        // الوحدةُ في عنوان البطاقة («… بالمشروع (ريال)») فلا تُكرَّر سبعَ مرّاتٍ تحته.
         projAmountEl.innerHTML=amtEntries.map(([name,amt],i)=>`
-          <div style="margin-bottom:10px">
+          <div style="margin-bottom:10px" title="${esc(name)}: ${amt.toLocaleString("en-US",{maximumFractionDigits:0})} ر.س">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-              <div style="font-size:11px;font-weight:700;color:${amt>0?'var(--text)':'var(--muted)'};word-break:break-word;line-height:1.3;flex:1">${esc(name)}</div>
-              <div style="font-size:11px;font-weight:900;color:${amt>0?cols[i%cols.length]:'var(--muted)'};white-space:nowrap;margin-right:6px;font-family:'JetBrains Mono',monospace;direction:ltr">${amt>0?amt.toLocaleString("en-US",{maximumFractionDigits:0})+" ر.س":"0 ر.س"}</div>
+              <div style="font-size:11px;font-weight:700;color:${amt>0?'var(--text)':'var(--zero)'};word-break:break-word;line-height:1.3;flex:1">${esc(name)}</div>
+              <div style="font-size:11px;font-weight:900;color:${amt>0?'var(--primary)':'var(--zero)'};white-space:nowrap;margin-right:6px;font-family:'JetBrains Mono',monospace;direction:ltr">${amt>0?amt.toLocaleString("en-US",{maximumFractionDigits:0}):"0"}</div>
             </div>
             <div style="background:var(--surface2);border-radius:4px;height:10px;overflow:hidden">
-              <div style="height:100%;width:${amt>0?Math.max(Math.round(amt/maxA*100),2):0}%;background:${cols[i%cols.length]};border-radius:4px;transition:width .5s;opacity:${amt>0?1:0}"></div>
+              <div style="height:100%;width:${amt>0?Math.max(Math.round(amt/maxA*100),2):0}%;background:${poRankColor(i)};border-radius:4px;transition:width .5s;opacity:${amt>0?1:0}"></div>
             </div>
           </div>`).join("");
       }
@@ -24543,13 +24545,15 @@ function renderPurchasesDashboard(){
         ${mEntries.map(({label,year,key,amt})=>{
           const pct=amt>0?Math.max(Math.round(amt/maxM*88),4):2;
           const isCur=isCurrentMonth(key);
-          const barColor=isCur?"#0a7c59":"#1b3a6b";
+          // كان الشهرُ الحاليُّ أخضرَ — والأخضرُ يعني «مكتمل» في كل موضعٍ آخر من الشاشة.
+          // الحداثةُ ليست حالةً: كلُّها كحليّةٌ، والحاليُّ يتميّز بالإشباع لا بالطيف.
+          const barColor="var(--primary)";
           const amtRounded=Math.round(amt);
           const amtLabel=amtRounded>=1000?(Math.round(amtRounded/1000)+"k"):(amtRounded>0?amtRounded:"");
           return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end;position:relative">
             <div style="font-size:8.5px;font-weight:700;color:${barColor};font-family:'JetBrains Mono',monospace;direction:ltr;white-space:nowrap;margin-bottom:2px">${amtLabel}</div>
             <div title="${amtRounded.toLocaleString("en-US")} ر.س" style="width:85%;border-radius:4px 4px 0 0;background:${barColor};height:${pct}%;min-height:${isCur?4:2}px;opacity:${isCur?1:amt>0?0.72:0.18};transition:height .5s;cursor:default"></div>
-            <div style="position:absolute;bottom:-26px;width:100%;text-align:center;font-size:9px;font-weight:${isCur?800:500};color:${isCur?"var(--accent)":"var(--muted)"};line-height:1.3;white-space:nowrap">${label}</div>
+            <div style="position:absolute;bottom:-26px;width:100%;text-align:center;font-size:9px;font-weight:${isCur?800:500};color:${isCur?"var(--primary)":"var(--muted)"};line-height:1.3;white-space:nowrap">${label}</div>
           </div>`;
         }).join("")}
       </div>`;

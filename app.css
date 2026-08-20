@@ -1779,7 +1779,7 @@ html[data-theme="dark"] .row-menu-item.danger:hover{background:#3a1717}
 /* ═══ v18.9np: مسار المشتريات — توزيع العمل الجاري على المراحل ═══ */
 .pof-row{display:grid;grid-template-columns:152px 1fr 30px;align-items:center;gap:9px;margin-bottom:4px}
 .pof-lbl{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;line-height:1.25;cursor:pointer;color:var(--text)}
-.pof-lbl.pof-zero{color:var(--muted);font-weight:600}
+.pof-lbl.pof-zero{color:var(--zero);font-weight:600}
 .pof-lbl .pof-ic{flex-shrink:0;opacity:.7;display:inline-flex}
 .pof-lbl .pof-ic svg{width:13px;height:13px;stroke-width:2}
 .pof-track{background:var(--surface2);border-radius:5px;height:15px;overflow:hidden;cursor:pointer}
