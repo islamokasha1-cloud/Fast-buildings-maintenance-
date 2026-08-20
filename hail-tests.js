@@ -5310,6 +5310,139 @@ function cleaningOpsTests() {
     hardHex.length === 0, hardHex.join("، ") || "لا ألوان مصمتة");
   T("الأرقام بخطّ المنصة أحاديّ العرض (JetBrains Mono tabular)",
     /JetBrains Mono/.test(cssBlock) && /tabular-nums/.test(cssBlock));
+
+  /* ══════════════════════════════════════════════════════════════════
+     ★ الأرشيفُ الشهريُّ لأعمال النظافة — مرآةُ «أرشيف البلاغات الشهري»
+     الحسابُ نقيٌّ فيُفحَص هنا بلا متصفّح؛ والسلوكُ في الشاشة يفحصه
+     `cleaning-archive-check.mjs` في Chromium حقيقيٍّ (٢٦ فحصاً).
+     ══════════════════════════════════════════════════════════════════ */
+  if (CO && typeof CO._computeCleanRollup === "function") {
+    // ── الشهرُ مشتقٌّ من التاريخ لا من حقلٍ جديد: كلُّ سجلٍّ قديمٍ يدخل الأرشيف بلا ترحيل ──
+    T("★ شهرُ السطر من date، وعند غيابه من at (لا ترحيلَ لسجلّاتٍ قائمة)",
+      CO._recMonth({ date: "2026-07-15" }) === "2026-07" &&
+      CO._recMonth({ at: "2026-07-15T08:00:00Z" }) === "2026-07" &&
+      CO._recMonth({}) === "");
+
+    T("الشهرُ السابق/التالي يعبران حدَّ السنة",
+      CO._prevMonthOf("2026-01") === "2025-12" && CO._nextMonthOf("2026-12") === "2027-01" &&
+      CO._prevMonthOf("2026-08") === "2026-07");
+    T("★ أشهرُ المدى شاملةٌ للطرفين، والمقلوبُ يُرجع فراغاً (لا حلقةَ لا نهائية)",
+      CO._monthsBetween("2025-11", "2026-02").join("|") === "2025-11|2025-12|2026-01|2026-02" &&
+      CO._monthsBetween("2026-05", "2026-01").length === 0 &&
+      CO._monthsBetween("", "2026-01").length === 0);
+    T("حدَّا استعلامِ الشهر مدًى على حقلٍ واحد (فهرسٌ مفردٌ تلقائيّ لا مركّب)",
+      CO._monthRange("2026-02").from === "2026-02-01" && CO._monthRange("2026-02").to === "2026-02-31");
+
+    const rec = (d, o) => Object.assign({
+      date: d, at: d + "T08:00:00Z", taskId: "t1", taskName: "مسح", building: "مبنى أ",
+      workType: "نظافة الأرضيات", supervisor: "خالد", by: "أحمد", doneItems: 3, totalItems: 4, photos: []
+    }, o || {});
+    const JUL = [
+      rec("2026-07-01", { photos: ["a", "b"] }),
+      rec("2026-07-01", { taskId: "t2", building: "مبنى ب", supervisor: "", workType: "إدارة النفايات", doneItems: 1, totalItems: 4 }),
+      rec("2026-07-09", { taskId: "t2", photos: ["c"], doneItems: 4, totalItems: 4 }),
+      rec("2026-08-01", { taskId: "t9", photos: ["x", "y", "z"] })   // شهرٌ آخر — لا يدخل
+    ];
+    const R = CO._computeCleanRollup("2026-07", JUL);
+    T("★ ملخّصُ الشهر لا يبتلع سطراً من شهرٍ آخر (٣ لا ٤)", R.runs === 3, "runs=" + R.runs);
+    T("أيامُ العمل اتّحادٌ لا مجموع (يومان لا ثلاثة)", R.days === 2, "days=" + R.days);
+    T("المهامُّ المختلفة تُعَدُّ بالمعرّف لا بالتنفيذ (٢)", R.taskCount === 2, "tasks=" + R.taskCount);
+    T("بنودُ الفحص تُجمَع كما هي (٨ من ١٢)", R.doneItems === 8 && R.totalItems === 12);
+    T("★ التوثيقُ يُعَدُّ بالتنفيذات المصوَّرة (٢) وبالصور (٣) معاً",
+      R.withPhotos === 2 && R.photoCount === 3, `withPhotos=${R.withPhotos} photos=${R.photoCount}`);
+    T("أوّلُ التنفيذ وآخرُه من الشهر نفسِه", R.firstDate === "2026-07-01" && R.lastDate === "2026-07-09");
+    T("التوزيعُ حسب المنطقة بأيامها (مبنى أ: تنفيذان في يومين)",
+      R.buildings["مبنى أ"].runs === 2 && R.buildings["مبنى أ"].days === 2 && R.buildings["مبنى ب"].runs === 1);
+    T("سطرٌ بلا مشرفٍ يُنسَب إلى «" + CO._SUP_UNASSIGNED + "» لا إلى فراغ",
+      R.supervisors[CO._SUP_UNASSIGNED] === 1 && R.supervisors["خالد"] === 2);
+    T("★ الحسابُ حتميّ: نفسُ المدخلات ⇒ نفسُ الملخّص حرفاً",
+      JSON.stringify(CO._computeCleanRollup("2026-07", JUL.slice().reverse()).buildings) === JSON.stringify(R.buildings) &&
+      CO._computeCleanRollup("2026-07", JUL).runs === R.runs);
+    T("شهرٌ بلا تنفيذاتٍ يُختَم بصفرٍ صريح (فلا يُعاد استعلامُه كلَّ مرّة)",
+      CO._computeCleanRollup("2026-06", JUL).runs === 0 && CO._computeCleanRollup("2026-06", []).days === 0);
+
+    const ST = CO._rollupStats(R);
+    T("النسبُ مشتقّةٌ لا مخزَّنة (٨/١٢ = ٦٧٪ · ٢/٣ = ٦٧٪)",
+      ST.itemsPct === 67 && ST.photoPct === 67 && ST.zones === 2, JSON.stringify(ST));
+    T("★ لا قسمةَ على صفر في شهرٍ فارغ (النِّسبُ «—» لا صفراً كاذباً)",
+      CO._rollupStats(CO._computeCleanRollup("2026-06", [])).itemsPct === null &&
+      CO._rollupStats(CO._computeCleanRollup("2026-06", [])).photoPct === null);
+
+    // ── الإجماليُّ من الملخّصات وحدها — كما archivedAggregates() في البلاغات ──
+    const TOT = CO._archivedTotals({ "2026-07": R, "2026-06": CO._computeCleanRollup("2026-06", []) });
+    T("★ إجماليُّ الأرشيف يجمع الملخّصات ولا يعدّ الشهرَ الفارغَ شهراً",
+      TOT.months === 1 && TOT.runs === 3 && TOT.zones === 2 && TOT.itemsPct === 67, JSON.stringify(TOT));
+
+    // ── الفلاتر: مصدرٌ واحدٌ للعدّ وللقائمة ──
+    T("فلترُ المنطقة/نوع العمل/المشرف يقصر القائمة",
+      CO._archFilterRecs(JUL, { building: "مبنى ب" }).length === 1 &&
+      CO._archFilterRecs(JUL, { workType: "إدارة النفايات" }).length === 1 &&
+      CO._archFilterRecs(JUL, { supervisor: "خالد" }).length === 3);
+    T("★ البحثُ النصّيُّ يمسح اسمَ المهمة والمنطقة والمنفِّذ والملاحظة والتاريخ",
+      CO._archFilterRecs([rec("2026-07-03", { note: "زجاجُ الواجهة" })], { q: "زجاج" }).length === 1 &&
+      CO._archFilterRecs(JUL, { q: "2026-07-09" }).length === 1 &&
+      CO._archFilterRecs(JUL, { q: "لا شيء" }).length === 0);
+    T("بلا فلترٍ تعود القائمةُ كاملةً", CO._archFilterRecs(JUL, {}).length === 4 && CO._archFilterRecs(JUL, null).length === 4);
+    T("الترتيبُ الأحدثُ أولاً (كما أرشيف البلاغات)",
+      CO._archSortRecs(JUL)[0].date === "2026-08-01" && CO._archSortRecs(JUL)[3].date === "2026-07-01");
+  }
+
+  // ── الأرشفةُ ختمُ شهرٍ لا وسمُ سطر: قرارٌ مقصودٌ وموثَّق، وحارسٌ يمنع الانحراف ──
+  T("★ مجموعةُ الملخّصات معزولةٌ بالمشروع وبالبيئة (كبقية مجموعات الوحدة)",
+    /return id\+"_cleaning_rollups"\+\(_isDev\(\)\?"_dev":""\)/.test(src));
+  T("★ استعلامُ الشهر مدًى على date وحدَه — بلا orderBy خادميّ (لا فهرسَ مركّباً لكل مشروع)",
+    /const q=\(from,to\)=>database\.collection\(col\)\.where\("date",">=",from\)\.where\("date","<=",to\)\.limit\(ARCH_READ_CAP\)\.get\(\)/.test(src) &&
+    !/where\("date","<=",to\)\s*\.orderBy/.test(src));
+  T("ترشيحُ الشهر يُعاد محلّياً ولا يُترك للاستعلام وحدَه",
+    /return snap\.docs\.map\(d=>d\.data\(\)\|\|\{\}\)\.filter\(r=>recMonth\(r\)===ym\)/.test(src));
+  T("★ الختمُ يقرأ نفسَ قراءةِ العرض من Firestore لا من الكاش (كـwriteRollupForMonth)",
+    /async function sealCleanMonth\(ym\)\{[\s\S]{0,600}const recs=await _fetchMonthRecs\(ym\)/.test(src));
+  // ── لا قصَّ صامتاً: بلوغُ السقف يُعيد القراءةَ أثلاثاً، وما بقي ناقصاً يُقال في الشاشة ──
+  T("★ بلوغُ سقف القراءة يُعيدها أثلاثاً ويجمع بلا تكرار (لا شهرَ منقوصاً بصمت)",
+    /if\(snap\.size < ARCH_READ_CAP\)/.test(src) &&
+    /const parts=\[\[ym\+"-01",ym\+"-10"\],\[ym\+"-11",ym\+"-20"\],\[ym\+"-21",ym\+"-31"\]\]/.test(src) &&
+    /if\(seen\[d\.id\]\) return; seen\[d\.id\]=1;/.test(src));
+  T("★ الشهرُ الناقصُ يُعلن نقصَه في الشاشة، والملخّصُ يحمل الوسمَ نفسَه",
+    /أكبرُ من سقف القراءة/.test(src) && /r\.partial=!!_arTrunc\[ym\];/.test(src));
+  T("★ الختمُ التلقائيُّ لا يتجاوز الشهرَ المنصرم (الجاري لم ينتهِ بعد)",
+    /const lastClosed=_prevMonthOf\(_ymL\(new Date\(\)\)\)/.test(src));
+  T("★ الختمُ كتابةٌ ⇒ لا يحاولها إلا من يملك التحرير (المراقبُ ممنوعٌ في قواعد الخادم)",
+    /async function autoSealPastMonths\(\)\{\s*\n?\s*if\(!_db\(\) \|\| !canEdit\(\)\) return 0;/.test(src));
+  T("الختمُ التلقائيُّ مرّةً واحدةً لكل مشروعٍ في الجلسة (لا رحلاتٍ مكرّرة)",
+    /if\(_arSealedFor===_projId\(\)\) return 0;/.test(src));
+  T("★ الشهرُ الذي له ملخّصٌ بالصيغة الحالية لا يُعاد حسابُه (الماضي لا يتغيّر)",
+    /missing=all\.filter\(ym=>!_arRollups\[ym\] \|\| \(_arRollups\[ym\]\.fv\|\|0\)!==ARCH_FV\)/.test(src));
+  T("★ سقفُ الختم معلَنٌ لا صامت (يُسجَّل ما تُرك للجولة التالية)",
+    /missing\.length>batch\.length/.test(src) && /لم تُختم في هذه الجولة/.test(src));
+  T("★ تبديلُ المشروع يُبطل كاشَ الشهر والملخّصات معاً (لا أرقامَ مشروعٍ تحت اسم آخر)",
+    /if\(_arRollupsFor!==_projId\(\)\)\{ _arLog=\{\}/.test(src));
+  T("النطاق: أرقامُ المشرف من سجلّاته لا من ملخّص المشروع، والإجماليُّ يُخفى عنه",
+    /function archScoped\(recs\)\{[\s\S]{0,220}myBuildings\(\)/.test(src) &&
+    /function archTotalsHTML\(\)\{\s*\n?\s*if\(myBuildings\(\)\) return "";/.test(src));
+  T("تسجيلُ تنفيذٍ جديد يُبطل كاشَ شهرِ اليوم في الأرشيف",
+    /archInvalidateToday\(\);/.test(src) && /function archInvalidateToday\(\)\{ delete _arLog\[_ymL\(new Date\(\)\)\]; \}/.test(src));
+  T("★ السقفُ في القائمة معلَنٌ بعدد الباقي («عرض المزيد — بقي N»)",
+    /عرض المزيد — بقي \$\{filtered\.length-shown\.length\}/.test(src));
+  T("تحديثُ الفلاتر يُعيد رسمَ القائمة وحدَها (وإلا فقد حقلُ البحث تركيزَه كلَّ حرف)",
+    /function archFilter\(\)\{[\s\S]{0,400}_archRepaintList\(\)/.test(src) &&
+    /const box=document\.getElementById\("co-ar-list"\)/.test(src));
+  T("★ التصديرُ يُصدّر المعروضَ بعد الفلاتر لا الشهرَ كلَّه (كما exportArchiveToExcel)",
+    /function archExport\(\)\{\s*\n?\s*const recs=archSortRecs\(archFilterRecs\(archScoped\(_arLog\[_arMonth\]\|\|\[\]\), _arF\)\)/.test(src));
+  T("زرُّ «الأرشيف الشهري» في رأس الصفحة، والعرضُ مُوصَّلٌ في _render",
+    /setView\('archive'\)">\$\{_svg\('archive'\)\} الأرشيف الشهري/.test(src) &&
+    /_view==="archive" \? archiveHTML\(\)/.test(src));
+  T("دوالُّ الأرشيف مكشوفةٌ على window.cleaningOps (للفحص وللشاشة)",
+    /goArchive, archSelect, archFilter, archReset, archMore, archSeal, archExport,/.test(src) &&
+    /_computeCleanRollup: computeCleanRollup, _rollupStats: rollupStats, _archivedTotals: archivedTotals,/.test(src));
+  // ── التوازي مع أرشيف البلاغات: نفسُ المفردات (الشهرُ مفتاحاً · ختمٌ يدويّ · تصديرُ الشهر) ──
+  T("★ أرشيفُ البلاغات ما زال قائماً بمنطقه (المرآةُ تُقاس عليه)",
+    /function autoArchiveByMonth\(\)/.test(HTML) && /function archiveMonth\(ym\)/.test(HTML) &&
+    /function exportArchiveToExcel\(\)/.test(HTML));
+  const _NOTES_MD = (function(){ const p2=path.resolve(path.dirname(IDX), "NOTES.md");
+    return fs.existsSync(p2) ? fs.readFileSync(p2, "utf8") : ""; })();
+  T("★ فحصُ المتصفّح للأرشيف موجودٌ وله سطرُ تشغيلٍ في NOTES §5",
+    fs.existsSync(path.resolve(path.dirname(IDX), "cleaning-archive-check.mjs")) &&
+    _NOTES_MD.includes("node cleaning-archive-check.mjs"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
