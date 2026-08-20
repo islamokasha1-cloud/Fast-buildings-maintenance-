@@ -1011,6 +1011,6 @@ document.addEventListener("keydown",e=>{
    ومحتواها داخل IIFE عمداً — فلا تُضيف إلى النطاق العام إلا `window.operationsWall`.
    الرقمُ أدناه **لا يُحرَّر بيد**: `npm run stamp` يكتبه. ───────────────────── */
 (function(){
-  const MODULE_BUILD = "v18.9.2787";
+  const MODULE_BUILD = "v18.9.2789";
   window.operationsWall = { build: MODULE_BUILD };
 })();

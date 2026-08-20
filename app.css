@@ -38,12 +38,13 @@
      الأغمقُ ما ينتظر إجراءً والأفتحُ ما انتهى. وهو أدقُّ لشرائح عمر التوقّف لأنها
      **سلّمٌ مرتّبٌ** أصلاً لا فئاتٌ متجاورة؛ وثلاثةُ أطيافٍ لا تقول أيُّها أسوأ.
      والأحمرُ وحدَه يخرج عن السلّم — لولاه لما بقي في الشاشة ما يصرخ.
-     والتمييزُ بين «ماضٍ» و«اكتمل» بالإشباع لا بالعتمة وحدَها، وإلا لم يبقَ في
-     الأزرق مدىً يكفي تباينَ النصِّ ويفرّق الدرجتين معاً. */
-  --po-wait:#1b3a6b;       /* ينتظر قراراً — الأغمق، أشدُّ ما يستدعي النظر */
+     واتّجاهُ السلّم قرارُ المالك: **الأغمقُ ما اكتمل، والأفتحُ ما توقّف**. أي أن
+     العملَ يفقد لونَه كلّما طال وقوفُه، حتى إذا تجاوز الحدَّ خرج إلى الأحمر.
+     (كان الاتّجاهُ معكوساً — الأغمقُ ما ينتظر — فردّه المالكُ إلى هذا.) */
+  --po-done:#1b3a6b;       /* اكتمل — الأغمق */
   --po-move:#2f66ad;       /* أزرقُ مشبَع — اعتُمد ومضى */
-  --po-done:#5f7f9c;       /* أزرقُ رماديّ — اكتمل، حبرٌ يبقى مقروءاً */
-  --po-done-fill:#9fbdd8;  /* واكتملَ مساحةً — يخفت */
+  --po-wait:#5f7f9c;       /* ينتظر قراراً — يخفت، وحبرُه يبقى مقروءاً */
+  --po-wait-fill:#9fbdd8;  /* ومساحتُه أخفتُ من حبره */
   /* ── سلّمُ الرتبة ── للكميّات التي لا حالةَ فيها: مشروعٌ أكبرُ من مشروعٍ ليس
      «أسوأَ» منه، فلا يستحقّ لوناً دلالياً. درجةٌ واحدةٌ بسبع مراتب: الأغمقُ الأكبر. */
   --rank1:#1b3a6b;--rank2:#2c518c;--rank3:#4269a3;--rank4:#5f85b8;
@@ -57,7 +58,8 @@ html[data-theme="dark"]{
   --ai:#a5a3e8;--ai-ink:#c3c1f2;
   --shadow:0 1px 4px rgba(0,0,0,0.4);
   --zero:#5b6b83;
-  --po-wait:#7aa6ff;--po-move:#5b8def;--po-done:#8ba3bd;--po-done-fill:#3a5478;
+  /* في الداكن يُقاس البروزُ بالسطوع لا بالعتمة، فينقلب السلّمُ ليحفظ الترتيبَ نفسَه. */
+  --po-done:#7aa6ff;--po-move:#5b8def;--po-wait:#8ba3bd;--po-wait-fill:#3a5478;
   /* السلّمُ ينقلب في الداكن: الأغمقُ يختفي على خلفيةٍ داكنة، فالأبرزُ هو الأفتح. */
   --rank1:#7aa6ff;--rank2:#6690e2;--rank3:#547ac4;--rank4:#4566a6;
   --rank5:#3a5386;--rank6:#314468;--rank7:#2b3950;
@@ -451,7 +453,7 @@ input,select,textarea,button{font-family:'Cairo','Tajawal',sans-serif}
 /* v9hc: priority badges (no dot) — tokenized */
 .badge.b-critical{background:var(--surface2);color:var(--danger);border:1px solid var(--border)}
 .badge.b-urgent{background:var(--surface2);color:var(--po-move);border:1px solid var(--border)}
-.badge.b-normal{background:var(--surface2);color:var(--po-done);border:1px solid var(--border)}
+.badge.b-normal{background:var(--surface2);color:var(--po-wait);border:1px solid var(--border)}
 .b-type{background:#f0f4ff;color:#1b3a6b}
 .ticket-id{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--primary);background:var(--surface2);border:1px solid var(--border);padding:2px 8px;border-radius:5px;direction:ltr;display:inline-block}
 .overdue-tag{font-size:10px;color:var(--danger);font-weight:800;background:var(--surface2);border:1px solid var(--border);padding:2px 8px;border-radius:20px}
@@ -1737,7 +1739,7 @@ html[data-theme="dark"] .row-menu-item.danger:hover{background:#3a1717}
 .po-card{background:#fff;border-radius:10px;padding:11px 12px;margin-bottom:10px;cursor:pointer;box-shadow:var(--shadow);border-right:4px solid var(--info);transition:box-shadow .15s}
 .po-card:hover{box-shadow:0 4px 12px rgba(0,0,0,0.12)}
 .po-card.po-urgent{border-right-color:var(--danger);background:color-mix(in srgb,var(--danger) 4%,var(--surface))}
-.po-card.po-delivered{border-right-color:var(--po-done-fill)}
+.po-card.po-delivered{border-right-color:var(--po-done)}
 .po-card.po-cancelled{border-right-color:var(--muted);opacity:.7}
 /* v18.9mt: طلب شراء متأخر عن تاريخ الاستلام المتوقع */
 .po-card.po-overdue{border-right-color:var(--danger);background:color-mix(in srgb,var(--danger) 4%,var(--surface))}
@@ -1865,8 +1867,8 @@ html[data-theme="dark"] .row-menu-item.danger:hover{background:#3a1717}
 .b-po-approved{background:color-mix(in srgb,var(--po-move) 12%,var(--surface));color:var(--po-move)}
 .b-po-rejected{background:color-mix(in srgb,var(--danger) 12%,var(--surface));color:var(--danger)}
 .b-po-ordered{background:color-mix(in srgb,var(--po-move) 12%,var(--surface));color:var(--po-move)}
-.b-po-completed{background:color-mix(in srgb,var(--po-done) 14%,var(--surface));color:var(--po-done)}
-.b-po-delivered{background:color-mix(in srgb,var(--po-done) 14%,var(--surface));color:var(--po-done)}
+.b-po-completed{background:color-mix(in srgb,var(--po-done) 12%,var(--surface));color:var(--po-done)}
+.b-po-delivered{background:color-mix(in srgb,var(--po-done) 12%,var(--surface));color:var(--po-done)}
 .b-po-closed{background:var(--surface2);color:var(--muted)}
 .b-po-cancelled{background:var(--surface2);color:var(--muted)}
 .b-po-ceo{background:color-mix(in srgb,var(--po-wait) 12%,var(--surface));color:var(--po-wait);border:1px solid color-mix(in srgb,var(--po-wait) 28%,var(--border))}
