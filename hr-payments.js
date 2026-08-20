@@ -56,7 +56,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2789";
+  var MODULE_BUILD = "v18.9.2792";
 
   function COLL(){
     var dev=false;
@@ -131,8 +131,8 @@
   };
   // لون شريط بطاقة الطلب — نفس دلالات ألوان المنصة (توكنز، بلا ألوان جديدة).
   var _RAIL = {
-    hrp_pending_pm:"var(--warn)", hrp_pending_ceo:"#7e22ce",
-    hrp_pending_finance:"var(--info)", hrp_closed:"var(--accent)",
+    hrp_pending_pm:"var(--stage-wait)", hrp_pending_ceo:"var(--stage-wait)",
+    hrp_pending_finance:"var(--stage-wait)", hrp_closed:"var(--stage-done)",
     hrp_pm_rejected:"var(--danger)", hrp_ceo_rejected:"var(--danger)",
     hrp_finance_returned:"var(--danger)", hrp_cancelled:"var(--muted)"
   };
@@ -1162,10 +1162,10 @@
     // بطاقات اللوحة — نفس مكوّن لوحة المشتريات (.dash-top/.stat-tile)، وكلٌّ منها فلترٌ بنقرة.
     h+='<div class="dash-top" id="hrp-dash">'+
       _tile("mine",    "بانتظار إجرائك", pendingForMe().length, "var(--danger)", "bell")+
-      _tile("hrp_pending_pm",     "مدير المشاريع",   cnt("hrp_pending_pm"),     "var(--warn)",  "send")+
-      _tile("hrp_pending_ceo",    "المدير التنفيذي", cnt("hrp_pending_ceo"),    "#7e22ce",      "building2")+
-      _tile("hrp_pending_finance","سداد المالية",    cnt("hrp_pending_finance"),"var(--info)",  "banknote")+
-      _tile("hrp_closed",         "مسدَّد هذا الشهر", _fmt0(paidMonth),          "var(--accent)","checkCircle", "ر.س")+
+      _tile("hrp_pending_pm",     "مدير المشاريع",   cnt("hrp_pending_pm"),     "var(--stage-wait)", "send")+
+      _tile("hrp_pending_ceo",    "المدير التنفيذي", cnt("hrp_pending_ceo"),    "var(--stage-wait)", "building2")+
+      _tile("hrp_pending_finance","سداد المالية",    cnt("hrp_pending_finance"),"var(--stage-move)", "banknote")+
+      _tile("hrp_closed",         "مسدَّد هذا الشهر", _fmt0(paidMonth),          "var(--stage-done)","checkCircle", "ر.س")+
     '</div>';
 
     h+='<div class="card"><div class="filters">'+

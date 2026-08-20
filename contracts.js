@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2789";
+var MODULE_BUILD = "v18.9.2792";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -4439,9 +4439,10 @@ function budgetPlanned(projId, catKey){
 
 /* ── شارةُ الحالة ── */
 var _RAIL = {
-  crq_pending_pm:"var(--warn)", crq_pending_proc:"var(--warn)", crq_pending_finance:"var(--info)",
-  crq_pending_ceo:"#7c3aed", crq_pending_pay:"var(--info)", crq_approved:"var(--accent)",
-  crq_converted:"var(--accent)", crq_paid:"var(--accent)", crq_draft:"var(--muted)"
+  crq_pending_pm:"var(--stage-wait)", crq_pending_proc:"var(--stage-wait)",
+  crq_pending_finance:"var(--stage-wait)", crq_pending_ceo:"var(--stage-wait)",
+  crq_pending_pay:"var(--stage-wait)", crq_approved:"var(--stage-move)",
+  crq_converted:"var(--stage-move)", crq_paid:"var(--stage-done)", crq_draft:"var(--muted)"
 };
 var _BADGE = {
   crq_pending_pm:{cls:"b-po-approval",icon:"send"}, crq_pending_proc:{cls:"b-po-approval",icon:"cart"},

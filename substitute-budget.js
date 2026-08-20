@@ -579,7 +579,7 @@
         _kpi("مصروف على المنصة", _fmt(s.spentSell), "var(--accent)") +
         _kpi("المتبقي", _fmt(s.remaining), s.remaining<0?"var(--danger)":"var(--success)") +
         _kpi("الربح المحقّق", _fmt(s.profit), "var(--success)") +
-        _kpi("قيد التنفيذ (لم يُخصم بعد)", _fmt(s.wipSell), "var(--warn,#b45309)") +
+        _kpi("قيد التنفيذ (لم يُخصم بعد)", _fmt(s.wipSell), "var(--stage-wait)") +
       '</div>' : '';
 
     /* من أين جاء «المصروف»؟ رقمٌ واحدٌ يجمع شراءً وتعاقداً يُقرأ لغزاً حين لا يطابق

@@ -124,7 +124,7 @@
         </div>
       </div>
       <div class="card-body">
-        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;font-size:12px;color:#166534;margin-bottom:14px">
+        <div style="background:color-mix(in srgb,var(--accent) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 26%,var(--border));border-radius:8px;padding:10px 14px;font-size:12px;color:var(--accent);margin-bottom:14px">
           ℹ️ مكتبة أسعار مرجعية عامة للمصنعيات (اليد العاملة) — مشتركة بين جميع المشاريع. سعر البند يمثّل أجرة التنفيذ للوحدة المنجَزة، ويُستخدم لاحقاً كمصدر لمكوّن العمالة في تحليل الأسعار.
         </div>
         <div class="ast-stats" id="lab-stat-grid" style="margin-bottom:14px"></div>
@@ -352,7 +352,7 @@
       const scope = (it.scopeNotes||"").trim();
       const scopeCell = scope
         ? `<span title="${E(scope)}" style="font-size:11px;color:var(--muted)">${E(scope.length>40?scope.slice(0,40)+"…":scope)}</span>`
-        : '<span style="color:#dc2626;font-size:11px">⚠ غير محدد</span>';
+        : '<span style="color:var(--danger);font-size:11px">⚠ غير محدد</span>';
       return `
       <tr>
         <td style="font-weight:700;color:var(--muted)">${offset+i+1}</td>

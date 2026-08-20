@@ -11715,6 +11715,29 @@ function poColorSystemGuards() {
   T("★ ومساحةُ المنتظِر أفتحُ من حبره — وإلا لم تكن تهدئةً",
     (()=>{ const f = /--stage-wait-fill:\s*(#[0-9a-fA-F]{6})/.exec(rootBlock);
            return !!(f && stepHex("wait") && lum(f[1]) > lum(stepHex("wait"))); })());
+  // ── (٥ط) السلّمُ عابرٌ للوحدات: ما ينتظر ينتظر أياً كان المنتظَر ──
+  const RAILS = [
+    ["contracts.js",   "_RAIL = {",  "};"],
+    ["hr-payments.js", "_RAIL = {",  "};"],
+  ];
+  RAILS.forEach(([f, from, to]) => {
+    let src = "";
+    try { src = require("fs").readFileSync(__dirname + "/" + f, "utf8"); } catch (e) {}
+    const i = src.indexOf(from), j = i < 0 ? -1 : src.indexOf(to, i);
+    const rail = i < 0 || j < 0 ? "" : src.slice(i, j);
+    T(`★★ ${f}: شريطُ الحالة على السلّم — بلا رقمٍ سداسيٍّ ولا --warn/--accent`,
+      !!rail && hexIn(rail).length === 0 && !/var\(--(warn|accent)\)/.test(rail),
+      rail ? (hexIn(rail).concat(rail.match(/var\(--(warn|accent)\)/g) || []).join(" ") || undefined)
+           : "تعذّر قراءةُ الخريطة");
+    T(`★ و${f}: المنتظِرُ يستعمل --stage-wait فعلاً`,
+      /var\(--stage-wait\)/.test(rail));
+  });
+
+  // الوحداتُ التي حُوّلت: لا رقمَ سداسيَّ حالةٍ فيها خارجَ قوالب الطباعة
+  T("★★ عقودُ الأداء بلا رقمٍ سداسيٍّ نصّيٍّ إطلاقاً (وحدةٌ بلا قالبِ طباعة)",
+    (() => { let x = ""; try { x = require("fs").readFileSync(__dirname + "/performance-contract.js", "utf8"); } catch (e) { return false; }
+             return hexIn(x).length === 0; })());
+
   T("★ ودرجاتُ السلّم الثلاثُ متمايزةٌ لا تكرارَ فيها",
     new Set(["--stage-wait","--stage-move","--stage-done"].map(k=>{
       const m = new RegExp("\\" + k.slice(1) + ":\\s*(#[0-9a-fA-F]{6})").exec(rootBlock);
