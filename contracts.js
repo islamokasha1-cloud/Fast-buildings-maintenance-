@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2766";
+var MODULE_BUILD = "v18.9.2768";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1040,6 +1040,8 @@ function contractFromRequest(req, contractId, now, by, clauses){
     projectId: r.projectId || "", isCustomProject: r.isCustomProject === true,
     projectName: r.projectName || "",
     budgetCategoryKey: r.budgetCategoryKey || "",   // قد يكون فارغاً — الربطُ اختياريّ
+    // رصيدُ «البند المستعاض» يُختار مرةً على الطلب ويُورَث حرفياً — لا يُسأل ثانيةً
+    isSubstitute: r.isSubstitute === true, substituteAccountId: r.substituteAccountId || "",
     title: r.title || "", scope: r.scope || "",
     type: r.engagement === "pay_order" ? "pay_order" : "works_order",
     lines: lines,
@@ -1695,6 +1697,96 @@ function contractRollup(projectKey, requests, contracts, extracts, changes){
   return out;
 }
 
+/* ════ الأعمالُ التعاقديةُ على رصيد «البند المستعاض» ════   [طلبُ المالك]
+
+   **الفجوة.** «البند المستعاض» رصيدٌ من مال العميل يُنفَق على أعمالٍ خارج بنود
+   العقد. وكان يُخصَم من **طلبات الشراء وحدَها** — بينما نصفُ هذا العمل يُنفَّذ
+   بمقاولِ باطن: أمرُ دفعٍ صغير أو عقدٌ بمستخلصات. فالمصروفُ الحقيقيُّ أكبرُ ممّا
+   تعرضه شاشةُ الرصيد، و«المتبقّي» رقمٌ يُطمئن كذباً.
+
+   **العلَمُ على الطلب لا على العقد.** يُختار مرةً واحدةً عند إنشاء طلب التعاقد
+   (عقداً كان أو أمرَ دفع)، ثم **يرثه العقدُ حرفياً** عند التحويل (`contractFromRequest`)
+   وترثه مستخلصاتُه بالتبعية — فلا يُسأل أحدٌ مرتين ولا ينحرف الجوابان.
+
+   **الخصمُ ممّا خرج من الخزينة فعلاً** — لا من الالتزام. وهو اصطلاحُ `contractRollup`
+   نفسُه في هذه الوحدة، والمصدرُ نفسُه لأرقامه، فلا يقول رقمانِ الشيءَ ذاته بصيغتين:
+     • `spent`      = أوامرُ الدفع المسدَّدة + المستخلصاتُ المسدَّدة (`ext_paid`).
+     • `pending`    = طلباتٌ قيدَ الاعتماد (لم تُحوَّل ولم تُسدَّد بعد).
+     • `contracted` = المتبقّي من التزامِ عقدٍ قائم (قيمتُه − المسدَّدُ منه).
+   والاثنانِ الأخيرانِ **قيدُ التنفيذ**: يُعرَضان ولا يُخصَمان — تماماً كطلب الشراء
+   الجاري في `_calcStats`.
+
+   **الطلبُ المحوَّلُ لا يُعدُّ مرتين**: بعد التحويل تصير حالتُه `crq_converted`
+   (نهائية) فيسقط من `reqIsPending`، ويتولّى عقدُه الحساب. */
+function docSubstituteId(d){
+  return (d && d.isSubstitute === true) ? String(d.substituteAccountId || "") : "";
+}
+/* حالةُ المستند على الرصيد: `spent` خرج · `live` قيد التنفيذ · `idle` لا أثرَ له. */
+function substituteRollup(accountId, requests, contracts, extracts){
+  var id = String(accountId||"");
+  var out = { pending:0, contracted:0, spent:0, docs:[], liveCount:0, spentCount:0 };
+  if(!id) return out;
+  var reqs = Array.isArray(requests)?requests:[];
+  var ctrs = Array.isArray(contracts)?contracts:[];
+  var exts = Array.isArray(extracts)?extracts:[];
+
+  reqs.forEach(function(r){
+    if(docSubstituteId(r) !== id) return;
+    if(r.status === "crq_converted") return;              // عقدُه يحمله — لا يُعدّ مرتين
+    var eng = (r.engagement === "pay_order") ? "pay_order" : "contract";
+    var val = r2(crqValueOf(r));
+    var row = { kind:"req", engagement:eng, id:r.id||"", title:r.title||"",
+                vendorName:r.vendorName||"", status:r.status||"", statusLbl:CRQ_STATUS[r.status]||r.status||"—",
+                value:val, spent:0, state:"idle" };
+    if(r.status === "crq_paid"){
+      var paid = r2((r.payment||{}).amount != null ? (r.payment||{}).amount : r.value);
+      out.spent += paid; out.spentCount++;
+      row.spent = paid; row.state = "spent";
+    } else if(reqIsPending(r)){
+      out.pending += val; out.liveCount++;
+      row.state = "live";
+    }
+    out.docs.push(row);
+  });
+
+  ctrs.forEach(function(c){
+    if(docSubstituteId(c) !== id) return;
+    var val = r2(contractValue(c));
+    var paid = 0;
+    exts.forEach(function(e){
+      if(e && e.contractId === c.id && e.status === "ext_paid") paid += r2((e.payment||{}).amount);
+    });
+    paid = r2(paid);
+    // **المالُ المدفوعُ مصروفٌ أبداً** مهما صارت حالةُ العقد (قاعدةُ `contractRollup`)
+    out.spent += paid;
+    var live = ctrIsCommitted(c);
+    var remaining = live ? r2(Math.max(0, val - paid)) : 0;
+    out.contracted += remaining;
+    if(paid > 0) out.spentCount++;
+    if(live) out.liveCount++;
+    out.docs.push({ kind:"ctr", engagement:"contract", id:c.id||"", title:c.title||"",
+                    vendorName:c.vendorName||"", status:c.status||"", statusLbl:CTR_STATUS[c.status]||c.status||"—",
+                    value:val, spent:paid, remaining:remaining,
+                    state: live ? "live" : (paid>0 ? "spent" : "idle") });
+  });
+
+  out.pending=r2(out.pending); out.contracted=r2(out.contracted); out.spent=r2(out.spent);
+  out.docs.sort(function(a,b){ return String(b.id).localeCompare(String(a.id)); });
+  return out;
+}
+/* الغلافُ الذي تستدعيه `substitute-budget`: يضمن تشغيلَ المستمعين ثم يجمّع —
+   كما يفعل `rollupForProject` لإدارة المشاريع بالضبط. */
+function substituteRollupFor(accountId){
+  startReqSync(); startCtrSync(); startExtSync();
+  return substituteRollup(accountId, _reqs, _ctrs, _exts);
+}
+/* هل هذا العقدُ (أبو طلبِ شراءٍ ما) محمولٌ على رصيد استعاضة؟ يقرؤها حارسُ منع
+   الازدواج في `substitute-budget`: طلبُ شراءٍ تحت عقدٍ مستعاضٍ محسوبٌ في مستخلصاته. */
+function contractSubstituteId(contractId){
+  var c = contractById(contractId);
+  return c ? docSubstituteId(c) : "";
+}
+
 /* **حارسُ منع الازدواج**: طلبُ شراءٍ يحمل `contractId` جزءٌ من عقدٍ محسوبٍ أصلاً،
    فيُستبعَد من مصروف الشراء. تقرؤها `project-management` فلا تُنسَخ القاعدة. */
 function poIsUnderContract(p){ return !!(p && p.contractId); }
@@ -1912,6 +2004,7 @@ function _toast(m,t){ try{ toast(m,t); }catch(e){ console.log(m); } }
 function _icn(n,c){ try{ return _ic(n,c); }catch(e){ return ""; } }
 function _svg(n){ try{ return _svgIcon(n); }catch(e){ return ""; } }
 function _user(){ try{ return currentUser||null; }catch(e){ return null; } }
+function _sb(){ try{ return (window.substituteBudget && typeof window.substituteBudget.accounts==="function") ? window.substituteBudget : null; }catch(e){ return null; } }
 function _role(){ var u=_user(); return (u && u.role) ? u.role : ""; }
 function _me(){ var u=_user(); return (u && u.name) || "النظام"; }
 function _now(){ return new Date().toISOString(); }
@@ -4519,6 +4612,7 @@ function reqTileHTML(r){
     '<div class="ct-tile-kind">'+_icn(eng.icon,"ic-sm")+' '+_esc(eng.lbl)+
       ' <span class="ct-dot">·</span> <span class="num">'+_esc(r.id)+'</span>'+
       ' <span class="ct-dot">·</span> '+_esc(_projName(r))+'</div>'+
+    (docSubstituteId(r)?'<div style="margin-top:5px">'+substituteChip(r,true)+'</div>':'')+
     '<div class="ct-tile-foot">'+
       '<div class="ct-money"><span class="num">'+money(r.value)+'</span> <small>ر.س</small></div>'+
       '<div class="ct-tile-who">'+_esc(r.vendorName||"—")+(owner?' <span class="ct-dot">·</span> عند '+_esc(owner.lbl):'')+'</div>'+
@@ -4538,6 +4632,7 @@ function newRequest(){
     title:"", scope:"",
     vendorId:"", vendorName:"", vatMode:"incl", budgetCategoryKey:"",
     lines:[], candidates:[], rationale:"", durationDays:0, startDate:"",
+    isSubstitute:false, substituteAccountId:"",
     advance:{pct:0,recoveryPct:0}, retention:{pct:0,releaseOn:"completion"},
     penalty:{mode:"amount",perDayAmount:0,capAmount:0}, warranty:{months:0}, value:0
   };
@@ -4596,6 +4691,8 @@ function syncReqDraft(){
   if(document.getElementById("ct-r-scope")) d.scope=v("ct-r-scope");
   if(document.getElementById("ct-r-vat"))   d.vatMode=normVatMode(v("ct-r-vat"));
   if(document.getElementById("ct-r-cat"))   d.budgetCategoryKey=v("ct-r-cat");
+  var sbc=document.getElementById("ct-r-sub");
+  if(sbc){ d.isSubstitute = !!sbc.checked; d.substituteAccountId = d.isSubstitute ? v("ct-r-subacc") : ""; }
   if(document.getElementById("ct-r-mproj")) d.projectName=v("ct-r-mproj");
   if(document.getElementById("ct-r-dur"))   d.durationDays=n("ct-r-dur");
   if(document.getElementById("ct-r-start")) d.startDate=v("ct-r-start");
@@ -4756,6 +4853,7 @@ function reqFormHTML(){
       field("وضع الضريبة", vatSel)+
     '</div>'+
     budgetLinkHTML(linkState, d.budgetCategoryKey) +
+    substituteLinkHTML(d, ref) +
     eligNote +
     '<div class="ct-picks">'+engCards+'</div>'+
   '</div>'+
@@ -4818,6 +4916,40 @@ function budgetLinkHTML(state, catKey){
   '</div>';
 }
 
+/* ── رصيدُ «البند المستعاض» على طلب التعاقد ──
+   يظهر السؤالُ **فقط** إن كانت وحدةُ الرصيد حاضرةً وفيها حسابٌ واحدٌ على الأقل:
+   سؤالٌ بلا جوابٍ ممكنٍ ضوضاءُ نموذجٍ لا خيار. والحسابُ المربوطُ بمشروع الطلب
+   يُرشَّح تلقائياً بالمفتاح الموحّد نفسِه (`docProjectKey`: الرسميُّ بمعرّفه
+   واليدويُّ بـ`__CUSTOM__:`) — كما يفعل نموذجُ طلب الشراء حرفياً. */
+function substituteLinkHTML(d, ref){
+  var sb=_sb(); if(!sb) return "";
+  var accs=[]; try{ accs=sb.accounts()||[]; }catch(e){}
+  if(!accs.length) return "";
+  var on = d.isSubstitute === true;
+  var preferred = d.substituteAccountId || "";
+  if(on && !preferred){ try{ preferred = sb.accountForProject(docProjectKey(ref))||""; }catch(e){} }
+  var opts=""; try{ opts=sb.optionsHtml(preferred); }catch(e){}
+  return '<div class="ct-sub'+(on?" on":"")+'">'+
+    '<label class="ct-sub-h"><input type="checkbox" id="ct-r-sub"'+(on?" checked":"")+
+      ' onchange="contracts.toggleSubstitute()"> '+_icn("landmark","ic-sm")+' هذا العمل من البند المستعاض</label>'+
+    '<div class="ct-sub-s">يُخصَم من رصيد الحساب المختار ما يخرج فعلاً — أمرُ الدفع المسدَّد أو مستخلصاتُ العقد المسدَّدة.</div>'+
+    (on ? '<div style="margin-top:9px">'+field("حساب البند المستعاض *",
+        '<select class="form-input" id="ct-r-subacc">'+opts+'</select>')+'</div>' : '')+
+  '</div>';
+}
+
+/* شارةُ «البند المستعاض» على الطلب والعقد — دالّةٌ واحدةٌ تُستدعى في كلّ موضع.
+   `compact` للمواضع الضيّقة (بلاطاتُ القائمة). واسمُ الحساب في `title` لمن أراده. */
+function substituteChip(doc, compact){
+  if(!docSubstituteId(doc)) return "";
+  var nm=""; try{
+    var sb=_sb();
+    if(sb){ var a=(sb.accounts()||[]).find(function(x){ return x && x.id===doc.substituteAccountId; }); if(a) nm=a.name||""; }
+  }catch(e){}
+  return '<span class="ct-sub-chip" title="'+_esc("يُخصَم من رصيد البند المستعاض"+(nm?" — "+nm:""))+'">'+
+    _icn("landmark","ic-sm")+' '+(compact?"مستعاض":"البند المستعاض")+'</span>';
+}
+
 function totalsHTML(t, mode){
   var m=VAT_MODES[normVatMode(mode)];
   return '<div class="ct-tl"><span class="l">الأساس</span><span class="v num">'+money(t.base)+'</span></div>'+
@@ -4842,6 +4974,10 @@ function recalc(full){
   var box=document.getElementById("ct-r-total");
   if(box) box.innerHTML = totalsHTML(linesTotal(_rDraft.lines,_rDraft.vatMode), _rDraft.vatMode);
 }
+function toggleSubstitute(){
+  syncReqDraft(); if(!_rDraft) return;
+  paintReqs();
+}
 function cancelRequestForm(){ _rDraft=null; paintReqs(); }
 
 function submitRequest(){
@@ -4859,6 +4995,7 @@ function submitRequest(){
   if(elig && elig.block){ _toast("⚠ "+elig.reason,"warn"); return; }
   var total=crqValueOf(d);
   if(total<=0){ _toast("⚠ قيمة الطلب صفر — راجع الكميات والأسعار","warn"); return; }
+  if(d.isSubstitute && !d.substituteAccountId){ _toast("⚠ اختر حساب البند المستعاض","warn"); return; }
   if(d.engagement==="pay_order" && !payOrderAllowed(total,payOrderThreshold())){
     _toast("⚠ أمر الدفع لا يجوز عند "+money0(payOrderThreshold())+" ر.س فأكثر — حوّله إلى عقد","warn"); return;
   }
@@ -4936,6 +5073,7 @@ function reqCardHTML(id){
     infoCell("الطرف", vendorCell(r.vendorId, r.vendorName))+
     infoCell("المشروع", _esc(_projName(r))+(r.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':""))+
     infoCell("نوع الارتباط", _icn(eng.icon,"ic-sm")+" "+_esc(eng.lbl))+
+    (docSubstituteId(r)?infoCell("البند المستعاض", substituteChip(r)):"")+
     infoCell("وضع الضريبة", _esc((VAT_MODES[normVatMode(r.vatMode)]||{}).short||"—"))+
     infoCell("مدة التنفيذ", r.durationDays?(money0(r.durationDays)+" يوماً"):"—")+
     infoCell("أنشأه", _esc(r.createdBy||"—"))+
@@ -5559,6 +5697,7 @@ function ctrTileHTML(c){
     '<div class="ct-tile-kind"><span class="num">'+_esc(c.id)+'</span>'+
       ' <span class="ct-dot">·</span> '+_esc(_projName(c))+
       (c.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':'')+'</div>'+
+    (docSubstituteId(c)?'<div style="margin-top:5px">'+substituteChip(c,true)+'</div>':'')+
     extLine+
     '<div class="ct-tile-foot">'+
       '<div class="ct-money"><span class="num">'+money(v)+'</span> <small>ر.س</small></div>'+
@@ -5656,6 +5795,7 @@ function ctrOverviewHTML(c){
       infoCell("الطرف", vendorCell(c.vendorId, c.vendorName))+
       infoCell("المشروع", _esc(_projName(c))+(c.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':""))+
       infoCell("بند الموازنة", budgetCell)+
+      (docSubstituteId(c)?infoCell("البند المستعاض", substituteChip(c)):"")+
       infoCell("وضع الضريبة", _esc((VAT_MODES[normVatMode(c.vatMode)]||{}).short||"—"))+
       infoCell("تاريخ البدء", _esc(c.startDate||"—"))+
       infoCell("مدة التنفيذ", c.durationDays?(money0(c.durationDays)+" يوماً"):"—")+
@@ -7901,6 +8041,12 @@ function injectCSS(){
 ".ct-pick.on{border-color:var(--primary);background:var(--surface2)}",
 ".ct-pick.off{opacity:.5;cursor:not-allowed}",
 ".ct-pick input{position:absolute;opacity:0;pointer-events:none}",
+".ct-sub{margin-top:10px;border:1px solid var(--border);border-radius:12px;padding:11px 13px;background:var(--surface)}",
+".ct-sub.on{border-color:var(--subst-bd);background:var(--subst-bg)}",
+".ct-sub-h{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:800;color:var(--subst);cursor:pointer}",
+".ct-sub-h input{width:17px;height:17px;accent-color:var(--subst);cursor:pointer}",
+".ct-sub-s{font-size:11px;color:var(--muted);font-weight:600;margin-top:3px}",
+".ct-sub-chip{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;color:var(--subst);background:var(--subst-bg);border:1px solid var(--subst-bd)}",
 ".ct-pick-t{font-size:13px;font-weight:800;color:var(--primary);display:flex;align-items:center;gap:6px}",
 ".ct-pick-s{font-size:11px;color:var(--muted);font-weight:600}",
 ".ct-table tr.ct-on td{background:var(--sla-ok-bg)}",
@@ -8127,6 +8273,7 @@ window.contracts = {
   setReqProject: setReqProject, setEngagement: setEngagement, setReqVendor: setReqVendor,
   toggleBoqLine: toggleBoqLine, addFreeLine: addFreeLine, delReqLine: delReqLine,
   addCandidate: addCandidate, delCandidate: delCandidate, recalc: recalc,
+  toggleSubstitute: toggleSubstitute,
   filterReqs: filterReqs, clearReqFilters: clearReqFilters, openReq: openReq, backToReqs: backToReqs,
   act: act, doCancel: doCancel, doDelete: doDelete, openPay: openPay,
   openRewind: openRewind, closeRewind: closeRewind, doRewind: doRewind,
@@ -8278,6 +8425,11 @@ window.contracts = {
   contractsLoaded: contractsLoaded,
   poIsUnderContract: poIsUnderContract,
   _contractRollup: contractRollup,
+  // البند المستعاض — تقرؤها `substitute-budget.js`
+  substituteRollupFor: substituteRollupFor,
+  contractSubstituteId: contractSubstituteId,
+  _substituteRollup: substituteRollup,
+  _docSubstituteId: docSubstituteId,
   _projectKeyOfPm: projectKeyOfPm,
   _reqIsPending: reqIsPending,
   _ctrIsCommitted: ctrIsCommitted,

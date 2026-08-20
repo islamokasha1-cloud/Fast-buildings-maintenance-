@@ -886,6 +886,7 @@ function substituteBudget() {
   H("9) وحدة البند المستعاض (substitute-budget.js)");
   if (!SB_PATH) { console.log("  ⏭  substitute-budget.js غير موجود — تُخطّى"); return; }
   const src = fs.readFileSync(SB_PATH, "utf8");
+  const SBSRC = src;
   const vm = require("vm");
   try { new vm.Script(src); T("صياغة substitute-budget.js سليمة", true); }
   catch (e) { T("صياغة substitute-budget.js سليمة", false, String(e.message).slice(0, 120)); return; }
@@ -972,6 +973,34 @@ function substituteBudget() {
   // بلا كاشف ميّت (توقيع قديم 5 وسائط): السلوك السابق يبقى (لا كسر رجعي)
   const sLegacy = SB._calcStats(accD, posD, p => p.st === "closed", p => p.cost, p => p.est);
   T("توافق رجعي: بلا isDead يُحسَب كل غير-المغلق WIP", sLegacy.wipSell === (8000 + 7000) * 1.25);
+
+  /* ── v18.9.2767: الأعمالُ التعاقدية تُخصَم من الرصيد نفسِه ──
+     الوسيطُ السابعُ مساهمةُ التعاقدات بالتكلفة قبل الهامش، فتدخل المعادلةَ نفسَها:
+     المصروفُ يُخصَم بسعر بيعه، والالتزامُ القائمُ قيدُ تنفيذٍ يُعرَض ولا يُخصَم. */
+  const accC = { margin: 25, total: 500000, openingConsumed: 0 };
+  const posC = [{ st: "closed", cost: 10000, est: 0 }];
+  const isDeadC = p => p.st === "cancelled";
+  const sC = SB._calcStats(accC, posC, p => p.st === "closed", p => p.cost, p => p.est, isDeadC,
+                           { spent: 20000, wip: 40000, count: 3 });
+  T("★★ المصروفُ التعاقديُّ يُخصَم بسعر بيعه (20,000 × 1.25)",
+    sC.ctrSell === 25000 && sC.spentSell === 12500 + 25000, "ctrSell=" + sC.ctrSell + " spent=" + sC.spentSell);
+  T("★★ والمستهلكُ يجمع الشراءَ والتعاقدَ معاً", sC.consumed === 37500 && sC.remaining === 462500);
+  T("★ والالتزامُ التعاقديُّ قيدُ تنفيذٍ لا خصم", sC.ctrWip === 50000 && sC.wipSell === 50000);
+  T("★ والربحُ من المصدرين", sC.profit === (12500 - 10000) + (25000 - 20000));
+  T("★ والعدُّ يشمل مستنداتِ التعاقد", sC.count === 1 + 3, "count=" + sC.count);
+  T("★★ توافقٌ رجعيّ: بلا وسيط التعاقدات لا يتغيّر شيء",
+    SB._calcStats(accC, posC, p => p.st === "closed", p => p.cost, p => p.est, isDeadC).consumed === 12500);
+
+  /* حارسُ منع الازدواج: طلبُ شراءٍ تحت عقدٍ مستعاضٍ محسوبٌ في مستخلصاته */
+  T("★★ طلبُ الشراء تحت عقدٍ مستعاضٍ لا يُخصَم مرتين",
+    /function _poDoubleCounted/.test(SBSRC) && /contractSubstituteId/.test(SBSRC) &&
+    /function _posOf[\s\S]{0,220}!_poDoubleCounted\(p\)/.test(SBSRC));
+  T("★ والمصدرُ الوحيدُ لأرقام التعاقدات هو وحدتُها (لا نسخةَ ثانيةٍ من قواعدها)",
+    /substituteRollupFor/.test(SBSRC) && !/ext_paid/.test(SBSRC) && !/crq_paid/.test(SBSRC));
+  T("★ وغيابُ وحدة التعاقدات لا يكسر الشاشة (أصفارٌ آمنة)",
+    /return \{ spent:0, wip:0, count:0, docs:\[\] \};/.test(SBSRC));
+  T("★ وشاشةُ الحساب تعرض الأعمالَ التعاقدية بجدولها",
+    /الأعمال التعاقدية \('/.test(SBSRC) && /المصروف فعلاً/.test(SBSRC));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -8283,8 +8312,17 @@ function contractsPhase1() {
     !/estCost\s*:|actualCost\s*:/.test(src));
   T("★ وقراءةُ الطلبات من مصفوفة النواة بلا مستمعٍ ثانٍ للمجموعة نفسِها",
     /function allPurchases\(\)/.test(src) && !/PURCH_COL\(\)\)\.onSnapshot/.test(src));
-  T("★ لا تلمس المخزون ولا البند المستعاض",
-    !/_inventoryItems|substituteBudget|substituteAccountId/.test(src));
+  T("★ لا تلمس المخزون", !/_inventoryItems/.test(src));
+  /* ── البند المستعاض: تقرأ ولا تكتب ──   [v18.9.2767]
+     كان الحارسُ يمنع ذكرَ الرصيد إطلاقاً، ثم طلب المالكُ أن تُخصَم الأعمالُ
+     التعاقدية من رصيد الاستعاضة كما تُخصَم المشتريات. فالقاعدةُ تغيّرت ولم تُلغَ:
+     الوحدةُ تحمل **معرّفَ الحساب** وتقرأ واجهةَ الوحدة للعرض والترشيح، أمّا وثيقةُ
+     الأرصدة نفسُها فتبقى ملكاً لمالكها وحدَه — وإلا صار للرصيد كاتبان. */
+  T("★★ لا تكتب في وثيقة أرصدة البند المستعاض (تقرأ فقط)",
+    !/substitute_accounts/.test(src) &&
+    !/substituteBudget\.(openAdd|openEdit|remove|_applyUpsert|_applyRemove|save)/.test(src));
+  T("★ وتحمل معرّفَ الحساب وتقرأ واجهتَه للعرض والترشيح",
+    /substituteAccountId/.test(src) && /accountForProject/.test(src) && /optionsHtml/.test(src));
   T("مجموعاتها الخاصة معرّفة مع نسخ التطوير",
     /global_vendors_dev/.test(src) && /global_contract_requests_dev/.test(src) &&
     /global_contracts_dev/.test(src) && /global_contract_extracts_dev/.test(src));
@@ -8699,8 +8737,12 @@ function contractsPhase1() {
       /function canEditLines\(req\)\{ return _role\(\)==="admin" && !!req && !crqIsFinal\(req\.status\); \}/.test(src) &&
       /canEditLines\(r\) \? '<button[\s\S]{0,120}contracts\.editLines\(\)/.test(src));
     T("★★ وقواعدُ الخادم تفتح البنودَ والقيمةَ للأدمن **وحدَهما** (الطرفُ والشكلُ مجمَّدان للجميع)",
-      /unchanged\(\['createdAt','createdByUser','vendorId','engagement','projectId'\]\)/.test(RULX) &&
+      /unchanged\(\['createdAt','createdByUser','vendorId','engagement','projectId',\s*'isSubstitute','substituteAccountId'\]\)/.test(RULX) &&
       /\(unchanged\(\['value','lines'\]\) \|\| isAdmin\(\)\)/.test(RULX));
+    /* ومعهما رصيدُ البند المستعاض — تحويلُه بعد الاعتماد ينقل المالَ بين رصيدين
+       بلا معتمِد، فيُجمَّد كما تُجمَّد هويةُ الطرف. [v18.9.2768] */
+    T("★★ ورصيدُ البند المستعاض مجمَّدٌ بعد الإرسال للجميع (ولا يُرفَع علَمُه لاحقاً)",
+      /'isSubstitute','substituteAccountId'/.test(RULX));
     T("★ والمسودّةُ محلّيةٌ حتى الحفظ ولا تبقى معلّقةً على طلبٍ آخر",
       /function openReq\(id\)\{ _rOpen=id; _rDraft=null; _lnEdit=null;/.test(src) &&
       /function backToReqs\(\)\{ _rOpen=null; _rDraft=null; _lnEdit=null;/.test(src));
@@ -9847,6 +9889,81 @@ function contractsPhase1() {
       /القيمةُ الحالية = الأصليّ/.test(src));
     T("وسببُ التغيير إلزاميٌّ في طبقة البيانات لا في الشاشة وحدَها",
       /if\(!doc\.reason\) return Promise\.reject/.test(src));
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     الأعمالُ التعاقدية على رصيد «البند المستعاض»   [v18.9.2767]
+     العلَمُ يُختار مرةً على الطلب ويرثه العقد، والخصمُ ممّا خرج فعلاً لا من
+     الالتزام — الاصطلاحُ نفسُه الذي يحكم `contractRollup`.
+     ════════════════════════════════════════════════════════════ */
+  {
+    const RQS = [
+      // أمرُ دفعٍ مسدَّد ⇒ مصروف (بمبلغ السداد لا بقيمة الطلب)
+      { id:"P1", engagement:"pay_order", status:"crq_paid", value:2000, payment:{amount:1900},
+        isSubstitute:true, substituteAccountId:"sb1" },
+      // طلبُ تعاقدٍ قيدَ الاعتماد ⇒ قيد التنفيذ
+      { id:"P2", engagement:"contract", status:"crq_pending_finance", value:50000,
+        isSubstitute:true, substituteAccountId:"sb1" },
+      // محوَّلٌ إلى عقد ⇒ يسقط، فعقدُه يحمله (لا ازدواج)
+      { id:"P3", engagement:"contract", status:"crq_converted", value:80000,
+        isSubstitute:true, substituteAccountId:"sb1" },
+      // مستعاضٌ على حسابٍ آخر ⇒ لا يدخل
+      { id:"P4", engagement:"pay_order", status:"crq_paid", value:7000, payment:{amount:7000},
+        isSubstitute:true, substituteAccountId:"sb2" },
+      // غيرُ مستعاضٍ أصلاً
+      { id:"P5", engagement:"pay_order", status:"crq_paid", value:9000, payment:{amount:9000} }
+    ];
+    const CTS = [{ id:"K1", status:"ctr_active", value:80000, isSubstitute:true, substituteAccountId:"sb1" }];
+    const EXS = [
+      { id:"X1", contractId:"K1", status:"ext_paid",            payment:{amount:30000} },
+      { id:"X2", contractId:"K1", status:"ext_pending_finance", payment:{amount:12000} }
+    ];
+    const SR = C._substituteRollup("sb1", RQS, CTS, EXS);
+
+    T("★★ المصروفُ من الخزينة وحدَه: أمرُ دفعٍ مسدَّد 1,900 + مستخلصٌ مسدَّد 30,000",
+      SR.spent === 31900, String(SR.spent));
+    T("★ والمستخلصُ المعتمدُ غيرُ المسدَّد لا يُخصَم (لم يخرج بعد)",
+      SR.spent !== 43900);
+    T("★ «قيد الاعتماد» = طلبُ التعاقد القائم وحدَه", SR.pending === 50000, String(SR.pending));
+    T("★★ والمحوَّلُ لا يُعدّ مرتين — عقدُه يحمله",
+      SR.docs.every(d => d.id !== "P3") && SR.contracted === 50000, "contracted="+SR.contracted);
+    T("★ «متعاقَدٌ عليه» = قيمةُ العقد − المسدَّدُ منه (80,000 − 30,000)",
+      SR.contracted === 50000);
+    T("★★ ولا يدخل حسابٌ آخرُ ولا مستندٌ غيرُ مستعاض",
+      SR.docs.every(d => d.id !== "P4" && d.id !== "P5"));
+    T("★ حسابٌ بلا معرّفٍ يردّ أصفاراً (لا يبتلع كلَّ المستندات)",
+      C._substituteRollup("", RQS, CTS, EXS).spent === 0);
+    T("★ والعلَمُ بلا حساب لا يُحسَب على أحد",
+      C._docSubstituteId({ isSubstitute:true }) === "" &&
+      C._docSubstituteId({ isSubstitute:true, substituteAccountId:"sb1" }) === "sb1" &&
+      C._docSubstituteId({ substituteAccountId:"sb1" }) === "");
+
+    /* **المالُ المدفوعُ مصروفٌ أبداً** — قاعدةُ `contractRollup` نفسُها */
+    const SRc = C._substituteRollup("sb1", [], [{ id:"K1", status:"ctr_terminated", value:80000,
+      isSubstitute:true, substituteAccountId:"sb1" }], EXS);
+    T("★★ العقدُ المفسوخُ يُسقط التزامَه لا ما خرج منه",
+      SRc.spent === 30000 && SRc.contracted === 0);
+
+    /* الوراثة: العلَمُ يُختار مرةً ولا يُسأل ثانيةً */
+    const born = C._contractFromRequest({ id:"P3", isSubstitute:true, substituteAccountId:"sb1",
+      lines:[], vatMode:"incl" }, "K9", "", "أنا");
+    T("★★ العقدُ يرث العلَمَ والحسابَ من طلبه حرفياً",
+      born.isSubstitute === true && born.substituteAccountId === "sb1");
+    T("★ وطلبٌ عاديٌّ يُنتج عقداً عاديّاً",
+      C._contractFromRequest({ id:"P9", lines:[], vatMode:"incl" }, "K8", "", "أنا").isSubstitute === false);
+
+    /* الواجهة: السؤالُ في نموذج الطلب، والشارةُ في كلّ موضعِ عرض */
+    T("★ سؤالُ «من البند المستعاض» في نموذج طلب التعاقد (عقداً كان أو أمرَ دفع)",
+      /id="ct-r-sub"/.test(src) && /function substituteLinkHTML/.test(src) &&
+      /substituteLinkHTML\(d, ref\)/.test(src));
+    T("★ ولا يُعرض السؤالُ إن لم يوجد حسابٌ أصلاً (سؤالٌ بلا جوابٍ ضوضاء)",
+      /function substituteLinkHTML[\s\S]{0,300}if\(!accs\.length\) return ""/.test(src));
+    T("★★ وعلَمٌ بلا حسابٍ لا يُرسَل", /d\.isSubstitute && !d\.substituteAccountId[\s\S]{0,80}اختر حساب البند المستعاض/.test(src));
+    T("★ والشارةُ دالّةٌ واحدةٌ في البلاطتين والبطاقتين",
+      /function substituteChip\(doc, compact\)/.test(src) &&
+      (src.match(/substituteChip\(/g)||[]).length >= 5);
+    T("★ والقراءةُ من مصدرٍ واحدٍ للحالة (docSubstituteId) لا مقارنةٍ مكرَّرة",
+      (src.match(/docSubstituteId\(/g)||[]).length >= 6);
   }
 
   /* ════════════════════════════════════════════════════════════
