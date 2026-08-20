@@ -18,6 +18,10 @@
      مطابقة أسماء هشّة.
    • الخصم بسعر البيع (التكلفة الفعلية + الهامش) وعند الإغلاق الفعلي فقط.
    • «المستهلك قبل المنصة» يُدخَل رقماً افتتاحياً واحداً لكل حساب (openingConsumed).
+   • الفلاتر تصفّي **ما يُعرَض** لا ما يُحسَب: رصيدُ الحساب (الإجمالي/المستهلك/المتبقي/
+     الربح/قيد التنفيذ) يبقى على كل مستنداته مهما ضاق الجدول — وإلا قرأ المستخدمُ
+     رصيداً ناقصاً حقيقةً. الاستثناء الوحيد إجماليّاتُ شاشة القائمة: تتبع الصفوفَ
+     المعروضة كي تطابق ما تحتها، ويُقال ذلك صراحةً في سطر النطاق.
 
    مصدرٌ واحدٌ للحقيقة (اتساقاً مع بقية النظام): لا نخزّن «المستهلك» متغيّراً نعدّله
    مع كل طلب — بل الإعداد ثابتٌ في الوثيقة، والمستهلك/الربح يُحسبان لحظياً من الطلبات
@@ -43,6 +47,10 @@
   var _unsub    = null;  // إلغاء الاشتراك
   var _curId    = null;  // الحساب المفتوح في شاشة التفاصيل (أو null = القائمة)
   var _saving   = false; // حارس ضد النقر المزدوج على الحفظ
+  // فلاتر الشاشتين — في الوحدة لا في الـDOM: onSnapshot يعيد رسم الصفحة كاملةً،
+  // فحالةٌ محفوظةٌ في حقلٍ معروضٍ تُمحى مع أول تحديثٍ يصل من الخادم.
+  var _lf = { q:"", kind:"", state:"" };   // شاشة القائمة (الحسابات)
+  var _df = { q:"", state:"" };            // شاشة الحساب (الطلبات + التعاقدات)
 
   // ════════ أدوات مساعدة داخلية ════════
   function _now(){ return new Date().toISOString(); }
@@ -187,6 +195,70 @@
     return _calcStats(acc, _posOf(acc.id), _isClosed, _actualCost, _estTotal, _isDead, _ctrRollup(acc.id));
   }
 
+  /* ══════ الفلاتر — دوالُّ نقيّةٌ معروضةٌ لفحوص hail-tests ══════
+     كلُّها تأخذ ما تحتاجه وسائطَ ولا تقرأ globals، فتُفحَص بلا متصفّح. */
+
+  // تطبيع عربي للمطابقة (نهج stocktake/finance-audit): إزالة تشكيل، توحيد الألف
+  // والتاء المربوطة والياء، وإسقاط المسافات — «مبانى الامانه» ≡ «مباني الأمانة».
+  // ويزيد عليه توحيدَ الهمزة المتوسّطة (ئ/ؤ)، إذ اسمُ «حائل» في أكثر أسماء الحسابات
+  // ومَن يكتبه «حايل» في البحث كان يخرج بصفر نتائج.
+  function _norm(s){
+    return String(s==null?"":s)
+      .replace(/[\u064B-\u0652\u0670]/g,"")
+      .replace(/[\u0623\u0625\u0622]/g,"\u0627").replace(/\u0629/g,"\u0647")
+      .replace(/[\u0649\u0626]/g,"\u064A").replace(/\u0624/g,"\u0648")
+      .replace(/\s+/g,"").trim().toLowerCase();
+  }
+  function _hit(hay, q){ return _norm(hay).indexOf(q) >= 0; }
+
+  /* حالةُ الحساب من رصيده: «نفد» يشمل التجاوزَ (سالب) لأن كليهما يمنع الصرف،
+     و«أوشك» عتبتُه خُمسُ الرصيد — تنبيهٌ قبل الوقوع لا بعده. */
+  var LOW_RATIO = 0.2;
+  function _accState(s){
+    var total = Number(s && s.total)||0, rem = Number(s && s.remaining)||0;
+    if(rem <= 0) return "exhausted";
+    if(total > 0 && rem <= total*LOW_RATIO) return "low";
+    return "active";
+  }
+  // الاسمُ يُمرَّر وسيطاً لا يُشتقّ هنا: المربوطُ اسمُه من قائمة المشاريع الحيّة.
+  function _matchAccount(acc, name, stats, f){
+    f = f || {};
+    if(f.kind && ((acc && acc.kind) || "") !== f.kind) return false;
+    if(f.state && _accState(stats) !== f.state) return false;
+    var q = _norm(f.q); if(!q) return true;
+    return _hit(name, q) || _hit((acc && acc.note)||"", q) || _hit((acc && acc.id)||"", q);
+  }
+
+  // حالةُ المستند الواحد بلغةٍ واحدةٍ للجدولين: مغلق/مصروف · قيد تنفيذ · بلا أثر.
+  function _poState(p, isClosed, isDead){
+    if(isDead && isDead(p)) return "dead";
+    return isClosed && isClosed(p) ? "closed" : "wip";
+  }
+  function _ctrState(d){
+    var st = d && d.state;
+    return st==="spent" ? "closed" : (st==="live" ? "wip" : "dead");
+  }
+  function _poText(p){
+    if(!p) return "";
+    var items = Array.isArray(p.items)
+      ? p.items.map(function(i){ return (i && (i.itemName || i.name)) || ""; }).join(" ") : "";
+    return [p.id, p.itemName, items, p.vendorName, p.notes].join(" ");
+  }
+  function _matchPO(p, state, f){
+    f = f || {};
+    if(f.state && state !== f.state) return false;
+    var q = _norm(f.q); if(!q) return true;
+    return _hit(_poText(p), q);
+  }
+  function _matchCtrDoc(d, f){
+    f = f || {};
+    if(f.state && _ctrState(d) !== f.state) return false;
+    var q = _norm(f.q); if(!q) return true;
+    return _hit([d && d.id, d && d.title, d && d.vendorName, d && d.statusLbl].join(" "), q);
+  }
+  function _lfActive(){ return !!(_lf.q || _lf.kind || _lf.state); }
+  function _dfActive(){ return !!(_df.q || _df.state); }
+
   // الطلبات المستعاضة التي تشير لحسابٍ غير موجود (حُذف مثلاً) — دلوٌ للتنبيه.
   function _orphanPOs(){
     var ids = {}; _accounts.forEach(function(a){ ids[a.id]=1; });
@@ -257,6 +329,23 @@
       '<div style="font-size:11px;color:var(--muted);margin-top:4px">🔒 أرقام الرصيد والأرباح تظهر للمسؤول والمدير التنفيذي والمالية فقط.</div>';
   }
 
+  /* شريطُ الفلاتر — عرضٌ واحدٌ للشاشتين. مبنيٌّ بالخيارات وسيطاً فلا يُنسَخ مرّتين،
+     و«مسح» لا يظهر إلا وفلترٌ فعّالٌ فعلاً (زرٌّ لا يفعل شيئاً يُربك). */
+  function _selHtml(onchange, cur, opts){
+    return '<select class="form-select" style="flex:0 1 180px;min-width:140px;font-size:12.5px" onchange="'+onchange+'">' +
+      opts.map(function(o){
+        return '<option value="'+_esc(o.v)+'"'+(cur===o.v?" selected":"")+'>'+_esc(o.l)+'</option>';
+      }).join("") + '</select>';
+  }
+  function _filterBar(inputId, ph, val, setter, selects, active){
+    return '<div class="card" style="margin-bottom:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">' +
+      '<input class="form-input" id="'+inputId+'" style="flex:1 1 240px;min-width:180px;font-size:12.5px" ' +
+        'placeholder="'+_esc(ph)+'" value="'+_esc(val)+'" oninput="'+setter+'(\'q\',this.value)">' +
+      selects +
+      (active ? '<button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="'+setter+'(\'__clear__\')">'+_icn("xCircle","ic-sm")+' مسح الفلاتر</button>' : '') +
+    '</div>';
+  }
+
   function _listHtml(){
     var money = _canSeeMoney();
     var addBtn = _canManage()
@@ -282,9 +371,36 @@
         '</div>';
     }
 
-    // إجماليات (لأصحاب صلاحية المال فقط)
+    /* الصفوفُ تُحسَب مرّةً واحدة ثم تُصفّى — لا حسابَ مكرّرٌ للفلتر وللعرض.
+       وفلترُ الحالة (متاح/أوشك/نفد) لأصحاب صلاحية المال وحدهم: من لا يرى المتبقي
+       لا يُعطى مِصفاةً عليه (وإلا استُنتج الرقمُ من عدد النتائج). */
+    var all  = _accounts.map(function(a){ return { acc:a, s:_stats(a), name:_acctName(a) }; });
+    var rowsData = all.filter(function(r){ return _matchAccount(r.acc, r.name, money?r.s:null, money?_lf:{ q:_lf.q, kind:_lf.kind }); });
+
+    var stateOpts = money ? _selHtml("window.substituteBudget.filter('state',this.value)", _lf.state, [
+      { v:"", l:"كل حالات الرصيد" },
+      { v:"active", l:"رصيدٌ متاح" },
+      { v:"low", l:"أوشك على النفاد (≤ 20%)" },
+      { v:"exhausted", l:"نفد أو تجاوز" }
+    ]) : "";
+    var filters = _filterBar("sb-f-q", "🔍 ابحث باسم الحساب أو ملاحظته", _lf.q, "window.substituteBudget.filter",
+      _selHtml("window.substituteBudget.filter('kind',this.value)", _lf.kind, [
+        { v:"", l:"كل الأنواع" },
+        { v:"linked", l:"مربوط بمشروع" },
+        { v:"standalone", l:"مستقلّ" }
+      ]) + stateOpts, _lfActive());
+
+    /* سطرُ النطاق: قائمةٌ أقصرُ بلا تفسيرٍ تُقرأ نقصاً في البيانات لا تصفيةً —
+       ويقول صراحةً إن الإجماليّات تتبع المعروض، وإلا نُسبت للنظام كلّه. */
+    var scopeLine = _lfActive() ? '' +
+      '<div style="font-size:12px;color:var(--muted);margin:-4px 0 12px;padding:0 4px">' +
+        'عرض '+rowsData.length+' من '+all.length+' حساباً' +
+        (money ? ' — الإجماليّات أدناه للمعروض فقط.' : '.') +
+      '</div>' : '';
+
+    // إجماليات (لأصحاب صلاحية المال فقط) — على الصفوف المعروضة
     var totBudget=0, totConsumed=0, totRemaining=0, totProfit=0;
-    _accounts.forEach(function(a){ var s=_stats(a); totBudget+=s.total; totConsumed+=s.consumed; totRemaining+=s.remaining; totProfit+=s.profit; });
+    rowsData.forEach(function(r){ var s=r.s; totBudget+=s.total; totConsumed+=s.consumed; totRemaining+=s.remaining; totProfit+=s.profit; });
 
     var summary = money ? '' +
       '<div class="card" style="margin-bottom:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;text-align:center">' +
@@ -304,8 +420,8 @@
         '<th style="padding:8px;text-align:center">الهامش</th>'
       : '';
 
-    var rows = _accounts.map(function(acc){
-      var s = _stats(acc);
+    var rows = rowsData.map(function(r){
+      var acc = r.acc, s = r.s;
       var kindBadge = acc.kind==="linked"
         ? '<span style="font-size:10px;background:color-mix(in srgb,var(--primary) 12%,transparent);color:var(--primary);padding:2px 7px;border-radius:20px;font-weight:700">'+_icn("link","ic-sm")+' مربوط بمشروع</span>'
         : '<span style="font-size:10px;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);padding:2px 7px;border-radius:20px;font-weight:700">'+_icn("edit","ic-sm")+' مستقلّ</span>';
@@ -318,11 +434,12 @@
           '<td style="padding:8px;text-align:center">'+_fmt(s.margin)+'%</td>'
         : '';
       return '<tr style="cursor:pointer;border-top:1px solid var(--border)" onclick="window.substituteBudget.open(\''+acc.id+'\')">' +
-        '<td style="padding:8px;font-weight:700">'+_esc(_acctName(acc))+'<div style="margin-top:3px">'+kindBadge+'</div></td>' +
+        '<td style="padding:8px;font-weight:700">'+_esc(r.name)+'<div style="margin-top:3px">'+kindBadge+'</div></td>' +
         '<td style="padding:8px;text-align:center">'+s.count+'</td>' +
         moneyCells +
       '</tr>';
-    }).join("");
+    }).join("") ||
+      '<tr><td colspan="'+(money?8:2)+'" style="padding:22px;text-align:center;color:var(--muted)">لا حسابات تطابق الفلاتر الحالية.</td></tr>';
 
     var orphans = _orphanPOs();
     var orphanCard = orphans.length ? '' +
@@ -331,7 +448,7 @@
         '<div style="font-size:12px;color:var(--muted)">طلبات مُعلَّمة «مستعاض» لكنها لا تشير لحسابٍ موجود — لن تُخصم من أي رصيد. راجعها من صفحة الطلبات.</div>' +
       '</div>' : '';
 
-    return head + summary +
+    return head + filters + summary + scopeLine +
       '<div class="card" style="overflow-x:auto">' +
         '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
           '<thead><tr style="background:var(--surface2)">' +
@@ -353,8 +470,26 @@
     var money = _canSeeMoney();
     var ctr = _ctrRollup(acc.id);
     var s = _calcStats(acc, _posOf(acc.id), _isClosed, _actualCost, _estTotal, _isDead, ctr);
-    var pos = _posOf(acc.id)
+    var allPos = _posOf(acc.id)
                     .sort(function(a,b){ return String(b.createdAt||"").localeCompare(String(a.createdAt||"")); });
+    /* الفلترُ على العرض وحدَه: `s` أعلاه محسوبٌ من كلّ المستندات، فلا يتحرّك الرصيد
+       حين تضيق القائمة — رصيدٌ يتغيّر مع مِصفاةِ عرضٍ رقمٌ كاذب. */
+    var pos = allPos.filter(function(p){ return _matchPO(p, _poState(p, _isClosed, _isDead), _df); });
+    var allDocs = ctr.docs || [];
+    var ctrDocs = allDocs.filter(function(d){ return _matchCtrDoc(d, _df); });
+    var dFilters = (allPos.length || allDocs.length) ? _filterBar(
+      "sb-d-q", "🔍 ابحث برقم المستند أو البند أو الطرف", _df.q, "window.substituteBudget.filterDoc",
+      _selHtml("window.substituteBudget.filterDoc('state',this.value)", _df.state, [
+        { v:"", l:"كل الحالات" },
+        { v:"closed", l:"مغلق / مصروف" },
+        { v:"wip", l:"قيد التنفيذ" },
+        { v:"dead", l:"ملغى / مرفوض / بلا أثر" }
+      ]), _dfActive()) : "";
+    var dScope = _dfActive() ? '' +
+      '<div style="font-size:12px;color:var(--muted);margin:-4px 0 12px;padding:0 4px">' +
+        'عرض '+(pos.length+ctrDocs.length)+' من '+(allPos.length+allDocs.length)+
+        ' مستنداً — أرقامُ الرصيد أعلاه على كامل الحساب بلا تصفية.' +
+      '</div>' : '';
 
     var manageBtns = _canManage()
       ? '<button class="btn btn-ghost btn-sm" onclick="window.substituteBudget.openEdit(\''+acc.id+'\')">'+_icn("edit")+' تعديل</button> ' +
@@ -382,7 +517,7 @@
 
     /* جدولُ الأعمال التعاقدية — عمودُ المال فيه **ما خرج فعلاً** لا القيمة: العقدُ
        الساري التزامٌ لم يُدفَع، وخلطُهما يُظهر خصماً لم يقع. */
-    var ctrRows = (ctr.docs||[]).map(function(d){
+    var ctrRows = ctrDocs.map(function(d){
       var isReq = d.kind==="req";
       var lbl = isReq ? (d.engagement==="pay_order" ? "أمر دفع" : "طلب تعاقد") : "عقد";
       var sell = (Number(d.spent)||0)*(1+s.margin/100);
@@ -403,9 +538,12 @@
         moneyCells +
       '</tr>';
     }).join("");
-    var ctrTable = (ctr.docs||[]).length ? '' +
+    var ctrRowsOrEmpty = ctrRows ||
+      '<tr><td colspan="'+(money?6:3)+'" style="padding:18px;text-align:center;color:var(--muted)">لا أعمال تعاقدية تطابق الفلاتر.</td></tr>';
+    var ctrTable = allDocs.length ? '' +
       '<div class="card" style="overflow-x:auto;margin-top:12px">' +
-        '<div style="font-weight:800;margin-bottom:8px">'+_icn("fileText","ic-sm")+' الأعمال التعاقدية ('+ctr.docs.length+')</div>' +
+        '<div style="font-weight:800;margin-bottom:8px">'+_icn("fileText","ic-sm")+' الأعمال التعاقدية ('+
+          (_dfActive() ? ctrDocs.length+' من '+allDocs.length : allDocs.length)+')</div>' +
         '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
           '<thead><tr style="background:var(--surface2)">' +
             '<th style="padding:8px;text-align:right">المستند</th>' +
@@ -414,7 +552,7 @@
             (money?'<th style="padding:8px;text-align:center">القيمة</th>' +
                    '<th style="padding:8px;text-align:center">المصروف فعلاً</th>' +
                    '<th style="padding:8px;text-align:center">سعر البيع</th>':'') +
-          '</tr></thead><tbody>'+ctrRows+'</tbody>' +
+          '</tr></thead><tbody>'+ctrRowsOrEmpty+'</tbody>' +
         '</table>' +
       '</div>' : '';
 
@@ -448,7 +586,9 @@
         moneyCells +
       '</tr>';
     }).join("")
-    : '<tr><td colspan="'+(money?6:3)+'" style="padding:20px;text-align:center;color:var(--muted)">لا توجد طلبات مستعاضة على هذا الحساب بعد.</td></tr>';
+    : '<tr><td colspan="'+(money?6:3)+'" style="padding:20px;text-align:center;color:var(--muted)">' +
+        (allPos.length ? 'لا طلبات تطابق الفلاتر الحالية.' : 'لا توجد طلبات مستعاضة على هذا الحساب بعد.') +
+      '</td></tr>';
 
     return '' +
       '<div class="card" style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">' +
@@ -462,9 +602,10 @@
         '</div>' +
         '<div>'+manageBtns+'</div>' +
       '</div>' +
-      moneyBox + splitBox +
+      moneyBox + splitBox + dFilters + dScope +
       '<div class="card" style="overflow-x:auto">' +
-        '<div style="font-weight:800;margin-bottom:8px">📋 طلبات الشراء المستعاضة ('+pos.length+')</div>' +
+        '<div style="font-weight:800;margin-bottom:8px">📋 طلبات الشراء المستعاضة ('+
+          (_dfActive() ? pos.length+' من '+allPos.length : allPos.length)+')</div>' +
         '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
           '<thead><tr style="background:var(--surface2)">' +
             '<th style="padding:8px;text-align:right">رقم الطلب</th>' +
@@ -662,8 +803,28 @@
     });
   }
 
-  function open(id){ _curId=id; render(); }
+  function open(id){ _curId=id; _df={ q:"", state:"" }; render(); }   // فلترُ حسابٍ لا يتبع غيرَه
   function back(){ _curId=null; render(); }
+
+  /* ════════ أفعالُ الفلاتر ════════
+     `render()` يعيد بناء innerHTML كاملاً، فيضيع تركيزُ حقل البحث بعد كل حرف —
+     تُعاد المؤشّرةُ إلى آخر النصّ كما في وحدة التعاقدات. */
+  function _refocus(id){
+    var i = document.getElementById(id);
+    if(i){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length); }catch(e){} }
+  }
+  function filter(k,v){
+    if(k==="__clear__"){ _lf={ q:"", kind:"", state:"" }; render(); return; }
+    if(!(k in _lf)) return;
+    _lf[k] = v || ""; render();
+    if(k==="q") _refocus("sb-f-q");
+  }
+  function filterDoc(k,v){
+    if(k==="__clear__"){ _df={ q:"", state:"" }; render(); return; }
+    if(!(k in _df)) return;
+    _df[k] = v || ""; render();
+    if(k==="q") _refocus("sb-d-q");
+  }
 
   // ════════ واجهة للنموذج (نموذج طلب الشراء) ════════
   // قائمة <option> لكل الحسابات — يستدعيها نموذج طلب الشراء لبناء القائمة المنسدلة.
@@ -687,11 +848,15 @@
     startSync: startSync,
     render: render,
     open: open, back: back,
+    filter: filter, filterDoc: filterDoc,
     openAdd: openAdd, openEdit: openEdit, remove: remove,
     _kindToggle: _kindToggle,
     optionsHtml: optionsHtml, accounts: accounts, accountForProject: accountForProject,
     _calcStats: _calcStats,  // دالة الحساب النقية — لفحوص hail-tests
     _applyUpsert: _applyUpsert, _applyRemove: _applyRemove,  // مبدّلات الدمج النقية — للاختبار
-    _isDead: _isDead         // كاشف الطلب الميّت — للاختبار
+    _isDead: _isDead,        // كاشف الطلب الميّت — للاختبار
+    // مِصفاةُ العرض — دوالُّ نقيّةٌ لفحوص hail-tests (تصفية بلا متصفّح)
+    _norm: _norm, _accState: _accState, _matchAccount: _matchAccount,
+    _poState: _poState, _ctrState: _ctrState, _matchPO: _matchPO, _matchCtrDoc: _matchCtrDoc
   };
 })();

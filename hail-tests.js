@@ -1043,6 +1043,68 @@ function substituteBudget() {
     /return \{ spent:0, wip:0, count:0, docs:\[\] \};/.test(SBSRC));
   T("★ وشاشةُ الحساب تعرض الأعمالَ التعاقدية بجدولها",
     /الأعمال التعاقدية \('/.test(SBSRC) && /المصروف فعلاً/.test(SBSRC));
+
+  /* ── vNEXT: فلاتر شاشة البند المستعاض ──
+     الخطرُ الحقيقيُّ في مِصفاةٍ فوق شاشةِ مال: أن تصفّي **الحسابَ** لا **العرض**،
+     فيقرأ المستخدمُ متبقّياً أقلَّ ممّا في الرصيد ويبني عليه قراراً. فالحرّاسُ
+     على المطابِقات النقيّة، وعلى أن أرقامَ الحساب محسوبةٌ من غير المصفّى. */
+  T("مِصفاةُ العرض معروضةٌ للاختبار",
+    SB && typeof SB._matchAccount === "function" && typeof SB._matchPO === "function" &&
+    typeof SB._matchCtrDoc === "function" && typeof SB._accState === "function");
+  if (SB && typeof SB._matchAccount === "function") {
+    // تطبيع البحث: همزةٌ وتاءٌ مربوطةٌ ومسافاتٌ لا تُسقط النتيجة
+    T("بحثٌ متسامحٌ مع الهمزة والتاء المربوطة والمسافات",
+      SB._norm("مبانى الامانه") === SB._norm("مباني الأمانة") && SB._norm("حايل") === SB._norm("حائل"));
+
+    const accL = { kind: "linked", note: "المرحلة الأولى" };
+    const accS = { kind: "standalone", note: "" };
+    T("بحثٌ بالاسم يطابق (بلا تطابقٍ حرفيّ)", SB._matchAccount(accL, "مباني أمانة منطقة حائل", {}, { q: "حايل" }));
+    T("وبالملاحظة أيضاً", SB._matchAccount(accL, "س", {}, { q: "المرحله الاولى" }));
+    T("ونصٌّ لا يرد يُسقط الصفّ", !SB._matchAccount(accL, "مصاعد", {}, { q: "نظافة" }));
+    T("فلترُ النوع: المستقلّ لا يظهر تحت «مربوط»", !SB._matchAccount(accS, "مصاعد", {}, { kind: "linked" }) &&
+      SB._matchAccount(accS, "مصاعد", {}, { kind: "standalone" }));
+
+    // حالةُ الرصيد: نفد (≤0 شاملاً التجاوز) · أوشك (≤20%) · متاح
+    T("★ حالةُ الرصيد: نفد يشمل التجاوز", SB._accState({ total: 1000, remaining: 0 }) === "exhausted" &&
+      SB._accState({ total: 1000, remaining: -5 }) === "exhausted");
+    T("★ «أوشك» عند خُمس الرصيد فأقلّ", SB._accState({ total: 1000, remaining: 200 }) === "low" &&
+      SB._accState({ total: 1000, remaining: 201 }) === "active");
+    T("فلترُ الحالة يصفّي بها", SB._matchAccount(accL, "س", { total: 1000, remaining: 100 }, { state: "low" }) &&
+      !SB._matchAccount(accL, "س", { total: 1000, remaining: 900 }, { state: "low" }));
+
+    // مستنداتُ شاشة الحساب: لغةُ حالةٍ واحدةٌ للجدولين
+    T("حالةُ الطلب: ميّتٌ يسبق مغلقاً", SB._poState({}, () => true, () => true) === "dead" &&
+      SB._poState({}, () => true, () => false) === "closed" &&
+      SB._poState({}, () => false, () => false) === "wip");
+    T("وحالةُ مستند التعاقد بلغتها نفسِها",
+      SB._ctrState({ state: "spent" }) === "closed" && SB._ctrState({ state: "live" }) === "wip" &&
+      SB._ctrState({ state: "none" }) === "dead");
+    T("بحثُ الطلب يشمل رقمَه وبنودَه",
+      SB._matchPO({ id: "PO-77", items: [{ itemName: "مواد نظافة" }] }, "closed", { q: "نظافه" }) &&
+      SB._matchPO({ id: "PO-77", items: [] }, "closed", { q: "po-77" }));
+    T("وفلترُ الحالة يصفّي المستندين", !SB._matchPO({ id: "PO-1" }, "wip", { state: "closed" }) &&
+      SB._matchCtrDoc({ id: "C-1", state: "spent" }, { state: "closed" }));
+    T("وفلترٌ فارغٌ لا يُسقط شيئاً", SB._matchAccount(accS, "أيُّ اسم", {}, {}) &&
+      SB._matchPO({ id: "PO-9" }, "wip", {}) && SB._matchCtrDoc({ id: "C-9", state: "live" }, {}));
+  }
+
+  /* الحارسُ الأهمّ: الرصيدُ يُحسَب قبل التصفية — `_calcStats` في شاشة الحساب تأخذ
+     `_posOf(acc.id)` كاملةً، والمصفّى (`pos`/`ctrDocs`) للعرض وحدَه. */
+  T("★★ أرقامُ الرصيد تُحسَب من كلّ المستندات لا من المصفّى",
+    /var allPos = _posOf\(acc\.id\)/.test(SBSRC) &&
+    /var s = _calcStats\(acc, _posOf\(acc\.id\)/.test(SBSRC) &&
+    /var pos = allPos\.filter\(function\(p\)\{ return _matchPO\(/.test(SBSRC));
+  T("★ وحالةُ الفلاتر في الوحدة لا في الـDOM (onSnapshot يمحو الـDOM)",
+    /var _lf = \{ q:"", kind:"", state:"" \};/.test(SBSRC) && /var _df = \{ q:"", state:"" \};/.test(SBSRC));
+  T("★ وفتحُ حسابٍ يُصفّر فلترَ مستنداته", /function open\(id\)\{ _curId=id; _df=\{ q:"", state:"" \};/.test(SBSRC));
+  T("★ والبحثُ يستعيد تركيزَه بعد إعادة الرسم",
+    /function _refocus\(id\)/.test(SBSRC) && /if\(k==="q"\) _refocus\("sb-f-q"\)/.test(SBSRC) &&
+    /if\(k==="q"\) _refocus\("sb-d-q"\)/.test(SBSRC));
+  T("★ وأفعالُ الفلاتر معروضةٌ على الكائن (سمات onclick تُقيَّم في النطاق العام)",
+    /filter: filter, filterDoc: filterDoc,/.test(SBSRC) &&
+    /window\.substituteBudget\.filter\('kind',this\.value\)/.test(SBSRC) &&
+    /window\.substituteBudget\.filterDoc\('state',this\.value\)/.test(SBSRC));
+  T("★ وفلترُ حالة الرصيد محجوبٌ عمّن لا يرى المال", /var stateOpts = money \? _selHtml\(/.test(SBSRC));
 }
 
 /* ════════════════════════════════════════════════════════════════════
