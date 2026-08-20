@@ -881,7 +881,7 @@
         <div class="st-val" id="po-dash-total">0</div>
         <div class="st-lbl">إجمالي الطلبات</div>
       </div>
-      <div class="stat-tile" id="po-dash-pending-box" style="--_c:var(--po-wait-fill);--_ink:var(--po-wait);cursor:pointer" onclick="_poStageFilter('wip','')" title="اضغط لعرض الطلبات الجارية فقط — اضغط مجدداً للإلغاء">
+      <div class="stat-tile" id="po-dash-pending-box" style="--_c:var(--stage-wait-fill);--_ink:var(--stage-wait);cursor:pointer" onclick="_poStageFilter('wip','')" title="اضغط لعرض الطلبات الجارية فقط — اضغط مجدداً للإلغاء">
         <div class="st-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg></div>
         <div class="st-val" id="po-dash-pending">0</div>
         <div class="st-lbl">قيد المراجعة</div>
@@ -891,12 +891,12 @@
         <div class="st-val" id="po-dash-overdue">0</div>
         <div class="st-lbl">طلبات متأخرة</div>
       </div>
-      <div class="stat-tile" id="po-dash-approved-box" style="--_c:var(--po-done);cursor:pointer" onclick="_poStageFilter('closed')" title="اضغط لعرض الطلبات المغلقة فقط — اضغط مجدداً للإلغاء">
+      <div class="stat-tile" id="po-dash-approved-box" style="--_c:var(--stage-done);cursor:pointer" onclick="_poStageFilter('closed')" title="اضغط لعرض الطلبات المغلقة فقط — اضغط مجدداً للإلغاء">
         <div class="st-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
         <div class="st-val" id="po-dash-approved">0</div>
         <div class="st-lbl">الطلبات المغلقة</div>
       </div>
-      <div class="stat-tile" id="po-dash-amount-box" style="--_c:var(--po-done)">
+      <div class="stat-tile" id="po-dash-amount-box" style="--_c:var(--stage-done)">
         <div class="st-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01"/><path d="M18 12h.01"/></svg></div>
         <div class="st-val" id="po-dash-amount" style="direction:ltr">0</div>
         <div class="st-lbl">إجمالي المبالغ المغلقة (ريال)</div>
@@ -23865,9 +23865,9 @@ function poLateBadge(p){
    في الأنماط، فمصدرٌ واحدٌ يكفي الرسمَ والنصَّ معاً.
    ══════════════════════════════════════════════════════════════════════════ */
 const PO_COLORS = {
-  wait: "var(--po-wait)",  // بانتظار قرارٍ أو إجراءٍ من أحد — هنا يقف العمل
-  move: "var(--po-move)",  // اعتُمد ومضى — عملٌ جارٍ لا ينتظر أحداً
-  done: "var(--po-done)",  // مكتمل
+  wait: "var(--stage-wait)",  // بانتظار قرارٍ أو إجراءٍ من أحد — هنا يقف العمل
+  move: "var(--stage-move)",  // اعتُمد ومضى — عملٌ جارٍ لا ينتظر أحداً
+  done: "var(--stage-done)",  // مكتمل
   out:  "var(--muted)",    // خارج المسار — رماديٌّ يفرّقه عن أزرق المكتمل
   late: "var(--danger)",   // حَرِج — الاستثناءُ الوحيدُ خارج السلّم الأزرق
 };
@@ -23875,7 +23875,7 @@ const PO_COLORS = {
 /* ── الحبرُ ليس المساحة ── المساحةُ تهدأ والحبرُ يبقى: النقطةُ تطابق الشريطَ
    والرقمُ يُقرأ. وهي هنا مساحةُ **المنتظِر** (الأفتحُ في السلّم): لو نزل حبرُه
    إلى فتحةِ مساحته لسقط تباينُ النصّ. */
-const PO_FILL = { wait: "var(--po-wait-fill)" };
+const PO_FILL = { wait: "var(--stage-wait-fill)" };
 const _PO_INK_KEY = Object.keys(PO_COLORS).reduce((m,k)=>{ m[PO_COLORS[k]]=k; return m; },{});
 function poFill(ink){ return PO_FILL[_PO_INK_KEY[ink]] || ink; }
 
@@ -24196,8 +24196,8 @@ function renderPOOpenSummary(dashData){
   card.innerHTML=`
     <div class="pos-head">${_ic("hourglass","ic-sm")} ملخّص الطلبات المفتوحة والمتأخرة</div>
     <div class="pos-tiles">
-      <div class="pos-tile${wipActive?' active':''}" style="color:var(--po-wait)" onclick="_poStageFilter('wip','')" title="اضغط لعرض الطلبات الجارية فقط — اضغط مجدداً للإلغاء">
-        <div class="pv" style="color:${openN?'var(--po-wait)':'var(--zero)'}">${openN}</div><div class="pl">مفتوحة (جارية)</div>
+      <div class="pos-tile${wipActive?' active':''}" style="color:var(--stage-wait)" onclick="_poStageFilter('wip','')" title="اضغط لعرض الطلبات الجارية فقط — اضغط مجدداً للإلغاء">
+        <div class="pv" style="color:${openN?'var(--stage-wait)':'var(--zero)'}">${openN}</div><div class="pl">مفتوحة (جارية)</div>
       </div>
       <div class="pos-tile${overdueActive?' active':''}" style="color:var(--danger)" onclick="_poOverdueFilter()" title="اضغط لعرض المتأخرة عن الاستلام — اضغط مجدداً للإلغاء">
         <div class="pv" style="color:${overdue.length?'var(--danger)':'var(--zero)'}">${overdue.length}</div><div class="pl">متأخرة عن الاستلام</div>
@@ -25008,7 +25008,7 @@ function renderPurchases(){
                 <span>${_ic("download","ic-sm ic-muted")} الاستلام</span><span>${_rcv} / ${totalQty} (${pct}%)</span>
               </div>
               <div class="po-bar">
-                <div class="po-bar-f" style="width:${pct}%;background:${pct>=100?'var(--po-done)':'var(--po-move)'}"></div>
+                <div class="po-bar-f" style="width:${pct}%;background:${pct>=100?'var(--stage-done)':'var(--stage-move)'}"></div>
               </div>
             </div>`;
           })()}

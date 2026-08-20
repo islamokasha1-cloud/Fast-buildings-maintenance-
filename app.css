@@ -33,7 +33,7 @@
   /* ── الصفر يخفت ── لونٌ أفتحُ من --muted لِما قيمتُه صفر. الصفرُ ليس معلومةً
      تُقرأ، بل غيابُها؛ فحملُه حبراً مساوياً لِما فيه عملٌ يُغرق العينَ في لا شيء. */
   --zero:#a3b0c2;
-  /* ── سلّمُ حالة الطلب: درجةٌ زرقاءُ واحدة ──
+  /* ── سلّمُ حالة الإجراء: درجةٌ زرقاءُ واحدة (كل الوحدات) ──
      كان الطيفُ يحمل الحالةَ (أخضرُ تمّ · بنّيٌّ ينتظر). صارت **الدرجةُ** تحملها:
      الأغمقُ ما ينتظر إجراءً والأفتحُ ما انتهى. وهو أدقُّ لشرائح عمر التوقّف لأنها
      **سلّمٌ مرتّبٌ** أصلاً لا فئاتٌ متجاورة؛ وثلاثةُ أطيافٍ لا تقول أيُّها أسوأ.
@@ -41,10 +41,10 @@
      واتّجاهُ السلّم قرارُ المالك: **الأغمقُ ما اكتمل، والأفتحُ ما توقّف**. أي أن
      العملَ يفقد لونَه كلّما طال وقوفُه، حتى إذا تجاوز الحدَّ خرج إلى الأحمر.
      (كان الاتّجاهُ معكوساً — الأغمقُ ما ينتظر — فردّه المالكُ إلى هذا.) */
-  --po-done:#1b3a6b;       /* اكتمل — الأغمق */
-  --po-move:#2f66ad;       /* أزرقُ مشبَع — اعتُمد ومضى */
-  --po-wait:#5f7f9c;       /* ينتظر قراراً — يخفت، وحبرُه يبقى مقروءاً */
-  --po-wait-fill:#9fbdd8;  /* ومساحتُه أخفتُ من حبره */
+  --stage-done:#1b3a6b;       /* اكتمل — الأغمق */
+  --stage-move:#2f66ad;       /* أزرقُ مشبَع — اعتُمد ومضى */
+  --stage-wait:#5f7f9c;       /* ينتظر قراراً — يخفت، وحبرُه يبقى مقروءاً */
+  --stage-wait-fill:#9fbdd8;  /* ومساحتُه أخفتُ من حبره */
   /* ── سلّمُ الرتبة ── للكميّات التي لا حالةَ فيها: مشروعٌ أكبرُ من مشروعٍ ليس
      «أسوأَ» منه، فلا يستحقّ لوناً دلالياً. درجةٌ واحدةٌ بسبع مراتب: الأغمقُ الأكبر. */
   --rank1:#1b3a6b;--rank2:#2c518c;--rank3:#4269a3;--rank4:#5f85b8;
@@ -59,7 +59,7 @@ html[data-theme="dark"]{
   --shadow:0 1px 4px rgba(0,0,0,0.4);
   --zero:#5b6b83;
   /* في الداكن يُقاس البروزُ بالسطوع لا بالعتمة، فينقلب السلّمُ ليحفظ الترتيبَ نفسَه. */
-  --po-done:#7aa6ff;--po-move:#5b8def;--po-wait:#8ba3bd;--po-wait-fill:#3a5478;
+  --stage-done:#7aa6ff;--stage-move:#5b8def;--stage-wait:#8ba3bd;--stage-wait-fill:#3a5478;
   /* السلّمُ ينقلب في الداكن: الأغمقُ يختفي على خلفيةٍ داكنة، فالأبرزُ هو الأفتح. */
   --rank1:#7aa6ff;--rank2:#6690e2;--rank3:#547ac4;--rank4:#4566a6;
   --rank5:#3a5386;--rank6:#314468;--rank7:#2b3950;
@@ -452,8 +452,8 @@ input,select,textarea,button{font-family:'Cairo','Tajawal',sans-serif}
 .badge.b-reopen{display:inline-flex;align-items:center;gap:5px;background:var(--surface2);color:var(--danger)}
 /* v9hc: priority badges (no dot) — tokenized */
 .badge.b-critical{background:var(--surface2);color:var(--danger);border:1px solid var(--border)}
-.badge.b-urgent{background:var(--surface2);color:var(--po-move);border:1px solid var(--border)}
-.badge.b-normal{background:var(--surface2);color:var(--po-wait);border:1px solid var(--border)}
+.badge.b-urgent{background:var(--surface2);color:var(--stage-move);border:1px solid var(--border)}
+.badge.b-normal{background:var(--surface2);color:var(--stage-wait);border:1px solid var(--border)}
 .b-type{background:#f0f4ff;color:#1b3a6b}
 .ticket-id{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--primary);background:var(--surface2);border:1px solid var(--border);padding:2px 8px;border-radius:5px;direction:ltr;display:inline-block}
 .overdue-tag{font-size:10px;color:var(--danger);font-weight:800;background:var(--surface2);border:1px solid var(--border);padding:2px 8px;border-radius:20px}
@@ -1739,7 +1739,7 @@ html[data-theme="dark"] .row-menu-item.danger:hover{background:#3a1717}
 .po-card{background:#fff;border-radius:10px;padding:11px 12px;margin-bottom:10px;cursor:pointer;box-shadow:var(--shadow);border-right:4px solid var(--info);transition:box-shadow .15s}
 .po-card:hover{box-shadow:0 4px 12px rgba(0,0,0,0.12)}
 .po-card.po-urgent{border-right-color:var(--danger);background:color-mix(in srgb,var(--danger) 4%,var(--surface))}
-.po-card.po-delivered{border-right-color:var(--po-done)}
+.po-card.po-delivered{border-right-color:var(--stage-done)}
 .po-card.po-cancelled{border-right-color:var(--muted);opacity:.7}
 /* v18.9mt: طلب شراء متأخر عن تاريخ الاستلام المتوقع */
 .po-card.po-overdue{border-right-color:var(--danger);background:color-mix(in srgb,var(--danger) 4%,var(--surface))}
@@ -1747,7 +1747,7 @@ html[data-theme="dark"] .row-menu-item.danger:hover{background:#3a1717}
 .po-late-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;color:var(--danger);background:color-mix(in srgb,var(--danger) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--danger) 28%,var(--border));padding:2px 9px;border-radius:20px;white-space:nowrap}
 /* v18.9xc: التأخّرُ الداخليّ (لم يبدأ التوريد) لونُه غيرُ لونِ تأخّر المورّد — مالكُ
    المشكلة مختلف، فلا يصحّ أن يقرأهما الناظرُ وسماً واحداً */
-.po-late-badge.po-late-internal{color:var(--po-wait);background:color-mix(in srgb,var(--po-wait) 12%,var(--surface));border-color:color-mix(in srgb,var(--po-wait) 28%,var(--border))}
+.po-late-badge.po-late-internal{color:var(--stage-wait);background:color-mix(in srgb,var(--stage-wait) 12%,var(--surface));border-color:color-mix(in srgb,var(--stage-wait) 28%,var(--border))}
 /* بطاقةُ «وعد المورّد» في تفاصيل الطلب */
 .po-promise{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;color:#0e7490;background:#cffafe;border:1px solid #a5f3fc;padding:2px 9px;border-radius:20px;white-space:nowrap}
 /* ═══ شبكةُ بطاقات الشراء — أصغرُ ومتجاورةٌ على الكمبيوتر واللوحيّ ═══   (طلبُ المالك)
@@ -1859,19 +1859,19 @@ html[data-theme="dark"] .row-menu-item.danger:hover{background:#3a1717}
    المستودع» خضراءَ والخضرةُ تعني «اكتمل الطلبُ كلُّه» لا «تمّت خطوةٌ منه».
    الآن: انتظارٌ=--warn · ماضٍ=--primary · مكتمل=--accent · مرفوض=--danger،
    وبـcolor-mix فتُشتقّ الخلفيةُ من الحبر وينقلب الوضعان معاً. */
-.b-po-new{background:color-mix(in srgb,var(--po-move) 12%,var(--surface));color:var(--po-move)}
+.b-po-new{background:color-mix(in srgb,var(--stage-move) 12%,var(--surface));color:var(--stage-move)}
 /* v18.9mt: محاذاة الأيقونات والنقاط داخل الشارات */
 .badge[class*="b-po-"],.badge.b-critical,.badge.b-urgent,.badge.b-normal{display:inline-flex;align-items:center;gap:5px}
 .b-po-draft{background:var(--surface2);color:var(--muted)}
-.b-po-approval{background:color-mix(in srgb,var(--po-wait) 12%,var(--surface));color:var(--po-wait)}
-.b-po-approved{background:color-mix(in srgb,var(--po-move) 12%,var(--surface));color:var(--po-move)}
+.b-po-approval{background:color-mix(in srgb,var(--stage-wait) 12%,var(--surface));color:var(--stage-wait)}
+.b-po-approved{background:color-mix(in srgb,var(--stage-move) 12%,var(--surface));color:var(--stage-move)}
 .b-po-rejected{background:color-mix(in srgb,var(--danger) 12%,var(--surface));color:var(--danger)}
-.b-po-ordered{background:color-mix(in srgb,var(--po-move) 12%,var(--surface));color:var(--po-move)}
-.b-po-completed{background:color-mix(in srgb,var(--po-done) 12%,var(--surface));color:var(--po-done)}
-.b-po-delivered{background:color-mix(in srgb,var(--po-done) 12%,var(--surface));color:var(--po-done)}
+.b-po-ordered{background:color-mix(in srgb,var(--stage-move) 12%,var(--surface));color:var(--stage-move)}
+.b-po-completed{background:color-mix(in srgb,var(--stage-done) 12%,var(--surface));color:var(--stage-done)}
+.b-po-delivered{background:color-mix(in srgb,var(--stage-done) 12%,var(--surface));color:var(--stage-done)}
 .b-po-closed{background:var(--surface2);color:var(--muted)}
 .b-po-cancelled{background:var(--surface2);color:var(--muted)}
-.b-po-ceo{background:color-mix(in srgb,var(--po-wait) 12%,var(--surface));color:var(--po-wait);border:1px solid color-mix(in srgb,var(--po-wait) 28%,var(--border))}
+.b-po-ceo{background:color-mix(in srgb,var(--stage-wait) 12%,var(--surface));color:var(--stage-wait);border:1px solid color-mix(in srgb,var(--stage-wait) 28%,var(--border))}
 .po-id{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--primary);background:var(--surface2);padding:2px 8px;border-radius:4px}
 /* ═══ المشتريات المركزية ═══ */
 #po-dashboard{grid-template-columns:repeat(5,1fr)}
