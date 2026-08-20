@@ -11650,13 +11650,66 @@ function poColorSystemGuards() {
   T("★ وشريحةُ عمرٍ فارغةٌ تخفت رقماً ونقطةً",
     /buckets\[b\.k\]\?b\.color:'var\(--zero\)'/.test(sumSrc));
 
+  // ── (٥ج) الحبرُ ليس المساحة: المكتملُ يهدأ ملءاً ويبقى قوياً حبراً ──
+  let fill = null;
+  try {
+    const body = semantic.slice(semantic.indexOf("const PO_COLORS"),
+                                semantic.indexOf("const PO_STAGES"));
+    fill = new Function(body + "\n; return { PO_COLORS, poFill };")();
+  } catch (e) { /* يُبلَّغ في الفحص التالي */ }
+  T("poFill دالّةٌ نقيّةٌ تُستخرج وتُنفَّذ بلا متصفّح", !!(fill && fill.poFill));
+  if (fill && fill.poFill) {
+    const { PO_COLORS: C, poFill } = fill;
+    T("★★ مساحةُ المكتمل تهدأ ولا تبقى بحبره", poFill(C.done) !== C.done,
+      `${C.done} ⇐ ${poFill(C.done)}`);
+    T("★★ والمنتظِرُ والحَرِجُ يبقيان بكامل قوّتهما — وإلا ضاع ما يستدعي عملاً",
+      poFill(C.wait) === C.wait && poFill(C.late) === C.late);
+    T("لونٌ مجهولٌ يعود كما هو لا undefined", poFill("#123456") === "#123456");
+  }
+
+  // ── (٥د) المساحاتُ الخضراءُ الكبيرةُ كلُّها تمرّ بـpoFill ──
+  const flowSrc = slice("function renderPOStageFlow(dashData){", "\nfunction ") || "";
+  const sumSrc2 = slice("function renderPOOpenSummary(dashData){", "\n}") || "";
+  T("★★ قوسُ الحلقة ونقطتُها مساحةٌ، ورقمُها حبر",
+    /stroke="\$\{poFill\(pt\.c\)\}"/.test(flowSrc) &&
+    /<i style="background:\$\{poFill\(pt\.c\)\}"/.test(flowSrc) &&
+    /<b style="color:\$\{pt\.c\}"/.test(flowSrc));
+  T("★ شرائحُ المسار مساحة", /class="pof-seg"[^`]*background:\$\{poFill\(bk\.color\)\}/.test(flowSrc));
+  T("★ والشريطُ المكدَّسُ في بطاقة الملخّص كذلك",
+    /background:\$\{poFill\(b\.color\)\}" title=/.test(sumSrc2));
+  T("★ وشريطُ مخطّط الحالات", /background:\$\{poFill\(color\)\}/.test(HTML));
+
+  // ── (٥هـ) شاراتُ حالة الطلب: طيفُها من المخطّط، وبلا رقمٍ سداسيّ ──
+  const badgeCss = (HTML.match(/\.b-po-[a-z]+\{[^}]*\}/g) || []).join("\n");
+  T("★★ شاراتُ الحالة بلا رقمٍ سداسيٍّ نصّيّ — وإلا لم تنقلب ليلاً",
+    hexIn(badgeCss).length === 0, hexIn(badgeCss).join(" ") || undefined);
+  T("★★ ولا بنفسجيَّ فيها: «تنفيذ المشتريات» كحليٌّ كالمخطّط، و«اعتماد التنفيذيّ» كهرمانيّ",
+    /\.b-po-ordered\{[^}]*var\(--primary\)/.test(badgeCss) &&
+    /\.b-po-ceo\{[^}]*var\(--warn\)/.test(badgeCss) &&
+    /\.b-po-approved\{[^}]*var\(--primary\)/.test(badgeCss));
+
+  // ── (٥و) بطاقةُ الطلب: عنصرٌ صاخبٌ واحدٌ لا أربعة ──
+  const cardSrc = slice('return `<div class="po-card ${cls}"',
+                        '}).join("")+`<div class="po-span">') || "";
+  T("★★ «تعديل» فعلٌ روتينيٌّ فلا يصرخ — .btn-warn لا لونٌ ممتلئٌ مكتوبٌ نصّاً",
+    /class="btn btn-warn btn-sm"[^>]*openAdminEditPurchase/.test(cardSrc));
+  T("★ و«حذف» يبقى ممتلئاً — فعلٌ لا رجعةَ فيه",
+    /class="btn btn-danger btn-sm"[^>]*deletePurchase/.test(cardSrc));
+  T("★★ وبطاقةُ الطلب كلُّها بلا رقمٍ سداسيٍّ نصّيّ",
+    hexIn(cardSrc).length === 0, hexIn(cardSrc).join(" ") || undefined);
+
+  // ── (٥ز) زرّا الترويسة الإداريّان: أداتان لا حالتان ──
+  const hero = slice('<div class="page-hero-actions">', "</div>") || "";
+  T("★★ زرّا «توحيد الموردين» و«دمج مشروع» بلا طيفٍ خاصٍّ يزاحم الفعلَ الأساسيّ",
+    hexIn(hero).length === 0, hexIn(hero).join(" ") || undefined);
+
   // ── (٦) مفتاحُ عمر التوقّف يُشتقّ ولا يُكرَّر ──
   const legend = slice('<div class="pof-legend"', "</div>") || "";
   T("★★ مفتاحُ عمر التوقّف لا يكرّر ألوانَ PO_AGE_BUCKETS نصّاً",
     hexIn(legend).length === 0, hexIn(legend).join(" ") || undefined);
   T("★★ وrenderPOStageFlow هو من يملؤه من المصدر نفسِه",
     /getElementById\("po-flow-legend"\)/.test(HTML) &&
-    /PO_AGE_BUCKETS\.map\(b=>`<span><i style="background:\$\{b\.color\}"/.test(HTML));
+    /PO_AGE_BUCKETS\.map\(b=>`<span><i style="background:\$\{poFill\(b\.color\)\}"/.test(HTML));
 }
 
 /* ══ التشغيل ══ */
