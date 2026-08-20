@@ -33,6 +33,10 @@
   /* ── الصفر يخفت ── لونٌ أفتحُ من --muted لِما قيمتُه صفر. الصفرُ ليس معلومةً
      تُقرأ، بل غيابُها؛ فحملُه حبراً مساوياً لِما فيه عملٌ يُغرق العينَ في لا شيء. */
   --zero:#a3b0c2;
+  /* ── المكتملُ منتهٍ فلا يصرخ ── مساحةٌ أهدأُ من --accent لِما تمّ. على شاشةِ
+     تشغيلٍ الأهمُّ ما هو **مفتوح**، فحين تملأ ٨٣٪ من الحلقة خضرةٌ كاملةُ الإشباع
+     تُغرِق الـ١٥٪ الكهرمانيّة التي تستدعي عملاً. الحبرُ يبقى --accent للأرقام. */
+  --ok-fill:#8cc7b0;
   /* ── سلّمُ الرتبة ── للكميّات التي لا حالةَ فيها: مشروعٌ أكبرُ من مشروعٍ ليس
      «أسوأَ» منه، فلا يستحقّ لوناً دلالياً. درجةٌ واحدةٌ بسبع مراتب: الأغمقُ الأكبر. */
   --rank1:#1b3a6b;--rank2:#2c518c;--rank3:#4269a3;--rank4:#5f85b8;
@@ -46,6 +50,7 @@ html[data-theme="dark"]{
   --ai:#a5a3e8;--ai-ink:#c3c1f2;
   --shadow:0 1px 4px rgba(0,0,0,0.4);
   --zero:#5b6b83;
+  --ok-fill:#2f7f66;
   /* السلّمُ ينقلب في الداكن: الأغمقُ يختفي على خلفيةٍ داكنة، فالأبرزُ هو الأفتح. */
   --rank1:#7aa6ff;--rank2:#6690e2;--rank3:#547ac4;--rank4:#4566a6;
   --rank5:#3a5386;--rank6:#314468;--rank7:#2b3950;
@@ -383,10 +388,10 @@ input,select,textarea,button{font-family:'Cairo','Tajawal',sans-serif}
 .btn-primary{background:var(--primary);color:#fff;padding:9px 18px;font-size:13px}
 .is-guard-busy{opacity:.6;cursor:progress}
 .btn-success{background:var(--accent);color:#fff;padding:9px 18px;font-size:13px}
-.btn-warn{background:#fff8ed;color:var(--warn);border:1px solid #f6ad55!important;padding:5px 11px;font-size:11px}
-.btn-ghost{background:#fff;color:var(--muted);border:1px solid var(--border)!important;padding:5px 11px;font-size:11px}
+.btn-warn{background:color-mix(in srgb,var(--warn) 10%,var(--surface));color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 42%,var(--border))!important;padding:5px 11px;font-size:11px}
+.btn-ghost{background:var(--surface);color:var(--muted);border:1px solid var(--border)!important;padding:5px 11px;font-size:11px}
 .btn-danger{background:var(--danger);color:#fff;padding:6px 12px;font-size:12px}
-.btn-danger:hover{background:#a02020}
+.btn-danger:hover{background:color-mix(in srgb,var(--danger) 82%,#000)}
 .btn-sm{padding:6px 14px;font-size:12px}
 /* زر الإجراءات الذكية (AI) — موحّد */
 .btn-ai{position:relative;overflow:hidden;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);color:#fff;padding:6px 14px;font-size:12px;border-radius:9px;box-shadow:0 2px 10px rgba(79,70,229,.26)}
@@ -671,7 +676,10 @@ input,select,textarea,button{font-family:'Cairo','Tajawal',sans-serif}
 .page-hero-actions .btn svg{width:14px;height:14px;vertical-align:-2px;stroke-width:2}
 .mini-ic{display:inline-flex;align-items:center;vertical-align:-3px;margin-inline-end:6px;color:var(--primary)}
 .mini-ic svg{width:14px;height:14px;stroke-width:2}
-.stat-tile .st-val{font-size:26px;font-weight:900;line-height:1.05;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;margin-top:4px}
+/* الشريطُ مساحةٌ (--_c) والرقمُ حبرٌ (--_ink): المكتملُ يهدأ شريطُه ويبقى رقمُه مقروءاً. */
+.stat-tile .st-val{font-size:26px;font-weight:900;line-height:1.05;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;margin-top:4px;color:var(--_ink,var(--_c,var(--primary)))}
+/* صفرٌ لا يستحقّ شريطاً ملوّناً ولا رقماً صارخاً — البطاقةُ تخفت كلُّها. */
+.stat-tile.st-zero{--_c:var(--zero)!important;--_ink:var(--zero)!important}
 .stat-tile .st-lbl{font-size:11px;color:var(--muted);font-weight:700;margin-top:4px}
 .meter-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}
 .meter-card .mc-lbl{font-size:11px;color:var(--muted);font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
@@ -1721,16 +1729,16 @@ html[data-theme="dark"] .row-menu-item.danger:hover{background:#3a1717}
 /* ═══ PURCHASE CARDS ═══ */
 .po-card{background:#fff;border-radius:10px;padding:11px 12px;margin-bottom:10px;cursor:pointer;box-shadow:var(--shadow);border-right:4px solid var(--info);transition:box-shadow .15s}
 .po-card:hover{box-shadow:0 4px 12px rgba(0,0,0,0.12)}
-.po-card.po-urgent{border-right-color:var(--danger);background:#fff5f5}
-.po-card.po-delivered{border-right-color:var(--accent);background:#f0fff4}
+.po-card.po-urgent{border-right-color:var(--danger);background:color-mix(in srgb,var(--danger) 4%,var(--surface))}
+.po-card.po-delivered{border-right-color:var(--ok-fill)}
 .po-card.po-cancelled{border-right-color:var(--muted);opacity:.7}
 /* v18.9mt: طلب شراء متأخر عن تاريخ الاستلام المتوقع */
-.po-card.po-overdue{border-right-color:var(--danger);background:#fff8f8}
+.po-card.po-overdue{border-right-color:var(--danger);background:color-mix(in srgb,var(--danger) 4%,var(--surface))}
 .po-card.po-done{border-right-color:#fff}
-.po-late-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;padding:2px 9px;border-radius:20px;white-space:nowrap}
+.po-late-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;color:var(--danger);background:color-mix(in srgb,var(--danger) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--danger) 28%,var(--border));padding:2px 9px;border-radius:20px;white-space:nowrap}
 /* v18.9xc: التأخّرُ الداخليّ (لم يبدأ التوريد) لونُه غيرُ لونِ تأخّر المورّد — مالكُ
    المشكلة مختلف، فلا يصحّ أن يقرأهما الناظرُ وسماً واحداً */
-.po-late-badge.po-late-internal{color:#92400e;background:#fef3c7;border-color:#fde68a}
+.po-late-badge.po-late-internal{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--surface));border-color:color-mix(in srgb,var(--warn) 28%,var(--border))}
 /* بطاقةُ «وعد المورّد» في تفاصيل الطلب */
 .po-promise{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;color:#0e7490;background:#cffafe;border:1px solid #a5f3fc;padding:2px 9px;border-radius:20px;white-space:nowrap}
 /* ═══ شبكةُ بطاقات الشراء — أصغرُ ومتجاورةٌ على الكمبيوتر واللوحيّ ═══   (طلبُ المالك)
@@ -1836,20 +1844,26 @@ html[data-theme="dark"] .row-menu-item.danger:hover{background:#3a1717}
   .pof-grid{grid-template-columns:1fr;gap:12px}
   .pof-dwrap{flex-direction:row;justify-content:center;gap:16px;padding-top:10px;border-top:1px dashed var(--border)}
   .pof-dleg{width:auto;min-width:150px}}
-.b-po-new{background:#dbeafe;color:#1e40af}
+/* ══ شاراتُ حالة الطلب — طيفُها من PO_STAGES نفسِه ══
+   كانت مكتوبةً أرقاماً سداسيةً (فلا تنقلب في الوضع الليليّ) وتناقض مخطّطَ المسار:
+   البطاقةُ تقول «تنفيذ المشتريات» بنفسجياً والمخطّطُ يقولها كحلياً، و«تمت مراجعة
+   المستودع» خضراءَ والخضرةُ تعني «اكتمل الطلبُ كلُّه» لا «تمّت خطوةٌ منه».
+   الآن: انتظارٌ=--warn · ماضٍ=--primary · مكتمل=--accent · مرفوض=--danger،
+   وبـcolor-mix فتُشتقّ الخلفيةُ من الحبر وينقلب الوضعان معاً. */
+.b-po-new{background:color-mix(in srgb,var(--primary) 12%,var(--surface));color:var(--primary)}
 /* v18.9mt: محاذاة الأيقونات والنقاط داخل الشارات */
 .badge[class*="b-po-"],.badge.b-critical,.badge.b-urgent,.badge.b-normal{display:inline-flex;align-items:center;gap:5px}
-.b-po-draft{background:#f1f5f9;color:#475569}
-.b-po-approval{background:#fdf1e3;color:#a06010}
-.b-po-approved{background:#d1fae5;color:#065f46}
-.b-po-rejected{background:#fee2e2;color:#991b1b}
-.b-po-ordered{background:#ede9fe;color:#5b21b6}
-.b-po-completed{background:#d1fae5;color:#065f46}
-.b-po-delivered{background:#d1fae5;color:#0a7c59}
-.b-po-closed{background:#e2e8f0;color:#334155}
-.b-po-cancelled{background:#f1f5f9;color:#64748b}
-.b-po-ceo{background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff}
-.po-id{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--info);background:#eff6ff;padding:2px 8px;border-radius:4px}
+.b-po-draft{background:var(--surface2);color:var(--muted)}
+.b-po-approval{background:color-mix(in srgb,var(--warn) 12%,var(--surface));color:var(--warn)}
+.b-po-approved{background:color-mix(in srgb,var(--primary) 12%,var(--surface));color:var(--primary)}
+.b-po-rejected{background:color-mix(in srgb,var(--danger) 12%,var(--surface));color:var(--danger)}
+.b-po-ordered{background:color-mix(in srgb,var(--primary) 12%,var(--surface));color:var(--primary)}
+.b-po-completed{background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent)}
+.b-po-delivered{background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent)}
+.b-po-closed{background:var(--surface2);color:var(--muted)}
+.b-po-cancelled{background:var(--surface2);color:var(--muted)}
+.b-po-ceo{background:color-mix(in srgb,var(--warn) 12%,var(--surface));color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 28%,var(--border))}
+.po-id{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--primary);background:var(--surface2);padding:2px 8px;border-radius:4px}
 /* ═══ المشتريات المركزية ═══ */
 #po-dashboard{grid-template-columns:repeat(5,1fr)}
 /* وضع العرض فقط: بطاقة المبالغ مخفية → 4 أعمدة */
