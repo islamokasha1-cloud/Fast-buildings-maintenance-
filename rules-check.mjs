@@ -189,6 +189,17 @@ await check("★★ ولا يعدّلهما غيرُ الأدمن ولو كان 
 await check("★★ والأدمن نفسُه لا يبدّل الطرفَ ولا شكلَ الارتباط (البابُ لم يتّسع)",
   assertFails(updateDoc(doc(ADMIN, `${R}/R1`), { vendorId: "V-OTHER" })));
 await check("★ ولا مشروعَ الطلب", assertFails(updateDoc(doc(ADMIN, `${R}/R1`), { projectId: "other" })));
+/* ★★ رصيدُ «البند المستعاض» يُختار عند الإنشاء ويحدّد من أيّ جيبٍ يُصرَف —
+   فتحويلُه بعد الاعتماد ينقل المالَ بين رصيدين بلا معتمِد. */
+await seed(`${R}/RSUB`, Object.assign({}, REQ, { isSubstitute: true, substituteAccountId: "sb1" }));
+await check("★★ ولا يُحوَّل الطلبُ إلى رصيد استعاضةٍ آخر بعد الإرسال",
+  assertFails(updateDoc(doc(PROC, `${R}/RSUB`), { substituteAccountId: "sb2" })));
+await check("★★ ولا يُرفَع علَمُ الاستعاضة على طلبٍ لم يُنشأ به (ولا يُنزَع)",
+  assertFails(updateDoc(doc(ADMIN, `${R}/R1`), { isSubstitute: true, substituteAccountId: "sb1" })));
+await check("★ والأدمنُ نفسُه لا يبدّل الحساب المخصوم منه",
+  assertFails(updateDoc(doc(ADMIN, `${R}/RSUB`), { substituteAccountId: "sb3" })));
+await check("ويبقى اعتمادُ الطلب المستعاض ماضياً كغيره",
+  assertSucceeds(updateDoc(doc(PROC, `${R}/RSUB`), { status: "crq_pending_finance" })));
 await seed(`${R}/R2`, Object.assign({}, REQ, { status: "crq_pending_pay" }));
 await check("★ والسدادُ للمالية وحدَها", assertFails(updateDoc(doc(PROC, `${R}/R2`), { status: "crq_paid" })));
 await check("والماليةُ تُسدّد", assertSucceeds(updateDoc(doc(FIN, `${R}/R2`), { status: "crq_paid" })));

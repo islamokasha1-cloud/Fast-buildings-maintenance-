@@ -2555,6 +2555,95 @@ check('★★★ ومشرفٌ قديمٌ بلا حقل صلاحياتٍ لا ي�
   permStates.supLegacy.canView === false && permStates.supLegacy.grp === false,
   JSON.stringify(permStates.supLegacy));
 
+/* ════════════════════════════════════════════════════════════
+   الأعمالُ التعاقدية على رصيد «البند المستعاض»   [طلبُ المالك]
+   من النموذج إلى شاشة الرصيد: العلَمُ يُختار مرةً، والمصروفُ يُخصَم ممّا خرج
+   فعلاً، والرقمُ المرسوم في الشاشة = الرقمُ المحسوب من الدوالّ النقية.
+   ════════════════════════════════════════════════════════════ */
+console.log('\n=== البند المستعاض في التعاقدات ===');
+
+// حسابُ رصيدٍ مربوطٌ بمشروع حائل — بهامش ٢٥٪، يُكتب عبر db ليصل مستمعَ الوحدة
+await page.evaluate(() => db.doc('meta/substitute_accounts').set({ accounts: [
+  { id: 'sb1', kind: 'linked', projectId: 'hail', name: '', total: 200000, margin: 25, openingConsumed: 0 },
+  { id: 'sb2', kind: 'standalone', projectId: '', name: 'استراحة الشمال', total: 50000, margin: 10, openingConsumed: 0 }
+]}));
+await page.waitForTimeout(900);
+check('★ وحدةُ الرصيد استقبلت الحسابين',
+  await page.evaluate(() => (window.substituteBudget.accounts() || []).length === 2));
+
+// نموذجُ طلبٍ جديد: السؤالُ حاضر، والحسابُ المربوطُ بالمشروع مُرشَّحٌ تلقائياً
+await page.evaluate(() => { showPage('contract-requests'); window.contracts.newRequest(); });
+await page.waitForTimeout(1500);
+check('★ سؤالُ «من البند المستعاض» ظاهرٌ في نموذج طلب التعاقد',
+  await page.evaluate(() => !!document.getElementById('ct-r-sub')));
+check('★ ولا قائمةَ حساباتٍ قبل رفع العلَم', await page.evaluate(() => !document.getElementById('ct-r-subacc')));
+await page.evaluate(() => { document.getElementById('ct-r-sub').checked = true; window.contracts.toggleSubstitute(); });
+await page.waitForTimeout(900);
+const subPick = await page.evaluate(() => {
+  const sel = document.getElementById('ct-r-subacc');
+  return { has: !!sel, value: sel ? sel.value : '', opts: sel ? sel.options.length : 0,
+           draft: !!window.contracts._draft().isSubstitute };
+});
+check('★★ رفعُ العلَم يفتح قائمةَ الحسابات ويُرشّح حسابَ المشروع تلقائياً',
+  subPick.has && subPick.value === 'sb1' && subPick.opts === 3, JSON.stringify(subPick));
+check('★ والمسوّدةُ حملت العلَم', subPick.draft);
+await page.screenshot({ path: `${SHOTS}/60-sub-form.png` });
+await page.evaluate(() => { document.getElementById('ct-r-sub').checked = false; window.contracts.toggleSubstitute(); });
+await page.waitForTimeout(700);
+check('★ وإنزالُ العلَم يُخفي القائمةَ ويمسح الحساب',
+  await page.evaluate(() => !document.getElementById('ct-r-subacc') &&
+    window.contracts._draft().substituteAccountId === ''));
+await page.evaluate(() => window.contracts.cancelRequest());
+await page.waitForTimeout(600);
+
+/* مستنداتٌ مستعاضةٌ حقيقية: أمرُ دفعٍ مسدَّد · عقدٌ سارٍ بمستخلصين (مسدَّدٌ وقيدَ السداد) */
+await page.evaluate(() => {
+  const R = 'global_contract_requests', C = 'global_contracts', E = 'global_contract_extracts';
+  return Promise.all([
+    db.collection(R).doc('CRQ-SUB-PAY').set({ engagement: 'pay_order', status: 'crq_paid',
+      projectId: 'hail', title: 'ترميم سور', vendorName: 'مؤسسة النور', value: 2000,
+      payment: { amount: 1900 }, isSubstitute: true, substituteAccountId: 'sb1' }),
+    db.collection(R).doc('CRQ-SUB-WAIT').set({ engagement: 'contract', status: 'crq_pending_finance',
+      projectId: 'hail', title: 'أعمال إضافية', vendorName: 'مؤسسة النور', value: 50000,
+      isSubstitute: true, substituteAccountId: 'sb1' }),
+    db.collection(C).doc('CTR-SUB-1').set({ status: 'ctr_active', projectId: 'hail',
+      title: 'تشطيبات خارج العقد', vendorName: 'مؤسسة النور', value: 80000,
+      isSubstitute: true, substituteAccountId: 'sb1' }),
+    db.collection(E).doc('EXT-P').set({ contractId: 'CTR-SUB-1', status: 'ext_paid', payment: { amount: 30000 } }),
+    db.collection(E).doc('EXT-W').set({ contractId: 'CTR-SUB-1', status: 'ext_pending_finance', payment: { amount: 12000 } })
+  ]);
+});
+await page.waitForTimeout(1200);
+
+const sbRoll = await page.evaluate(() => window.contracts.substituteRollupFor('sb1'));
+check('★★ المصروفُ = أمرُ دفعٍ مسدَّد ١٩٠٠ + مستخلصٌ مسدَّد ٣٠٬٠٠٠',
+  sbRoll.spent === 31900, 'spent=' + sbRoll.spent);
+check('★ والمستخلصُ المعتمدُ غيرُ المسدَّد لم يُخصَم', sbRoll.spent !== 43900);
+check('★ «قيد الاعتماد» = طلبُ التعاقد القائم', sbRoll.pending === 50000, 'pending=' + sbRoll.pending);
+check('★ و«متعاقَدٌ عليه» = قيمةُ العقد − المسدَّد', sbRoll.contracted === 50000, 'contracted=' + sbRoll.contracted);
+
+// شاشةُ الرصيد: الرقمُ المرسوم = الرقمُ المحسوب
+await page.evaluate(() => { showPage('substitute-budget'); window.substituteBudget.open('sb1'); });
+await page.waitForTimeout(1200);
+const sbTxt = (await page.textContent('#page-substitute-budget')) || '';
+check('★★ شاشةُ الرصيد تعرض جدولَ الأعمال التعاقدية بمستنداته الثلاثة',
+  sbTxt.includes('الأعمال التعاقدية') && sbTxt.includes('CRQ-SUB-PAY') &&
+  sbTxt.includes('CTR-SUB-1') && sbTxt.includes('CRQ-SUB-WAIT'));
+const drawnKpi = await page.evaluate(() => {
+  const box = document.querySelector('#page-substitute-budget .card[style*="repeat(3,1fr)"]');
+  return box ? Array.from(box.children).map(e => e.textContent.replace(/\s+/g, ' ').trim()) : [];
+});
+const spentDrawn = (drawnKpi.find(t => t.includes('مصروف على المنصة')) || '').replace(/[^\d.]/g, '');
+check('★★★ «مصروف على المنصة» المرسوم = المحسوب (31,900 × 1.25 = 39,875)',
+  spentDrawn === '39875', 'مرسوم=' + spentDrawn);
+const remDrawn = (drawnKpi.find(t => t.includes('المتبقي')) || '').replace(/[^\d.]/g, '');
+check('★★ والمتبقي = الرصيد − المستهلك (200,000 − 39,875)', remDrawn === '160125', 'مرسوم=' + remDrawn);
+await page.screenshot({ path: `${SHOTS}/61-sub-budget.png`, fullPage: true });
+check('★ وسطرُ المصدرين يفصل الشراءَ عن التعاقد',
+  sbTxt.includes('أعمال تعاقدية') && sbTxt.includes('طلبات شراء'));
+check('★★ وحسابٌ آخرُ لا يرث مستنداتِ غيره',
+  await page.evaluate(() => window.contracts.substituteRollupFor('sb2').docs.length === 0));
+
 check('لا أخطاء جافاسكربت طوال الرحلة', errors.length === 0, errors.slice(0, 2).join(' | '));
 
 console.log('\n' + '═'.repeat(58));

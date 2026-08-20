@@ -113,7 +113,9 @@
   // دالة نقية (بلا قراءة globals) لتكون قابلة للاختبار: تأخذ الحساب وقائمة طلباته
   // والدوال المُعينة (مغلق؟ / التكلفة الفعلية / التقديرية). تُستدعى من _stats بالدوال
   // المدعومة بالـ globals، وتُعرَّض كـ _calcStats لفحوص hail-tests.
-  function _calcStats(acc, pos, isClosed, actualCost, estTotal, isDead){
+  // `ctr` (اختياريّ) = مساهمةُ التعاقدات: { spent, wip } بالتكلفة قبل الهامش —
+  // تأتي من `contracts.substituteRollupFor`، وتُمرَّر وسيطاً لتبقى الدالّةُ نقيّة.
+  function _calcStats(acc, pos, isClosed, actualCost, estTotal, isDead, ctr){
     var margin = Number(acc && acc.margin)||0, f = 1 + margin/100;
     var closedCost=0, closedSell=0, closedProfit=0, wipSell=0, closedCount=0, wipCount=0, deadCount=0;
     (pos||[]).forEach(function(p){
@@ -127,19 +129,62 @@
     });
     var opening = Number(acc && acc.openingConsumed)||0;
     var total   = Number(acc && acc.total)||0;
-    var consumed = opening + closedSell;
+    // التعاقدات: المصروفُ يُخصَم بسعر بيعه كطلب الشراء المغلق، والالتزامُ القائم
+    // (طلباتٌ قيد الاعتماد + متبقّي عقودٍ سارية) قيدُ تنفيذٍ يُعرَض ولا يُخصَم.
+    var ctrCost   = Number(ctr && ctr.spent)||0;
+    var ctrSell   = ctrCost*f;
+    var ctrProfit = ctrSell - ctrCost;
+    var ctrWip    = (Number(ctr && ctr.wip)||0)*f;
+    var ctrCount  = Number(ctr && ctr.count)||0;
+    wipSell += ctrWip;
+    var spentCost = closedCost + ctrCost;
+    var spentSell = closedSell + ctrSell;
+    var profit    = closedProfit + ctrProfit;
+    var consumed = opening + spentSell;
     return {
       margin:margin, total:total, opening:opening,
       closedCost:closedCost, closedSell:closedSell, closedProfit:closedProfit,
+      ctrCost:ctrCost, ctrSell:ctrSell, ctrProfit:ctrProfit, ctrWip:ctrWip, ctrCount:ctrCount,
+      spentCost:spentCost, spentSell:spentSell, profit:profit,
       consumed:consumed, remaining: total - consumed,
       wipSell:wipSell, closedCount:closedCount, wipCount:wipCount, deadCount:deadCount,
-      count: closedCount + wipCount   // الطلبات الحيّة فقط (تستبعد الميّتة)
+      count: closedCount + wipCount + ctrCount   // الحيّة فقط (تستبعد الميّتة) + مستندات التعاقد
     };
   }
 
+  /* ── مساهمةُ التعاقدات ──
+     المصدرُ الوحيدُ هو `contracts.substituteRollupFor` — لا نسخةَ ثانيةً هنا من
+     قواعد «متى يُعدّ العقدُ مصروفاً». وإن غابت الوحدةُ (ملفٌّ خارجيّ قد لا يصل)
+     رجعت الأصفارُ فتعمل الشاشةُ كما كانت بلا كسر. */
+  function _ctrRollup(accId){
+    try{
+      if(window.contracts && typeof window.contracts.substituteRollupFor==="function"){
+        var r = window.contracts.substituteRollupFor(accId) || {};
+        var docs = Array.isArray(r.docs)?r.docs:[];
+        return { spent:Number(r.spent)||0, wip:(Number(r.pending)||0)+(Number(r.contracted)||0),
+                 count:docs.length, docs:docs };
+      }
+    }catch(e){}
+    return { spent:0, wip:0, count:0, docs:[] };
+  }
+  /* **حارسُ منع الازدواج**: طلبُ شراءٍ تحت عقدٍ محمولٍ على رصيدِ استعاضةٍ محسوبٌ
+     مرةً في مستخلصات ذلك العقد — فعدُّه هنا ثانيةً يُخصم المالَ مرتين لعملٍ واحد.
+     القاعدةُ تُقرأ من وحدة التعاقدات ولا تُنسَخ (كما تفعل `project-management`). */
+  function _poDoubleCounted(p){
+    try{
+      if(!p || !p.contractId) return false;
+      if(window.contracts && typeof window.contracts.contractSubstituteId==="function")
+        return !!window.contracts.contractSubstituteId(p.contractId);
+    }catch(e){}
+    return false;
+  }
+  function _posOf(accId){
+    return _pos().filter(function(p){
+      return p && p.isSubstitute && p.substituteAccountId===accId && !_poDoubleCounted(p);
+    });
+  }
   function _stats(acc){
-    var pos = _pos().filter(function(p){ return p && p.isSubstitute && p.substituteAccountId===acc.id; });
-    return _calcStats(acc, pos, _isClosed, _actualCost, _estTotal, _isDead);
+    return _calcStats(acc, _posOf(acc.id), _isClosed, _actualCost, _estTotal, _isDead, _ctrRollup(acc.id));
   }
 
   // الطلبات المستعاضة التي تشير لحسابٍ غير موجود (حُذف مثلاً) — دلوٌ للتنبيه.
@@ -222,7 +267,7 @@
         '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">' +
           '<div>' +
             '<div style="font-size:17px;font-weight:800">'+(typeof _ic==="function"?_ic("landmark","ic-lg"):"")+' رصيد البند المستعاض</div>' +
-            '<div style="font-size:12px;color:var(--muted);margin-top:2px">رصيد كل مشروع للمشتريات والخدمات خارج بنود العقد — يُخصم بسعر البيع عند إغلاق الطلب.</div>' +
+            '<div style="font-size:12px;color:var(--muted);margin-top:2px">رصيد كل مشروع للمشتريات والخدمات خارج بنود العقد — يُخصم بسعر البيع ممّا صُرف فعلاً: طلبُ شراءٍ مغلق، أو أمرُ دفعٍ مسدَّد، أو مستخلصُ عقدٍ مسدَّد.</div>' +
             _moneyNote() +
           '</div>' + addBtn +
         '</div>' +
@@ -239,7 +284,7 @@
 
     // إجماليات (لأصحاب صلاحية المال فقط)
     var totBudget=0, totConsumed=0, totRemaining=0, totProfit=0;
-    _accounts.forEach(function(a){ var s=_stats(a); totBudget+=s.total; totConsumed+=s.consumed; totRemaining+=s.remaining; totProfit+=s.closedProfit; });
+    _accounts.forEach(function(a){ var s=_stats(a); totBudget+=s.total; totConsumed+=s.consumed; totRemaining+=s.remaining; totProfit+=s.profit; });
 
     var summary = money ? '' +
       '<div class="card" style="margin-bottom:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;text-align:center">' +
@@ -267,9 +312,9 @@
       var moneyCells = money
         ? '<td style="padding:8px;text-align:center">'+_fmt(s.total)+'</td>' +
           '<td style="padding:8px;text-align:center;color:var(--muted)">'+_fmt(s.opening)+'</td>' +
-          '<td style="padding:8px;text-align:center">'+_fmt(s.closedSell)+'</td>' +
+          '<td style="padding:8px;text-align:center">'+_fmt(s.spentSell)+'</td>' +
           '<td style="padding:8px;text-align:center;font-weight:800;color:'+(s.remaining<0?"var(--danger)":"var(--success)")+'">'+_fmt(s.remaining)+'</td>' +
-          '<td style="padding:8px;text-align:center;color:var(--success);font-weight:700">'+_fmt(s.closedProfit)+'</td>' +
+          '<td style="padding:8px;text-align:center;color:var(--success);font-weight:700">'+_fmt(s.profit)+'</td>' +
           '<td style="padding:8px;text-align:center">'+_fmt(s.margin)+'%</td>'
         : '';
       return '<tr style="cursor:pointer;border-top:1px solid var(--border)" onclick="window.substituteBudget.open(\''+acc.id+'\')">' +
@@ -291,7 +336,7 @@
         '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
           '<thead><tr style="background:var(--surface2)">' +
             '<th style="padding:8px;text-align:right">الحساب</th>' +
-            '<th style="padding:8px;text-align:center">عدد الطلبات المستعاضة</th>' +
+            '<th style="padding:8px;text-align:center">مستندات مستعاضة</th>' +
             moneyHeads +
           '</tr></thead>' +
           '<tbody>'+rows+'</tbody>' +
@@ -306,8 +351,9 @@
 
   function _detailHtml(acc){
     var money = _canSeeMoney();
-    var s = _stats(acc);
-    var pos = _pos().filter(function(p){ return p && p.isSubstitute && p.substituteAccountId===acc.id; })
+    var ctr = _ctrRollup(acc.id);
+    var s = _calcStats(acc, _posOf(acc.id), _isClosed, _actualCost, _estTotal, _isDead, ctr);
+    var pos = _posOf(acc.id)
                     .sort(function(a,b){ return String(b.createdAt||"").localeCompare(String(a.createdAt||"")); });
 
     var manageBtns = _canManage()
@@ -319,10 +365,57 @@
       '<div class="card" style="margin-bottom:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center">' +
         _kpi("إجمالي الرصيد", _fmt(s.total), "var(--primary)") +
         _kpi("مستهلك قبل المنصة", _fmt(s.opening), "var(--muted)") +
-        _kpi("مصروف على المنصة", _fmt(s.closedSell), "var(--accent)") +
+        _kpi("مصروف على المنصة", _fmt(s.spentSell), "var(--accent)") +
         _kpi("المتبقي", _fmt(s.remaining), s.remaining<0?"var(--danger)":"var(--success)") +
-        _kpi("الربح المحقّق", _fmt(s.closedProfit), "var(--success)") +
+        _kpi("الربح المحقّق", _fmt(s.profit), "var(--success)") +
         _kpi("قيد التنفيذ (لم يُخصم بعد)", _fmt(s.wipSell), "var(--warn,#b45309)") +
+      '</div>' : '';
+
+    /* من أين جاء «المصروف»؟ رقمٌ واحدٌ يجمع شراءً وتعاقداً يُقرأ لغزاً حين لا يطابق
+       ما يذكره صاحبُه. فالسطرُ يفصل المصدرين بلا فتح شاشةٍ أخرى. */
+    var splitBox = (money && (s.ctrSell>0 || s.ctrWip>0)) ? '' +
+      '<div class="card" style="margin-bottom:12px;font-size:12.5px;display:flex;flex-wrap:wrap;gap:6px 22px">' +
+        '<span>'+_icn("cart","ic-sm")+' طلبات شراء: <b>'+_fmt(s.closedSell)+'</b> ر.س</span>' +
+        '<span>'+_icn("fileText","ic-sm")+' أعمال تعاقدية: <b>'+_fmt(s.ctrSell)+'</b> ر.س</span>' +
+        (s.ctrWip>0?'<span style="color:var(--muted)">منها قيد التنفيذ تعاقدياً: '+_fmt(s.ctrWip)+' ر.س</span>':'') +
+      '</div>' : '';
+
+    /* جدولُ الأعمال التعاقدية — عمودُ المال فيه **ما خرج فعلاً** لا القيمة: العقدُ
+       الساري التزامٌ لم يُدفَع، وخلطُهما يُظهر خصماً لم يقع. */
+    var ctrRows = (ctr.docs||[]).map(function(d){
+      var isReq = d.kind==="req";
+      var lbl = isReq ? (d.engagement==="pay_order" ? "أمر دفع" : "طلب تعاقد") : "عقد";
+      var sell = (Number(d.spent)||0)*(1+s.margin/100);
+      var stateCell = d.state==="spent"
+        ? '<span style="color:var(--success);font-weight:700">مصروف ✓</span>'
+        : (d.state==="live" ? '<span style="color:var(--muted)">قيد التنفيذ</span>'
+                            : '<span style="color:var(--danger,#dc2626)">بلا أثر</span>');
+      var moneyCells = money
+        ? '<td style="padding:8px;text-align:center">'+_fmt(d.value)+'</td>' +
+          '<td style="padding:8px;text-align:center">'+_fmt(d.spent)+'</td>' +
+          '<td style="padding:8px;text-align:center">'+(d.spent>0?_fmt(sell):"—")+'</td>' : '';
+      var open = isReq ? "openReqFrom" : "openCtrFrom";
+      return '<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="try{window.contracts.'+open+'(\''+d.id+'\')}catch(e){}">' +
+        '<td style="padding:8px;font-weight:600">'+_esc(d.id)+'</td>' +
+        '<td style="padding:8px">'+_esc(lbl)+' — '+_esc(d.title||d.vendorName||"—")+'</td>' +
+        '<td style="padding:8px;text-align:center">'+stateCell+
+          '<div style="font-size:10.5px;color:var(--muted);margin-top:2px">'+_esc(d.statusLbl||"")+'</div></td>' +
+        moneyCells +
+      '</tr>';
+    }).join("");
+    var ctrTable = (ctr.docs||[]).length ? '' +
+      '<div class="card" style="overflow-x:auto;margin-top:12px">' +
+        '<div style="font-weight:800;margin-bottom:8px">'+_icn("fileText","ic-sm")+' الأعمال التعاقدية ('+ctr.docs.length+')</div>' +
+        '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+          '<thead><tr style="background:var(--surface2)">' +
+            '<th style="padding:8px;text-align:right">المستند</th>' +
+            '<th style="padding:8px;text-align:right">النوع والعنوان</th>' +
+            '<th style="padding:8px;text-align:center">الحالة</th>' +
+            (money?'<th style="padding:8px;text-align:center">القيمة</th>' +
+                   '<th style="padding:8px;text-align:center">المصروف فعلاً</th>' +
+                   '<th style="padding:8px;text-align:center">سعر البيع</th>':'') +
+          '</tr></thead><tbody>'+ctrRows+'</tbody>' +
+        '</table>' +
       '</div>' : '';
 
     var moneyPOHeads = money
@@ -369,9 +462,9 @@
         '</div>' +
         '<div>'+manageBtns+'</div>' +
       '</div>' +
-      moneyBox +
+      moneyBox + splitBox +
       '<div class="card" style="overflow-x:auto">' +
-        '<div style="font-weight:800;margin-bottom:8px">📋 الطلبات المستعاضة ('+pos.length+')</div>' +
+        '<div style="font-weight:800;margin-bottom:8px">📋 طلبات الشراء المستعاضة ('+pos.length+')</div>' +
         '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
           '<thead><tr style="background:var(--surface2)">' +
             '<th style="padding:8px;text-align:right">رقم الطلب</th>' +
@@ -380,7 +473,7 @@
             moneyPOHeads +
           '</tr></thead><tbody>'+poRows+'</tbody>' +
         '</table>' +
-      '</div>';
+      '</div>' + ctrTable;
   }
 
   // ════════ نموذج الإضافة/التعديل ════════
@@ -546,8 +639,9 @@
     if(!_canManage()){ _toast("⚠ صلاحية المسؤول فقط","warn"); return; }
     var acc = _accounts.find(function(a){ return a.id===id; });
     if(!acc){ return; }
-    var linked = _pos().filter(function(p){ return p && p.isSubstitute && p.substituteAccountId===id; }).length;
-    var warn = linked ? ("\n\n⚠ يشير إليه "+linked+" طلب مستعاض — ستبقى الطلبات لكنها ستصبح «بلا حساب» ولن تُخصم من أي رصيد.") : "";
+    var linked = _pos().filter(function(p){ return p && p.isSubstitute && p.substituteAccountId===id; }).length
+                 + (_ctrRollup(id).docs||[]).length;
+    var warn = linked ? ("\n\n⚠ يشير إليه "+linked+" مستند مستعاض (طلبات شراء · تعاقدات) — ستبقى المستندات لكنها ستصبح «بلا حساب» ولن تُخصم من أي رصيد.") : "";
     Promise.resolve(_confirm({
       title:"حذف حساب البند المستعاض؟",
       msg:"سيُحذف حساب «"+_acctName(acc)+"»."+warn,
