@@ -18,6 +18,20 @@
      مطابقة أسماء هشّة.
    • الخصم بسعر البيع (التكلفة الفعلية + الهامش) وعند الإغلاق الفعلي فقط.
    • «المستهلك قبل المنصة» يُدخَل رقماً افتتاحياً واحداً لكل حساب (openingConsumed).
+   • **الشراءُ النقديُّ من العهدة** — بندٌ يشتريه مشرفٌ أو مسؤولُ مشترياتٍ من عهدته
+     **بلا طلبِ شراء** — قناةُ خصمٍ رابعةٌ مستقلّة: مستندُ «مصروف نقدي» بمبلغه الفعليّ،
+     يُخصَم **بسعر البيع** (التكلفة × (1+الهامش)) كطلبِ الشراء المغلق تماماً.
+     **ولا يُدخَل فيه ما له طلبُ شراءٍ أو مستندُ تعاقدٍ على المنصّة** — ذاك مخصومٌ في
+     قناته، وإدخالُه هنا خصمٌ مرّتين لعملٍ واحد.
+   • **ومَن يُدخِل ليس مَن يعتمد** (قرارُ المالك): الإدخالُ للمشرف ومسؤول المشتريات
+     والمالية والمسؤول، **والاعتمادُ للمسؤول (admin) وحدَه**. والمستندُ حالتان:
+     `pending` يُعرَض في «قيد التنفيذ» **ولا يُخصَم**، و`approved` يُخصَم. فالاعتمادُ
+     هو لحظةُ الخصم — وإلا كان توقيعاً على ورقةٍ نفَذ أثرُها قبل أن تُقرأ.
+   • **ولذلك مجموعةٌ لا مصفوفةٌ في مستند** (`global_substitute_expenses`): قواعدُ
+     Firestore تحرس **مستنداً** لا عنصراً داخل مصفوفة. فمصفوفةٌ في وثيقةٍ واحدةٍ تعني
+     أن كلَّ مَن يملك الإدخالَ يستطيع كتابةَ المصفوفة كاملةً بحالة `approved` —
+     فيعتمد لنفسه، ولا سطرَ في القاعدة يمنعه. المستندُ المستقلُّ وحدَه يجعل
+     «مَن يعتمد» شرطاً على الخادم لا رجاءً في المتصفّح.
    • الفلاتر تصفّي **ما يُعرَض** لا ما يُحسَب: رصيدُ الحساب (الإجمالي/المستهلك/المتبقي/
      الربح/قيد التنفيذ) يبقى على كل مستنداته مهما ضاق الجدول — وإلا قرأ المستخدمُ
      رصيداً ناقصاً حقيقةً. الاستثناء الوحيد إجماليّاتُ شاشة القائمة: تتبع الصفوفَ
@@ -42,9 +56,21 @@
     try{ dev = (typeof IS_DEV!=="undefined" && IS_DEV); }catch(e){}
     return dev ? "meta/substitute_accounts_dev" : "meta/substitute_accounts";
   }
+  /* مجموعةُ المصروفات النقدية — **مستندٌ لكلّ مصروف** لا مصفوفةٌ في وثيقة الأرصدة.
+     السببُ الأول أمنيّ (انظر الترويسة): «مَن يعتمد» لا يُحرَس إلا على مستندٍ مستقلّ.
+     والثاني حجميّ: الحساباتُ عشراتٌ تُعدَّل نادراً والمصروفاتُ مئاتٌ تُضاف يومياً،
+     فجمعُهما يجعل كلَّ إيصالٍ يعيد كتابةَ الأرصدةِ كلِّها ويقرّب المستندَ من سقفه. */
+  function EXP_COLL(){
+    var dev = false;
+    try{ dev = (typeof IS_DEV!=="undefined" && IS_DEV); }catch(e){}
+    return dev ? "global_substitute_expenses_dev" : "global_substitute_expenses";
+  }
 
   var _accounts = [];    // كل الحسابات (من onSnapshot)
   var _unsub    = null;  // إلغاء الاشتراك
+  var _expenses = [];    // المصروفات النقدية من العهدة (من onSnapshot الثاني)
+  var _expUnsub = null;  // إلغاء اشتراك المصروفات
+  var _expLoaded= false; // وصلت أوّل لقطةٍ للمصروفات؟ — بوّابةُ رسمٍ كالحسابات تماماً
   var _curId    = null;  // الحساب المفتوح في شاشة التفاصيل (أو null = القائمة)
   var _saving   = false; // حارس ضد النقر المزدوج على الحفظ
   // فلاتر الشاشتين — في الوحدة لا في الـDOM: onSnapshot يعيد رسم الصفحة كاملةً،
@@ -91,6 +117,30 @@
   function _canManage(){ // إنشاء/تعديل/حذف الحسابات — المسؤول فقط
     try{ return (typeof isAdmin==="function") && isAdmin(); }catch(e){ return false; }
   }
+  /* ── مَن يُدخِل ومَن يعتمد ──
+     الإدخالُ لأربعة أدوار: المشرف (بصيغتيه — «مشرف» من نافذة الإدارة و`supervisor`
+     من توكِن تطبيق الفنيين؛ وقائمةٌ بإحداهما تردّ نصفَ المشرفين بلا سببٍ ظاهر)،
+     ومسؤول المشتريات، والمالية، والمسؤول. **والاعتمادُ للمسؤول وحدَه** — وهو
+     لحظةُ الخصم من الرصيد. وهذه نسخةُ الواجهة من القاعدة؛ نسختُها المُلزِمةُ على
+     الخادم في `firestore.rules` (المتصفّحُ يمنع الخطأ لا التعمّد). */
+  var _EXP_ENTRY_ROLES = ["admin","supervisor","مشرف","finance","procurement_officer"];
+  function _role(){ try{ return (currentUser && currentUser.role) || ""; }catch(e){ return ""; } }
+  function _meUser(){ try{ return (currentUser && currentUser.user) || ""; }catch(e){ return ""; } }
+  function _canEnterExpense(){ return _EXP_ENTRY_ROLES.indexOf(_role()) >= 0; }
+  function _canApproveExpense(){ return _canManage(); }   // المسؤول وحدَه
+  /* ومَن يعدّل أو يحذف؟ المسؤولُ في كلّ حال؛ ومُدخِلُ المستند ما دام **معلّقاً**
+     وباسم دخوله لا باسمه المعروض (`createdByUser` — اصطلاحُ `global_vendors` نفسُه).
+     أمّا المعتمَدُ فمالٌ خُصم من رصيد العميل: لا يمسّه إلا المسؤول. */
+  function _ownsExpense(e){
+    var me = _meUser();
+    return !!me && String((e && e.createdByUser) || "") === me;
+  }
+  function _canEditExpense(e){
+    if(_canManage()) return true;
+    return _canEnterExpense() && _expIsPending(e) && _ownsExpense(e);
+  }
+  function _expIsPending(e){ return !e || e.status !== "approved"; }
+
   function _canSeeMoney(){ // بطاقة المال والأرباح — admin + ceo + finance
     try{
       return ((typeof isAdmin==="function") && isAdmin())
@@ -129,7 +179,9 @@
   // المدعومة بالـ globals، وتُعرَّض كـ _calcStats لفحوص hail-tests.
   // `ctr` (اختياريّ) = مساهمةُ التعاقدات: { spent, wip } بالتكلفة قبل الهامش —
   // تأتي من `contracts.substituteRollupFor`، وتُمرَّر وسيطاً لتبقى الدالّةُ نقيّة.
-  function _calcStats(acc, pos, isClosed, actualCost, estTotal, isDead, ctr){
+  // `exp` (اختياريّ) = مساهمةُ الشراء النقديّ من العهدة: { cost, count } بالتكلفة قبل
+  // الهامش — تُمرَّر وسيطاً كذلك، فالدالّةُ لا تقرأ حالةَ الوحدة ولا Firestore.
+  function _calcStats(acc, pos, isClosed, actualCost, estTotal, isDead, ctr, exp){
     var margin = Number(acc && acc.margin)||0, f = 1 + margin/100;
     var closedCost=0, closedSell=0, closedProfit=0, wipSell=0, closedCount=0, wipCount=0, deadCount=0;
     (pos||[]).forEach(function(p){
@@ -151,18 +203,31 @@
     var ctrWip    = (Number(ctr && ctr.wip)||0)*f;
     var ctrCount  = Number(ctr && ctr.count)||0;
     wipSell += ctrWip;
-    var spentCost = closedCost + ctrCost;
-    var spentSell = closedSell + ctrSell;
-    var profit    = closedProfit + ctrProfit;
+    /* الشراءُ النقديُّ من عهدة المشرفين/المشتريات: **المعتمَدُ وحدَه يُخصَم** بسعر
+       بيعه كالطلبِ المغلق تماماً، والمعلَّقُ (بانتظار اعتماد المسؤول) يُعرَض في «قيد
+       التنفيذ» ولا يُخصَم — كطلبِ شراءٍ لم يُغلَق بعد. فالاعتمادُ هو لحظةُ الخصم. */
+    var expCost   = Number(exp && exp.cost)||0;
+    var expSell   = expCost*f;
+    var expProfit = expSell - expCost;
+    var expCount  = Number(exp && exp.count)||0;
+    var expPendCost  = Number(exp && exp.pendingCost)||0;
+    var expPendCount = Number(exp && exp.pendingCount)||0;
+    var expWip    = expPendCost*f;
+    wipSell += expWip;
+    var spentCost = closedCost + ctrCost + expCost;
+    var spentSell = closedSell + ctrSell + expSell;
+    var profit    = closedProfit + ctrProfit + expProfit;
     var consumed = opening + spentSell;
     return {
       margin:margin, total:total, opening:opening,
       closedCost:closedCost, closedSell:closedSell, closedProfit:closedProfit,
       ctrCost:ctrCost, ctrSell:ctrSell, ctrProfit:ctrProfit, ctrWip:ctrWip, ctrCount:ctrCount,
+      expCost:expCost, expSell:expSell, expProfit:expProfit, expCount:expCount,
+      expPendCost:expPendCost, expPendCount:expPendCount, expWip:expWip,
       spentCost:spentCost, spentSell:spentSell, profit:profit,
       consumed:consumed, remaining: total - consumed,
       wipSell:wipSell, closedCount:closedCount, wipCount:wipCount, deadCount:deadCount,
-      count: closedCount + wipCount + ctrCount   // الحيّة فقط (تستبعد الميّتة) + مستندات التعاقد
+      count: closedCount + wipCount + ctrCount + expCount + expPendCount   // الحيّة فقط + التعاقد + النقديّ (معتمَدُه ومعلَّقُه)
     };
   }
 
@@ -197,8 +262,24 @@
       return p && p.isSubstitute && p.substituteAccountId===accId && !_poDoubleCounted(p);
     });
   }
+  /* مصروفاتُ الحساب النقدية — مستنداتٌ قائمةٌ بذاتها لا طلباتُ شراء، فلا حارسَ
+     ازدواجٍ آليّاً لها: حارسُها أن مُدخِلَها هو المسؤولُ وحدَه، والنموذجُ يقول له
+     صراحةً ألّا يُدخل ما له طلبٌ أو عقدٌ على المنصّة. */
+  function _expensesOf(accId){
+    return _expenses.filter(function(e){ return e && e.accountId===accId; });
+  }
+  function _expRollup(accId){
+    var cost=0, count=0, pendingCost=0, pendingCount=0;
+    _expensesOf(accId).forEach(function(e){
+      var v = Number(e && e.amount)||0;
+      if(_expIsPending(e)){ pendingCost += v; pendingCount++; }
+      else { cost += v; count++; }
+    });
+    return { cost:cost, count:count, pendingCost:pendingCost, pendingCount:pendingCount };
+  }
   function _stats(acc){
-    return _calcStats(acc, _posOf(acc.id), _isClosed, _actualCost, _estTotal, _isDead, _ctrRollup(acc.id));
+    return _calcStats(acc, _posOf(acc.id), _isClosed, _actualCost, _estTotal, _isDead,
+                      _ctrRollup(acc.id), _expRollup(acc.id));
   }
 
   /* ══════ الفلاتر — دوالُّ نقيّةٌ معروضةٌ لفحوص hail-tests ══════
@@ -256,6 +337,15 @@
     var q = _norm(f.q); if(!q) return true;
     return _hit(_poText(p), q);
   }
+  /* مِصفاةُ المصروف النقديّ بلغةِ الجدولين نفسِها: المعتمَدُ «مغلق/مصروف»
+     والمعلَّقُ «قيد التنفيذ» — ولا «بلا أثر» له (المرفوضُ يُحذَف لا يُؤرشَف). */
+  function _expState(e){ return _expIsPending(e) ? "wip" : "closed"; }
+  function _matchExpense(e, f){
+    f = f || {};
+    if(f.state && f.state !== _expState(e)) return false;
+    var q = _norm(f.q); if(!q) return true;
+    return _hit([e && e.id, e && e.desc, e && e.payer, e && e.ref, e && e.note, e && e.date].join(" "), q);
+  }
   function _matchCtrDoc(d, f){
     f = f || {};
     if(f.state && _ctrState(d) !== f.state) return false;
@@ -299,9 +389,24 @@
       _syncing=false; _error="تعذّر تحميل حسابات البند المستعاض — تحقّق من الاتصال.";
       _repaint();
     });
+    /* مستمعٌ ثانٍ لوثيقة المصروفات النقدية. **ولا يُخفَى عطلُه**: المصروفُ النقديُّ
+       جزءٌ من «المستهلك»، فرسمُ الشاشة بدونه يُظهر «متبقّياً» أكبرَ من الحقيقة —
+       وهي الكذبةُ نفسُها التي حُرست منها أرقامُ الطلبات. */
+    if(_expUnsub) _expUnsub();
+    _expUnsub = db.collection(EXP_COLL()).onSnapshot(function(snap){
+      var out = [];
+      snap.forEach(function(d){ out.push(Object.assign({ id:d.id }, d.data())); });
+      _expenses = out;
+      _expLoaded = true;
+      _repaint();
+    }, function(e){
+      console.warn("substitute-budget expenses sync error:", e);
+      if(!_expLoaded){ _syncing=false; _error="تعذّر تحميل المصروفات النقدية من العهدة — الأرقام ستكون ناقصة، تحقّق من الاتصال."; }
+      _repaint();
+    });
   }
   // إعادةُ المحاولة بعد عطل — يستدعيها زرُّ الشاشة.
-  function retry(){ _error=""; _loaded=false; _syncing=false; startSync(); render(); }
+  function retry(){ _error=""; _loaded=false; _expLoaded=false; _syncing=false; startSync(); render(); }
 
   /* «جاهزة» ليست وصولَ الحسابات وحدَه: كلُّ عمودِ مالٍ في الجدول محسوبٌ من
      `purchases`، فالرسمُ قبل أوّل لقطةٍ لها يُظهر لحسابٍ حقيقيٍّ «٠ مستندات · ٠
@@ -310,7 +415,7 @@
   function _poSynced(){
     try{ return !!(window._fsLoaded && window._fsLoaded.purchases); }catch(e){ return false; }
   }
-  function _ready(){ return _loaded && _poSynced(); }
+  function _ready(){ return _loaded && _expLoaded && _poSynced(); }
   // مكوّنُ المزامنة من المنصة (نفسُه في شاشة الرصيد والتقارير) — بديلٌ آمنٌ إن غاب.
   function _syncHTML(){
     try{ if(typeof _syncLoadingHTML==="function") return _syncLoadingHTML(); }catch(e){}
@@ -331,20 +436,37 @@
   function _applyRemove(list, id){                       // نقيّة — مكشوفة للاختبار
     return list.filter(function(a){ return a && a.id!==id; });
   }
-  function _txAccounts(mutate){
+  /* معاملةٌ واحدةٌ لمصفوفتين — الحساباتُ في وثيقتها والمصروفاتُ في وثيقتها. نسختان
+     من المنطق نفسِه كانتا ستفترقان عند أوّل إصلاح، والمبدّلاتُ (`_applyUpsert` /
+     `_applyRemove`) تعمل على أيّ عنصرٍ له `id` فلا تحتاج نسخةً ثانية. */
+  function _txArray(docPath, field, mutate){
     if(typeof db==="undefined" || !db) return Promise.reject(new Error("no db"));
-    var ref = db.doc(DOC());
+    var ref = db.doc(docPath);
     return db.runTransaction(function(tx){
       return tx.get(ref).then(function(snap){
-        var server = (snap.exists && Array.isArray(snap.data().accounts)) ? snap.data().accounts : [];
+        var server = (snap.exists && Array.isArray(snap.data()[field])) ? snap.data()[field] : [];
         var next = mutate(server.map(function(a){ return Object.assign({}, a); }));
-        tx.set(ref, { accounts: next }, { merge:true });
+        var patch = {}; patch[field] = next;
+        tx.set(ref, patch, { merge:true });
         return next;
       });
     });
   }
+  function _txAccounts(mutate){ return _txArray(DOC(), "accounts", mutate); }
   function _upsertAccount(account){ return _txAccounts(function(list){ return _applyUpsert(list, account); }); }
   function _removeAccountTx(id){    return _txAccounts(function(list){ return _applyRemove(list, id); }); }
+  /* المصروفُ مستندٌ مستقلٌّ — فلا معاملةَ دمجٍ له أصلاً: كتابتان متزامنتان تصيبان
+     مستندين مختلفين لا مصفوفةً واحدة. و`id` مفتاحُ المستند لا حقلٌ فيه (من `snap.id`). */
+  function _expRef(id){ return db.collection(EXP_COLL()).doc(id); }
+  function _writeExpense(id, data, isNew){
+    if(typeof db==="undefined" || !db) return Promise.reject(new Error("no db"));
+    var body = Object.assign({}, data); delete body.id;
+    return isNew ? _expRef(id).set(body) : _expRef(id).update(body);
+  }
+  function _deleteExpense(id){
+    if(typeof db==="undefined" || !db) return Promise.reject(new Error("no db"));
+    return _expRef(id).delete();
+  }
 
   // ════════ العرض ════════
   function render(){
@@ -397,7 +519,7 @@
         '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">' +
           '<div>' +
             '<div style="font-size:17px;font-weight:800">'+(typeof _ic==="function"?_ic("landmark","ic-lg"):"")+' رصيد البند المستعاض</div>' +
-            '<div style="font-size:12px;color:var(--muted);margin-top:2px">رصيد كل مشروع للمشتريات والخدمات خارج بنود العقد — يُخصم بسعر البيع ممّا صُرف فعلاً: طلبُ شراءٍ مغلق، أو أمرُ دفعٍ مسدَّد، أو مستخلصُ عقدٍ مسدَّد.</div>' +
+            '<div style="font-size:12px;color:var(--muted);margin-top:2px">رصيد كل مشروع للمشتريات والخدمات خارج بنود العقد — يُخصم بسعر البيع ممّا صُرف فعلاً: طلبُ شراءٍ مغلق، أو أمرُ دفعٍ مسدَّد، أو مستخلصُ عقدٍ مسدَّد، أو شراءٌ نقديٌّ من عهدةٍ بلا طلبِ شراء اعتمده المسؤول.</div>' +
             _moneyNote() +
           '</div>' + addBtn +
         '</div>' +
@@ -423,7 +545,8 @@
       '</div>';
     }
     var what = !_loaded ? "جارٍ تحميل حسابات البند المستعاض…"
-                        : "وصلت الحسابات — بانتظار طلبات الشراء لحساب المصروف والمتبقي…";
+             : (!_expLoaded ? "وصلت الحسابات — بانتظار المشتريات النقدية من العهدة…"
+                            : "وصلت الحسابات — بانتظار طلبات الشراء لحساب المصروف والمتبقي…");
     return '<div class="card">' + _syncHTML() +
       '<div style="text-align:center;font-size:12px;color:var(--muted);margin:-14px 0 18px">'+_esc(what)+'</div>' +
       _skelRow() + _skelRow() + _skelRow() + _skelRow() +
@@ -545,7 +668,7 @@
   function _detailHtml(acc){
     var money = _canSeeMoney();
     var ctr = _ctrRollup(acc.id);
-    var s = _calcStats(acc, _posOf(acc.id), _isClosed, _actualCost, _estTotal, _isDead, ctr);
+    var s = _calcStats(acc, _posOf(acc.id), _isClosed, _actualCost, _estTotal, _isDead, ctr, _expRollup(acc.id));
     var allPos = _posOf(acc.id)
                     .sort(function(a,b){ return String(b.createdAt||"").localeCompare(String(a.createdAt||"")); });
     /* الفلترُ على العرض وحدَه: `s` أعلاه محسوبٌ من كلّ المستندات، فلا يتحرّك الرصيد
@@ -553,7 +676,11 @@
     var pos = allPos.filter(function(p){ return _matchPO(p, _poState(p, _isClosed, _isDead), _df); });
     var allDocs = ctr.docs || [];
     var ctrDocs = allDocs.filter(function(d){ return _matchCtrDoc(d, _df); });
-    var dFilters = (allPos.length || allDocs.length) ? _filterBar(
+    // الشراءُ النقديُّ من العهدة — الأحدثُ أوّلاً بالتاريخ (ISO يُرتَّب نصّياً بأمان)
+    var allExps = _expensesOf(acc.id).slice()
+                    .sort(function(a,b){ return String(b.date||"").localeCompare(String(a.date||"")); });
+    var exps    = allExps.filter(function(e){ return _matchExpense(e, _df); });
+    var dFilters = (allPos.length || allDocs.length || allExps.length) ? _filterBar(
       "sb-d-q", "🔍 ابحث برقم المستند أو البند أو الطرف", _df.q, "window.substituteBudget.filterDoc",
       _selHtml("window.substituteBudget.filterDoc('state',this.value)", _df.state, [
         { v:"", l:"كل الحالات" },
@@ -563,7 +690,7 @@
       ]), _dfActive()) : "";
     var dScope = _dfActive() ? '' +
       '<div style="font-size:12px;color:var(--muted);margin:-4px 0 12px;padding:0 4px">' +
-        'عرض '+(pos.length+ctrDocs.length)+' من '+(allPos.length+allDocs.length)+
+        'عرض '+(pos.length+ctrDocs.length+exps.length)+' من '+(allPos.length+allDocs.length+allExps.length)+
         ' مستنداً — أرقامُ الرصيد أعلاه على كامل الحساب بلا تصفية.' +
       '</div>' : '';
 
@@ -584,11 +711,13 @@
 
     /* من أين جاء «المصروف»؟ رقمٌ واحدٌ يجمع شراءً وتعاقداً يُقرأ لغزاً حين لا يطابق
        ما يذكره صاحبُه. فالسطرُ يفصل المصدرين بلا فتح شاشةٍ أخرى. */
-    var splitBox = (money && (s.ctrSell>0 || s.ctrWip>0)) ? '' +
+    var splitBox = (money && (s.ctrSell>0 || s.ctrWip>0 || s.expSell>0 || s.expWip>0)) ? '' +
       '<div class="card" style="margin-bottom:12px;font-size:12.5px;display:flex;flex-wrap:wrap;gap:6px 22px">' +
         '<span>'+_icn("cart","ic-sm")+' طلبات شراء: <b>'+_fmt(s.closedSell)+'</b> ر.س</span>' +
         '<span>'+_icn("fileText","ic-sm")+' أعمال تعاقدية: <b>'+_fmt(s.ctrSell)+'</b> ر.س</span>' +
+        '<span>'+_icn("banknote","ic-sm")+' شراء نقديّ من العهدة: <b>'+_fmt(s.expSell)+'</b> ر.س</span>' +
         (s.ctrWip>0?'<span style="color:var(--muted)">منها قيد التنفيذ تعاقدياً: '+_fmt(s.ctrWip)+' ر.س</span>':'') +
+        (s.expWip>0?'<span style="color:var(--muted)">ونقديٌّ بانتظار الاعتماد (لم يُخصَم): '+_fmt(s.expWip)+' ر.س</span>':'') +
       '</div>' : '';
 
     /* جدولُ الأعمال التعاقدية — عمودُ المال فيه **ما خرج فعلاً** لا القيمة: العقدُ
@@ -629,6 +758,83 @@
                    '<th style="padding:8px;text-align:center">المصروف فعلاً</th>' +
                    '<th style="padding:8px;text-align:center">سعر البيع</th>':'') +
           '</tr></thead><tbody>'+ctrRowsOrEmpty+'</tbody>' +
+        '</table>' +
+      '</div>' : '';
+
+    /* جدولُ الشراء النقديّ من العهدة — النشاطُ يراه الجميع (كبقية المستندات)،
+       وأعمدةُ المال لأصحابها، والإضافةُ/التعديلُ/الحذفُ للمسؤول وحدَه. ويُعرَض
+       الجدولُ للمسؤول ولو كان فارغاً: بلا زرٍّ ظاهرٍ لا يعرف أحدٌ أن القناةَ موجودة. */
+    /* عمودُ «الحالة» ليس زينةً: المعلَّقُ **لم يُخصَم بعد** والمعتمَدُ خُصم — ورقمان
+       متساويان بحالتين مختلفتين يُقرآن واحداً إن لم يُقَل أيُّهما دخل الرصيد. */
+    var expActs  = _expenses.some(function(e){ return _canEditExpense(e); }) || _canApproveExpense();
+    var expCols  = 5 + (money?3:0) + (expActs?1:0);
+    var expRows  = exps.length ? exps.map(function(e){
+      var cost = Number(e.amount)||0, sell = cost*(1+s.margin/100);
+      var pend = _expIsPending(e);
+      var stateCell = pend
+        ? '<span style="color:var(--stage-wait,#b45309);font-weight:700">بانتظار اعتماد المسؤول</span>' +
+          '<div style="font-size:10.5px;color:var(--muted);margin-top:2px">لم يُخصَم بعد</div>'
+        : '<span style="color:var(--success);font-weight:700">معتمَد ✓</span>' +
+          (e.approvedBy?'<div style="font-size:10.5px;color:var(--muted);margin-top:2px">'+_esc(e.approvedBy)+'</div>':'');
+      var moneyCells = money
+        ? '<td style="padding:8px;text-align:center">'+_fmt(cost)+'</td>' +
+          '<td style="padding:8px;text-align:center">'+_fmt(sell)+'</td>' +
+          '<td style="padding:8px;text-align:center;color:'+(pend?'var(--muted)':'var(--success)')+'">'+(pend?'—':_fmt(sell-cost))+'</td>' : '';
+      /* زرٌّ يَعِد ولا يفي أسوأُ من غيابه: لا يُرسَم إلا لمن يملك الفعلَ على هذا
+         المستند بعينه — الاعتمادُ للمسؤول، والتعديلُ/الحذفُ له أو لمُدخِلٍ معلَّقٍ. */
+      var btns = '';
+      if(pend && _canApproveExpense())
+        btns += '<button class="btn btn-primary btn-sm" onclick="window.substituteBudget.approveExpense(\''+_esc(e.id)+'\')">'+_icn("checkCircle","ic-sm")+' اعتماد</button> ';
+      if(_canEditExpense(e))
+        btns += '<button class="btn btn-ghost btn-sm" onclick="window.substituteBudget.openExpEdit(\''+_esc(e.id)+'\')">'+_icn("edit","ic-sm")+'</button> ' +
+                '<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="window.substituteBudget.removeExpense(\''+_esc(e.id)+'\')">'+_icn("trash","ic-sm")+'</button>';
+      var actions = expActs ? '<td style="padding:8px;text-align:center;white-space:nowrap">'+(btns||'—')+'</td>' : '';
+      return '<tr style="border-top:1px solid var(--border)">' +
+        '<td style="padding:8px;white-space:nowrap">'+_esc(e.date||"—")+'</td>' +
+        '<td style="padding:8px;font-weight:600">'+_esc(e.desc||"—")+
+          (e.note?'<div style="font-size:10.5px;color:var(--muted);margin-top:2px">'+_esc(e.note)+'</div>':'')+'</td>' +
+        '<td style="padding:8px">'+_esc(e.payer||"—")+
+          (e.createdBy?'<div style="font-size:10.5px;color:var(--muted);margin-top:2px">أدخله: '+_esc(e.createdBy)+'</div>':'')+'</td>' +
+        '<td style="padding:8px;text-align:center;color:var(--muted)">'+_esc(e.ref||"—")+'</td>' +
+        '<td style="padding:8px;text-align:center">'+stateCell+'</td>' +
+        moneyCells + actions +
+      '</tr>';
+    }).join("")
+    : '<tr><td colspan="'+expCols+'" style="padding:18px;text-align:center;color:var(--muted)">' +
+        (allExps.length ? 'لا مصروفات تطابق الفلاتر الحالية.' : 'لا مشتريات نقدية من العهدة على هذا الحساب.') +
+      '</td></tr>';
+    var expAddBtn = _canEnterExpense()
+      ? '<button class="btn btn-primary btn-sm" onclick="window.substituteBudget.openExpAdd(\''+_esc(acc.id)+'\')">➕ مصروف نقدي</button>' : '';
+    // شريطُ المعلَّق: رقمٌ ينتظر فعلاً من المسؤول لا يُترك في عمودٍ داخل جدول
+    var pendBar = (s.expPendCount>0) ? '' +
+      '<div style="font-size:12px;padding:8px 10px;border-radius:8px;margin-bottom:8px;border-inline-start:3px solid var(--stage-wait,#b45309);background:var(--surface2)">' +
+        _icn("hourglass","ic-sm")+' <b>'+s.expPendCount+'</b> مصروفٌ نقديٌّ بانتظار اعتماد المسؤول' +
+        (money ? ' — قيمتُها بسعر البيع <b>'+_fmt(s.expWip)+'</b> ر.س، معروضةٌ في «قيد التنفيذ» ولم تُخصَم بعد.' : ' — لم تُخصَم بعد.') +
+      '</div>' : '';
+    var expTable = (allExps.length || _canEnterExpense()) ? '' +
+      '<div class="card" style="overflow-x:auto;margin-top:12px">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">' +
+          '<div style="font-weight:800">'+_icn("banknote","ic-sm")+' شراء نقديّ من العهدة — بلا طلب شراء ('+
+            (_dfActive() ? exps.length+' من '+allExps.length : allExps.length)+')</div>' +
+          expAddBtn +
+        '</div>' +
+        pendBar +
+        '<div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">' +
+          'بنودٌ اشتراها مشرفٌ أو مسؤولُ مشترياتٍ من عهدته نقداً. يُدخلها المشرفُ أو المشترياتُ أو الماليةُ أو المسؤول، ' +
+          '<b>ويُخصَم المبلغُ بسعر البيع عند اعتماد المسؤول</b> لا عند إدخاله. ' +
+          '<b>ولا يُسجَّل هنا ما له طلبُ شراءٍ أو مستندُ تعاقدٍ على المنصّة</b> (يُخصَم مرتين).</div>' +
+        '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+          '<thead><tr style="background:var(--surface2)">' +
+            '<th style="padding:8px;text-align:right">التاريخ</th>' +
+            '<th style="padding:8px;text-align:right">البيان</th>' +
+            '<th style="padding:8px;text-align:right">مَن دفع</th>' +
+            '<th style="padding:8px;text-align:center">المرجع</th>' +
+            '<th style="padding:8px;text-align:center">الحالة</th>' +
+            (money?'<th style="padding:8px;text-align:center">المدفوع نقداً</th>' +
+                   '<th style="padding:8px;text-align:center">سعر البيع</th>' +
+                   '<th style="padding:8px;text-align:center">الربح</th>':'') +
+            (expActs?'<th style="padding:8px;text-align:center">إجراء</th>':'') +
+          '</tr></thead><tbody>'+expRows+'</tbody>' +
         '</table>' +
       '</div>' : '';
 
@@ -690,7 +896,7 @@
             moneyPOHeads +
           '</tr></thead><tbody>'+poRows+'</tbody>' +
         '</table>' +
-      '</div>' + ctrTable;
+      '</div>' + ctrTable + expTable;
   }
 
   // ════════ نموذج الإضافة/التعديل ════════
@@ -857,8 +1063,8 @@
     var acc = _accounts.find(function(a){ return a.id===id; });
     if(!acc){ return; }
     var linked = _pos().filter(function(p){ return p && p.isSubstitute && p.substituteAccountId===id; }).length
-                 + (_ctrRollup(id).docs||[]).length;
-    var warn = linked ? ("\n\n⚠ يشير إليه "+linked+" مستند مستعاض (طلبات شراء · تعاقدات) — ستبقى المستندات لكنها ستصبح «بلا حساب» ولن تُخصم من أي رصيد.") : "";
+                 + (_ctrRollup(id).docs||[]).length + _expensesOf(id).length;
+    var warn = linked ? ("\n\n⚠ يشير إليه "+linked+" مستند مستعاض (طلبات شراء · تعاقدات · مصروفات نقدية) — ستبقى المستندات لكنها ستصبح «بلا حساب» ولن تُخصم من أي رصيد.") : "";
     Promise.resolve(_confirm({
       title:"حذف حساب البند المستعاض؟",
       msg:"سيُحذف حساب «"+_acctName(acc)+"»."+warn,
@@ -875,6 +1081,199 @@
       }).catch(function(){
         _accounts=backup; window._substituteAccounts=_accounts;
         _toast("⚠ خطأ في الحذف","warn"); render();
+      });
+    });
+  }
+
+
+  /* ════════ الشراءُ النقديُّ من العهدة — إدخالٌ ثمّ اعتماد ════════
+     **مَن يُدخِل ليس مَن يعتمد** (قرارُ المالك): يُدخِله مَن بيده الإيصالُ فعلاً —
+     المشرفُ أو مسؤولُ المشتريات أو المالية أو المسؤول — **ويعتمده المسؤولُ وحدَه**.
+     والاعتمادُ هو **لحظةُ الخصم**: قبله يُعرَض المبلغُ في «قيد التنفيذ» ولا يمسّ
+     الرصيد، وبعده يُخصَم بسعر البيع كطلبِ الشراء المغلق تماماً. ولو خُصم عند
+     الإدخال لكان الاعتمادُ توقيعاً على ورقةٍ نفَذ أثرُها قبل أن تُقرأ.
+     وكلُّ إدخالٍ وتعديلٍ واعتمادٍ وحذفٍ يُقيَّد في `audit` — فللمخصوم أثرٌ يُراجَع.
+     ومُدخِلُ المستند يملك تصحيحَه وحذفَه **ما دام معلّقاً**؛ فإذا اعتُمد صار مالاً
+     خرج من رصيد العميل فلا يمسّه إلا المسؤول. */
+  function _today(){ try{ return new Date().toISOString().slice(0,10); }catch(e){ return ""; } }
+
+  function _expFormHtml(exp, acc){
+    return '' +
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:10px;padding:8px 10px;border-radius:8px;background:var(--surface2)">' +
+        _icn("alertTriangle","ic-sm")+' يُخصَم من رصيد «'+_esc(_acctName(acc))+'» بسعر البيع (التكلفة + هامش '+_fmt(acc.margin)+'%) ' +
+        '<b>عند اعتماد المسؤول</b> لا عند الإدخال. ' +
+        '<b>ولا تُسجّل هنا ما له طلبُ شراءٍ أو مستندُ تعاقدٍ على المنصّة</b> — سيُخصَم مرّتين.' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+        '<div class="form-group"><label class="form-label">تاريخ الشراء *</label>' +
+          '<input class="form-input" type="date" id="sbx-date" value="'+_esc((exp&&exp.date)||_today())+'"></div>' +
+        '<div class="form-group"><label class="form-label">المبلغ المدفوع نقداً (ريال) *</label>' +
+          '<input class="form-input" type="number" min="0" step="0.01" id="sbx-amount" placeholder="0" value="'+((exp&&exp.amount!=null)?exp.amount:"")+'"></div>' +
+      '</div>' +
+      '<div class="form-group"><label class="form-label">البيان (ما الذي اشتُري؟) *</label>' +
+        '<input class="form-input" id="sbx-desc" placeholder="مثال: مواسير 2 بوصة + لواصق" value="'+_esc((exp&&exp.desc)||"")+'"></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+        '<div class="form-group"><label class="form-label">مَن دفع (من عهدته) *</label>' +
+          '<input class="form-input" id="sbx-payer" placeholder="اسم المشرف / مسؤول المشتريات" value="'+_esc((exp&&exp.payer)||"")+'"></div>' +
+        '<div class="form-group"><label class="form-label">'+_icn("receipt","ic-sm")+' رقم الإيصال / المرجع</label>' +
+          '<input class="form-input" id="sbx-ref" placeholder="رقم فاتورة أو إيصال" value="'+_esc((exp&&exp.ref)||"")+'"></div>' +
+      '</div>' +
+      '<div class="form-group"><label class="form-label">ملاحظة (اختياري)</label>' +
+        '<input class="form-input" id="sbx-note" value="'+_esc((exp&&exp.note)||"")+'"></div>';
+  }
+
+  function openExpAdd(accId){
+    if(!_canEnterExpense()){ _toast("⚠ الإدخال للمشرف والمشتريات والمالية والمسؤول","warn"); return; }
+    var acc = _accounts.find(function(a){ return a.id===accId; });
+    if(!acc){ _toast("⚠ الحساب غير موجود","warn"); return; }
+    _openExpForm(null, acc);
+  }
+  function openExpEdit(id){
+    var exp = _expenses.find(function(e){ return e.id===id; });
+    if(!exp){ _toast("⚠ المصروف غير موجود","warn"); return; }
+    // المعتمَدُ مالٌ خُصم — لا يعدّله إلا المسؤول، ولا يعدّل المعلَّقَ إلا مُدخِلُه
+    if(!_canEditExpense(exp)){
+      _toast(_expIsPending(exp) ? "⚠ يعدّله مُدخِلُه أو المسؤول" : "⚠ اعتُمد وخُصم — التعديل للمسؤول فقط","warn");
+      return;
+    }
+    var acc = _accounts.find(function(a){ return a.id===exp.accountId; });
+    if(!acc){ _toast("⚠ حساب هذا المصروف غير موجود","warn"); return; }
+    _openExpForm(exp, acc);
+  }
+  function _openExpForm(exp, acc){
+    try{
+      showCustomModal({
+        title: (exp ? (_icn("edit")+" تعديل مصروف نقدي") : (_icn("banknote")+" ➕ شراء نقديّ من العهدة")),
+        body: _expFormHtml(exp, acc),
+        okText: exp ? "💾 حفظ التعديل"
+                    : (_canApproveExpense() ? "✅ تسجيل واعتماد" : "📤 إرسال للاعتماد"),
+        onOk: function(){ return _submitExpForm(exp, acc); }
+      });
+    }catch(e){ _toast("⚠ تعذّر فتح النموذج","warn"); }
+  }
+
+  // يُرجع true للنجاح (يُغلق المودال) و false للبقاء مفتوحاً عند خطأ التحقق/الحفظ.
+  async function _submitExpForm(exp, acc){
+    if(_saving) return false;
+    var date   = ((document.getElementById("sbx-date")||{}).value||"").trim();
+    var desc   = ((document.getElementById("sbx-desc")||{}).value||"").trim();
+    var payer  = ((document.getElementById("sbx-payer")||{}).value||"").trim();
+    var ref    = ((document.getElementById("sbx-ref")||{}).value||"").trim();
+    var note   = ((document.getElementById("sbx-note")||{}).value||"").trim();
+    var amount = parseFloat((document.getElementById("sbx-amount")||{}).value);
+
+    if(!date){ _toast("⚠ أدخل تاريخ الشراء","warn"); return false; }
+    if(!desc){ _toast("⚠ أدخل بيان ما اشتُري","warn"); return false; }
+    if(!payer){ _toast("⚠ أدخل اسم مَن دفع من عهدته","warn"); return false; }
+    // صفرٌ أو سالبٌ ليس مصروفاً — والقبولُ به يزرع سطراً لا يخصم شيئاً ويُربك المراجعة.
+    if(isNaN(amount) || !(amount>0)){ _toast("⚠ أدخل مبلغاً أكبر من صفر","warn"); return false; }
+
+    _saving = true;
+    var backup = _expenses.map(function(e){ return Object.assign({}, e); });
+    var saved, isNew = !exp;
+    if(exp){
+      /* **تعديلُ المبلغ يُسقط الاعتماد** (قاعدةُ «لا توقيعَ على رقمٍ قديم» نفسُها في
+         `contracts`): مَن اعتمد ٤٠٠٠ لم يعتمد ٩٠٠٠. وتعديلُ البيان أو المرجع لا
+         يمسّ المال فلا يُسقط شيئاً. (والمعتمَدُ لا يعدّله إلا المسؤول أصلاً.) */
+      var amountChanged = Math.abs((Number(exp.amount)||0) - amount) > 0.004;
+      saved = Object.assign({}, exp, {
+        date:date, desc:desc, payer:payer, ref:ref, note:note, amount:amount,
+        updatedAt:_now(), updatedBy:_me()
+      });
+      if(amountChanged && saved.status==="approved"){
+        saved.status="pending"; saved.approvedBy=""; saved.approvedByUser=""; saved.approvedAt="";
+      }
+    } else {
+      var id = "sx_" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+      saved = {
+        id:id, accountId:acc.id, date:date, desc:desc, payer:payer, ref:ref, note:note,
+        amount:amount, createdAt:_now(), createdBy:_me(), createdByUser:_meUser(), updatedAt:_now(),
+        status:"pending", approvedBy:"", approvedByUser:"", approvedAt:""
+      };
+      /* والمسؤولُ الذي يُدخل هو المعتمِدُ نفسُه — فبوّابةٌ يفتحها بيدٍ ويعبرها
+         بالأخرى ليست حراسةً بل نقرةً زائدة. ويُسجَّل اعتمادُه صراحةً لا ضمناً. */
+      if(_canApproveExpense()){
+        saved.status="approved"; saved.approvedBy=_me(); saved.approvedByUser=_meUser(); saved.approvedAt=_now();
+      }
+    }
+    var idx = -1;
+    for(var k=0;k<_expenses.length;k++){ if(_expenses[k] && _expenses[k].id===saved.id){ idx=k; break; } }
+    if(idx>=0) _expenses[idx]=saved; else _expenses.push(saved);   // تفاؤلٌ محلّيّ — يوحّده onSnapshot
+    try{
+      await _writeExpense(saved.id, saved, isNew);
+      _saving=false;
+      _toast(exp ? "✅ تم حفظ التعديل"
+                 : (saved.status==="approved" ? "✅ سُجّل واعتُمد وخُصم من الرصيد"
+                                              : "📤 سُجّل وأُرسل لاعتماد المسؤول — لم يُخصَم بعد"),"success");
+      _audit(exp?"تعديل مصروف نقدي (بند مستعاض)":"إضافة مصروف نقدي (بند مستعاض)",
+             _acctName(acc)+" — "+desc+" — "+_fmt(amount)+" ر.س — دفعها: "+payer+
+             (ref?(" — مرجع: "+ref):"")+" — الحالة: "+(saved.status==="approved"?"معتمَد":"بانتظار الاعتماد"));
+      render();
+      return true;
+    }catch(e){
+      _saving=false; _expenses=backup;
+      _toast("⚠ خطأ في الحفظ — تحقق من الاتصال","warn"); render();
+      return false;
+    }
+  }
+
+  /* الاعتمادُ — فعلُ المسؤول وحدَه، وهو **لحظةُ الخصم**. فالتأكيدُ يقول المبلغَ
+     الذي سيُخصَم بسعر بيعه لا مبلغَ الإيصال وحدَه: مَن يوقّع يرى ما يوقّع عليه. */
+  function approveExpense(id){
+    if(!_canApproveExpense()){ _toast("⚠ الاعتماد للمسؤول فقط","warn"); return; }
+    var exp = _expenses.find(function(e){ return e.id===id; });
+    if(!exp) return;
+    if(!_expIsPending(exp)){ _toast("مُعتمَدٌ أصلاً","info"); return; }
+    var acc  = _accounts.find(function(a){ return a.id===exp.accountId; });
+    var f    = 1 + ((acc && Number(acc.margin)) || 0)/100;
+    var sell = (Number(exp.amount)||0)*f;
+    Promise.resolve(_confirm({
+      title:"اعتماد المصروف النقدي؟",
+      msg:"«"+(exp.desc||"—")+"» — مدفوعٌ نقداً "+_fmt(exp.amount)+" ر.س.\n\n" +
+          "سيُخصَم من رصيد «"+(acc?_acctName(acc):"—")+"» بسعر البيع: "+_fmt(sell)+" ر.س.",
+      icon:"✅", okText:"اعتماد وخصم"
+    })).then(function(ok){
+      if(!ok) return;
+      var backup = _expenses.map(function(e){ return Object.assign({}, e); });
+      var patch = { status:"approved", approvedBy:_me(), approvedByUser:_meUser(), approvedAt:_now() };
+      Object.assign(exp, patch);
+      _writeExpense(id, patch, false).then(function(){
+        _toast("✅ اعتُمد وخُصم من الرصيد","success");
+        _audit("اعتماد مصروف نقدي (بند مستعاض)",
+               (acc?_acctName(acc):"—")+" — "+(exp.desc||"—")+" — "+_fmt(exp.amount)+
+               " ر.س (خصمٌ بسعر البيع: "+_fmt(sell)+")");
+        render();
+      }).catch(function(){
+        _expenses=backup; _toast("⚠ تعذّر الاعتماد — تحقق من الاتصال","warn"); render();
+      });
+    });
+  }
+
+  function removeExpense(id){
+    var exp = _expenses.find(function(e){ return e.id===id; });
+    if(!exp) return;
+    if(!_canEditExpense(exp)){
+      _toast(_expIsPending(exp) ? "⚠ يحذفه مُدخِلُه أو المسؤول" : "⚠ اعتُمد وخُصم — الحذف للمسؤول فقط","warn");
+      return;
+    }
+    var acc = _accounts.find(function(a){ return a.id===exp.accountId; });
+    Promise.resolve(_confirm({
+      title:"حذف المصروف النقدي؟",
+      msg:"سيُحذف «"+(exp.desc||"—")+"» بمبلغ "+_fmt(exp.amount)+" ر.س." +
+          (_expIsPending(exp) ? "\n\n(معلّقٌ لم يُخصَم — يختفي من «قيد التنفيذ».)"
+                              : "\n\n⚠ معتمَدٌ ومخصوم — سيعود المبلغُ (بسعر بيعه) إلى الرصيد المتاح."),
+      icon:"🗑", okText:"حذف", okClass:"btn-danger"
+    })).then(function(ok){
+      if(!ok) return;
+      var backup=_expenses.slice();
+      _expenses = _expenses.filter(function(e){ return e.id!==id; });
+      _deleteExpense(id).then(function(){
+        _toast("✅ تم حذف المصروف","success");
+        _audit("حذف مصروف نقدي (بند مستعاض)",
+               (acc?_acctName(acc):"—")+" — "+(exp.desc||"—")+" — "+_fmt(exp.amount)+" ر.س");
+        render();
+      }).catch(function(){
+        _expenses=backup; _toast("⚠ خطأ في الحذف","warn"); render();
       });
     });
   }
@@ -926,6 +1325,8 @@
     open: open, back: back,
     filter: filter, filterDoc: filterDoc, retry: retry,
     openAdd: openAdd, openEdit: openEdit, remove: remove,
+    openExpAdd: openExpAdd, openExpEdit: openExpEdit, removeExpense: removeExpense,
+    approveExpense: approveExpense,
     _kindToggle: _kindToggle,
     optionsHtml: optionsHtml, accounts: accounts, accountForProject: accountForProject,
     _calcStats: _calcStats,  // دالة الحساب النقية — لفحوص hail-tests
@@ -933,6 +1334,7 @@
     _isDead: _isDead,        // كاشف الطلب الميّت — للاختبار
     // مِصفاةُ العرض — دوالُّ نقيّةٌ لفحوص hail-tests (تصفية بلا متصفّح)
     _norm: _norm, _accState: _accState, _matchAccount: _matchAccount,
-    _poState: _poState, _ctrState: _ctrState, _matchPO: _matchPO, _matchCtrDoc: _matchCtrDoc
+    _poState: _poState, _ctrState: _ctrState, _matchPO: _matchPO, _matchCtrDoc: _matchCtrDoc,
+    _matchExpense: _matchExpense, _expState: _expState, _expRollup: _expRollup
   };
 })();
