@@ -257,6 +257,7 @@ input,select,textarea,button{font-family:'Cairo','Tajawal',sans-serif}
      ملاحظة: الـ JS يعيد بناء الزر بـ span يحمل id="current-project-label" (بدون class)،
      لذلك نستهدف الـ class والـ id معاً حتى يبقى مخفياً بعد إعادة البناء. */
   #switch-project-btn{ padding:5px 8px !important; font-size:14px !important; max-width:none !important; gap:0 !important }
+  #switch-project-btn .ic svg{ width:17px; height:17px }
   #switch-project-btn .current-project-label,
   #switch-project-btn #current-project-label,
   #current-project-label{ display:none !important }
@@ -2523,6 +2524,10 @@ html[data-theme="dark"]{--sla-ok:#34d399;--sla-ok-bg:#123024;--sla-ok-bd:#1f5c46
 .sidebar-nav-btn .s-icon svg{width:18px;height:18px;display:block;stroke-width:2}
 .sidebar-group-header .s-icon svg{width:17px;height:17px;display:block;stroke-width:2.1}
 .sidebar-nav-btn.sidebar-child .s-icon svg{width:16px;height:16px;opacity:.9}
+
+/* أيقونةُ زرّ تبديل المشروع/العودة للمشاريع/الخروج — بمقاس أيقونةِ زرّ الخروج المجاور
+   في الهيدر (15px · stroke 2.2) فيقرأ الزرّان كطقمٍ واحد لا كأيقونتين متجاورتين. */
+#switch-project-btn .ic svg{width:15px;height:15px;stroke-width:2.2}
 
 /* ══ LIGHT UNIFIED HEADER (v18.9jx) — هيدر فاتح موحّد مع الشريط الجانبي ══ */
 #header{border-top:3px solid var(--primary)}
