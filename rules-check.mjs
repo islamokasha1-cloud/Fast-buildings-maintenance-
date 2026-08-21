@@ -517,6 +517,67 @@ await check("★ ويكتب الحضورَ والفنيين ويحدّث الب�
     await setDoc(doc(TECH, "hail_tickets/TK1"), { status: "open" }, { merge: true });
   })()));
 
+/* ═════════ رصيدُ البند المستعاض — وثيقتا المال للأدمن وحدَه ═════════
+   `substitute_accounts` تحمل الأرصدةَ والهوامش، و`substitute_expenses` تحمل الشراءَ
+   النقديَّ من عهدة المشرفين بلا طلبِ شراء — وكلتاهما تُخصَم من مال العميل **بلا
+   بوّابةِ اعتمادٍ خلفَها**، فبابُ الكتابة هو البوّابةُ الوحيدة. والوحدةُ تحرسهما في
+   المتصفّح، وذاك يمنع الخطأ لا التعمّد. */
+head("رصيدُ البند المستعاض — الأرصدةُ والمصروفُ النقديّ (الكتابةُ للأدمن وحدَه)");
+const SB_A = "meta/substitute_accounts", SB_X = "meta/substitute_expenses";
+const SB_AD = "meta/substitute_accounts_dev", SB_XD = "meta/substitute_expenses_dev";
+const FAT_ACC = { accounts: [{ id: "sb1", kind: "standalone", name: "مشروعٌ وهميّ", total: 9000000, margin: 25 }] };
+const FAKE_EXP = { expenses: [{ id: "sx1", accountId: "sb1", date: "2026-08-20",
+                                desc: "بندٌ لم يُشترَ", payer: "—", amount: 250000 }] };
+await seed("meta/substitute_accounts", { accounts: [{ id: "sb1", total: 100, margin: 25 }] });
+await seed("meta/substitute_expenses", { expenses: [] });
+
+await check("★★★ لا يرفع مسؤولُ المستودعات رصيدَ بندٍ مستعاضٍ بمليون",
+  assertFails(setDoc(doc(WH, SB_A), FAT_ACC)));
+await check("★★ ولا المشترياتُ ولا الماليةُ ولا مديرُ المشاريع ولا المديرُ التنفيذيّ",
+  assertFails(setDoc(doc(PROC, SB_A), FAT_ACC)));
+await check("★ ولا المالية", assertFails(setDoc(doc(FIN, SB_A), FAT_ACC)));
+await check("★ ولا المديرُ التنفيذيّ", assertFails(setDoc(doc(CEO, SB_A), FAT_ACC)));
+await check("★ ولا مديرُ المشاريع", assertFails(setDoc(doc(PM, SB_A), FAT_ACC)));
+await check("★ ولا الزائر", assertFails(setDoc(doc(VIEWER, SB_A), FAT_ACC)));
+await check("★★ ولا تطبيقُ الفنيين (مُصادَقٌ مجهولاً)", assertFails(setDoc(doc(TECH, SB_A), FAT_ACC)));
+
+await check("★★★ ولا يخصم مسؤولُ المشتريات ربعَ مليونٍ بمصروفٍ نقديٍّ من العهدة",
+  assertFails(setDoc(doc(PROC, SB_X), FAKE_EXP)));
+await check("★★ ولا مسؤولُ المستودعات ولا المالية",
+  assertFails(setDoc(doc(WH, SB_X), FAKE_EXP)));
+await check("★ ولا المالية", assertFails(setDoc(doc(FIN, SB_X), FAKE_EXP)));
+await check("★★ والتعديلُ الجزئيُّ والحذفُ بابان آخران للشيء نفسِه",
+  assertFails(updateDoc(doc(WH, SB_X), { expenses: FAKE_EXP.expenses })));
+await check("★★ ولا يُمحى مستندُ المصروفات فيُعاد بناؤه من الصفر",
+  assertFails(deleteDoc(doc(PROC, SB_X))));
+await check("★★ والنسختان التجريبيّتان مقفولتان كذلك (وإلا فُتح البابُ من الخلف)",
+  assertFails(setDoc(doc(WH, SB_XD), FAKE_EXP)));
+await check("★ ونسخةُ الأرصدة التجريبية", assertFails(setDoc(doc(PROC, SB_AD), FAT_ACC)));
+
+/* ── والوجهُ الآخر: قاعدةٌ تمنع المسؤولَ معاً تعطيلٌ لا حراسة ── */
+await check("والأدمن يكتب الأرصدةَ والمصروفاتِ (شكلُ `_txArray` بالضبط)",
+  assertSucceeds((async () => {
+    await setDoc(doc(ADMIN, SB_A), FAT_ACC, { merge: true });
+    await setDoc(doc(ADMIN, SB_X), FAKE_EXP, { merge: true });
+  })()));
+await check("★ وفي النسختَين التجريبيّتَين",
+  assertSucceeds((async () => {
+    await setDoc(doc(ADMIN, SB_AD), FAT_ACC, { merge: true });
+    await setDoc(doc(ADMIN, SB_XD), FAKE_EXP, { merge: true });
+  })()));
+
+/* ── والقراءةُ لم تُمَسّ: الشاشةُ تعرض النشاطَ للجميع وتحجب المالَ بالدور في الواجهة ── */
+await check("★★ وكلُّ ذي دورٍ يقرأ الأرصدةَ والمصروفات (وإلا عُرضت أصفارٌ صامتة)",
+  assertSucceeds((async () => {
+    await getDoc(doc(WH, SB_A));
+    await getDoc(doc(PROC, SB_X));
+    await getDoc(doc(VIEWER, SB_A));
+  })()));
+
+/* ── ولم نُفرِط في القفل: اسمٌ يشبه ولا يطابق يبقى تحت القاعدة العامة ── */
+await check("★ ومستندٌ اسمُه يشبه ولا يطابق يبقى كما كان (التفريقُ يجب أن يكون دقيقاً)",
+  assertSucceeds(setDoc(doc(WH, "meta/substitute_notes"), { x: 1 })));
+
 /* ═════════ ٨) طابورُ واتساب — للخادم وحدَه (البند M16) ═════════
    `wa_outbox` قناةُ إرسالٍ لا مجموعةُ بيانات: ما يُكتب فيه يُرسَل رسالةً رسميةً من
    رقم الشركة. والكاتبُ الشرعيُّ دوالُّ السحابة بـAdmin SDK — وهو يتجاوز القواعد،

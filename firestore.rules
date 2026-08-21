@@ -58,6 +58,25 @@ service cloud.firestore {
       allow write: if isAdmin() && doc.matches('(.*_)?users(_dev)?');
     }
 
+    /* ═══════════ رصيدُ البند المستعاض — الكتابةُ للأدمن وحدَه ═══════════
+       وثيقتان: `substitute_accounts` (الأرصدةُ والهوامش) و`substitute_expenses`
+       (الشراءُ النقديُّ من عهدة المشرفين بلا طلبِ شراء). كلتاهما **مالُ العميل
+       مباشرةً**: سطرٌ في الأولى يرفع رصيداً بمليون، وسطرٌ في الثانية يخصم مبلغاً
+       بلا بوّابةِ اعتمادٍ خلفَه — لا مستودعَ يستلم ولا ماليةَ تسدّد، فبابُ الكتابة
+       هو البوّابةُ الوحيدة. والوحدةُ تقصرهما على `isAdmin()` في المتصفّح، وذاك
+       يمنع الخطأ لا التعمّد: من يفتح الـConsole يكتب المستندَ مباشرةً.
+
+       **والاستثناءُ من القاعدة العامة شرطُ الإصلاح لا تنظيفٌ**: القواعدُ تُقيَّم
+       بـ«أو»، فبلوكٌ متساهلٌ باقٍ يُبطل التشديدَ هنا بلا أن يظهر ذلك في أيّ سطر
+       (وقع ذلك فعلاً في البند M11). **والقراءةُ لم تُمَسّ**: تبقى لكلّ ذي دورٍ —
+       الشاشةُ تعرض النشاطَ للجميع وتحجب أرقامَ المال بالدور في الواجهة. */
+    function isSubstDoc(coll, doc) {
+      return coll == 'meta' && doc.matches('substitute_(accounts|expenses)(_dev)?');
+    }
+    match /meta/{doc} {
+      allow write: if isAdmin() && doc.matches('substitute_(accounts|expenses)(_dev)?');
+    }
+
     /* ═══════════ طابورُ واتساب — للخادم وحدَه (البند M16) ═══════════
        `wa_outbox` ليس مجموعةَ بيانات بل **قناةَ إرسالٍ باسم الشركة**: كلُّ مستندٍ
        يُنشأ فيه يلتقطه `waSender` ويرسله رسالةً رسميةً من رقمها. فمن يكتب فيه
@@ -134,6 +153,7 @@ service cloud.firestore {
       allow read:  if hasRole();
       allow write: if hasRole() && !isViewer() && !ctrLocked(document[0])
                       && !isUsersDoc(document[0], document[1])
+                      && !isSubstDoc(document[0], document[1])
                       && !srvOnly(document[0])
                       && !isAuditColl(document[0]);
     }

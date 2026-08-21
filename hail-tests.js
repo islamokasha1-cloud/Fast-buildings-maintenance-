@@ -1001,6 +1001,126 @@ function substituteBudget() {
     T("_isDead: مغلق/جارٍ ليس ميّتاً",
       !SB._isDead({ status: "closed" }) && !SB._isDead({ status: "proc_executing" }) && !SB._isDead({ status: "pending_finance" }));
   }
+
+  /* ── الشراءُ النقديُّ من العهدة — قناةُ الخصم الرابعة ──
+     بندٌ يشتريه مشرفٌ أو مسؤولُ مشترياتٍ من عهدته **بلا طلبِ شراء**: مالٌ خرج فعلاً
+     ولا مستندَ له على المنصّة، فكان يسقط من «المستهلك» ويُظهر متبقّياً أكبرَ من
+     الحقيقة. الحارسُ يُثبّت: أنه يُخصَم **بسعر البيع** كالطلبِ المغلق، وأنه لا يدخل
+     «قيد التنفيذ» أبداً، وأن الدالّةَ تبقى صحيحةً حين لا يُمرَّر (توافقٌ خلفيّ). */
+  const accX = { margin: 25, total: 500000, openingConsumed: 0 };
+  const posX = [{ closed: true, cost: 10000, est: 9000 }, { closed: false, cost: 0, est: 9000 }];
+  const sX = SB._calcStats(accX, posX, p => p.closed, p => p.cost, p => p.est, null, null,
+                           { cost: 4000, count: 3 });
+  T("النقديُّ من العهدة يُخصَم بسعر البيع (4000 × 1.25 = 5000)", sX.expSell === 5000, `=${sX.expSell}`);
+  T("وربحُه = سعر البيع − التكلفة", sX.expProfit === 1000, `=${sX.expProfit}`);
+  T("ويدخل «المصروف» مع الطلبات (12500 + 5000)", sX.spentSell === 17500, `=${sX.spentSell}`);
+  T("★ ويُنقص المتبقي فعلاً (500000 − 17500)", sX.remaining === 482500, `=${sX.remaining}`);
+  T("★★ ولا يدخل «قيد التنفيذ» أبداً (لا يُسجَّل إلا بعد خروج المال)", sX.wipSell === 11250, `=${sX.wipSell}`);
+  T("ويُعَدّ في عدد المستندات (مغلقٌ + جارٍ + ٣ مصروفات)", sX.count === 5, `=${sX.count}`);
+  T("★ وبلا تمريره تبقى الأرقامُ كما كانت (توافقٌ خلفيّ)",
+    SB._calcStats(accX, posX, p => p.closed, p => p.cost, p => p.est).spentSell === 12500);
+
+  // ثابتٌ عشوائيّ ثانٍ: المعادلاتُ متماسكةٌ مع التعاقدات والنقديّ معاً
+  let _s3 = 913377, bad3 = null;
+  const rnd3 = () => { _s3 = (_s3 + 0x6D2B79F5) | 0; let t = Math.imul(_s3 ^ (_s3 >>> 15), 1 | _s3); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  for (let i = 0; i < 400 && !bad3; i++) {
+    const a = { margin: Math.round(rnd3() * 5000) / 100, total: Math.round(rnd3() * 1e6), openingConsumed: Math.round(rnd3() * 2e5) };
+    const ps = Array.from({ length: Math.floor(rnd3() * 5) }, () => ({ closed: rnd3() < 0.6, cost: Math.round(rnd3() * 5e4), est: Math.round(rnd3() * 5e4) }));
+    const ct = { spent: Math.round(rnd3() * 3e4), wip: Math.round(rnd3() * 3e4), count: 1 };
+    const ex = { cost: Math.round(rnd3() * 2e4), count: Math.floor(rnd3() * 4) };
+    const r = SB._calcStats(a, ps, p => p.closed, p => p.cost, p => p.est, null, ct, ex);
+    const eps = 1e-6;
+    if (Math.abs(r.spentSell - (r.closedSell + r.ctrSell + r.expSell)) > eps) bad3 = { why: "spentSell", r };
+    else if (Math.abs(r.consumed - (a.openingConsumed + r.spentSell)) > eps) bad3 = { why: "consumed", r };
+    else if (Math.abs(r.remaining - (a.total - r.consumed)) > eps) bad3 = { why: "remaining", r };
+    else if (Math.abs(r.profit - (r.spentSell - r.spentCost)) > eps) bad3 = { why: "profit", r };
+  }
+  T("ثابت: المصروف/المستهلك/المتبقي/الربح متماسكة مع التعاقد والنقديّ (400 تركيبة)",
+    !bad3, bad3 ? JSON.stringify(bad3).slice(0, 140) : "");
+
+  // مِصفاةُ المصروف — حالتُه واحدةٌ أبداً، فلا يظهر تحت «قيد التنفيذ» ولا «بلا أثر»
+  T("substituteBudget._matchExpense مكشوفة", typeof SB._matchExpense === "function");
+  if (typeof SB._matchExpense === "function") {
+    const ex1 = { id: "sx1", desc: "مواسير 2 بوصة", payer: "أبو محمد", ref: "R-9", date: "2026-08-20" };
+    T("_matchExpense: يبحث في البيان ومَن دفع والمرجع",
+      SB._matchExpense(ex1, { q: "مواسير" }) && SB._matchExpense(ex1, { q: "R-9" }) &&
+      SB._matchExpense(ex1, { q: "ابو محمد" }) && !SB._matchExpense(ex1, { q: "كهرباء" }));
+    T("★ ويظهر تحت «مغلق/مصروف» ولا يظهر تحت «قيد التنفيذ» ولا «بلا أثر»",
+      SB._matchExpense(ex1, { state: "closed" }) && !SB._matchExpense(ex1, { state: "wip" }) &&
+      !SB._matchExpense(ex1, { state: "dead" }));
+  }
+
+  // ضوابطُ المصدر: وثيقةٌ منفصلة · مستمعٌ ثانٍ · بوّابةُ رسمٍ · صلاحيةُ المسؤول
+  T("★ المصروفاتُ في وثيقةٍ منفصلةٍ لا مصفوفةٍ في وثيقة الأرصدة",
+    /function EXP_DOC\(\)/.test(SBSRC) && /"meta\/substitute_expenses_dev" : "meta\/substitute_expenses"/.test(SBSRC));
+  T("★★ ومستمعٌ ثانٍ لها (onSnapshot — لا جلبٌ لمرّة)",
+    /_expUnsub = db\.doc\(EXP_DOC\(\)\)\.onSnapshot\(/.test(SBSRC));
+  T("★★★ ولا تُرسَم الشاشةُ قبل وصولها (وإلا عُرض «متبقٍّ» أكبرُ من الحقيقة)",
+    /function _ready\(\)\{ return _loaded && _expLoaded && _poSynced\(\); \}/.test(SBSRC));
+  T("★★ والكتابةُ عبر معاملةٍ ذرّية على وثيقتها وحدَها",
+    /function _txExpenses\(mutate\)\{ return _txArray\(EXP_DOC\(\), "expenses", mutate\); \}/.test(SBSRC) &&
+    /await _upsertExpense\(saved\);/.test(SBSRC) && /_removeExpenseTx\(id\)\.then/.test(SBSRC));
+  T("★★ والإدخالُ والتعديلُ والحذفُ للمسؤول وحدَه (بابُ الإدخال هو البوّابة)",
+    /function openExpAdd\(accId\)\{\s+if\(!_canManage\(\)\)/.test(SBSRC) &&
+    /function openExpEdit\(id\)\{\s+if\(!_canManage\(\)\)/.test(SBSRC) &&
+    /function removeExpense\(id\)\{\s+if\(!_canManage\(\)\)/.test(SBSRC));
+  T("★ ولا يُقبل مبلغٌ صفرٌ أو سالب (سطرٌ لا يخصم شيئاً يُربك المراجعة)",
+    /isNaN\(amount\) \|\| !\(amount>0\)\)\{ _toast\("⚠ أدخل مبلغاً أكبر من صفر"/.test(SBSRC));
+  T("★★ وكلُّ إدخالٍ وتعديلٍ وحذفٍ يُقيَّد في سجلّ التدقيق",
+    /_audit\(exp\?"تعديل مصروف نقدي \(بند مستعاض\)":"إضافة مصروف نقدي \(بند مستعاض\)"/.test(SBSRC) &&
+    /_audit\("حذف مصروف نقدي \(بند مستعاض\)"/.test(SBSRC));
+  T("★★ والنموذجُ يحذّر صراحةً من الخصم مرّتين (ما له طلبٌ أو عقدٌ لا يُسجَّل هنا)",
+    /لا تُسجّل هنا ما له طلبُ شراءٍ أو مستندُ تعاقدٍ على المنصّة/.test(SBSRC));
+  T("★ ويُعرَض مصدرُه منفصلاً في سطر «من أين جاء المصروف؟»",
+    /شراء نقديّ من العهدة: <b>'\+_fmt\(s\.expSell\)/.test(SBSRC));
+  T("★ ورأسُ الصفحة يذكر القناةَ الرابعة", /أو شراءٌ نقديٌّ من عهدةٍ بلا طلبِ شراء/.test(SBSRC));
+
+  /* ── ورسمٌ حقيقيٌّ للشاشة: الجدولُ الجديدُ كلُّه ترميزٌ لا تُنفّذه دالّةٌ نقيّة ──
+     الحسابُ صحيحٌ ولا يُرسَم = خطأٌ لا يُنذر. فتُشغَّل الوحدةُ في DOM حقيقيّ
+     بمستمعَين مزيَّفين، ويُقرأ ما رُسم فعلاً. */
+  {
+    const { JSDOM } = require("jsdom");
+    const dom = new JSDOM(`<!DOCTYPE html><body><div id="page-substitute-budget" class="active"></div></body>`,
+                          { runScripts: "dangerously" });
+    const W = dom.window;
+    W.esc = x => String(x == null ? "" : x).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    W.toast = () => {}; W.logAudit = () => {};
+    W.currentUser = { name: "المسؤول" };
+    W.isAdmin = () => true; W.isCEO = () => false; W.isFinance = () => false;
+    W.normalizePOStatus = st => st;
+    W.poIsClosed  = p => p.status === "closed";
+    W.poActualCost = p => Number(p.actualCost) || 0;
+    W.getPOTotal   = p => Number(p.estCost) || 0;
+    W.purchases = [{ id: "PO-1", isSubstitute: true, substituteAccountId: "sb1", status: "closed", actualCost: 10000 }];
+    W._fsLoaded = { purchases: true };
+    W._projectsList = [];
+    const SNAPS = {
+      "meta/substitute_accounts": { accounts: [{ id: "sb1", kind: "standalone", name: "مشروعُ اختبار", total: 500000, openingConsumed: 0, margin: 25 }] },
+      "meta/substitute_expenses": { expenses: [{ id: "sx1", accountId: "sb1", date: "2026-08-20", desc: "مواسير 2 بوصة", payer: "أبو محمد", ref: "R-9", amount: 4000 }] }
+    };
+    W.db = { doc: p => ({ onSnapshot(cb) { cb({ exists: true, data: () => SNAPS[p] }); return () => {}; } }) };
+    let boom = null;
+    try {
+      W.eval(SBSRC);
+      W.substituteBudget.startSync();
+      W.substituteBudget.open("sb1");
+    } catch (e) { boom = String(e.message).slice(0, 140); }
+    T("★★ الوحدةُ تُشغَّل وترسم شاشةَ الحساب في DOM حقيقيّ بلا خطأ", !boom, boom || "");
+    const H = boom ? "" : W.document.getElementById("page-substitute-budget").innerHTML;
+    T("★★ وجدولُ الشراء النقديّ مرسومٌ بسطره (بيانٌ · مَن دفع · مرجع)",
+      /شراء نقديّ من العهدة/.test(H) && H.includes("مواسير 2 بوصة") && H.includes("أبو محمد") && H.includes("R-9"));
+    T("★★★ وسعرُ بيعه مرسومٌ لا محسوبٌ فقط (4,000 ⇐ 5,000)", H.includes("5,000"));
+    T("★★★ والمتبقي المرسومُ يطابق المحسوب: 500000 − (12500 + 5000)", H.includes("482,500"));
+    T("★ وزرُّ الإضافة يظهر للمسؤول على هذا الحساب", H.includes("openExpAdd('sb1')"));
+    // والوجهُ الآخر: بلا صلاحيةِ مالٍ ولا إدارةٍ — النشاطُ يُرى والمالُ يُحجَب
+    W.isAdmin = () => false;
+    W.substituteBudget.render();
+    const H2 = W.document.getElementById("page-substitute-budget").innerHTML;
+    T("★★ وبلا صلاحية: النشاطُ يُرى (البيانُ ومَن دفع) والأرقامُ تُحجَب ولا زرَّ إضافة",
+      H2.includes("مواسير 2 بوصة") && H2.includes("أبو محمد") &&
+      !H2.includes("482,500") && !H2.includes("5,000") && !/openExpAdd|removeExpense/.test(H2));
+  }
+
   const accD = { margin: 25, total: 500000, openingConsumed: 0 };
   const posD = [
     { st: "closed", cost: 10000, est: 9000 },          // مغلق → مستهلك
@@ -1113,8 +1233,8 @@ function substituteBudget() {
      يُظهر «٠ مصروف · المتبقي = كامل الرصيد» — أرقامٌ كاملةُ الشكل كاذبة. */
   T("★★ الفراغُ لا يُرسَم قبل وصول اللقطة (بوّابةُ حالةٍ في render)",
     /if\(!_ready\(\)\)\{ host\.innerHTML = _headHtml\(false\) \+ _stateCardHtml\(\); return; \}/.test(SBSRC));
-  T("★★ و«جاهزة» = الحساباتُ **وطلباتُ الشراء** معاً (لا أرقامَ مالٍ قبل مصدرها)",
-    /function _ready\(\)\{ return _loaded && _poSynced\(\); \}/.test(SBSRC) &&
+  T("★★ و«جاهزة» = الحساباتُ **وطلباتُ الشراء** والمصروفُ النقديُّ معاً (لا أرقامَ مالٍ قبل مصدرها)",
+    /function _ready\(\)\{ return _loaded && _expLoaded && _poSynced\(\); \}/.test(SBSRC) &&
     /window\._fsLoaded && window\._fsLoaded\.purchases/.test(SBSRC));
   T("★ والعلَمُ يُرفَع من لقطة الحسابات وحدَها لا من تركيب المشترِك",
     /_accounts = \(d && Array\.isArray\(d\.accounts\)\) \? d\.accounts : \[\];\s*\n\s*_loaded = true;/.test(SBSRC));
@@ -8918,6 +9038,14 @@ function contractsPhase1() {
     T("★ والمسودّةُ محلّيةٌ حتى الحفظ ولا تبقى معلّقةً على طلبٍ آخر",
       /function openReq\(id\)\{ _rOpen=id; _rDraft=null; _lnEdit=null;/.test(src) &&
       /function backToReqs\(\)\{ _rOpen=null; _rDraft=null; _lnEdit=null;/.test(src));
+    /* وثيقتا رصيد البند المستعاض (الأرصدةُ والمصروفُ النقديُّ من العهدة) تُخصَمان
+       من مال العميل بلا بوّابةِ اعتمادٍ خلفَهما — فبابُ الكتابة هو البوّابةُ الوحيدة.
+       **والاستثناءُ من القاعدة العامة شرطُ الإصلاح**: القواعدُ تُقيَّم بـ«أو». */
+    T("★★★ وكتابةُ أرصدة البند المستعاض ومصروفِه النقديّ للأدمن وحدَه على الخادم",
+      /allow write: if isAdmin\(\) && doc\.matches\('substitute_\(accounts\|expenses\)\(_dev\)\?'\)/.test(RULX));
+    T("★★★ ومُستثناةٌ من القاعدة العامة (وإلا لم يقيّد القفلُ شيئاً)",
+      /&& !isSubstDoc\(document\[0\], document\[1\]\)/.test(RULX) &&
+      /function isSubstDoc\(coll, doc\)/.test(RULX));
   }
 
   /* ════ حذفُ عقدٍ لم يُوقَّع بعد — للأدمن ════   (طلبُ المالك: عقدٌ أُنشئ تجربةً)
