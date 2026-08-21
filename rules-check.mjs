@@ -517,61 +517,112 @@ await check("★ ويكتب الحضورَ والفنيين ويحدّث الب�
     await setDoc(doc(TECH, "hail_tickets/TK1"), { status: "open" }, { merge: true });
   })()));
 
-/* ═════════ رصيدُ البند المستعاض — وثيقتا المال للأدمن وحدَه ═════════
-   `substitute_accounts` تحمل الأرصدةَ والهوامش، و`substitute_expenses` تحمل الشراءَ
-   النقديَّ من عهدة المشرفين بلا طلبِ شراء — وكلتاهما تُخصَم من مال العميل **بلا
-   بوّابةِ اعتمادٍ خلفَها**، فبابُ الكتابة هو البوّابةُ الوحيدة. والوحدةُ تحرسهما في
-   المتصفّح، وذاك يمنع الخطأ لا التعمّد. */
-head("رصيدُ البند المستعاض — الأرصدةُ والمصروفُ النقديّ (الكتابةُ للأدمن وحدَه)");
-const SB_A = "meta/substitute_accounts", SB_X = "meta/substitute_expenses";
-const SB_AD = "meta/substitute_accounts_dev", SB_XD = "meta/substitute_expenses_dev";
+/* ═════════ رصيدُ البند المستعاض — الأرصدةُ والشراءُ النقديُّ من العهدة ═════════
+   `meta/substitute_accounts` تحمل الأرصدةَ والهوامش: مالُ العميل مباشرةً، وكانت
+   تحت القاعدة العامة (كلُّ دورٍ غيرِ الزائر يكتبها). و`global_substitute_expenses`
+   الشراءُ النقديُّ بلا طلبِ شراء: **مَن يُدخِل ليس مَن يعتمد** — الإدخالُ للمشرف
+   والمشترياتِ والماليةِ والمسؤول، والاعتمادُ (وهو لحظةُ الخصم) للمسؤول وحدَه. */
+head("رصيدُ البند المستعاض — الأرصدةُ للأدمن، والمصروفُ النقديُّ إدخالٌ ثمّ اعتماد");
+const SB_A = "meta/substitute_accounts", SB_AD = "meta/substitute_accounts_dev";
 const FAT_ACC = { accounts: [{ id: "sb1", kind: "standalone", name: "مشروعٌ وهميّ", total: 9000000, margin: 25 }] };
-const FAKE_EXP = { expenses: [{ id: "sx1", accountId: "sb1", date: "2026-08-20",
-                                desc: "بندٌ لم يُشترَ", payer: "—", amount: 250000 }] };
-await seed("meta/substitute_accounts", { accounts: [{ id: "sb1", total: 100, margin: 25 }] });
-await seed("meta/substitute_expenses", { expenses: [] });
+await seed(SB_A, { accounts: [{ id: "sb1", total: 100, margin: 25 }] });
 
 await check("★★★ لا يرفع مسؤولُ المستودعات رصيدَ بندٍ مستعاضٍ بمليون",
   assertFails(setDoc(doc(WH, SB_A), FAT_ACC)));
-await check("★★ ولا المشترياتُ ولا الماليةُ ولا مديرُ المشاريع ولا المديرُ التنفيذيّ",
-  assertFails(setDoc(doc(PROC, SB_A), FAT_ACC)));
+await check("★★ ولا المشتريات", assertFails(setDoc(doc(PROC, SB_A), FAT_ACC)));
 await check("★ ولا المالية", assertFails(setDoc(doc(FIN, SB_A), FAT_ACC)));
 await check("★ ولا المديرُ التنفيذيّ", assertFails(setDoc(doc(CEO, SB_A), FAT_ACC)));
 await check("★ ولا مديرُ المشاريع", assertFails(setDoc(doc(PM, SB_A), FAT_ACC)));
+await check("★ ولا المشرف", assertFails(setDoc(doc(SUP_RGD, SB_A), FAT_ACC)));
 await check("★ ولا الزائر", assertFails(setDoc(doc(VIEWER, SB_A), FAT_ACC)));
 await check("★★ ولا تطبيقُ الفنيين (مُصادَقٌ مجهولاً)", assertFails(setDoc(doc(TECH, SB_A), FAT_ACC)));
-
-await check("★★★ ولا يخصم مسؤولُ المشتريات ربعَ مليونٍ بمصروفٍ نقديٍّ من العهدة",
-  assertFails(setDoc(doc(PROC, SB_X), FAKE_EXP)));
-await check("★★ ولا مسؤولُ المستودعات ولا المالية",
-  assertFails(setDoc(doc(WH, SB_X), FAKE_EXP)));
-await check("★ ولا المالية", assertFails(setDoc(doc(FIN, SB_X), FAKE_EXP)));
 await check("★★ والتعديلُ الجزئيُّ والحذفُ بابان آخران للشيء نفسِه",
-  assertFails(updateDoc(doc(WH, SB_X), { expenses: FAKE_EXP.expenses })));
-await check("★★ ولا يُمحى مستندُ المصروفات فيُعاد بناؤه من الصفر",
-  assertFails(deleteDoc(doc(PROC, SB_X))));
-await check("★★ والنسختان التجريبيّتان مقفولتان كذلك (وإلا فُتح البابُ من الخلف)",
-  assertFails(setDoc(doc(WH, SB_XD), FAKE_EXP)));
-await check("★ ونسخةُ الأرصدة التجريبية", assertFails(setDoc(doc(PROC, SB_AD), FAT_ACC)));
+  assertFails(updateDoc(doc(WH, SB_A), { accounts: FAT_ACC.accounts })));
+await check("والأدمن يكتب الأرصدةَ (شكلُ `_txArray` بالضبط)",
+  assertSucceeds(setDoc(doc(ADMIN, SB_A), FAT_ACC, { merge: true })));
+await check("★ وفي النسخة التجريبية", assertSucceeds(setDoc(doc(ADMIN, SB_AD), FAT_ACC, { merge: true })));
+await check("★ ولا يكتبها غيرُه فيها (وإلا فُتح البابُ من الخلف)",
+  assertFails(setDoc(doc(PROC, SB_AD), FAT_ACC)));
 
-/* ── والوجهُ الآخر: قاعدةٌ تمنع المسؤولَ معاً تعطيلٌ لا حراسة ── */
-await check("والأدمن يكتب الأرصدةَ والمصروفاتِ (شكلُ `_txArray` بالضبط)",
+/* ── والمصروفُ النقديّ: مجموعةٌ لا مصفوفة، ليُحرَس «مَن يعتمد» على الخادم ── */
+const SBX = "global_substitute_expenses", SBXD = "global_substitute_expenses_dev";
+const expBody = (extra) => Object.assign({
+  accountId: "sb1", date: "2026-08-20", desc: "مواسير 2 بوصة", payer: "أبو محمد",
+  ref: "R-9", amount: 4000, status: "pending", createdBy: "رغده", createdByUser: "رغده",
+  createdAt: "2026-08-20T08:00:00.000Z"
+}, extra || {});
+await seed(SBX + "/SX-OWN",   expBody());                                   // معلَّقٌ لرغده
+await seed(SBX + "/SX-OTHER", expBody({ createdByUser: "خالد", createdBy: "خالد" }));
+await seed(SBX + "/SX-OK",    expBody({ status: "approved", approvedByUser: "admin" }));
+
+await check("★★ يُدخِل المشرفُ مصروفاً نقدياً (بصيغتَي الدور: «مشرف» و`supervisor`)",
   assertSucceeds((async () => {
-    await setDoc(doc(ADMIN, SB_A), FAT_ACC, { merge: true });
-    await setDoc(doc(ADMIN, SB_X), FAKE_EXP, { merge: true });
+    await setDoc(doc(SUP_RGD, SBX + "/SX-N1"), expBody());
+    await setDoc(doc(SUP, SBX + "/SX-N2"), expBody({ createdByUser: "" }));
   })()));
-await check("★ وفي النسختَين التجريبيّتَين",
+await check("★ ويُدخِله مسؤولُ المشتريات والماليةُ والمسؤول",
   assertSucceeds((async () => {
-    await setDoc(doc(ADMIN, SB_AD), FAT_ACC, { merge: true });
-    await setDoc(doc(ADMIN, SB_XD), FAKE_EXP, { merge: true });
+    await setDoc(doc(PROC, SBX + "/SX-N3"), expBody());
+    await setDoc(doc(FIN,  SBX + "/SX-N4"), expBody());
+    await setDoc(doc(ADMIN, SBX + "/SX-N5"), expBody({ status: "approved" }));
+  })()));
+await check("★★ ولا يُدخِله مسؤولُ المستودعات ولا مديرُ المشاريع ولا التنفيذيّ ولا الزائر",
+  assertFails(setDoc(doc(WH, SBX + "/SX-BAD1"), expBody())));
+await check("★ ولا مديرُ المشاريع", assertFails(setDoc(doc(PM, SBX + "/SX-BAD2"), expBody())));
+await check("★ ولا المديرُ التنفيذيّ", assertFails(setDoc(doc(CEO, SBX + "/SX-BAD3"), expBody())));
+await check("★ ولا الزائر", assertFails(setDoc(doc(VIEWER, SBX + "/SX-BAD4"), expBody())));
+await check("★★ ولا تطبيقُ الفنيين ولا غيرُ المُصادَق",
+  assertFails(setDoc(doc(TECH, SBX + "/SX-BAD5"), expBody())));
+
+/* ★★★ لبُّ البند: مَن يُدخِل لا يعتمد لنفسه — لا عند الإنشاء ولا بتحديثٍ بعده */
+await check("★★★ ولا يُنشئ المشرفُ مصروفاً **معتمَداً** (اعتمادٌ لنفسه بحقلٍ واحد)",
+  assertFails(setDoc(doc(SUP_RGD, SBX + "/SX-EVIL1"), expBody({ status: "approved" }))));
+await check("★★★ ولا المشترياتُ ولا المالية",
+  assertFails(setDoc(doc(PROC, SBX + "/SX-EVIL2"), expBody({ status: "approved" }))));
+await check("★ ولا المالية", assertFails(setDoc(doc(FIN, SBX + "/SX-EVIL3"), expBody({ status: "approved" }))));
+await check("★★★ ولا يعتمد المشرفُ مستندَه المعلَّقَ بتحديثٍ لاحق (البابُ الخلفيّ)",
+  assertFails(updateDoc(doc(SUP_RGD, SBX + "/SX-OWN"), { status: "approved" })));
+await check("★★★ ولا يعتمده مسؤولُ المشتريات ولا المالية",
+  assertFails(updateDoc(doc(PROC, SBX + "/SX-OWN"), { status: "approved" })));
+await check("★ ولا المالية", assertFails(updateDoc(doc(FIN, SBX + "/SX-OWN"), { status: "approved" })));
+await check("★★★ ولا في النسخة التجريبية (البابُ الخلفيُّ يُقفل في النسختين)",
+  assertFails((async () => {
+    await setDoc(doc(SUP_RGD, SBXD + "/SX-EVIL9"), expBody({ status: "approved" }));
   })()));
 
-/* ── والقراءةُ لم تُمَسّ: الشاشةُ تعرض النشاطَ للجميع وتحجب المالَ بالدور في الواجهة ── */
+/* ★★ ومُدخِلُ المستند يصحّح معلَّقَه — وحدَه، وبِاسم دخوله لا باسمه المعروض */
+await check("★★ يصحّح المشرفُ مصروفَه المعلَّق (خطأٌ في المبلغ يُدرَك قبل الاعتماد)",
+  assertSucceeds(updateDoc(doc(SUP_RGD, SBX + "/SX-OWN"), { amount: 4500, desc: "مواسير 3 بوصة" })));
+await check("★★★ ولا يمسّ مصروفَ مشرفٍ آخر", assertFails(updateDoc(doc(SUP_RGD, SBX + "/SX-OTHER"), { amount: 1 })));
+await check("★★★ ولا يمسّ **معتمَداً** — مالٌ خرج من رصيد العميل",
+  assertFails(updateDoc(doc(SUP_RGD, SBX + "/SX-OK"), { amount: 1 })));
+await check("★★ ولا يورّث المِلكيّةَ لنفسه على مستندِ غيره (تبديلُ `createdByUser`)",
+  assertFails(updateDoc(doc(SUP_RGD, SBX + "/SX-OTHER"), { createdByUser: "رغده" })));
+await check("★★ ولا يبدّل الحسابَ المخصومَ منه بعد الإدخال (من أيّ جيبٍ يُصرَف)",
+  assertFails(updateDoc(doc(SUP_RGD, SBX + "/SX-OWN"), { accountId: "sb2" })));
+await check("★ وتوكِنٌ بلا اسمِ دخولٍ لا يفتح باباً (حدُّ القاعدة معلَن)",
+  assertFails(updateDoc(doc(SUP, SBX + "/SX-OWN"), { amount: 9 })));
+await check("★★ ويحذف مُدخِلُه معلَّقَه، ولا يحذف معلَّقَ غيرِه ولا معتمَداً",
+  assertSucceeds(deleteDoc(doc(SUP_RGD, SBX + "/SX-N1"))));
+await check("★★ ولا معلَّقَ غيرِه", assertFails(deleteDoc(doc(SUP_RGD, SBX + "/SX-OTHER"))));
+await check("★★★ ولا معتمَداً", assertFails(deleteDoc(doc(SUP_RGD, SBX + "/SX-OK"))));
+
+/* ── والوجهُ الآخر: قاعدةٌ تمنع المعتمِدَ معاً تعطيلٌ لا حراسة ── */
+await check("★★ والأدمن يعتمد المعلَّق (لحظةُ الخصم)",
+  assertSucceeds(updateDoc(doc(ADMIN, SBX + "/SX-OWN"),
+    { status: "approved", approvedBy: "المسؤول", approvedByUser: "admin", approvedAt: "2026-08-21T00:00:00.000Z" })));
+await check("★ ويعدّل المعتمَدَ ويحذفه (وحدَه)",
+  assertSucceeds((async () => {
+    await updateDoc(doc(ADMIN, SBX + "/SX-OK"), { amount: 7000 });
+    await deleteDoc(doc(ADMIN, SBX + "/SX-OTHER"));
+  })()));
+
+/* ── والقراءةُ لم تُمَسّ: النشاطُ يُعرَض للجميع والمالُ يُحجَب بالدور في الواجهة ── */
 await check("★★ وكلُّ ذي دورٍ يقرأ الأرصدةَ والمصروفات (وإلا عُرضت أصفارٌ صامتة)",
   assertSucceeds((async () => {
     await getDoc(doc(WH, SB_A));
-    await getDoc(doc(PROC, SB_X));
-    await getDoc(doc(VIEWER, SB_A));
+    await getDocs(collection(VIEWER, SBX));
+    await getDocs(collection(PROC, SBX));
   })()));
 
 /* ── ولم نُفرِط في القفل: اسمٌ يشبه ولا يطابق يبقى تحت القاعدة العامة ── */
@@ -662,6 +713,7 @@ const APP_COLLS = [
   "global_issue_orders", "global_item_catalog", "global_labor_catalog",
   "global_hr_payments", "global_warehouses", "global_stocktakes", "global_custody",
   "global_assets", "global_price_analysis", "global_substitute_budget",
+  "global_substitute_expenses",
   "meta", "hail_tickets", "audit_log",
   "global_vendors", "global_contract_requests", "global_contracts",
   "global_contract_extracts", "global_contract_changes"

@@ -58,23 +58,66 @@ service cloud.firestore {
       allow write: if isAdmin() && doc.matches('(.*_)?users(_dev)?');
     }
 
-    /* ═══════════ رصيدُ البند المستعاض — الكتابةُ للأدمن وحدَه ═══════════
-       وثيقتان: `substitute_accounts` (الأرصدةُ والهوامش) و`substitute_expenses`
-       (الشراءُ النقديُّ من عهدة المشرفين بلا طلبِ شراء). كلتاهما **مالُ العميل
-       مباشرةً**: سطرٌ في الأولى يرفع رصيداً بمليون، وسطرٌ في الثانية يخصم مبلغاً
-       بلا بوّابةِ اعتمادٍ خلفَه — لا مستودعَ يستلم ولا ماليةَ تسدّد، فبابُ الكتابة
-       هو البوّابةُ الوحيدة. والوحدةُ تقصرهما على `isAdmin()` في المتصفّح، وذاك
-       يمنع الخطأ لا التعمّد: من يفتح الـConsole يكتب المستندَ مباشرةً.
+    /* ═══════════ أرصدةُ «البند المستعاض» — الكتابةُ للأدمن وحدَه ═══════════
+       `substitute_accounts` تحمل الأرصدةَ والهوامش — **مالُ العميل مباشرةً**: سطرٌ
+       فيها يرفع رصيداً بمليون. وكانت تحت القاعدة العامة: كلُّ دورٍ غيرِ الزائر
+       يكتبها. والوحدةُ تقصرها على `isAdmin()` في المتصفّح، وذاك يمنع الخطأ لا
+       التعمّد: من يفتح الـConsole يكتب المستندَ مباشرةً.
 
        **والاستثناءُ من القاعدة العامة شرطُ الإصلاح لا تنظيفٌ**: القواعدُ تُقيَّم
        بـ«أو»، فبلوكٌ متساهلٌ باقٍ يُبطل التشديدَ هنا بلا أن يظهر ذلك في أيّ سطر
        (وقع ذلك فعلاً في البند M11). **والقراءةُ لم تُمَسّ**: تبقى لكلّ ذي دورٍ —
        الشاشةُ تعرض النشاطَ للجميع وتحجب أرقامَ المال بالدور في الواجهة. */
     function isSubstDoc(coll, doc) {
-      return coll == 'meta' && doc.matches('substitute_(accounts|expenses)(_dev)?');
+      return coll == 'meta' && doc.matches('substitute_accounts(_dev)?');
     }
     match /meta/{doc} {
-      allow write: if isAdmin() && doc.matches('substitute_(accounts|expenses)(_dev)?');
+      allow write: if isAdmin() && doc.matches('substitute_accounts(_dev)?');
+    }
+
+    /* ═══════════ الشراءُ النقديُّ من العهدة — مَن يُدخِل ليس مَن يعتمد ═══════════
+       بندٌ يشتريه مشرفٌ أو مسؤولُ مشترياتٍ من عهدته **بلا طلبِ شراء**. يُدخِله مَن
+       بيده الإيصال (المشرفُ · المشترياتُ · الماليةُ · المسؤول)، **ويعتمده المسؤولُ
+       وحدَه** — والاعتمادُ هو **لحظةُ الخصم** من رصيد العميل.
+
+       **ولذلك مجموعةٌ لا مصفوفةٌ في مستند**: القواعدُ تحرس مستنداً لا عنصراً داخل
+       مصفوفة. فمصفوفةٌ في وثيقةٍ واحدةٍ تعني أن كلَّ مَن يملك الإدخالَ يكتب المصفوفةَ
+       كاملةً بحالة `approved` فيعتمد لنفسه، ولا سطرَ في القاعدة يمنعه. المستندُ
+       المستقلُّ وحدَه يجعل «مَن يعتمد» شرطاً على الخادم لا رجاءً في المتصفّح.
+
+       **والدورُ بصيغتيه** («مشرف» من نافذة الإدارة و`supervisor` من توكِن تطبيق
+       الفنيين) — وقائمةٌ بإحداهما تردّ نصفَ المشرفين بلا سببٍ ظاهر.
+       **والمِلكيّةُ باسم الدخول لا بالاسم المعروض** (`createdByUser` — اصطلاحُ
+       `global_vendors` نفسُه): الاسمُ المعروض يتكرّر، واسمُ الدخول لا. */
+    function sbxColl(coll) {
+      return coll.matches('global_substitute_expenses(_dev)?');
+    }
+    function sbxEntryRole() {
+      return anyRole(['admin','supervisor','مشرف','finance','procurement_officer']);
+    }
+    function sbxTokUser() {
+      return request.auth != null ? request.auth.token.get('u', '') : '';
+    }
+    // مُدخِلُ المستند وهو **معلَّقٌ** — لا بعد اعتماده: ذاك مالٌ خرج من الرصيد
+    function sbxOwnPending() {
+      return sbxEntryRole()
+        && sbxTokUser() != ''
+        && resource.data.get('status', '') != 'approved'
+        && resource.data.get('createdByUser', '') == sbxTokUser();
+    }
+    match /{coll}/{id} {
+      /* الإنشاءُ: بحالة `pending` حصراً لغير الأدمن — وإلا اعتمد المُدخِلُ لنفسه
+         بتزوير حقلٍ واحدٍ في الطلب. والأدمنُ يُنشئ معتمَداً لأنه المعتمِدُ نفسُه. */
+      allow create: if sbxColl(coll) && sbxEntryRole()
+                       && (isAdmin() || request.resource.data.get('status', '') == 'pending');
+      /* التعديلُ: الأدمنُ في كلّ حال؛ وغيرُه على معلَّقِه هو **دون أن يعتمده**،
+         ودون أن يبدّل مَن أنشأه (وإلا ورّث المِلكيّةَ لنفسه على مستندِ غيره). */
+      allow update: if sbxColl(coll) && (
+                         isAdmin()
+                      || ( sbxOwnPending()
+                           && request.resource.data.get('status', '') != 'approved'
+                           && unchanged(['createdAt', 'createdByUser', 'accountId']) ) );
+      allow delete: if sbxColl(coll) && (isAdmin() || sbxOwnPending());
     }
 
     /* ═══════════ طابورُ واتساب — للخادم وحدَه (البند M16) ═══════════
@@ -154,6 +197,7 @@ service cloud.firestore {
       allow write: if hasRole() && !isViewer() && !ctrLocked(document[0])
                       && !isUsersDoc(document[0], document[1])
                       && !isSubstDoc(document[0], document[1])
+                      && !sbxColl(document[0])
                       && !srvOnly(document[0])
                       && !isAuditColl(document[0]);
     }
