@@ -1070,7 +1070,8 @@ table tfoot td{background:#f1f5f9;font-weight:800}
   }
 
   // ══ تصدير Excel ══
-  function exportExcel(){
+  async function exportExcel(){
+    if(!await window._needLib(window._ensureXLSX,"Excel")) return;   // عند أوّل تصدير
     if(isViewerMode()){ T("🔒 وضع العرض فقط — الأسعار محجوبة","warn"); return; }
     if(!_items.length){ T("لا توجد بنود للتصدير","warn"); return; }
     const rows = _items.map(function(it,i){

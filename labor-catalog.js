@@ -518,7 +518,8 @@
   }
 
   // ══ تصدير Excel ══
-  function exportExcel(){
+  async function exportExcel(){
+    if(!await window._needLib(window._ensureXLSX,"Excel")) return;   // عند أوّل تصدير
     if(isViewerMode()){ T("🔒 وضع العرض فقط — الأسعار محجوبة","warn"); return; }
     if(!_items.length){ T("لا توجد مصنعيات للتصدير","warn"); return; }
     const rows = _items.map(function(it,i){
@@ -539,7 +540,8 @@
   }
 
   // ══ قالب الاستيراد ══
-  function downloadTemplate(){
+  async function downloadTemplate(){
+    if(!await window._needLib(window._ensureXLSX,"Excel")) return;   // عند أوّل تصدير
     const rows = [
       ["ℹ أدخل البنود من السطر 3 — الحقول المطلوبة: اسم البند + سعر المصنعية | الكود اختياري (يُولَّد تلقائياً) | لا تعدّل رؤوس الأعمدة","","","","","",""],
       ["#","الكود","اسم البند *","التصنيف","الوحدة","سعر المصنعية (ر.س) *","نطاق العمل"],
@@ -565,6 +567,7 @@
 
   // ══ استيراد Excel ══
   async function importExcel(input){
+    if(!await window._needLib(window._ensureXLSX,"Excel")) return;   // عند أوّل تصدير
     if(!canManage()){ T("⚠ صلاحية غير كافية","warn"); return; }
     const file = input && input.files && input.files[0];
     if(!file) return;
