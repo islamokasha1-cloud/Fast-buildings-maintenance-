@@ -1338,7 +1338,8 @@
     return String(s||"تقرير").replace(/[:\\\/\?\*\[\]]/g,"-").slice(0,31);
   }
 
-  function exportExcel(){
+  async function exportExcel(){
+    if(!await window._needLib(window._ensureXLSX,"Excel")) return;   // عند أوّل تصدير
     const kinds=Object.keys(_sheets);
     if(!kinds.length){ _toast("⚠ ولِّد تقريراً أولاً","warn"); return; }
     if(typeof XLSX==="undefined"){ _toast("⚠ مكتبة Excel غير محمّلة","warn"); return; }

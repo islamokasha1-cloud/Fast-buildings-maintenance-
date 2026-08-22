@@ -28,9 +28,6 @@
 <script src="https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore-compat.js" crossorigin="anonymous"></script>
 <script src="https://www.gstatic.com/firebasejs/12.17.0/firebase-storage-compat.js" crossorigin="anonymous"></script>
 <script src="https://www.gstatic.com/firebasejs/12.17.0/firebase-app-check-compat.js" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" crossorigin="anonymous"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=Tajawal:wght@400;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="app.css?v=18.9.2806">
 </head>
@@ -5519,7 +5516,8 @@ function renderPoAuditLog(fromFilter){
   else loadAuditLog(doRender);
 }
 
-function exportReportToExcel(){
+async function exportReportToExcel(){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   if(!lastReportFiltered||!lastReportFiltered.length){
     toast("⚠ يجب إنشاء التقرير أولاً","warn"); return;
   }
@@ -5558,6 +5556,7 @@ function exportReportToExcel(){
 
 //  EXPORT: POWERPOINT (التقرير المصور)
 async function exportPhotoReportToPPTX(){
+  if(!await _needLib(_ensurePptx,"PowerPoint")) return;   // تُجلَب عند أوّل تصدير
   if(!photoReportTickets||!photoReportTickets.length){
     toast("⚠ يجب إنشاء التقرير المصور أولاً","warn"); return;
   }
@@ -5856,6 +5855,7 @@ function startRealtimeSync(){
       timeline:     d.data().timeline||[]
     }));
     tickets.sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
+    hideSplash();   // البيانات وصلت — لا معنى لإبقاء شاشة الافتتاح
 
     // تحديث الـ counter من الـ snapshot لو كان أعلى
     const maxSvrNum=tickets.reduce((mx,t)=>{
@@ -7497,7 +7497,8 @@ function renderDashboardPurchaseSummary(){
 }
 
 //  ARCHIVE EXCEL EXPORT
-function exportArchiveToExcel(){
+async function exportArchiveToExcel(){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   if(!_archiveSelectedMonth){
     toast("⚠ اختر شهراً من الأرشيف أولاً","warn"); return;
   }
@@ -10204,9 +10205,63 @@ function deleteTicket(id){
   // الـ onSnapshot سيُحدّث tickets[] و UI تلقائياً عند الحذف من Firestore
 }
 
-function showSplash(duration){
+/* ══ جدولة مزامنات ما بعد الإقلاع خارج المسار الحرج ══
+   الدخول كان يُركّب تسعةَ مستمعين دفعةً واحدة (~٥٧٠٠ مستند) قبل رسمِ لوحةٍ لا تقرأ
+   إلا `tickets`، فتزاحم البلاغاتُ على النطاق ما لا يظهر على الشاشة. الآن: الحرجُ
+   فوراً والباقي على أوّل فراغٍ بعد الرسم. لا يُلغى شيء ولا يُقصّ — كلُّ المجموعات
+   تصل كما كانت، فالشاراتُ والاعتمادياتُ المتقاطعة سليمة؛ تغيّر الترتيبُ لا المحتوى. */
+/* ══ حارسُ سقفِ المزامنة ══
+   المخزونُ والكتالوجُ والمستودعاتُ كانت تُجلَب بلا `limit` — استعلامٌ ينمو بلا سقف.
+   والقصُّ الصامتُ في نظام مخزونٍ أسوأُ من البطء (صنفٌ يسقط = رصيدٌ خاطئٌ بلا إنذار)،
+   فالسقفُ سخيٌّ ومعه تنبيهٌ للأدمن عند ٩٠٪ منه — على نمطِ إنذارِ البلاغات القائم. */
+function _warnSyncCap(label, got, cap, advice){
+  if(!(currentUser && currentUser.role==="admin")) return;
+  if(got < Math.floor(cap*0.9)) return;
+  const id = "sync-cap-warn-"+label.replace(/[^a-z]/gi,"");
+  if(document.getElementById(id)) return;
+  const bar=document.createElement("div");
+  bar.id=id;
+  bar.style.cssText="position:fixed;bottom:60px;left:16px;background:#7c3aed;color:#fff;padding:10px 16px;border-radius:10px;font-size:12px;font-weight:700;z-index:990;max-width:320px;box-shadow:0 6px 20px rgba(0,0,0,.25)";
+  bar.textContent="⚠ "+label+" اقترب من حدّ المزامنة ("+got+"/"+cap+")"+(advice?" — "+advice:"");
+  document.body.appendChild(bar);
+  setTimeout(()=>bar.remove(), 15000);
+}
+
+// سقوفُ المجموعات المرجعية — سخيّةٌ عمداً، والإنذارُ يسبق بلوغَها
+const _INV_SYNC_CAP = 4000, _CATALOG_SYNC_CAP = 4000, _WH_SYNC_CAP = 300;
+
+function _deferBoot(fn, label){
+  const run = ()=>{ try{ fn(); }catch(e){ console.warn("deferred boot ["+(label||"?")+"]:",e); } };
+  if(typeof requestIdleCallback==="function") requestIdleCallback(run,{timeout:1500});
+  else setTimeout(run, 250);
+}
+
+/* ══ شاشة الافتتاح: تُخفى عند جاهزية البيانات لا بمؤقّتٍ ثابت ══
+   `showSplash(3000)` كانت تحجب الواجهة ثلاثَ ثوانٍ في كل دخول بلا علاقةٍ بالشبكة —
+   جذرُ الشكوى من «بطء التحميل»: البياناتُ جاهزةٌ والشاشةُ وحدها تنتظر. الآن المؤقّت
+   سقفٌ للأمان لا موعدَ إخفاء، وأولُ لقطةِ بلاغاتٍ تُخفيها؛ و`_SPLASH_MIN_MS` يمنع الوميض. */
+let _splashTimer = null, _splashFloorAt = 0, _splashDone = true;
+const _SPLASH_MIN_MS = 450;
+
+function hideSplash(){
+  if(_splashDone) return;
+  const el=document.getElementById("splash-overlay");
+  if(!el){ _splashDone=true; return; }
+  // احترام الحدّ الأدنى: إن وصلت البيانات قبله نؤجّل الإخفاء لا نُلغيه
+  const wait = _splashFloorAt - Date.now();
+  if(wait > 0){ setTimeout(hideSplash, wait); return; }
+  _splashDone = true;
+  if(_splashTimer){ clearTimeout(_splashTimer); _splashTimer=null; }
+  el.style.transition="opacity .4s ease";
+  el.style.opacity="";
+  el.classList.add("hidden");
+}
+
+function showSplash(maxDuration){
   const el=document.getElementById("splash-overlay");
   if(!el) return;
+  _splashDone = false;
+  _splashFloorAt = Date.now() + _SPLASH_MIN_MS;
   el.style.transition="none";
   el.classList.remove("hidden");
   el.style.opacity="1";
@@ -10214,11 +10269,8 @@ function showSplash(duration){
   el.querySelectorAll("img,.splash-title,.splash-bar").forEach(node=>{
     node.style.animation="none"; void node.offsetWidth; node.style.animation="";
   });
-  setTimeout(()=>{
-    el.style.transition="opacity .4s ease";
-    el.style.opacity="";
-    el.classList.add("hidden");
-  },duration||3000);
+  if(_splashTimer) clearTimeout(_splashTimer);
+  _splashTimer = setTimeout(hideSplash, maxDuration||3000);   // سقفٌ لا موعد
 }
 
 function renderSystemStats(){
@@ -10388,17 +10440,25 @@ function enterApp(found,opts){
   } else {
     toast("👋 أهلاً "+found.name+(CURRENT_PROJECT?" — "+CURRENT_PROJECT.name:""),"success");
   }
+  // ── الطبقة الحرجة: ما ترسمه الشاشة الأولى وما يحمل شارات الرأس ──
   startRealtimeSync();
   startPurchaseSync();
   startHailNotifications();
-  loadRFQs();
-  startAssetsSync();
-  startInventorySync();
-  startIssueOrdersSync();
-  startPPMSync();
   startNotifSync();
+  // ── الطبقة المؤجَّلة: تصل بعد أوّل رسم، فلا تزاحم البلاغات على النطاق ──
+  _deferBoot(()=>{ loadRFQs();            }, "rfq");
+  _deferBoot(()=>{ startAssetsSync();     }, "assets");
+  _deferBoot(()=>{ startInventorySync();  }, "inventory");
+  _deferBoot(()=>{ startIssueOrdersSync();}, "issue-orders");
+  _deferBoot(()=>{ startPPMSync();        }, "ppm");
   // جلب البلاغات المؤرشفة في الخلفية لتحديث إحصائيات الداشبورد الكاملة
-  setTimeout(()=>_fetchExtraArchivedTickets(()=>{ renderCurrentPage(); _initRollups(); }), 3000);
+  // مسحُ الأرشيف كاملاً لإتمام أرقام اللوحة. لا يُقصّ بنافذةٍ زمنية: `where+orderBy`
+  // يلزمه فهرسٌ مركّبٌ يدويٌّ لكل مشروع ({id}_tickets) — وهو ما فشل سابقاً. فبدل قصِّ
+  // الأرقام نُخرجه من زحمة الإقلاع: أرضيةُ الثلاثِ ثوانٍ ثم أوّلُ فراغٍ فوقها.
+  setTimeout(()=>_deferBoot(
+    ()=>_fetchExtraArchivedTickets(()=>{ renderCurrentPage(); _initRollups(); }),
+    "archive-stats"
+  ), 3000);
   if(window._slaInterval) clearInterval(window._slaInterval);
   window._slaInterval = setInterval(checkSLAAlerts,60000);
   if(window._ppmInterval) clearInterval(window._ppmInterval);
@@ -11925,10 +11985,12 @@ async function openGlobalPurchases(){
   //   لا يصل. وهذا جذرُ «الإشعارات لا تصل للمسؤولين». الدالة idempotent (تفكّ المستمع
   //   القديم قبل التركيب) فاستدعاؤها هنا آمنٌ مع أي مسار دخول.
   startNotifSync();
-  loadRFQs();
-  startInventorySync();
+  // مؤجَّلة إلى ما بعد أوّل رسم — الشاشةُ هنا المشترياتُ وحدها، وهذه تُغذّي شاراتٍ
+  // وشاشاتٍ أخرى فلا داعي لأن تزاحمها على النطاق لحظةَ الدخول (نفس منطق enterApp)
+  _deferBoot(()=>{ loadRFQs();             }, "rfq/global");
+  _deferBoot(()=>{ startInventorySync();   }, "inventory/global");
   /* startCustodySync(); — معطّل: تبويب العهد مخفي (v18.9ok) */
-  startIssueOrdersSync();
+  _deferBoot(()=>{ startIssueOrdersSync(); }, "issue-orders/global");
 
   // حمّل المشاريع وانتظر الاكتمال لضمان ملء قائمة np-project
   if(!window._projectsList||!window._projectsList.length){
@@ -13046,30 +13108,46 @@ ${el.outerHTML}
 }
 
 //  NOTIFICATIONS SYSTEM — مع مزامنة Firestore عبر المستخدمين
-// ══ تحميل PDF.js عند الحاجة فقط (lazy) لعرض/تحويل فواتير الـ PDF ══
-let _pdfjsLoadPromise = null;
-function _ensurePdfJs(){
-  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
-  if(_pdfjsLoadPromise) return _pdfjsLoadPromise;
-  _pdfjsLoadPromise = new Promise((resolve,reject)=>{
-    const s = document.createElement('script');
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-    s.crossOrigin = "anonymous";
-    s.onload = ()=>{
-      try{
-        if(window.pdfjsLib){
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-          resolve(window.pdfjsLib);
-        } else { reject(new Error("pdfjsLib not found after load")); }
-      }catch(e){ reject(e); }
+/* ══ المكتباتُ الثقيلة تُحمَّل عند أوّل استعمال ══
+   XLSX و PptxGenJS و Chart.js كانت وسومَ <script> متزامنةً في <head>: ~٢٫٥ م.ب تحجب
+   تحليلَ الصفحة قبل أن يبدأ <body> أصلاً، ولا يمسّها إلا التصديرُ والرسومُ البيانية.
+   الآن تُجلَب عند أوّل نداءٍ لها — تعميمُ نمطِ `_ensurePdfJs` الذي كان قائماً هنا. */
+const _libPromises = {};
+function _loadLib(key, src, globalName, after){
+  if(window[globalName]) return Promise.resolve(window[globalName]);
+  if(_libPromises[key]) return _libPromises[key];
+  _libPromises[key] = new Promise((resolve,reject)=>{
+    const el = document.createElement('script');
+    el.src = src; el.crossOrigin = "anonymous";
+    el.onload = ()=>{
+      if(!window[globalName]){ reject(new Error(globalName+" not found after load")); return; }
+      try{ if(after) after(); }catch(e){ reject(e); return; }
+      resolve(window[globalName]);
     };
-    s.onerror = ()=>reject(new Error("failed to load pdf.js"));
-    document.head.appendChild(s);
+    el.onerror = ()=>{ _libPromises[key]=null; el.remove(); reject(new Error("failed to load "+key)); };
+    document.head.appendChild(el);
   });
-  return _pdfjsLoadPromise;
+  return _libPromises[key];
 }
-
+function _ensurePdfJs(){
+  return _loadLib("pdfjs","https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js","pdfjsLib",
+    ()=>{ window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; });
+}
+/* فشلُ الشبكة لا يُسقط الزرَّ صامتاً: المكتبةُ كانت وسماً ثابتاً فغيابُها كان
+   يُلتقَط بحارس `typeof XLSX` برسالةٍ عربية. الجلبُ الكسول يُبقي الرسالةَ نفسَها. */
+async function _needLib(ensure, name){
+  try{ await ensure(); return true; }
+  catch(e){ console.warn("lib load failed:",name,e);
+            try{ toast("⚠ تعذّر تحميل مكتبة "+name+" — تحقّق من الاتصال وأعد المحاولة","warn"); }catch(_e){}
+            return false; }
+}
+window._needLib = _needLib;
+function _ensureXLSX(){ return _loadLib("xlsx","https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js","XLSX"); }
+function _ensurePptx(){ return _loadLib("pptx","https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js","PptxGenJS"); }
+function _ensureChart(){ return _loadLib("chart","https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js","Chart"); }
+// الوحداتُ الخارجية (كتالوج المصنعيات · تحليل الأسعار · الجرد…) تصدّر إكسل أيضاً
+window._ensureXLSX = _ensureXLSX; window._ensurePptx = _ensurePptx; window._ensureChart = _ensureChart;
 // ══ تحويل الفاتورة المرفقة (صورة أو PDF) إلى صور data-URL لتضمينها داخل ملف الطباعة ══
 // الصور تُطبع بشكل موثوق داخل PDF (بخلاف iframe/embed التي لا تظهر في الطباعة)
 async function _renderInvoiceImagesForPrint(p){
@@ -16489,7 +16567,9 @@ function startInventorySync(){
   // رصيد المخزون
   if(!_invUnsub) _invUnsub = db.collection(INVENTORY_COLLECTION())
     .orderBy("itemName","asc")
+    .limit(_INV_SYNC_CAP)
     .onSnapshot(snap=>{
+      _warnSyncCap("رصيد المخزون", snap.docs.length, _INV_SYNC_CAP, "راجِع أصنافاً راكدة للأرشفة");
       _inventoryItems = snap.docs.map(d=>({id:d.id,...d.data()}));
       _fsLoaded.inventory=true;
       if(document.getElementById("page-inventory")?.classList.contains("active")) renderInventory();
@@ -16507,7 +16587,9 @@ function startInventorySync(){
 
   // قائمة المستودعات المُدارة
   if(!_whUnsub) _whUnsub = db.collection(WAREHOUSES_COLLECTION())
+    .limit(_WH_SYNC_CAP)
     .onSnapshot(snap=>{
+      _warnSyncCap("المستودعات", snap.docs.length, _WH_SYNC_CAP, "");
       _warehouses = snap.docs.map(d=>({id:d.id,...d.data()}));
       // تحديث قائمة صفحة الإضافة إن كانت مفتوحة ولم يكن المستخدم يكتب مستودعاً جديداً
       const s=document.getElementById("inv-add-warehouse-sel");
@@ -18058,7 +18140,8 @@ async function resetInventoryItemToZero(itemId, itemName){
 }
 
 // ── تصدير رصيد المخزون Excel ──
-function exportInventoryExcel(){
+async function exportInventoryExcel(){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   try{
     const items = _inventoryFiltered();   // نفس فلاتر الشاشة + استبعاد المدموج
     if(!items||!items.length){ toast("⚠ لا يوجد مخزون مطابق للفلاتر للتصدير","warn"); return; }
@@ -20134,7 +20217,9 @@ function loadItemCatalog(onDone){
   if(_catalogUnsub){ if(onDone) onDone(); return; }
   _catalogUnsub = db.collection(ITEM_CATALOG_COLLECTION())
     .orderBy("name","asc")
+    .limit(_CATALOG_SYNC_CAP)
     .onSnapshot(snap=>{
+      _warnSyncCap("كتالوج البنود", snap.docs.length, _CATALOG_SYNC_CAP, "ادمج البنود المكرّرة");
       _catalogItems = snap.docs.map(d=>({id:d.id,...d.data()}));
       _catalogLoaded = true;
       _fsLoaded.catalog=true;
@@ -21591,7 +21676,8 @@ function openCatalogPriceModal(id){
 }
 
 // تصدير الكتالوج إلى Excel
-function exportCatalogExcel(){
+async function exportCatalogExcel(){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   if(isViewer()){ try{ toast("🔒 وضع العرض فقط — الأسعار محجوبة","warn"); }catch(e){} return; }
   if(!_catalogItems.length){ toast("لا توجد بنود للتصدير","warn"); return; }
   const rows = _catalogItems.map((item,i)=>({
@@ -21611,7 +21697,8 @@ function exportCatalogExcel(){
 }
 
 // ══ تحميل قالب الاستيراد ══
-function downloadCatalogTemplate(){
+async function downloadCatalogTemplate(){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   const TYPES = (typeof _catTypeNames==="function") ? _catTypeNames() : ["مواد كهربائية","مواد سباكة","مواد ميكانيكية","مواد تكييف","مواد بناء","مواد مختلفة","أدوات","خدمات","أخرى"];
   const UNITS = CAT_UNITS;   // v18.9og: مصدرٌ واحد
 
@@ -21667,6 +21754,7 @@ function triggerCatalogImport(){
 }
 
 async function importCatalogFromExcel(inputEl){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   if(!canManageCatalog()){ toast("⚠ صلاحية غير كافية","warn"); return; }
   const file = inputEl.files[0];
   if(!file) return;
@@ -30875,7 +30963,8 @@ function generatePurchaseReport(){
   `;
 }
 
-function exportPurchaseReportToExcel(){
+async function exportPurchaseReportToExcel(){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   if(isViewer()){ try{ toast("🔒 وضع العرض فقط — الأسعار محجوبة","warn"); }catch(e){} return; }
   // نفس فلاتر الشاشة/PDF — لا يُصدَّر ما لا يُعرَض
   const _rep=_purchaseReportFiltered();
@@ -32113,6 +32202,9 @@ function startAssetsSync(){
       rebuildFloorFilter();
       if(document.getElementById("page-assets").classList.contains("active")) renderAssets();
       if(document.getElementById("page-ppm").classList.contains("active")) renderPPM();
+      // `renderTickets` يعرض اسمَ الأصل من `assets`؛ وصولُ اللقطة بعد الرسم كان يتركه
+      // فارغاً حتى أوّل تنقّل — سباقٌ قائمٌ يتّسع بالتأجيل، فنُعيد الرسم صراحةً.
+      if(document.getElementById("page-tickets")?.classList.contains("active")) renderTickets();
     }, e=>console.warn("assets sync error:",e));
 }
 
@@ -32450,7 +32542,8 @@ function openAssetDetail(id){
   openModal("modal-asset-detail");
 }
 
-function exportAssetsExcel(){
+async function exportAssetsExcel(){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   if(!assets.length){ toast("⚠ لا توجد أصول لتصديرها","warn"); return; }
   try{
     const rows = assets.map(a=>({
@@ -32507,7 +32600,8 @@ function initImportAssetsPage(){
   // لا شيء خاص — الصفحة تعمل بالأحداث
 }
 
-function downloadAssetTemplate(){
+async function downloadAssetTemplate(){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   try{
     const headers = ["نوع الجهاز *","النوع الفرعي","الموقع الفرعي","الدور","المبنى *","الرقم التسلسلي","الموديل","تاريخ التركيب (YYYY-MM-DD)","انتهاء الضمان (YYYY-MM-DD)","ملاحظات"];
     // صف مثال
@@ -32528,7 +32622,8 @@ function downloadAssetTemplate(){
   }
 }
 
-function previewImportedAssets(input){
+async function previewImportedAssets(input){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   const file = input.files[0];
   if(!file){ return; }
 
@@ -33489,7 +33584,8 @@ async function confirmPPMTicket(){
   updatePPMBadge();
 }
 
-function exportPPMExcel(){
+async function exportPPMExcel(){
+  if(!await _needLib(_ensureXLSX,"Excel")) return;   // تُجلَب عند أوّل تصدير
   if(!ppmPlans.length){ toast("⚠ لا توجد خطط PPM لتصديرها","warn"); return; }
   try{
     const rows=ppmPlans.filter(p=>!p.disabled).map(p=>({
@@ -33638,7 +33734,8 @@ function renderMonthlyCompare(){
       </div>`;
 
     // تأخير بسيط لضمان render الـ DOM
-    setTimeout(()=>{
+    setTimeout(async ()=>{
+      if(!await _needLib(_ensureChart,"الرسوم البيانية")) return;   // عند أوّل عرض
       const barCtx=document.getElementById("mcomp-bar-chart");
       if(barCtx){
         if(barCtx._chartInst) barCtx._chartInst.destroy();
@@ -36987,7 +37084,8 @@ function render(){
   </div>`}
   `;
 
-  if(K.total>0 && window.Chart){ drawCharts(K); _fitCharts(); }
+  if(K.total>0){ _ensureChart().then(()=>{ drawCharts(K); _fitCharts(); })
+                              .catch(e=>console.warn("chart lib:",e)); }
 }
 
 function themeColors(){

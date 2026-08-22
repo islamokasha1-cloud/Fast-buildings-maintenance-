@@ -724,7 +724,8 @@
 
   // ════════ استيراد Excel ════════
   // يبحث عن عمود كود/اسم وعمود كمية معدودة، ويطابق ببنود اللقطة (كود ثم اسم مطبّع).
-  function _import(input){
+  async function _import(input){
+    if(!await window._needLib(window._ensureXLSX,"Excel")) return;   // عند أوّل تصدير
     const file = input.files && input.files[0];
     input.value="";
     if(!file) return;
