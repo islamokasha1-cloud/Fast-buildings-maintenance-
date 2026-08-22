@@ -931,7 +931,8 @@ function _parseBoqRows(rows){
   });
   return out;
 }
-function importBoqExcel(){
+async function importBoqExcel(){
+  if(!await window._needLib(window._ensureXLSX,"Excel")) return;   // عند أوّل تصدير
   if(!_canEdit()){ _toast("🔒 التحرير للأدمن أو مدير المشاريع","warn"); return; }
   if(typeof XLSX==="undefined"){ _toast("⚠ مكتبة Excel غير محمّلة — حدّث الصفحة وأعد المحاولة","warn"); return; }
   const inp=document.createElement("input");
@@ -958,7 +959,8 @@ function importBoqExcel(){
   setTimeout(()=>{ try{ inp.remove(); }catch(_e){} }, 60000);
 }
 // قالب Excel جاهز لملء المقايسة (أعمدة صحيحة + أمثلة + ورقة بأسماء بنود الموازنة)
-function downloadBoqTemplate(){
+async function downloadBoqTemplate(){
+  if(!await window._needLib(window._ensureXLSX,"Excel")) return;   // عند أوّل تصدير
   if(typeof XLSX==="undefined"){ _toast("⚠ مكتبة Excel غير محمّلة — حدّث الصفحة","warn"); return; }
   try{
     const aoa=[

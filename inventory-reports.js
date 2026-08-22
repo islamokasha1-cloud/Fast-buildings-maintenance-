@@ -50,7 +50,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.2804";
+  const MODULE_BUILD = "v18.9.2806";
 
   const HOST_ID   = "page-inventory-reports";
   const READ_CAP  = 5000;    // سقف الحركات المقروءة لكل توليد — يُعلَن عند بلوغه
@@ -1338,7 +1338,8 @@
     return String(s||"تقرير").replace(/[:\\\/\?\*\[\]]/g,"-").slice(0,31);
   }
 
-  function exportExcel(){
+  async function exportExcel(){
+    if(!await window._needLib(window._ensureXLSX,"Excel")) return;   // عند أوّل تصدير
     const kinds=Object.keys(_sheets);
     if(!kinds.length){ _toast("⚠ ولِّد تقريراً أولاً","warn"); return; }
     if(typeof XLSX==="undefined"){ _toast("⚠ مكتبة Excel غير محمّلة","warn"); return; }
