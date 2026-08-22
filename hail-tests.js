@@ -442,7 +442,10 @@ function predelivery() {
        مستمعِ البلاغات (`_TICKETS_SYNC_LIMIT`) وحالةَ الأرشيف، وكلاهما هنا؛ ونقلُه
        إلى وحدةٍ يفصله عن الحالتين اللتين يقرؤهما. ودالّةُ القرار `_archiveFetchNeeded`
        نقيّةٌ ومعروضةٌ ليفحصها هذا الملفُّ بلا متصفّح (قاعدة CLAUDE.md ٥). */
-    const IDX_CEILING = 37390;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم **خُفض** من 37390 إلى 37340 — أُزيل مفتاحُ الكاش المحلي بكامله (‏٤٦ سطراً)
+       بعد أن حسمت التجربةُ الحقيقية أن الخللَ ما زال حيّاً. والخفضُ هنا واجبٌ لا
+       تجميل: مكسبٌ لا يُثبَّت في السقف يُبتلَع صامتاً في الأسابيع التالية. */
+    const IDX_CEILING = 37340;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -11416,50 +11419,39 @@ function browserCheckTimeBombs() {
    الفحصُ يُنفّذ دالّةَ القرار الحقيقيّةَ المستخرجةَ من index.html — لا يقرأ سطراً.
    ════════════════════════════════════════════════════════════════════ */
 /* ═══════════════════════════════════════════════════════════════════════
-   تجربةُ الكاش المحلي (IndexedDB persistence) — الأمانُ قبل المكسب
-   الكاشُ المحليّ أكبرُ مكسبٍ للتحميل المتكرّر، لكنّه هو نفسُه ما أُزيل في v18.9pf
-   لأنه أطلق `INTERNAL ASSERTION FAILED (ca9/b815/da08)` فجمّد المزامنة. ولا بديلَ
-   حديثاً هنا: `persistentLocalCache` من الـSDK النمطيّ وحدَه، والمنصّةُ على compat.
-   فالمطلوبُ من هذه الفحوص أن تُثبّت **شروطَ التجربة** لا أن تجيز الكاشَ للجميع:
-   مطفأٌ افتراضياً · تبويبٌ واحدٌ حصراً · وأوّلُ انهيارٍ يُطفئه للأبد على هذا الجهاز.
+   الكاشُ المحليّ (IndexedDB persistence): ممنوعٌ نهائياً — قرارٌ مبنيٌّ على تجربة
+   أُزيل أوّلَ مرّة في v18.9pf. ثم أُعيد في v18.9.2810 **مفتاحاً اختيارياً مطفأً**
+   بقاطعٍ ذاتيّ، لتُجرَّب المسألةُ على جهازٍ واحدٍ بلا خطرٍ على أحد. وجُرِّب فعلاً
+   على جهاز المالك في الإنتاج، والنتيجةُ قاطعة: لحظةَ التفعيل وإعادةِ التحميل
+   انفجر الخللُ نفسُه — `INTERNAL ASSERTION FAILED (b815/ca9)` عبر
+   `persistent_stream` و`webchannel_connection`، **٦٨٧ خطأً** ثم **٨٧٥**، ولوحةٌ
+   على أصفارٍ ومزامنةٌ ميتة حتى الإطفاء اليدويّ.
+   فالخللُ حيٌّ في SDK 12.17.0، ولا بديلَ حديثاً في نسختنا (`persistentLocalCache`
+   من الـSDK النمطيّ وحدَه، و`firestore-compat` لا يُعيد تصديرَها). أُزيل المفتاح
+   بكامله، وهذا الحارسُ يمنع عودتَه: **لا استدعاءَ لـ`enablePersistence` في كودٍ
+   حيّ** — وذكرُه في التعليقات مسموحٌ لأنه توثيقُ القرار نفسِه.
    ═══════════════════════════════════════════════════════════════════════ */
-function localCacheTrialGuards() {
-  H("vNEXT) الكاشُ المحلي: مطفأٌ افتراضياً، تبويبٌ واحد، ويُطفئ نفسَه عند أوّل انهيار");
+function localCacheStaysDisabled() {
+  H("vNEXT) الكاشُ المحليّ ممنوعٌ نهائياً — لا مفتاحَ ولا استدعاءَ حيّ");
 
-  const A = HTML.indexOf("var _PERSIST_OPTIN");
-  const B = HTML.indexOf("window.hailPersist", A);
-  if (A < 0 || B < 0) { T("دالّةُ القرار _persistDecision مستخرَجة", false, "لم يُعثر على الكتلة"); return; }
-  let decide;
-  try {
-    decide = new Function("window", HTML.slice(A, B) + "\n return window._persistDecision;")({});
-  } catch (e) { T("دالّةُ القرار تُنفَّذ", false, String(e.message).slice(0, 140)); return; }
-  T("دالّةُ القرار _persistDecision مستخرَجةٌ وتُنفَّذ", typeof decide === "function");
+  const isComment = l => /^\s*(\/\/|\*|\/\*)/.test(l);
+  const live = [];
+  IDX_RAW.split("\n").forEach((l, i) => {
+    if (l.includes("enablePersistence") && !isComment(l)) live.push(i + 1);
+  });
 
-  const C = (name, optin, tripped, supported, want) => {
-    let got;
-    try { got = decide(optin, tripped, supported); } catch (e) { T(name, false, "خطأ: " + e.message); return; }
-    T(name, got === want, "القرار: " + got + (got === want ? "" : " ← المتوقع " + want));
-  };
+  T("★★★ لا استدعاءَ حيّاً لـ`enablePersistence` (‏٦٨٧→٨٧٥ assertion في تجربةٍ حقيقية)",
+    live.length === 0,
+    live.length ? `أسطرٌ حيّة: ${live.join("، ")}` : "لا شيء");
 
-  C("★★ الافتراضُ إطفاء — بلا اشتراكٍ صريحٍ لا كاشَ محلياً لأحد", false, false, true, "off");
-  C("★ والاشتراكُ الصريح وحدَه يُفعّل", true, false, true, "on");
-  C("★★ وبعد انهيارٍ واحدٍ لا يعود ولو بقي الاشتراك قائماً", true, true, true, "tripped");
-  C("★ متصفّحٌ بلا IndexedDB لا يُحاوَل أصلاً", true, false, false, "unsupported");
+  T("★★ ولا مفتاحَ تجربةٍ معروضاً (`hailPersist`)", !/hailPersist/.test(IDX_RAW));
+  T("★ ولا بقايا حالةٍ للمفتاح في المصدر",
+    !/_persistState|_persistTrip|_persistActive|_persistDecision|hail_persist_/.test(IDX_RAW));
 
-  /* ── حرّاسُ المصدر: ما لا تلتقطه دالّةٌ نقيّة ── */
-  T("★★ لا تفعيلَ إلا داخل فرع «on» (لا كاشَ لمن لم يشترك)",
-    /_persistState\(\)\s*===\s*"on"[\s\S]{0,260}?db\.enablePersistence/.test(HTML));
-  T("★★ التبويباتُ المتعدّدة مُقصاةٌ صراحةً (جذرُ b815/ca9 انتخابُ التبويب الرئيس)",
-    /db\.enablePersistence\(\s*\{\s*synchronizeTabs\s*:\s*false\s*\}\s*\)/.test(HTML));
-  T("★★ أوّلُ assertion يُطفئ الكاشَ قبل إعادة التحميل (فلا حلقةُ انهيارٍ تتكرّر)",
-    /function _fsHardHalt\(\)[\s\S]{0,600}?_persistTrip\(\)/.test(HTML));
-  T("★ وفشلُ التفعيل يُنزل العلَم فلا يُتَّهم الكاشُ بانهيارٍ ليس منه",
-    /db\.enablePersistence\([\s\S]{0,260}?catch[\s\S]{0,160}?_persistActive\s*=\s*false/.test(HTML));
-  T("★★ التفعيل يسبق أيَّ عمليةِ Firestore (بعد settings ومع أوّل استعمالٍ للعميل)",
-    HTML.indexOf("db.enablePersistence(") > HTML.indexOf("experimentalForceLongPolling") &&
-    HTML.indexOf("db.enablePersistence(") < HTML.indexOf("storage = firebase.storage()"));
-  T("★ ومفتاحُ التجربة معروضٌ للمالك (enable/disable/status)",
-    /window\.hailPersist\s*=\s*\{[\s\S]{0,400}?enable[\s\S]{0,400}?disable[\s\S]{0,400}?status/.test(HTML));
+  /* والقرارُ موثَّقٌ حيث يُقرأ: تعليقُ التهيئة يشرح لماذا كاشُ الذاكرة وحدَه —
+     فمن يفتح السطرَ بعد سنةٍ يجد السببَ ولا يعيد التجربة اجتهاداً. */
+  T("★ وسببُ الاكتفاء بكاش الذاكرة موثَّقٌ عند سطر التهيئة",
+    /كاش الذاكرة فقط[\s\S]{0,400}?(ca9|b815)/.test(IDX_RAW));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -12368,7 +12360,7 @@ function printIconSizeGuards() {
   catalogMustNotBeCapped();
   firestoreIndexContract();
   archiveScanSkipGuards();
-  localCacheTrialGuards();
+  localCacheStaysDisabled();
   poAlignRepair();
   errLogGrouping();
   hailNotifyFeed();
