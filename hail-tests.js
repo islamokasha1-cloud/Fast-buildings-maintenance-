@@ -449,7 +449,10 @@ function predelivery() {
        ‏٣٠ ثانية): تأجيلُ الكتالوج عن المسار الحرج، وتشغيلُ مستمعِ الشاشة فورَ
        فتحها في showPage، وتصفيرُ التحرير العاري في startAssetsSync/startPPMSync.
        كلُّها أسطرٌ داخل دوالَّ قائمةٍ لا تعيش في وحدة. */
-    const IDX_CEILING = 37350;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37350 إلى 37360 — ‏٧ أسطرِ توثيقٍ لعلّة «مشترياتٌ صفرٌ بعد
+       التنقّل»: تصفيرٌ في applyProjectConfig لمصفوفةٍ مستمعُها حيّ. إصلاحُ سطرٍ
+       في دالّةٍ قائمة — والتعليقُ عندها كي لا يُعاد التصفيرُ اجتهاداً. */
+    const IDX_CEILING = 37360;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -11654,6 +11657,45 @@ function transportNotThrottled() {
     /تحوّطٌ\n?[\s\S]{0,120}?فاشلٌ باهظ[\s\S]{0,300}?AutoDetect/.test(IDX_RAW));
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   البياناتُ تعيش مع مستمعها: لا تصفيرَ لمصفوفةِ مجالٍ عامٍّ بلا فكِّ مستمعها
+   بلاغُ المالك: «الذهابُ إلى مشروعٍ والعودةُ للمشتريات ⇒ لا بيانات حتى إعادة
+   التحميل». الجذر: v18.9sz جعل مستمعي المجال العامّ أحياءً عبر التنقّل، وبقي
+   `applyProjectConfig` يصفّر `purchases` — مصفوفةٌ فارغةٌ ومستمعٌ حيٌّ لا يعيد
+   لقطتَه إلا عند تغيّرِ الخادم ⇒ شاشةٌ صفرٌ (نهاراً تتقنّع بأول كتابةِ طلب).
+   الحارس يفرض القاعدةَ على المجال كلِّه: كلُّ موضعِ تصفيرٍ لمصفوفةٍ عامةٍ يجب
+   أن يصاحبَه فكُّ مستمعِها في جواره — وإلا سقط الفحص.
+   ═══════════════════════════════════════════════════════════════════════ */
+function dataLivesWithItsListener() {
+  H("vNEXT) لا تصفيرَ لمصفوفةِ مجالٍ عامٍّ بلا فكِّ مستمعها في الجوار");
+
+  const lines = IDX_RAW.split("\n");
+  const PAIRS = [
+    ["purchases",       /(?:^|[^\w.])purchases\s*=\s*\[\]/, "_poUnsub"],
+    ["rfqs",            /(?:^|[^\w.])rfqs\s*=\s*\[\]/, "_rfqUnsub"],
+    ["_issueOrders",    /_issueOrders\s*=\s*\[\]/, "_issueOrdersUnsub"],
+    ["_inventoryItems", /_inventoryItems\s*=\s*\[\]/, "_invUnsub"],
+    ["_catalogItems",   /_catalogItems\s*=\s*\[\]/, "_catalogUnsub"]
+  ];
+  PAIRS.forEach(([name, re, unsub]) => {
+    const bad = [];
+    lines.forEach((l, i) => {
+      if (!re.test(l)) return;
+      if (/(let|var|const)\s+[\w$]*\s*=/.test(l)) return;         // التعريفُ الابتدائيّ (ولو ذُكر نصاً)
+      if (/^\s*(\/\/|\*|\/\*)/.test(l)) return;                   // سطرُ تعليق
+      if (l.includes("snap.docs")) return;                         // إسنادُ اللقطة نفسِها
+      const around = lines.slice(Math.max(0, i - 45), i + 3).join("\n");
+      if (!around.includes(unsub + "(") && !around.includes(unsub + "=null") &&
+          !around.includes(unsub + " = null")) bad.push(i + 1);
+    });
+    T(`★★ كلُّ تصفيرٍ لـ${name} يصاحبه فكُّ ${unsub} في جواره`,
+      bad.length === 0, bad.length ? `مواضعُ يتيمة: ${bad.join("، ")}` : "لا شيء");
+  });
+
+  T("★★★ وapplyProjectConfig لا تصفّر المشتريات (مستمعُها حيٌّ عبر تبديل المشروع)",
+    !/function applyProjectConfig[\s\S]{0,2500}?[^\w.]purchases\s*=\s*\[\]/.test(IDX_RAW));
+}
+
 function fsRecoveryNoDeadEnd() {
   H("v18.9xd) تعافي Firestore: كلُّ مسارٍ ينتهي بتحميلٍ أو برسالة");
 
@@ -12423,6 +12465,7 @@ function printIconSizeGuards() {
   supplyPromiseDates();
   browserCheckTimeBombs();
   fsRecoveryNoDeadEnd();
+  dataLivesWithItsListener();
   transportNotThrottled();
   loadTimeSurgeryGuards();
   catalogMustNotBeCapped();
