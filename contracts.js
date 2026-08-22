@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2797";
+var MODULE_BUILD = "v18.9.2802";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -334,6 +334,17 @@ function applyDocAutofill(vendorDraft){
     if(auto.expiry && !String(dc.expiry||"").trim()){ dc.expiry = auto.expiry; dc._auto = true; }
   });
   return d;
+}
+/* عكسُ الملء: يُسقط من صفٍّ **ما اشتُقّ له لنوعٍ سابق** — والمعيارُ أن تكون القيمةُ
+   مطابقةً لاشتقاقِ ذلك النوع حرفياً. فما كتبه المستخدمُ بيده يبقى ولو خالف الأعلى،
+   وما اشتُقّ لا يُترك في صفٍّ لم يعد يعنيه. نقيّةٌ عمداً: يفحصها `hail-tests.js`
+   بلا متصفّح، فالخللُ هنا صامتٌ في الشاشة (رقمٌ صحيحُ الشكل تحت عنوانٍ خاطئ). */
+function clearStaleDocAuto(dc, prevType, vendorDraft){
+  if(!dc) return dc;
+  var wasAuto = docAutoValue(prevType, vendorDraft) || {};
+  if(wasAuto.number && String(dc.number||"") === wasAuto.number){ dc.number = ""; dc._auto = false; }
+  if(wasAuto.expiry && String(dc.expiry||"") === wasAuto.expiry){ dc.expiry = ""; dc._auto = false; }
+  return dc;
 }
 var DOC_LBL = (function(){ var m={}; DOC_TYPES.forEach(function(d){ m[d.key]=d.lbl; }); return m; })();
 /* الاختصارُ حقلٌ صريحٌ لا قصُّ أولِ كلمة: «شهادة ضريبة…» و«شهادة التأمينات…»
@@ -1951,12 +1962,37 @@ function suggestVatMode(vendor){
 }
 
 /* كلُّ ما له تاريخُ انتهاءٍ عند الطرف — الوثائقُ **وهويتُه الرسمية**.
-   محرّكُ الانتهاء واحدٌ لا اثنان: لو بقيت الهويةُ خارجه لمرّت إقامةٌ منتهيةٌ بلا تنبيه. */
+   محرّكُ الانتهاء واحدٌ لا اثنان: لو بقيت الهويةُ خارجه لمرّت إقامةٌ منتهيةٌ بلا تنبيه.
+
+   لكنّ الهويةَ **تُدمَج في الوثيقة التي تمثّلها ولا تُضاف بجوارها**: صفُّ الوثائق
+   يشتقّ رقمَه من البيانات الأساسية أصلاً (`applyDocAutofill`)، فالمنشأةُ التي لها
+   وثيقةُ «سجلّ تجاريّ» برقم سجلّها **هي هي** الهويةُ الرسمية — وإضافتُها صفّاً
+   ثانياً تعرض السجلَّ التجاريَّ مرّتين في شاشة الطرف وشارتين «س.ت» في بطاقته،
+   وتَعُدُّه وثيقتين في حالة الامتثال. (بلاغُ المالك: «السجلّ التجاريّ الأخير في
+   قائمة الوثائق أنا لم أُضفه، وفي التعديل لا يظهر أنه موجودٌ مرّتين» — لأنه لم يكن
+   في `docs` أصلاً بل صفٌّ مشتقٌّ في العرض وحدَه.)
+
+   والمعيارُ **النوعُ والرقمُ معاً** لا النوعُ وحدَه: سجلٌّ فرعيٌّ برقمٍ آخرَ وثيقةٌ
+   قائمةٌ بذاتها، وانتهاءُ السجلّ الرئيس يبقى محروساً بصفّه.
+
+   والدمجُ يورّث التاريخَ ولا يأخذه: صفٌّ يحمل الرقمَ بلا تاريخِ انتهاءٍ (بياناتٌ
+   قديمةٌ حُفظت قبل الاشتقاق) يرث `crExpiry`/`idExpiry` — فلا يسقط تاريخٌ من
+   المحرّك بحجّة الدمج. والوراثةُ **على نسخةٍ** لا على المخزَّن: العرضُ لا يكتب. */
 function allExpiring(vendor){
   var v = vendor || {};
-  var out = (Array.isArray(v.docs) ? v.docs : []).slice();
   var id = identityOf(v);
-  if(id.expiry) out.push({ type:(id.entity==="individual" ? "identity" : "cr"), number:id.number, expiry:id.expiry, _identity:true });
+  var idType = (id.entity === "individual") ? "identity" : "cr";
+  var idNum  = String(id.number||"").trim();
+  var merged = false;
+  var out = (Array.isArray(v.docs) ? v.docs : []).map(function(dc){
+    if(!dc || merged || dc.type !== idType) return dc;
+    if(!idNum || String(dc.number||"").trim() !== idNum) return dc;
+    merged = true;
+    var row = Object.assign({}, dc, { _identity:true });
+    if(!String(row.expiry||"").trim() && id.expiry) row.expiry = id.expiry;
+    return row;
+  });
+  if(!merged && id.expiry) out.push({ type:idType, number:id.number, expiry:id.expiry, _identity:true });
   return out;
 }
 
@@ -4245,13 +4281,18 @@ function delDocFile(i){
 /* تبديلُ نوع الوثيقة: **ما اشتُقّ للنوع القديم يسقط** ثمّ يُشتقّ للجديد. بدونه يبقى
    رقمُ السجل التجاريّ في صفٍّ صار «عنواناً وطنياً» — قيمةٌ باليةٌ لا خطأَ مستخدمٍ
    ولا بيانَ وثيقة. والمقارنةُ **بقيمة الاشتقاق القديمة نفسِها** لا بشارةٍ عامّة:
-   فما كتبه المستخدمُ بيده لا يُمسّ ولو بدّل النوعَ عشر مرّات. */
+   فما كتبه المستخدمُ بيده لا يُمسّ ولو بدّل النوعَ عشر مرّات.
+
+   و**النوعُ القديم يُلتقط قبل `syncDraft`** لا بعدَها، وذلك جوهرُ الإصلاح لا ترتيبَ
+   أسطر: قائمةُ النوع تحمل `data-f="type"`، فـ`syncDraft` تقرؤها من الشاشة وتكتب
+   **النوعَ الجديد** في المسوّدة قبل أن يُحسب المسقَط — فيُقاس الاشتقاقُ القديم
+   بالنوع الجديد، ولا يطابق رقمَ الصفّ شيءٌ، فلا يسقط شيء. (بلاغُ المالك: صفٌّ
+   بُدّل إلى «شهادة ضريبة القيمة المضافة» يعرض رقمَ السجل التجاريّ وانتهاءَه.) */
 function setDocType(i, type){
+  var prevType = (_vEdit && _vEdit.docs && _vEdit.docs[i]) ? _vEdit.docs[i].type : null;
   syncDraft(); if(!_vEdit || !_vEdit.docs[i]) return;
   var dc = _vEdit.docs[i];
-  var wasAuto = docAutoValue(dc.type, _vEdit) || {};
-  if(wasAuto.number && String(dc.number||"") === wasAuto.number){ dc.number = ""; dc._auto = false; }
-  if(wasAuto.expiry && String(dc.expiry||"") === wasAuto.expiry){ dc.expiry = ""; dc._auto = false; }
+  clearStaleDocAuto(dc, prevType, _vEdit);
   dc.type = String(type||"other");
   paintDraft();
 }
@@ -8399,7 +8440,7 @@ window.contracts = {
   _duplicateOf: duplicateOf,
   _docTypesFor: docTypesFor,
   _DOC_TYPES: DOC_TYPES,
-  _docAutoValue: docAutoValue, _applyDocAutofill: applyDocAutofill, _docsForSave: docsForSave,
+  _docAutoValue: docAutoValue, _applyDocAutofill: applyDocAutofill, _clearStaleDocAuto: clearStaleDocAuto, _docsForSave: docsForSave,
   _normEntity: normEntity,
   // نوعُ الأعمال (التخصّص) — الدوالُّ النقيّةُ التي تقرؤها الشاشةُ والفحصُ معاً
   _TRADES: TRADES,
