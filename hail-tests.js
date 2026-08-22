@@ -11633,6 +11633,27 @@ function loadTimeSurgeryGuards() {
     bare.length === 0, bare.length ? `أسطرٌ عارية: ${bare.join("، ")}` : "لا شيء");
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   نقلُ Firestore: لا فرضَ long-polling — الفرضُ تحوّطٌ ثبت فشلُه وبقيت كلفتُه
+   v18.9pf فرض `experimentalForceLongPolling` تحوّطاً من ca9/b815. والقياسُ نقضه
+   من الجهتين: الانهيارُ وقع في الإنتاج **والفرضُ مفعّل** (‏٨٧٥ assertion —
+   ‏٢٢/٠٨/٢٠٢٦)، أي أنه لا يحمي؛ وهو يحوّل البثَّ الانسيابيَّ إلى طلباتٍ متتابعةٍ
+   فتستغرق المزامنةُ الأولى (~٩٠٠٠ وثيقة) ‏٢٠–٣٠ ثانيةً — قياسُ المالك على شاشة
+   المخزون. وجذرُ ca9 تحريرٌ مزدوجٌ للمستمع لا النقلُ (حارسُه أعلاه). فالمعتمد:
+   `AutoDetect` — يبثّ حيث تسمح الشبكةُ ويهبط للـlong-polling تلقائياً حيث يلزم.
+   ═══════════════════════════════════════════════════════════════════════ */
+function transportNotThrottled() {
+  H("vNEXT) نقلُ Firestore: AutoDetect لا Force — الفرضُ لا يحمي ويُبطئ أضعافاً");
+
+  T("★★★ لا استدعاءَ حيّاً لفرض long-polling (كلفتُه ٢٠–٣٠ ثانيةً بلا حمايةٍ مثبتة)",
+    !/db\.settings\(\{\s*experimentalForceLongPolling/.test(IDX_RAW));
+  T("★★ والمعتمدُ AutoDetect صراحةً قبل أيّ عمليةِ Firestore",
+    /db\.settings\(\{\s*experimentalAutoDetectLongPolling:\s*true\s*\}\)/.test(IDX_RAW) &&
+    IDX_RAW.indexOf("experimentalAutoDetectLongPolling") < IDX_RAW.indexOf("storage = firebase.storage()"));
+  T("★ وسببُ العدول عن الفرض موثَّقٌ عند السطر نفسِه (فلا يُعاد اجتهاداً)",
+    /تحوّطٌ\n?[\s\S]{0,120}?فاشلٌ باهظ[\s\S]{0,300}?AutoDetect/.test(IDX_RAW));
+}
+
 function fsRecoveryNoDeadEnd() {
   H("v18.9xd) تعافي Firestore: كلُّ مسارٍ ينتهي بتحميلٍ أو برسالة");
 
@@ -12402,6 +12423,7 @@ function printIconSizeGuards() {
   supplyPromiseDates();
   browserCheckTimeBombs();
   fsRecoveryNoDeadEnd();
+  transportNotThrottled();
   loadTimeSurgeryGuards();
   catalogMustNotBeCapped();
   firestoreIndexContract();
