@@ -12038,6 +12038,66 @@ function poColorSystemGuards() {
     /PO_AGE_BUCKETS\.map\(b=>`<span><i style="background:\$\{poFill\(b\.color\)\}"/.test(HTML));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   أيقوناتُ المطبوع — أيقونةٌ بلا مقاسٍ تبتلع خانتَها
+   مستندُ الطباعة نصٌّ مستقلٌّ لا يحمّل `app.css`، فأيقونةُ `_ic(...)` تصل إليه
+   `<svg viewBox="0 0 24 24">` بلا width ولا height، فتتمدّد إلى مقاس المتصفّح
+   الافتراضيِّ للعنصر المستبدَل — قيست ٢٤١×٢٤١ بكسل في خانةِ شبكة طلب الشراء،
+   فابتلعت خانةَ «البند المستعاض» ورفعت صفَّها كاملاً. ولا مترجمَ ينذر بهذا ولا
+   وحدةَ تحكّم: الشاشةُ تحمّل الورقةَ والمطبوعُ وحدَه لا يحمّلها.
+   يحرس هنا: أنّ المعبرَ الوحيدَ (`_openPrintWindow`) يحقن مقاساً احتياطياً،
+   وأنّ الحقنَ أوّلَ الترويسة (فتغلبه أنماطُ المستند)، وأنّ المقاسَ لا ينزلق عن
+   مقاس `app.css` نفسِه، وأنّ الخانةَ المعنيّةَ ما زالت تكتب أيقونتَها.
+   ════════════════════════════════════════════════════════════════════ */
+function printIconSizeGuards() {
+  H("أيقوناتُ المطبوع — مقاسٌ احتياطيٌّ في معبر الطباعة");
+
+  // ── (١) المعبرُ يمرّر كلَّ مستندٍ على الحاقن، أوّلَ ما يفعل ──
+  T("★★ `_openPrintWindow` يمرّر مستندَه على `_withPrintIconCSS` قبل أيّ شيء",
+    /function _openPrintWindow\(htmlStr\)\{\s*\n\s*htmlStr = _withPrintIconCSS\(htmlStr\);/.test(HTML));
+
+  // ── (٢) الحاقنُ دالّةٌ نقيّةٌ تُنفَّذ بلا متصفّح ──
+  const a = HTML.indexOf("const _PRINT_ICON_CSS");
+  const b = HTML.indexOf("window._withPrintIconCSS");
+  let fn = null;
+  try { fn = new Function(HTML.slice(a, b) + "\n; return _withPrintIconCSS;")(); } catch (e) {}
+  T("`_withPrintIconCSS` دالّةٌ نقيّةٌ تُستخرج وتُنفَّذ بلا متصفّح", typeof fn === "function");
+  if (typeof fn === "function") {
+    const doc = '<!DOCTYPE html>\n<html lang="ar" dir="rtl">\n<head>\n<meta charset="UTF-8">\n<style>.ii{}</style>\n</head>\n<body>x</body></html>';
+    const out = fn(doc);
+    T("★★ الورقةُ تُحقن أوّلَ الترويسة — فتغلبها أنماطُ المستند نفسِه",
+      /<head[^>]*>\s*<style data-print-icons>/.test(out));
+    T("★ والحقنُ لا يتكرّر إن مرّ المستندُ مرّتين", fn(out) === out);
+    T("★ ومستندٌ بلا ترويسةٍ يعود كما هو لا مبتوراً", fn("<div>لا ترويسة</div>") === "<div>لا ترويسة</div>");
+    T("★ وما ليس نصّاً يعود كما هو بلا انفجار", fn(null) === null && fn(undefined) === undefined);
+    T("★★ والمقاسُ المحقونُ يقيّد الأيقونةَ فعلاً (١٤ بكسل لا ٢٤١)",
+      /\.ic svg\{width:14px;height:14px/.test(out));
+  }
+
+  // ── (٣) المقاسُ لا ينزلق عن `app.css` — مصدرٌ واحدٌ للحقيقة ──
+  const injCss  = (HTML.match(/const _PRINT_ICON_CSS = '([^']*)'/) || [])[1] || "";
+  const appRule = (HTML.match(/\.ic svg\{width:(\d+)px;height:(\d+)px/) || []);   // أوّلُ مطابقةٍ = app.css المُضمَّنة
+  const injRule = (injCss.match(/\.ic svg\{width:(\d+)px;height:(\d+)px/) || []);
+  T("★★ مقاسُ المطبوع = مقاسُ الشاشة في `app.css` (١٤px) — لا مقاسان يفترقان",
+    appRule[1] === "14" && injRule[1] === appRule[1] && injRule[2] === appRule[2],
+    `app.css=${appRule[1]}×${appRule[2]} · print=${injRule[1]}×${injRule[2]}`);
+  ["ic-sm", "ic-lg", "ic-xl"].forEach(k => {
+    T(`★ ورتبةُ ${k} محقونةٌ أيضاً — وإلا عادت إلى المقاس الافتراضي`,
+      new RegExp("\\.ic\\.ic-" + k.slice(3) + "[a-z]* svg\\{width:\\d+px").test(HTML.slice(a, b)) ||
+      HTML.slice(a, b).includes("." + k + " svg{width:"));
+  });
+
+  // ── (٤) الخانةُ المعنيّةُ ما زالت تكتب أيقونتَها، والقالبُ لا يعرّف `.ic` بنفسه ──
+  const withPrices = slice("async function printPurchaseDetail(poId){", "async function printGRN(") || "";
+  const noPrices   = slice("function printPurchaseDetailNoPrices(poId){", "function NOTIF_DOC(") || "";
+  [["طلب الشراء (بالأسعار)", withPrices], ["طلب الشراء (بلا أسعار)", noPrices]].forEach(([nm, src]) => {
+    T(`★ ${nm}: خانةُ «البند المستعاض» تكتب أيقونتَها بـ_ic`,
+      /\$\{_ic\("landmark"\)\} البند المستعاض/.test(src));
+    T(`★★ و${nm} لا يعرّف \`.ic\` في أنماطه — فالحقنُ هو مصدرُ المقاس الوحيد`,
+      !!src && !/\.ic\s*\{/.test(src) && !/\.ic svg\{/.test(src));
+  });
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -12104,6 +12164,7 @@ function poColorSystemGuards() {
   hailNotifyFeed();
   npMultiAttach();
   poColorSystemGuards();
+  printIconSizeGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
