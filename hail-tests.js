@@ -436,7 +436,13 @@ function predelivery() {
        أن تسبقه. وهو نفسُ استثناء `_moduleMissingPage` أعلاه: حارسٌ يعمل بالضبط حيث لا
        تصل الوحدات. والدالّةُ القرارية `_persistDecision` نقيّةٌ ومعروضةٌ ليفحصها هذا
        الملفُّ بلا متصفّح (قاعدة CLAUDE.md ٥). */
-    const IDX_CEILING = 37370;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37370 إلى 37390 — ‏١٩ سطراً لشرطِ «هل يلزم مسحُ الأرشيف؟».
+       **إصلاحُ منطقٍ قائمٍ في موضعه**: `_fetchExtraArchivedTickets` كانت تقرأ كلَّ
+       المؤرشفة في كل دخولٍ ثم يرميها `allTickets` لأنها مكرّرة — والشرطُ يقرأ حالةَ
+       مستمعِ البلاغات (`_TICKETS_SYNC_LIMIT`) وحالةَ الأرشيف، وكلاهما هنا؛ ونقلُه
+       إلى وحدةٍ يفصله عن الحالتين اللتين يقرؤهما. ودالّةُ القرار `_archiveFetchNeeded`
+       نقيّةٌ ومعروضةٌ ليفحصها هذا الملفُّ بلا متصفّح (قاعدة CLAUDE.md ٥). */
+    const IDX_CEILING = 37390;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -11456,6 +11462,56 @@ function localCacheTrialGuards() {
     /window\.hailPersist\s*=\s*\{[\s\S]{0,400}?enable[\s\S]{0,400}?disable[\s\S]{0,400}?status/.test(HTML));
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   مسحُ الأرشيف: قراءةٌ بلا ناتج حين لا يكون المستمعُ مقصوصاً
+   مستمعُ البلاغات `orderBy(createdAt).limit(N)` **لا يستثني المؤرشف**. فما دام
+   رجّع أقلَّ من السقف فقد استنفد المجموعة، وكلُّ مؤرشفٍ فيها سلفاً — ومع ذلك كان
+   `_fetchExtraArchivedTickets` يقرأ المؤرشفةَ كاملةً في كل دخول ثم يرميها كلَّها
+   في `allTickets` لأنها مكرّرة. (قياسٌ حقيقيّ: ٤٨٢ مستنداً لكل فتحةٍ ناتجُها صفر،
+   ضمن ٦٠١ ألف قراءةٍ يومياً مقابل ٥٢٠ كتابة.) هذه الفحوصُ تحرس الشرطَ وحالاتِه.
+   ═══════════════════════════════════════════════════════════════════════ */
+function archiveScanSkipGuards() {
+  H("vNEXT) مسحُ الأرشيف لا يُشغَّل إلا حين يكون المستمعُ مقصوصاً فعلاً");
+
+  const A = HTML.indexOf("let _ticketsSyncedCount");
+  const B = HTML.indexOf("let _archiveFetchDone", A);
+  if (A < 0 || B < 0) { T("دالّةُ القرار _archiveFetchNeeded مستخرَجة", false, "لم يُعثر على الكتلة"); return; }
+  let need;
+  try {
+    need = new Function("window", HTML.slice(A, B) + "\n return window._archiveFetchNeeded;")({});
+  } catch (e) { T("دالّةُ القرار تُنفَّذ", false, String(e.message).slice(0, 140)); return; }
+  T("دالّةُ القرار _archiveFetchNeeded مستخرَجةٌ وتُنفَّذ", typeof need === "function");
+
+  const C = (name, cnt, lim, want) => {
+    let got;
+    try { got = need(cnt, lim); } catch (e) { T(name, false, "خطأ: " + e.message); return; }
+    T(name, got === want, "القرار: " + got + (got === want ? "" : " ← المتوقع " + want));
+  };
+
+  C("★★ لقطةٌ غيرُ مقصوصة (٤٨٦ من ٦٠٠) ⇒ لا مسحَ — كلُّ المؤرشفة في الذاكرة", 486, 600, false);
+  C("★★ لقطةٌ مقصوصةٌ عند السقف ⇒ نمسح (قد ينقص ما هو أقدم)", 600, 600, true);
+  C("★ وما تجاوز السقف كذلك", 601, 600, true);
+  C("★★ لقطةٌ لم تصل بعدُ (null) ⇒ نمسح — لا نُخاطر بأرقامٍ ناقصة", null, 600, true);
+  C("★ ونوعٌ غيرُ رقميّ يُعامَل معاملةَ المجهول", undefined, 600, true);
+  C("★ مجموعةٌ فارغةٌ (لقطةٌ وصلت بصفر) ⇒ لا مسح", 0, 600, false);
+
+  /* ── حرّاسُ المصدر ── */
+  T("★★ الخروجُ المبكّر يسبق ضبطَ `_archiveFetching` (وإلا عَلِق الحارسُ مرفوعاً)",
+    /_archiveFetchNeeded\([\s\S]{0,400}?\}\s*\n\s*_archiveFetching = true;/.test(HTML));
+  T("★★ وعند التخطّي يُعلَن الاكتمالُ ويُفرَّغ الزائد (فلا شاشةُ «جارٍ التحميل» أبديّة)",
+    /_archiveFetchNeeded\([\s\S]{0,300}?_extraArchivedTickets = \[\];[\s\S]{0,120}?_archiveFetchDone = true;[\s\S]{0,80}?onDone/.test(HTML));
+  T("★ طولُ اللقطة يُسجَّل داخل مستمع البلاغات",
+    /_ticketsSyncedCount = snap\.docs\.length;/.test(HTML));
+
+  /* كلُّ تصفيرٍ لحالة الأرشيف يجب أن يُصفّر العدّاد — وإلا خدع عدّادُ مشروعٍ سابقٍ
+     الشرطَ في مشروعٍ جديدٍ فسقطت بلاغاتٌ مؤرشفةٌ من الأرقام بصمت. */
+  const resets = (HTML.match(/_archiveFetchDone\s*=\s*false/g) || []).length;
+  const counts = (HTML.match(/_ticketsSyncedCount\s*=\s*null/g) || []).length;
+  T("★★ كلُّ تصفيرٍ لحالة الأرشيف يُصفّر عدّادَ اللقطة (لا عدّادَ مشروعٍ سابقٍ يخدع الشرط)",
+    resets >= 1 && counts >= resets,
+    `تصفيرُ الأرشيف ${resets} · تصفيرُ العدّاد ${counts}`);
+}
+
 function fsRecoveryNoDeadEnd() {
   H("v18.9xd) تعافي Firestore: كلُّ مسارٍ ينتهي بتحميلٍ أو برسالة");
 
@@ -12225,6 +12281,7 @@ function printIconSizeGuards() {
   supplyPromiseDates();
   browserCheckTimeBombs();
   fsRecoveryNoDeadEnd();
+  archiveScanSkipGuards();
   localCacheTrialGuards();
   poAlignRepair();
   errLogGrouping();
