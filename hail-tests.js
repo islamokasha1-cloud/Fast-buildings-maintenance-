@@ -445,7 +445,11 @@ function predelivery() {
     /* ثم **خُفض** من 37390 إلى 37340 — أُزيل مفتاحُ الكاش المحلي بكامله (‏٤٦ سطراً)
        بعد أن حسمت التجربةُ الحقيقية أن الخللَ ما زال حيّاً. والخفضُ هنا واجبٌ لا
        تجميل: مكسبٌ لا يُثبَّت في السقف يُبتلَع صامتاً في الأسابيع التالية. */
-    const IDX_CEILING = 37340;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37340 إلى 37350 — ‏٧ أسطرٍ لجراحة زمن التحميل (قياسُ المالك:
+       ‏٣٠ ثانية): تأجيلُ الكتالوج عن المسار الحرج، وتشغيلُ مستمعِ الشاشة فورَ
+       فتحها في showPage، وتصفيرُ التحرير العاري في startAssetsSync/startPPMSync.
+       كلُّها أسطرٌ داخل دوالَّ قائمةٍ لا تعيش في وحدة. */
+    const IDX_CEILING = 37350;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -11588,6 +11592,47 @@ function catalogMustNotBeCapped() {
     /_INV_SYNC_CAP/.test(HTML) && /_warnSyncCap\(\s*"رصيد المخزون/.test(HTML));
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   زمنُ التحميل: الكتالوجُ خارج المسار الحرج، والشاشةُ تُشغّل مستمعَها بنفسها
+   قياسُ المالك: التحميل ~٣٠ ثانية، وشاشةُ المخزون تقف على «جارٍ مزامنة
+   البيانات...». سببان في كودنا: (١) الكتالوج (~٤٠٠٠ وثيقة — أكبرُ حمولةٍ
+   منفردة) كان يُجلَب في المسار الحرج للدخول؛ (٢) الشاشاتُ المؤجَّلةُ مزامنتُها
+   كانت تنتظر فراغَ المتصفّح حتى لو فتحها المستخدمُ ووقف أمام السبينر.
+   وثالثةٌ للانهيار: نمطا تحريرٍ عاريان (بلا تصفيرٍ فوريّ) هما الوحيدان
+   المطابقان لتوقيع ca9 — عدّادُ مراجع الهدف M ينزل إلى ‎-1 عند تحريرٍ مزدوج.
+   ═══════════════════════════════════════════════════════════════════════ */
+function loadTimeSurgeryGuards() {
+  H("vNEXT) جراحةُ زمن التحميل: كتالوجٌ مؤجَّل · شاشةٌ تبدأ مستمعَها · لا تحريرَ عارياً");
+
+  const A = HTML.indexOf("function startPurchaseSync()");
+  const B = HTML.indexOf("function", A + 30);
+  const body = HTML.slice(A, B > A ? B : A + 4000);
+  T("★★ الكتالوج (٤٠٠٠ وثيقة) مؤجَّلٌ عن المسار الحرج داخل startPurchaseSync",
+    /_deferBoot\(\s*\(\)\s*=>\s*\{\s*loadItemCatalog\(\);\s*\}/.test(body));
+  T("★ ولا نداءَ مباشراً له في المسار الحرج نفسِه",
+    !/^\s*loadItemCatalog\(\);/m.test(body));
+
+  /* الشاشةُ المفتوحة لا تنتظر فراغَ المتصفّح */
+  const pageStarts = [
+    ['inventory',     /if\(id==="inventory"\)\s*\{\s*if\(!_invUnsub\) startInventorySync\(\);/],
+    ['inventory-log', /if\(id==="inventory-log"\)\s*\{\s*if\(!_invUnsub\) startInventorySync\(\);/],
+    ['assets',        /if\(id==="assets"\)\s*\{\s*if\(!_assetsUnsub\) startAssetsSync\(\);/],
+    ['ppm',           /if\(id==="ppm"\)\s*\{\s*if\(!_ppmUnsub\) startPPMSync\(\);/],
+    ['item-catalog',  /if\(id==="item-catalog"\)\s*\{\s*loadItemCatalog\(\);/],
+    ['rfq',           /if\(id==="rfq"\)\s*\{\s*loadRFQs\(\);/]
+  ];
+  pageStarts.forEach(([pg, re]) =>
+    T(`★★ فتحُ «${pg}» يُشغّل مستمعَه فوراً (لا سبينرَ ينتظر idle)`, re.test(HTML)));
+
+  /* لا تحريرَ عارياً في الملفّ كلِّه — النمطُ الآمن يُصفّر في السطر نفسِه */
+  const bare = [];
+  HTML.split("\n").forEach((l, i) => {
+    if (/^\s*if\(_\w+Unsub\) _\w+Unsub\(\);\s*$/.test(l)) bare.push(i + 1);
+  });
+  T("★★★ لا نمطَ تحريرٍ عارياً (توقيعُ ca9: M=-1 من تحريرٍ مزدوج)",
+    bare.length === 0, bare.length ? `أسطرٌ عارية: ${bare.join("، ")}` : "لا شيء");
+}
+
 function fsRecoveryNoDeadEnd() {
   H("v18.9xd) تعافي Firestore: كلُّ مسارٍ ينتهي بتحميلٍ أو برسالة");
 
@@ -12357,6 +12402,7 @@ function printIconSizeGuards() {
   supplyPromiseDates();
   browserCheckTimeBombs();
   fsRecoveryNoDeadEnd();
+  loadTimeSurgeryGuards();
   catalogMustNotBeCapped();
   firestoreIndexContract();
   archiveScanSkipGuards();
