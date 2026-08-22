@@ -11512,6 +11512,60 @@ function archiveScanSkipGuards() {
     `تصفيرُ الأرشيف ${resets} · تصفيرُ العدّاد ${counts}`);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   فهارسُ Firestore: الملفُّ عقدٌ لا زينة
+   `firestore.indexes.json` ليس توثيقاً بل **الحالةَ المقصودة** التي ينشرها
+   `firebase deploy --only firestore:indexes`. وخللان حقيقيّان انكشفا بالقياس:
+   (١) استعلامُ `waRetry` على `status + updatedAt` بلا فهرسٍ منشور — يفشل ٦٩٠ مرةً
+       يومياً بصمت، فلا تُستعاد رسالةُ واتساب عالقةٌ في «sending» أبداً؛
+   (٢) وفهرسا `hail_tickets` و`bathroom001_tickets` موجودان في المشروع وغائبان عن
+       الملفّ — فأمرُ النشر كان **يعرض حذفَهما**، وهما فهرسا استعلام الأرشيف.
+   فالحارسان هنا: كلُّ استعلامٍ مركّبٍ في `functions/` له فهرسٌ في الملفّ، والملفُّ
+   يبقى صالحاً بنيوياً. النقصُ هنا لا يُنتج خطأً في أيّ فحصٍ آخر — يُنتج فشلاً صامتاً.
+   ═══════════════════════════════════════════════════════════════════════ */
+function firestoreIndexContract() {
+  H("vNEXT) فهارسُ Firestore: كلُّ استعلامٍ مركّبٍ له فهرسُه في الملفّ");
+
+  const IDXF = path.join(path.dirname(IDX), "firestore.indexes.json");
+  if (!fs.existsSync(IDXF)) { T("ملفُّ الفهارس موجود", false, IDXF); return; }
+  let doc;
+  try { doc = JSON.parse(fs.readFileSync(IDXF, "utf8")); }
+  catch (e) { T("★ ملفُّ الفهارس JSON صالح", false, String(e.message).slice(0, 120)); return; }
+  T("★ ملفُّ الفهارس JSON صالح", Array.isArray(doc.indexes), `indexes=${typeof doc.indexes}`);
+
+  const has = (coll, f1, f2) => (doc.indexes || []).some(ix =>
+    ix.collectionGroup === coll && Array.isArray(ix.fields) &&
+    ix.fields.length >= 2 &&
+    ix.fields[0] && ix.fields[0].fieldPath === f1 &&
+    ix.fields[1] && ix.fields[1].fieldPath === f2);
+
+  /* ── الاستعلاماتُ المركّبةُ في دوالّ الخادم تُقرأ من المصدر لا تُكتب هنا يدوياً ── */
+  const FN = path.join(path.dirname(IDX), "functions", "index.js");
+  const fnSrc = fs.existsSync(FN) ? fs.readFileSync(FN, "utf8") : "";
+  T("★ مصدرُ دوالّ الخادم مقروء", !!fnSrc, FN);
+
+  // كلُّ زوجٍ (status == …) ثم (X <|>|<=|>= …) في نفس السلسلة يلزمه فهرسٌ [status, X]
+  const pairs = new Set();
+  const re = /\.where\(\s*"status"\s*,\s*"=="[\s\S]{0,200}?\.where\(\s*"([A-Za-z_$][\w$]*)"\s*,\s*"[<>]=?"/g;
+  let m;
+  while ((m = re.exec(fnSrc)) !== null) pairs.add(m[1]);
+  T("★★ رُصدت استعلاماتُ الطابور المركّبة في المصدر (وإلا فالحارسُ أعمى)",
+    pairs.size >= 2, `الحقولُ المرصودة: ${[...pairs].join("، ") || "لا شيء"}`);
+
+  for (const f of pairs) {
+    T(`★★ فهرسٌ لـ wa_outbox على status + ${f} موجودٌ في الملفّ`,
+      has("wa_outbox", "status", f),
+      `الاستعلامُ في functions/index.js يلزمه [status, ${f}] — غيابُه فشلٌ صامتٌ في الإنتاج`);
+  }
+
+  /* ── فهارسُ الأرشيف لكلّ مشروع: موجودةٌ في المشروع، فيجب أن تبقى في الملفّ ──
+     غيابُها عن الملفّ يجعل `firebase deploy` يعرض حذفَها — وهي حيّةٌ ومستعمَلة. */
+  for (const coll of ["hail_tickets", "bathroom001_tickets"]) {
+    T(`★★ فهرسُ الأرشيف ${coll} (archived + createdAt) مُعلَنٌ فلا يعرض النشرُ حذفَه`,
+      has(coll, "archived", "createdAt"));
+  }
+}
+
 function fsRecoveryNoDeadEnd() {
   H("v18.9xd) تعافي Firestore: كلُّ مسارٍ ينتهي بتحميلٍ أو برسالة");
 
@@ -12281,6 +12335,7 @@ function printIconSizeGuards() {
   supplyPromiseDates();
   browserCheckTimeBombs();
   fsRecoveryNoDeadEnd();
+  firestoreIndexContract();
   archiveScanSkipGuards();
   localCacheTrialGuards();
   poAlignRepair();
