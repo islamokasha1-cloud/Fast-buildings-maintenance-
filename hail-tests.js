@@ -9292,6 +9292,49 @@ function contractsPhase1() {
 
   T("★ انتهاءُ الهوية داخلَ محرّك الانتهاء نفسِه (لا إقامةٌ تنتهي بلا تنبيه)",
     C._allExpiring(person).length === 1 && C._allExpiring(person)[0]._identity === true);
+
+  /* ── والهويةُ تُدمَج في وثيقتها ولا تُضاف بجوارها (بلاغُ المالك) ──
+     صفُّ الوثائق يشتقّ رقمَه من البيانات الأساسية، فوثيقةُ «سجلّ تجاريّ» برقم
+     السجلّ **هي** الهويةُ الرسمية. وإضافتُها صفّاً ثانياً تعرض السجلَّ مرّتين في
+     الشاشة وشارتين «س.ت» في البطاقة وتَعُدُّه وثيقتين في الامتثال — وصفٌّ لا وجودَ
+     له في `docs` فلا يظهر في التعديل ولا يُحذَف: بلاغُ المالك حرفياً. */
+  const firmDoc = {
+    entityType: "establishment", name: "شركة إبداع",
+    legal: { crNumber: "7032937653", crExpiry: "2027-01-28", vatNumber: "314388797400003" },
+    docs: [{ type: "cr", number: "7032937653", expiry: "2027-01-28", url: "u://cr.pdf" },
+           { type: "vat", number: "314388797400003", expiry: "2027-01-28" }]
+  };
+  T("★★ سجلٌّ تجاريٌّ له وثيقةٌ بالرقم نفسِه ⇐ صفٌّ **واحد** لا اثنان (بلاغُ المالك)",
+    (() => {
+      const rows = C._allExpiring(firmDoc);
+      const crs = rows.filter(r => r.type === "cr");
+      return rows.length === 2 && crs.length === 1 && crs[0]._identity === true &&
+             crs[0].url === "u://cr.pdf";          // ⇐ ومرفقُ الوثيقة لا يضيع في الدمج
+    })());
+  T("★★ ولا يُعَدُّ وثيقتين في حالة الامتثال (رقمٌ واحدٌ لا يُحسب مرّتين)",
+    C._vendorComplianceState(firmDoc, "2026-08-22").total === 2);
+  T("★★ وسجلٌّ **فرعيٌّ برقمٍ آخرَ** وثيقةٌ قائمةٌ بذاتها — والهويةُ تبقى محروسة",
+    (() => {
+      const branch = { ...firmDoc, docs: [{ type: "cr", number: "1010999888", expiry: "2029-05-05" }] };
+      const rows = C._allExpiring(branch);
+      return rows.length === 2 &&
+             rows.some(r => r.number === "1010999888" && !r._identity) &&
+             rows.some(r => r.number === "7032937653" && r._identity === true);
+    })());
+  T("★★ وصفٌّ يحمل الرقمَ بلا تاريخٍ يرث انتهاءَ الهوية (لا تاريخَ يسقط بحجّة الدمج)",
+    (() => {
+      const stored = { type: "cr", number: "7032937653", expiry: "" };
+      const old = { ...firmDoc, docs: [stored] };
+      const rows = C._allExpiring(old);
+      return rows.length === 1 && rows[0].expiry === "2027-01-28" &&
+             stored.expiry === "";                 // ⇐ العرضُ لا يكتب في المخزَّن
+    })());
+  T("★ والشخصُ كذلك: وثيقةُ هويةٍ برقم إقامته تُدمَج ولا تُكرَّر",
+    (() => {
+      const p = { ...person, docs: [{ type: "identity", number: "2401234567", expiry: "2026-09-10" }] };
+      const rows = C._allExpiring(p);
+      return rows.length === 1 && rows[0]._identity === true;
+    })());
   T("★ إقامةٌ منتهيةٌ تُنبّه بنصٍّ صريحٍ وتبقى تحذيراً لا منعاً",
     (() => {
       const e = C._vendorEligibility({ entityType: "individual", name: "س", legal: { idType: "iqama", idNumber: "2", idExpiry: "2026-07-01" } }, today);

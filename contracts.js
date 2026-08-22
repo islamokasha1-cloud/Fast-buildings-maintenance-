@@ -1962,12 +1962,37 @@ function suggestVatMode(vendor){
 }
 
 /* كلُّ ما له تاريخُ انتهاءٍ عند الطرف — الوثائقُ **وهويتُه الرسمية**.
-   محرّكُ الانتهاء واحدٌ لا اثنان: لو بقيت الهويةُ خارجه لمرّت إقامةٌ منتهيةٌ بلا تنبيه. */
+   محرّكُ الانتهاء واحدٌ لا اثنان: لو بقيت الهويةُ خارجه لمرّت إقامةٌ منتهيةٌ بلا تنبيه.
+
+   لكنّ الهويةَ **تُدمَج في الوثيقة التي تمثّلها ولا تُضاف بجوارها**: صفُّ الوثائق
+   يشتقّ رقمَه من البيانات الأساسية أصلاً (`applyDocAutofill`)، فالمنشأةُ التي لها
+   وثيقةُ «سجلّ تجاريّ» برقم سجلّها **هي هي** الهويةُ الرسمية — وإضافتُها صفّاً
+   ثانياً تعرض السجلَّ التجاريَّ مرّتين في شاشة الطرف وشارتين «س.ت» في بطاقته،
+   وتَعُدُّه وثيقتين في حالة الامتثال. (بلاغُ المالك: «السجلّ التجاريّ الأخير في
+   قائمة الوثائق أنا لم أُضفه، وفي التعديل لا يظهر أنه موجودٌ مرّتين» — لأنه لم يكن
+   في `docs` أصلاً بل صفٌّ مشتقٌّ في العرض وحدَه.)
+
+   والمعيارُ **النوعُ والرقمُ معاً** لا النوعُ وحدَه: سجلٌّ فرعيٌّ برقمٍ آخرَ وثيقةٌ
+   قائمةٌ بذاتها، وانتهاءُ السجلّ الرئيس يبقى محروساً بصفّه.
+
+   والدمجُ يورّث التاريخَ ولا يأخذه: صفٌّ يحمل الرقمَ بلا تاريخِ انتهاءٍ (بياناتٌ
+   قديمةٌ حُفظت قبل الاشتقاق) يرث `crExpiry`/`idExpiry` — فلا يسقط تاريخٌ من
+   المحرّك بحجّة الدمج. والوراثةُ **على نسخةٍ** لا على المخزَّن: العرضُ لا يكتب. */
 function allExpiring(vendor){
   var v = vendor || {};
-  var out = (Array.isArray(v.docs) ? v.docs : []).slice();
   var id = identityOf(v);
-  if(id.expiry) out.push({ type:(id.entity==="individual" ? "identity" : "cr"), number:id.number, expiry:id.expiry, _identity:true });
+  var idType = (id.entity === "individual") ? "identity" : "cr";
+  var idNum  = String(id.number||"").trim();
+  var merged = false;
+  var out = (Array.isArray(v.docs) ? v.docs : []).map(function(dc){
+    if(!dc || merged || dc.type !== idType) return dc;
+    if(!idNum || String(dc.number||"").trim() !== idNum) return dc;
+    merged = true;
+    var row = Object.assign({}, dc, { _identity:true });
+    if(!String(row.expiry||"").trim() && id.expiry) row.expiry = id.expiry;
+    return row;
+  });
+  if(!merged && id.expiry) out.push({ type:idType, number:id.number, expiry:id.expiry, _identity:true });
   return out;
 }
 

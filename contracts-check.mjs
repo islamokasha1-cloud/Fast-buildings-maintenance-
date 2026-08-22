@@ -349,6 +349,36 @@ await page.waitForTimeout(1000);
 const cardTxt = await page.textContent('#page-vendors').catch(() => '');
 check('بطاقة الطرف فُتحت بوثائقها', cardTxt.includes('الوثائق وسريانها') && cardTxt.includes('البيانات البنكية'));
 check('الآيبان ظاهرٌ كاملاً للأدمن', cardTxt.includes('SA0380000000608010167519'));
+
+/* ── السجلّ التجاريّ صفٌّ واحدٌ في الجدول لا صفّان (بلاغُ المالك) ──
+   الهويةُ الرسمية تُدمَج في الوثيقة التي تحمل رقمَها، فلا صفٌّ مشتقٌّ يقف بجوارها
+   في العرض وحدَه — صفٌّ لا وجودَ له في `docs` فلا يظهر في التعديل ولا يُحذَف.
+   والفحصُ يقيس **الجدولَ المرسوم** لا الدالّة: الازدواجُ كان في الرسم. */
+const crRows = await page.evaluate(() => {
+  const rows = Array.from(document.querySelectorAll('#page-vendors .ct-table tbody tr'));
+  const hit = rows.filter(r => (r.cells[1] || {}).textContent.trim() === '1010234567');
+  return {
+    total: rows.length,
+    cr: hit.length,
+    badged: hit.map(r => r.textContent.includes('الهوية الرسمية'))
+  };
+});
+check('★★ السجلُّ التجاريُّ يظهر **صفّاً واحداً** في «الوثائق وسريانها» (بلاغُ المالك)',
+  crRows.cr === 1 && crRows.badged[0] === true, JSON.stringify(crRows));
+
+await page.evaluate(() => window.contracts.backToVendors());
+await page.waitForTimeout(700);
+const tileChips = await page.evaluate(() => {
+  const tiles = Array.from(document.querySelectorAll('#page-vendors .ct-tile'));
+  const t = tiles.find(x => x.textContent.includes('مؤسسة الأنوار'));
+  if (!t) return null;
+  return Array.from(t.querySelectorAll('.ct-doc')).map(c => c.textContent.trim());
+});
+check('★★ وبطاقةُ الطرف لا تحمل شارتَي «س.ت» لرقمٍ واحد',
+  Array.isArray(tileChips) && tileChips.filter(c => c === 'س.ت').length === 1,
+  JSON.stringify(tileChips));
+await page.evaluate(() => window.contracts.openVendor('VND-0001'));
+await page.waitForTimeout(800);
 await page.screenshot({ path: `${SHOTS}/02-vendor-card.png`, fullPage: true });
 
 /* ══ أرقامُ الجوال: تُقرأ خاماً · تُعرَض روابطَ اتصال · تُبحَث بأيّ صيغة · تُحفَظ مطبَّعة ══ */
