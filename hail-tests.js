@@ -428,7 +428,15 @@ function predelivery() {
        • `_loadLib`/`_needLib` — **تعميمُ `_ensurePdfJs` التي كانت هنا أصلاً**: الدالّةُ
          البديلة أقصرُ من الأصل، والزيادةُ هي الأغلفةُ الثلاثة (XLSX · Pptx · Chart)
          التي نابت عن ثلاثةِ وسومِ <script> حُذفت من <head>. */
-    const IDX_CEILING = 37320;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37320 إلى 37370 — ‏٤٦ سطراً لمفتاح تجربة الكاش المحلي. و**لا يمكن أن
+       يعيش في وحدة**، لسببين لا مفرَّ منهما: (١) `enablePersistence` يجب أن تسبق أيَّ
+       عمليةِ Firestore، وموضعُها هو سطرُ التهيئة نفسُه (~٤٧٧٠) بينما وسومُ الوحدات في
+       آخر `<body>` (~٣٦٥٠٠) — أي بعد آلاف الاستعلامات؛ (٢) القاطعُ الذاتيّ يُعشَّش داخل
+       `_fsHardHalt` وهي دالّةٌ في معالج الأخطاء العامّ المضمَّن، ولا سبيلَ لوحدةٍ خارجيةٍ
+       أن تسبقه. وهو نفسُ استثناء `_moduleMissingPage` أعلاه: حارسٌ يعمل بالضبط حيث لا
+       تصل الوحدات. والدالّةُ القرارية `_persistDecision` نقيّةٌ ومعروضةٌ ليفحصها هذا
+       الملفُّ بلا متصفّح (قاعدة CLAUDE.md ٥). */
+    const IDX_CEILING = 37370;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -11401,6 +11409,53 @@ function browserCheckTimeBombs() {
    شاشةٌ مجمّدةٌ على «جارٍ مزامنة البيانات...» إلى الأبد (المُبلَّغ عنه على #p-purchases).
    الفحصُ يُنفّذ دالّةَ القرار الحقيقيّةَ المستخرجةَ من index.html — لا يقرأ سطراً.
    ════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════
+   تجربةُ الكاش المحلي (IndexedDB persistence) — الأمانُ قبل المكسب
+   الكاشُ المحليّ أكبرُ مكسبٍ للتحميل المتكرّر، لكنّه هو نفسُه ما أُزيل في v18.9pf
+   لأنه أطلق `INTERNAL ASSERTION FAILED (ca9/b815/da08)` فجمّد المزامنة. ولا بديلَ
+   حديثاً هنا: `persistentLocalCache` من الـSDK النمطيّ وحدَه، والمنصّةُ على compat.
+   فالمطلوبُ من هذه الفحوص أن تُثبّت **شروطَ التجربة** لا أن تجيز الكاشَ للجميع:
+   مطفأٌ افتراضياً · تبويبٌ واحدٌ حصراً · وأوّلُ انهيارٍ يُطفئه للأبد على هذا الجهاز.
+   ═══════════════════════════════════════════════════════════════════════ */
+function localCacheTrialGuards() {
+  H("vNEXT) الكاشُ المحلي: مطفأٌ افتراضياً، تبويبٌ واحد، ويُطفئ نفسَه عند أوّل انهيار");
+
+  const A = HTML.indexOf("var _PERSIST_OPTIN");
+  const B = HTML.indexOf("window.hailPersist", A);
+  if (A < 0 || B < 0) { T("دالّةُ القرار _persistDecision مستخرَجة", false, "لم يُعثر على الكتلة"); return; }
+  let decide;
+  try {
+    decide = new Function("window", HTML.slice(A, B) + "\n return window._persistDecision;")({});
+  } catch (e) { T("دالّةُ القرار تُنفَّذ", false, String(e.message).slice(0, 140)); return; }
+  T("دالّةُ القرار _persistDecision مستخرَجةٌ وتُنفَّذ", typeof decide === "function");
+
+  const C = (name, optin, tripped, supported, want) => {
+    let got;
+    try { got = decide(optin, tripped, supported); } catch (e) { T(name, false, "خطأ: " + e.message); return; }
+    T(name, got === want, "القرار: " + got + (got === want ? "" : " ← المتوقع " + want));
+  };
+
+  C("★★ الافتراضُ إطفاء — بلا اشتراكٍ صريحٍ لا كاشَ محلياً لأحد", false, false, true, "off");
+  C("★ والاشتراكُ الصريح وحدَه يُفعّل", true, false, true, "on");
+  C("★★ وبعد انهيارٍ واحدٍ لا يعود ولو بقي الاشتراك قائماً", true, true, true, "tripped");
+  C("★ متصفّحٌ بلا IndexedDB لا يُحاوَل أصلاً", true, false, false, "unsupported");
+
+  /* ── حرّاسُ المصدر: ما لا تلتقطه دالّةٌ نقيّة ── */
+  T("★★ لا تفعيلَ إلا داخل فرع «on» (لا كاشَ لمن لم يشترك)",
+    /_persistState\(\)\s*===\s*"on"[\s\S]{0,260}?db\.enablePersistence/.test(HTML));
+  T("★★ التبويباتُ المتعدّدة مُقصاةٌ صراحةً (جذرُ b815/ca9 انتخابُ التبويب الرئيس)",
+    /db\.enablePersistence\(\s*\{\s*synchronizeTabs\s*:\s*false\s*\}\s*\)/.test(HTML));
+  T("★★ أوّلُ assertion يُطفئ الكاشَ قبل إعادة التحميل (فلا حلقةُ انهيارٍ تتكرّر)",
+    /function _fsHardHalt\(\)[\s\S]{0,600}?_persistTrip\(\)/.test(HTML));
+  T("★ وفشلُ التفعيل يُنزل العلَم فلا يُتَّهم الكاشُ بانهيارٍ ليس منه",
+    /db\.enablePersistence\([\s\S]{0,260}?catch[\s\S]{0,160}?_persistActive\s*=\s*false/.test(HTML));
+  T("★★ التفعيل يسبق أيَّ عمليةِ Firestore (بعد settings ومع أوّل استعمالٍ للعميل)",
+    HTML.indexOf("db.enablePersistence(") > HTML.indexOf("experimentalForceLongPolling") &&
+    HTML.indexOf("db.enablePersistence(") < HTML.indexOf("storage = firebase.storage()"));
+  T("★ ومفتاحُ التجربة معروضٌ للمالك (enable/disable/status)",
+    /window\.hailPersist\s*=\s*\{[\s\S]{0,400}?enable[\s\S]{0,400}?disable[\s\S]{0,400}?status/.test(HTML));
+}
+
 function fsRecoveryNoDeadEnd() {
   H("v18.9xd) تعافي Firestore: كلُّ مسارٍ ينتهي بتحميلٍ أو برسالة");
 
@@ -12170,6 +12225,7 @@ function printIconSizeGuards() {
   supplyPromiseDates();
   browserCheckTimeBombs();
   fsRecoveryNoDeadEnd();
+  localCacheTrialGuards();
   poAlignRepair();
   errLogGrouping();
   hailNotifyFeed();
