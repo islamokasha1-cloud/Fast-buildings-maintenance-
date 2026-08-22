@@ -9354,6 +9354,46 @@ function contractsPhase1() {
   T("★★ والآيبانُ لا يُملأ إلا لمن يراه أصلاً (canBank) — لا كشفَ من بابٍ خلفيّ",
     /bank:\s*function\(d\)\{\s*return canBank\(\)/.test(src));
 
+  /* ── تبديلُ النوع: ما اشتُقّ للنوع القديم يسقط (بلاغُ المالك) ──
+     الصفُّ الجديد يبدأ «سجلاً تجارياً» فيُملأ برقمه وانتهائه، فإن بُدّل إلى «شهادة
+     ضريبة القيمة المضافة» وجب أن يسقط ما اشتُقّ للسجلّ ويُشتقّ رقمُ الضريبة. الخللُ
+     صامتٌ تماماً: رقمٌ صحيحُ الشكل تحت عنوانٍ خاطئ — لا مترجمَ يعترض ولا شاشةَ
+     تُنذر، ويُحفظ رقمُ السجلّ التجاريّ **بياناً لشهادةٍ ضريبية**. */
+  T("★★ وتبديلُ نوع الوثيقة يُسقط ما اشتُقّ **للنوع القديم** ثمّ يُشتقّ للجديد",
+    (() => {
+      const d = { ...vAuto, docs: [{ type: "cr", number: "", expiry: "" }] };
+      C._applyDocAutofill(d);
+      if(d.docs[0].number !== "1010111222" || d.docs[0].expiry !== "2027-03-01") return false;
+      // `syncDraft` كتبت النوعَ الجديدَ في المسوّدة قبل الإسقاط — والإسقاطُ يقيس بالقديم
+      d.docs[0].type = "vat";
+      C._clearStaleDocAuto(d.docs[0], "cr", d);
+      if(d.docs[0].number !== "" || d.docs[0].expiry !== "") return false;
+      C._applyDocAutofill(d);
+      return d.docs[0].number === "300099" && d.docs[0].expiry === "" && d.docs[0]._auto === true;
+    })());
+  T("★★ والمقياسُ **النوعُ السابق** لا `dc.type` — وإلا بقي رقمُ السجلّ في صفٍّ صار ضريبياً",
+    (() => {
+      // القياسُ بالنوع الجديد (الخللُ الأصليّ): لا شيء يطابق فلا شيء يسقط
+      const d = { ...vAuto, docs: [{ type: "vat", number: "1010111222", expiry: "2027-03-01" }] };
+      C._clearStaleDocAuto(d.docs[0], d.docs[0].type, d);
+      const stayed = d.docs[0].number === "1010111222";
+      // والقياسُ بالسابق يُسقطه
+      C._clearStaleDocAuto(d.docs[0], "cr", d);
+      return stayed && d.docs[0].number === "" && d.docs[0].expiry === "";
+    })() &&
+    /var prevType = \(_vEdit && _vEdit\.docs && _vEdit\.docs\[i\]\) \? _vEdit\.docs\[i\]\.type : null;[\s\S]{0,120}syncDraft\(\)/.test(src) &&
+    /clearStaleDocAuto\(dc, prevType, _vEdit\)/.test(src));
+  T("★★ وما كتبه المستخدمُ بيده لا يُمسّ عند تبديل النوع ولو بدّله عشراً",
+    (() => {
+      const d = { ...vAuto, docs: [{ type: "cr", number: "فرعٌ آخر", expiry: "2030-01-01" }] };
+      ["vat","natAddr","other","cr","insurance"].forEach(function(t){
+        const prev = d.docs[0].type; d.docs[0].type = t;
+        C._clearStaleDocAuto(d.docs[0], prev, d);
+        C._applyDocAutofill(d);
+      });
+      return d.docs[0].number === "فرعٌ آخر" && d.docs[0].expiry === "2030-01-01";
+    })());
+
   /* ════════════════════════════════════════════════════════════
      الملفُّ المختارُ لا يضيع عند إعادة رسم النموذج  (بلاغُ المالك)
      `input[type=file]` لا يُملأ برمجياً، وإعادةُ الرسم تُتلفه. فما لم يُلتقط

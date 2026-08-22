@@ -467,6 +467,44 @@ const manual = await page.evaluate(() => {
 check('★★ وما كتبه المستخدمُ بيده يصمد لتبديل النوع (الاشتقاقُ لا يدهس يداً)',
   manual === 'رقمٌ كتبتُه بيدي', manual);
 
+/* ── وبالمسار الحقيقيّ: القائمةُ تُبدَّل بيدِ المستخدم (`change`) لا بنداءٍ برمجيّ ──
+   الفرقُ ليس شكلياً وهو سببُ نجاةِ الخلل من الفحص أعلاه: النداءُ البرمجيُّ يترك
+   قائمةَ النوع في الشاشة على **قيمتها القديمة**، فتقرأ `syncDraft` القديمَ ويصحُّ
+   الإسقاطُ بالمصادفة. أمّا في يد المستخدم فالقائمةُ تحمل **الجديد** قبل أن تُنادى
+   `setDocType`، فيُقاس الاشتقاقُ القديم بالنوع الجديد ولا يطابق شيئاً فلا يسقط شيء.
+   (بلاغُ المالك: صفٌّ بُدّل إلى «شهادة ضريبة القيمة المضافة» يعرض رقمَ السجل
+   التجاريّ وانتهاءَه.) */
+await page.evaluate(() => { window.contracts.addDoc(); });
+await page.waitForTimeout(500);
+const seeded = await page.evaluate(() => {
+  const r = document.querySelectorAll('#ct-docs-tbl tbody tr');
+  const l = r[r.length - 1];
+  return {
+    type: l.querySelector('[data-f="type"]').value,
+    number: l.querySelector('[data-f="number"]').value,
+    expiry: l.querySelector('[data-f="expiry"]').value
+  };
+});
+check('★ الصفُّ الجديد يبدأ «سجلاً تجارياً» فيُملأ رقمُه وانتهاؤه من الأعلى',
+  seeded.type === 'cr' && seeded.number === '1010234567' && !!seeded.expiry, JSON.stringify(seeded));
+
+const byEvent = await page.evaluate(() => {
+  const r = document.querySelectorAll('#ct-docs-tbl tbody tr');
+  const sl = r[r.length - 1].querySelector('[data-f="type"]');
+  sl.value = 'vat';
+  sl.dispatchEvent(new Event('change', { bubbles: true }));   // ⇐ ما تفعله يدُ المستخدم بالضبط
+  const r2 = document.querySelectorAll('#ct-docs-tbl tbody tr');
+  const l = r2[r2.length - 1];
+  return {
+    type: l.querySelector('[data-f="type"]').value,
+    number: l.querySelector('[data-f="number"]').value,
+    expiry: l.querySelector('[data-f="expiry"]').value
+  };
+});
+check('★★ وتبديلُه **من القائمة نفسِها** إلى «الضريبة» لا يُبقي رقمَ السجلّ ولا انتهاءَه (بلاغُ المالك)',
+  byEvent.type === 'vat' && byEvent.number === '300012345600003' && byEvent.expiry === '',
+  JSON.stringify(byEvent));
+
 // تنظيفٌ: تُحذف صفوفُ الفحص فلا تُلوّث بقيةَ الرحلة
 await page.evaluate(() => {
   const d = window.contracts._draftVendor();

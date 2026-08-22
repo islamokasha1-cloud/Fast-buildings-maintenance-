@@ -335,6 +335,17 @@ function applyDocAutofill(vendorDraft){
   });
   return d;
 }
+/* عكسُ الملء: يُسقط من صفٍّ **ما اشتُقّ له لنوعٍ سابق** — والمعيارُ أن تكون القيمةُ
+   مطابقةً لاشتقاقِ ذلك النوع حرفياً. فما كتبه المستخدمُ بيده يبقى ولو خالف الأعلى،
+   وما اشتُقّ لا يُترك في صفٍّ لم يعد يعنيه. نقيّةٌ عمداً: يفحصها `hail-tests.js`
+   بلا متصفّح، فالخللُ هنا صامتٌ في الشاشة (رقمٌ صحيحُ الشكل تحت عنوانٍ خاطئ). */
+function clearStaleDocAuto(dc, prevType, vendorDraft){
+  if(!dc) return dc;
+  var wasAuto = docAutoValue(prevType, vendorDraft) || {};
+  if(wasAuto.number && String(dc.number||"") === wasAuto.number){ dc.number = ""; dc._auto = false; }
+  if(wasAuto.expiry && String(dc.expiry||"") === wasAuto.expiry){ dc.expiry = ""; dc._auto = false; }
+  return dc;
+}
 var DOC_LBL = (function(){ var m={}; DOC_TYPES.forEach(function(d){ m[d.key]=d.lbl; }); return m; })();
 /* الاختصارُ حقلٌ صريحٌ لا قصُّ أولِ كلمة: «شهادة ضريبة…» و«شهادة التأمينات…»
    يبدآن بالكلمة نفسها، فالقصُّ يجعل شارتين مختلفتين تُقرآن «شهادة». */
@@ -4245,13 +4256,18 @@ function delDocFile(i){
 /* تبديلُ نوع الوثيقة: **ما اشتُقّ للنوع القديم يسقط** ثمّ يُشتقّ للجديد. بدونه يبقى
    رقمُ السجل التجاريّ في صفٍّ صار «عنواناً وطنياً» — قيمةٌ باليةٌ لا خطأَ مستخدمٍ
    ولا بيانَ وثيقة. والمقارنةُ **بقيمة الاشتقاق القديمة نفسِها** لا بشارةٍ عامّة:
-   فما كتبه المستخدمُ بيده لا يُمسّ ولو بدّل النوعَ عشر مرّات. */
+   فما كتبه المستخدمُ بيده لا يُمسّ ولو بدّل النوعَ عشر مرّات.
+
+   و**النوعُ القديم يُلتقط قبل `syncDraft`** لا بعدَها، وذلك جوهرُ الإصلاح لا ترتيبَ
+   أسطر: قائمةُ النوع تحمل `data-f="type"`، فـ`syncDraft` تقرؤها من الشاشة وتكتب
+   **النوعَ الجديد** في المسوّدة قبل أن يُحسب المسقَط — فيُقاس الاشتقاقُ القديم
+   بالنوع الجديد، ولا يطابق رقمَ الصفّ شيءٌ، فلا يسقط شيء. (بلاغُ المالك: صفٌّ
+   بُدّل إلى «شهادة ضريبة القيمة المضافة» يعرض رقمَ السجل التجاريّ وانتهاءَه.) */
 function setDocType(i, type){
+  var prevType = (_vEdit && _vEdit.docs && _vEdit.docs[i]) ? _vEdit.docs[i].type : null;
   syncDraft(); if(!_vEdit || !_vEdit.docs[i]) return;
   var dc = _vEdit.docs[i];
-  var wasAuto = docAutoValue(dc.type, _vEdit) || {};
-  if(wasAuto.number && String(dc.number||"") === wasAuto.number){ dc.number = ""; dc._auto = false; }
-  if(wasAuto.expiry && String(dc.expiry||"") === wasAuto.expiry){ dc.expiry = ""; dc._auto = false; }
+  clearStaleDocAuto(dc, prevType, _vEdit);
   dc.type = String(type||"other");
   paintDraft();
 }
@@ -8399,7 +8415,7 @@ window.contracts = {
   _duplicateOf: duplicateOf,
   _docTypesFor: docTypesFor,
   _DOC_TYPES: DOC_TYPES,
-  _docAutoValue: docAutoValue, _applyDocAutofill: applyDocAutofill, _docsForSave: docsForSave,
+  _docAutoValue: docAutoValue, _applyDocAutofill: applyDocAutofill, _clearStaleDocAuto: clearStaleDocAuto, _docsForSave: docsForSave,
   _normEntity: normEntity,
   // نوعُ الأعمال (التخصّص) — الدوالُّ النقيّةُ التي تقرؤها الشاشةُ والفحصُ معاً
   _TRADES: TRADES,
