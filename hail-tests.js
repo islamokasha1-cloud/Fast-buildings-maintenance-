@@ -11566,6 +11566,36 @@ function firestoreIndexContract() {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   كتالوجُ البنود مرجعٌ لا يُقصّ
+   قياسٌ في الإنتاج: بلغ الكتالوجُ سقفَ ٤٠٠٠ الذي أُدخل في vNEXT فصار يُقصّ فعلاً
+   (٤٠٠٠/٤٠٠٠ في الإنذار). و٨٧ موضعاً في `index.html` تقرأ `_catalogItems` لاختيار
+   بنود طلبات الشراء والاستلام والمطابقة بالكود والاسم — فبندٌ يسقط من اللقطة
+   يعني بنداً **لا يمكن طلبُه**، بلا خطأٍ ولا رسالة. ولذلك: لا سقفَ على هذا
+   الاستعلام، وكلفةُ قراءته تُعالَج بالتحميل عند الحاجة لا بحذف بيانات.
+   ═══════════════════════════════════════════════════════════════════════ */
+function catalogMustNotBeCapped() {
+  H("vNEXT) كتالوجُ البنود يُجلَب كاملاً — لا سقفَ يقصّ مرجعَ الاختيار");
+
+  const A = HTML.indexOf("_catalogUnsub = db.collection(ITEM_CATALOG_COLLECTION())");
+  if (A < 0) { T("مستمعُ الكتالوج موجود", false, "لم يُعثر عليه"); return; }
+  const B = HTML.indexOf(".onSnapshot(", A);
+  T("★ مستمعُ الكتالوج مستخرَجٌ للفحص", B > A);
+  const seg = HTML.slice(A, B);
+
+  T("★★ لا `limit` على استعلام الكتالوج (بندٌ مقصوصٌ = بندٌ لا يُطلَب، بصمت)",
+    !/\.limit\s*\(/.test(seg), `المقطع: ${seg.replace(/\s+/g, " ").slice(0, 120)}`);
+  T("★ ولا ثابتَ سقفٍ للكتالوج باقياً في الملفّ",
+    !/_CATALOG_SYNC_CAP/.test(HTML));
+  T("★ ولا إنذارَ سقفٍ على الكتالوج (لا سقفَ يُنذَر ببلوغه)",
+    !/_warnSyncCap\(\s*"كتالوج/.test(HTML));
+
+  /* والمجموعتان الباقيتان تبقيان محدودتَين — قياسُهما الحقيقيّ دون السقف بفارقٍ
+     واسع (المخزون ٣٧١ من ٤٠٠٠)، وهما لا تُبنى عليهما قائمةُ اختيارٍ كالكتالوج. */
+  T("★ والمخزونُ يبقى محدوداً بإنذاره (٣٧١ فعلياً من ٤٠٠٠)",
+    /_INV_SYNC_CAP/.test(HTML) && /_warnSyncCap\(\s*"رصيد المخزون/.test(HTML));
+}
+
 function fsRecoveryNoDeadEnd() {
   H("v18.9xd) تعافي Firestore: كلُّ مسارٍ ينتهي بتحميلٍ أو برسالة");
 
@@ -12335,6 +12365,7 @@ function printIconSizeGuards() {
   supplyPromiseDates();
   browserCheckTimeBombs();
   fsRecoveryNoDeadEnd();
+  catalogMustNotBeCapped();
   firestoreIndexContract();
   archiveScanSkipGuards();
   localCacheTrialGuards();
