@@ -46,7 +46,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2842";
+const MODULE_BUILD = "v18.9.2844";
 
 /* ════════ الثوابت ════════ */
 // الأدوار التي تُصدر — المشتريات والأدمن (قرار المالك)
@@ -186,6 +186,60 @@ function applyIssue(p, payload, ctx){
     notes: "الإجمالي شامل ض.ق.م: "+_fmtN(vpo.total)+" ر.س — "+vpo.items.length+" بنداً",
   });
   return vpo;
+}
+
+/* ════════ الاعتمادات الداخلية — تُطبع أسفل الوثيقة (طلب المالك: كما في ورقة المستخلص) ════════
+   المصدرُ سجلُّ الطلب نفسُه: قيودُ الـtimeline تحمل `code` الحالةَ الجديدةَ بعد كل
+   انتقال (v18.9od)، فتسلسلُ الأكواد هو مسارُ الطلب. **البوّابةُ تُعرَّف بالحالة التي
+   تُغادَر**: من غادر `pending_pm` قُدُماً فهو اعتمادُ مدير المشاريع، وهكذا. وهذه
+   **خريطةُ انتقالاتٍ** لقراءة السجل لا قائمةُ تصنيفِ حالاتٍ تنافس `poStageOf` —
+   التصنيفُ المركزيُّ يبقى للمراحل، وهذه لقراءة «مَن وقّع كلَّ بوّابة».
+   وآخرُ عبورٍ يغلب (إرجاعُ الأدمن ثم إعادةُ الاعتماد ⇒ يُقرأ الاعتمادُ الأخير).
+   وللتنفيذيّ ختمُه المقرونُ بمبلغه (`ceoApprovedBy/At`) وللسداد مستندُ الدفع
+   (`payment.paidBy/paidAt`) — مصادرُ أدقُّ من السجل فتُقدَّم عليه. */
+var VPO_GATES = [
+  { key:"pm",   lbl:"اعتماد مدير المشاريع",
+    from:["pending_pm"],
+    to:["pm_approved","wh_review","wh_reviewed","wh_approved","pending_proc","pending_ceo","pending_finance","proc_executing"] },
+  { key:"wh",   lbl:"مراجعة المستودع",
+    from:["wh_review","pm_approved"],
+    to:["wh_reviewed","wh_approved","pending_proc"] },
+  { key:"proc", lbl:"اعتماد المشتريات",
+    from:["pending_proc","wh_reviewed","wh_approved"],
+    to:["pending_ceo","pending_finance","proc_executing"] },
+];
+function poSignoffs(p){
+  if(!p) return [];
+  var norm = function(s){
+    try{ if(typeof normalizePOStatus==="function") return normalizePOStatus(s); }catch(e){}
+    return s;
+  };
+  var found = {}, finTl = null;
+  var prev = "pending_pm";
+  ((p.timeline)||[]).forEach(function(tl){
+    if(!tl || !tl.code) return;
+    var t = norm(tl.code);
+    if(t === "vendor_po_issued") return;      // قيدُ هذه الوحدة — ليس انتقالَ حالة
+    VPO_GATES.forEach(function(g){
+      if(g.from.indexOf(prev)!==-1 && g.to.indexOf(t)!==-1) found[g.key] = { by:tl.by||"", at:tl.at||"" };
+    });
+    if(prev==="pending_finance" && t==="proc_executing") finTl = { by:tl.by||"", at:tl.at||"" };
+    if(t !== prev) prev = t;
+  });
+  var out = VPO_GATES.map(function(g){
+    return { key:g.key, lbl:g.lbl, by:(found[g.key]||{}).by||"", at:(found[g.key]||{}).at||"" };
+  });
+  // ارتدادُ المستودع لحقله المخصَّص إن خلا السجل (الطلبات القديمة)
+  if(!out[1].by && p.whReviewedBy){ out[1].by = p.whReviewedBy; out[1].at = p.whReviewedAt||""; }
+  // بوّابةُ التنفيذي شرطية — تظهر فقط إن مرّ الطلبُ بها (كما تشرط ورقةُ المستخلص عتبتَها)
+  var ceoPassed = !!p.ceoApprovedAt ||
+    ((p.timeline)||[]).some(function(tl){ return tl && norm(tl.code)==="pending_ceo"; });
+  if(ceoPassed) out.push({ key:"ceo", lbl:"اعتماد المدير التنفيذي", by:p.ceoApprovedBy||"", at:p.ceoApprovedAt||"" });
+  var pay = (p.payment)||{};
+  var fin = { key:"fin", lbl:"سداد المالية", by:pay.paidBy||pay.by||"", at:pay.paidAt||pay.at||"" };
+  if(!fin.by && finTl){ fin.by = finTl.by; fin.at = finTl.at; }
+  out.push(fin);
+  return out;
 }
 
 /* ════════ قوالب الشروط ════════ */
@@ -517,6 +571,16 @@ function print(poId){
     '</tr>';
   }).join("");
 
+  // الاعتمادات الداخلية أسفل الوثيقة (طلب المالك) — «لم يعتمد بعد» تُطبع صراحةً
+  // كما في ورقة المستخلص، فمن يقرأ الورقة يعرف أين يقف الطلب لا يستنتجه من فراغ.
+  var signoffs = poSignoffs(p);
+  var apprHtml = signoffs.length ? '<div class="st">🖊 الاعتمادات الداخلية</div><div class="appr">'+
+    signoffs.map(function(g){
+      return '<div class="ap"><div class="ap-l">'+_e(g.lbl)+'</div>'+
+        '<div class="ap-n">'+(g.by?_e(g.by):'<span class="ap-w">لم يعتمد بعد</span>')+'</div>'+
+        '<div class="ap-d">'+(g.at?_fmtD(g.at):'—')+'</div></div>';
+    }).join("")+'</div>' : '';
+
   var termsHtml = v.terms ? '<div class="st">📜 شروط أمر الشراء</div>'+
     '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:11.5px;white-space:pre-line;line-height:1.9">'+_e(v.terms)+'</div>' : '';
   var notesHtml = v.notes ? '<div style="background:#f0f4ff;border:1px solid #c7d7f5;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:11.5px;white-space:pre-line"><b>ملاحظات:</b> '+_e(v.notes)+'</div>' : '';
@@ -552,6 +616,7 @@ function print(poId){
     '</table>'+
     '<div style="margin-top:6px;font-size:11px;color:#475569">الإجمالي شامل ضريبة القيمة المضافة 15٪: <b style="direction:ltr;display:inline-block;font-family:monospace">'+_fmtN(v.total)+'</b> ر.س</div>'+
     termsHtml+notesHtml+
+    apprHtml+
     '<div class="sig">'+
       '<div>مسؤول المشتريات<br><b>'+_e(v.issuedBy||"")+'</b></div>'+
       '<div>ختم وتوقيع الشركة<br><b>&nbsp;</b></div>'+
@@ -579,6 +644,12 @@ function print(poId){
     'table{width:100%;border-collapse:collapse;font-size:11px}'+
     'table th,table td{border:1px solid #dde3ed;padding:5px 7px}'+
     'table thead tr{background:#1b3a6b;color:#fff}'+
+    '.appr{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:8px;break-inside:avoid}'+
+    '.ap{border:1px solid #dde3ed;border-radius:8px;padding:8px;text-align:center}'+
+    '.ap-l{font-size:10px;color:#64748b;font-weight:700}'+
+    '.ap-n{font-size:12px;font-weight:800;margin-top:3px}'+
+    '.ap-w{color:#b45309;font-weight:700;font-size:10.5px}'+
+    '.ap-d{font-size:10px;color:#64748b;font-family:monospace}'+
     '.sig{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:36px;text-align:center;font-size:11px}'+
     '.sig div{border-top:1.5px solid #94a3b8;padding-top:6px}'+
     '.pf{margin-top:16px;padding-top:8px;border-top:1px solid #dde3ed;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between}';
@@ -610,6 +681,7 @@ window.vendorPO = {
   // نقيّة — يفحصها hail-tests.js بلا متصفح
   _lineCalc: lineCalc, _totals: totalsOf, _buyQty: buyQty,
   _defaultItems: defaultItems, _canIssue: canIssue, _applyIssue: applyIssue,
+  _signoffs: poSignoffs,
   _ISSUE_STAGES: VPO_STAGES.slice(), _ROLES: VPO_ROLES.slice(),
   _DEFAULT_TEMPLATES: VPO_DEFAULT_TEMPLATES.slice(),
 };
