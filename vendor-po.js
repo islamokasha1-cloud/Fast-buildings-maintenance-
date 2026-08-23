@@ -46,7 +46,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2845";
+const MODULE_BUILD = "v18.9.2847";
 
 /* ════════ الثوابت ════════ */
 // الأدوار التي تُصدر — المشتريات والأدمن (قرار المالك)
@@ -79,6 +79,10 @@ function _e(s){
   return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 function _toast(msg, kind){ try{ if(typeof toast==="function") toast(msg, kind); }catch(e){} }
+/* أيقونات svg من طقم المنصّة (_ICON عبر _ic) — لا إيموجي في الشاشة ولا في المطبوع
+   (طلب المالك). مقاسُ `.ic` في المطبوع يحقنه _openPrintWindow من مصدرٍ واحد،
+   والقالبُ لا يعرّف `.ic` بنفسه أبداً (درسُ v18.9.2841). */
+function _icx(name, cls){ try{ if(typeof _ic==="function") return _ic(name, cls); }catch(e){} return ""; }
 function _db(){ try{ return (typeof db!=="undefined") ? db : null; }catch(e){ return null; } }
 function _me(){ try{ return (typeof currentUser!=="undefined" && currentUser) ? currentUser : null; }catch(e){ return null; } }
 function _role(){ var u=_me(); return (u&&u.role)||""; }
@@ -346,7 +350,7 @@ function _render(p, gate){
 
   var existBanner = existing ?
     '<div style="background:color-mix(in srgb,var(--accent) 10%,var(--surface));border:1.5px solid color-mix(in srgb,var(--accent) 35%,var(--border));border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12.5px">'+
-      '✅ صدر أمر شراء لهذا الطلب — <b>'+_e(existing.vendorName||"—")+'</b> · مراجعة '+(Number(existing.rev)||1)+' · '+_fmtD(existing.issuedAt)+
+      _icx("checkCircle","ic-sm")+' صدر أمر شراء لهذا الطلب — <b>'+_e(existing.vendorName||"—")+'</b> · مراجعة '+(Number(existing.rev)||1)+' · '+_fmtD(existing.issuedAt)+
       ' · الإجمالي <b class="mono">'+_fmtN(existing.total)+'</b> ر.س'+
       (gate.reprintOnly?'':' — الإصدار من جديد يحفظ هذه النسخة في السجل ويرفع رقم المراجعة.')+
     '</div>' : '';
@@ -389,7 +393,7 @@ function _render(p, gate){
           '<input class="form-input" type="date" id="vpo-date" value="'+_e(existing?String(existing.deliveryDate||"").slice(0,10):_defaultDate(p))+'" '+(gate.reprintOnly?'disabled':'')+'></div>'+
       '</div></div>'+
     '<div class="d-sec" style="margin-top:12px"><div class="d-sec-label">البنود والأسعار (قابلة للتعديل قبل الإصدار)</div>'+
-      (covered?'<div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">ℹ '+covered+' بند مغطّى من المخزون بالكامل — لا يدخل أمر المورد.</div>':'')+
+      (covered?'<div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">'+_icx("alertCircle","ic-sm ic-muted")+' '+covered+' بند مغطّى من المخزون بالكامل — لا يدخل أمر المورد.</div>':'')+
       '<div class="po-items-scroll"><table class="po-table" style="min-width:760px" id="vpo-items">'+
         '<thead><tr><th style="text-align:center">✔</th><th class="th-r">البند</th><th>الكمية</th><th>الوحدة</th><th>سعر الوحدة (قبل الضريبة)</th><th>ض.ق.م 15%</th><th>إجمالي البند</th></tr></thead>'+
         '<tbody>'+(rows||'<tr><td colspan="7" style="text-align:center;padding:14px">لا بنود للشراء</td></tr>')+'</tbody>'+
@@ -414,8 +418,8 @@ function _render(p, gate){
 
   foot.innerHTML =
     '<button class="btn btn-ghost btn-sm" onclick="vendorPO.close()">إغلاق</button>'+
-    (existing?'<button class="btn btn-sm po-btn-accent" onclick="vendorPO.print(\''+_e(p.id)+'\')">🖨 طباعة النسخة الصادرة (مراجعة '+(Number(existing.rev)||1)+')</button>':'')+
-    (gate.reprintOnly?'':'<button class="btn btn-primary btn-sm" onclick="vendorPO.issue()">📤 '+(existing?"إصدار مراجعة جديدة وطباعتها":"إصدار الأمر وطباعته")+'</button>');
+    (existing?'<button class="btn btn-sm po-btn-accent" onclick="vendorPO.print(\''+_e(p.id)+'\')">'+_icx("printer","ic-sm ic-white")+' طباعة النسخة الصادرة (مراجعة '+(Number(existing.rev)||1)+')</button>':'')+
+    (gate.reprintOnly?'':'<button class="btn btn-primary btn-sm" onclick="vendorPO.issue()">'+_icx("send","ic-sm ic-white")+' '+(existing?"إصدار مراجعة جديدة وطباعتها":"إصدار الأمر وطباعته")+'</button>');
 
   recalc();
 }
@@ -581,14 +585,14 @@ function print(poId){
   // الاعتمادات الداخلية أسفل الوثيقة (طلب المالك) — «لم يعتمد بعد» تُطبع صراحةً
   // كما في ورقة المستخلص، فمن يقرأ الورقة يعرف أين يقف الطلب لا يستنتجه من فراغ.
   var signoffs = poSignoffs(p);
-  var apprHtml = signoffs.length ? '<div class="st">🖊 الاعتمادات الداخلية</div><div class="appr">'+
+  var apprHtml = signoffs.length ? '<div class="st">'+_icx("clipboardCheck","ic-sm")+' الاعتمادات الداخلية</div><div class="appr">'+
     signoffs.map(function(g){
       return '<div class="ap"><div class="ap-l">'+_e(g.lbl)+'</div>'+
         '<div class="ap-n">'+(g.by?_e(g.by):'<span class="ap-w">لم يعتمد بعد</span>')+'</div>'+
         '<div class="ap-d">'+(g.at?_fmtD(g.at):'—')+'</div></div>';
     }).join("")+'</div>' : '';
 
-  var termsHtml = v.terms ? '<div class="st">📜 شروط أمر الشراء</div>'+
+  var termsHtml = v.terms ? '<div class="st">'+_icx("scrollText","ic-sm")+' شروط أمر الشراء</div>'+
     '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:11.5px;white-space:pre-line;line-height:1.9">'+_e(v.terms)+'</div>' : '';
   var notesHtml = v.notes ? '<div style="background:#f0f4ff;border:1px solid #c7d7f5;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:11.5px;white-space:pre-line"><b>ملاحظات:</b> '+_e(v.notes)+'</div>' : '';
 
@@ -609,7 +613,7 @@ function print(poId){
       '<div class="ii"><div class="il">مكان التسليم</div><div class="iv">'+_e(v.deliveryPlace||"—")+'</div></div>'+
       '<div class="ii"><div class="il">موعد التوريد المطلوب</div><div class="iv">'+_fmtD(v.deliveryDate)+'</div></div>'+
     '</div>'+
-    '<div class="st">📋 البنود المطلوب توريدها ('+(v.items||[]).length+')</div>'+
+    '<div class="st">'+_icx("clipboardList","ic-sm")+' البنود المطلوب توريدها ('+(v.items||[]).length+')</div>'+
     '<table>'+
       '<thead><tr><th style="width:24px">#</th><th style="text-align:right">البند</th><th>الكمية</th><th>الوحدة</th><th>سعر الوحدة</th><th>ض.ق.م 15%</th><th>الإجمالي</th></tr></thead>'+
       '<tbody>'+rows+
