@@ -2365,6 +2365,49 @@ check('★ ودورٌ لا يملك الانتقال يُرفض في طبقة ا
 
 await page.evaluate(() => window.contracts.backToCtrs());
 await page.waitForTimeout(700);
+
+/* ── تبويبا صفحة العقود (طلبُ المالك): المقفلُ غادر «الجارية» إلى «المنتهية» ── */
+const ctrTabsBar = await page.evaluate((cid) => {
+  const tb = [...document.querySelectorAll('#page-contracts-list .ct-tab')];
+  const all = window.contracts.contractsList();
+  return {
+    nTabs: tb.length,
+    txt: tb.map(e => e.textContent.replace(/\s+/g, ' ').trim()),
+    calc: ['running', 'finished'].map(k => all.filter(c => window.contracts._ctrTabOf(c) === k).length),
+    inRunning: [...document.querySelectorAll('#page-contracts-list .ct-tile')].some(e => e.textContent.includes(cid))
+  };
+}, conv.cid);
+check('★★ صفحةُ العقود تبويبان بأعدادٍ من ctrTabOf — والمقفلُ ليس بين «الجارية»',
+  ctrTabsBar.nTabs === 2 && ctrTabsBar.inRunning === false &&
+  ctrTabsBar.txt[0].includes('الجارية') && ctrTabsBar.txt[0].includes(String(ctrTabsBar.calc[0])) &&
+  ctrTabsBar.txt[1].includes('المنتهية') && ctrTabsBar.txt[1].includes(String(ctrTabsBar.calc[1])),
+  JSON.stringify(ctrTabsBar));
+const finTab = await page.evaluate(async (cid) => {
+  window.contracts.ctrsTab('finished');
+  await new Promise(r => setTimeout(r, 500));
+  const tiles = [...document.querySelectorAll('#page-contracts-list .ct-tile')];
+  const stTxt = [...document.querySelectorAll('#page-contracts-list .ct-stat')]
+    .map(e => e.textContent.replace(/\s+/g, ' ').trim()).join('|');
+  const tile = tiles.find(e => e.textContent.includes(cid));
+  let nameRatio = 0;
+  if (tile) {
+    const name = tile.querySelector('.ct-tile-name');
+    const top = tile.querySelector('.ct-tile-top');
+    nameRatio = name && top ? name.getBoundingClientRect().width / top.getBoundingClientRect().width : 0;
+  }
+  const want = window.contracts.contractsList().filter(c => window.contracts._ctrTabOf(c) === 'finished').length;
+  return { n: tiles.length, want, has: !!tile, stTxt, nameRatio };
+}, conv.cid);
+check('★★ وتبويبُ «المنتهية» يعرض المنتهيةَ كلَّها ومنها المقفل',
+  finTab.has && finTab.n === finTab.want && finTab.n >= 2, JSON.stringify(finTab));
+check('★ وشريطُه يفصّل: بانتظار الضمان · مقفلة · مفسوخة',
+  /بانتظار انتهاء الضمان/.test(finTab.stTxt) && /مقفلة/.test(finTab.stTxt) && /مفسوخة/.test(finTab.stTxt),
+  finTab.stTxt.slice(0, 120));
+check('★★ واسمُ العقد لا تعصره شارةُ «مقفل — أُفرِج عن المحتجز» (بلاغُ المالك: الاسم ينزاح)',
+  finTab.nameRatio >= 0.5, 'نسبةُ عرض الاسم=' + finTab.nameRatio.toFixed(2));
+await page.screenshot({ path: `${SHOTS}/21b-contracts-finished-tab.png`, fullPage: true });
+await page.evaluate(async () => { window.contracts.ctrsTab('running'); await new Promise(r => setTimeout(r, 400)); });
+
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
 await page.waitForTimeout(600);
 await page.screenshot({ path: `${SHOTS}/19-contracts-dark.png` });
