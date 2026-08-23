@@ -8982,6 +8982,22 @@ function contractsPhase1() {
       /var wip    = scoped\.filter/.test(src) && /var converted = pScoped\.filter/.test(src));
     T("★ وخياراتُ المشروع من الطلبات نفسِها بمفتاح docProjectKey (فلا خيارٌ بلا طلبٍ ولا يدويّان في خيار)",
       /all\.forEach\(function\(r\)\{\s*var k=docProjectKey\(r\);/.test(src));
+
+    /* ── مرفقاتُ الطلب (طلبُ المالك): عرضُ سعرٍ وفاتورةٌ تسند القرار ── */
+    T("★★ الرفعُ بـuploadVendorDoc نفسِها — بادئةُ Storage القائمة po/ لا مسارٌ جذريٌّ جديد",
+      /uploadVendorDoc\(r\.id, f, "attachment"\)/.test(src) &&
+      /uploadVendorDoc\(id, f, "attachment"\)/.test(src) &&
+      /st\.ref\("po\/vendors\//.test(src));
+    T("★★ وملفاتُ المتصفّح لا تصل Firestore — تُسقَط من payload وتُرفَع بعد الإنشاء برقم الطلب",
+      /delete payload\.attachFiles;/.test(src) &&
+      /createRequest\(payload\)\.then\(function\(id\)\{/.test(src));
+    T("★★ والتسجيلُ معاملةٌ على الوثيقة الطازجة: نهائيٌّ لا يُرفَق له، والصلاحيةُ تُفحص هناك، والسجلُّ يوثّق",
+      /function addReqAttachments\(id, atts\)\{[\s\S]{0,900}runTransaction[\s\S]{0,900}لا تُضاف مرفقات[\s\S]{0,600}canAttachReq\(r\)[\s\S]{0,900}_pushTimeline\(r, "إضافة مرفق", "attached"/.test(src));
+    T("★★ وحذفُ المرفق للأدمن أو لمن أضافه — وعلى غير النهائيّ، ويُسجَّل في الخطّ الزمني",
+      /function deleteReqAttachment\(id, attId\)\{[\s\S]{0,900}لا تُحذف مرفقاته[\s\S]{0,400}canDelAttach\(r, att\)[\s\S]{0,600}_pushTimeline\(r, "حذف مرفق", "attach_removed"/.test(src) &&
+      /function canDelAttach\(r, att\)\{[\s\S]{0,300}att\.byUser===_meUser\(\)/.test(src));
+    T("★ وفشلُ رفعِ مرفقٍ لا يُسقط طلباً أُنشئ فعلاً — يُعلَن ويُستدرَك من البطاقة",
+      /لكن تعذّر رفع "\+failed\+" مرفق/.test(src));
     T("★ وبطاقاتُ الشريط أزرارٌ بـaria-pressed تصفّي مجموعتَها ونقرتان تُلغيان",
       /class="ct-stat ct-stat-btn/.test(src) && /aria-pressed="/.test(src) &&
       /contracts\.filterReqs\(\\'status\\',\\''\+\(on\?"":key\)\+'\\'\)/.test(src));
