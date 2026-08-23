@@ -15,6 +15,7 @@ on:
       - 'cleaning-operations.js'
       - 'performance-contract.js'
       - 'finance-audit.js'
+      - 'vendor-po.js'
       - 'hr-payments.js'
       - 'contracts.js'
       - 'HailNotify.js'
