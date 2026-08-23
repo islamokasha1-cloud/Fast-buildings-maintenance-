@@ -46,7 +46,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2849";
+const MODULE_BUILD = "v18.9.2851";
 
 /* ════════ الثوابت ════════ */
 // الأدوار التي تُصدر — المشتريات والأدمن (قرار المالك)
@@ -190,6 +190,36 @@ function applyIssue(p, payload, ctx){
     notes: "الإجمالي شامل ض.ق.م: "+_fmtN(vpo.total)+" ر.س — "+vpo.items.length+" بنداً",
   });
   return vpo;
+}
+
+/* مطابقةُ اسمٍ مكتوبٍ يدوياً بسجل الأطراف — بالتطبيع العربيّ الخفيف (تشكيل ·
+   تطويل · همزات · تاء مربوطة · ياء · مسافات) على نهج مطابقة أسماء المشتريات.
+   الغرضُ (طلب المالك): السجلُّ التجاريّ والرقمُ الضريبيّ يُحمَّلان تلقائياً حتى لو
+   كُتب اسمُ المورد يدوياً مطابقاً لطرفٍ مسجَّل. مطابقةٌ تامةٌ بعد التطبيع فقط —
+   لا تخمينَ جزئياً، فبيانا هويةٍ خاطئان أسوأُ من خانةٍ فارغة. */
+function normVendorName(s){
+  return String(s||"")
+    .replace(/[ـً-ْ]/g,"")
+    .replace(/[أإآ]/g,"ا")
+    .replace(/ة/g,"ه")
+    .replace(/ى/g,"ي")
+    .replace(/\s+/g," ").trim().toLowerCase();
+}
+function matchVendor(list, name){
+  var k = normVendorName(name);
+  if(!k) return null;
+  for(var i=0;i<(list||[]).length;i++){
+    var v=list[i];
+    if(v && normVendorName(v.name)===k) return v;
+  }
+  return null;
+}
+function _vendorFromRegistry(name){
+  try{
+    if(window.contracts && typeof contracts.vendors==="function")
+      return matchVendor(contracts.vendors(), name);
+  }catch(e){}
+  return null;
 }
 
 /* ════════ الاعتمادات الداخلية — تُطبع أسفل الوثيقة (طلب المالك: كما في ورقة المستخلص) ════════
@@ -507,6 +537,13 @@ function _selectedVendor(){
     }
   }
   var manual=((document.getElementById("vpo-vendor-manual")||{}).value||"").trim();
+  // اسمٌ يدويٌّ يطابق طرفاً مسجَّلاً (بالتطبيع) ⇒ تُحمَّل هويتُه تلقائياً (طلب المالك)
+  var reg=_vendorFromRegistry(manual);
+  if(reg){
+    var rlg=reg.legal||{};
+    return { vendorId:reg.id, vendorName:reg.name||manual, vendorPhone:reg.phone||"",
+             vendorVatNo:rlg.vatNumber||"", vendorCrNo:rlg.crNumber||"" };
+  }
   return { vendorId:"", vendorName:manual, vendorPhone:"", vendorVatNo:"", vendorCrNo:"" };
 }
 
@@ -597,20 +634,35 @@ function print(poId){
     '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:11.5px;white-space:pre-line;line-height:1.9">'+_e(v.terms)+'</div>' : '';
   var notesHtml = v.notes ? '<div style="background:#f0f4ff;border:1px solid #c7d7f5;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:11.5px;white-space:pre-line"><b>ملاحظات:</b> '+_e(v.notes)+'</div>' : '';
 
+  /* رقمُ الشريط لاتينيٌّ صِرف («Rev 2» لا «مراجعة 2») — خلطُ العربية بالرقم داخل
+     خانة monospace كان يعبث بترتيب البِيدي في الترويسة (بلاغ المالك). */
   var headHtml = (window.contracts && typeof contracts._docHeadHTML==="function")
-    ? contracts._docHeadHTML({ on:lhOn, logo:logoSrc, subtitle:"أمر شراء — Purchase Order", docNo:v.docNo+(v.rev>1?" · مراجعة "+v.rev:"") })
-    : '<div class="dochead"><div class="dh-t">أمر شراء — Purchase Order</div><div>'+_e(v.docNo)+'</div></div>';
+    ? contracts._docHeadHTML({ on:lhOn, logo:logoSrc, subtitle:"أمر شراء — Purchase Order", docNo:v.docNo+(v.rev>1?" - Rev "+v.rev:"") })
+    : '<div class="dochead"><div class="dh-t">أمر شراء — Purchase Order</div><div class="doc-no">'+_e(v.docNo)+'</div></div>';
+
+  /* هويةُ المورد (السجل التجاري · الرقم الضريبي) بطاقتان دائمتان (طلب المالك) —
+     وإن خلت لقطةُ الأمر منهما (اسمٌ يدويٌّ وقتَ الإصدار) تُحمَّلان من سجل الأطراف
+     بمطابقة الاسم المطبَّع لحظةَ الطباعة، فتنفع الأوامرَ الصادرةَ قبل هذه الميزة. */
+  var _vv = v.vendorVatNo||"", _vc = v.vendorCrNo||"", _vp = v.vendorPhone||"";
+  if(!_vv || !_vc || !_vp){
+    var _reg = _vendorFromRegistry(v.vendorName);
+    if(_reg){
+      var _rlg = _reg.legal||{};
+      _vv = _vv || _rlg.vatNumber || "";
+      _vc = _vc || _rlg.crNumber || "";
+      _vp = _vp || _reg.phone || "";
+    }
+  }
 
   var inner =
     headHtml+
     '<div class="ig" style="margin-top:12px">'+
-      '<div class="ii"><div class="il">رقم أمر الشراء</div><div class="iv" style="font-family:monospace">'+_e(v.docNo)+(v.rev>1?' <span style="color:#b45309">(مراجعة '+v.rev+')</span>':'')+'</div></div>'+
-      '<div class="ii"><div class="il">تاريخ الإصدار</div><div class="iv">'+_fmtD(v.issuedAt)+'</div></div>'+
+      '<div class="ii"><div class="il">تاريخ الإصدار</div><div class="iv">'+_fmtD(v.issuedAt)+(v.rev>1?' <span style="color:#b45309">(مراجعة '+v.rev+')</span>':'')+'</div></div>'+
       '<div class="ii"><div class="il">أصدره</div><div class="iv">'+_e(v.issuedBy||"—")+'</div></div>'+
       '<div class="ii"><div class="il">المورد</div><div class="iv">'+_e(v.vendorName||"—")+'</div></div>'+
-      (v.vendorPhone?'<div class="ii"><div class="il">جوال المورد</div><div class="iv" style="direction:ltr">'+_e(v.vendorPhone)+'</div></div>':'')+
-      (v.vendorVatNo?'<div class="ii"><div class="il">الرقم الضريبي للمورد</div><div class="iv" style="font-family:monospace">'+_e(v.vendorVatNo)+'</div></div>':'')+
-      (v.vendorCrNo?'<div class="ii"><div class="il">السجل التجاري للمورد</div><div class="iv" style="font-family:monospace">'+_e(v.vendorCrNo)+'</div></div>':'')+
+      '<div class="ii"><div class="il">السجل التجاري للمورد</div><div class="iv" style="font-family:monospace">'+(_vc?_e(_vc):"—")+'</div></div>'+
+      '<div class="ii"><div class="il">الرقم الضريبي للمورد</div><div class="iv" style="font-family:monospace">'+(_vv?_e(_vv):"—")+'</div></div>'+
+      '<div class="ii"><div class="il">جوال المورد</div><div class="iv" style="direction:ltr">'+(_vp?_e(_vp):"—")+'</div></div>'+
       '<div class="ii"><div class="il">مكان التسليم</div><div class="iv">'+_e(v.deliveryPlace||"—")+'</div></div>'+
       '<div class="ii"><div class="il">موعد التوريد المطلوب</div><div class="iv">'+_fmtD(v.deliveryDate)+'</div></div>'+
     '</div>'+
@@ -628,10 +680,13 @@ function print(poId){
     '</table>'+
     '<div style="margin-top:6px;font-size:11px;color:#475569">الإجمالي شامل ضريبة القيمة المضافة 15٪: <b style="direction:ltr;display:inline-block;font-family:monospace">'+_fmtN(v.total)+'</b> ر.س</div>'+
     termsHtml+notesHtml+
-    /* ذيلُ الوثيقة كتلةٌ واحدةٌ لا تنقسم بين صفحتين (بلاغ المالك: التوقيعات رحّلت
-       وحدها إلى صفحةٍ ثانيةٍ فارغة) — إن ضاقت الصفحةُ انتقل الذيلُ كلُّه معاً. */
-    '<div class="tail">'+
+    /* الترقيمُ ديناميكيّ (بلاغا المالك): وحدتان صغيرتان لا كتلةٌ واحدة — الاعتماداتُ
+       وحدةٌ (.appr) والتوقيعاتُ مع التذييل وحدةٌ (.sigblk). فما اتّسعت له صفحةُ
+       البنود بقي فيها، وما ضاق انتقل وحدَه كاملاً. الكتلةُ الكبيرةُ الواحدة كانت
+       تقفز بكاملها لصفحةٍ ثانية رغم اتّساع الأولى — محرّكُ التقسيم داخل جدول
+       الورقة الرسمية يتحفّظ مع الكتل الكبيرة. */
     apprHtml+
+    '<div class="sigblk">'+
     '<div class="sig">'+
       '<div>مسؤول المشتريات<br><b>'+_e(v.issuedBy||"")+'</b></div>'+
       '<div>ختم وتوقيع الشركة<br><b>&nbsp;</b></div>'+
@@ -666,7 +721,8 @@ function print(poId){
     '.ap-n{font-size:12px;font-weight:800;margin-top:3px}'+
     '.ap-w{color:#b45309;font-weight:700;font-size:10.5px}'+
     '.ap-d{font-size:10px;color:#64748b;font-family:monospace}'+
-    '.tail{break-inside:avoid;page-break-inside:avoid}'+
+    '.dochead{margin-top:3mm}'+
+    '.sigblk{break-inside:avoid;page-break-inside:avoid}'+
     '.sig{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:26px;text-align:center;font-size:11px}'+
     '.sig div{border-top:1.5px solid #94a3b8;padding-top:6px}'+
     '.pf{margin-top:14px;padding-top:8px;border-top:1px solid #dde3ed;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between}';
@@ -702,6 +758,7 @@ window.vendorPO = {
   _lineCalc: lineCalc, _totals: totalsOf, _buyQty: buyQty,
   _defaultItems: defaultItems, _canIssue: canIssue, _applyIssue: applyIssue,
   _signoffs: poSignoffs,
+  _matchVendor: matchVendor, _normVendorName: normVendorName,
   _ISSUE_STAGES: VPO_STAGES.slice(), _ROLES: VPO_ROLES.slice(),
   _DEFAULT_TEMPLATES: VPO_DEFAULT_TEMPLATES.slice(),
 };

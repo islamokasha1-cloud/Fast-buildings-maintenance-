@@ -12688,19 +12688,41 @@ function vendorPOIssuance() {
     src.includes('_icx("clipboardCheck"') && src.includes('_icx("printer"') && src.includes('_icx("send"'));
   T("★ 📤 بقي في قيد الـtimeline وحده (عرفُ السجل إيموجي)", (src.match(/📤/g) || []).length === 1);
 
-  /* ── ترقيمُ صفحات الوثيقة واسمُ ملف الحفظ (بلاغ المالك بملف PDF حقيقيّ) ──
-     التوقيعاتُ رحّلت وحدَها إلى صفحةٍ ثانيةٍ فارغة، وخانةُ «سداد المالية» انفردت
-     سطراً، واسمُ الملف المقترَح عند حفظ PDF كان مشوَّهاً (عنوانٌ عربيٌّ بشرطةٍ
-     طويلة). الذيلُ (اعتمادات + توقيعات + تذييل) كتلةٌ لا تنقسم، والخاناتُ صفٌّ
-     بعددها، والعنوانُ رقمُ الأمر وحده بحروفٍ لاتينية. */
-  T("★ ذيلُ الوثيقة كتلةٌ لا تنقسم بين صفحتين",
-    src.includes('<div class="tail">') && src.includes(".tail{break-inside:avoid;page-break-inside:avoid}") &&
-    /class="tail">'\+[\s\S]{0,80}apprHtml/.test(src));
+  /* ── ترقيمُ صفحات الوثيقة واسمُ ملف الحفظ (بلاغا المالك بملفَّي PDF حقيقيَّين) ──
+     الجولة ١: التوقيعاتُ رحّلت وحدَها إلى صفحةٍ فارغة ⇒ ذيلٌ بكتلةٍ واحدة.
+     الجولة ٢: الكتلةُ الواحدةُ قفزت **بكاملها** لصفحةٍ ثانية رغم اتّساع الأولى —
+     محرّكُ التقسيم داخل جدول الورقة الرسمية يتحفّظ مع الكتل الكبيرة. فالترقيمُ
+     **ديناميكيّ بوحدتين صغيرتين**: الاعتماداتُ وحدةٌ والتوقيعاتُ مع التذييل وحدة —
+     ما اتّسعت له صفحةُ البنود بقي فيها، وما ضاق انتقل وحدَه كاملاً. */
+  T("★ الترقيمُ ديناميكيّ: وحدتان صغيرتان لا كتلةٌ واحدة",
+    src.includes('<div class="sigblk">') && src.includes(".sigblk{break-inside:avoid;page-break-inside:avoid}") &&
+    src.includes(".appr{") && /\.appr\{[^}]*break-inside:avoid/.test(src) &&
+    !src.includes('<div class="tail">'));
   T("★ خاناتُ الاعتمادات صفٌّ واحدٌ بعددها الفعلي",
     src.includes("grid-template-columns:repeat('+signoffs.length+',1fr)"));
   T("★ عنوانُ نافذة الطباعة = رقمُ الأمر وحده (اسمُ الملف المقترَح عند حفظ PDF)",
     src.includes("'<title>'+_e(v.docNo+(v.rev>1?\"-Rev\"+v.rev:\"\"))+'</title>'") &&
     !src.includes("<title>أمر شراء"));
+  T("★ شريطُ الترويسة لاتينيٌّ صِرف («Rev N» لا «مراجعة N» في خانة monospace)",
+    src.includes('" - Rev "+v.rev') && !src.includes('" · مراجعة "+v.rev'));
+
+  /* ── هويةُ المورد بطاقتان دائمتان تُحمَّلان من سجل الأطراف (طلب المالك) ── */
+  T("★ بطاقتا السجل التجاري والرقم الضريبي دائمتان (لا شرطَ يخفيهما)",
+    src.includes('السجل التجاري للمورد') && src.includes('الرقم الضريبي للمورد') &&
+    !/v\.vendorVatNo\?'<div class="ii"/.test(src) && !/v\.vendorCrNo\?'<div class="ii"/.test(src));
+  T("★ وتُحمَّلان من سجل الأطراف لحظةَ الطباعة إن خلت اللقطة", src.includes("_vendorFromRegistry(v.vendorName)"));
+  T("تعرّض _matchVendor", typeof V._matchVendor === "function");
+  if (typeof V._matchVendor === "function") {
+    const reg = [
+      { id: "VND-1", name: "مؤسسة اتراك التجارية", legal: { crNumber: "1010101010", vatNumber: "300123456700003" } },
+      { id: "VND-2", name: "عالم الريتاج" },
+    ];
+    T("★ الاسمُ اليدويّ يطابق السجلَّ بالتطبيع (همزة · تاء مربوطة · مسافات · تشكيل)",
+      (V._matchVendor(reg, "  مؤسسه أتراك   التجاريه ") || {}).id === "VND-1" &&
+      (V._matchVendor(reg, "عالم الريتاج") || {}).id === "VND-2");
+    T("★ ولا تخمينَ جزئياً — المطابقةُ تامةٌ بعد التطبيع أو لا شيء",
+      V._matchVendor(reg, "اتراك") === null && V._matchVendor(reg, "") === null);
+  }
   T("★ القالب لا يعرّف `.ic` بنفسه — الحقنُ مصدرُ المقاس الوحيد",
     !/\.ic\s*\{/.test(src) && !/\.ic svg\{/.test(src));
   T("زرُّ التفاصيل بلا إيموجي بدوره", HTML.includes('"أمر الشراء للمورد "+_ic("checkCircle"'));
