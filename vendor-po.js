@@ -46,7 +46,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2840";
+const MODULE_BUILD = "v18.9.2842";
 
 /* ════════ الثوابت ════════ */
 // الأدوار التي تُصدر — المشتريات والأدمن (قرار المالك)
@@ -301,8 +301,11 @@ function _render(p, gate){
       '<td style="text-align:center"><input type="number" class="form-input vpo-qty" value="'+(Number(it.qty)||0)+'" min="0" step="any" style="width:84px;text-align:center" oninput="vendorPO.recalc()"></td>'+
       '<td style="text-align:center">'+_e(it.unit||"—")+'</td>'+
       '<td style="text-align:center"><input type="number" class="form-input vpo-price" value="'+(Number(it.unitCost)||0)+'" min="0" step="any" style="width:104px;text-align:center" oninput="vendorPO.recalc()"></td>'+
-      '<td style="text-align:center" class="vpo-vat mono">—</td>'+
-      '<td style="text-align:center;font-weight:800" class="vpo-line mono">—</td>'+
+      /* «mono» في app.css تحمل display:inline-block — على <td> تُخرج الخليةَ من
+         تخطيط الجدول فتطفو الأرقام خارج أعمدتها (بلاغ المالك v18.9.2841).
+         فالخطُّ هنا سطريٌّ على الخلية، والصنفُ لا يُوضَع على خلايا جدولٍ أبداً. */
+      '<td style="text-align:center;font-family:\'JetBrains Mono\',monospace" class="vpo-vat">—</td>'+
+      '<td style="text-align:center;font-weight:800;font-family:\'JetBrains Mono\',monospace" class="vpo-line">—</td>'+
     '</tr>';
   }).join("");
 
@@ -330,9 +333,9 @@ function _render(p, gate){
         '<thead><tr><th style="text-align:center">✔</th><th class="th-r">البند</th><th>الكمية</th><th>الوحدة</th><th>سعر الوحدة (قبل الضريبة)</th><th>ض.ق.م 15%</th><th>إجمالي البند</th></tr></thead>'+
         '<tbody>'+(rows||'<tr><td colspan="7" style="text-align:center;padding:14px">لا بنود للشراء</td></tr>')+'</tbody>'+
         '<tfoot><tr style="font-weight:800"><td colspan="4" style="text-align:left">الإجمالي</td>'+
-          '<td style="text-align:center" class="mono" id="vpo-net">—</td>'+
-          '<td style="text-align:center" class="mono" id="vpo-vatsum">—</td>'+
-          '<td style="text-align:center" class="mono" id="vpo-total">—</td></tr></tfoot>'+
+          '<td style="text-align:center;font-family:\'JetBrains Mono\',monospace" id="vpo-net">—</td>'+
+          '<td style="text-align:center;font-family:\'JetBrains Mono\',monospace" id="vpo-vatsum">—</td>'+
+          '<td style="text-align:center;font-family:\'JetBrains Mono\',monospace" id="vpo-total">—</td></tr></tfoot>'+
       '</table></div></div>'+
     '<div class="d-sec" style="margin-top:12px"><div class="d-sec-label">الشروط</div>'+
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">'+
