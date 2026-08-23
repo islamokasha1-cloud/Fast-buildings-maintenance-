@@ -10130,8 +10130,27 @@ function contractsPhase1() {
     T("★★★ وبطاقةُ العقد تقول: له مستخلصٌ وعند مَن يقف — من البوّابات نفسِها",
       /function ctrTileHTML[\s\S]{0,900}openExtractOf\(_exts, c\.id\)[\s\S]{0,700}extGateOwner\(openE\.status\)/.test(src) &&
       /ct-tile-ext/.test(src));
-    T("★ وشريطُ صفحة العقود يعدّ المستخلصاتِ المفتوحة",
-      /مستخلصاتٌ مفتوحة/.test(src) && /openExts=all\.filter/.test(src));
+    T("★ وشريطُ صفحة العقود يعدّ المستخلصاتِ المفتوحة — من نطاق تبويب الجاري",
+      /مستخلصاتٌ مفتوحة/.test(src) && /openExts=scoped\.filter/.test(src));
+    /* ── تبويبا صفحة العقود (طلبُ المالك): المنتهي لا يختلط بالجاري ── */
+    T("★★ ctrTabOf: الجاري (توقيعٌ · سارٍ · موقوف) في تبويبه — والمنتهي (ضمانٌ · مقفلٌ · مفسوخ) في تبويبه",
+      C._ctrTabOf({ status: "ctr_pending_signature" }) === "running" &&
+      C._ctrTabOf({ status: "ctr_active" })     === "running" &&
+      C._ctrTabOf({ status: "ctr_suspended" })  === "running" &&
+      C._ctrTabOf({ status: "ctr_completed" })  === "finished" &&
+      C._ctrTabOf({ status: "ctr_closed" })     === "finished" &&
+      C._ctrTabOf({ status: "ctr_terminated" }) === "finished");
+    T("★★ والقائمةُ والتبويبُ والشريطُ تقرأ الإسنادَ نفسَه ctrTabOf",
+      /var scoped=all\.filter\(function\(c\)\{ return ctrTabOf\(c\)===tab; \}\);/.test(src) &&
+      /all\.filter\(function\(c\)\{ return ctrTabOf\(c\)===t\.key; \}\)\.length/.test(src));
+    T("★ ولتبويب المنتهي شريطُه: ضمانٌ ومقفلٌ ومفسوخٌ وقيمةٌ وإجمالي",
+      /بانتظار انتهاء الضمان/.test(src) && /مقفلة — أُفرِج عن المحتجز<\/span>/.test(src) &&
+      /مفسوخة/.test(src));
+    /* ترويسةُ البطاقة: الاسمُ لا تعصره شارةٌ طويلة — يلتفّ الشريطُ ولا يضيق الاسم */
+    T("★ وترويسةُ البطاقة تلتفّ بدل عصر الاسم (flex-wrap + min-width للاسم + التفافُ الشارة)",
+      /\.ct-tile-top\{[^}]*flex-wrap:wrap\}/.test(src) &&
+      /\.ct-tile-name\{[^}]*min-width:56%\}/.test(src) &&
+      /\.ct-tile-top \.badge\{[^}]*white-space:normal[^}]*\}/.test(src));
   }
 
   /* ════════════════════════════════════════════════════════════

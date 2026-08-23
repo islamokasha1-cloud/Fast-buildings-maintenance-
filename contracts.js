@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2830";
+var MODULE_BUILD = "v18.9.2832";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -5682,7 +5682,7 @@ function doPay(){
 /* ════════════════════════════════════════════════════════════════════
    ٧-ج) العقود — الواجهة  [المرحلة ٣]
    ════════════════════════════════════════════════════════════════════ */
-var _cFilter = { q:"", status:"" };
+var _cFilter = { q:"", status:"", tab:"running" };
 var _cOpen   = null;
 var _cTab    = "overview";
 
@@ -5729,9 +5729,24 @@ function paintCtrs(){
   el.innerHTML = _cOpen ? ctrCardHTML(_cOpen) : ctrListHTML();
 }
 
+/* ── تبويبا الصفحة: الجاري والمنتهي لا يختلطان (طلبُ المالك) ──
+   المنتهي (منتهٍ بانتظار الضمان · مقفل · مفسوخ) سجلٌّ يُرجَع إليه لا عملٌ ينتظر،
+   وخلطُه بالجاري يدفن ما يحتاج المتابعةَ فعلاً بين ما أُغلق. `ctrTabOf` دالةٌ
+   نقيةٌ واحدةٌ يقرؤها العدُّ والقائمةُ والشريطُ معاً — نهجُ `reqTabOf` نفسُه. */
+var CTR_TABS = [
+  { key:"running",  lbl:"العقود الجارية",  icon:"briefcase" },
+  { key:"finished", lbl:"العقود المنتهية", icon:"lock" }
+];
+var CTR_FINISHED = ["ctr_completed","ctr_closed","ctr_terminated"];
+function ctrTabOf(c){
+  return CTR_FINISHED.indexOf((c||{}).status) !== -1 ? "finished" : "running";
+}
+function ctrCurTab(){ return _cFilter.tab==="finished" ? "finished" : "running"; }
+
 function ctrListHTML(){
-  var all=_ctrs.slice(), q=normName(_cFilter.q);
-  var list=all.filter(function(c){
+  var all=_ctrs.slice(), q=normName(_cFilter.q), tab=ctrCurTab();
+  var scoped=all.filter(function(c){ return ctrTabOf(c)===tab; });
+  var list=scoped.filter(function(c){
     if(_cFilter.status && c.status!==_cFilter.status) return false;
     if(q){
       var hay=normName(c.id)+" "+normName(c.vendorName)+" "+normName(c.title)+" "+normName(_projName(c));
@@ -5739,25 +5754,51 @@ function ctrListHTML(){
     }
     return true;
   });
-  var live=all.filter(function(c){ return c.status==="ctr_active"; });
-  var liveVal=live.reduce(function(s,c){ return s+contractValue(c); },0);
-  var susp=all.filter(function(c){ return c.status==="ctr_suspended"; }).length;
-  var openExts=all.filter(function(c){ return !!openExtractOf(_exts, c.id); }).length;
 
   var head=headHTML("العقود","الالتزاماتُ النافذة — قيمتُها ومدّتُها ومستخلصاتُها.","", "briefcase");
-  var strip='<div class="ct-strip">'+
-    '<div class="ct-stat"><span class="l">عقودٌ سارية</span><span class="v">'+live.length+'</span></div>'+
-    '<div class="ct-stat"><span class="l">قيمتُها (ر.س)</span><span class="v">'+money0(liveVal)+'</span></div>'+
-    '<div class="ct-stat'+(openExts?' warn':'')+'"><span class="l">مستخلصاتٌ مفتوحة</span><span class="v">'+openExts+'</span></div>'+
-    '<div class="ct-stat'+(susp?' warn':'')+'"><span class="l">موقوفة</span><span class="v">'+susp+'</span></div>'+
-    '<div class="ct-stat"><span class="l">الإجمالي</span><span class="v">'+all.length+'</span></div>'+
-  '</div>';
 
+  /* شريطُ التبويبين — العدُّ من `ctrTabOf` نفسِها فلا يَعِد تبويبٌ بما لا يعرضه. */
+  var tabsBar='<div class="ct-tabs">'+CTR_TABS.map(function(t){
+    var n=all.filter(function(c){ return ctrTabOf(c)===t.key; }).length;
+    return '<button type="button" class="ct-tab'+(tab===t.key?" on":"")+'" onclick="contracts.ctrsTab(\''+t.key+'\')">'+
+      _icn(t.icon,"ic-sm")+' '+t.lbl+' <span class="num">'+n+'</span></button>';
+  }).join("")+'</div>';
+
+  /* لكلِّ تبويبٍ شريطُه: الجاري يسأل «ماذا ينتظرني؟»، والمنتهي «كيف انتهى؟». */
+  var strip;
+  if(tab==="finished"){
+    var wait=scoped.filter(function(c){ return c.status==="ctr_completed"; }).length;
+    var closed=scoped.filter(function(c){ return c.status==="ctr_closed"; }).length;
+    var term=scoped.filter(function(c){ return c.status==="ctr_terminated"; }).length;
+    var finVal=scoped.reduce(function(s,c){ return s+contractValue(c); },0);
+    strip='<div class="ct-strip">'+
+      '<div class="ct-stat'+(wait?' warn':'')+'"><span class="l">بانتظار انتهاء الضمان</span><span class="v">'+wait+'</span></div>'+
+      '<div class="ct-stat"><span class="l">مقفلة — أُفرِج عن المحتجز</span><span class="v">'+closed+'</span></div>'+
+      '<div class="ct-stat'+(term?' bad':'')+'"><span class="l">مفسوخة</span><span class="v">'+term+'</span></div>'+
+      '<div class="ct-stat"><span class="l">قيمتُها (ر.س)</span><span class="v">'+money0(finVal)+'</span></div>'+
+      '<div class="ct-stat"><span class="l">الإجمالي</span><span class="v">'+scoped.length+'</span></div>'+
+    '</div>';
+  } else {
+    var live=scoped.filter(function(c){ return c.status==="ctr_active"; });
+    var liveVal=live.reduce(function(s,c){ return s+contractValue(c); },0);
+    var susp=scoped.filter(function(c){ return c.status==="ctr_suspended"; }).length;
+    var openExts=scoped.filter(function(c){ return !!openExtractOf(_exts, c.id); }).length;
+    strip='<div class="ct-strip">'+
+      '<div class="ct-stat"><span class="l">عقودٌ سارية</span><span class="v">'+live.length+'</span></div>'+
+      '<div class="ct-stat"><span class="l">قيمتُها (ر.س)</span><span class="v">'+money0(liveVal)+'</span></div>'+
+      '<div class="ct-stat'+(openExts?' warn':'')+'"><span class="l">مستخلصاتٌ مفتوحة</span><span class="v">'+openExts+'</span></div>'+
+      '<div class="ct-stat'+(susp?' warn':'')+'"><span class="l">موقوفة</span><span class="v">'+susp+'</span></div>'+
+      '<div class="ct-stat"><span class="l">الإجمالي</span><span class="v">'+scoped.length+'</span></div>'+
+    '</div>';
+  }
+
+  /* خياراتُ الحالة من التبويب نفسِه — خيارٌ لا يقع فيه وعدٌ بقائمةٍ فارغة. */
+  var stOf=function(k){ return (CTR_FINISHED.indexOf(k)!==-1) === (tab==="finished"); };
   var filters='<div class="ct-filters">'+
     '<input class="form-input ct-search" id="ct-c-q" placeholder="ابحث برقم العقد أو الطرف أو المشروع" value="'+_esc(_cFilter.q)+'" oninput="contracts.filterCtrs(\'q\',this.value)">'+
     '<select class="form-input" onchange="contracts.filterCtrs(\'status\',this.value)">'+
       '<option value="">كل الحالات</option>'+
-      Object.keys(CTR_STATUS).map(function(k){ return '<option value="'+k+'"'+(_cFilter.status===k?' selected':'')+'>'+_esc(CTR_STATUS[k])+'</option>'; }).join("")+
+      Object.keys(CTR_STATUS).filter(stOf).map(function(k){ return '<option value="'+k+'"'+(_cFilter.status===k?' selected':'')+'>'+_esc(CTR_STATUS[k])+'</option>'; }).join("")+
     '</select><div></div>'+
   '</div>';
 
@@ -5773,12 +5814,16 @@ function ctrListHTML(){
       '<div class="ct-empty-s">العقدُ يُولَد من طلبِ تعاقدٍ معتمَد — اعتمِد طلباً ثم اضغط «إنشاء العقد» من بطاقته.</div>'+
       '<button class="btn btn-ghost btn-sm" style="margin-top:14px" onclick="showPage(\'contract-requests\')">'+_icn("fileText","ic-sm")+' طلبات التعاقد</button>'+
     '</div>';
+  } else if(!scoped.length){
+    /* التبويبُ فارغٌ والبياناتُ موجودة — يُقال معناه لا «لا نتائج» تُقرأ عطلاً. */
+    body='<div class="card" style="text-align:center;padding:26px 18px;color:var(--muted);font-size:13px">'+
+      (tab==="finished" ? "لا عقودَ منتهيةً بعد — ما يُقفَل أو يُفسَخ ينتقل إلى هنا." : "لا عقودَ جاريةً — المنتهيةُ في تبويبها.")+'</div>';
   } else if(!list.length){
     body='<div class="card" style="text-align:center;padding:26px 18px;color:var(--muted);font-size:13px">لا نتائج تطابق البحث.</div>';
   } else {
     body='<div class="ct-grid">'+list.map(ctrTileHTML).join("")+'</div>';
   }
-  return head+strip+filters+body;
+  return head+tabsBar+strip+filters+body;
 }
 
 /* بلاغُ المالك: «العقدُ لا يُظهر أنّ له مستخلصاً ولا عند مَن يقف». وكان المستخلصُ
@@ -6898,6 +6943,15 @@ function doCancelChange(){
 function filterCtrs(k,v){
   _cFilter[k]=v||""; paintCtrs();
   if(k==="q"){ var i=document.getElementById("ct-c-q"); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length,i.value.length); }catch(e){} } }
+}
+/* تبديلُ تبويب القائمة يُصفّر فلترَ الحالة وحدَه — حالاتُ التبويبين لا تتقاطع،
+   ويبقى البحثُ فهو سؤالُ المستخدم لا سؤالَ التبويب. (الاسمُ `ctrsTab` لأن
+   `ctrTab` محجوزٌ لتبويبات بطاقة العقد المفتوح.) */
+function ctrsTab(t){
+  var to = t==="finished" ? "finished" : "running";
+  if(to===ctrCurTab()) return;
+  _cFilter.tab=to; _cFilter.status="";
+  paintCtrs();
 }
 function openCtr(id){ _cOpen=id; _cTab="overview"; _extDraft=null; _extOpen=null; _clEdit=null; _chgDraft=null; _chgOpen=null; paintCtrs(); }
 function backToCtrs(){ _cOpen=null; paintCtrs(); }
@@ -8116,8 +8170,13 @@ function injectCSS(){
 ".ct-tile{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 15px;box-shadow:var(--shadow);cursor:pointer;position:relative;overflow:hidden;transition:transform .16s,box-shadow .16s}",
 ".ct-tile::before{content:'';position:absolute;inset-block:0;inset-inline-start:0;width:4px;background:var(--rail,var(--sla-ok))}",
 ".ct-tile:hover{transform:translateY(-3px);box-shadow:0 14px 32px rgba(20,30,55,.13)}",
-".ct-tile-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:5px}",
-".ct-tile-name{font-size:14.5px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary);line-height:1.35}",
+/* ترويسةُ البطاقة (بلاغُ المالك): شارةُ حالةٍ طويلة («مقفل — أُفرِج عن المحتجز»)
+   كانت تعصر الاسمَ إلى عمودٍ ضيّقٍ فيتكسّر كلمةً كلمة. العلاج بنيويٌّ لا قصّاً:
+   الاسمُ لا ينزل تحت ٥٦٪ من العرض، والشارةُ التي لا تسَعُها البقيّةُ تنزل سطراً
+   كاملاً وحدَها — وتلتفّ داخلياً بدل nowrap العامة فلا تفيض خارج البطاقة. */
+".ct-tile-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px 8px;margin-bottom:5px;flex-wrap:wrap}",
+".ct-tile-name{font-size:14.5px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary);line-height:1.35;flex:1 1 auto;min-width:56%}",
+".ct-tile-top .badge{flex:0 0 auto;max-width:100%;white-space:normal;text-align:start;line-height:1.4}",
 ".ct-tile-kind{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:10px}",
 ".ct-dot{opacity:.5}",
 /* سطرُ المستخلص على بطاقة العقد — بألوان SLA نفسِها: منتظِرٌ (تنبيه) · منجَزٌ (سلامة) */
@@ -8409,7 +8468,7 @@ window.contracts = {
   _crqDraftState: crqDraftState, _crqDraftContract: crqDraftContract,
   // العقود [المرحلة ٣]
   renderCtrs: renderCtrs, startCtrSync: startCtrSync, stopCtrSync: stopCtrSync,
-  filterCtrs: filterCtrs, openCtr: openCtr, backToCtrs: backToCtrs, ctrTab: ctrTab,
+  filterCtrs: filterCtrs, openCtr: openCtr, backToCtrs: backToCtrs, ctrTab: ctrTab, ctrsTab: ctrsTab,
   transit: transit, makeContract: makeContract, doDeleteCtr: doDeleteCtr,
   openReqFromCtr: openReqFromCtr, openCtrFromReq: openCtrFromReq,
   openVendorFrom: openVendorFrom,
@@ -8530,6 +8589,7 @@ window.contracts = {
   _crqIsBounced: crqIsBounced,
   _reqTabOf: reqTabOf,
   _reqStatSet: reqStatSet,
+  _ctrTabOf: ctrTabOf,
   _normalizeProjectRef: normalizeProjectRef,
   _docProjectName: docProjectName,
   _docProjectKey: docProjectKey,
