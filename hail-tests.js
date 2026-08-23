@@ -12677,6 +12677,20 @@ function vendorPOIssuance() {
       src.includes("الاعتمادات الداخلية") && src.includes("لم يعتمد بعد"));
   }
 
+  /* ── أيقونات svg من طقم المنصّة لا إيموجي (طلب المالك v18.9.2846) ──
+     عناوينُ أقسام الوثيقة وأزرارُ النافذة تكتب أيقوناتها بـ_ic — ومقاسُ `.ic`
+     في المطبوع يحقنه _openPrintWindow من مصدرٍ واحد، فالقالبُ لا يعرّف `.ic`
+     بنفسه (نفس قاعدة قالبَي طلب الشراء — v18.9.2841). الإيموجي يبقى حيث هو
+     عرفُ المنصّة: رسائلُ toast وأيقوناتُ الـtimeline (خريطة statusIcons). */
+  T("★ لا إيموجي في عناوين الوثيقة وأزرار النافذة — أيقونات _ic",
+    !src.includes("📋") && !src.includes("📜") && !src.includes("🖊") && !src.includes("🖨") &&
+    src.includes('_icx("clipboardList"') && src.includes('_icx("scrollText"') &&
+    src.includes('_icx("clipboardCheck"') && src.includes('_icx("printer"') && src.includes('_icx("send"'));
+  T("★ 📤 بقي في قيد الـtimeline وحده (عرفُ السجل إيموجي)", (src.match(/📤/g) || []).length === 1);
+  T("★ القالب لا يعرّف `.ic` بنفسه — الحقنُ مصدرُ المقاس الوحيد",
+    !/\.ic\s*\{/.test(src) && !/\.ic svg\{/.test(src));
+  T("زرُّ التفاصيل بلا إيموجي بدوره", HTML.includes('"أمر الشراء للمورد "+_ic("checkCircle"'));
+
   /* ── «mono» لا تُوضَع على خليّة جدولٍ أبداً — في أيّ ملف ──
      الصنفُ في app.css يحمل `display:inline-block`، وعلى `<td>` يُخرج الخليّةَ من
      تخطيط الجدول فتطفو الأرقامُ خارج أعمدتها **بلا خطأٍ واحدٍ في وحدة التحكّم** —
