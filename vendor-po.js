@@ -46,7 +46,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2851";
+const MODULE_BUILD = "v18.9.2853";
 
 /* ════════ الثوابت ════════ */
 // الأدوار التي تُصدر — المشتريات والأدمن (قرار المالك)
@@ -631,7 +631,7 @@ function print(poId){
     }).join("")+'</div>' : '';
 
   var termsHtml = v.terms ? '<div class="st">'+_icx("scrollText","ic-sm")+' شروط أمر الشراء</div>'+
-    '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:11.5px;white-space:pre-line;line-height:1.9">'+_e(v.terms)+'</div>' : '';
+    '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:11px;white-space:pre-line;line-height:1.75">'+_e(v.terms)+'</div>' : '';
   var notesHtml = v.notes ? '<div style="background:#f0f4ff;border:1px solid #c7d7f5;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:11.5px;white-space:pre-line"><b>ملاحظات:</b> '+_e(v.notes)+'</div>' : '';
 
   /* رقمُ الشريط لاتينيٌّ صِرف («Rev 2» لا «مراجعة 2») — خلطُ العربية بالرقم داخل
@@ -667,7 +667,7 @@ function print(poId){
       '<div class="ii"><div class="il">موعد التوريد المطلوب</div><div class="iv">'+_fmtD(v.deliveryDate)+'</div></div>'+
     '</div>'+
     '<div class="st">'+_icx("clipboardList","ic-sm")+' البنود المطلوب توريدها ('+(v.items||[]).length+')</div>'+
-    '<table>'+
+    '<table class="items">'+
       '<thead><tr><th style="width:24px">#</th><th style="text-align:right">البند</th><th>الكمية</th><th>الوحدة</th><th>سعر الوحدة</th><th>ض.ق.م 15%</th><th>الإجمالي</th></tr></thead>'+
       '<tbody>'+rows+
         '<tr style="background:#f0f4ff;font-weight:800">'+
@@ -707,14 +707,19 @@ function print(poId){
     '.subtitle{font-size:11px;color:#64748b}'+
     '.company-logo{width:54px;height:54px;object-fit:contain}'+
     '.doc-no{font-family:monospace;font-size:13px;font-weight:800;color:#1b3a6b}'+
-    '.ig{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:10px}'+
-    '.ii{background:#f8fafc;border-radius:6px;padding:5px 8px;border:1px solid #e2e8f0}'+
-    '.il{font-size:9px;font-weight:700;color:#64748b;margin-bottom:1px}'+
-    '.iv{font-size:11px;font-weight:700;color:#1a202c}'+
-    '.st{font-size:13px;font-weight:800;color:#1b3a6b;margin:13px 0 7px;padding-bottom:4px;border-bottom:2px solid #e2e8f0}'+
-    'table{width:100%;border-collapse:collapse;font-size:11px}'+
-    'table th,table td{border:1px solid #dde3ed;padding:5px 7px}'+
-    'table thead tr{background:#1b3a6b;color:#fff}'+
+    /* بطاقاتُ المعلومات ٤ أعمدة مضغوطة — كانت ٣ أعمدةً بثلاثة صفوفٍ عريضة تلتهم
+       ~٥ سم فترحّل التوقيعاتِ للصفحة الثانية (بلاغ المالك الثالث). */
+    '.ig{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:8px}'+
+    '.ii{background:#f8fafc;border-radius:6px;padding:4px 7px;border:1px solid #e2e8f0}'+
+    '.il{font-size:8.5px;font-weight:700;color:#64748b;margin-bottom:1px}'+
+    '.iv{font-size:10.5px;font-weight:700;color:#1a202c;line-height:1.5}'+
+    '.st{font-size:13px;font-weight:800;color:#1b3a6b;margin:11px 0 6px;padding-bottom:4px;border-bottom:2px solid #e2e8f0}'+
+    /* أنماطُ الجدول محصورةٌ في جدول البنود (.items) — قاعدةٌ عامةٌ على `table thead`
+       كانت تلوّن **صفَّ ترويسة جدول الورقة الرسمية** (`.pg` جدولٌ بـthead يحجز مساحةَ
+       الترويسة وحاشيتُه شفافة) شريطاً كحلياً أسفل الترويسة على كل صفحة (بلاغ المالك). */
+    '.items{width:100%;border-collapse:collapse;font-size:11px}'+
+    '.items th,.items td{border:1px solid #dde3ed;padding:5px 7px}'+
+    '.items thead tr{background:#1b3a6b;color:#fff}'+
     '.appr{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:8px;break-inside:avoid}'+
     '.ap{border:1px solid #dde3ed;border-radius:8px;padding:8px;text-align:center}'+
     '.ap-l{font-size:10px;color:#64748b;font-weight:700}'+
@@ -723,9 +728,9 @@ function print(poId){
     '.ap-d{font-size:10px;color:#64748b;font-family:monospace}'+
     '.dochead{margin-top:3mm}'+
     '.sigblk{break-inside:avoid;page-break-inside:avoid}'+
-    '.sig{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:26px;text-align:center;font-size:11px}'+
+    '.sig{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:18px;text-align:center;font-size:11px}'+
     '.sig div{border-top:1.5px solid #94a3b8;padding-top:6px}'+
-    '.pf{margin-top:14px;padding-top:8px;border-top:1px solid #dde3ed;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between}';
+    '.pf{margin-top:10px;padding-top:7px;border-top:1px solid #dde3ed;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between}';
   var lhCss = (lhOn && window.contracts && typeof contracts._letterheadCSS==="function") ? contracts._letterheadCSS() : "";
   var wrapped = (lhOn && window.contracts && typeof contracts._letterheadWrap==="function") ? contracts._letterheadWrap(inner, lh) : inner;
 
