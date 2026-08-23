@@ -12687,6 +12687,20 @@ function vendorPOIssuance() {
     src.includes('_icx("clipboardList"') && src.includes('_icx("scrollText"') &&
     src.includes('_icx("clipboardCheck"') && src.includes('_icx("printer"') && src.includes('_icx("send"'));
   T("★ 📤 بقي في قيد الـtimeline وحده (عرفُ السجل إيموجي)", (src.match(/📤/g) || []).length === 1);
+
+  /* ── ترقيمُ صفحات الوثيقة واسمُ ملف الحفظ (بلاغ المالك بملف PDF حقيقيّ) ──
+     التوقيعاتُ رحّلت وحدَها إلى صفحةٍ ثانيةٍ فارغة، وخانةُ «سداد المالية» انفردت
+     سطراً، واسمُ الملف المقترَح عند حفظ PDF كان مشوَّهاً (عنوانٌ عربيٌّ بشرطةٍ
+     طويلة). الذيلُ (اعتمادات + توقيعات + تذييل) كتلةٌ لا تنقسم، والخاناتُ صفٌّ
+     بعددها، والعنوانُ رقمُ الأمر وحده بحروفٍ لاتينية. */
+  T("★ ذيلُ الوثيقة كتلةٌ لا تنقسم بين صفحتين",
+    src.includes('<div class="tail">') && src.includes(".tail{break-inside:avoid;page-break-inside:avoid}") &&
+    /class="tail">'\+[\s\S]{0,80}apprHtml/.test(src));
+  T("★ خاناتُ الاعتمادات صفٌّ واحدٌ بعددها الفعلي",
+    src.includes("grid-template-columns:repeat('+signoffs.length+',1fr)"));
+  T("★ عنوانُ نافذة الطباعة = رقمُ الأمر وحده (اسمُ الملف المقترَح عند حفظ PDF)",
+    src.includes("'<title>'+_e(v.docNo+(v.rev>1?\"-Rev\"+v.rev:\"\"))+'</title>'") &&
+    !src.includes("<title>أمر شراء"));
   T("★ القالب لا يعرّف `.ic` بنفسه — الحقنُ مصدرُ المقاس الوحيد",
     !/\.ic\s*\{/.test(src) && !/\.ic svg\{/.test(src));
   T("زرُّ التفاصيل بلا إيموجي بدوره", HTML.includes('"أمر الشراء للمورد "+_ic("checkCircle"'));

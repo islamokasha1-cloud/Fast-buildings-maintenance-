@@ -46,7 +46,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2847";
+const MODULE_BUILD = "v18.9.2849";
 
 /* ════════ الثوابت ════════ */
 // الأدوار التي تُصدر — المشتريات والأدمن (قرار المالك)
@@ -585,7 +585,8 @@ function print(poId){
   // الاعتمادات الداخلية أسفل الوثيقة (طلب المالك) — «لم يعتمد بعد» تُطبع صراحةً
   // كما في ورقة المستخلص، فمن يقرأ الورقة يعرف أين يقف الطلب لا يستنتجه من فراغ.
   var signoffs = poSignoffs(p);
-  var apprHtml = signoffs.length ? '<div class="st">'+_icx("clipboardCheck","ic-sm")+' الاعتمادات الداخلية</div><div class="appr">'+
+  // الخانات صفٌّ واحدٌ دائماً بعددها الفعليّ — auto-fit كانت تكسر الخامسة سطراً وحدها
+  var apprHtml = signoffs.length ? '<div class="st">'+_icx("clipboardCheck","ic-sm")+' الاعتمادات الداخلية</div><div class="appr" style="grid-template-columns:repeat('+signoffs.length+',1fr)">'+
     signoffs.map(function(g){
       return '<div class="ap"><div class="ap-l">'+_e(g.lbl)+'</div>'+
         '<div class="ap-n">'+(g.by?_e(g.by):'<span class="ap-w">لم يعتمد بعد</span>')+'</div>'+
@@ -627,13 +628,17 @@ function print(poId){
     '</table>'+
     '<div style="margin-top:6px;font-size:11px;color:#475569">الإجمالي شامل ضريبة القيمة المضافة 15٪: <b style="direction:ltr;display:inline-block;font-family:monospace">'+_fmtN(v.total)+'</b> ر.س</div>'+
     termsHtml+notesHtml+
+    /* ذيلُ الوثيقة كتلةٌ واحدةٌ لا تنقسم بين صفحتين (بلاغ المالك: التوقيعات رحّلت
+       وحدها إلى صفحةٍ ثانيةٍ فارغة) — إن ضاقت الصفحةُ انتقل الذيلُ كلُّه معاً. */
+    '<div class="tail">'+
     apprHtml+
     '<div class="sig">'+
       '<div>مسؤول المشتريات<br><b>'+_e(v.issuedBy||"")+'</b></div>'+
       '<div>ختم وتوقيع الشركة<br><b>&nbsp;</b></div>'+
       '<div>استلام المورد (الاسم والتوقيع)<br><b>&nbsp;</b></div>'+
     '</div>'+
-    '<div class="pf foot"><span>طُبع بتاريخ: '+_fmtD(new Date().toISOString())+'</span><span>'+_e(v.docNo)+'</span><span>شركة المباني السريعة للمقاولات</span></div>';
+    '<div class="pf foot"><span>طُبع بتاريخ: '+_fmtD(new Date().toISOString())+'</span><span>'+_e(v.docNo)+'</span><span>شركة المباني السريعة للمقاولات</span></div>'+
+    '</div>';
 
   var baseCss =
     '@page{size:A4 portrait;margin:12mm 14mm}'+
@@ -661,14 +666,18 @@ function print(poId){
     '.ap-n{font-size:12px;font-weight:800;margin-top:3px}'+
     '.ap-w{color:#b45309;font-weight:700;font-size:10.5px}'+
     '.ap-d{font-size:10px;color:#64748b;font-family:monospace}'+
-    '.sig{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:36px;text-align:center;font-size:11px}'+
+    '.tail{break-inside:avoid;page-break-inside:avoid}'+
+    '.sig{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:26px;text-align:center;font-size:11px}'+
     '.sig div{border-top:1.5px solid #94a3b8;padding-top:6px}'+
-    '.pf{margin-top:16px;padding-top:8px;border-top:1px solid #dde3ed;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between}';
+    '.pf{margin-top:14px;padding-top:8px;border-top:1px solid #dde3ed;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between}';
   var lhCss = (lhOn && window.contracts && typeof contracts._letterheadCSS==="function") ? contracts._letterheadCSS() : "";
   var wrapped = (lhOn && window.contracts && typeof contracts._letterheadWrap==="function") ? contracts._letterheadWrap(inner, lh) : inner;
 
   var html='<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">'+
-    '<title>أمر شراء — '+_e(v.docNo)+'</title>'+
+    /* عنوانُ النافذة هو اسمُ الملف الذي يقترحه المتصفّح عند «حفظ PDF» (طلب المالك:
+       يُحفَظ باسمه) — رقمُ الأمر وحده بحروفٍ لاتينية، فالعربيةُ والشَّرطةُ الطويلة
+       كانتا تُفسدان الاسمَ المقترَح فيكتبه المستخدمُ يدوياً. */
+    '<title>'+_e(v.docNo+(v.rev>1?"-Rev"+v.rev:""))+'</title>'+
     '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">'+
     '<style>'+baseCss+lhCss+'</style></head><body>'+wrapped+'</body></html>';
 
