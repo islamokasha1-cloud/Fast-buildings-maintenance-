@@ -1303,44 +1303,73 @@ await page.screenshot({ path: `${SHOTS}/16-manual-request-card.png` });
 
 await page.evaluate(() => window.contracts.backToReqs());
 await page.waitForTimeout(900);
-// ستةُ طلباتٍ باقيةٍ في القائمة: المحوَّلُ لعقد · أمرُ الدفع · طلبُ تعديل البنود ·
-// طلبُ الإرجاع لمرحلة · طلبُ فصل المهام · المشروعُ اليدويّ. (وطلبا الحذف حُذفا فعلاً.)
-check('القائمةُ تعرض الطلبات وشريطَ «بانتظار دورك»',
-  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 6);
+/* ── تبويباتُ الصفحة (طلبُ المالك): أوامرُ الدفع تنفصل عن طلبات التعاقد، والمسدَّدُ
+   منها عن الذي تحت إجراء السداد، والمحوَّلُ لعقدٍ يغادر الصفحةَ إلى صفحة العقود.
+   ستةُ طلباتٍ باقيةٍ موزَّعةً: أربعةُ طلباتِ عقدٍ في تبويب «طلبات التعاقد» (المعتمَدُ
+   الذي سيصير عقداً · تعديلُ البنود · الإرجاعُ لمرحلة · اليدويّ)، وأمرا دفعٍ في
+   تبويب «أوامر الدفع» (1500 بانتظار السداد · 900 قيد الاعتماد). وطلبا الحذف حُذفا. */
+check('★★ التبويبُ الافتراضيُّ يعرض طلباتِ العقود وحدَها — أربعُ بطاقات',
+  await page.evaluate(() => document.querySelectorAll('#page-contract-requests .ct-tile').length) === 4);
+check('★★ ولا بطاقةَ أمرِ دفعٍ بين بطاقاته — أوامرُ الدفع انفصلت فعلاً',
+  await page.evaluate(() =>
+    ![...document.querySelectorAll('#page-contract-requests .ct-tile')].some(e => /أمر دفع/.test(e.textContent))));
+const tabsBar = await page.evaluate(() => {
+  const tb = [...document.querySelectorAll('#page-contract-requests .ct-tab')];
+  const rs = window.contracts.requests();
+  return {
+    n: tb.length,
+    txt: tb.map(e => e.textContent.replace(/\s+/g, ' ').trim()),
+    calc: ['requests', 'pay_orders', 'pay_paid'].map(k => rs.filter(r => window.contracts._reqTabOf(r) === k).length)
+  };
+});
+check('★★ شريطُ تبويباتٍ ثلاثة، وعددُ كلِّ تبويبٍ = المحسوبُ من reqTabOf نفسِها',
+  tabsBar.n === 3 &&
+  tabsBar.txt[0].includes('طلبات التعاقد') && tabsBar.txt[0].includes(String(tabsBar.calc[0])) &&
+  tabsBar.txt[1].includes('أوامر الدفع') && tabsBar.txt[1].includes(String(tabsBar.calc[1])) &&
+  tabsBar.txt[2].includes('مسدَّدة') && tabsBar.txt[2].includes(String(tabsBar.calc[2])),
+  JSON.stringify(tabsBar));
+const payTab = await page.evaluate(async () => {
+  window.contracts.reqTab('pay_orders');
+  await new Promise(r => setTimeout(r, 500));
+  const tiles = [...document.querySelectorAll('#page-contract-requests .ct-tile')];
+  const st = [...document.querySelectorAll('#page-contract-requests .ct-stat')];
+  const out = {
+    n: tiles.length,
+    allPay: tiles.every(e => /أمر دفع/.test(e.textContent)),
+    labels: st.map(e => (e.querySelector('.l') || {}).textContent || ''),
+    payCount: ((st[2] || document.createElement('div')).querySelector('.v') || {}).textContent || ''
+  };
+  return out;
+});
+check('★★ تبويبُ «أوامر الدفع» يعرض أمرَي الدفع وحدَهما', payTab.n === 2 && payTab.allPay, JSON.stringify(payTab));
+check('★★ وفيه بطاقةُ «بانتظار سداد المالية» تعدّ ما تحت إجراء السداد (أمرُ الـ1500)',
+  /بانتظار سداد المالية/.test(payTab.labels.join('|')) && payTab.payCount === '1', JSON.stringify(payTab));
+await page.screenshot({ path: `${SHOTS}/12f-pay-orders-tab.png`, fullPage: true });
+await page.evaluate(async () => { window.contracts.reqTab('requests'); await new Promise(r => setTimeout(r, 400)); });
 await page.screenshot({ path: `${SHOTS}/12-requests-list.png`, fullPage: true });
 
-/* ── v18.9ub: شريطُ الطلبات — «مُنجَزة» مجموعةٌ لها بطاقة، وفلترُ المشروع نطاقٌ ──
-   البلاغ (المالك): «تمّ سداد 1200 ريال — لماذا لا يظهر في بطاقة (قيمتها)؟» وكان
-   الرقمُ صحيحاً بتعريفٍ لا يقوله العنوان: «قيمتها» = قيمةُ ما **قيد الاعتماد** وحدَه،
-   والمسدَّدُ نهائيٌّ فخرج. فالفحصُ هنا على المعنى لا على الرسم: الرقمُ المرسوم على كل
-   بطاقةٍ = المحسوبُ من الطلبات، ونقرُها يعرض مجموعتَها بعينها. */
+/* شريطُ تبويب الطلبات: ثلاثُ بطاقاتٍ ولا «مُنجَزة» بينها — المُنجَزُ لم يعد في هذه
+   الصفحة أصلاً: المحوَّلُ في صفحة العقود، والمسدَّدُ في تبويبه الأرشيفيّ. */
 const stripNow = await page.evaluate(() => {
   const st = [...document.querySelectorAll('#page-contract-requests .ct-stat')];
-  const rs = window.contracts.requests();
-  const done = rs.filter(r => r.status === 'crq_converted' || r.status === 'crq_paid');
-  const m0 = n => (Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
   return {
     labels: st.map(e => (e.querySelector('.l') || {}).textContent || ''),
-    drawnDone: ((st[3] || {}).querySelector('.v') || {}).textContent || '',
-    drawnDoneVal: ((st[3] || {}).querySelector('.s') || {}).textContent || '',
-    calcDone: String(done.length),
-    calcDoneVal: 'قيمتها ' + m0(done.reduce((s, r) => s + (Number(r.value) || 0), 0)) + ' ر.س',
     btns: st.filter(e => e.tagName === 'BUTTON').length
   };
 });
-check('★ بطاقةُ «مُنجَزة — عقدٌ أو سداد» موجودةٌ في الشريط',
-  /مُنجَزة/.test(stripNow.labels.join('|')), stripNow.labels.join(' · '));
-check('بطاقاتُ الشريط أزرارٌ حقيقية (لوحةُ المفاتيح تبلغها)', stripNow.btns === 4, stripNow.btns + ' زرّ');
-// أرقامُ «مُنجَزة» تُفحَص بعد التحويل لعقدٍ (لا مُنجَزَ بعدُ هنا) — فحصُ صفرٍ بصفرٍ لا يُثبت شيئاً.
+check('★ شريطُه: بانتظار دورك · قيد الاعتماد · جاهزٌ للعقد — ولا بطاقةَ «مُنجَزة»',
+  stripNow.labels.length === 3 && /جاهزٌ للعقد/.test(stripNow.labels.join('|')) &&
+  !/مُنجَزة/.test(stripNow.labels.join('|')), stripNow.labels.join(' · '));
+check('بطاقاتُ الشريط أزرارٌ حقيقية (لوحةُ المفاتيح تبلغها)', stripNow.btns === 3, stripNow.btns + ' زرّ');
 
-/* فلترُ المشروع — نطاقٌ يقرؤه الشريطُ والقائمةُ معاً */
+/* فلترُ المشروع — نطاقٌ يقرؤه التبويبُ والشريطُ والقائمةُ معاً (التبويبُ الحالي: طلبات التعاقد) */
 const projFilter = await page.evaluate(async () => {
   const sel = document.querySelectorAll('#page-contract-requests .ct-filters select')[0];
   const opts = [...sel.options].map(o => ({ v: o.value, t: o.textContent }));
   const pick = opts.find(o => o.v);
   window.contracts.filterReqs('project', pick.v);
   await new Promise(r => setTimeout(r, 500));
-  const rs = window.contracts.requests();
+  const rs = window.contracts.requests().filter(r => window.contracts._reqTabOf(r) === 'requests');
   const key = r => (r.isCustomProject === true || r.projectId === '__OTHER__') ? '__CUSTOM__:' + String(r.projectName || '') : String(r.projectId || '');
   return {
     isProjSel: /كل المشاريع/.test(opts[0].t), nOpts: opts.length - 1,
@@ -1349,7 +1378,7 @@ const projFilter = await page.evaluate(async () => {
     scope: (document.querySelector('#page-contract-requests .ct-scope') || {}).textContent || '',
     stripWip: (document.querySelectorAll('#page-contract-requests .ct-stat')[1].querySelector('.v') || {}).textContent.trim(),
     wantWip: String(rs.filter(r => key(r) === pick.v)
-      .filter(r => ['crq_converted', 'crq_paid', 'crq_cancelled', 'crq_pm_rejected', 'crq_proc_returned', 'crq_finance_returned', 'crq_ceo_rejected'].indexOf(r.status) === -1).length)
+      .filter(r => ['crq_pending_pay', 'crq_cancelled', 'crq_pm_rejected', 'crq_proc_returned', 'crq_finance_returned', 'crq_ceo_rejected'].indexOf(r.status) === -1).length)
   };
 });
 check('★ فلترُ المشروع مضافٌ للصفحة وخياراتُه من الطلبات نفسِها',
@@ -1368,7 +1397,7 @@ const cleared = await page.evaluate(async () => {
   return { n: document.querySelectorAll('#page-contract-requests .ct-tile').length,
            scope: !!document.querySelector('#page-contract-requests .ct-scope') };
 });
-check('«مسح الفلاتر» يعيد كلَّ الطلبات ويُخفي سطرَ النطاق', cleared.n === 6 && !cleared.scope, cleared.n + ' بطاقة');
+check('«مسح الفلاتر» يعيد كلَّ طلبات التبويب ويُخفي سطرَ النطاق', cleared.n === 4 && !cleared.scope, cleared.n + ' بطاقة');
 
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });
 await page.waitForTimeout(600);
@@ -1405,38 +1434,26 @@ check('★ وورث القيمةَ المعتمَدة كما هي', conv.ctr.val
 check('★ والشروطُ التجارية انتقلت من الطلب، والمقدَّمُ اشتُقّ (١٠٪ من 33,600)',
   conv.ctr.ret === 5 && conv.ctr.adv === 3360, JSON.stringify({ ret: conv.ctr.ret, adv: conv.ctr.adv }));
 
-/* ── v18.9ub: «مُنجَزة» بعد أن صار في الشاشة مُنجَزٌ فعلاً ──
-   هنا وحدَه يُثبت الفحصُ شيئاً: طلبٌ خرج من «قيد الاعتماد» إلى عقد. الرقمُ المرسوم
-   على البطاقة وقيمتُها الفرعيةُ = المحسوبُ من الطلبات، ونقرُها يعرض مجموعتَها. */
+/* ── بعد التحويل: العقدُ المُنشأ يختفي من طلبات التعاقد (طلبُ المالك) ──
+   هنا وحدَه يُثبت الفحصُ شيئاً: طلبٌ صار عقداً فعلاً. بطاقتُه تغادر التبويبَ،
+   ويبقى سطرُ إحالةٍ يقول كم طلباً تحوّل وأين يُقرأ — فالغيابُ مفسَّرٌ لا صامت. */
 await page.evaluate(() => window.contracts.backToReqs());
 await page.waitForTimeout(700);
-const doneStrip = await page.evaluate(async () => {
-  const box = () => [...document.querySelectorAll('#page-contract-requests .ct-stat')][3];
-  const rs = window.contracts.requests();
-  const done = rs.filter(r => r.status === 'crq_converted' || r.status === 'crq_paid');
+const afterConv = await page.evaluate((id) => {
+  const tiles = [...document.querySelectorAll('#page-contract-requests .ct-tile')];
+  const pageTxt = (document.getElementById('page-contract-requests') || {}).textContent || '';
+  const conv = window.contracts.requests().filter(r => window.contracts._reqTabOf(r) === 'converted');
   const m0 = n => (Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
-  const drawn = (box().querySelector('.v') || {}).textContent.trim();
-  const drawnVal = (box().querySelector('.s') || {}).textContent.replace(/\s+/g, ' ').trim();
-  box().click();
-  await new Promise(r => setTimeout(r, 600));
-  const shown = document.querySelectorAll('#page-contract-requests .ct-tile').length;
-  const pressed = box().getAttribute('aria-pressed');
-  box().click();
-  await new Promise(r => setTimeout(r, 600));
-  return { drawn, calc: String(done.length), drawnVal,
-           calcVal: 'قيمتها ' + m0(done.reduce((s, r) => s + (Number(r.value) || 0), 0)) + ' ر.س',
-           shown, want: done.length, pressed,
-           offAgain: document.querySelectorAll('#page-contract-requests .ct-tile').length, total: rs.length };
-});
-check('★★ الرقمُ المرسوم على «مُنجَزة» = المحسوبُ من الطلبات',
-  doneStrip.drawn === doneStrip.calc && Number(doneStrip.calc) > 0,
-  `مرسوم=${doneStrip.drawn} محسوب=${doneStrip.calc}`);
-check('★★ وقيمتُها سطرٌ فرعيٌّ داخل بطاقتها = مجموعُ قيمِ مجموعتها',
-  doneStrip.drawnVal === doneStrip.calcVal, `مرسوم=${doneStrip.drawnVal} محسوب=${doneStrip.calcVal}`);
-check('★★ ونقرُها يعرض مجموعتَها بعينها', doneStrip.shown === doneStrip.want && doneStrip.pressed === 'true',
-  `عرض=${doneStrip.shown} مطلوب=${doneStrip.want}`);
-check('ونقرُها ثانيةً يُلغي التصفية', doneStrip.offAgain === doneStrip.total,
-  `${doneStrip.offAgain} من ${doneStrip.total}`);
+  return { n: tiles.length, hasConv: tiles.some(e => e.textContent.includes(id)),
+           refLine: /طلباً صار عقداً/.test(pageTxt), openCtrsBtn: /فتح العقود/.test(pageTxt),
+           calcConv: conv.length, valDrawn: pageTxt.includes(m0(conv.reduce((s, r) => s + (Number(r.value) || 0), 0))) };
+}, reqId);
+check('★★ الطلبُ المحوَّلُ لعقدٍ اختفى من تبويب الطلبات — بقيت ثلاثُ بطاقاتٍ جارية',
+  afterConv.n === 3 && afterConv.hasConv === false, JSON.stringify(afterConv));
+check('★★ وسطرُ إحالةٍ يعدّ المحوَّلَ وقيمتَه ويفتح صفحةَ العقود',
+  afterConv.refLine && afterConv.openCtrsBtn && afterConv.calcConv === 1 && afterConv.valDrawn,
+  JSON.stringify(afterConv));
+await page.screenshot({ path: `${SHOTS}/12g-converted-left-list.png`, fullPage: true });
 await page.evaluate((id) => window.contracts.openReq(id), reqId);
 await page.waitForTimeout(700);
 
@@ -1535,6 +1552,35 @@ const notApproved = await page.evaluate(async (id) => {
   catch (e) { return e.message; }
 }, payStages.id);
 check('★ طلبٌ غير معتمَدٍ لا يُنشأ منه عقد', /ليس معتمَداً/.test(notApproved), notApproved);
+
+/* ── سدادُ أمر الدفع ينقله من «أوامر الدفع» إلى تبويب «مسدَّدة» (طلبُ المالك) ──
+   الفصلُ الثالث: ما سُدِّد وأُغلق لا يبقى بين ما ينتظر السداد. */
+const payMove = await page.evaluate(async (pid) => {
+  window.contracts.backToReqs();
+  window.contracts.reqTab('pay_orders');
+  await new Promise(r => setTimeout(r, 400));
+  const before = document.querySelectorAll('#page-contract-requests .ct-tile').length;
+  await window.contracts._pay(pid, { ref: 'TRX-PAY-1', receiptUrl: 'https://example.test/pay.pdf' });
+  window.contracts.filterReqs('q', '');           // إعادةُ رسمٍ بعد السداد
+  await new Promise(r => setTimeout(r, 500));
+  const after = document.querySelectorAll('#page-contract-requests .ct-tile').length;
+  const gone = ![...document.querySelectorAll('#page-contract-requests .ct-tile')].some(e => e.textContent.includes(pid));
+  window.contracts.reqTab('pay_paid');
+  await new Promise(r => setTimeout(r, 400));
+  const paidTiles = [...document.querySelectorAll('#page-contract-requests .ct-tile')];
+  const stTxt = [...document.querySelectorAll('#page-contract-requests .ct-stat')]
+    .map(e => e.textContent.replace(/\s+/g, ' ').trim()).join('|');
+  return { before, after, gone, st: window.contracts.requestById(pid).status,
+           nPaid: paidTiles.length, inPaid: paidTiles.some(e => e.textContent.includes(pid)), stTxt };
+}, payStages.id);
+check('★★ سدادُ أمر الدفع (بإيصال) أخرجه من تبويب «أوامر الدفع»',
+  payMove.st === 'crq_paid' && payMove.before === 2 && payMove.after === 1 && payMove.gone,
+  JSON.stringify(payMove));
+check('★★ وظهر في تبويب «مسدَّدة» وبطاقتُه تعدّه بقيمته (1,500)',
+  payMove.inPaid && payMove.nPaid === 1 && /مسدَّدة/.test(payMove.stTxt) && /1,500/.test(payMove.stTxt),
+  JSON.stringify(payMove));
+await page.screenshot({ path: `${SHOTS}/12h-pay-paid-tab.png`, fullPage: true });
+await page.evaluate(async () => { window.contracts.reqTab('requests'); await new Promise(r => setTimeout(r, 400)); });
 
 // بطاقةُ العقد وتبويباتُها
 await page.evaluate(() => showPage('contracts-list'));
