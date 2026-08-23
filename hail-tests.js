@@ -9326,6 +9326,39 @@ function contractsPhase1() {
   T("الصافي = الفترةُ بضريبتها ناقصَ مجموعِ الخصومات (لا حسابَ ثانٍ)",
     n1.net === Math.round((n1.withVat - n1.deductions) * 100) / 100);
 
+  /* ════ سدادُ الدفعة المقدمة (طلبُ المالك): الاستردادُ بسقف المسدَّد فعلاً ════
+     الدفعةُ المكتوبةُ في العقد التزامٌ لا صرف — والماليةُ قد تسدّد أقلَّ منها.
+     فالاستردادُ من المستخلصات لا يتجاوز **ما دُفع فعلاً**، والعقودُ القديمة
+     (بلا حقل `paid`) تبقى على سلوكها التاريخيّ بسقف دفعة العقد. */
+  T("★★ عقدٌ متتبَّعٌ لم تُسدَّد مقدمتُه: لا استردادَ إطلاقاً — لا يُستردّ ما لم يُدفع",
+    C._extNet(ext, { ...ctr, advance: { amount: 10000, recoveryPct: 20, recovered: 0, paid: 0, payments: [] } },
+      { prevGross: 0 }).advanceRecovery === 0);
+  T("★★ وسُدِّد نصفُها (5,000): الاستردادُ بسقف المسدَّد لا دفعةِ العقد",
+    C._extNet(ext, { ...ctr, advance: { amount: 10000, recoveryPct: 20, recovered: 0, paid: 5000 } },
+      { prevGross: 0 }).advanceRecovery === 5000);
+  T("★★ وما استُردّ يُخصَم من سقف المسدَّد (دُفع 5,000 واستُردّ 4,200 ⇐ يبقى 800)",
+    C._extNet(ext, { ...ctr, advance: { amount: 10000, recoveryPct: 20, recovered: 4200, paid: 5000 } },
+      { prevGross: 0 }).advanceRecovery === 800);
+  T("★★ والعقدُ القديم (بلا حقل paid) على سلوكه التاريخيّ — السقفُ دفعةُ العقد",
+    C._extNet(ext, { ...ctr, advance: { amount: 10000, recoveryPct: 20, recovered: 0 } },
+      { prevGross: 0 }).advanceRecovery === 6000);
+  T("★ advancePaidOf/advanceDueOf: المسدَّدُ والمتبقّي من الحقول — والقديمُ لا مطالبةَ وهميةً عليه",
+    C._advancePaidOf({ advance: { amount: 10000, paid: 4000 } }) === 4000 &&
+    C._advanceDueOf({ advance: { amount: 10000, paid: 4000 }, status: "ctr_active" }) === 6000 &&
+    C._advanceDueOf({ advance: { amount: 10000 }, status: "ctr_active" }) === 0 &&
+    C._advancePaidOf({}) === 0);
+  T("★ advancePayable: مستحقّةٌ على الجاري وحدَه — لا على مقفلٍ أو مفسوخٍ أو منتهٍ",
+    C._advancePayable({ status: "ctr_active", advance: { amount: 1000, paid: 0 } }) === true &&
+    C._advancePayable({ status: "ctr_pending_signature", advance: { amount: 1000, paid: 400 } }) === true &&
+    C._advancePayable({ status: "ctr_closed", advance: { amount: 1000, paid: 0 } }) === false &&
+    C._advancePayable({ status: "ctr_completed", advance: { amount: 1000, paid: 0 } }) === false &&
+    C._advancePayable({ status: "ctr_active", advance: { amount: 1000, paid: 1000 } }) === false);
+  T("★★ وسدادُها معاملةٌ للمالية وبإيصالٍ وبسقف المتبقّي — والمبلغُ الفعليُّ إلزاميٌّ ويُدوَّن في السجل",
+    /function payAdvance\(id, payload\)\{[\s\S]{0,300}إيصال السداد إلزامي[\s\S]{0,200}مبلغ السداد إلزامي[\s\S]{0,300}سداد الدفعة المقدمة للمالية فقط[\s\S]{0,1200}يتجاوز المتبقّي[\s\S]{0,900}_pushTimeline\(c, "سداد دفعة مقدمة", "advance_paid"/.test(src));
+  T("★ والمدفوعُ فعلاً من المقدمة مصروفٌ في التجميعَين (الموازنةُ والبندُ المستعاض) بلا ازدواج",
+    /var paid = advancePaidOf\(c\);[\s\S]{0,300}ext_paid/.test(src) &&
+    (src.match(/var paid = advancePaidOf\(c\);/g) || []).length === 2);
+
   /* ════ سريانُ الوثائق ════ */
   const today = new Date("2026-08-08T00:00:00Z");
   T("وثيقةٌ منتهيةٌ تُصنَّف expired", C._docExpiryState("2026-08-01", today).state === "expired");
@@ -10539,8 +10572,11 @@ function contractsPhase1() {
       /function renderMyTasks\(\)/.test(src) && /التعاقدات بانتظار إجراءك/.test(src));
     T("★★ وتُبنى من **البوّابات نفسِها** التي تحرس الأزرار لا من قائمةٍ ثانية",
       /function myPendingItems\(role\)[\s\S]{0,1400}crqCanAct\(r\.status, role\)/.test(src) &&
-      /myPendingItems[\s\S]{0,1600}extCanAct\(e\.status, role\)/.test(src) &&
-      /myPendingItems[\s\S]{0,2000}chgCanAct\(g\.status, role\)/.test(src));
+      /myPendingItems[\s\S]{0,2200}extCanAct\(e\.status, role\)/.test(src) &&
+      /myPendingItems[\s\S]{0,2600}chgCanAct\(g\.status, role\)/.test(src));
+    T("★ وتشمل الدفعةَ المقدمةَ المستحقّةَ لسداد المالية — من advancePayable نفسِها التي تحرس الزرّ",
+      /myPendingItems[\s\S]{0,1400}advancePayable\(c\) && \["finance","admin"\]\.indexOf\(role\)!==-1/.test(src) &&
+      /lbl:"دفعة مقدمة"/.test(src));
     T("★ وتشمل العقدَ المنتظِرَ توقيعاً (عملٌ حقيقيٌّ ينتظر صاحبَه)",
       /myPendingItems[\s\S]{0,900}ctrCanTransit\("sign","ctr_pending_signature",role\)/.test(src));
     T("★ ولا تعرض منتهياً", /myPendingItems[\s\S]{0,1400}!crqIsFinal\(r\.status\)/.test(src) &&
