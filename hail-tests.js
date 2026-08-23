@@ -12621,6 +12621,25 @@ function vendorPOIssuance() {
   // لا قائمةَ حالاتٍ خامٍ محلية — التصنيف عبر poStageOf المركزية (قاعدة §3)
   T("★ البوّابة تقرأ poStageOf المركزية لا قائمةَ حالاتٍ خام",
     src.includes("poStageOf") && !/VPO_STAGES\s*=\s*\[[^\]]*"ordered"/.test(src));
+
+  /* ── «mono» لا تُوضَع على خليّة جدولٍ أبداً — في أيّ ملف ──
+     الصنفُ في app.css يحمل `display:inline-block`، وعلى `<td>` يُخرج الخليّةَ من
+     تخطيط الجدول فتطفو الأرقامُ خارج أعمدتها **بلا خطأٍ واحدٍ في وحدة التحكّم** —
+     وقع فعلاً في نافذة إصدار أمر الشراء (بلاغُ المالك v18.9.2841: عمودا الضريبة
+     والإجمالي متراكبان قطرياً). العلّةُ تُرى بالعين وحدَها، فالحارسُ نصّيٌّ عامّ. */
+  {
+    const ROOTV = path.dirname(IDX);
+    const CELL_MONO = /<t[dh][^>]*class="[^"]*\bmono\b/;
+    ["index.html", "vendor-po.js", "contracts.js", "hr-payments.js", "finance-audit.js",
+     "inventory-reports.js", "stocktake.js", "price-analysis.js", "cleaning-operations.js",
+     "operations-wall.js", "project-management.js", "performance-contract.js", "substitute-budget.js"]
+      .forEach(f => {
+        const fp = path.join(ROOTV, f);
+        if (!fs.existsSync(fp)) return;
+        T(`★ ${f}: لا خليّةَ جدولٍ تحمل صنف mono (display:inline-block يفكّ الجدول)`,
+          !CELL_MONO.test(fs.readFileSync(fp, "utf8")));
+      });
+  }
 }
 
 /* ══ التشغيل ══ */
