@@ -46,7 +46,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2844";
+const MODULE_BUILD = "v18.9.2845";
 
 /* ════════ الثوابت ════════ */
 // الأدوار التي تُصدر — المشتريات والأدمن (قرار المالك)
@@ -208,8 +208,14 @@ var VPO_GATES = [
     from:["pending_proc","wh_reviewed","wh_approved"],
     to:["pending_ceo","pending_finance","proc_executing"] },
 ];
+/* قرار المالك (قبل دمج #352): «مدير النظام» في خانات الاعتمادات يُعرَض «مدير
+   المشاريع» — حسابُ الأدمن يقوم بدور مدير المشاريع فعلياً، والوثيقةُ الموجَّهةُ
+   للمورد تُظهر الصفةَ لا اسمَ الحساب التقنيّ. العرضُ وحدَه يتبدّل: السجلُّ
+   والـtimeline يبقيان على الاسم الحقيقيّ كما كُتب. */
+var VPO_BY_ALIAS = { "مدير النظام": "مدير المشاريع" };
 function poSignoffs(p){
   if(!p) return [];
+  var alias = function(by){ return VPO_BY_ALIAS[by] || by || ""; };
   var norm = function(s){
     try{ if(typeof normalizePOStatus==="function") return normalizePOStatus(s); }catch(e){}
     return s;
@@ -239,6 +245,7 @@ function poSignoffs(p){
   var fin = { key:"fin", lbl:"سداد المالية", by:pay.paidBy||pay.by||"", at:pay.paidAt||pay.at||"" };
   if(!fin.by && finTl){ fin.by = finTl.by; fin.at = finTl.at; }
   out.push(fin);
+  out.forEach(function(g){ g.by = alias(g.by); });
   return out;
 }
 
