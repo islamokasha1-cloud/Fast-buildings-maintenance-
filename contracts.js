@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2838";
+var MODULE_BUILD = "v18.9.2840";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -8832,6 +8832,8 @@ window.contracts = {
   _contractPaperHTML: contractPaperHTML,
   _ctrLinesHTML: ctrLinesHTML,     // جدولُ بنود العقد — يُنفَّذ في فحص المتصفّح
   _letterheadAssets: letterheadAssets, _letterheadOn: letterheadOn,
+  // هندسة الورقة الرسمية مصدرها الواحد هنا — تقرؤها vendor-po.js لأمر الشراء بدل نسخ مقاساتها
+  _letterheadCSS: letterheadCSS, _letterheadWrap: letterheadWrap, _docHeadHTML: docHeadHTML,
   editClauses: editClauses, addClause: addClause, delClause: delClause,
   cancelClauses: cancelClauses, saveClauses: saveClauses,
   openSign: openSign, closeSign: closeSign, doSign: doSign,

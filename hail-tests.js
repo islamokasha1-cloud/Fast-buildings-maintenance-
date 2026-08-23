@@ -458,7 +458,11 @@ function predelivery() {
        وتأكيدٍ بدل المنع الصامت (`_fpOverWarn` + confirm في `doFinancePaid`).
        **تعديلُ سلوكِ نافذةٍ قائمة** (`openFinancePaidModal`) لا ميزةٌ جديدة —
        ونقلُ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). */
-    const IDX_CEILING = 37383;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37383 إلى 37387 — ‏٤ أسطرِ **ربطٍ** لوحدة أمر الشراء للمورد
+       (`vendor-po.js`): زرُّ الإصدار في تذييل التفاصيل، وسطرُ «الأمر الصادر» في شبكة
+       البيانات، ووسمُ <script> بتعليقه. الميزةُ نفسُها كلُّها في ملفّ الوحدة المستقلّ
+       كما توجب القاعدة — والربطُ لا يعيش إلا حيث الشاشةُ المربوطة. */
+    const IDX_CEILING = 37387;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -12527,6 +12531,98 @@ function printIconSizeGuards() {
   });
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   وحدة أمر الشراء للمورد (vendor-po.js)
+   الإصدارُ اختياريٌّ لا مرحلة: وثيقةٌ رسميةٌ للمورد بنفس رقم الطلب، من مرحلة
+   «تنفيذ المشتريات» فصاعداً، بأسعارٍ قابلةٍ للتعديل ولقطةٍ مستقلّةٍ في `vendorPO`
+   لا تمسّ بنودَ الطلب ولا `p.vendor` ولا سلّمَ الحالات. الحرّاس يثبّتون:
+   حسابَ ض.ق.م على الوحدة (نفس اصطلاح `_poItemLine`)، وبوّابةَ الدور والمرحلة،
+   وإعادةَ الإصدار بحفظ الأثر، وكودَ الـtimeline خارج STAGE_ORDER.
+   ════════════════════════════════════════════════════════════════════ */
+function vendorPOIssuance() {
+  H("وحدة أمر الشراء للمورد (vendor-po.js)");
+  const VPO_PATH = path.resolve(path.dirname(IDX), "vendor-po.js");
+  if (!fs.existsSync(VPO_PATH)) { T("vendor-po.js موجود", false); return; }
+  const src = fs.readFileSync(VPO_PATH, "utf8");
+  const vm = require("vm");
+  try { new vm.Script(src); T("صياغة vendor-po.js سليمة", true); }
+  catch (e) { T("صياغة vendor-po.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  // ── نقاط الربط: الحذفُ الصامتُ لأيٍّ منها زرٌّ ميتٌ بلا خطأ ──
+  T("الوسم موجود في index.html", /<script src="vendor-po\.js\?v=/.test(HTML));
+  T("زرُّ الإصدار في تذييل تفاصيل الطلب (خلف بوّابة canIssueBtn)",
+    HTML.includes("vendorPO.canIssueBtn(p)") && HTML.includes("vendorPO.open("));
+  T("سطرُ «الأمر الصادر» في شبكة بيانات الطلب", HTML.includes("أمر الشراء الصادر للمورد"));
+  const CTRS = CTR_PATH ? fs.readFileSync(CTR_PATH, "utf8") : "";
+  T("هندسةُ الورقة الرسمية تُقرأ من contracts (مصدرٌ واحدٌ لا نسخة)",
+    CTRS.includes("_letterheadCSS: letterheadCSS") && CTRS.includes("_letterheadWrap: letterheadWrap") &&
+    src.includes("contracts._letterheadCSS") && !src.includes("lh-h{left:"));
+
+  // ── تحميل الوحدة واختبار الدوال النقية ──
+  const sandbox = { window: {}, console };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل الوحدة", false, String(e.message).slice(0, 120)); return; }
+  const V = sandbox.window.vendorPO;
+  T("تعرّض window.vendorPO بدوالّه النقية", V && ["_lineCalc","_totals","_buyQty","_defaultItems","_canIssue","_applyIssue"].every(k => typeof V[k] === "function"));
+  if (!V) return;
+
+  // ض.ق.م على الوحدة — نفس اصطلاح _poItemLine (v18.9nd): تقريبُ ضريبة الوحدة أولاً
+  const l1 = V._lineCalc(100, 3);
+  T("حساب السطر: 100×3 ⇒ صافي 300 · ضريبة 45 · إجمالي 345",
+    l1.net === 300 && l1.vat === 45 && l1.total === 345, JSON.stringify(l1));
+  const l2 = V._lineCalc(33.33, 3);   // 33.33×0.15=4.9995 ⇒ ضريبة الوحدة 5.00 ⇒ إجمالي الوحدة 38.33
+  T("★ التقريب على الوحدة لا على السطر (33.33×3 ⇒ إجمالي 114.99)",
+    l2.total === 114.99 && l2.net === 99.99 && l2.vat === 15, JSON.stringify(l2));
+  const tt = V._totals([{ unitCost: 100, qty: 3 }, { unitCost: 33.33, qty: 3 }]);
+  T("الإجماليات جمعُ السطور", tt.net === 399.99 && tt.vat === 60 && tt.total === 459.99, JSON.stringify(tt));
+
+  // بنودُ الأمر: المغطّى من المخزون بالكامل لا يدخل أمر المورد
+  T("_buyQty: المغطّى مخزونياً = 0، وغيرُه كميتُه",
+    V._buyQty({ qty: 5, _fullyCoveredByStock: true }) === 0 && V._buyQty({ qty: 5 }) === 5);
+  const items = V._defaultItems({ items: [
+    { itemName: "أ", qty: 4, unit: "قطعة", unitCost: 10 },
+    { itemName: "ب", qty: 2, unit: "كيس", _fullyCoveredByStock: true, unitCost: 7 },
+    { itemName: "ج", qty: 3, unit: "لتر", estUnitCost: 8 },
+  ] });
+  T("البنود الافتراضية: بندان (سقط المغطّى) والسعرُ يرتدّ للتقديري",
+    items.length === 2 && items[0].unitCost === 10 && items[1].unitCost === 8, JSON.stringify(items.map(i => i.unitCost)));
+
+  // بوّابة الإصدار — الدور ثم المرحلة عبر دالة التصنيف المركزية (تُحقن هنا كبديل)
+  const stageOf = s => ({ proc_executing: "proc_executing", ordered: "proc_executing", wh_receiving: "wh_receiving",
+                          pending_pm: "pending_pm", closed: "closed" }[s] || null);
+  T("الدور: المشرف لا يُصدر", !V._canIssue({ status: "proc_executing" }, "supervisor", stageOf).ok);
+  T("المرحلة: قبل تنفيذ المشتريات لا إصدار", !V._canIssue({ status: "pending_pm" }, "procurement_officer", stageOf).ok);
+  T("تنفيذ المشتريات ⇒ إصدارٌ متاح",
+    V._canIssue({ status: "proc_executing" }, "procurement_officer", stageOf).ok &&
+    V._canIssue({ status: "ordered" }, "admin", stageOf).ok);
+  const rp = V._canIssue({ status: "closed", vendorPO: { rev: 1 } }, "procurement_officer", stageOf);
+  T("★ بعد الإغلاق: الصادرُ سابقاً طباعةٌ فقط (reprintOnly) — ولا إصدارَ جديداً بلا أمرٍ سابق",
+    rp.ok && rp.reprintOnly && !V._canIssue({ status: "closed" }, "procurement_officer", stageOf).ok);
+
+  // تطبيق الإصدار: لقطةٌ مستقلة، وإعادةُ الإصدار تحفظ الأثر، وp.vendor لا يُمَسّ
+  const po = { id: "PO-202608-0001", status: "proc_executing", vendor: "المورد المقترح", items: [], timeline: [] };
+  const v1 = V._applyIssue(po, {
+    vendorName: "مؤسسة البناء", items: [{ itemName: "أ", qty: 3, unitCost: 100 }],
+  }, { now: "2026-08-23T10:00:00.000Z", by: "خالد", byUser: "khaled" });
+  T("الإصدار الأول: نفس رقم الطلب · مراجعة 1 · الإجمالي 345",
+    v1 && po.vendorPO === v1 && v1.docNo === "PO-202608-0001" && v1.rev === 1 && v1.total === 345, JSON.stringify({ rev: v1 && v1.rev, total: v1 && v1.total }));
+  T("★ قيدُ الـtimeline بكود vendor_po_issued خارج STAGE_ORDER",
+    po.timeline.length === 1 && po.timeline[0].code === "vendor_po_issued" &&
+    !KPI_SRC.includes("vendor_po_issued"));
+  const v2 = V._applyIssue(po, {
+    vendorName: "مؤسسة الإعمار", items: [{ itemName: "أ", qty: 3, unitCost: 90 }],
+  }, { now: "2026-08-24T10:00:00.000Z", by: "خالد", byUser: "khaled" });
+  T("★★ إعادة الإصدار: مراجعة 2 والنسخةُ الأولى محفوظةٌ في السجل",
+    v2.rev === 2 && Array.isArray(po.vendorPOHistory) && po.vendorPOHistory.length === 1 &&
+    po.vendorPOHistory[0].rev === 1 && po.vendorPOHistory[0].vendorName === "مؤسسة البناء");
+  T("★ اللقطةُ مستقلة: p.vendor وبنودُ الطلب لم يتغيّرا",
+    po.vendor === "المورد المقترح" && po.items.length === 0);
+
+  // لا قائمةَ حالاتٍ خامٍ محلية — التصنيف عبر poStageOf المركزية (قاعدة §3)
+  T("★ البوّابة تقرأ poStageOf المركزية لا قائمةَ حالاتٍ خام",
+    src.includes("poStageOf") && !/VPO_STAGES\s*=\s*\[[^\]]*"ordered"/.test(src));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -12602,6 +12698,7 @@ function printIconSizeGuards() {
   npMultiAttach();
   poColorSystemGuards();
   printIconSizeGuards();
+  vendorPOIssuance();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
