@@ -8946,19 +8946,40 @@ function contractsPhase1() {
       (src.match(/ApprovedByUser=_meUser\(\)/g) || []).length === 10,
       "المواضع: " + (src.match(/ApprovedByUser=_meUser\(\)/g) || []).length);
 
-    /* ── v18.9ub: شريطُ طلبات التعاقد — لكلِّ رقمٍ مجموعةٌ يفتحها، ولا قيمةَ بلا مرجع ──
-       بلاغُ المالك: «سُدِّد 1200 — لماذا لا يظهر في (قيمتها)؟» والجذرُ أن «قيمتها» كانت
-       قيمةَ ما قيد الاعتماد وحدَه، والمسدَّدُ نهائيٌّ فخرج من العدّ ومن القيمة معاً. */
-    T("★★ «مُنجَزة» = المحوَّلُ لعقدٍ والمسدَّدُ — والملغيُّ نهائيٌّ لكنه ليس مُنجَزاً",
-      /function crqIsDone\(s\)\{ return s==="crq_converted" \|\| s==="crq_paid"; \}/.test(src) &&
-      !/crqIsDone[\s\S]{0,80}crq_cancelled/.test(src));
-    T("★★ لكلِّ مجموعةٍ بطاقتُها وقيمتُها سطرٌ فرعيٌّ داخلها (لا «قيمتها» بضميرٍ بلا مرجع)",
+    /* ── تبويباتُ طلبات التعاقد (طلبُ المالك): المحوَّلُ لعقدٍ يغادر الصفحةَ إلى صفحة
+       العقود، وأوامرُ الدفع تنفصل عن طلبات العقود، والمسدَّدُ منها عن الذي تحت
+       إجراء السداد. `reqTabOf` دالةٌ نقيةٌ واحدةٌ تُسند كلَّ طلبٍ إلى تبويبه —
+       يقرؤها العدُّ والقائمةُ والشريطُ معاً فلا يفترق رقمٌ عن قائمته. */
+    T("★★ reqTabOf: طلبُ العقد الجاري في تبويب الطلبات — بكلّ حالاته غير التحويل",
+      C._reqTabOf({ engagement: "contract", status: "crq_pending_pm" }) === "requests" &&
+      C._reqTabOf({ engagement: "contract", status: "crq_approved" }) === "requests" &&
+      C._reqTabOf({ engagement: "contract", status: "crq_cancelled" }) === "requests");
+    T("★★ والمحوَّلُ لعقدٍ خارج التبويبات كلِّها — سجلُّه الحيُّ في صفحة العقود وحدَها",
+      C._reqTabOf({ engagement: "contract", status: "crq_converted" }) === "converted" &&
+      /\{ key:"requests"/.test(src) && /\{ key:"pay_orders"/.test(src) &&
+      /\{ key:"pay_paid"/.test(src) && !/\{ key:"converted"/.test(src));
+    T("★★ وأمرُ الدفع غيرُ المسدَّد في تبويبه — والمسدَّدُ في تبويبٍ أرشيفيٍّ ثالث",
+      C._reqTabOf({ engagement: "pay_order", status: "crq_pending_pm" })  === "pay_orders" &&
+      C._reqTabOf({ engagement: "pay_order", status: "crq_pending_pay" }) === "pay_orders" &&
+      C._reqTabOf({ engagement: "pay_order", status: "crq_cancelled" })   === "pay_orders" &&
+      C._reqTabOf({ engagement: "pay_order", status: "crq_paid" })        === "pay_paid");
+    T("★★ والقائمةُ والتبويبُ يقرآن الإسنادَ نفسَه reqTabOf (لا عدٌّ بقاعدةٍ وعرضٌ بأخرى)",
+      /var scoped    = pScoped\.filter\(function\(r\)\{ return reqTabOf\(r\)===tab; \}\);/.test(src) &&
+      /pScoped\.filter\(function\(r\)\{ return reqTabOf\(r\)===t\.key; \}\)\.length/.test(src));
+    T("★ وسطرُ إحالةٍ يقول أين صار المحوَّل وكم (غيابٌ بلا تفسيرٍ يُقرأ فقداً في البيانات)",
+      /طلباً صار عقداً وقيمتُه/.test(src) && /showPage\(\\''\+PAGE_CTRS\+'\\'\)/.test(src));
+    T("★★ لكلِّ تبويبٍ شريطُه وقيمةُ كلِّ مجموعةٍ سطرٌ فرعيٌّ داخل بطاقتها (لا ضميرَ بلا مرجع)",
       /stat\("قيد الاعتماد", wip\.length, "قيمتها "\+money0\(wipVal\)/.test(src) &&
-      /stat\("جاهزٌ للعقد", ready, "قيمتها "\+money0\(readyVal\)/.test(src) &&
-      /stat\("مُنجَزة — عقدٌ أو سداد", done\.length, "قيمتها "\+money0\(doneVal\)/.test(src));
-    T("★★ فلترُ المشروع نطاقٌ يقرؤه الشريطُ والقائمةُ معاً (لا بطاقةٌ أوسعُ من قائمتها)",
-      /var scoped = _rFilter\.project \? all\.filter\(function\(r\)\{ return docProjectKey\(r\)===_rFilter\.project; \}\) : all;/.test(src) &&
-      /var wip    = scoped\.filter/.test(src) && /var done   = scoped\.filter/.test(src));
+      /stat\("جاهزٌ للعقد", readyL\.length, "قيمتها "\+money0\(readyVal\)/.test(src) &&
+      /stat\("بانتظار سداد المالية", payL\.length, "قيمتها "\+money0\(payVal\)/.test(src) &&
+      /stat\("أوامرُ دفعٍ مسدَّدة — مغلقة", scoped\.length, "قيمتها "\+money0\(paidVal\)/.test(src));
+    T("★★ و«قيد الاعتماد» بلا بوّابة السداد — لبوّابة السداد بطاقتُها الخاصة",
+      C._reqStatSet({ status: "crq_pending_pay" },  "__wip__") === false &&
+      C._reqStatSet({ status: "crq_pending_proc" }, "__wip__") === true &&
+      C._reqStatSet({ status: "crq_paid" },         "__wip__") === false);
+    T("★★ فلترُ المشروع نطاقٌ يقرؤه التبويبُ والشريطُ والقائمةُ معاً (لا بطاقةٌ أوسعُ من قائمتها)",
+      /var pScoped = _rFilter\.project \? all\.filter\(function\(r\)\{ return docProjectKey\(r\)===_rFilter\.project; \}\) : all;/.test(src) &&
+      /var wip    = scoped\.filter/.test(src) && /var converted = pScoped\.filter/.test(src));
     T("★ وخياراتُ المشروع من الطلبات نفسِها بمفتاح docProjectKey (فلا خيارٌ بلا طلبٍ ولا يدويّان في خيار)",
       /all\.forEach\(function\(r\)\{\s*var k=docProjectKey\(r\);/.test(src));
     T("★ وبطاقاتُ الشريط أزرارٌ بـaria-pressed تصفّي مجموعتَها ونقرتان تُلغيان",
