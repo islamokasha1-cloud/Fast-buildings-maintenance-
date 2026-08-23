@@ -751,8 +751,9 @@ await page.evaluate(() => window.contracts.recalc(true));
 await page.waitForTimeout(600);
 // الصفحةُ تُمرَّر داخل `.main-area` لا في نافذة المتصفّح، فـfullPage لا يلتقط ما تحتها.
 const secs = await page.evaluate(() => Array.from(document.querySelectorAll('#page-contract-requests .ct-sec-h')).map(e => e.textContent.trim().split(' ')[0]));
-check('★ أقسامُ النموذج الخمسة مرسومة (الشروطُ التجارية والمرشّحون تحت الطيّة)',
-  secs.length === 5 && secs.includes('الشروط') && secs.includes('المرشّحون'), secs.join(' · '));
+check('★ أقسامُ النموذج الستة مرسومة (الشروطُ والمرشّحون والمرفقاتُ تحت الطيّة)',
+  secs.length === 6 && secs.includes('الشروط') && secs.includes('المرشّحون') && secs.includes('المرفقات'),
+  secs.join(' · '));
 await page.screenshot({ path: `${SHOTS}/09-request-form-top.png` });
 await page.evaluate(() => { const a = document.querySelector('.main-area'); if (a) a.scrollTop = a.scrollHeight; });
 await page.waitForTimeout(500);
@@ -1068,6 +1069,48 @@ check('★★ بطاقةُ الطلب تعرض الغرامةَ بالريال �
   /500\.00 ر\.س يومياً/.test(penCard) && /سقف 20,000\.00 ر\.س/.test(penCard) && !/٪ يومياً/.test(penCard),
   (penCard.match(/غرامة التأخير[\s\S]{0,60}/) || [''])[0].replace(/\s+/g, ' '));
 
+/* ── مرفقاتُ الطلب (طلبُ المالك): الإضافةُ والعرضُ وحارسُ الحذف ──
+   الإضافةُ عبر طبقة البيانات مباشرةً — لا Storage في بيئة الفحص، كما تُفحص
+   التواقيعُ والإيصالات بروابطَ مباشرة. */
+const attFlow = await page.evaluate(async (id) => {
+  const out = {};
+  window.contracts.openReq(id);
+  await new Promise(r => setTimeout(r, 500));
+  const p = () => document.getElementById('page-contract-requests').textContent || '';
+  out.secShown = /المرفقات/.test(p());
+  out.addBtn = /إضافة مرفق/.test(p());
+  await window.contracts._addAttach(id, [{ url: 'https://example.test/quote.pdf', name: 'عرض سعر المقاول.pdf' }]);
+  window.contracts.openReq(id);
+  await new Promise(r => setTimeout(r, 500));
+  out.linkShown = /عرض سعر المقاول/.test(p());
+  const r1 = window.contracts.requestById(id);
+  out.n = (r1.attachments || []).length;
+  out.att = (r1.attachments || [])[0] || {};
+  out.tlAdd = ((r1.timeline || []).slice(-1)[0] || {}).code;
+  // الحذفُ بغير صاحبه ولا أدمن يُرفض في طبقة البيانات
+  const realRole = currentUser.role, realUser = currentUser.user;
+  currentUser.role = 'procurement_officer'; currentUser.user = 'proc77';
+  try { await window.contracts._delAttach(id, out.att.id); out.wrongDel = 'حُذف بغير صاحبه'; }
+  catch (e) { out.wrongDel = e.message; }
+  currentUser.role = realRole; currentUser.user = realUser;
+  // والأدمن يحذف — ويبقى الحذفُ قيداً في السجل الزمني
+  await window.contracts._delAttach(id, out.att.id);
+  const r2 = window.contracts.requestById(id);
+  out.after = (r2.attachments || []).length;
+  out.tlDel = ((r2.timeline || []).slice(-1)[0] || {}).code;
+  return out;
+}, edStart.id);
+check('★★ فقرةُ المرفقات على البطاقة وزرُّ «إضافة مرفق» لمن يملكها',
+  attFlow.secShown && attFlow.addBtn, JSON.stringify({ s: attFlow.secShown, b: attFlow.addBtn }));
+check('★★ الإضافةُ سجّلت المرفقَ باسمِ رافعِه وقيّدت السجلَّ الزمنيّ وظهر رابطُه',
+  attFlow.n === 1 && attFlow.att.byUser === 'admin' && attFlow.tlAdd === 'attached' && attFlow.linkShown,
+  JSON.stringify({ n: attFlow.n, by: attFlow.att.byUser, tl: attFlow.tlAdd, ln: attFlow.linkShown }));
+check('★★ وحذفُ المرفق لغير صاحبه ولا أدمن يُرفض في طبقة البيانات',
+  /للأدمن أو لمن أضافه/.test(attFlow.wrongDel), attFlow.wrongDel);
+check('★ والأدمن يحذفه — ويبقى الحذفُ قيداً في السجل',
+  attFlow.after === 0 && attFlow.tlDel === 'attach_removed', JSON.stringify({ a: attFlow.after, tl: attFlow.tlDel }));
+await page.screenshot({ path: `${SHOTS}/12i-request-attachments.png`, fullPage: true });
+
 /* ── إرجاعُ الطلب إلى مرحلةٍ محدّدة — للأدمن (طلبُ المالك) ──
    يُنفَّذ **من الشاشة**: زرٌّ ⇐ صندوقٌ وجهاتُه مشتقّةٌ من الطلب ⇐ سببٌ إلزاميّ ⇐
    وقوفُ الطلب عند البوّابة المختارة بعد سقوط اعتماداتها وما بعدها. */
@@ -1251,6 +1294,25 @@ const afterDel = await page.evaluate((id) => ({
 }), delId);
 check('★★ وضغطُ الزرِّ يحذفه فعلاً ويعود لقائمةٍ بلا أثرٍ له',
   afterDel.gone === true && afterDel.onList === false, JSON.stringify(afterDel));
+
+/* ── مرفقاتُ نموذج الإنشاء: تُمسَك في المسوّدة وتُرفَع مع الإرسال ── */
+const draftAtt = await page.evaluate(async () => {
+  window.contracts.newRequest();
+  await new Promise(r => setTimeout(r, 600));
+  const f = new File(['pdfdata'], 'عرض تجريبي.pdf', { type: 'application/pdf' });
+  window.contracts.addDraftAttach({ files: [f] });
+  await new Promise(r => setTimeout(r, 400));
+  const p = () => document.getElementById('page-contract-requests').textContent || '';
+  const shown = /عرض تجريبي\.pdf/.test(p()) && /يُرفَع مع الإرسال/.test(p());
+  window.contracts.delDraftAttach(0);
+  await new Promise(r => setTimeout(r, 400));
+  const gone = !/عرض تجريبي\.pdf/.test(p());
+  window.contracts.cancelRequest();
+  await new Promise(r => setTimeout(r, 300));
+  return { shown, gone };
+});
+check('★★ نموذجُ الإنشاء يقبل مرفقاتٍ في المسوّدة ويُعلن أنها تُرفَع مع الإرسال — وحذفُها قبل الإرسال يعمل',
+  draftAtt.shown && draftAtt.gone, JSON.stringify(draftAtt));
 
 /* ── مشروعٌ يدويٌّ بلا موازنة: الربطُ اختياريٌّ فعلاً ── */
 await page.evaluate(() => window.contracts.newRequest());
@@ -1581,6 +1643,13 @@ check('★★ وظهر في تبويب «مسدَّدة» وبطاقتُه تع�
   JSON.stringify(payMove));
 await page.screenshot({ path: `${SHOTS}/12h-pay-paid-tab.png`, fullPage: true });
 await page.evaluate(async () => { window.contracts.reqTab('requests'); await new Promise(r => setTimeout(r, 400)); });
+
+// ولا مرفقَ على طلبٍ في حالةٍ نهائية — السجلُّ المُغلق لا يُعدَّل
+const attFinal = await page.evaluate(async (pid) => {
+  try { await window.contracts._addAttach(pid, [{ url: 'https://example.test/late.pdf', name: 'متأخر' }]); return 'أُرفق على نهائيّ'; }
+  catch (e) { return e.message; }
+}, payStages.id);
+check('★★ ولا مرفقَ على طلبٍ في حالةٍ نهائية (المسدَّدُ سجلٌّ مُغلق)', /نهائية/.test(attFinal), attFinal);
 
 // بطاقةُ العقد وتبويباتُها
 await page.evaluate(() => showPage('contracts-list'));

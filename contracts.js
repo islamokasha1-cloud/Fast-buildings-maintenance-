@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2832";
+var MODULE_BUILD = "v18.9.2834";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -2577,6 +2577,80 @@ function payRequest(id, payload){
   });
 }
 
+/* ════ مرفقاتُ الطلب — عرضُ السعر والفاتورةُ وكلُّ مستندٍ يسند القرار ════
+   (طلبُ المالك) الرفعُ بـ`uploadVendorDoc` نفسِها — بادئةُ Storage القائمة `po/…`
+   عمداً (درسُ hr-payments: مسارٌ جذريٌّ جديدٌ قد يُرفَض صامتاً). والتسجيلُ **معاملةٌ
+   على الوثيقة الطازجة** كسائر الإجراءات، فلا يدهس مرفقان متزامنان بعضَهما.
+   والحذفُ يرفع **الإشارةَ** من الوثيقة ويُبقي الملفَّ في التخزين: السجلُّ الزمنيُّ
+   يذكر من حذف وماذا، وبقاءُ الملفّ أرخصُ من فقدِ أثرٍ يسند قراراً ماليّاً. */
+function canAttachReq(r){
+  if(!r || crqIsFinal(r.status)) return false;
+  var role=_role();
+  if(role==="admin" || ["project_manager","procurement_officer","finance","ceo"].indexOf(role)!==-1) return true;
+  /* مُنشئُ الطلب يرفق ولو لم يكن من أدوار السلسلة — المطابقةُ باسم الدخول،
+     وبالاسم المعروض للوثائق القديمة التي سبقت حقلَه (نهجُ فصل المهام نفسُه). */
+  return r.createdByUser ? r.createdByUser===_meUser() : r.createdBy===_me();
+}
+function canDelAttach(r, att){
+  if(!r || !att || crqIsFinal(r.status)) return false;
+  if(_role()==="admin") return true;
+  return att.byUser ? att.byUser===_meUser() : att.by===_me();
+}
+function addReqAttachments(id, atts){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  var list=(Array.isArray(atts)?atts:[atts]).filter(function(a){ return a && a.url; });
+  if(!list.length) return Promise.resolve(null);
+  var ref=database.collection(REQUESTS_COL()).doc(id);
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("الطلب غير موجود");
+      var r=s.data()||{}; r.id=id;
+      if(crqIsFinal(r.status)) throw new Error("الطلب في حالةٍ نهائية — لا تُضاف مرفقات");
+      if(!canAttachReq(r)) throw new Error("إضافة المرفق لمُنشئ الطلب أو لأدوار سلسلة اعتماده");
+      if(!Array.isArray(r.attachments)) r.attachments=[];
+      list.forEach(function(a){
+        r.attachments.push({ id:"ATT-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),
+          url:String(a.url), storagePath:a.storagePath||"", name:String(a.name||"مرفق").slice(0,120),
+          at:_now(), by:_me(), byUser:_meUser() });
+      });
+      _pushTimeline(r, "إضافة مرفق", "attached",
+        list.map(function(a){ return String(a.name||"مرفق").slice(0,120); }).join(" · "));
+      r.updatedAt=_now(); r.updatedBy=_me();
+      var out=Object.assign({},r); delete out.id;
+      t.set(ref,out,{merge:true});
+      return r;
+    });
+  }).then(function(r){
+    _mirror(_reqs, r, true);
+    _audit("إضافة مرفق لطلب تعاقد", id+" — "+list.length+" ملفاً");
+    return r;
+  });
+}
+function deleteReqAttachment(id, attId){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  var ref=database.collection(REQUESTS_COL()).doc(id);
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("الطلب غير موجود");
+      var r=s.data()||{}; r.id=id;
+      var att=(r.attachments||[]).find(function(a){ return a && a.id===attId; });
+      if(!att) throw new Error("المرفق غير موجود");
+      if(crqIsFinal(r.status)) throw new Error("الطلب في حالةٍ نهائية — لا تُحذف مرفقاته");
+      if(!canDelAttach(r, att)) throw new Error("حذف المرفق للأدمن أو لمن أضافه");
+      r.attachments=r.attachments.filter(function(a){ return a.id!==attId; });
+      _pushTimeline(r, "حذف مرفق", "attach_removed", att.name||"مرفق");
+      r.updatedAt=_now(); r.updatedBy=_me();
+      var out=Object.assign({},r); delete out.id;
+      t.set(ref,out,{merge:true});
+      return r;
+    });
+  }).then(function(r){
+    _mirror(_reqs, r, true);
+    _audit("حذف مرفق من طلب تعاقد", id);
+    return r;
+  });
+}
+
 /* إلغاءُ الطلب — لمُنشئه أو الأدمن، وما لم يصر نهائياً. */
 function cancelRequest(id, reason){
   var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
@@ -4738,7 +4812,8 @@ function newRequest(){
     lines:[], candidates:[], rationale:"", durationDays:0, startDate:"",
     isSubstitute:false, substituteAccountId:"",
     advance:{pct:0,recoveryPct:0}, retention:{pct:0,releaseOn:"completion"},
-    penalty:{mode:"amount",perDayAmount:0,capAmount:0}, warranty:{months:0}, value:0
+    penalty:{mode:"amount",perDayAmount:0,capAmount:0}, warranty:{months:0}, value:0,
+    attachFiles:[]
   };
   paintReqs();
   loadProjectData(_draftLoadKey());
@@ -4990,6 +5065,19 @@ function reqFormHTML(){
     '<div style="margin-top:12px">'+field("مبرّر اختيار الطرف (إلزامي إن لم يكن الأرخص)",
       '<textarea class="form-input" id="ct-r-rationale" rows="2">'+_esc(d.rationale||"")+'</textarea>')+'</div>'+
   '</div>'+
+  /* المرفقات (طلبُ المالك): تُختار هنا وتُرفَع **بعد** إنشاء الطلب برقمه — ملفاتُ
+     المتصفّح لا تُكتب في Firestore، فتبقى في المسوّدة حتى الإرسال. */
+  '<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("paperclip","ic-sm")+' المرفقات '+
+      '<span class="ct-sec-lock">عرضُ السعر · الفاتورة · أيُّ مستندٍ يسند القرار</span>'+
+      '<input type="file" id="ct-r-attadd" style="display:none" accept="image/*,application/pdf" multiple onchange="contracts.addDraftAttach(this)">'+
+      '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="document.getElementById(\'ct-r-attadd\').click()">'+_icn("plus","ic-sm")+' إضافة مرفق</button></div>'+
+    ((d.attachFiles||[]).length ? (d.attachFiles||[]).map(function(f,i){
+      return '<div class="ct-att"><span>'+_icn("paperclip","ic-sm")+' '+_esc(f.name||"ملف")+'</span>'+
+        '<span class="ct-att-m"><span class="num">'+money0(Math.max(1,Math.round((f.size||0)/1024)))+'</span> ك.ب — يُرفَع مع الإرسال</span>'+
+        '<button class="btn btn-delete" onclick="contracts.delDraftAttach('+i+')">'+_icn("trash","ic-sm")+'</button></div>';
+    }).join("") : '<div style="color:var(--muted);font-size:12px">لا مرفقات — الإرفاق اختياريٌّ، ويمكن إضافته لاحقاً من بطاقة الطلب.</div>')+
+  '</div>'+
   '<div class="ct-save-bar">'+
     '<button class="btn btn-ghost btn-sm" onclick="contracts.cancelRequest()">إلغاء</button>'+
     '<button class="btn btn-success btn-sm" id="ct-r-send" onclick="contracts.submitRequest()">'+_icn("send","ic-sm")+' إرسال للاعتماد</button>'+
@@ -5084,6 +5172,23 @@ function toggleSubstitute(){
 }
 function cancelRequestForm(){ _rDraft=null; paintReqs(); }
 
+/* ── مرفقاتُ المسوّدة: ملفاتٌ تُمسَك في الذاكرة حتى الإرسال ── */
+var ATTACH_MAX_MB = 10;
+function addDraftAttach(inp){
+  syncReqDraft(); if(!_rDraft) return;
+  var fs=inp&&inp.files?Array.prototype.slice.call(inp.files):[];
+  if(!fs.length) return;
+  if(!Array.isArray(_rDraft.attachFiles)) _rDraft.attachFiles=[];
+  var dropped=0;
+  fs.forEach(function(f){
+    if((f.size||0) > ATTACH_MAX_MB*1024*1024){ dropped++; return; }
+    _rDraft.attachFiles.push(f);
+  });
+  if(dropped) _toast("⚠ "+dropped+" ملفاً تجاوز "+ATTACH_MAX_MB+" م.ب فأُسقط","warn");
+  paintReqs();
+}
+function delDraftAttach(i){ syncReqDraft(); if(!_rDraft) return; (_rDraft.attachFiles||[]).splice(i,1); paintReqs(); }
+
 function submitRequest(){
   syncReqDraft();
   var d=_rDraft; if(!d) return;
@@ -5105,11 +5210,29 @@ function submitRequest(){
   }
   var btn=document.getElementById("ct-r-send"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الإرسال…"; }
   // الشكلُ القياسيُّ للمشروع يُثبَّت هنا مرةً واحدة — ولا يُخزَّن معرّفُ العرض الداخليّ
+  var files=(d.attachFiles||[]).slice();
   var payload=Object.assign({}, d, ref);
   delete payload.projectSel;
+  delete payload.attachFiles;   // ملفاتُ المتصفّح لا تُكتب في Firestore — تُرفَع بعد الإنشاء برقم الطلب
   createRequest(payload).then(function(id){
-    _rDraft=null; _rOpen=id; paintReqs();
-    _toast("✅ أُرسل الطلب "+id,"success");
+    /* المرفقاتُ بعد الإنشاء: فشلُ رفعِ ملفٍّ لا يُسقط طلباً أُنشئ فعلاً — يُقال
+       صراحةً ويبقى بابُ الإضافة من البطاقة مفتوحاً (نهجُ مستندات الأطراف). */
+    var failed=0;
+    var up = !files.length ? Promise.resolve() :
+      Promise.all(files.map(function(f){
+        return uploadVendorDoc(id, f, "attachment")
+          .catch(function(e){ console.warn("contracts/attachUpload", e); failed++; return null; });
+      })).then(function(atts){
+        var ok=atts.filter(Boolean);
+        return ok.length ? addReqAttachments(id, ok).catch(function(e){
+          console.warn("contracts/attachSave", e); failed+=ok.length;
+        }) : null;
+      });
+    return Promise.resolve(up).then(function(){
+      _rDraft=null; _rOpen=id; paintReqs();
+      if(failed) _toast("⚠ أُرسل الطلب "+id+" لكن تعذّر رفع "+failed+" مرفق — أضِفه من بطاقة الطلب","warn");
+      else _toast("✅ أُرسل الطلب "+id,"success");
+    });
   }).catch(function(e){
     console.warn("contracts/submitRequest",e);
     if(btn){ btn.disabled=false; btn.innerHTML=_icn("send","ic-sm")+" إرسال للاعتماد"; }
@@ -5212,6 +5335,23 @@ function reqCardHTML(id){
     (r.rationale?'<div class="ct-note">'+_icn("lightbulb","ic-sm")+' '+_esc(r.rationale)+'</div>':'')+
   '</div>' : "";
 
+  /* المرفقات — تظهر الفقرةُ لمن يرى الطلب، وزرُّ الإضافة لمن يملكها فقط */
+  var atts=Array.isArray(r.attachments)?r.attachments:[];
+  var attRows=atts.map(function(a){
+    return '<div class="ct-att">'+
+      '<a class="ct-link" href="'+_esc(a.url)+'" target="_blank" rel="noopener">'+_icn("paperclip","ic-sm")+' '+_esc(a.name||"مرفق")+'</a>'+
+      '<span class="ct-att-m">'+_esc(a.by||"")+' · '+_esc(String(a.at||"").slice(0,16).replace("T"," "))+'</span>'+
+      (canDelAttach(r,a)?'<button class="btn btn-delete" title="حذف المرفق" onclick="contracts.delReqAttach(\''+_jq(a.id)+'\')">'+_icn("trash","ic-sm")+'</button>':'')+
+    '</div>';
+  }).join("");
+  var attSec=(atts.length||canAttachReq(r)) ? '<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("paperclip","ic-sm")+' المرفقات'+
+      (canAttachReq(r)?'<input type="file" id="ct-r-attfile" style="display:none" accept="image/*,application/pdf" onchange="contracts.pickReqAttach(this)">'+
+        '<button class="btn btn-ghost btn-sm" id="ct-r-attbtn" style="margin-inline-start:auto" onclick="document.getElementById(\'ct-r-attfile\').click()">'+_icn("plus","ic-sm")+' إضافة مرفق</button>':'')+
+    '</div>'+
+    (attRows||'<div style="color:var(--muted);font-size:12px">لا مرفقات — أرفق عرضَ السعر أو الفاتورة أو أيَّ مستندٍ يسند القرار.</div>')+
+  '</div>' : "";
+
   var tl=(r.timeline||[]).map(function(e){
     return '<div class="ct-tl-row"><span class="d"></span><div><div class="t">'+_esc(e.event)+'</div>'+
       '<div class="m">'+_esc(e.by||"")+' · '+_esc(String(e.at||"").slice(0,16).replace("T"," "))+
@@ -5242,8 +5382,40 @@ function reqCardHTML(id){
       '<tbody>'+lineRows+'</tbody></table></div>'+
       '<div class="ct-total">'+totalsHTML(t, r.vatMode)+'</div>'+
     '</div>')+
-    termsRow + candSec + draftSec +
+    termsRow + candSec + draftSec + attSec +
     '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' السجل الزمني</div><div class="ct-timeline">'+tl+'</div></div>';
+}
+
+/* ── إضافةُ مرفقٍ من البطاقة وحذفُه ── */
+var _attBusy=false;
+function pickReqAttach(inp){
+  var r=requestById(_rOpen); if(!r) return;
+  var f=inp&&inp.files&&inp.files[0]; if(!f) return;
+  if(_attBusy) return;
+  if((f.size||0) > ATTACH_MAX_MB*1024*1024){ _toast("⚠ حجم المرفق يتجاوز "+ATTACH_MAX_MB+" م.ب","warn"); inp.value=""; return; }
+  _attBusy=true;
+  var btn=document.getElementById("ct-r-attbtn"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الرفع…"; }
+  uploadVendorDoc(r.id, f, "attachment").then(function(att){
+    return addReqAttachments(r.id, [att]);
+  }).then(function(){
+    _attBusy=false; _toast("✅ أُضيف المرفق","success"); paintReqs();
+  }).catch(function(e){
+    _attBusy=false;
+    console.warn("contracts/pickReqAttach", e);
+    _toast("⚠ تعذّر رفع المرفق — "+_errMsg(e),"warn");
+    paintReqs();
+  });
+}
+function delReqAttach(attId){
+  var r=requestById(_rOpen); if(!r) return;
+  var att=(r.attachments||[]).find(function(a){ return a && a.id===attId; }); if(!att) return;
+  Promise.resolve(_confirm({ kind:"danger", icon:"🗑", okText:"حذف",
+    title:"حذف المرفق",
+    msg:'سيُحذف المرفق «'+(att.name||"مرفق")+'» من الطلب. يبقى الحذفُ مسجّلاً في السجل الزمني.'
+  })).then(function(ok){
+    if(!ok) return;
+    return deleteReqAttachment(r.id, attId).then(function(){ _toast("✅ حُذف المرفق","success"); paintReqs(); });
+  }).catch(function(e){ _toast("⚠ "+_errMsg(e),"warn"); });
 }
 
 /* ── مسودةُ العقد على الشاشة ──
@@ -8230,6 +8402,11 @@ function injectCSS(){
 ".ct-tl-row .d{width:9px;height:9px;border-radius:50%;background:var(--primary);flex-shrink:0;margin-top:5px}",
 ".ct-tl-row .t{font-size:12.5px;font-weight:800;color:var(--text)}",
 ".ct-tl-row .m{font-size:11px;color:var(--muted);font-weight:600;margin-top:2px}",
+/* سطرُ المرفق — رابطٌ ومَن أضافه ومتى، وزرُّ حذفٍ لمن يملكه */
+".ct-att{display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px dashed var(--border);font-size:12.5px;flex-wrap:wrap}",
+".ct-att:last-child{border-bottom:none}",
+".ct-att .ct-link{display:inline-flex;align-items:center;gap:4px;min-width:0;overflow-wrap:anywhere}",
+".ct-att-m{color:var(--muted);font-size:11px;font-weight:600;margin-inline-start:auto}",
 /* ── بطاقة العقد ── */
 ".ct-mytasks{border:1.5px solid var(--warn)}",
 ".ct-mt-h{display:flex;align-items:center;gap:8px;font-weight:900;font-size:14px;color:var(--warn);margin-bottom:10px}",
@@ -8447,6 +8624,8 @@ window.contracts = {
   filterReqs: filterReqs, clearReqFilters: clearReqFilters, reqTab: reqTab,
   openReq: openReq, backToReqs: backToReqs,
   act: act, doCancel: doCancel, doDelete: doDelete, openPay: openPay,
+  pickReqAttach: pickReqAttach, delReqAttach: delReqAttach,
+  addDraftAttach: addDraftAttach, delDraftAttach: delDraftAttach,
   openRewind: openRewind, closeRewind: closeRewind, doRewind: doRewind,
   openExtRewind: openExtRewind, doExtRewind: doExtRewind,
   openChgRewind: openChgRewind, doChgRewind: doChgRewind, closeDocRewind: closeDocRewind,
@@ -8527,6 +8706,8 @@ window.contracts = {
   // مقابضُ طبقة البيانات — مكشوفةٌ لفحص المتصفّح ليختبر القواعد نفسَها التي
   // تحرسها الشاشة، لا نسخةً منها: الرفضُ يجب أن يقع في البيانات لا على الزرّ.
   _create: createRequest, _act: actOnRequest, _pay: payRequest, _cancel: cancelRequest,
+  _addAttach: addReqAttachments, _delAttach: deleteReqAttachment,
+  _canAttachReq: canAttachReq, _canDelAttach: canDelAttach,
   _delete: deleteRequest, _rewind: rewindRequest, _editLines: editRequestLines,
   _crqRewind: crqRewind, _crqRewindTargets: crqRewindTargets,
   _extRewind: extRewind, _extRewindTargets: extRewindTargets, _rewindExt: rewindExtract,
