@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2834";
+var MODULE_BUILD = "v18.9.2836";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1058,7 +1058,10 @@ function contractFromRequest(req, contractId, now, by, clauses){
     lines: lines,
     value: crqValueOf(r), vatMode: normVatMode(r.vatMode),
     startDate: r.startDate || "", durationDays: Number(r.durationDays)||0,
-    advance:   Object.assign({ pct:0, recoveryPct:0, amount:0, recovered:0 }, r.advance||{}),
+    /* `paid:0` و`payments:[]` يفتحان تتبّعَ سداد الدفعة المقدمة (طلبُ المالك):
+       عقدٌ جديدٌ دفعتُه **مستحقّةٌ للسداد عند المالية** حتى تُسدَّد فعلاً — بينما
+       العقودُ القديمة (بلا حقل `paid`) تبقى على سلوكها التاريخيّ في الاسترداد. */
+    advance:   Object.assign({ pct:0, recoveryPct:0, amount:0, recovered:0, paid:0, payments:[] }, r.advance||{}),
     retention: Object.assign({ pct:0, releaseOn:"completion", released:0 }, r.retention||{}),
     penalty:   normPenalty(r.penalty),
     warranty:  Object.assign({ months:0 }, r.warranty||{}),
@@ -1088,6 +1091,32 @@ function advanceAmountOf(contract){
   var c = contract || {}, pct = Number((c.advance||{}).pct);
   if(!isFinite(pct) || pct <= 0) return 0;
   return r2(contractValue(c) * pct / 100);
+}
+
+/* ════ سدادُ الدفعة المقدمة — الدوالُّ النقية ════   (طلبُ المالك)
+   الدفعةُ المكتوبةُ في العقد **التزامٌ لا صرف**: بعد إنشاء العقد تنتقل إلى
+   «بانتظار سداد المالية»، والماليةُ تدوّن **كم سُدِّد فعلاً** — وقد يكون أقلَّ
+   من دفعة العقد، وقد يُسدَّد على دفعات. ثلاثُ دوالَّ يقرؤها كلُّ شيء:
+   • `advancePaidOf`  — المسدَّدُ الفعليُّ التراكميّ.
+   • `advanceDueOf`   — المتبقّي المستحقُّ للسداد (صفرٌ للعقود القديمة غير المتتبَّعة —
+                        فلا مطالبةٌ وهميةٌ على دفعةٍ صُرفت قبل التتبّع).
+   • والتمييزُ بوجود حقل `paid`: العقودُ القديمة بلا الحقل تبقى على سلوكها
+     التاريخيّ في استرداد المستخلصات (السقفُ دفعةُ العقد كاملةً). */
+function advancePaidOf(contract){
+  var p = Number(((contract||{}).advance||{}).paid);
+  return (isFinite(p) && p > 0) ? r2(p) : 0;
+}
+function advanceDueOf(contract){
+  var c = contract || {}, a = c.advance || {};
+  if(a.paid == null) return 0;
+  var amt = Number(a.amount); if(!isFinite(amt)) amt = 0;
+  return r2(Math.max(0, r2(amt) - advancePaidOf(c)));
+}
+/* الحالاتُ التي يجوز فيها تسجيلُ السداد: العقدُ الجاري — لا منتهٍ ولا مقفلٌ ولا مفسوخ. */
+var ADV_PAY_STATUSES = ["ctr_pending_signature","ctr_active","ctr_suspended"];
+function advancePayable(contract){
+  var c = contract || {};
+  return ADV_PAY_STATUSES.indexOf(c.status) !== -1 && advanceDueOf(c) > 0;
 }
 
 /* حالاتُ العقد: مَن يملك الانتقال، وأيُّها نهائيّ. */
@@ -1387,11 +1416,16 @@ function extNet(ext, contract, ctx){
   var retPct = Number((c.retention||{}).pct); if(!isFinite(retPct)) retPct = 0;
   var retention = r2(period * retPct / 100);
 
-  // (٥) − استردادُ الدفعة المقدمة — بنسبةٍ من أعمال الفترة، وبسقفِ ما تبقّى منها
+  // (٥) − استردادُ الدفعة المقدمة — بنسبةٍ من أعمال الفترة، وبسقفِ ما تبقّى منها.
+  //       والسقفُ **ما دُفع فعلاً** لا ما كُتب في العقد: دفعةٌ سُدِّد نصفُها لا
+  //       يُستردّ منها إلا نصفُها، وما لم يُسدَّد شيءٌ فلا استرداد. والعقودُ القديمة
+  //       (بلا حقل `paid` — سبقت التتبّع) تبقى بسقف دفعة العقد: مستخلصاتُها
+  //       التاريخية بُنيت عليه، وتصفيرُها بأثرٍ رجعيٍّ يكسر أرقاماً مسدَّدة.
   var advPct = Number((c.advance||{}).recoveryPct); if(!isFinite(advPct)) advPct = 0;
   var advTotal = Number((c.advance||{}).amount); if(!isFinite(advTotal)) advTotal = 0;
   var advDone  = Number((c.advance||{}).recovered); if(!isFinite(advDone)) advDone = 0;
-  var advanceRecovery = r2(Math.min(r2(period * advPct / 100), Math.max(0, r2(advTotal - advDone))));
+  var advCap   = ((c.advance||{}).paid == null) ? advTotal : Math.min(advTotal, advancePaidOf(c));
+  var advanceRecovery = r2(Math.min(r2(period * advPct / 100), Math.max(0, r2(advCap - advDone))));
 
   // (٦) − غرامةُ التأخير (بسقفها من قيمة العقد إن حُدِّد)
   var penalty = r2(Math.max(0, Number(x.penaltyAmount)||0));
@@ -1670,7 +1704,9 @@ function contractRollup(projectKey, requests, contracts, extracts, changes){
     if(docProjectKey(c) !== projectKey) return;
     var b = bucket(c.budgetCategoryKey);
     var val = contractValue(c);
-    var paid = 0;
+    // الدفعةُ المقدمةُ **المسدَّدةُ فعلاً** مالٌ خرج — تدخل المصروفَ مع المستخلصات،
+    // ولا ازدواجَ: صافي المستخلص يخصم استردادَها أصلاً، فالمجموعُ = النقدُ الخارج.
+    var paid = advancePaidOf(c);
     (Array.isArray(extracts)?extracts:[]).forEach(function(e){
       if(e && e.contractId===c.id && e.status==="ext_paid") paid += r2((e.payment||{}).amount);
     });
@@ -1763,7 +1799,9 @@ function substituteRollup(accountId, requests, contracts, extracts){
   ctrs.forEach(function(c){
     if(docSubstituteId(c) !== id) return;
     var val = r2(contractValue(c));
-    var paid = 0;
+    // الدفعةُ المقدمةُ المسدَّدةُ فعلاً «ما يخرج فعلاً» — كقاعدة الحساب المعلنة،
+    // ولا ازدواج: صافي المستخلص يخصم استردادَها.
+    var paid = advancePaidOf(c);
     exts.forEach(function(e){
       if(e && e.contractId === c.id && e.status === "ext_paid") paid += r2((e.payment||{}).amount);
     });
@@ -2943,6 +2981,53 @@ function signContract(id, att){
     var i=_ctrs.findIndex(function(x){ return x.id===id; });
     if(i>=0) _ctrs[i]=c;
     _audit("تسجيل توقيع عقد", id);
+    return c;
+  });
+}
+
+/* ════ تسجيلُ سداد الدفعة المقدمة — المالية فقط وبإيصالٍ إلزاميّ ════
+   (طلبُ المالك) الماليةُ تدوّن **المبلغَ الفعليَّ** — وقد يكون أقلَّ من دفعة العقد،
+   ويجوز السدادُ على دفعاتٍ حتى سقفِ الدفعة. المعاملةُ على الوثيقة الطازجة، وفصلُ
+   السقف في طبقة البيانات: لا يُسدَّد فوق المتبقّي، فلا يخرج مالٌ زائدٌ باسم مقدمة. */
+function payAdvance(id, payload){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  var p = payload || {};
+  if(!p.receiptUrl) return Promise.reject(new Error("إيصال السداد إلزامي"));
+  var amt = r2(Number(p.amount));
+  if(!(amt > 0)) return Promise.reject(new Error("مبلغ السداد إلزامي — اكتب كم سُدِّد فعلاً"));
+  var role=_role();
+  if(["finance","admin"].indexOf(role) === -1) return Promise.reject(new Error("سداد الدفعة المقدمة للمالية فقط"));
+  var ref=database.collection(CONTRACTS_COL()).doc(id);
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("العقد غير موجود");
+      var c=s.data()||{}; c.id=id;
+      if(ADV_PAY_STATUSES.indexOf(c.status) === -1) throw new Error("لا يُسدَّد على حالة العقد الحالية");
+      var a=Object.assign({}, c.advance||{});
+      if(a.paid == null) throw new Error("هذا العقد لا يتتبّع سداد المقدمة (أُنشئ قبل الميزة)");
+      var due = advanceDueOf(c);
+      if(!(due > 0)) throw new Error("الدفعة المقدمة مسدَّدة بالفعل — لا متبقٍّ عليها");
+      if(amt > due + 0.01) throw new Error("المبلغ يتجاوز المتبقّي من الدفعة المقدمة ("+money(due)+" ر.س)");
+      a.paid = r2((Number(a.paid)||0) + amt);
+      a.payments = (Array.isArray(a.payments)?a.payments:[]).concat([{
+        amount:amt, ref:String(p.ref||""), receiptUrl:String(p.receiptUrl),
+        at:_now(), by:_me(), byUser:_meUser()
+      }]);
+      c.advance = a;
+      var left = r2(Math.max(0, (Number(a.amount)||0) - a.paid));
+      _pushTimeline(c, "سداد دفعة مقدمة", "advance_paid",
+        money(amt)+" ر.س من "+money(a.amount)+(p.ref?(" — "+p.ref):"")+
+        (left>0 ? " · المتبقّي "+money(left)+" ر.س" : " · اكتملت الدفعة"));
+      c.updatedAt=_now(); c.updatedBy=_me();
+      var out=Object.assign({},c); delete out.id;
+      t.set(ref,out,{merge:true});
+      return c;
+    });
+  }).then(function(c){
+    var i=_ctrs.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _ctrs[i]=c;
+    _audit("سداد دفعة مقدمة", id+" — "+money(amt)+" ر.س");
+    _notify("سداد دفعة مقدمة", id+" — "+money(amt)+" ر.س", id);
     return c;
   });
 }
@@ -5955,12 +6040,14 @@ function ctrListHTML(){
     var liveVal=live.reduce(function(s,c){ return s+contractValue(c); },0);
     var susp=scoped.filter(function(c){ return c.status==="ctr_suspended"; }).length;
     var openExts=scoped.filter(function(c){ return !!openExtractOf(_exts, c.id); }).length;
+    var advDueN=scoped.filter(advancePayable).length;
     strip='<div class="ct-strip">'+
       '<div class="ct-stat"><span class="l">عقودٌ سارية</span><span class="v">'+live.length+'</span></div>'+
       '<div class="ct-stat"><span class="l">قيمتُها (ر.س)</span><span class="v">'+money0(liveVal)+'</span></div>'+
       '<div class="ct-stat'+(openExts?' warn':'')+'"><span class="l">مستخلصاتٌ مفتوحة</span><span class="v">'+openExts+'</span></div>'+
       '<div class="ct-stat'+(susp?' warn':'')+'"><span class="l">موقوفة</span><span class="v">'+susp+'</span></div>'+
       '<div class="ct-stat"><span class="l">الإجمالي</span><span class="v">'+scoped.length+'</span></div>'+
+      (advDueN?'<div class="ct-stat warn"><span class="l">دفعاتٌ مقدمةٌ بانتظار السداد</span><span class="v">'+advDueN+'</span></div>':'')+
     '</div>';
   }
 
@@ -6009,6 +6096,12 @@ function ctrTileHTML(c){
   var openE=openExtractOf(_exts, c.id);
   var allE=extractsFor(c.id);
   var paidE=allE.filter(function(e){ return e.status==="ext_paid"; });
+  /* الدفعةُ المقدمةُ المستحقّةُ حالةٌ حيّةٌ كالمستخلص المفتوح — تُقال على البطاقة
+     حيث يُتَّخذ القرار، من `advancePayable` نفسِها التي تحرس زرَّ السداد. */
+  var advLine = advancePayable(c)
+    ? '<div class="ct-tile-ext warn">'+_icn("banknote","ic-sm")+
+      ' دفعةٌ مقدمةٌ بانتظار سداد المالية — المتبقّي <span class="num">'+money(advanceDueOf(c))+'</span> ر.س</div>'
+    : "";
   var extLine="";
   if(openE){
     var og=extGateOwner(openE.status);
@@ -6028,7 +6121,7 @@ function ctrTileHTML(c){
       ' <span class="ct-dot">·</span> '+_esc(_projName(c))+
       (c.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':'')+'</div>'+
     (docSubstituteId(c)?'<div style="margin-top:5px">'+substituteChip(c,true)+'</div>':'')+
-    extLine+
+    advLine+extLine+
     '<div class="ct-tile-foot">'+
       '<div class="ct-money"><span class="num">'+money(v)+'</span> <small>ر.س</small></div>'+
       '<div class="ct-tile-who">'+_esc(c.vendorName||"—")+'</div>'+
@@ -6045,6 +6138,10 @@ function ctrCardHTML(id){
   var tools='<button class="btn btn-ghost btn-sm" onclick="contracts.printCtr()">'+_icn("printer","ic-sm")+' طباعة العقد</button> ';
   if(c.status==="ctr_pending_signature" && ctrCanTransit("sign","ctr_pending_signature",role)){
     tools+='<button class="btn btn-primary btn-sm" onclick="contracts.openSign()">'+_icn("save","ic-sm")+' تسجيل التوقيع</button> ';
+  }
+  /* سدادُ الدفعة المقدمة — للمالية والأدمن ما دام عليها متبقٍّ والعقدُ جارياً */
+  if(advancePayable(c) && ["finance","admin"].indexOf(role)!==-1){
+    tools+='<button class="btn btn-success btn-sm" onclick="contracts.openAdvPay()">'+_icn("banknote","ic-sm")+' تسجيل سداد الدفعة المقدمة</button> ';
   }
   /* حذفُ العقد غيرِ الموقَّع — للأدمن: النافذةُ الوحيدةُ التي لم يُنتج فيها أثراً. */
   if(c.status==="ctr_pending_signature" && role==="admin"){
@@ -6111,15 +6208,43 @@ function ctrOverviewHTML(c){
       (ch.daysAdded?' وتمديدٍ '+money0(ch.daysAdded)+' يوماً':'')+'</div>'
     : "";
 
+  /* الدفعةُ المقدمة على العقود المتتبَّعة: المستحقُّ يُقال بلونه، والمسدَّدُ يُدوَّن
+     **بمبلغه الفعليّ** دفعةً دفعةً — فقد تسدّد الماليةُ أقلَّ من دفعة العقد. */
+  var advPaid=advancePaidOf(c), advDue=advanceDueOf(c);
+  var advTracked=(c.advance||{}).paid!=null && adv>0;
+  var advNote="";
+  if(advTracked){
+    var pays=(Array.isArray((c.advance||{}).payments)?(c.advance||{}).payments:[]).map(function(p){
+      return '<div class="ct-att"><span>'+_icn("banknote","ic-sm")+' سُدِّد <b class="num">'+money(p.amount)+'</b> ر.س'+
+        (p.ref?' — <span class="num">'+_esc(p.ref)+'</span>':'')+'</span>'+
+        '<span class="ct-att-m">'+_esc(p.by||"")+' · '+_esc(String(p.at||"").slice(0,16).replace("T"," "))+
+        (p.receiptUrl?' · <a class="ct-link" href="'+_esc(p.receiptUrl)+'" target="_blank" rel="noopener">'+_icn("paperclip","ic-sm")+' الإيصال</a>':'')+'</span></div>';
+    }).join("");
+    advNote='<div class="card ct-sec"><div class="ct-sec-h">'+_icn("banknote","ic-sm")+' الدفعة المقدمة'+
+      (advancePayable(c) && ["finance","admin"].indexOf(_role())!==-1
+        ? '<button class="btn btn-success btn-sm" style="margin-inline-start:auto" onclick="contracts.openAdvPay()">'+_icn("banknote","ic-sm")+' تسجيل السداد</button>' : '')+
+      '</div>'+
+      (advDue>0
+        ? '<div class="ct-note warn">'+_icn("timer","ic-sm")+' بانتظار سداد المالية — المتبقّي <b class="num">'+money(advDue)+'</b> من <span class="num">'+money(adv)+'</span> ر.س'+
+          (advPaid>0?' (سُدِّد <span class="num">'+money(advPaid)+'</span>)':'')+'</div>'
+        : '<div class="ct-note">'+_icn("checkCircle","ic-sm")+' سُدِّدت الدفعة المقدمة — <b class="num">'+money(advPaid)+'</b> ر.س'+
+          (advPaid+0.01<adv?' من أصل <span class="num">'+money(adv)+'</span> ر.س (سُدِّد أقلُّ من دفعة العقد)':'')+'</div>')+
+      pays+
+      '<div class="ct-note" style="margin-top:8px">'+_icn("rotateCcw","ic-sm")+' المسترَدُّ من المستخلصات حتى الآن: <span class="num">'+money((c.advance||{}).recovered||0)+'</span> ر.س — والاستردادُ بسقفِ المسدَّد فعلاً.</div>'+
+    '</div>';
+  }
+
   return chNote+'<div class="card ct-sec">'+
     '<div class="ct-money-row">'+
       '<div class="ct-tl big"><span class="l">قيمة العقد النافذة</span><span class="v num">'+money(v)+'</span></div>'+
       '<div class="ct-tl"><span class="l">الأساس</span><span class="v num">'+money(t.base)+'</span></div>'+
       '<div class="ct-tl"><span class="l">ض.ق.م</span><span class="v num">'+money(t.vat)+'</span></div>'+
       '<div class="ct-tl"><span class="l">دفعة مقدمة</span><span class="v num">'+money(adv)+'</span></div>'+
+      (advTracked?'<div class="ct-tl"><span class="l">المسدَّد من المقدمة</span><span class="v num">'+money(advPaid)+'</span></div>':'')+
       '<div class="ct-tl"><span class="l">محتجز الضمان</span><span class="v num">'+money(ret)+'</span></div>'+
     '</div>'+
   '</div>'+
+  advNote+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("clipboardList","ic-sm")+' بيانات العقد</div>'+
     '<div class="ct-info">'+
       infoCell("الطرف", vendorCell(c.vendorId, c.vendorName))+
@@ -6645,6 +6770,10 @@ function myPendingItems(role){
     if(c && c.status==="ctr_pending_signature" && ctrCanTransit("sign","ctr_pending_signature",role))
       out.push({ kind:"ctr", id:c.id, lbl:"عقد بانتظار التوقيع", title:c.title||c.vendorName||"",
                  value:contractValue(c), gate:"تسجيل التوقيع", at:c.updatedAt||c.createdAt||"" });
+    /* الدفعةُ المقدمةُ المستحقّة عملُ المالية — من `advancePayable` نفسِها التي تحرس الزرّ */
+    if(c && advancePayable(c) && ["finance","admin"].indexOf(role)!==-1)
+      out.push({ kind:"ctr", id:c.id, lbl:"دفعة مقدمة", title:c.title||c.vendorName||"",
+                 value:advanceDueOf(c), gate:"المالية — سداد الدفعة المقدمة", at:c.updatedAt||c.createdAt||"" });
   });
   _exts.forEach(function(e){
     if(e && !extIsFinal(e.status) && extCanAct(e.status, role) &&
@@ -7972,6 +8101,53 @@ function doSign(){
   });
 }
 
+/* ── سدادُ الدفعة المقدمة — صندوقُه على بطاقة العقد (نهجُ صندوق سداد أمر الدفع) ── */
+function openAdvPay(){
+  var c=contractById(_cOpen); if(!c) return;
+  var el=document.getElementById("page-"+PAGE_CTRS); if(!el) return;
+  var due=advanceDueOf(c);
+  var old=document.getElementById("ct-advpay"); if(old) old.remove();
+  var box=document.createElement("div");
+  box.className="card ct-sec"; box.id="ct-advpay";
+  box.innerHTML='<div class="ct-sec-h">'+_icn("banknote","ic-sm")+' تسجيل سداد الدفعة المقدمة</div>'+
+    '<div class="ct-note">'+_icn("alertCircle","ic-sm")+' اكتب <b>المبلغَ المسدَّد فعلاً</b> — يجوز أقلُّ من دفعة العقد ولا يجوز أكثرُ من المتبقّي ('+money(due)+' ر.س)، ويجوز الإكمالُ لاحقاً على دفعات.</div>'+
+    '<div class="ct-form-row">'+
+      field("المبلغ المسدَّد فعلاً *", '<input class="form-input num" id="ct-adv-amt" type="number" step="any" min="0" value="'+_esc(due)+'">')+
+      field("مرجع التحويل", '<input class="form-input" id="ct-adv-ref" placeholder="رقم العملية">')+
+    '</div>'+
+    '<div class="ct-form-row">'+
+      field("إيصال السداد * (صورة أو PDF)", '<input type="file" class="form-input ct-file" id="ct-adv-file" accept="image/*,application/pdf">')+
+      '<div></div>'+
+    '</div>'+
+    '<div class="ct-save-bar" style="position:static">'+
+      '<button class="btn btn-ghost btn-sm" onclick="contracts.closeAdvPay()">إلغاء</button>'+
+      '<button class="btn btn-success btn-sm" id="ct-adv-btn" onclick="contracts.doAdvPay()">'+_icn("save","ic-sm")+' تسجيل السداد</button>'+
+    '</div>';
+  el.insertBefore(box, el.children[2]||null);
+  box.scrollIntoView({behavior:"smooth",block:"center"});
+}
+function closeAdvPay(){ var b=document.getElementById("ct-advpay"); if(b) b.remove(); }
+function doAdvPay(){
+  var c=contractById(_cOpen); if(!c) return;
+  var f=(document.getElementById("ct-adv-file")||{}).files;
+  if(!f||!f[0]){ _toast("⚠ إيصال السداد إلزامي","warn"); return; }
+  var amt=Number((document.getElementById("ct-adv-amt")||{}).value)||0;
+  var ref=String((document.getElementById("ct-adv-ref")||{}).value||"").trim();
+  var btn=document.getElementById("ct-adv-btn"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الرفع…"; }
+  uploadVendorDoc(c.id, f[0], "adv_receipt").then(function(att){
+    if(!att||!att.url) throw new Error("تعذّر رفع الإيصال");
+    return payAdvance(c.id, { amount:amt, ref:ref, receiptUrl:att.url });
+  }).then(function(cc){
+    closeAdvPay(); paintCtrs();
+    var left=advanceDueOf(cc);
+    _toast(left>0 ? "✅ سُجِّل سداد "+money(amt)+" ر.س — المتبقّي "+money(left)+" ر.س" : "✅ سُدِّدت الدفعة المقدمة","success");
+  }).catch(function(e){
+    console.warn("contracts/doAdvPay",e);
+    if(btn){ btn.disabled=false; btn.innerHTML=_icn("save","ic-sm")+" تسجيل السداد"; }
+    _toast("⚠ "+_errMsg(e)+" — لا يُسجَّل سدادٌ بلا إيصال","warn");
+  });
+}
+
 /* ── أفعالُ المستخلص ── */
 function newExtract(){
   var c=contractById(_cOpen); if(!c) return;
@@ -8662,6 +8838,9 @@ window.contracts = {
   clauseTemplates: clauseTemplates, loadClauseTemplates: loadClauseTemplates,
   saveClauseTemplates: saveClauseTemplates,
   _sign: signContract, _saveClauses: saveContractClauses,
+  _payAdvance: payAdvance,
+  _advancePaidOf: advancePaidOf, _advanceDueOf: advanceDueOf, _advancePayable: advancePayable,
+  openAdvPay: openAdvPay, closeAdvPay: closeAdvPay, doAdvPay: doAdvPay,
   contractsList: contractsList, contractById: contractById, contractForRequest: contractForRequest,
   _convert: convertToContract, _transit: transitContract, _deleteCtr: deleteContract,
   // المستخلصات [المرحلة ٤]

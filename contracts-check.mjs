@@ -1773,6 +1773,80 @@ const signRes = await page.evaluate(async (cid) => {
 check('★ التوقيعُ يُرفض بلا نسخةٍ موقّعة', /إلزامية/.test(signRes.noDoc), signRes.noDoc);
 check('★ ورفعُ النسخة الموقّعة جعل العقد **سارياً**',
   signRes.st === 'ctr_active' && signRes.docs === 1 && signRes.at, JSON.stringify(signRes));
+
+/* ═════ الدفعةُ المقدمة (طلبُ المالك): بانتظار سداد المالية بعد الإنشاء،
+   والماليةُ تدوّن **المبلغَ الفعليَّ** — وقد يكون أقلَّ من دفعة العقد وعلى دفعات ═════ */
+const advStart = await page.evaluate((cid) => {
+  const c = window.contracts.contractById(cid);
+  return { due: window.contracts._advanceDueOf(c), paid: window.contracts._advancePaidOf(c),
+           payable: window.contracts._advancePayable(c),
+           pendFin: window.contracts._myPendingItems('finance').filter(x => x.id === cid && x.lbl === 'دفعة مقدمة').length,
+           recNow: window.contracts._extNet({ lines: [{ cumQty: 100, unitPrice: c.lines[0].unitPrice }] }, c, { prevGross: 0 }).advanceRecovery };
+}, conv.cid);
+check('★★ عقدٌ بدفعةٍ مقدمة (3,360): مستحقّةٌ كاملةً لسداد المالية بعد الإنشاء',
+  advStart.due === 3360 && advStart.paid === 0 && advStart.payable === true, JSON.stringify(advStart));
+check('★★ وتظهر في «بانتظار إجراءك» للمالية', advStart.pendFin === 1, String(advStart.pendFin));
+check('★★★ ولا استردادَ من المستخلصات قبل سدادها — لا يُستردّ ما لم يُدفع',
+  advStart.recNow === 0, String(advStart.recNow));
+const advCardTxt = await page.evaluate(async () => {
+  window.contracts.ctrTab('overview');
+  await new Promise(r => setTimeout(r, 600));
+  return document.getElementById('page-contracts-list').textContent || '';
+});
+check('★★ وبطاقةُ العقد تقولها: بانتظار سداد المالية وزرُّ «تسجيل سداد الدفعة المقدمة»',
+  /بانتظار سداد المالية/.test(advCardTxt) && /تسجيل سداد الدفعة المقدمة/.test(advCardTxt));
+await page.screenshot({ path: `${SHOTS}/18b-advance-due.png`, fullPage: true });
+
+// حرّاسُ طبقة البيانات: إيصالٌ إلزاميّ · مبلغٌ إلزاميّ · لا فوق المتبقّي · للمالية وحدها
+const advGuards = await page.evaluate(async (cid) => {
+  const out = {};
+  try { await window.contracts._payAdvance(cid, { amount: 1000 }); out.noRcpt = 'مرّ بلا إيصال'; }
+  catch (e) { out.noRcpt = e.message; }
+  try { await window.contracts._payAdvance(cid, { receiptUrl: 'https://example.test/r.pdf' }); out.noAmt = 'مرّ بلا مبلغ'; }
+  catch (e) { out.noAmt = e.message; }
+  try { await window.contracts._payAdvance(cid, { amount: 5000, receiptUrl: 'https://example.test/r.pdf' }); out.over = 'مرّ فوق المتبقّي'; }
+  catch (e) { out.over = e.message; }
+  const real = currentUser.role; currentUser.role = 'project_manager';
+  try { await window.contracts._payAdvance(cid, { amount: 1000, receiptUrl: 'https://example.test/r.pdf' }); out.role = 'مرّ بغير المالية'; }
+  catch (e) { out.role = e.message; }
+  currentUser.role = real;
+  return out;
+}, conv.cid);
+check('★★ لا سدادَ بلا إيصال', /إيصال/.test(advGuards.noRcpt), advGuards.noRcpt);
+check('★★ والمبلغُ الفعليُّ إلزاميّ — «اكتب كم سُدِّد»', /مبلغ السداد إلزامي/.test(advGuards.noAmt), advGuards.noAmt);
+check('★★ ولا يُسدَّد فوق المتبقّي من الدفعة', /يتجاوز المتبقّي/.test(advGuards.over), advGuards.over);
+check('★★ والسدادُ للمالية (والأدمن) وحدَها', /للمالية فقط/.test(advGuards.role), advGuards.role);
+
+// سدادٌ جزئيٌّ (1,360) ثم إكمالٌ (2,000) — المبلغُ الفعليُّ يُدوَّن دفعةً دفعة
+const advPay = await page.evaluate(async (cid) => {
+  await window.contracts._payAdvance(cid, { amount: 1360, ref: 'ADV-1', receiptUrl: 'https://example.test/adv1.pdf' });
+  const c1 = window.contracts.contractById(cid);
+  const mid = { paid: window.contracts._advancePaidOf(c1), due: window.contracts._advanceDueOf(c1),
+                tl: ((c1.timeline || []).slice(-1)[0] || {}) };
+  await window.contracts._payAdvance(cid, { amount: 2000, ref: 'ADV-2', receiptUrl: 'https://example.test/adv2.pdf' });
+  const c2 = window.contracts.contractById(cid);
+  let extra;
+  try { await window.contracts._payAdvance(cid, { amount: 1, receiptUrl: 'https://example.test/r.pdf' }); extra = 'مرّ بعد الاكتمال'; }
+  catch (e) { extra = e.message; }
+  window.contracts.ctrTab('overview');
+  await new Promise(r => setTimeout(r, 600));
+  return { mid, paid: window.contracts._advancePaidOf(c2), due: window.contracts._advanceDueOf(c2),
+           n: (c2.advance.payments || []).length, extra,
+           pendFin: window.contracts._myPendingItems('finance').filter(x => x.id === cid && x.lbl === 'دفعة مقدمة').length,
+           txt: document.getElementById('page-contracts-list').textContent || '' };
+}, conv.cid);
+check('★★★ السدادُ الجزئيُّ دُوِّن بمبلغه الفعليّ: سُدِّد 1,360 والمتبقّي 2,000 وقيدُ السجل يذكرهما',
+  advPay.mid.paid === 1360 && advPay.mid.due === 2000 && advPay.mid.tl.code === 'advance_paid' &&
+  /1,360\.00/.test(advPay.mid.tl.note) && /المتبقّي 2,000\.00/.test(advPay.mid.tl.note),
+  JSON.stringify(advPay.mid));
+check('★★ والإكمالُ على دفعةٍ ثانية: 3,360 كاملةً بدفعتين مدوَّنتين',
+  advPay.paid === 3360 && advPay.due === 0 && advPay.n === 2, JSON.stringify({ p: advPay.paid, d: advPay.due, n: advPay.n }));
+check('★ وبعد الاكتمال لا سدادَ زائداً ولا تبقى في انتظار المالية',
+  /مسدَّدة بالفعل/.test(advPay.extra) && advPay.pendFin === 0, advPay.extra + ' · معلَّق=' + advPay.pendFin);
+check('★★ والبطاقةُ تعرض المسدَّدَ الفعليَّ بمرجعَيه',
+  /المسدَّد من المقدمة/.test(advPay.txt) && /ADV-1/.test(advPay.txt) && /ADV-2/.test(advPay.txt) &&
+  /سُدِّدت الدفعة المقدمة/.test(advPay.txt));
+await page.screenshot({ path: `${SHOTS}/18c-advance-paid.png`, fullPage: true });
 await page.evaluate(() => window.contracts.ctrTab('overview'));
 await page.waitForTimeout(800);
 check('والبطاقةُ صارت تعرض توقيعَه ومرفقَه',
