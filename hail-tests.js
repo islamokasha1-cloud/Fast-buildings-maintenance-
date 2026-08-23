@@ -452,7 +452,9 @@ function predelivery() {
     /* ثم رُفع من 37350 إلى 37360 — ‏٧ أسطرِ توثيقٍ لعلّة «مشترياتٌ صفرٌ بعد
        التنقّل»: تصفيرٌ في applyProjectConfig لمصفوفةٍ مستمعُها حيّ. إصلاحُ سطرٍ
        في دالّةٍ قائمة — والتعليقُ عندها كي لا يُعاد التصفيرُ اجتهاداً. */
-    const IDX_CEILING = 37360;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37360 إلى 37368 — ‏٥ أسطرٍ لحارس db في loadItemCatalog مع توثيقِ
+       الثغرة عند موضعها (اصطادها فحصُ ما بعد الدمج التشغيليّ في متصفّحٍ حقيقيّ). */
+    const IDX_CEILING = 37368;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -11696,6 +11698,23 @@ function dataLivesWithItsListener() {
     !/function applyProjectConfig[\s\S]{0,2500}?[^\w.]purchases\s*=\s*\[\]/.test(IDX_RAW));
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   كلُّ مشغّلِ مزامنةٍ تناديه الشاشاتُ محروسٌ ضدّ غياب db
+   فحصُ ما بعد الدمج (v18.9.2824) في متصفّحٍ حقيقيٍّ بلا Firebase أظهر أن
+   `loadItemCatalog` — الوحيدةَ بين الستة بلا `if(!db)` — تفجّر فتحَ ثلاث شاشات
+   (الكتالوج · طلبٌ جديد · إضافةُ مخزون) بـTypeError في وضع offline: قبل v18.9.2820
+   كان حارسُ startPurchaseSync يحميها من فوق، ثم صارت تُنادى من showPage مباشرة.
+   الحارس هنا يفرض القاعدة على الستة جميعاً فلا تسقط واحدةٌ عند إضافة نداءٍ جديد.
+   ═══════════════════════════════════════════════════════════════════════ */
+function pageStartersGuardDb() {
+  H("vNEXT) مشغّلاتُ الشاشات الستة كلُّها تبدأ بحارس غياب db");
+  ["loadItemCatalog","loadRFQs","startInventorySync","startAssetsSync","startPPMSync","startIssueOrdersSync"]
+    .forEach(fn => {
+      const m = IDX_RAW.match(new RegExp("function " + fn + "\\([^)]*\\)\\{[\\s\\S]{0,600}?if\\(!db\\)"));
+      T(`★★ ${fn} تتحقّق من db قبل أيّ استعمالٍ له`, !!m);
+    });
+}
+
 function fsRecoveryNoDeadEnd() {
   H("v18.9xd) تعافي Firestore: كلُّ مسارٍ ينتهي بتحميلٍ أو برسالة");
 
@@ -12465,6 +12484,7 @@ function printIconSizeGuards() {
   supplyPromiseDates();
   browserCheckTimeBombs();
   fsRecoveryNoDeadEnd();
+  pageStartersGuardDb();
   dataLivesWithItsListener();
   transportNotThrottled();
   loadTimeSurgeryGuards();
