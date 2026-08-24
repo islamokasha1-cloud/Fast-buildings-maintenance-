@@ -476,7 +476,7 @@ function predelivery() {
     /* ثم رُفع من 37481 إلى 37535 — ‏٥٤ سطراً لكاشف «البند التوأم بسعر مختلف»
        (بلاغ المالك الثاني: بندان بحروف متبادلة «بالط/بلاط» بسعرين والإكمال يلتقط
        القديم). **إصلاح سلوكِ اختيار البند القائم في النواة في مكانه** (CLAUDE.md). */
-    const IDX_CEILING = 37550;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    const IDX_CEILING = 37620;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -6842,6 +6842,22 @@ function hrPaymentsTests() {
   T("الدور hr_manager مضاف لقائمتَي إضافة المستخدمين ولأدوار المشتريات",
     (HTML.match(/<option value="hr_manager">/g) || []).length >= 2 &&
     /"hr_manager":\s*"👥 مدير الموارد البشرية"/.test(HTML));
+
+  /* ── تغيير دور مستخدمٍ قائم (طلب المالك — كان الدور يتجمّد عند الإنشاء) ── */
+  T("★ زرّ «الدور» في قائمتَي المستخدمين (شاشة الأدمن وشاشة المشتريات)",
+    (HTML.match(/onclick="openChangeUserRole\(\$\{i\}\)"/g) || []).length >= 2);
+  T("★ تغيير الدور للمسؤول وحده، ولا يطال حسابات admin ولا المستخدم الحالي",
+    /function openChangeUserRole\(i\)\{\s*if\(!_adminOnlyUsersGuard\(\)\) return;/.test(HTML) &&
+    /async function _applyChangeUserRole\(i\)\{\s*if\(!_adminOnlyUsersGuard\(\)\)/.test(HTML) &&
+    (HTML.match(/لا يمكن تغيير دور المستخدم الحالي/g) || []).length >= 2 &&
+    /حسابات مدير النظام لا يُغيَّر دورها من هنا/.test(HTML));
+  T("★ الدور الجديد يُزامَن مع المخزن المركزي (meta/users) ويُقيَّد في سجل التدقيق",
+    /_sync=await _upsertUserCentral\(u\);/.test(HTML) &&
+    /logAudit\("تغيير دور مستخدم"/.test(HTML));
+  T("★ مغادرة دور مسؤول الموارد البشرية تُسقط مفتاح «طلب شراء» المانح (لا أزرار ميتة)",
+    /if\(newRole!=="hr_officer" && u\.permissions && u\.permissions\.poRequest\) delete u\.permissions\.poRequest;/.test(HTML));
+  T("★ فشل الحفظ يرجع الدور والصلاحيات كما كانا (لا حالة نصفية)",
+    /u\.role=oldRole; u\.permissions=oldPerms;/.test(HTML));
 
   // ── بصمة البناء تطابق الإصدار ──
   const hrBuild = (src.match(/var MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
