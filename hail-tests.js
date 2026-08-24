@@ -2615,6 +2615,15 @@ function financialInvariants() {
   T("★ وفائضُ السداد عن الإجمالي يُدوَّن في السجلّ الزمني وسجلّ التدقيق",
     HTML.includes("فائض عن الإجمالي") && HTML.includes('excess>0.01?(" — فائض: "'));
 
+  // ── جدول «المالية — السداد»: عمود المشروع من المصدر الموحّد لا «الجهة» (طلب المالك) ──
+  {
+    const th = HTML.indexOf("openFinancePaidModal('${esc(p.id)}')");
+    const seg = th >= 0 ? HTML.slice(Math.max(0, th - 3000), th + 6000) : "";
+    T("★ عمود جدول السداد «المشروع» باسم المشروع الموحّد (poProjectDisplayName) — لا «الجهة»",
+      seg.includes(">المشروع</th>") && !seg.includes(">الجهة</th>") &&
+      seg.includes("poProjectDisplayName(p)"));
+  }
+
   // ── v18.9ua — بطاقاتُ «المالية — السداد» تفاعلية: مجموعةُ الفلتر = مجموعةُ الرقم المرسوم ──
   {
     const fs = HTML.indexOf("function _poFinancePayDays(");
