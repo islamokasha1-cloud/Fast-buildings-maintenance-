@@ -56,7 +56,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2859";
+  var MODULE_BUILD = "v18.9.2861";
 
   function COLL(){
     var dev=false;
@@ -83,6 +83,7 @@
     {k:"insurance",   l:"تأمين طبي",                   icon:"shield"},
     {k:"labor_office",l:"مكتب العمل / رسوم حكومية",    icon:"landmark"},
     {k:"passport",    l:"جوازات / أحوال",              icon:"book"},
+    {k:"advance",     l:"سلفة موظف",                   icon:"banknote"},
     {k:"other",       l:"أخرى",                        icon:"folderOpen"}
   ];
   var _WT_MAP = (function(){ var m={}; WORK_TYPES.forEach(function(w){ m[w.k]=w; }); return m; })();

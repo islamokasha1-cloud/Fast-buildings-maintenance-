@@ -185,6 +185,7 @@ const HRP_WORK_TYPES = {
   insurance: "تأمين طبي",
   labor_office: "مكتب العمل / رسوم حكومية",
   passport: "جوازات / أحوال",
+  advance: "سلفة موظف",
   other: "أخرى",
 };
 
