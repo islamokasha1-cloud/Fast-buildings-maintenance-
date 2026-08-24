@@ -476,7 +476,7 @@ function predelivery() {
     /* ثم رُفع من 37481 إلى 37535 — ‏٥٤ سطراً لكاشف «البند التوأم بسعر مختلف»
        (بلاغ المالك الثاني: بندان بحروف متبادلة «بالط/بلاط» بسعرين والإكمال يلتقط
        القديم). **إصلاح سلوكِ اختيار البند القائم في النواة في مكانه** (CLAUDE.md). */
-    const IDX_CEILING = 37535;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    const IDX_CEILING = 37550;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -6839,6 +6839,9 @@ function hrPaymentsTests() {
     HTML.includes('{name:"hr-payments.js", get:function(){ return window.hrPayments; }}'));
   T("الدور hr_officer مضاف لقائمتَي إضافة المستخدمين",
     (HTML.match(/<option value="hr_officer">/g) || []).length >= 2);
+  T("الدور hr_manager مضاف لقائمتَي إضافة المستخدمين ولأدوار المشتريات",
+    (HTML.match(/<option value="hr_manager">/g) || []).length >= 2 &&
+    /"hr_manager":\s*"👥 مدير الموارد البشرية"/.test(HTML));
 
   // ── بصمة البناء تطابق الإصدار ──
   const hrBuild = (src.match(/var MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
@@ -6873,6 +6876,21 @@ function hrPaymentsTests() {
 
   const TH = 2000;
   const ns = (r) => HR._nextStage(r, TH);
+  const HRM_TS = "2026-08-01T00:00:00Z";
+
+  /* (٠) بوّابة مدير الموارد البشرية — إلزامية لكل طلبٍ جديد (needsHRM يُثبَّت عند
+     الإنشاء) وتتقدّم على كل البوّابات مهما كان المبلغ. والطلبات الأقدم بلا الحقل
+     تمضي في مسارها القديم — لا تُعاد لبوّابةٍ لم تكن قائمةً يوم أُنشئت. */
+  T("★ طلب جديد (needsHRM) يبدأ عند مدير الموارد البشرية مهما كان المبلغ والاختيار",
+    ns({ amount: 100, needsHRM: true, needsPM: true }) === "hrp_pending_hrm" &&
+    ns({ amount: 99999, needsHRM: true, needsPM: false }) === "hrp_pending_hrm");
+  T("★ بعد اعتماد مدير الموارد البشرية يمضي المسار القديم نفسه",
+    ns({ amount: 100,  needsHRM: true, hrmApprovedAt: HRM_TS, needsPM: true  }) === "hrp_pending_pm" &&
+    ns({ amount: 5000, needsHRM: true, hrmApprovedAt: HRM_TS, needsPM: false }) === "hrp_pending_ceo" &&
+    ns({ amount: 500,  needsHRM: true, hrmApprovedAt: HRM_TS, needsPM: false }) === "hrp_pending_finance");
+  T("★ الطلبات الأقدم (بلا needsHRM) لا تُعاد لبوّابةٍ لم تكن قائمة",
+    ns({ amount: 100, needsPM: true }) === "hrp_pending_pm" &&
+    ns({ amount: 500, needsPM: false }) === "hrp_pending_finance");
 
   // (١) اختيار مدير المشاريع يقدَّم على كل شيء
   T("★ اختار «يحتاج مدير المشاريع» ⇒ يبدأ عنده",
@@ -6912,11 +6930,12 @@ function hrPaymentsTests() {
     ns({ amount: 8000, needsPM: false, ceoApprovedAt: "2026-08-01T00:00:00Z" }) === "hrp_pending_ceo");
 
   // (٧) جدول الحالات مكتمل ومتّسق
-  const need = ["hrp_pending_pm","hrp_pending_ceo","hrp_pending_finance","hrp_closed",
-                "hrp_pm_rejected","hrp_ceo_rejected","hrp_finance_returned","hrp_cancelled"];
+  const need = ["hrp_pending_hrm","hrp_pending_pm","hrp_pending_ceo","hrp_pending_finance","hrp_closed",
+                "hrp_hrm_rejected","hrp_pm_rejected","hrp_ceo_rejected","hrp_finance_returned","hrp_cancelled"];
   T("جدول الحالات يغطّي كل مراحل المسار", need.every(k => !!HR.HRP_STATUS[k]));
   T("كل مخرجات دالة التوجيه حالاتٌ معرَّفة",
-    [ns({amount:1,needsPM:true}), ns({amount:1,needsPM:false}), ns({amount:1e6,needsPM:false})]
+    [ns({amount:1,needsPM:true}), ns({amount:1,needsPM:false}), ns({amount:1e6,needsPM:false}),
+     ns({amount:1,needsHRM:true,needsPM:false})]
       .every(k => !!HR.HRP_STATUS[k]));
   T("الحالات النهائية والمرتدّة معرَّفة ولا تتقاطع",
     HR.HRP_FINAL.every(k => !!HR.HRP_STATUS[k]) &&
@@ -6939,11 +6958,13 @@ function hrPaymentsTests() {
 
   // (١٠) الصلاحيات — الأدوار المعنية وحدها
   T("★ العرض مقصور على الأدوار المعنية (لا المستودع ولا المشتريات ولا الزائر)",
-    /function canView\(\)\{ return canCreate\(\) \|\| canPM\(\) \|\| canCEO\(\) \|\| canFinance\(\); \}/.test(src.replace(/\s+/g, " ").replace(/function canView\(\)/, "function canView()")) ||
-    (/canCreate\(\)\s*\|\|\s*canPM\(\)\s*\|\|\s*canCEO\(\)\s*\|\|\s*canFinance\(\)/.test(src) &&
-     !/warehouse_manager|procurement_officer/.test(src)));
+    /canCreate\(\)\s*\|\|\s*canHRM\(\)\s*\|\|\s*canPM\(\)\s*\|\|\s*canCEO\(\)\s*\|\|\s*canFinance\(\)/.test(src) &&
+    !/warehouse_manager|procurement_officer/.test(src));
   T("الإنشاء لمسؤول الموارد البشرية والمسؤول فقط",
     /function canCreate\(\)\s*\{\s*return _role\(\)==="hr_officer" \|\| _isAdmin\(\); \}/.test(src));
+  T("★ اعتماد البوّابة الأولى لمدير الموارد البشرية والمسؤول فقط",
+    /function canHRM\(\)\s*\{\s*return _role\(\)==="hr_manager" \|\| _isAdmin\(\); \}/.test(src) &&
+    /if\(r\.status==="hrp_pending_hrm" && canHRM\(\)\)/.test(src));
   T("تسجيل السداد يفرض إيصالاً إلزامياً", /إيصال التحويل إلزامي/.test(src));
   T("كل كتابة تمرّ بمعاملة على الوثيقة الطازجة", /runTransaction/.test(src));
 
@@ -7139,6 +7160,7 @@ function hrPaymentNotificationTests(src) {
     /if\(_lastActor\(r\)===_me\(\)\) return;/.test(src));
   T("★ التنبيه لمن دورُه الآن وحده (نفس منطق عدّاد السايدبار)",
     /function _awaitsMe\(r\)\{/.test(src) &&
+    /if\(r\.status==="hrp_pending_hrm"\)\s*return canHRM\(\);/.test(src) &&
     /if\(r\.status==="hrp_pending_pm"\)\s*return canPM\(\);/.test(src) &&
     /if\(r\.status==="hrp_pending_ceo"\)\s*return canCEO\(\);/.test(src) &&
     /if\(r\.status==="hrp_pending_finance"\) return canFinance\(\);/.test(src));
@@ -7164,15 +7186,16 @@ function hrPaymentNotificationTests(src) {
   const routeKeys = (cfgSrc.match(/^\s{2}(hrp_[a-z_]+): \{ role:/gm) || [])
     .map(l => l.trim().split(":")[0]);
   T("★★ كل مرحلةِ انتظارٍ في الوحدة لها مستلمٌ في خريطة الخادم",
-    ["hrp_pending_pm", "hrp_pending_ceo", "hrp_pending_finance"].every(k => routeKeys.includes(k)) &&
-    routeKeys.length === 3, routeKeys.join(" · "));
-  T("★ الأدوار مطابقة لبوّابات الوحدة (مدير المشاريع · التنفيذي · المالية)",
+    ["hrp_pending_hrm", "hrp_pending_pm", "hrp_pending_ceo", "hrp_pending_finance"].every(k => routeKeys.includes(k)) &&
+    routeKeys.length === 4, routeKeys.join(" · "));
+  T("★ الأدوار مطابقة لبوّابات الوحدة (مدير الموارد البشرية · مدير المشاريع · التنفيذي · المالية)",
+    /hrp_pending_hrm: \{ role: "hr_manager"/.test(cfgSrc) &&
     /hrp_pending_pm: \{ role: "project_manager"/.test(cfgSrc) &&
     /hrp_pending_ceo: \{ role: "ceo"/.test(cfgSrc) &&
     /hrp_pending_finance: \{ role: "finance"/.test(cfgSrc));
   T("★ صاحب الطلب يُنبَّه بالرفض والإعادة والإغلاق — لا بإلغائه هو",
-    /HRP_NOTIFY_REQUESTER = new Set\(\[\s*"hrp_pm_rejected",\s*"hrp_ceo_rejected",\s*"hrp_finance_returned",\s*"hrp_closed",\s*\]\)/.test(cfgSrc) &&
-    !/HRP_NOTIFY_REQUESTER[\s\S]{0,200}hrp_cancelled/.test(cfgSrc));
+    /HRP_NOTIFY_REQUESTER = new Set\(\[\s*"hrp_hrm_rejected",\s*"hrp_pm_rejected",\s*"hrp_ceo_rejected",\s*"hrp_finance_returned",\s*"hrp_closed",\s*\]\)/.test(cfgSrc) &&
+    !/HRP_NOTIFY_REQUESTER[\s\S]{0,240}hrp_cancelled/.test(cfgSrc));
 
   // تسميات نوعية العمل نسختان (واجهة/خادم) — الحارس يمنع انحرافهما.
   const uiKeys = (src.match(/\{k:"([a-z_]+)",\s*l:/g) || []).map(m => m.match(/k:"([a-z_]+)"/)[1]);

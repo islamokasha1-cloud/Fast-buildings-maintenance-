@@ -147,6 +147,7 @@ const HRP = {
  * الرموز مطابقة لـ`HRP_STATUS` في `hr-payments.js` حرفياً (يحرسه فحصٌ في hail-tests).
  */
 const HRP_ROUTING = {
+  hrp_pending_hrm: { role: "hr_manager", action: "اعتمادك" },
   hrp_pending_pm: { role: "project_manager", action: "موافقتك" },
   hrp_pending_ceo: { role: "ceo", action: "اعتمادك" },
   hrp_pending_finance: { role: "finance", action: "سدادك" },
@@ -158,6 +159,7 @@ const HRP_ROUTING = {
  * فهو فعلُه هو — لا يُشعَر به أحدٌ.
  */
 const HRP_NOTIFY_REQUESTER = new Set([
+  "hrp_hrm_rejected",
   "hrp_pm_rejected",
   "hrp_ceo_rejected",
   "hrp_finance_returned",
@@ -166,6 +168,7 @@ const HRP_NOTIFY_REQUESTER = new Set([
 
 /** تسميات الحالة العربية (للرسالة إلى صاحب الطلب). */
 const HRP_STATUS_LABELS = {
+  hrp_hrm_rejected: "مرفوض من مدير الموارد البشرية",
   hrp_pm_rejected: "مرفوض من مدير المشاريع",
   hrp_ceo_rejected: "مرفوض من المدير التنفيذي",
   hrp_finance_returned: "مُعاد من المالية للتصحيح",

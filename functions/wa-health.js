@@ -168,7 +168,8 @@ async function checkRecipients(db) {
   // دورٌ بلا رقمٍ مُفعَّلٍ = الإشعارُ يُسقَط بسطرٍ في سجلٍّ لا يقرؤه أحد.
   const ROLES = {
     project_manager: "مدير المشاريع", ceo: "المدير التنفيذي", finance: "المالية",
-    hr_officer: "مسؤول الموارد البشرية", procurement_officer: "مسؤول المشتريات",
+    hr_officer: "مسؤول الموارد البشرية", hr_manager: "مدير الموارد البشرية",
+    procurement_officer: "مسؤول المشتريات",
     warehouse_manager: "مسؤول المستودعات", admin: "الأدمن (الدورُ الاحتياطيّ)",
   };
   const found = {};
