@@ -469,7 +469,11 @@ function predelivery() {
     /* ثم رُفع من 37412 إلى 37425 — ‏١٣ سطراً لخيار `input` في `showConfirm`
        (v18.9xi: خانة ملاحظات الاعتماد في التعاقدات). **توسيعُ مكوّنِ نواةٍ قائم**
        يخدم كلَّ الوحدات — والنافذةُ ودالّتُها يعيشان في النواة لا في وحدة. */
-    const IDX_CEILING = 37425;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37425 إلى 37481 — ‏٥٦ سطراً لمزامنة السعر المقفول مع الكتالوج
+       الحي (بلاغ المالك: تغيّر سعر الكتالوج وبقي الطلب على القديم). **إصلاحُ
+       منطقٍ قائمٍ في مكانه** — قفلُ السعر ونموذجُ الطلب والمسودة كلُّها في النواة،
+       ونقلُها لملفٍّ جديدٍ بحجّة الإصلاح ممنوع (CLAUDE.md). */
+    const IDX_CEILING = 37481;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -7651,6 +7655,55 @@ function financeAuditTests() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   السعر المقفول من الكتالوج يتبع الكتالوج الحي (بلاغ المالك)
+   كان السعر يتجمّد لحظة الاختيار، فطلبٌ أُنشئ من مسودة أو أُضيف بندُه قبل
+   تعديل سعر الكتالوج يخرج بالسعر القديم. الحرّاس: معادلة إعادة الحساب
+   (lineTotal + vat === itemCost) · اليدوي لا يُمَسّ · الخطافات الثلاثة
+   (لقطة الكتالوج · استعادة المسودة · قبل الإرسال).
+   ════════════════════════════════════════════════════════════════════ */
+function npLockedPriceSyncGuards() {
+  H("مزامنة السعر المقفول مع الكتالوج الحي");
+  const fs2 = HTML.indexOf("function _npSyncLockedItem(");
+  const fe2 = HTML.indexOf("function _npResyncCatalogPrices(");
+  T("★ دالة المزامنة موجودة", fs2 >= 0 && fe2 > fs2);
+  if (fs2 < 0 || fe2 <= fs2) return;
+  let syncFn = null;
+  try {
+    syncFn = new Function("_catalogItems", "_catResolveId", HTML.slice(fs2, fe2) + "\nreturn _npSyncLockedItem;");
+  } catch (e) { T("تُبنى دالة المزامنة", false, String(e.message).slice(0, 120)); return; }
+  const CAT = [{ id: "c1", unitPrice: 1.48 }];
+  const RES = id => id;
+  const run = it => { const f = syncFn(CAT, RES); return { changed: f(it), it }; };
+
+  const locked = { priceLocked: true, itemId: "c1", qty: 10, unitCost: 1.74, estUnitCost: 1.74, itemCost: 20.01, lineTotal: 17.4, vat: 2.61, vatUnit: 0.26 };
+  const r1 = run({ ...locked });
+  T("★ البند المقفول يتحدّث لسعر الكتالوج الجديد ويعاد حسابه كاملاً",
+    r1.changed === true && r1.it.unitCost === 1.48 && r1.it.estUnitCost === 1.48 &&
+    r1.it.lineTotal === 14.8 && r1.it.itemCost === 17 && r1.it.vat === 2.2,
+    JSON.stringify({ u: r1.it.unitCost, l: r1.it.lineTotal, c: r1.it.itemCost, v: r1.it.vat }));
+  T("★ معادلة v18.9nc محفوظة بعد المزامنة: lineTotal + vat === itemCost",
+    Math.abs(r1.it.lineTotal + r1.it.vat - r1.it.itemCost) < 0.001);
+  const manual = run({ priceLocked: false, itemId: "c1", qty: 10, unitCost: 1.74 });
+  T("★ البند اليدوي (غير المقفول) لا يُمَسّ", manual.changed === false && manual.it.unitCost === 1.74);
+  const same = run({ priceLocked: true, itemId: "c1", qty: 10, unitCost: 1.48 });
+  T("سعر مطابق أصلاً: لا تغيير (لا توست كاذب)", same.changed === false);
+  const orphan = run({ priceLocked: true, itemId: "غائب", qty: 10, unitCost: 1.74 });
+  T("بند كتالوجه محذوف: يبقى على سعره (لا تصفير)", orphan.changed === false && orphan.it.unitCost === 1.74);
+  T("★ المعرّف يُحلّ عبر الدمج (_catResolveId) قبل البحث",
+    /_catalogItems\.find\(c=>c\.id===_catResolveId\(it\.itemId\)\)/.test(HTML));
+
+  // الخطافات الثلاثة — لقطة الكتالوج الحية، استعادة المسودة، قبل الإرسال
+  T("★ لقطة الكتالوج (onSnapshot) تزامن الأسعار المقفولة فور وصولها",
+    /try\{ _npResyncCatalogPrices\(!document\.getElementById\("page-new-purchase"\)\?\.classList\.contains\("active"\)\); \}catch\(_e\)\{\}/.test(HTML));
+  T("★ استعادة المسودة تزامن وتُخبر المستخدم بما تغيّر بعد حفظها",
+    /const _upd=_npResyncCatalogPrices\(true\);/.test(HTML) &&
+    HTML.includes("تغيّر بعد حفظ المسودة"));
+  T("★ شبكة أمان قبل الإرسال: لا يخرج طلب بسعر كتالوج قديم",
+    /const _priceUpd=_npResyncCatalogPrices\(true\);/.test(HTML) &&
+    HTML.includes("قبل الإرسال"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    v18.9ag) مركزُ العمليات — كل لوحات TV في شاشةٍ واحدة
    الحرّاس: مصدرٌ واحدٌ للتصنيف والصلاحية · عزلٌ تامٌّ عن المشروع المفتوح ·
    مستمعون يُفكّون عند الخروج · حسابُ البطاقة صحيح · نافذةٌ مُعلَنة.
@@ -12850,6 +12903,7 @@ function vendorPOIssuance() {
   kpi();
   substituteBudget();
   financeAuditTests();
+  npLockedPriceSyncGuards();
   hrPaymentsTests();
   numParsing();
   hailNotify();
