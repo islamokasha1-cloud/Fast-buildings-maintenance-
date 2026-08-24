@@ -7607,6 +7607,35 @@ function financeAuditTests() {
   T("بلا إجمالي مخزّن: الرجوع لـ unitCost", FA._unitNet({ unitCost: 55 }) === 55);
   T("كمية صفرية: لا قسمة على صفر — الرجوع لـ unitCost",
     FA._unitNet({ itemCost: 1150, vat: 150, rcvQty: 0, qty: 0, unitCost: 33 }) === 33);
+
+  // ── v18.9wt: تفاصيل المراجعة (قراءة) + إضافة طلب يدوياً للعينة ──
+  const man = FA._manualSample({ poId: "PO-X", vendor: "مورد", actualCost: 500 }, "اشتباه فرق سعر", "أنا", "2026-08-24T10:00:00Z");
+  T("★ wt: العينة اليدوية نقية بنفس بنية عينات الإنشاء وتبدأ «بانتظار المراجعة»",
+    man.poId === "PO-X" && man.source === "manual" && man.status === "pending" &&
+    man.manualReason === "اشتباه فرق سعر" && man.addedBy === "أنا" && man.addedAt === "2026-08-24T10:00:00Z" &&
+    man.vendor === "مورد" && man.actualCost === 500 && man.verdict === "" &&
+    Array.isArray(man.manualQuotes) && Array.isArray(man.reasons) && man.escalated === false &&
+    ["findings", "recommendation", "reviewedBy", "reviewedAt", "procurementReply", "closedBy", "closeNote"].every(k => man[k] === ""));
+  T("★ wt: الإضافة اليدوية محروسة داخل المعاملة (منع التكرار + منع الدورة المغلقة) وتُقيَّد في سجل التدقيق بسببها",
+    /function openAddManual\(\)\{\s*if\(!_canAudit\(\)\)/.test(src) &&
+    src.includes('"__DUP__"') && src.includes('"__CLOSED__"') &&
+    src.includes('"إضافة طلب يدوياً لعينة الرقابة المالية"') && src.includes("السبب: ") &&
+    src.includes("اكتب سبب الإضافة"));
+  T("★ wt: زر الإضافة للمالية على دورة مفتوحة فقط، والمرشّحون طلبات مغلقة خارج العينة (الأحدث إغلاقاً أولاً)",
+    src.includes("window.financeAudit.openAddManual()") &&
+    /if\(canA && open\)\s*tools\+=/.test(src) &&
+    src.includes("_isClosed(p) && !inSample[p.id]"));
+  T("★ wt: شارة «مُضاف يدوياً» وسبب الإضافة ظاهران في الجدول وتقرير الطباعة",
+    src.includes('_pill("مُضاف يدوياً"') && src.includes('"مُضاف يدوياً":"عشوائي"') &&
+    src.includes("سبب الإضافة اليدوية: "));
+  T("★ wt: نافذة تفاصيل المراجعة قرائية لكل مخوَّلي العرض — من راجع ومتى والحكم والعروض والرد والإغلاق",
+    /function openDetails\(poId\)\{\s*if\(!_canView\(\)\)/.test(src) &&
+    src.includes("window.financeAudit.openDetails(") &&
+    src.includes("function _fmtDT") && src.includes("_mqDetailsHtml(s)") &&
+    src.includes("openDetails:openDetails"));
+  T("★ wt: الخط الزمني يميّز المنجَز من المنتظر (fa-step-off) ولا يَعِد برد لم يُطلب",
+    src.includes("fa-step-off") && src.includes("لم تتم المراجعة بعد") &&
+    src.includes("لم يُطلب رد — الحكم لا يستدعي دورة رد"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
