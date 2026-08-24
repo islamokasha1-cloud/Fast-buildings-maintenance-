@@ -462,7 +462,11 @@ function predelivery() {
        (`vendor-po.js`): زرُّ الإصدار في تذييل التفاصيل، وسطرُ «الأمر الصادر» في شبكة
        البيانات، ووسمُ <script> بتعليقه. الميزةُ نفسُها كلُّها في ملفّ الوحدة المستقلّ
        كما توجب القاعدة — والربطُ لا يعيش إلا حيث الشاشةُ المربوطة. */
-    const IDX_CEILING = 37387;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37387 إلى 37412 — ‏٢٥ سطراً لإعادة تنظيم سجل أحداث طلب الشراء
+       (v18.9xh): تجميعُ القيود باليوم وفصلُ «من ← إلى» حبّتين. **تحسينُ عرضِ
+       بنيةٍ قائمة داخل openPurchaseDetail** لا ميزةٌ جديدة — ونقلُ منطقٍ قائمٍ
+       إلى ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). */
+    const IDX_CEILING = 37412;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -6426,6 +6430,14 @@ function partialReceiptBackToProc() {
     HTML.includes("const e = poTimelineEvent(tl);") &&
     HTML.includes("${esc(poTimelineEvent(tl))}") &&
     !HTML.includes("${esc(tl.event)}"));
+  // ── v18.9xh: سجل الشاشة يُجمَع باليوم ويفصل تغييرَ الحالة «من ← إلى» ──
+  // رأسُ يومٍ واحد (dtl-day) بدل تكرار التاريخ في كل قيد، وحبّتا dtl-pill داخل
+  // dtl-flow بدل جملةٍ واحدةٍ طويلة. سقوطُ أيٍّ منها = عودة السجل المزدحم.
+  T("★ v18.9xh: سجل الشاشة مجموعٌ باليوم وتغيير الحالة مفصولٌ حبّتين",
+    HTML.includes('class="dtl-day"') &&
+    HTML.includes('class="dtl-flow"') &&
+    HTML.includes('class="dtl-pill') &&
+    HTML.includes("_tlDayKey"));
   T("★ إنشاء الطلب لم يعد يخزّن رمزاً خاماً في event",
     !HTML.includes('{event:"pending_pm",code:"pending_pm"'));
 }
