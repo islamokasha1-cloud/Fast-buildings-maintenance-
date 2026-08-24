@@ -473,7 +473,10 @@ function predelivery() {
        الحي (بلاغ المالك: تغيّر سعر الكتالوج وبقي الطلب على القديم). **إصلاحُ
        منطقٍ قائمٍ في مكانه** — قفلُ السعر ونموذجُ الطلب والمسودة كلُّها في النواة،
        ونقلُها لملفٍّ جديدٍ بحجّة الإصلاح ممنوع (CLAUDE.md). */
-    const IDX_CEILING = 37481;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37481 إلى 37535 — ‏٥٤ سطراً لكاشف «البند التوأم بسعر مختلف»
+       (بلاغ المالك الثاني: بندان بحروف متبادلة «بالط/بلاط» بسعرين والإكمال يلتقط
+       القديم). **إصلاح سلوكِ اختيار البند القائم في النواة في مكانه** (CLAUDE.md). */
+    const IDX_CEILING = 37535;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -7704,6 +7707,61 @@ function npLockedPriceSyncGuards() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   البند التوأم بسعر مختلف (بلاغ المالك الثاني — «نفس المشكلة»)
+   بندان مكرّران بحروف متبادلة («فواصل بالط/بلاط ٣ ملي») بسعرين: التعديل
+   يقع على أحدهما والإكمال يلتقط الآخر. المفتاح التوأمي يفرز حروف كل كلمة
+   بعد التطبيع فيمسك التبادل، والتحذير يظهر لحظة الاختيار مع زر التبديل.
+   ════════════════════════════════════════════════════════════════════ */
+function npTwinItemGuards() {
+  H("البند التوأم بسعر مختلف في نموذج طلب الشراء");
+  const ns = HTML.indexOf("function _catSearchNorm(");
+  const ne = HTML.indexOf("function _catBaseHay(");
+  const ts = HTML.indexOf("function _npTwinKey(");
+  const te = HTML.indexOf("function _npTwinHide(");
+  T("★ دوال المفتاح التوأمي موجودة", ns >= 0 && ne > ns && ts >= 0 && te > ts);
+  if (!(ns >= 0 && ne > ns && ts >= 0 && te > ts)) return;
+  let TW = null;
+  try {
+    TW = new Function("_catMergedInto", "_catalogItems",
+      HTML.slice(ns, ne) + "\n" + HTML.slice(ts, te) + "\nreturn { _npTwinKey, _npTwinsOf };")(
+      it => (it && it.mergedInto) || "", []);
+  } catch (e) { T("تُبنى دوال التوأم", false, String(e.message).slice(0, 120)); return; }
+  T("★ حالة المالك الحقيقية: «فواصل بالط ٣ ملي» ≡ «فواصل بلاط ٣ ملي» (تبادل حروف داخل الكلمة)",
+    TW._npTwinKey("فواصل بالط 3 ملي صليب سبيسر") === TW._npTwinKey("فواصل بلاط 3 ملي صليب سبيسر"));
+  T("مقاس مختلف ليس توأماً (1.5 ملي ≠ 3 ملي)",
+    TW._npTwinKey("فواصل بلاط 1.5 ملي صليب سبيسر") !== TW._npTwinKey("فواصل بلاط 3 ملي صليب سبيسر"));
+  T("ترتيب الكلمات لا يفرّق، والتطبيع العربي سارٍ (ة/ه · أ/ا)",
+    TW._npTwinKey("مواد نظافة عامة") === TW._npTwinKey("عامه نظافه مواد"));
+  const CAT = [
+    { id: "a", name: "فواصل بالط 3 ملي صليب سبيسر", unitPrice: 1.74 },
+    { id: "b", name: "فواصل بلاط 3 ملي صليب سبيسر", unitPrice: 1.48 },
+    { id: "c", name: "فواصل بلاط 3 ملي صليب سبيسر", unitPrice: 2.0, mergedInto: "b" },
+    { id: "d", name: "فواصل بلاط 3 ملي صليب سبيسر", unitPrice: 1.74 },
+    { id: "e", name: "شريط فايبر للفواصل رول",      unitPrice: 15 },
+  ];
+  let TW2 = null;
+  try {
+    TW2 = new Function("_catMergedInto", "_catalogItems",
+      HTML.slice(ns, ne) + "\n" + HTML.slice(ts, te) + "\nreturn { _npTwinKey, _npTwinsOf };")(
+      it => (it && it.mergedInto) || "", CAT);
+  } catch (e) { T("تُبنى دوال التوأم على كتالوج مزروع", false, String(e.message).slice(0, 120)); return; }
+  const twins = TW2._npTwinsOf(CAT[0]).map(t => t.id);
+  T("★ توائم البند: المختلف سعراً فقط — لا المدموج ولا المطابق سعراً ولا الغريب",
+    JSON.stringify(twins) === JSON.stringify(["b"]), twins.join("،"));
+  T("بند بلا توأم: لا تحذير", TW2._npTwinsOf(CAT[4]).length === 0);
+
+  // الخطافات وعنصر التحذير
+  T("★ التحذير يُبنى لحظة اختيار البند (selectCatalogItem) وعنصره في النموذج",
+    HTML.includes("_npTwinWarn(item);") && HTML.includes('id="np-twin-hint"'));
+  T("★ يُخفى عند الكتابة وعند إضافة البند (لا تحذير يعلق لبند تالٍ)",
+    /function onItemNameInput\(\)\{[\s\S]{0,200}_npTwinHide\(\);/.test(HTML) &&
+    /_npAltHide\(\); _npTwinHide\(\);/.test(HTML));
+  T("★ زر «استخدم هذا البند» يعيد الاختيار عبر selectCatalogItem نفسها (فيرث القفل والمزامنة)",
+    HTML.includes("استخدم هذا البند") &&
+    /onclick="selectCatalogItem\('\$\{esc\(t\.id\)\}'\)"/.test(HTML));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    v18.9ag) مركزُ العمليات — كل لوحات TV في شاشةٍ واحدة
    الحرّاس: مصدرٌ واحدٌ للتصنيف والصلاحية · عزلٌ تامٌّ عن المشروع المفتوح ·
    مستمعون يُفكّون عند الخروج · حسابُ البطاقة صحيح · نافذةٌ مُعلَنة.
@@ -12904,6 +12962,7 @@ function vendorPOIssuance() {
   substituteBudget();
   financeAuditTests();
   npLockedPriceSyncGuards();
+  npTwinItemGuards();
   hrPaymentsTests();
   numParsing();
   hailNotify();
