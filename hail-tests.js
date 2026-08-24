@@ -466,7 +466,10 @@ function predelivery() {
        (v18.9xh): تجميعُ القيود باليوم وفصلُ «من ← إلى» حبّتين. **تحسينُ عرضِ
        بنيةٍ قائمة داخل openPurchaseDetail** لا ميزةٌ جديدة — ونقلُ منطقٍ قائمٍ
        إلى ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). */
-    const IDX_CEILING = 37412;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37412 إلى 37425 — ‏١٣ سطراً لخيار `input` في `showConfirm`
+       (v18.9xi: خانة ملاحظات الاعتماد في التعاقدات). **توسيعُ مكوّنِ نواةٍ قائم**
+       يخدم كلَّ الوحدات — والنافذةُ ودالّتُها يعيشان في النواة لا في وحدة. */
+    const IDX_CEILING = 37425;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -8884,6 +8887,34 @@ function contractsPhase1() {
         .map(g => g.key).join(",") === "pm,proc");
     T("★ ومسمّياتُ الخانات من `GATE_ROLES` نفسِها التي تحرس الأزرار",
       C._crqSignoffs(ctrReq, 50000).map(g => g.lbl).join(",") === "مدير المشاريع,المشتريات,المالية");
+  }
+
+  /* ════ v18.9xi: ملاحظاتُ الاعتماد — خانةٌ عند الاعتماد، تُعرض في تفاصيل العقد
+     ولا تدخل ورقتَه المطبوعة ════
+     المالكُ طلبها بهذا النصّ حرفياً. ثلاثةُ حدودٍ تُحرَس: (١) الخانةُ موجودةٌ في
+     نافذة تأكيد الاعتماد وتصل قيمتُها طبقةَ البيانات؛ (٢) التجميدُ مع العقد يلتقط
+     الاعتماداتِ ذواتِ النصّ وحدَها (لا الرفضَ ولا الاعتمادَ الصامت)؛ (٣) العرضُ في
+     تفاصيل العقد فقط — وورقةُ contractPaperHTML لا تعرف الحقلَ أصلاً. */
+  {
+    T("★ v18.9xi: خانةُ ملاحظاتٍ اختيارية في نافذة تأكيد الاعتماد",
+      /ملاحظات الاعتماد \(اختياري\)/.test(src) && /input:\s*isRej\s*\?\s*null/.test(src));
+    const noteReq = { engagement: "contract", lines: [{ qty: 1, unitPrice: 100 }], timeline: [
+      { event: "اعتماد — مدير المشاريع", code: "approved", by: "وائل", at: "2026-08-24T10:00", note: "يُراجَع السعر مع المورد" },
+      { event: "اعتماد — المشتريات",     code: "approved", by: "محمد", at: "2026-08-24T11:00", note: "" },
+      { event: "رفض/إعادة — المالية",    code: "rejected", by: "منى",  at: "2026-08-24T12:00", note: "سببُ الإعادة" }
+    ]};
+    const cnv = C._contractFromRequest(noteReq, "CTR-X", "2026-08-24T13:00", "مسؤول", undefined);
+    T("★★ v18.9xi: التجميدُ مع العقد يلتقط الاعتماداتِ ذواتِ النصّ وحدَها",
+      Array.isArray(cnv.approvalNotes) && cnv.approvalNotes.length === 1 &&
+      cnv.approvalNotes[0].note === "يُراجَع السعر مع المورد" &&
+      cnv.approvalNotes[0].gate === "اعتماد — مدير المشاريع",
+      JSON.stringify(cnv.approvalNotes));
+    const ovSrc = src.slice(src.indexOf("function ctrOverviewHTML"), src.indexOf("function ctrLinesHTML"));
+    T("★ v18.9xi: تفاصيلُ العقد تعرض «ملاحظات الاعتماد» — بارتدادٍ للطلب المصدر للعقود القديمة",
+      ovSrc.includes("approvalNotes") && ovSrc.includes("ملاحظات الاعتماد") && ovSrc.includes("req"));
+    const paperSrc = src.slice(src.indexOf("function contractPaperHTML"), src.indexOf("function printContract("));
+    T("★★ v18.9xi: ورقةُ العقد المطبوعة لا تقرأ approvalNotes إطلاقاً",
+      paperSrc.length > 0 && !paperSrc.includes("approvalNotes"));
   }
 
   /* ════ التوجيه: دالةٌ واحدةٌ للعقد ولأمر الدفع ════ */

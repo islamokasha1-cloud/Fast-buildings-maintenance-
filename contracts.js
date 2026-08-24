@@ -58,7 +58,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2855";
+var MODULE_BUILD = "v18.9.2857";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1071,6 +1071,11 @@ function contractFromRequest(req, contractId, now, by, clauses){
       return { key:cl.key, category:cl.category||"general", title:cl.title||"", body:cl.body||"" };
     }),
     signedDocs: [],
+    /* v18.9xi: ملاحظاتُ المعتمِدين تُجمَّد مع العقد نسخةً لا تتأثر بما يطرأ على
+       الطلب — تُعرض في تفاصيل العقد وحدها، وورقةُ العقد المطبوعة
+       (contractPaperHTML) لا تقرؤها أصلاً فلا تتسرّب للورق. */
+    approvalNotes: (r.timeline||[]).filter(function(e){ return e && e.code==="approved" && e.note; })
+      .map(function(e){ return { gate:e.event||"", by:e.by||"", at:e.at||"", note:e.note||"" }; }),
     // **لا يسري قبل التوقيع**: قرارُ المالك — فلا يُصرف مالٌ على عقدٍ لم يوقّعه الطرف
     status: "ctr_pending_signature",
     timeline: [{ event:"إنشاء العقد من الطلب "+(r.id||""), code:"created", by:by||"", at:now||"", note:"" }],
@@ -2100,7 +2105,9 @@ function _confirm(o){
   delete opt.kind;
   try{
     return Promise.resolve(showConfirm(opt)).then(
-      function(v){ return v !== false; },
+      /* v18.9xi: مع `input` تعود قيمةُ الخانة ({ok,value}) كما هي — وبدونها
+         السلوكُ القديم حرفياً (منطقيٌّ صرف). */
+      function(v){ return v === false ? false : (opt.input ? v : v !== false); },
       function(){ return false; }
     );
   }catch(e){ return Promise.resolve(window.confirm(opt.msg||"تأكيد؟")); }
@@ -5564,10 +5571,14 @@ function act(action){
     kind: isRej?"reject":"approve",
     title: isRej?"رفض / إعادة الطلب":"اعتماد الطلب",
     msg: isRej ? "سيعود الطلب لمُنشئه للتصحيح. اكتب السبب في الخطوة التالية."
-               : 'اعتماد «'+(r.title||r.id)+'» بقيمة '+money(r.value)+' ر.س؟'
+               : 'اعتماد «'+(r.title||r.id)+'» بقيمة '+money(r.value)+' ر.س؟',
+    /* v18.9xi: خانةُ ملاحظات المعتمِد (طلبُ المالك) — اختياريةٌ، تُقيَّد في السجل
+       الزمنيّ وتُجمَّد مع العقد فتظهر في تفاصيله، ولا تدخل ورقتَه المطبوعة. */
+    input: isRej ? null : { label:"ملاحظات الاعتماد (اختياري)",
+                            placeholder:"تظهر في تفاصيل الطلب والعقد — ولا تُطبَع في العقد نفسه" }
   })).then(function(ok){
     if(!ok) return;
-    var note="";
+    var note = (!isRej && ok && ok.value) ? String(ok.value).trim() : "";
     if(isRej){
       note=(window.prompt("سبب الرفض / الإعادة (إلزامي):")||"").trim();
       if(!note){ _toast("⚠ السبب إلزامي","warn"); return; }
@@ -6234,6 +6245,20 @@ function ctrOverviewHTML(c){
     '</div>';
   }
 
+  /* v18.9xi: ملاحظاتُ الاعتماد — من نسخة العقد المجمَّدة، وارتداداً من الطلب
+     المصدر للعقود المنشأة قبل الميزة (العلاجُ عند العرض فتنتفع كلُّها بلا ترحيل).
+     تُعرض هنا وحدها ولا تدخل ورقةَ العقد المطبوعة. */
+  var apprNotes = (Array.isArray(c.approvalNotes) ? c.approvalNotes
+    : (req ? (req.timeline||[]).filter(function(e){ return e && e.code==="approved" && e.note; })
+        .map(function(e){ return { gate:e.event||"", by:e.by||"", at:e.at||"", note:e.note||"" }; }) : []))
+    .filter(function(n){ return n && n.note; });
+  var apprSec = apprNotes.length ? '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' ملاحظات الاعتماد'+
+      '<span class="ct-sec-lock">تُعرض هنا ولا تُطبَع في العقد</span></div>'+
+    apprNotes.map(function(n){
+      return '<div class="ct-note"><b>'+_esc(n.gate||"اعتماد")+'</b> — '+_esc(n.note)+
+        '<div style="color:var(--muted);font-size:11px;margin-top:2px">'+_esc(n.by||"")+' · '+_esc(String(n.at||"").slice(0,16).replace("T"," "))+'</div></div>';
+    }).join("")+'</div>' : "";
+
   return chNote+'<div class="card ct-sec">'+
     '<div class="ct-money-row">'+
       '<div class="ct-tl big"><span class="l">قيمة العقد النافذة</span><span class="v num">'+money(v)+'</span></div>'+
@@ -6259,6 +6284,7 @@ function ctrOverviewHTML(c){
     '</div>'+
     (c.scope?'<div class="ct-note" style="margin-top:12px">'+_esc(c.scope)+'</div>':'')+
   '</div>'+
+  apprSec+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("shield","ic-sm")+' الشروط التجارية</div>'+
     '<div class="ct-info">'+
       infoCell("الدفعة المقدمة", ((c.advance||{}).pct||0)+"٪ — تُستردّ "+((c.advance||{}).recoveryPct||0)+"٪ من كل مستخلص")+
