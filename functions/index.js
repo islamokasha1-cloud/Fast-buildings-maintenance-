@@ -12,6 +12,7 @@
  */
 const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { logger } = require("firebase-functions");
 const admin = require("firebase-admin");
@@ -22,11 +23,13 @@ const { sendTemplate } = require("./lib/whatsapp");
 const { routePurchase } = require("./lib/purchases");
 const { routeHrPayment } = require("./lib/hr-payments");
 const { routeContractDoc } = require("./lib/contracts");
+const { makeHandler: makeExternalApiHandler } = require("./lib/external-api");
 
 admin.initializeApp();
 const db = admin.firestore();
 
 const WHATSAPP_TOKEN = defineSecret("WHATSAPP_TOKEN");
+const EXTERNAL_API_KEY = defineSecret("EXTERNAL_API_KEY");
 
 /* ═══════════════════════ أدوات مساعدة ═══════════════════════ */
 
@@ -213,6 +216,24 @@ for (const src of CTR_SOURCES) {
     }
   );
 }
+
+/* ═══════════ واجهة النظام الخارجي (externalApi — HTTPS/Cloud Run) ═══════════
+   نقطتان: POST /purchases (إنشاء طلب شراء بالشكل القياسي وبحالة pending_pm حصراً)
+   و GET /purchases[/{id}] (قراءة القائمة بمرشّحات أو طلب واحد). المفتاح سرٌّ في
+   Secret Manager (EXTERNAL_API_KEY) ويُرسَل في ترويسة x-api-key. المنطق كله —
+   تحقّقاً وحساباً وبناءً — في `lib/external-api.js` (دوالّ نقية يفحصها hail-tests)،
+   وهنا الحقن وحده. الطلب المُنشأ يلتقطه `poRouteCreate` فيُشعِر واتساب تلقائياً. */
+exports.externalApi = onRequest(
+  { secrets: [EXTERNAL_API_KEY], maxInstances: 5 },
+  (req, res) =>
+    makeExternalApiHandler({
+      db,
+      logger,
+      FieldPath: admin.firestore.FieldPath,
+      getApiKey: () => EXTERNAL_API_KEY.value(),
+      purchasesCollection: cfg.PURCHASES_COLLECTION,
+    })(req, res)
+);
 
 /* ═══════════════════════ المُرسِل (waSender) ═══════════════════════ */
 exports.waSender = onDocumentCreated(
