@@ -9043,6 +9043,42 @@ function contractsPhase1() {
   T("مبلغٌ صفريٌّ أو سالبٌ لا يفتح مسارَ أمر الدفع",
     C._payOrderAllowed(0, PT) === false && C._payOrderAllowed(-5, PT) === false);
 
+  /* ════ فوق العتبة بإقرارٍ صريح (طلبُ المالك) ════
+     الدالّةُ النقيةُ تبقى «ممنوعاً» — والبابُ يُفتح في الحرّاس وحدَهم بعلَم
+     `overThresholdAck` المختوم على الوثيقة عند الإنشاء. */
+  T("★ الإنشاء فوق العتبة بلا إقرارٍ يُرفض، وبالإقرار يُختم العلَم باسم صاحبه",
+    /function createRequest[\s\S]{0,900}payOrderAllowed\(doc\.value, payOrderThreshold\(\)\)[\s\S]{0,400}overThresholdAck = \{ by:_me\(\), byUser:_meUser\(\), at:_now\(\), threshold:payOrderThreshold\(\) \}/.test(src));
+  T("★ تعديلُ البنود لا يفتح البابَ — يمرّ ما وُلد بإقرارٍ وحدَه",
+    /engagement==="pay_order" && !payOrderAllowed\(r\.value, payOrderThreshold\(\)\) && !r\.overThresholdAck/.test(src));
+  T("★ الإرسال من النموذج يلزمه مربّع الإقرار (ct-r-overth) فوق العتبة",
+    /!payOrderAllowed\(total,\s*payOrderThreshold\(\)\) && !d\.overThreshold/.test(src) &&
+    /id="ct-r-overth"/.test(src));
+  T("★ الإقرارُ يظهر على بطاقة الطلب لكلّ معتمِد (فوق عتبة أمر الدفع)",
+    /overThresholdAck\?infoCell\("فوق عتبة أمر الدفع"/.test(src));
+
+  /* ════ سدادُ أمر الدفع على دفعات (طلبُ المالك) ════ */
+  T("★★ crqPaidTotal: مجموعُ الدفعات هو المصدر",
+    C._crqPaidTotal({ payments:[{amount:500},{amount:250.5}] }) === 750.5);
+  T("★ و`payment` القديمُ احتياطٌ لوثائق ما قبل الدفعات",
+    C._crqPaidTotal({ payment:{amount:1200} }) === 1200);
+  T("★ والمغلقُ القديمُ بلا أيّهما قيمتُه كلُّها — والمفتوحُ بلا دفعاتٍ صفر",
+    C._crqPaidTotal({ status:"crq_paid", value:900 }) === 900 &&
+    C._crqPaidTotal({ status:"crq_pending_pay", value:900 }) === 0);
+  T("★ crqPayDue: المتبقّي = القيمة − المسدَّد، ولا ينزل تحت الصفر",
+    C._crqPayDue({ value:1500, payments:[{amount:500}] }) === 1000 &&
+    C._crqPayDue({ value:1500, payments:[{amount:1600}] }) === 0);
+  T("★★ الدفعةُ الجزئية تُبقي الأمرَ مفتوحاً وتُغلقه الأخيرة (المصدرُ في payRequest)",
+    /var done = paid >= r2\(Number\(r\.value\)\|\|0\) - 0\.01;[\s\S]{0,80}r\.status = done \? "crq_paid" : "crq_pending_pay";/.test(src));
+  T("★ ولا دفعةَ فوق المتبقّي — سندٌ بمبلغٍ فوق قيمته بابُ صرفٍ بلا اعتماد",
+    /if\(amt > due \+ 0\.01\) throw new Error\("الدفعة أكبر من المتبقّي/.test(src));
+  T("★ كلُّ دفعةٍ تُلحَق بالمصفوفة وبإيصالها، والملخّصُ القديم يُكتب بالمجموع",
+    /r\.payments\.push\(\{ id:"PAY-"/.test(src) &&
+    /r\.payment = \{ amount:paid, ref:payload\.ref\|\|"", receiptUrl:payload\.receiptUrl/.test(src));
+  T("★★ الموازنةُ والرصيدُ المستعاض يقرآن المسدَّدَ عبر crqPaidTotal (الجزئيُّ مصروفٌ منذ خروجه)",
+    (src.match(/crqPaidTotal\(r\)/g)||[]).length >= 4 &&
+    /v = r2\(Math\.max\(0, v - crqPaidTotal\(r\)\)\)/.test(src) &&
+    /out\.pending \+= r2\(Math\.max\(0, val - part\)\)/.test(src));
+
   /* ════ سندُ صرفِ أمر الدفع: المبلغُ كتابةً · الحالةُ · التوقيعات ════
      الورقةُ تخرج من المنصّة ويُصرَف بها مال، فثلاثةُ حرّاسٍ عليها:
      التفقيطُ يطابق الرقم، والورقةُ تُعلن أنها غيرُ صالحةٍ للصرف ما لم تكتمل
