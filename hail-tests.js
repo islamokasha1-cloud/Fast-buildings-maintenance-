@@ -469,7 +469,14 @@ function predelivery() {
     /* ثم رُفع من 37412 إلى 37425 — ‏١٣ سطراً لخيار `input` في `showConfirm`
        (v18.9xi: خانة ملاحظات الاعتماد في التعاقدات). **توسيعُ مكوّنِ نواةٍ قائم**
        يخدم كلَّ الوحدات — والنافذةُ ودالّتُها يعيشان في النواة لا في وحدة. */
-    const IDX_CEILING = 37425;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37425 إلى 37481 — ‏٥٦ سطراً لمزامنة السعر المقفول مع الكتالوج
+       الحي (بلاغ المالك: تغيّر سعر الكتالوج وبقي الطلب على القديم). **إصلاحُ
+       منطقٍ قائمٍ في مكانه** — قفلُ السعر ونموذجُ الطلب والمسودة كلُّها في النواة،
+       ونقلُها لملفٍّ جديدٍ بحجّة الإصلاح ممنوع (CLAUDE.md). */
+    /* ثم رُفع من 37481 إلى 37535 — ‏٥٤ سطراً لكاشف «البند التوأم بسعر مختلف»
+       (بلاغ المالك الثاني: بندان بحروف متبادلة «بالط/بلاط» بسعرين والإكمال يلتقط
+       القديم). **إصلاح سلوكِ اختيار البند القائم في النواة في مكانه** (CLAUDE.md). */
+    const IDX_CEILING = 37620;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -6832,6 +6839,25 @@ function hrPaymentsTests() {
     HTML.includes('{name:"hr-payments.js", get:function(){ return window.hrPayments; }}'));
   T("الدور hr_officer مضاف لقائمتَي إضافة المستخدمين",
     (HTML.match(/<option value="hr_officer">/g) || []).length >= 2);
+  T("الدور hr_manager مضاف لقائمتَي إضافة المستخدمين ولأدوار المشتريات",
+    (HTML.match(/<option value="hr_manager">/g) || []).length >= 2 &&
+    /"hr_manager":\s*"👥 مدير الموارد البشرية"/.test(HTML));
+
+  /* ── تغيير دور مستخدمٍ قائم (طلب المالك — كان الدور يتجمّد عند الإنشاء) ── */
+  T("★ زرّ «الدور» في قائمتَي المستخدمين (شاشة الأدمن وشاشة المشتريات)",
+    (HTML.match(/onclick="openChangeUserRole\(\$\{i\}\)"/g) || []).length >= 2);
+  T("★ تغيير الدور للمسؤول وحده، ولا يطال حسابات admin ولا المستخدم الحالي",
+    /function openChangeUserRole\(i\)\{\s*if\(!_adminOnlyUsersGuard\(\)\) return;/.test(HTML) &&
+    /async function _applyChangeUserRole\(i\)\{\s*if\(!_adminOnlyUsersGuard\(\)\)/.test(HTML) &&
+    (HTML.match(/لا يمكن تغيير دور المستخدم الحالي/g) || []).length >= 2 &&
+    /حسابات مدير النظام لا يُغيَّر دورها من هنا/.test(HTML));
+  T("★ الدور الجديد يُزامَن مع المخزن المركزي (meta/users) ويُقيَّد في سجل التدقيق",
+    /_sync=await _upsertUserCentral\(u\);/.test(HTML) &&
+    /logAudit\("تغيير دور مستخدم"/.test(HTML));
+  T("★ مغادرة دور مسؤول الموارد البشرية تُسقط مفتاح «طلب شراء» المانح (لا أزرار ميتة)",
+    /if\(newRole!=="hr_officer" && u\.permissions && u\.permissions\.poRequest\) delete u\.permissions\.poRequest;/.test(HTML));
+  T("★ فشل الحفظ يرجع الدور والصلاحيات كما كانا (لا حالة نصفية)",
+    /u\.role=oldRole; u\.permissions=oldPerms;/.test(HTML));
 
   // ── بصمة البناء تطابق الإصدار ──
   const hrBuild = (src.match(/var MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
@@ -6866,6 +6892,21 @@ function hrPaymentsTests() {
 
   const TH = 2000;
   const ns = (r) => HR._nextStage(r, TH);
+  const HRM_TS = "2026-08-01T00:00:00Z";
+
+  /* (٠) بوّابة مدير الموارد البشرية — إلزامية لكل طلبٍ جديد (needsHRM يُثبَّت عند
+     الإنشاء) وتتقدّم على كل البوّابات مهما كان المبلغ. والطلبات الأقدم بلا الحقل
+     تمضي في مسارها القديم — لا تُعاد لبوّابةٍ لم تكن قائمةً يوم أُنشئت. */
+  T("★ طلب جديد (needsHRM) يبدأ عند مدير الموارد البشرية مهما كان المبلغ والاختيار",
+    ns({ amount: 100, needsHRM: true, needsPM: true }) === "hrp_pending_hrm" &&
+    ns({ amount: 99999, needsHRM: true, needsPM: false }) === "hrp_pending_hrm");
+  T("★ بعد اعتماد مدير الموارد البشرية يمضي المسار القديم نفسه",
+    ns({ amount: 100,  needsHRM: true, hrmApprovedAt: HRM_TS, needsPM: true  }) === "hrp_pending_pm" &&
+    ns({ amount: 5000, needsHRM: true, hrmApprovedAt: HRM_TS, needsPM: false }) === "hrp_pending_ceo" &&
+    ns({ amount: 500,  needsHRM: true, hrmApprovedAt: HRM_TS, needsPM: false }) === "hrp_pending_finance");
+  T("★ الطلبات الأقدم (بلا needsHRM) لا تُعاد لبوّابةٍ لم تكن قائمة",
+    ns({ amount: 100, needsPM: true }) === "hrp_pending_pm" &&
+    ns({ amount: 500, needsPM: false }) === "hrp_pending_finance");
 
   // (١) اختيار مدير المشاريع يقدَّم على كل شيء
   T("★ اختار «يحتاج مدير المشاريع» ⇒ يبدأ عنده",
@@ -6905,11 +6946,12 @@ function hrPaymentsTests() {
     ns({ amount: 8000, needsPM: false, ceoApprovedAt: "2026-08-01T00:00:00Z" }) === "hrp_pending_ceo");
 
   // (٧) جدول الحالات مكتمل ومتّسق
-  const need = ["hrp_pending_pm","hrp_pending_ceo","hrp_pending_finance","hrp_closed",
-                "hrp_pm_rejected","hrp_ceo_rejected","hrp_finance_returned","hrp_cancelled"];
+  const need = ["hrp_pending_hrm","hrp_pending_pm","hrp_pending_ceo","hrp_pending_finance","hrp_closed",
+                "hrp_hrm_rejected","hrp_pm_rejected","hrp_ceo_rejected","hrp_finance_returned","hrp_cancelled"];
   T("جدول الحالات يغطّي كل مراحل المسار", need.every(k => !!HR.HRP_STATUS[k]));
   T("كل مخرجات دالة التوجيه حالاتٌ معرَّفة",
-    [ns({amount:1,needsPM:true}), ns({amount:1,needsPM:false}), ns({amount:1e6,needsPM:false})]
+    [ns({amount:1,needsPM:true}), ns({amount:1,needsPM:false}), ns({amount:1e6,needsPM:false}),
+     ns({amount:1,needsHRM:true,needsPM:false})]
       .every(k => !!HR.HRP_STATUS[k]));
   T("الحالات النهائية والمرتدّة معرَّفة ولا تتقاطع",
     HR.HRP_FINAL.every(k => !!HR.HRP_STATUS[k]) &&
@@ -6932,11 +6974,13 @@ function hrPaymentsTests() {
 
   // (١٠) الصلاحيات — الأدوار المعنية وحدها
   T("★ العرض مقصور على الأدوار المعنية (لا المستودع ولا المشتريات ولا الزائر)",
-    /function canView\(\)\{ return canCreate\(\) \|\| canPM\(\) \|\| canCEO\(\) \|\| canFinance\(\); \}/.test(src.replace(/\s+/g, " ").replace(/function canView\(\)/, "function canView()")) ||
-    (/canCreate\(\)\s*\|\|\s*canPM\(\)\s*\|\|\s*canCEO\(\)\s*\|\|\s*canFinance\(\)/.test(src) &&
-     !/warehouse_manager|procurement_officer/.test(src)));
+    /canCreate\(\)\s*\|\|\s*canHRM\(\)\s*\|\|\s*canPM\(\)\s*\|\|\s*canCEO\(\)\s*\|\|\s*canFinance\(\)/.test(src) &&
+    !/warehouse_manager|procurement_officer/.test(src));
   T("الإنشاء لمسؤول الموارد البشرية والمسؤول فقط",
     /function canCreate\(\)\s*\{\s*return _role\(\)==="hr_officer" \|\| _isAdmin\(\); \}/.test(src));
+  T("★ اعتماد البوّابة الأولى لمدير الموارد البشرية والمسؤول فقط",
+    /function canHRM\(\)\s*\{\s*return _role\(\)==="hr_manager" \|\| _isAdmin\(\); \}/.test(src) &&
+    /if\(r\.status==="hrp_pending_hrm" && canHRM\(\)\)/.test(src));
   T("تسجيل السداد يفرض إيصالاً إلزامياً", /إيصال التحويل إلزامي/.test(src));
   T("كل كتابة تمرّ بمعاملة على الوثيقة الطازجة", /runTransaction/.test(src));
 
@@ -7132,6 +7176,7 @@ function hrPaymentNotificationTests(src) {
     /if\(_lastActor\(r\)===_me\(\)\) return;/.test(src));
   T("★ التنبيه لمن دورُه الآن وحده (نفس منطق عدّاد السايدبار)",
     /function _awaitsMe\(r\)\{/.test(src) &&
+    /if\(r\.status==="hrp_pending_hrm"\)\s*return canHRM\(\);/.test(src) &&
     /if\(r\.status==="hrp_pending_pm"\)\s*return canPM\(\);/.test(src) &&
     /if\(r\.status==="hrp_pending_ceo"\)\s*return canCEO\(\);/.test(src) &&
     /if\(r\.status==="hrp_pending_finance"\) return canFinance\(\);/.test(src));
@@ -7157,15 +7202,16 @@ function hrPaymentNotificationTests(src) {
   const routeKeys = (cfgSrc.match(/^\s{2}(hrp_[a-z_]+): \{ role:/gm) || [])
     .map(l => l.trim().split(":")[0]);
   T("★★ كل مرحلةِ انتظارٍ في الوحدة لها مستلمٌ في خريطة الخادم",
-    ["hrp_pending_pm", "hrp_pending_ceo", "hrp_pending_finance"].every(k => routeKeys.includes(k)) &&
-    routeKeys.length === 3, routeKeys.join(" · "));
-  T("★ الأدوار مطابقة لبوّابات الوحدة (مدير المشاريع · التنفيذي · المالية)",
+    ["hrp_pending_hrm", "hrp_pending_pm", "hrp_pending_ceo", "hrp_pending_finance"].every(k => routeKeys.includes(k)) &&
+    routeKeys.length === 4, routeKeys.join(" · "));
+  T("★ الأدوار مطابقة لبوّابات الوحدة (مدير الموارد البشرية · مدير المشاريع · التنفيذي · المالية)",
+    /hrp_pending_hrm: \{ role: "hr_manager"/.test(cfgSrc) &&
     /hrp_pending_pm: \{ role: "project_manager"/.test(cfgSrc) &&
     /hrp_pending_ceo: \{ role: "ceo"/.test(cfgSrc) &&
     /hrp_pending_finance: \{ role: "finance"/.test(cfgSrc));
   T("★ صاحب الطلب يُنبَّه بالرفض والإعادة والإغلاق — لا بإلغائه هو",
-    /HRP_NOTIFY_REQUESTER = new Set\(\[\s*"hrp_pm_rejected",\s*"hrp_ceo_rejected",\s*"hrp_finance_returned",\s*"hrp_closed",\s*\]\)/.test(cfgSrc) &&
-    !/HRP_NOTIFY_REQUESTER[\s\S]{0,200}hrp_cancelled/.test(cfgSrc));
+    /HRP_NOTIFY_REQUESTER = new Set\(\[\s*"hrp_hrm_rejected",\s*"hrp_pm_rejected",\s*"hrp_ceo_rejected",\s*"hrp_finance_returned",\s*"hrp_closed",\s*\]\)/.test(cfgSrc) &&
+    !/HRP_NOTIFY_REQUESTER[\s\S]{0,240}hrp_cancelled/.test(cfgSrc));
 
   // تسميات نوعية العمل نسختان (واجهة/خادم) — الحارس يمنع انحرافهما.
   const uiKeys = (src.match(/\{k:"([a-z_]+)",\s*l:/g) || []).map(m => m.match(/k:"([a-z_]+)"/)[1]);
@@ -7648,6 +7694,110 @@ function financeAuditTests() {
   T("★ wt: الخط الزمني يميّز المنجَز من المنتظر (fa-step-off) ولا يَعِد برد لم يُطلب",
     src.includes("fa-step-off") && src.includes("لم تتم المراجعة بعد") &&
     src.includes("لم يُطلب رد — الحكم لا يستدعي دورة رد"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   السعر المقفول من الكتالوج يتبع الكتالوج الحي (بلاغ المالك)
+   كان السعر يتجمّد لحظة الاختيار، فطلبٌ أُنشئ من مسودة أو أُضيف بندُه قبل
+   تعديل سعر الكتالوج يخرج بالسعر القديم. الحرّاس: معادلة إعادة الحساب
+   (lineTotal + vat === itemCost) · اليدوي لا يُمَسّ · الخطافات الثلاثة
+   (لقطة الكتالوج · استعادة المسودة · قبل الإرسال).
+   ════════════════════════════════════════════════════════════════════ */
+function npLockedPriceSyncGuards() {
+  H("مزامنة السعر المقفول مع الكتالوج الحي");
+  const fs2 = HTML.indexOf("function _npSyncLockedItem(");
+  const fe2 = HTML.indexOf("function _npResyncCatalogPrices(");
+  T("★ دالة المزامنة موجودة", fs2 >= 0 && fe2 > fs2);
+  if (fs2 < 0 || fe2 <= fs2) return;
+  let syncFn = null;
+  try {
+    syncFn = new Function("_catalogItems", "_catResolveId", HTML.slice(fs2, fe2) + "\nreturn _npSyncLockedItem;");
+  } catch (e) { T("تُبنى دالة المزامنة", false, String(e.message).slice(0, 120)); return; }
+  const CAT = [{ id: "c1", unitPrice: 1.48 }];
+  const RES = id => id;
+  const run = it => { const f = syncFn(CAT, RES); return { changed: f(it), it }; };
+
+  const locked = { priceLocked: true, itemId: "c1", qty: 10, unitCost: 1.74, estUnitCost: 1.74, itemCost: 20.01, lineTotal: 17.4, vat: 2.61, vatUnit: 0.26 };
+  const r1 = run({ ...locked });
+  T("★ البند المقفول يتحدّث لسعر الكتالوج الجديد ويعاد حسابه كاملاً",
+    r1.changed === true && r1.it.unitCost === 1.48 && r1.it.estUnitCost === 1.48 &&
+    r1.it.lineTotal === 14.8 && r1.it.itemCost === 17 && r1.it.vat === 2.2,
+    JSON.stringify({ u: r1.it.unitCost, l: r1.it.lineTotal, c: r1.it.itemCost, v: r1.it.vat }));
+  T("★ معادلة v18.9nc محفوظة بعد المزامنة: lineTotal + vat === itemCost",
+    Math.abs(r1.it.lineTotal + r1.it.vat - r1.it.itemCost) < 0.001);
+  const manual = run({ priceLocked: false, itemId: "c1", qty: 10, unitCost: 1.74 });
+  T("★ البند اليدوي (غير المقفول) لا يُمَسّ", manual.changed === false && manual.it.unitCost === 1.74);
+  const same = run({ priceLocked: true, itemId: "c1", qty: 10, unitCost: 1.48 });
+  T("سعر مطابق أصلاً: لا تغيير (لا توست كاذب)", same.changed === false);
+  const orphan = run({ priceLocked: true, itemId: "غائب", qty: 10, unitCost: 1.74 });
+  T("بند كتالوجه محذوف: يبقى على سعره (لا تصفير)", orphan.changed === false && orphan.it.unitCost === 1.74);
+  T("★ المعرّف يُحلّ عبر الدمج (_catResolveId) قبل البحث",
+    /_catalogItems\.find\(c=>c\.id===_catResolveId\(it\.itemId\)\)/.test(HTML));
+
+  // الخطافات الثلاثة — لقطة الكتالوج الحية، استعادة المسودة، قبل الإرسال
+  T("★ لقطة الكتالوج (onSnapshot) تزامن الأسعار المقفولة فور وصولها",
+    /try\{ _npResyncCatalogPrices\(!document\.getElementById\("page-new-purchase"\)\?\.classList\.contains\("active"\)\); \}catch\(_e\)\{\}/.test(HTML));
+  T("★ استعادة المسودة تزامن وتُخبر المستخدم بما تغيّر بعد حفظها",
+    /const _upd=_npResyncCatalogPrices\(true\);/.test(HTML) &&
+    HTML.includes("تغيّر بعد حفظ المسودة"));
+  T("★ شبكة أمان قبل الإرسال: لا يخرج طلب بسعر كتالوج قديم",
+    /const _priceUpd=_npResyncCatalogPrices\(true\);/.test(HTML) &&
+    HTML.includes("قبل الإرسال"));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   البند التوأم بسعر مختلف (بلاغ المالك الثاني — «نفس المشكلة»)
+   بندان مكرّران بحروف متبادلة («فواصل بالط/بلاط ٣ ملي») بسعرين: التعديل
+   يقع على أحدهما والإكمال يلتقط الآخر. المفتاح التوأمي يفرز حروف كل كلمة
+   بعد التطبيع فيمسك التبادل، والتحذير يظهر لحظة الاختيار مع زر التبديل.
+   ════════════════════════════════════════════════════════════════════ */
+function npTwinItemGuards() {
+  H("البند التوأم بسعر مختلف في نموذج طلب الشراء");
+  const ns = HTML.indexOf("function _catSearchNorm(");
+  const ne = HTML.indexOf("function _catBaseHay(");
+  const ts = HTML.indexOf("function _npTwinKey(");
+  const te = HTML.indexOf("function _npTwinHide(");
+  T("★ دوال المفتاح التوأمي موجودة", ns >= 0 && ne > ns && ts >= 0 && te > ts);
+  if (!(ns >= 0 && ne > ns && ts >= 0 && te > ts)) return;
+  let TW = null;
+  try {
+    TW = new Function("_catMergedInto", "_catalogItems",
+      HTML.slice(ns, ne) + "\n" + HTML.slice(ts, te) + "\nreturn { _npTwinKey, _npTwinsOf };")(
+      it => (it && it.mergedInto) || "", []);
+  } catch (e) { T("تُبنى دوال التوأم", false, String(e.message).slice(0, 120)); return; }
+  T("★ حالة المالك الحقيقية: «فواصل بالط ٣ ملي» ≡ «فواصل بلاط ٣ ملي» (تبادل حروف داخل الكلمة)",
+    TW._npTwinKey("فواصل بالط 3 ملي صليب سبيسر") === TW._npTwinKey("فواصل بلاط 3 ملي صليب سبيسر"));
+  T("مقاس مختلف ليس توأماً (1.5 ملي ≠ 3 ملي)",
+    TW._npTwinKey("فواصل بلاط 1.5 ملي صليب سبيسر") !== TW._npTwinKey("فواصل بلاط 3 ملي صليب سبيسر"));
+  T("ترتيب الكلمات لا يفرّق، والتطبيع العربي سارٍ (ة/ه · أ/ا)",
+    TW._npTwinKey("مواد نظافة عامة") === TW._npTwinKey("عامه نظافه مواد"));
+  const CAT = [
+    { id: "a", name: "فواصل بالط 3 ملي صليب سبيسر", unitPrice: 1.74 },
+    { id: "b", name: "فواصل بلاط 3 ملي صليب سبيسر", unitPrice: 1.48 },
+    { id: "c", name: "فواصل بلاط 3 ملي صليب سبيسر", unitPrice: 2.0, mergedInto: "b" },
+    { id: "d", name: "فواصل بلاط 3 ملي صليب سبيسر", unitPrice: 1.74 },
+    { id: "e", name: "شريط فايبر للفواصل رول",      unitPrice: 15 },
+  ];
+  let TW2 = null;
+  try {
+    TW2 = new Function("_catMergedInto", "_catalogItems",
+      HTML.slice(ns, ne) + "\n" + HTML.slice(ts, te) + "\nreturn { _npTwinKey, _npTwinsOf };")(
+      it => (it && it.mergedInto) || "", CAT);
+  } catch (e) { T("تُبنى دوال التوأم على كتالوج مزروع", false, String(e.message).slice(0, 120)); return; }
+  const twins = TW2._npTwinsOf(CAT[0]).map(t => t.id);
+  T("★ توائم البند: المختلف سعراً فقط — لا المدموج ولا المطابق سعراً ولا الغريب",
+    JSON.stringify(twins) === JSON.stringify(["b"]), twins.join("،"));
+  T("بند بلا توأم: لا تحذير", TW2._npTwinsOf(CAT[4]).length === 0);
+
+  // الخطافات وعنصر التحذير
+  T("★ التحذير يُبنى لحظة اختيار البند (selectCatalogItem) وعنصره في النموذج",
+    HTML.includes("_npTwinWarn(item);") && HTML.includes('id="np-twin-hint"'));
+  T("★ يُخفى عند الكتابة وعند إضافة البند (لا تحذير يعلق لبند تالٍ)",
+    /function onItemNameInput\(\)\{[\s\S]{0,200}_npTwinHide\(\);/.test(HTML) &&
+    /_npAltHide\(\); _npTwinHide\(\);/.test(HTML));
+  T("★ زر «استخدم هذا البند» يعيد الاختيار عبر selectCatalogItem نفسها (فيرث القفل والمزامنة)",
+    HTML.includes("استخدم هذا البند") &&
+    /onclick="selectCatalogItem\('\$\{esc\(t\.id\)\}'\)"/.test(HTML));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -12940,6 +13090,8 @@ function externalPurchaseApiGuards() {
   kpi();
   substituteBudget();
   financeAuditTests();
+  npLockedPriceSyncGuards();
+  npTwinItemGuards();
   hrPaymentsTests();
   numParsing();
   hailNotify();

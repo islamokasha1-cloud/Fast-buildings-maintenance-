@@ -13,12 +13,17 @@
      مختصر + تكلفة السداد + مستند مرفق. لا بنود ولا كميات ولا موردين.
    • تسلسل الاعتماد:
          مسؤول الموارد البشرية ينشئ الطلب
+              ↓
+         مدير الموارد البشرية (بوّابة إلزامية لكل طلب جديد — v18.9)
               ↓ (اختار «يحتاج اعتماد مدير المشاريع»؟)
          مدير المشاريع
               ↓ (التكلفة ≥ سقف التنفيذي؟)
          المدير التنفيذي
               ↓
          المالية للسداد  →  يُغلق الطلب فور تسجيل السداد.
+     بوّابة مدير الموارد البشرية تُثبَّت عند الإنشاء بحقل `needsHRM` — فالطلبات
+     الأقدم (بلا الحقل) تمضي في مسارها الذي اعتُمدت عليه ولا تُعاد لبوّابةٍ لم
+     تكن قائمةً يومها.
 
    ثلاثة ثوابت محكومة في التصميم:
    (١) **بوابة التنفيذي تُحسب من التكلفة، لا من اختيار مُنشئ الطلب.** خيار
@@ -33,10 +38,11 @@
        ما اعتمده (ceoApprovedAmount)، فلا يُسدَّد مبلغٌ لم يره أحد.
 
    الصلاحيات (متفق عليها — بيانات الإقامات والتأشيرات حساسة):
-   • العرض: hr_officer + project_manager + ceo + finance + admin **فقط**.
+   • العرض: hr_officer + hr_manager + project_manager + ceo + finance + admin **فقط**.
      مسؤول المستودعات ومسؤول المشتريات والزائر والمراقب لا يرون المجموعة أصلاً.
    • الإنشاء/التعديل/إعادة الإرسال/الإلغاء: hr_officer + admin.
-   • اعتماد/رفض المرحلة الأولى: project_manager + admin.
+   • اعتماد/رفض بوّابة الموارد البشرية الأولى: hr_manager + admin.
+   • اعتماد/رفض مرحلة مدير المشاريع: project_manager + admin.
    • اعتماد/رفض ما فوق السقف: ceo + admin.
    • تسجيل السداد (إيصال إلزامي) أو الإعادة للتصحيح: finance + admin.
 
@@ -56,7 +62,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2865";
+  var MODULE_BUILD = "v18.9.2871";
 
   function COLL(){
     var dev=false;
@@ -98,10 +104,12 @@
 
   /* ════════ الحالات ════════ */
   var HRP_STATUS = {
+    hrp_pending_hrm:     "بانتظار اعتماد مدير الموارد البشرية",
     hrp_pending_pm:      "بانتظار اعتماد مدير المشاريع",
     hrp_pending_ceo:     "بانتظار اعتماد المدير التنفيذي",
     hrp_pending_finance: "بانتظار سداد المالية",
     hrp_closed:          "مغلق — تم السداد",
+    hrp_hrm_rejected:    "مرفوض من مدير الموارد البشرية",
     hrp_pm_rejected:     "مرفوض من مدير المشاريع",
     hrp_ceo_rejected:    "مرفوض من المدير التنفيذي",
     hrp_finance_returned:"مُعاد من المالية للتصحيح",
@@ -110,21 +118,24 @@
   // الحالات النهائية — لا إجراء عليها بعد الآن (تُستثنى من «الجارية»).
   var HRP_FINAL = ["hrp_closed","hrp_cancelled"];
   // الحالات المرتدّة لمسؤول الموارد البشرية — قابلة للتصحيح وإعادة الإرسال.
-  var HRP_BOUNCED = ["hrp_pm_rejected","hrp_ceo_rejected","hrp_finance_returned"];
+  var HRP_BOUNCED = ["hrp_hrm_rejected","hrp_pm_rejected","hrp_ceo_rejected","hrp_finance_returned"];
 
   /* البوّابات: نفس أيقونات المنصة وشاراتها لنفس المعاني — بوّابة التنفيذي هنا هي
      بوّابة التنفيذي في طلبات الشراء، فتُقرأ بلا تعلّمٍ جديد (PO_STAGES/poStatusBadge). */
   var HRP_STAGES = [
+    {key:"hrp_pending_hrm",     lbl:"مدير الموارد البشرية", icon:"users"},
     {key:"hrp_pending_pm",      lbl:"مدير المشاريع",   icon:"send"},
     {key:"hrp_pending_ceo",     lbl:"المدير التنفيذي", icon:"building2"},
     {key:"hrp_pending_finance", lbl:"سداد المالية",    icon:"banknote"},
     {key:"hrp_closed",          lbl:"إغلاق",           icon:"lock"}
   ];
   var _BADGE = {
+    hrp_pending_hrm:     {cls:"b-po-approval",  icon:"users"},
     hrp_pending_pm:      {cls:"b-po-approval",  icon:"send"},
     hrp_pending_ceo:     {cls:"b-po-ceo",       icon:"building2"},
     hrp_pending_finance: {cls:"b-po-approval",  icon:"banknote"},
     hrp_closed:          {cls:"b-po-closed",    icon:"lock"},
+    hrp_hrm_rejected:    {cls:"b-po-rejected",  icon:"xCircle"},
     hrp_pm_rejected:     {cls:"b-po-rejected",  icon:"xCircle"},
     hrp_ceo_rejected:    {cls:"b-po-rejected",  icon:"xCircle"},
     hrp_finance_returned:{cls:"b-po-rejected",  icon:"rotateCcw"},
@@ -132,8 +143,10 @@
   };
   // لون شريط بطاقة الطلب — نفس دلالات ألوان المنصة (توكنز، بلا ألوان جديدة).
   var _RAIL = {
+    hrp_pending_hrm:"var(--stage-wait)",
     hrp_pending_pm:"var(--stage-wait)", hrp_pending_ceo:"var(--stage-wait)",
     hrp_pending_finance:"var(--stage-wait)", hrp_closed:"var(--stage-done)",
+    hrp_hrm_rejected:"var(--danger)",
     hrp_pm_rejected:"var(--danger)", hrp_ceo_rejected:"var(--danger)",
     hrp_finance_returned:"var(--danger)", hrp_cancelled:"var(--muted)"
   };
@@ -152,7 +165,10 @@
   function _nextStage(req, threshold){
     var amt = Number(req && req.amount) || 0;
     var th  = Number(threshold) || 0;
-    // (١) مدير المشاريع أولاً — إن طلبه مُنشئ الطلب ولم يعتمده بعد.
+    // (٠) مدير الموارد البشرية أولاً — بوّابة إلزامية تُثبَّت عند الإنشاء (needsHRM).
+    //     الطلبات الأقدم بلا الحقل تمضي في مسارها القديم كما اعتُمدت.
+    if(req && req.needsHRM && !req.hrmApprovedAt) return "hrp_pending_hrm";
+    // (١) مدير المشاريع — إن طلبه مُنشئ الطلب ولم يعتمده بعد.
     if(req && req.needsPM && !req.pmApprovedAt) return "hrp_pending_pm";
     // (٢) بوابة التنفيذي بالتكلفة وحدها. واعتماده يسقط إن رُفعت التكلفة فوق
     //     ما اعتمده — فلا يمرّ مبلغ أكبر ممّا رآه على توقيعٍ قديم.
@@ -201,11 +217,12 @@
   function _role(){ try{ return (currentUser && currentUser.role) || ""; }catch(e){ return ""; } }
   function _isAdmin(){ return _role()==="admin"; }
   function canCreate(){ return _role()==="hr_officer" || _isAdmin(); }
+  function canHRM(){    return _role()==="hr_manager" || _isAdmin(); }
   function canPM(){     return _role()==="project_manager" || _isAdmin(); }
   function canCEO(){    return _role()==="ceo" || _isAdmin(); }
   function canFinance(){return _role()==="finance" || _isAdmin(); }
   // العرض للأدوار المعنية وحدها — بيانات الموارد البشرية لا تخصّ المستودع ولا المشتريات.
-  function canView(){ return canCreate() || canPM() || canCEO() || canFinance(); }
+  function canView(){ return canCreate() || canHRM() || canPM() || canCEO() || canFinance(); }
   // صاحب الطلب — يعدّل ويعيد الإرسال ويلغي.
   function isOwner(req){
     if(!req) return false;
@@ -265,6 +282,7 @@
   // «ينتظرك أنت» — نفس منطق عدّاد السايدبار (pendingForMe) مع إضافة خبر الإغلاق لصاحبه.
   function _awaitsMe(r){
     if(!r) return false;
+    if(r.status==="hrp_pending_hrm")     return canHRM();
     if(r.status==="hrp_pending_pm")      return canPM();
     if(r.status==="hrp_pending_ceo")     return canCEO();
     if(r.status==="hrp_pending_finance") return canFinance();
@@ -527,6 +545,7 @@
     var th=_threshold();
     var overTh = amt >= th;
     var steps=[];
+    steps.push({icon:"users", lbl:"مدير الموارد البشرية"});  // بوّابة إلزامية لكل طلب جديد
     if(needsPM) steps.push({icon:"send", lbl:"مدير المشاريع"});
     if(overTh)  steps.push({icon:"building2", lbl:"المدير التنفيذي"});
     steps.push({icon:"banknote", lbl:"سداد المالية"});
@@ -582,6 +601,7 @@
       var doc={
         workType:type, workTypeOther:(type==="other"?other:""),
         title:title, amount:+amount.toFixed(2),
+        needsHRM:true,   // بوّابة مدير الموارد البشرية إلزامية لكل طلبٍ جديد
         needsPM:needsPM,
         status:"", // يُملأ من _nextStage أدناه
         attachments: att?[att]:[],
@@ -619,6 +639,31 @@
   /* ════════════════════════════════════════════════════════════════════
      الإجراءات على الطلب
      ════════════════════════════════════════════════════════════════════ */
+
+  // ── اعتماد مدير الموارد البشرية (البوّابة الأولى) ──
+  function approveHRM(id){
+    var r=byId(id); if(!r) return;
+    if(!canHRM()){ _toast("⚠ صلاحية مدير الموارد البشرية فقط","warn"); return; }
+    if(r.status!=="hrp_pending_hrm"){ _toast("⚠ الطلب ليس بانتظار مدير الموارد البشرية","warn"); return; }
+    var th=_threshold();
+    var willCEO = (Number(r.amount)||0) >= th;
+    showCustomModal({
+      title:"اعتماد مدير الموارد البشرية",
+      body:
+        _summaryHtml(r)+
+        '<div class="desc-box" style="margin:10px 0 0">'+
+          (r.needsPM
+            ? 'بعد اعتمادك يُحال الطلب إلى مدير المشاريع'+(willCEO?' ثم المدير التنفيذي':'')+'، ثم للمالية.'
+            : (willCEO
+                ? 'التكلفة '+_fmt(r.amount)+' ر.س ≥ '+_fmt0(th)+' — سيُحال للمدير التنفيذي بعد اعتمادك، ثم للمالية.'
+                : 'سيُحال مباشرةً إلى المالية للسداد بعد اعتمادك.'))+
+        '</div>'+
+        '<div class="form-group" style="margin:10px 0 0"><label class="form-label" for="hrp-hrm-note">ملاحظة</label>'+
+        '<input class="form-input" id="hrp-hrm-note" placeholder="اختياري"></div>',
+      okText:"اعتماد",
+      onOk:function(){ return _doApprove(id, "hrm", _val("hrp-hrm-note")); }
+    });
+  }
 
   // ── اعتماد مدير المشاريع ──
   function approvePM(id){
@@ -666,7 +711,10 @@
     try{
       var by=_me(), at=_now();
       var next=await _tx(id, function(d){
-        if(gate==="pm"){
+        if(gate==="hrm"){
+          if(d.status!=="hrp_pending_hrm") throw new Error("stale");
+          d.hrmApprovedAt=at; d.hrmApprovedBy=by; d.hrmRejectReason="";
+        }else if(gate==="pm"){
           if(d.status!=="hrp_pending_pm") throw new Error("stale");
           d.pmApprovedAt=at; d.pmApprovedBy=by; d.pmRejectReason="";
         }else{
@@ -676,10 +724,11 @@
           d.ceoRejectReason="";
         }
         d.status = nextStage(d);
-        _push(d, gate==="pm" ? "اعتماد مدير المشاريع" : "اعتماد المدير التنفيذي", d.status, note||"", gate==="pm"?"👔":"🏢");
+        _push(d, gate==="hrm" ? "اعتماد مدير الموارد البشرية" : gate==="pm" ? "اعتماد مدير المشاريع" : "اعتماد المدير التنفيذي",
+          d.status, note||"", gate==="hrm"?"👥":gate==="pm"?"👔":"🏢");
         return d;
       });
-      _log("سداد موارد بشرية — "+(gate==="pm"?"اعتماد مدير المشاريع":"اعتماد المدير التنفيذي"),
+      _log("سداد موارد بشرية — "+(gate==="hrm"?"اعتماد مدير الموارد البشرية":gate==="pm"?"اعتماد مدير المشاريع":"اعتماد المدير التنفيذي"),
            "رقم الطلب: "+id+" — الوجهة: "+next.status);
       _notifyStage(Object.assign({id:id}, next), next.status);
       _toast("✅ اعتُمد — "+statusLabel(next.status),"success");
@@ -694,10 +743,11 @@
   // ── الرفض (مدير المشاريع / التنفيذي) — يعود لمسؤول الموارد البشرية للتصحيح ──
   function reject(id, gate){
     var r=byId(id); if(!r) return;
+    if(gate==="hrm" && !canHRM()){ _toast("⚠ صلاحية مدير الموارد البشرية فقط","warn"); return; }
     if(gate==="pm" && !canPM()){ _toast("⚠ صلاحية مدير المشاريع فقط","warn"); return; }
     if(gate==="ceo" && !canCEO()){ _toast("⚠ صلاحية المدير التنفيذي فقط","warn"); return; }
     showCustomModal({
-      title: gate==="pm" ? "رفض — مدير المشاريع" : "رفض — المدير التنفيذي",
+      title: gate==="hrm" ? "رفض — مدير الموارد البشرية" : gate==="pm" ? "رفض — مدير المشاريع" : "رفض — المدير التنفيذي",
       body:
         _summaryHtml(r)+
         '<div class="desc-box" style="margin:10px 0 0;border-right:3px solid var(--danger)">يعود الطلب لمسؤول الموارد البشرية لتصحيحه وإعادة إرساله. سبب الرفض إلزامي.</div>'+
@@ -713,17 +763,18 @@
     if(!reason){ _toast("⚠ اكتب سبب الرفض","warn"); return false; }
     _busy=true;
     try{
-      var target = gate==="pm" ? "hrp_pm_rejected" : "hrp_ceo_rejected";
-      var expect = gate==="pm" ? "hrp_pending_pm"  : "hrp_pending_ceo";
+      var target = gate==="hrm" ? "hrp_hrm_rejected" : gate==="pm" ? "hrp_pm_rejected" : "hrp_ceo_rejected";
+      var expect = gate==="hrm" ? "hrp_pending_hrm"  : gate==="pm" ? "hrp_pending_pm"  : "hrp_pending_ceo";
       var next=await _tx(id, function(d){
         if(d.status!==expect) throw new Error("stale");
         d.status=target;
-        if(gate==="pm"){ d.pmRejectReason=reason; d.pmRejectedAt=_now(); }
+        if(gate==="hrm"){ d.hrmRejectReason=reason; d.hrmRejectedAt=_now(); }
+        else if(gate==="pm"){ d.pmRejectReason=reason; d.pmRejectedAt=_now(); }
         else           { d.ceoRejectReason=reason; d.ceoRejectedAt=_now(); }
-        _push(d, gate==="pm" ? "رفض مدير المشاريع" : "رفض المدير التنفيذي", target, reason, "❌");
+        _push(d, gate==="hrm" ? "رفض مدير الموارد البشرية" : gate==="pm" ? "رفض مدير المشاريع" : "رفض المدير التنفيذي", target, reason, "❌");
         return d;
       });
-      _log("سداد موارد بشرية — رفض", "رقم الطلب: "+id+" — الجهة: "+(gate==="pm"?"مدير المشاريع":"المدير التنفيذي")+" — السبب: "+reason);
+      _log("سداد موارد بشرية — رفض", "رقم الطلب: "+id+" — الجهة: "+(gate==="hrm"?"مدير الموارد البشرية":gate==="pm"?"مدير المشاريع":"المدير التنفيذي")+" — السبب: "+reason);
       _notifyStage(Object.assign({id:id}, next), target, reason);
       _toast("تم الرفض — أُعيد لمسؤول الموارد البشرية","success");
       return true;
@@ -848,7 +899,7 @@
     if(isFinalStatus(r.status)) return false;
     if(isBouncedStatus(r.status)) return true;
     // قبل أي اعتماد فعلي — ما دام في أول بوابة ولم يُعتمد شيء بعد
-    return !r.pmApprovedAt && !r.ceoApprovedAt;
+    return !r.hrmApprovedAt && !r.pmApprovedAt && !r.ceoApprovedAt;
   }
 
   function editModal(id){
@@ -899,7 +950,7 @@
         d.amount=+amount.toFixed(2);
         d.payment=Object.assign({}, d.payment||{}, {beneficiary:benef, iban:iban.clean, note:note});
         // مسح أسباب الارتداد — الطلب دخل دورةً جديدة
-        d.pmRejectReason=""; d.ceoRejectReason=""; d.financeReturnReason="";
+        d.hrmRejectReason=""; d.pmRejectReason=""; d.ceoRejectReason=""; d.financeReturnReason="";
         d.status = nextStage(d);   // المصدر الوحيد للتوجيه — يعيد فرض بوابة التنفيذي إن لزم
         _push(d, "تعديل وإعادة إرسال", d.status,
           (Math.abs(oldAmt-d.amount)>0.009 ? ("التكلفة: "+_fmt(oldAmt)+" ← "+_fmt(d.amount)+" ر.س") : ""), "✏️");
@@ -1040,7 +1091,9 @@
      من داخل الوحدة التي لا يفتحها إلا أصحاب الصلاحية. */
   function _notifyStage(r, status, reason){
     var id=r.id, amt=_fmt0(r.amount), wt=workTypeLabel(r);
-    if(status==="hrp_pending_pm")
+    if(status==="hrp_pending_hrm")
+      _notify("سداد موارد بشرية — بانتظار مدير الموارد البشرية 👥", id+" — "+wt+" — "+amt+" ر.س", id);
+    else if(status==="hrp_pending_pm")
       _notify("سداد موارد بشرية — بانتظار مدير المشاريع 👔", id+" — "+wt+" — "+amt+" ر.س", id);
     else if(status==="hrp_pending_ceo")
       _notify("سداد موارد بشرية — بانتظار المدير التنفيذي 🏢", id+" — "+wt+" — "+amt+" ر.س (بلغت "+_fmt0(_threshold())+" ر.س فأكثر)", id);
@@ -1048,7 +1101,7 @@
       _notify("سداد موارد بشرية — بانتظار المالية 💳", id+" — "+wt+" — "+amt+" ر.س", id);
     else if(status==="hrp_closed")
       _notify("سداد موارد بشرية — تم السداد 🔒", id+" — "+wt+" — "+amt+" ر.س — أُغلق الطلب", id);
-    else if(status==="hrp_pm_rejected" || status==="hrp_ceo_rejected")
+    else if(status==="hrp_hrm_rejected" || status==="hrp_pm_rejected" || status==="hrp_ceo_rejected")
       _notify("سداد موارد بشرية — مرفوض ❌", id+" — "+(reason||"")+" — يمكن التصحيح وإعادة الإرسال", id);
     else if(status==="hrp_finance_returned")
       _notify("سداد موارد بشرية — أُعيد من المالية ↩", id+" — "+(reason||"")+" — بانتظار التصحيح", id);
@@ -1058,6 +1111,7 @@
   function pendingForMe(){
     return _reqs.filter(function(r){
       if(!r) return false;
+      if(r.status==="hrp_pending_hrm")     return canHRM();
       if(r.status==="hrp_pending_pm")      return canPM();
       if(r.status==="hrp_pending_ceo")     return canCEO();
       if(r.status==="hrp_pending_finance") return canFinance();
@@ -1163,6 +1217,7 @@
     // بطاقات اللوحة — نفس مكوّن لوحة المشتريات (.dash-top/.stat-tile)، وكلٌّ منها فلترٌ بنقرة.
     h+='<div class="dash-top" id="hrp-dash">'+
       _tile("mine",    "بانتظار إجرائك", pendingForMe().length, "var(--danger)", "bell")+
+      _tile("hrp_pending_hrm",    "مدير الموارد البشرية", cnt("hrp_pending_hrm"), "var(--stage-wait)", "users")+
       _tile("hrp_pending_pm",     "مدير المشاريع",   cnt("hrp_pending_pm"),     "var(--stage-wait)", "send")+
       _tile("hrp_pending_ceo",    "المدير التنفيذي", cnt("hrp_pending_ceo"),    "var(--stage-wait)", "building2")+
       _tile("hrp_pending_finance","سداد المالية",    cnt("hrp_pending_finance"),"var(--stage-move)", "banknote")+
@@ -1281,10 +1336,12 @@
   function _stepperHtml(r){
     var th=_threshold();
     var keys=[];
+    if(r.needsHRM) keys.push("hrp_pending_hrm");
     if(r.needsPM) keys.push("hrp_pending_pm");
     if((Number(r.amount)||0) >= th) keys.push("hrp_pending_ceo");
     keys.push("hrp_pending_finance","hrp_closed");
     var doneAt={
+      hrp_pending_hrm:     r.hrmApprovedAt,
       hrp_pending_pm:      r.pmApprovedAt,
       hrp_pending_ceo:     r.ceoApprovedAt,
       hrp_pending_finance: (r.payment&&r.payment.paidAt),
@@ -1319,7 +1376,8 @@
   function _detailHtml(r){
     var th=_threshold(), pay=r.payment||{};
     var rail=_RAIL[r.status]||"var(--muted)";
-    var reason = r.status==="hrp_pm_rejected" ? r.pmRejectReason
+    var reason = r.status==="hrp_hrm_rejected" ? r.hrmRejectReason
+               : r.status==="hrp_pm_rejected" ? r.pmRejectReason
                : r.status==="hrp_ceo_rejected" ? r.ceoRejectReason
                : r.status==="hrp_finance_returned" ? r.financeReturnReason : "";
 
@@ -1365,6 +1423,7 @@
         '<div class="d-grid">'+
           _item("نوعية الأعمال", workTypeLabel(r))+
           _item("تكلفة السداد", '<span class="mono">'+_fmt(r.amount)+'</span> ر.س', true)+
+          _item("اعتماد مدير الموارد البشرية", '<span class="po-bool '+(r.needsHRM?"yes":"no")+'">'+(r.needsHRM?"مطلوب":"غير مطلوب — طلب سابق للبوّابة")+'</span>', true)+
           _item("اعتماد مدير المشاريع", '<span class="po-bool '+(r.needsPM?"yes":"no")+'">'+(r.needsPM?"مطلوب":"غير مطلوب")+'</span>', true)+
           _item("بوّابة المدير التنفيذي",
             (Number(r.amount)||0)>=th
@@ -1420,6 +1479,10 @@
 
   function _actionsHtml(r){
     var id=_jq(r.id), out=[];
+    if(r.status==="hrp_pending_hrm" && canHRM()){
+      out.push('<button class="btn btn-success btn-sm" onclick="hrPayments.approveHRM(\''+id+'\')">'+_icon("checkCircle")+' اعتماد</button>');
+      out.push('<button class="btn btn-danger btn-sm" onclick="hrPayments.reject(\''+id+'\',\'hrm\')">'+_icon("xCircle")+' رفض</button>');
+    }
     if(r.status==="hrp_pending_pm" && canPM()){
       out.push('<button class="btn btn-success btn-sm" onclick="hrPayments.approvePM(\''+id+'\')">'+_icon("checkCircle")+' اعتماد</button>');
       out.push('<button class="btn btn-danger btn-sm" onclick="hrPayments.reject(\''+id+'\',\'pm\')">'+_icon("xCircle")+' رفض</button>');
@@ -1465,10 +1528,9 @@
       '.hrp-att:hover{border-color:var(--primary)}'+
       '.hrp-att-n{font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'+
       '.hrp-att-m{font-size:10px;color:var(--muted);white-space:nowrap}'+
-      '#hrp-dash{grid-template-columns:repeat(5,minmax(0,1fr))}'+
-      // خمس بطاقات على عمودين تترك الأخيرة وحيدةً في نصف صفّ — تمتدّ على العرض كاملاً.
-      '@media(max-width:900px){#hrp-dash{grid-template-columns:repeat(2,minmax(0,1fr))}'+
-        '#hrp-dash>:last-child{grid-column:1/-1}}'+
+      '#hrp-dash{grid-template-columns:repeat(6,minmax(0,1fr))}'+
+      // ستّ بطاقات على عمودين = ثلاثة صفوف مكتملة، فلا بطاقة يتيمة تحتاج مدّاً.
+      '@media(max-width:900px){#hrp-dash{grid-template-columns:repeat(2,minmax(0,1fr))}}'+
       '@media(max-width:560px){.hrp-card-amt{font-size:16px}}';
     document.head.appendChild(st);
   }
@@ -1478,7 +1540,7 @@
     startSync:startSync, render:render, renderNew:renderNew, retryLoad:retryLoad,
     open:open, back:back, list:list, setFilter:setFilter,
     onTypeChange:onTypeChange, onAmountChange:onAmountChange, submitNew:submitNew,
-    approvePM:approvePM, approveCEO:approveCEO, reject:reject,
+    approveHRM:approveHRM, approvePM:approvePM, approveCEO:approveCEO, reject:reject,
     payModal:payModal, financeReturn:financeReturn,
     editModal:editModal, attachModal:attachModal, cancel:cancel, remove:remove,
     canView:canView, canCreate:canCreate, pendingForMe:pendingForMe,
