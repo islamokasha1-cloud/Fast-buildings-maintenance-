@@ -62,7 +62,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2881";
+  var MODULE_BUILD = "v18.9.2883";
 
   function COLL(){
     var dev=false;
@@ -257,6 +257,8 @@
     if(pg && pg.classList.contains("active")) render();
     _navToggle();
     _badge();
+    // بطاقة لوحة المشتريات تتنفّس مع كل لقطة — لا تنتظر إعادة رسم اللوحة كلها.
+    try{ renderMyTasks(); }catch(e){}
   }
 
   function _applySnap(snap){
@@ -319,6 +321,7 @@
 
   function startSync(){
     _navToggle();
+    hookMyTasks();   // النواة تستدعينا عند بدء مزامنة المشتريات — renderPOMyTasks معرّفة حينها
     if(typeof db==="undefined" || !db) return;
     if(_unsub) return; // idempotent — المستمعون العامون يُركَّبون مرة واحدة (v18.9sz)
     // جلبةٌ فورية توازي فتح التيار: مصافحة Watch قد تطول على اتصال بارد.
@@ -1144,6 +1147,87 @@
     }catch(e){}
   }
 
+  /* ════════ بطاقة لوحة المشتريات — «سداد الموارد البشرية بانتظار إجراءك» ════════
+     المعتمِد (التنفيذي · مدير المشاريع · المالية · مدير الموارد البشرية) يفتح لوحة
+     المشتريات أول يومه، وطلبات السداد المتوقّفة عليه كانت خلف صفحةٍ لا يفتحها إلا
+     قصداً — فتنام أياماً بلا سبب. البطاقة تُحقن بعد بطاقة «بانتظار إجراءك» لطلبات
+     الشراء مباشرةً (وقبل بطاقة التعاقدات)، على نمط لفّ contracts.js نفسِه: لفٌّ حول
+     renderPOMyTasks يستدعي الأصل ثم يرسمنا، فنُرسم مع كل رسمٍ للوحة بلا حاويةٍ
+     ثابتةٍ في index.html.
+     المصدر الموحّد للحقيقة هو pendingForMe نفسُها التي تغذّي عدّاد السايدبار وتوست
+     HailNotify — إن قالت إن الطلب بانتظارك فستجد زرَّ الإجراء في تفاصيله، فلا تعِد
+     البطاقة بزرٍّ لن يوجد. والعرض محكوم بـcanView (بيانات الموارد البشرية حساسة —
+     لا تُعرض لمن لا يملك فتح الوحدة أصلاً). */
+  var MYTASK_ID = "hrp-my-tasks-card";
+  function _daysSince(iso){
+    if(!iso) return null;
+    var t=new Date(String(iso)).getTime();
+    if(!isFinite(t)) return null;
+    return Math.max(0, Math.floor((Date.now()-t)/86400000));
+  }
+  function renderMyTasks(){
+    var anchor=document.getElementById("po-my-tasks-card");
+    if(!anchor || !anchor.parentNode) return;
+    var host=document.getElementById(MYTASK_ID);
+    if(!host){ host=document.createElement("div"); host.id=MYTASK_ID; host.style.margin="0 0 12px"; }
+    // الموضع ثابتٌ بعد بطاقة طلبات الشراء مباشرةً مهما كان ترتيبُ تركيب اللفّات —
+    // فتقرأ العين دائماً: طلبات الشراء ثم سداد الموارد البشرية ثم التعاقدات.
+    if(anchor.nextSibling!==host) anchor.parentNode.insertBefore(host, anchor.nextSibling);
+    if(!canView()){ host.style.display="none"; host.innerHTML=""; return; }
+    startSync();
+    var items=pendingForMe();
+    if(!items.length){ host.style.display="none"; host.innerHTML=""; return; }
+    // الأقدم أولاً — ما نام أطول يُرى أولاً (نفس ترتيب بطاقتَي المشتريات والتعاقدات)
+    items=items.slice().sort(function(a,b){
+      return String(a.updatedAt||a.createdAt||"").localeCompare(String(b.updatedAt||b.createdAt||""));
+    });
+    var rows=items.map(function(r){
+      var d=_daysSince(r.updatedAt||r.createdAt);
+      var stale=d!=null && d>=3;
+      return '<tr>'+
+        '<td style="padding:6px 10px;white-space:nowrap"><a href="javascript:void(0)" onclick="hrPayments.open(\''+_jq(r.id)+'\')" style="color:var(--primary);font-weight:700;font-family:monospace;font-size:11px">'+_esc(r.id)+'</a></td>'+
+        '<td style="padding:6px 10px;font-weight:700;white-space:nowrap">'+_icon(workTypeIcon(r))+' '+_esc(workTypeLabel(r))+'</td>'+
+        '<td style="padding:6px 10px">'+_esc(r.title||"—")+'</td>'+
+        '<td style="padding:6px 10px;text-align:center;font-family:monospace;font-size:11.5px;white-space:nowrap">'+_fmt0(r.amount)+' ر.س</td>'+
+        '<td style="padding:6px 10px;white-space:nowrap">'+statusBadge(r.status)+'</td>'+
+        '<td style="padding:6px 10px;text-align:center;white-space:nowrap'+(stale?';color:var(--danger);font-weight:800':'')+'">'+(d==null?"—":(d+" يوم"+(stale?" ⚠":"")))+'</td>'+
+      '</tr>';
+    }).join("");
+    host.style.display="";
+    host.innerHTML=
+      '<div class="card" style="border:1.5px solid var(--primary)"><div class="card-body">'+
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
+          '<div style="font-weight:900;font-size:14px;color:var(--primary)">'+_icon("users")+' سداد الموارد البشرية بانتظار إجراءك</div>'+
+          '<span style="font-size:11px;background:var(--surface2);color:var(--primary);border:1px solid var(--primary);border-radius:10px;padding:0 9px;font-weight:800">'+items.length+'</span>'+
+          '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="hrPayments.list()">'+_icon("users")+' الصفحة</button>'+
+        '</div>'+
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'+
+          '<thead><tr style="background:var(--surface2);color:var(--muted)">'+
+            '<th style="padding:6px 10px;text-align:right">الطلب</th>'+
+            '<th style="padding:6px 10px;text-align:right">نوع العمل</th>'+
+            '<th style="padding:6px 10px;text-align:right">البيان</th>'+
+            '<th style="padding:6px 10px;text-align:center">المبلغ</th>'+
+            '<th style="padding:6px 10px;text-align:right">المرحلة</th>'+
+            '<th style="padding:6px 10px;text-align:center">منذ</th>'+
+          '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      '</div></div>';
+  }
+  /* لفُّ بطاقة المشتريات — نستدعي الأصل ولا نستبدله، ومرةً واحدة مهما أُعيد الرسم. */
+  function hookMyTasks(){
+    try{
+      if(window.__hrpMyTasksHooked) return;
+      if(typeof window.renderPOMyTasks!=="function") return;
+      var orig = window.renderPOMyTasks;
+      window.renderPOMyTasks = function(){
+        var r;
+        try{ r = orig.apply(this, arguments); }catch(e){ console.warn("hr-payments/hookMyTasks orig", e); }
+        try{ renderMyTasks(); }catch(e){ console.warn("hr-payments/renderMyTasks", e); }
+        return r;
+      };
+      window.__hrpMyTasksHooked = true;
+    }catch(e){ console.warn("hr-payments/hookMyTasks", e); }
+  }
+
   /* ════════════════════════════════════════════════════════════════════
      العرض
      ════════════════════════════════════════════════════════════════════ */
@@ -1544,6 +1628,7 @@
     payModal:payModal, financeReturn:financeReturn,
     editModal:editModal, attachModal:attachModal, cancel:cancel, remove:remove,
     canView:canView, canCreate:canCreate, pendingForMe:pendingForMe,
+    renderMyTasks:renderMyTasks, hookMyTasks:hookMyTasks,
     all:all, byId:byId, refreshNav:_navToggle,
     // دوال نقية مكشوفة لفحوص hail-tests
     _nextStage:_nextStage, _iban:_iban, _threshold:_threshold,
@@ -1551,4 +1636,8 @@
     HRP_STATUS:HRP_STATUS, HRP_FINAL:HRP_FINAL, HRP_BOUNCED:HRP_BOUNCED, WORK_TYPES:WORK_TYPES,
     build:MODULE_BUILD
   };
+
+  // وسم الوحدة يأتي بعد تعريف renderPOMyTasks في النواة، فاللفّ يصحّ هنا مباشرةً —
+  // وstartSync يعيد المحاولة احتياطاً إن تغيّر ترتيب التحميل يوماً.
+  hookMyTasks();
 })();
