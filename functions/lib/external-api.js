@@ -17,8 +17,11 @@
  * فيصحّ `lineTotal + vat === itemCost` دائماً)، والحالةُ `pending_pm` **حصراً** —
  * فيدخل الطلبُ دورةَ الاعتماد من أوّلها ويلتقطه `poRouteCreate` فيُشعِر مديرَ
  * المشاريع واتسابَ بلا أيّ كودٍ إضافيّ. والقراءةُ نقطتان (قائمة بمرشّحات + طلب
- * واحد) مرتّبتان على معرّف المستند تنازلياً — `PO-YYYYMM-<عدّاد متزايد>` زمنيُّ
- * الترتيب أصلاً — فلا حاجةَ لفهرسٍ مركّب.
+ * واحد) مرتّبتان تنازلياً على **حقل `id` المخزَّن** (يساوي معرّفَ المستند حرفياً،
+ * و`PO-YYYYMM-<عدّاد متزايد>` زمنيُّ الترتيب أصلاً). **لا على `__name__`**:
+ * Firestore يرفض مسحَ المفاتيح تنازلياً بلا مرشّح ("descending key scans") —
+ * خطأٌ لا يظهر إلا في الإنتاج (المحاكي يتساهل). ومع المرشّحات تلزم الفهارسُ
+ * المركّبة المعلنةُ في `firestore.indexes.json` (status/projectId + id DESC).
  *
  * ── القرار ──
  * الدوالُّ الحسابية والتحقّقية هنا **نقيّةٌ** بلا أيّ استيرادٍ من Firebase، فيفحصها
@@ -260,7 +263,7 @@ function keyMatches(provided, expected) {
  * @param {object} deps { db, logger, FieldPath, getApiKey }
  */
 function makeHandler(deps) {
-  const { db, logger, FieldPath, getApiKey } = deps;
+  const { db, logger, getApiKey } = deps;
   const COLL = deps.purchasesCollection || "global_purchases";
   const META = deps.counterDoc || "meta/global_po_counter";
   const SETTINGS = deps.settingsDoc || "meta/external_api";
@@ -310,9 +313,12 @@ function makeHandler(deps) {
         let q = db.collection(COLL);
         if (p.status) q = q.where("status", "==", p.status);
         if (p.projectId) q = q.where("projectId", "==", p.projectId);
-        // الترتيب على معرّف المستند تنازلياً: PO-YYYYMM-<عدّاد متزايد> زمنيّ
-        // الترتيب أصلاً، ولا يحتاج فهرساً مركّباً مع مرشّحات المساواة.
-        q = q.orderBy(FieldPath.documentId(), "desc");
+        // الترتيب تنازلياً على حقل `id` المخزَّن (= معرّف المستند، زمنيّ الترتيب)
+        // لا على __name__: الإنتاج يرفض مسح المفاتيح تنازلياً بلا مرشّح
+        // ("Firestore does not support descending key scans"). فهرسُ الحقل
+        // الأحاديّ التنازلي تلقائيّ، ومع المرشّحات تخدم الفهارسُ المركّبة
+        // المعلنة في firestore.indexes.json.
+        q = q.orderBy("id", "desc");
         if (p.after) q = q.startAfter(p.after);
         const snap = await q.limit(p.limit).get();
         const purchases = snap.docs.map((d) => d.data());
@@ -393,7 +399,12 @@ function makeHandler(deps) {
       });
     } catch (e) {
       logger.error("externalApi: خطأ غير متوقع", e);
-      return fail(res, 500, "internal", "خطأ داخلي — أعد المحاولة");
+      // detail يصل حاملَ المفتاح وحده (بعد المصادقة) — يختصر تشخيص التكامل
+      // بدل "internal" أعمى (وهكذا اكتُشف خطأ descending key scans أصلاً).
+      return send(res, 500, {
+        ok: false, error: "internal", message: "خطأ داخلي — أعد المحاولة",
+        detail: String((e && e.message) || e).slice(0, 300),
+      });
     }
   };
 }
