@@ -12991,6 +12991,96 @@ function vendorPOIssuance() {
   }
 }
 
+/* ══ واجهة النظام الخارجي (externalApi): حساب البند والدورة لا يُكسران ══
+   الوحدة نقيّة (بلا Firebase) فتُستدعى دوالُّها هنا مباشرةً. الحارسان الجوهريان:
+   (١) معادلاتُ البند مطابقةٌ لـ`addPurchaseItem` حرفياً — lineTotal + vat === itemCost
+   دائماً، والتقريبُ عند المصدر فلا يتسرّب العائم. (٢) الحالةُ `pending_pm` حصراً
+   مهما أرسل النظامُ الخارجي — الباب يُدخل الدورةَ من أولها ولا يتجاوزها أبداً. */
+function externalPurchaseApiGuards() {
+  H("واجهة النظام الخارجي (external-api) — الحساب والتحقّق والدورة");
+  let X = null;
+  try { X = require(path.resolve(path.dirname(IDX), "functions/lib/external-api.js")); }
+  catch (e) { T("تُحمَّل الوحدة بلا Firebase (دوالّ نقية)", false, e.message); return; }
+  T("تُحمَّل الوحدة بلا Firebase (دوالّ نقية)", !!X);
+
+  // ── (١) معادلات البند — مرآة addPurchaseItem (v18.9nc) ──
+  const c1 = X.computeItem({ unitCost: 100, qty: 2 });
+  T("★★ حساب البند: 100×2 → صافي 200 + ض.ق.م 30 = 230",
+    c1.vatUnit === 15 && c1.unitTotal === 115 && c1.lineTotal === 200 &&
+    c1.vat === 30 && c1.itemCost === 230);
+  const c2 = X.computeItem({ unitCost: 0.1, qty: 3 });
+  // كالتطبيق حرفياً: ض.ق.م الوحدة تُقرَّب أولاً (0.015→0.02) ثم يُشتق الباقي منها.
+  T("★★ التقريب عند المصدر — لا عائم يتسرّب (0.1×3 = 0.3 لا 0.30000000004)",
+    c2.lineTotal === 0.3 && c2.vatUnit === 0.02 && c2.unitTotal === 0.12 &&
+    c2.itemCost === 0.36 && c2.vat === 0.06);
+  const c3 = X.computeItem({ unitCost: 33.33, qty: 7 });
+  T("★★ lineTotal + vat === itemCost دائماً (الاشتقاق طرحاً كما في التطبيق)",
+    Math.round((c3.lineTotal + c3.vat) * 100) / 100 === c3.itemCost);
+
+  // ── (٢) التحقّق يرفض الناقص ويقبل الصحيح ──
+  T("★ التحقّق يرفض جسماً فارغاً بقائمة أخطاء", X.validateCreate(null).length > 0);
+  T("★★ يرفض طلباً بلا بنود وبلا مشروع وبلا طالب مواد",
+    X.validateCreate({}).some(e => e.includes("items")) &&
+    X.validateCreate({}).some(e => e.includes("المشروع")) &&
+    X.validateCreate({}).some(e => e.includes("supervisor")));
+  const okBody = {
+    projectName: "مشروع تجريبي", supervisor: "م. أحمد", priority: "عادي",
+    items: [{ itemType: "كهرباء", itemName: "كيبل", qty: 2, unit: "لفة", unitCost: 100 }],
+  };
+  T("★ ويقبل الجسم الصحيح (صفر أخطاء)", X.validateCreate(okBody).length === 0);
+  T("★ الأولوية من قائمة التطبيق حرفياً (عاجل/متوسط/عادي)",
+    JSON.stringify(X.VALID_PRIORITIES) === JSON.stringify(["عاجل", "متوسط", "عادي"]) &&
+    X.validateCreate({ ...okBody, priority: "قصوى" }).some(e => e.includes("priority")));
+  T("★ كمية صفرية أو سالبة تُرفض",
+    X.validateCreate({ ...okBody, items: [{ ...okBody.items[0], qty: 0 }] }).length > 0 &&
+    X.validateCreate({ ...okBody, items: [{ ...okBody.items[0], qty: -1 }] }).length > 0);
+
+  // ── (٣) بناء المستند — الشكل القياسي والدورة من أولها ──
+  const nowIso = "2026-08-25T10:00:00.000Z";
+  const po = X.buildPO({
+    body: { ...okBody, status: "closed", actualCost: 999 },   // محاولة تجاوز — تُتجاهل
+    poId: "PO-202608-0042", projName: "مشروع تجريبي", isCustomProject: true, nowIso,
+  });
+  T("★★ الحالة pending_pm حصراً مهما أرسل النظام الخارجي",
+    po.status === "pending_pm" && po.actualCost === 0);
+  T("★★ timeline بقيدَين والرمز صريح في code (درس v18.9od)",
+    po.timeline.length === 2 && po.timeline[1].code === "pending_pm" &&
+    po.timeline[1].event === "تغيير الحالة: بانتظار موافقة مدير المشاريع");
+  T("★ حقول التوافق من البند الأول (itemName/qty/unit) والإجماليات مقرَّبة",
+    po.itemName === "كيبل" && po.qty === 2 && po.unit === "لفة" &&
+    po.estCost === 230 && po.estCostNet === 200 && po.estVAT === 30);
+  T("★ المشروع اليدوي بالشكل القياسي (درس v18.9sz): __OTHER__ + العلَم + الاسم",
+    po.projectId === "__OTHER__" && po.isCustomProject === true && po.projectName === "مشروع تجريبي");
+  T("★ الطلب موسوم بمصدره (source=external_api) ومُنشئه «نظام خارجي»",
+    po.source === "external_api" && po.createdBy.startsWith("نظام خارجي"));
+  const po2 = X.buildPO({ body: okBody, poId: "PO-1", projName: "هيل", isCustomProject: false, nowIso });
+  T("★ بند المستند بشكل currentPurchaseItems الكامل (estUnitCost/priceLocked/itemId)",
+    po2.items[0].estUnitCost === 100 && po2.items[0].priceLocked === false &&
+    po2.items[0].itemId === null && po2.items[0].vatUnit === 15);
+
+  // ── (٤) رقم الطلب والمسارات ──
+  T("★ صيغة الرقم مطابقة لـ generatePOId: PO-YYYYMM-0007",
+    X.formatPoId(7, new Date("2026-08-25T10:00:00Z")) === "PO-202608-0007");
+  T("★ المسارات: إنشاء وقائمة وطلب واحد — وما عداها مرفوض",
+    X.parseRoute("POST", "/purchases").op === "create" &&
+    X.parseRoute("GET", "/purchases").op === "list" &&
+    X.parseRoute("GET", "/purchases/PO-202608-0042").id === "PO-202608-0042" &&
+    X.parseRoute("DELETE", "/purchases/PO-1").op === null &&
+    X.parseRoute("PUT", "/purchases").op === null);
+  T("★ حدّ القائمة مضبوط (افتراضي 25، سقف 100)",
+    X.normalizeListParams({}).limit === 25 && X.normalizeListParams({ limit: "9999" }).limit === 100);
+  T("★ مقارنة المفتاح بزمن ثابت ترفض الفارغ والمختلف وتقبل المطابق",
+    X.keyMatches("abc", "abc") === true && X.keyMatches("abd", "abc") === false &&
+    X.keyMatches("", "") === false && X.keyMatches("abc", "") === false);
+
+  // ── (٥) الربط في functions/index.js — السرّ مربوط والمعالج مُصدَّر ──
+  const IDXFN = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "functions/index.js"), "utf8"); } catch { return ""; } })();
+  T("★★ externalApi مُصدَّرة في functions/index.js ومفتاحها سرٌّ من Secret Manager",
+    IDXFN.includes('defineSecret("EXTERNAL_API_KEY")') &&
+    IDXFN.includes("exports.externalApi = onRequest(") &&
+    IDXFN.includes("secrets: [EXTERNAL_API_KEY]"));
+}
+
 /* ══ التشغيل ══ */
 (async () => {
   await step4;
@@ -13069,6 +13159,7 @@ function vendorPOIssuance() {
   poColorSystemGuards();
   printIconSizeGuards();
   vendorPOIssuance();
+  externalPurchaseApiGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
