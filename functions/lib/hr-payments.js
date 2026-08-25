@@ -140,6 +140,34 @@ async function routeHrPayment(before, after, { db, logger, isEnabled }) {
       logger.info(`wa(hrp): صاحب الطلب ${id} بلا هاتف/موافقة — تخطّي`);
     }
   }
+
+  // (٣) إشعار أدوار الموارد البشرية بتحديث الحالة (سداد المالية = `hrp_closed`).
+  // الطلبَ قد يُنشئه الأدمن نيابةً، ومسؤولُ الموارد قد لا يكون مديرَها — فالإشعار
+  // بالدور يضمن وصول خبر السداد لمن يتابع المعاملة، لا لمن ضغط زرّ الإنشاء وحده.
+  // ومعرّفُ الطابور الحتمي (يشمل رقم المستلم) يُسقط النسخةَ الثانية تلقائياً حين
+  // يكون صاحبُ الطلب المُشعَر في (٢) هو نفسَه صاحبَ الدور هنا — رسالةٌ واحدة للجوال.
+  const notifyRoles = cfg.HRP_STATUS_NOTIFY_ROLES[newStatus] || [];
+  if (notifyRoles.length) {
+    const label = cfg.HRP_STATUS_LABELS[newStatus] || newStatus;
+    for (const role of notifyRoles) {
+      const recipients = await findByRoleAnywhere(db, role);
+      if (!recipients.length) {
+        logger.info(`wa(hrp): لا مستلم للدور ${role} لتحديث ${id} — تخطّي`);
+      }
+      for (const r of recipients) {
+        const { queued } = await enqueue(db, {
+          to: r.phone,
+          recipientRef: `role:${role}`,
+          template: cfg.HRP.statusTemplate,
+          lang: cfg.HRP.lang,
+          params: statusParams(after, label), // {{1}}رقم {{2}}النوع/السياق {{3}}الحالة
+          buttonParam: id,
+          event: { type: "hrp_status_update", entityId: id, transition, occurrence },
+        });
+        logger.info(`wa(hrp): ${queued ? "أُضيف" : "تكرار"} تحديث ${id} → ${role} (${r.phone})`);
+      }
+    }
+  }
 }
 
 module.exports = { routeHrPayment, workTypeLabel, context, approvalParams, statusParams };

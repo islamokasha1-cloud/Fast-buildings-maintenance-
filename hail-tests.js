@@ -7212,6 +7212,9 @@ function hrPaymentNotificationTests(src) {
   T("★ صاحب الطلب يُنبَّه بالرفض والإعادة والإغلاق — لا بإلغائه هو",
     /HRP_NOTIFY_REQUESTER = new Set\(\[\s*"hrp_hrm_rejected",\s*"hrp_pm_rejected",\s*"hrp_ceo_rejected",\s*"hrp_finance_returned",\s*"hrp_closed",\s*\]\)/.test(cfgSrc) &&
     !/HRP_NOTIFY_REQUESTER[\s\S]{0,240}hrp_cancelled/.test(cfgSrc));
+  T("★ سداد المالية يُنبّه دورَي الموارد البشرية (مسؤولاً ومديراً) — لا الحالات الأخرى",
+    /HRP_STATUS_NOTIFY_ROLES = \{\s*hrp_closed: \["hr_officer", "hr_manager"\],\s*\}/.test(cfgSrc) &&
+    !/HRP_STATUS_NOTIFY_ROLES = \{[\s\S]{0,200}?(hrp_pending|hrp_cancelled|hrp_hrm|hrp_pm|hrp_ceo|hrp_finance_returned)/.test(cfgSrc));
 
   // تسميات نوعية العمل نسختان (واجهة/خادم) — الحارس يمنع انحرافهما.
   const uiKeys = (src.match(/\{k:"([a-z_]+)",\s*l:/g) || []).map(m => m.match(/k:"([a-z_]+)"/)[1]);
@@ -7249,7 +7252,7 @@ function hrPaymentNotificationTests(src) {
     /async function puSaveUserWa[\s\S]{0,1400}?await _upsertUserCentral\(u\)/.test(HTML));
   T("★ منعُ التكرار يحمل طابعَ الكتابة (occurrence) — فالرفضُ المتكرّر يصل ثانيةً",
     /const occurrence = String\(after\.updatedAt \|\| after\.createdAt \|\| ""\);/.test(hrpSrc) &&
-    (hrpSrc.match(/transition, occurrence \}/g) || []).length === 2);
+    (hrpSrc.match(/transition, occurrence \}/g) || []).length === 3);
   T("★ لا مبالغ في نصّ الرسالة (خصوصية — كقاعدة الشراء)",
     !/after\.amount/.test(hrpSrc) && !/amount/.test(hrpSrc));
   /* ولا البيانُ المختصر: نصٌّ حرٌّ قد يحمل اسمَ موظّف («تجديد إقامة فلان»)، وقاعدةُ
@@ -7343,6 +7346,7 @@ function hrPaymentNotificationTests(src) {
     { user: "ceo01", name: "التنفيذي", role: "ceo", phone: "0502222222", waOptIn: true },
     { user: "fin01", name: "المالية", role: "finance", phone: "0503333333", waOptIn: true },
     { user: "hr01", name: "مسؤول الموارد", role: "hr_officer", phone: "0504444444", waOptIn: true },
+    { user: "hrm01", name: "مدير الموارد", role: "hr_manager", phone: "0507777777", waOptIn: true },
     { user: "wh01", name: "المستودع", role: "warehouse_manager", phone: "0505555555", waOptIn: true },
     { user: "ceo02", name: "تنفيذيٌّ بلا موافقة", role: "ceo", phone: "0506666666", waOptIn: false },
   ];
@@ -7413,9 +7417,14 @@ function hrPaymentNotificationTests(src) {
       JSON.stringify((of("returned")[0] || {}).params));
     T("★★ إعادةٌ ثانيةٌ بنفس الانتقال تصل ثانيةً (لا تُبتلع كتكرار — M14)",
       of("returnedAgain").length === 1);
-    T("★ الإغلاق يصل صاحب الطلب وحده",
-      of("closed").length === 1 && of("closed")[0].to === "0504444444" &&
-      of("closed")[0].params[2] === "مغلق — تم السداد");
+    T("★★ سداد المالية يصل صاحب الطلب ومدير الموارد البشرية على جوّاليهما",
+      of("closed").length === 2 &&
+      of("closed").some(m => m.to === "0504444444") &&
+      of("closed").some(m => m.to === "0507777777") &&
+      of("closed").every(m => m.params[2] === "مغلق — تم السداد"),
+      of("closed").map(m => m.to).join(",") || "لا شيء");
+    T("★ ومسؤول الموارد (صاحب الطلب نفسه) رسالةٌ واحدة لا اثنتان — منع التكرار بالمعرّف الحتمي",
+      of("closed").filter(m => m.to === "0504444444").length === 1);
     T("★ الإلغاء (فعلُ صاحبه) لا يُشعِر أحداً", of("cancelled").length === 0);
     T("★ مفتاح القتل العام يوقف إرسال السداد أيضاً", of("killSwitch").length === 0);
     T("★★ لا تصل بيانات الموارد البشرية للمستودع ولا للمشتريات",
