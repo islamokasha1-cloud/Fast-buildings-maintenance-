@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2892";
+var MODULE_BUILD = "v18.9.2893";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -470,6 +470,40 @@ function crqPaidTotal(req){
 function crqPayDue(req){
   var r = req || {};
   return r2(Math.max(0, r2(Number(r.value)||0) - crqPaidTotal(r)));
+}
+
+/* ════ خطةُ صرف الدفعات — **منشئُ الطلب هو من يحدّدها** ════   (طلبُ المالك)
+
+   نسبُ الدفعات ليست قرارَ المالية: المنشئُ يكتبها في الطلب نفسِه (٥٠٪ ثم ٥٠٪…)
+   فيوقّع المعتمِدون عليها مع القيمة، والماليةُ **تنفّذ الدفعةَ التالية وفق الخطة
+   حرفياً** — «مُسدِّدةٌ لا مُقرِّرة»، وهو مبدأُ الوحدة نفسُه في كل بوّابة.
+   • `normPaymentPlan` — تطبيعُ الخطة: نسبٌ موجبةٌ وحدَها (تقبل أرقاماً أو {pct}).
+   • `paymentPlanOk`   — الخطةُ الصالحة: دفعةٌ فأكثر ومجموعُها ١٠٠٪ بالضبط.
+   • `crqPlanInstallment` — الدفعةُ التالية المستحقّة: مبلغُها نسبتُها من القيمة،
+     و**الأخيرةُ تلتهم فروقَ التقريب** فتساوي المتبقّي بالضبط — فلا يبقى في
+     الأمر هللةٌ عالقةٌ لا تُغلقه ولا تُصرف. لا خطةَ على الوثيقة ⇒ null
+     (مبلغٌ حرّ — سلوكُ الوثائق القديمة ومسارات الـAPI). */
+function normPaymentPlan(plan){
+  return (Array.isArray(plan)?plan:[]).map(function(p){
+    return r2(Number((p && p.pct != null) ? p.pct : p) || 0);
+  }).filter(function(p){ return p > 0; });
+}
+function paymentPlanOk(plan){
+  var l = normPaymentPlan(plan);
+  if(!l.length) return false;
+  var s = 0; l.forEach(function(p){ s += p; });
+  return Math.abs(r2(s) - 100) <= 0.01;
+}
+function crqPlanInstallment(req){
+  var r = req || {};
+  var plan = normPaymentPlan(r.paymentPlan);
+  if(!plan.length) return null;
+  var i = Array.isArray(r.payments) ? r.payments.length : 0;
+  var due = crqPayDue(r);
+  if(i >= plan.length || due <= 0) return null;   // استُنفدت الخطة أو اكتمل السداد
+  if(i === plan.length - 1) return { index:i, count:plan.length, pct:plan[i], amount:due };
+  return { index:i, count:plan.length, pct:plan[i],
+           amount: Math.min(due, r2(r2(Number(r.value)||0) * plan[i] / 100)) };
 }
 
 /* ════ تفقيطُ المبلغ — «المبلغُ كتابةً» على أمر الدفع ════
@@ -2581,6 +2615,13 @@ function createRequest(draft){
         "أمر الدفع عند "+money0(payOrderThreshold())+" ر.س فأكثر يلزمه إقرارٌ صريح بالتجاوز — أو حوّله إلى عقد"));
       doc.overThresholdAck = { by:_me(), byUser:_meUser(), at:_now(), threshold:payOrderThreshold() };
     }
+    /* خطةُ صرف الدفعات — يحدّدها المنشئ هنا وتُجمَّد على الوثيقة: نسبٌ مجموعُها
+       ١٠٠٪ وإلا رُفض الإنشاء. ولغير أمر الدفع لا معنى لها فلا تُخزَّن. */
+    if(doc.engagement === "pay_order" && doc.paymentPlan != null){
+      doc.paymentPlan = normPaymentPlan(doc.paymentPlan);
+      if(!paymentPlanOk(doc.paymentPlan))
+        return Promise.reject(new Error("خطة صرف الدفعات: نسبٌ موجبةٌ مجموعُها ١٠٠٪ بالضبط"));
+    } else if(doc.paymentPlan != null) delete doc.paymentPlan;
     doc.createdAt=_now(); doc.createdBy=_me(); doc.createdByUser=_meUser();
     doc.status = crqNextStage(doc, ceoThreshold());
     _pushTimeline(doc, "إنشاء الطلب", "created",
@@ -2588,6 +2629,9 @@ function createRequest(draft){
     if(doc.overThresholdAck)
       _pushTimeline(doc, "أمر دفع فوق العتبة — بإقرارٍ صريح", "over_threshold",
         money(doc.value)+" ر.س والعتبة "+money0(doc.overThresholdAck.threshold)+" ر.س");
+    if(Array.isArray(doc.paymentPlan) && doc.paymentPlan.length > 1)
+      _pushTimeline(doc, "خطة صرف الدفعات — حدّدها منشئ الطلب", "payment_plan",
+        doc.paymentPlan.map(function(p){ return p+"٪"; }).join(" ثم "));
     return database.collection(REQUESTS_COL()).doc(id).set(doc).then(function(){
       doc.id=id; _mirror(_reqs, doc, true);
       _audit("إنشاء طلب تعاقد", id+" — "+(doc.vendorName||"")+" — "+money(doc.value)+" ر.س");
@@ -2671,7 +2715,18 @@ function payRequest(id, payload){
       var pmode = crqActMode(r, r.status, role, _meUser(), _me(), _users());
       if(pmode === "blocked") throw new Error("اعتمدتَ هذا الطلب في بوّابةٍ سابقة — السدادُ لغيرك");
       var due = crqPayDue(r);
-      var amt = r2(payload.amount != null ? payload.amount : due);
+      /* منشئُ الطلب هو من يحدّد نسبَ الدفعات: خطةٌ على الوثيقة تقفل مبلغَ الدفعة
+         التالية — الماليةُ تنفّذها حرفياً لا تختار. وبلا خطةٍ (وثائقُ قديمة) يبقى
+         المبلغُ حراً في حدود المتبقّي. */
+      var inst = crqPlanInstallment(r), amt;
+      if(inst){
+        amt = inst.amount;
+        if(payload.amount != null && Math.abs(r2(payload.amount) - amt) > 0.01)
+          throw new Error("منشئ الطلب حدّد خطة الصرف — الدفعة "+(inst.index+1)+" من "+inst.count+
+                          " هي "+inst.pct+"٪ ("+money(amt)+" ر.س) لا غير");
+      } else {
+        amt = r2(payload.amount != null ? payload.amount : due);
+      }
       if(!(amt > 0)) throw new Error("مبلغ الدفعة إلزامي — اكتب كم يُسدَّد فعلاً");
       if(amt > due + 0.01) throw new Error("الدفعة أكبر من المتبقّي ("+money(due)+" ر.س) — لا يُسدَّد فوق قيمة الأمر");
       if(!Array.isArray(r.payments)) r.payments = [];
@@ -2687,7 +2742,9 @@ function payRequest(id, payload){
       var pdlg = (pmode === "delegate") ? " · نيابةً — لا يوجد غيرُك يملك السداد" : "";
       if(pmode === "delegate") r.delegatedApproval = true;
       _pushTimeline(r, done ? "سداد أمر الدفع — اكتمل" : "سداد دفعة من أمر الدفع", "paid",
-        money(amt)+" ر.س"+(payload.ref?(" — "+payload.ref):"")+
+        money(amt)+" ر.س"+
+        (inst?(" (الدفعة "+(inst.index+1)+" من "+inst.count+" — "+inst.pct+"٪ وفق خطة المنشئ)"):"")+
+        (payload.ref?(" — "+payload.ref):"")+
         " · المسدَّد "+money(paid)+" من "+money(r.value)+" ر.س"+pdlg);
       r.updatedAt=_now(); r.updatedBy=_me();
       var out=Object.assign({},r); delete out.id;
@@ -4994,7 +5051,7 @@ function newRequest(){
     isSubstitute:false, substituteAccountId:"",
     advance:{pct:0,recoveryPct:0}, retention:{pct:0,releaseOn:"completion"},
     penalty:{mode:"amount",perDayAmount:0,capAmount:0}, warranty:{months:0}, value:0,
-    attachFiles:[], overThreshold:false
+    attachFiles:[], overThreshold:false, payPlan:[100]
   };
   paintReqs();
   loadProjectData(_draftLoadKey());
@@ -5017,6 +5074,43 @@ function setReqProject(sel){
 function setEngagement(v){ syncReqDraft(); if(!_rDraft) return; _rDraft.engagement=v; paintReqs(); }
 /* إقرارُ تجاوز العتبة — `syncReqDraft` أولاً فلا تضيع كتابةٌ في الحقول عند إعادة الرسم. */
 function setOverTh(v){ syncReqDraft(); if(!_rDraft) return; _rDraft.overThreshold=!!v; paintReqs(); }
+
+/* ── خطةُ صرف الدفعات في النموذج ──
+   الإضافةُ والحذفُ يعيدان الرسم (نقرُ زرٍّ لا كتابة)، أمّا الكتابةُ في نسبةٍ
+   فتُحدَّث مبالغُها وسطرُ المجموع **في مكانها** — إعادةُ رسمٍ كاملةٌ عند كل رقمٍ
+   كانت ستُفقد التركيزَ من الحقل وسطَ الكتابة. */
+function addPlanRow(){
+  syncReqDraft(); if(!_rDraft) return;
+  if(!Array.isArray(_rDraft.payPlan) || !_rDraft.payPlan.length) _rDraft.payPlan=[100];
+  _rDraft.payPlan.push(0);
+  paintReqs();
+}
+function delPlanRow(i){
+  syncReqDraft(); if(!_rDraft) return;
+  (_rDraft.payPlan||[]).splice(i,1);
+  if(!(_rDraft.payPlan||[]).length) _rDraft.payPlan=[100];
+  paintReqs();
+}
+function planInput(){
+  if(!_rDraft) return;
+  var pcts=[];
+  document.querySelectorAll(".ct-plan-pct").forEach(function(inp){
+    pcts[parseInt(inp.dataset.i,10)] = Number(inp.value)||0;
+  });
+  _rDraft.payPlan = pcts;
+  var tot = linesTotal(_rDraft.lines, _rDraft.vatMode).total;
+  document.querySelectorAll(".ct-plan-amt").forEach(function(td){
+    var i=parseInt(td.dataset.i,10);
+    td.textContent = money(r2(tot*(pcts[i]||0)/100));
+  });
+  var s = r2(pcts.reduce(function(a,b){ return a+(b||0); },0));
+  var el=document.getElementById("ct-plan-sum");
+  if(el){
+    var ok = Math.abs(s-100) <= 0.01;
+    el.style.color = ok ? "var(--success)" : "var(--danger)";
+    el.innerHTML = 'المجموع: <span class="num">'+s+'</span>٪'+(ok?' ✓':' — يجب أن يبلغ ١٠٠٪');
+  }
+}
 function setReqVendor(vid){
   syncReqDraft(); if(!_rDraft) return;
   var v=vendorById(vid);
@@ -5057,6 +5151,12 @@ function syncReqDraft(){
   if(sbc){ d.isSubstitute = !!sbc.checked; d.substituteAccountId = d.isSubstitute ? v("ct-r-subacc") : ""; }
   var oth=document.getElementById("ct-r-overth");
   if(oth) d.overThreshold = !!oth.checked;
+  var pl=document.querySelectorAll(".ct-plan-pct");
+  if(pl.length){
+    var pp=[];
+    pl.forEach(function(inp){ pp[parseInt(inp.dataset.i,10)]=Number(inp.value)||0; });
+    d.payPlan=pp;
+  }
   if(document.getElementById("ct-r-mproj")) d.projectName=v("ct-r-mproj");
   if(document.getElementById("ct-r-dur"))   d.durationDays=n("ct-r-dur");
   if(document.getElementById("ct-r-start")) d.startDate=v("ct-r-start");
@@ -5114,6 +5214,31 @@ function reqFormHTML(){
   }).join("");
   /* مربّعُ الإقرار — لا يظهر إلا حين يلزم، ونصُّه يسمّي ما يُتنازل عنه بالاسم:
      لا بنودَ عقدٍ ولا محتجزَ ضمانٍ ولا مستخلصات — والاعتماداتُ كلُّها باقية. */
+  /* خطةُ صرف الدفعات — **منشئُ الطلب هو من يحدّدها** (طلبُ المالك): نسبٌ مجموعُها
+     ١٠٠٪، يوقّع عليها المعتمِدون مع القيمة، والماليةُ تنفّذها دفعةً دفعةً حرفياً. */
+  var planRows = (d.payPlan||[]).map(function(p,i){
+    var amt = r2(tot.total * (Number(p)||0) / 100);
+    return '<tr>'+
+      '<td style="font-weight:700">'+(i+1)+'</td>'+
+      '<td><input class="form-input num ct-plan-pct" data-i="'+i+'" type="number" step="any" min="0" max="100" value="'+_esc(p)+'" oninput="contracts.planInput()" style="min-width:80px"></td>'+
+      '<td class="num ct-plan-amt" data-i="'+i+'">'+money(amt)+'</td>'+
+      '<td>'+((d.payPlan||[]).length>1?'<button class="btn btn-delete" onclick="contracts.delPlanRow('+i+')">'+_icn("trash","ic-sm")+'</button>':'')+'</td>'+
+    '</tr>';
+  }).join("");
+  var planSum = r2((d.payPlan||[]).reduce(function(s,p){ return s+(Number(p)||0); },0));
+  var planOk  = Math.abs(planSum-100) <= 0.01;
+  var planSec = !isPay ? '' :
+    '<div class="card ct-sec">'+
+      '<div class="ct-sec-h">'+_icn("banknote","ic-sm")+' خطة صرف الدفعات'+
+        '<span class="ct-sec-lock">أنت من يحدّد نسبَ الدفعات — المالية تنفّذها حرفياً دفعةً بإيصالها، والأمرُ مفتوحٌ حتى تكتمل</span>'+
+        '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.addPlanRow()">'+_icn("plus","ic-sm")+' دفعة</button></div>'+
+      '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+
+        '<th style="width:40px">#</th><th>نسبة الدفعة ٪</th><th>مبلغها من القيمة الحالية</th><th></th>'+
+      '</tr></thead><tbody>'+planRows+'</tbody></table></div>'+
+      '<div id="ct-plan-sum" style="margin-top:8px;font-size:12px;font-weight:800;color:'+(planOk?'var(--success)':'var(--danger)')+'">'+
+        'المجموع: <span class="num">'+planSum+'</span>٪'+(planOk?' ✓':' — يجب أن يبلغ ١٠٠٪')+'</div>'+
+    '</div>';
+
   var overThBox = overTh
     ? '<div class="ct-note '+(d.overThreshold?'':'warn')+'" style="display:block">'+
         '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-weight:700">'+
@@ -5237,6 +5362,7 @@ function reqFormHTML(){
     '<div class="ct-picks">'+engCards+'</div>'+
     overThBox +
   '</div>'+
+  planSec +
   (isPay || !items.length ? '' :
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("book","ic-sm")+' بنود المقايسة — '+_esc(_projName(ref))+
@@ -5409,12 +5535,17 @@ function submitRequest(){
   if(d.engagement==="pay_order" && !payOrderAllowed(total,payOrderThreshold()) && !d.overThreshold){
     _toast("⚠ أمر الدفع عند "+money0(payOrderThreshold())+" ر.س فأكثر يلزمه إقرارٌ صريح — فعِّل مربّع الإقرار أو حوّله إلى عقد","warn"); return;
   }
+  if(d.engagement==="pay_order" && !paymentPlanOk(d.payPlan)){
+    _toast("⚠ خطة صرف الدفعات: نسبٌ موجبةٌ مجموعُها ١٠٠٪ بالضبط — راجع الخطة","warn"); return;
+  }
   var btn=document.getElementById("ct-r-send"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الإرسال…"; }
   // الشكلُ القياسيُّ للمشروع يُثبَّت هنا مرةً واحدة — ولا يُخزَّن معرّفُ العرض الداخليّ
   var files=(d.attachFiles||[]).slice();
   var payload=Object.assign({}, d, ref);
   delete payload.projectSel;
   delete payload.attachFiles;   // ملفاتُ المتصفّح لا تُكتب في Firestore — تُرفَع بعد الإنشاء برقم الطلب
+  delete payload.payPlan;       // حقلُ المسوّدة — يُخزَّن مطبَّعاً باسم paymentPlan
+  if(d.engagement==="pay_order") payload.paymentPlan = normPaymentPlan(d.payPlan);
   createRequest(payload).then(function(id){
     /* المرفقاتُ بعد الإنشاء: فشلُ رفعِ ملفٍّ لا يُسقط طلباً أُنشئ فعلاً — يُقال
        صراحةً ويبقى بابُ الإضافة من البطاقة مفتوحاً (نهجُ مستندات الأطراف). */
@@ -5504,6 +5635,16 @@ function reqCardHTML(id){
     (r.overThresholdAck?infoCell("فوق عتبة أمر الدفع",
       '<span class="ct-doc s-soon">'+_icn("alertTriangle","ic-sm")+' بإقرار '+_esc(r.overThresholdAck.by||"")+
       ' — العتبة '+money0(r.overThresholdAck.threshold)+' ر.س</span>'):"")+
+    (function(){
+      // خطةُ الصرف كما حدّدها المنشئ — والمسدَّدُ منها موسومٌ ✓ فيقرؤها كلُّ معتمِد
+      if(r.engagement!=="pay_order") return "";
+      var _plan=normPaymentPlan(r.paymentPlan);
+      if(!_plan.length) return "";
+      var _pc=Array.isArray(r.payments)?r.payments.length:0;
+      return infoCell("خطة الصرف (حدّدها المنشئ)", _plan.map(function(p,i){
+        return '<span class="ct-doc '+(i<_pc?'s-ok':'s-soon')+'">'+p+'٪'+(i<_pc?' ✓':'')+'</span>';
+      }).join(' '));
+    })()+
     (docSubstituteId(r)?infoCell("البند المستعاض", substituteChip(r)):"")+
     infoCell("وضع الضريبة", _esc((VAT_MODES[normVatMode(r.vatMode)]||{}).short||"—"))+
     infoCell("مدة التنفيذ", r.durationDays?(money0(r.durationDays)+" يوماً"):"—")+
@@ -6046,14 +6187,23 @@ function openPay(){
   var pctBtns=[25,50,75].map(function(p){
     return '<button type="button" class="btn btn-ghost btn-sm" onclick="contracts.setPayPct('+p+')" style="font-size:11px;padding:3px 10px">'+p+'٪</button>';
   }).join(" ")+' <button type="button" class="btn btn-ghost btn-sm" onclick="contracts.setPayPct(100)" style="font-size:11px;padding:3px 10px">المتبقّي كاملاً</button>';
+  /* الخطةُ على الوثيقة تحكم: مبلغُ الدفعة التالية مقفولٌ على ما حدّده المنشئ —
+     الماليةُ تنفّذ لا تختار. وبلا خطةٍ (وثائقُ قديمة) يبقى المبلغُ حراً بالأزرار. */
+  var inst=crqPlanInstallment(r);
+  var amtField = inst
+    ? field("مبلغ هذه الدفعة — وفق خطة المنشئ",
+        '<input class="form-input num" id="ct-pay-amt" type="number" step="any" value="'+_esc(inst.amount)+'" readonly style="background:var(--surface2)">'+
+        '<div style="margin-top:6px;font-size:11px;color:var(--muted)">الدفعة '+(inst.index+1)+' من '+inst.count+' — '+inst.pct+'٪ حدّدها منشئ الطلب، ولا يُقبل غيرُها.</div>')
+    : field("مبلغ هذه الدفعة",
+        '<input class="form-input num" id="ct-pay-amt" type="number" step="any" max="'+_esc(due)+'" value="'+_esc(due)+'">'+
+        '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:11px;color:var(--muted)">نسبةً من القيمة:</span> '+pctBtns+'</div>');
   box.innerHTML='<div class="ct-sec-h">'+_icn("banknote","ic-sm")+' تسجيل دفعة سداد</div>'+
     '<div class="ct-note" style="display:block">'+_icn("banknote","ic-sm")+
       ' قيمة الأمر <b class="num">'+money(r.value)+'</b> ر.س'+
       (paid>0?' · سُدِّد <b class="num">'+money(paid)+'</b> ر.س':'')+
       ' · المتبقّي <b class="num">'+money(due)+'</b> ر.س — الدفعةُ الجزئية تُبقي الأمرَ مفتوحاً حتى اكتمال السداد.</div>'+
     '<div class="ct-form-row">'+
-      field("مبلغ هذه الدفعة", '<input class="form-input num" id="ct-pay-amt" type="number" step="any" max="'+_esc(due)+'" value="'+_esc(due)+'">'+
-        '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:11px;color:var(--muted)">نسبةً من القيمة:</span> '+pctBtns+'</div>')+
+      amtField+
       field("مرجع التحويل", '<input class="form-input" id="ct-pay-ref" placeholder="رقم العملية">')+
     '</div>'+
     '<div class="ct-form-row">'+
@@ -6072,6 +6222,7 @@ function openPay(){
    وتُقصّ على المتبقّي فلا يُكتب فوقه رقمٌ مرفوض. */
 function setPayPct(p){
   var r=requestById(_rOpen); if(!r) return;
+  if(crqPlanInstallment(r)) return;   // خطةُ المنشئ تحكم المبلغ — لا اختيارَ حراً
   var el=document.getElementById("ct-pay-amt"); if(!el) return;
   var due=crqPayDue(r);
   var amt=(Number(p)>=100) ? due : Math.min(due, r2(r2(Number(r.value)||0)*(Number(p)||0)/100));
@@ -7840,6 +7991,15 @@ function printPayOrder(id){
   var _pl = Array.isArray(r.payments) && r.payments.length ? r.payments
           : (r.payment && r.payment.at ? [r.payment] : []);
   var _pt = crqPaidTotal(r), _pd = crqPayDue(r);
+  /* خطةُ الصرف على الورقة نفسِها — المنشئُ حدّدها والمعتمِدون وقّعوا عليها،
+     فتقرؤها المحاسبةُ والمراجعةُ من السند لا من الشاشة. تظهر ولو قبل أول دفعة. */
+  var _plan = normPaymentPlan(r.paymentPlan);
+  var planBox = _plan.length ? '<h2>خطةُ صرف الدفعات — حدّدها منشئ الطلب</h2>'+
+    '<table class="kv">'+_plan.map(function(p,i){
+      var _paidRow = i < _pl.length;
+      return '<tr><td>الدفعة '+(i+1)+' — '+p+'٪</td><td class="n">'+
+        money(r2(r2(Number(r.value)||0)*p/100))+' ر.س'+(_paidRow?' — سُدِّدت ✓':'')+'</td></tr>';
+    }).join("")+'</table>' : "";
   var paidBox = _pl.length ? '<h2>بيانُ السداد</h2>'+
     '<table><thead><tr><th style="width:36px">#</th><th>المبلغ</th><th>مرجع التحويل</th><th>سجّله</th><th>التاريخ</th></tr></thead><tbody>'+
     _pl.map(function(p,i){
@@ -7934,6 +8094,7 @@ function printPayOrder(id){
   vatRow+'<tr><td>المطلوب صرفه ('+_esc(vm.short||"")+')</td><td class="n">'+money(val)+' ر.س</td></tr></table>'+
   '<div class="words"><div class="wl">المبلغ كتابةً</div><div class="wv">'+_esc(amountWords(val))+'</div></div>'+
 
+  planBox+
   paidBox+
 
   '<h2>الاعتمادات والتوقيعات</h2><div class="sign">'+sigCells+'</div>'+
@@ -8984,6 +9145,7 @@ window.contracts = {
   renderReqs: renderReqs, startReqSync: startReqSync, stopReqSync: stopReqSync, retryReqs: retryReqs,
   newRequest: newRequest, cancelRequest: cancelRequestForm, submitRequest: submitRequest,
   setReqProject: setReqProject, setEngagement: setEngagement, setOverTh: setOverTh, setReqVendor: setReqVendor,
+  addPlanRow: addPlanRow, delPlanRow: delPlanRow, planInput: planInput,
   toggleBoqLine: toggleBoqLine, addFreeLine: addFreeLine, delReqLine: delReqLine,
   addCandidate: addCandidate, delCandidate: delCandidate, recalc: recalc,
   toggleSubstitute: toggleSubstitute,
@@ -9103,6 +9265,9 @@ window.contracts = {
   _payOrderAllowed: payOrderAllowed,
   _crqPaidTotal: crqPaidTotal,
   _crqPayDue: crqPayDue,
+  _normPaymentPlan: normPaymentPlan,
+  _paymentPlanOk: paymentPlanOk,
+  _crqPlanInstallment: crqPlanInstallment,
   _penaltyIsPct: penaltyIsPct, _penaltyPerDay: penaltyPerDay, _penaltyCap: penaltyCap,
   _normPenalty: normPenalty, _penaltyText: penaltyText,
   _crqNextStage: crqNextStage,

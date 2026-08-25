@@ -9079,6 +9079,30 @@ function contractsPhase1() {
     /v = r2\(Math\.max\(0, v - crqPaidTotal\(r\)\)\)/.test(src) &&
     /out\.pending \+= r2\(Math\.max\(0, val - part\)\)/.test(src));
 
+  /* ════ خطةُ صرف الدفعات — **منشئُ الطلب هو من يحدّدها** (طلبُ المالك) ════
+     الماليةُ تنفّذ الدفعةَ التالية وفق الخطة حرفياً — «مُسدِّدةٌ لا مُقرِّرة». */
+  T("★ paymentPlanOk: يقبل ما مجموعُه ١٠٠٪ وحدَه",
+    C._paymentPlanOk([50,50]) === true && C._paymentPlanOk([100]) === true &&
+    C._paymentPlanOk([30,30,30]) === false && C._paymentPlanOk([]) === false);
+  T("★ والتطبيع يقبل أرقاماً أو {pct} ويطرح الأصفار",
+    JSON.stringify(C._normPaymentPlan([{pct:40},60,0])) === "[40,60]");
+  T("★★ crqPlanInstallment: الدفعةُ التالية بنسبتها من القيمة",
+    JSON.stringify(C._crqPlanInstallment({ value:1500, paymentPlan:[40,60] }))
+      === JSON.stringify({index:0,count:2,pct:40,amount:600}));
+  T("★★ والأخيرةُ تلتهم فروقَ التقريب فتساوي المتبقّي بالضبط (لا هللةَ عالقة)",
+    C._crqPlanInstallment({ value:1000, paymentPlan:[33.33,33.33,33.34],
+      payments:[{amount:333.3},{amount:333.3}] }).amount === 333.4);
+  T("★ لا خطةَ على الوثيقة ⇒ مبلغٌ حرّ (null) — سلوكُ الوثائق القديمة محفوظ",
+    C._crqPlanInstallment({ value:1500 }) === null &&
+    C._crqPlanInstallment({ value:1500, paymentPlan:[100], payments:[{amount:1500}] }) === null);
+  T("★★ المالية تنفّذ الخطةَ حرفياً — مبلغٌ مخالفٌ يُرفض في payRequest",
+    /منشئ الطلب حدّد خطة الصرف/.test(src) && /amt = inst\.amount;/.test(src));
+  T("★ والإنشاء يرفض خطةً لا يبلغ مجموعُها ١٠٠٪ ويطبّعها على الوثيقة",
+    /if\(!paymentPlanOk\(doc\.paymentPlan\)\)/.test(src) &&
+    /خطة صرف الدفعات: نسبٌ موجبةٌ مجموعُها ١٠٠٪/.test(src));
+  T("★ النموذج يحمل قسمَ الخطة والافتراضُ دفعةٌ واحدة ١٠٠٪",
+    /خطة صرف الدفعات/.test(src) && /payPlan:\[100\]/.test(src) && /ct-plan-pct/.test(src));
+
   /* ════ سندُ صرفِ أمر الدفع: المبلغُ كتابةً · الحالةُ · التوقيعات ════
      الورقةُ تخرج من المنصّة ويُصرَف بها مال، فثلاثةُ حرّاسٍ عليها:
      التفقيطُ يطابق الرقم، والورقةُ تُعلن أنها غيرُ صالحةٍ للصرف ما لم تكتمل
