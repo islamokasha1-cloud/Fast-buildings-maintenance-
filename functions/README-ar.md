@@ -33,6 +33,16 @@
    ```
 4. اضبط القيم والسرّ ثم انشر (تكملة الخطوات §2–§4 أدناه، كلها تعمل داخل Cloud Shell).
 
+> **⚠ استنساخٌ جديد = `.env` غائب.** الملفُّ خارج git عمداً، والنشرُ بدونه **يمسح إعدادات
+> الإرسال من الخادم**. إن كانت المنظومة منشورةً وتعمل، أعِد بناءه من الخادم نفسِه بسطرٍ
+> واحد (من داخل `functions`) — بلا رجوعٍ للوحة Meta:
+> ```bash
+> gcloud functions describe waSender --gen2 --region=us-central1 --project=fast-buildings \
+>   --format="value(serviceConfig.environmentVariables)" | tr ';' '\n' | grep -E '^(WA_|WHATSAPP_)' > .env
+> ```
+> ثم `node wa-health.js` للتأكد (القسم الأول يجب أن يخلو من ❌). التفصيل في `NOTES.md §3`
+> («`functions/.env` هو مصدرُ الحقيقة»). الإعدادُ من الصفر لأول مرة: §2 أدناه.
+
 > ملاحظة: كل الأوامر في الأقسام التالية تعمل حرفياً داخل Cloud Shell كما على الكمبيوتر.
 
 ---
