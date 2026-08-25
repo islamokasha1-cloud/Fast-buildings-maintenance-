@@ -1228,7 +1228,7 @@
 
 ## 6) سجل موجز بأهم التعديلات
 
-- **vNEXT — إصلاح قائمة واجهة النظام الخارجي: الإنتاج يرفض مسح المفاتيح تنازلياً (`functions/lib/external-api.js` · `firestore.indexes.json`):**
+- **v18.9.2881 — إصلاح قائمة واجهة النظام الخارجي: الإنتاج يرفض مسح المفاتيح تنازلياً (`functions/lib/external-api.js` · `firestore.indexes.json`):**
   **العرض.** بعد نشر `externalApi` نجح الإنشاءُ وقراءةُ الطلب الواحد، بينما ردّت
   `GET /purchases` خطأ `internal` دائماً. **الجذر.** القائمةُ كانت تُرتَّب
   `orderBy(FieldPath.documentId(), "desc")`، وFirestore **الإنتاجيّ** يرفض مسحَ
