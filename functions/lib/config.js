@@ -187,6 +187,10 @@ const HRP_STATUS_LABELS = {
  */
 const HRP_STATUS_NOTIFY_ROLES = {
   hrp_closed: ["hr_officer", "hr_manager"],
+  // الإعادة للتصحيح تنتظر فعلاً من صاحب الطلب (يُنبَّه في HRP_NOTIFY_REQUESTER) —
+  // ومديرُ الموارد البشرية اعتمد الطلبَ أولَ المسار، فارتدادُه من المالية خبرٌ
+  // يعنيه: قد يكون سببُ الإعادة في بابٍ هو من يملك تصحيحَه (طلب المالك).
+  hrp_finance_returned: ["hr_manager"],
 };
 
 /**
