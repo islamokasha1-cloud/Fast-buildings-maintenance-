@@ -476,7 +476,11 @@ function predelivery() {
     /* ثم رُفع من 37481 إلى 37535 — ‏٥٤ سطراً لكاشف «البند التوأم بسعر مختلف»
        (بلاغ المالك الثاني: بندان بحروف متبادلة «بالط/بلاط» بسعرين والإكمال يلتقط
        القديم). **إصلاح سلوكِ اختيار البند القائم في النواة في مكانه** (CLAUDE.md). */
-    const IDX_CEILING = 37620;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37620 إلى 37628 — ‏٨ أسطرٍ صافية لـ`poItemsLabel` (بلاغ المالك:
+       القوائم الخارجية تعرض اسم البند المطلوب لا المورَّد بعد الاستبدال).
+       **إصلاحُ عرضِ منطقٍ قائمٍ في مكانه**: الدالة بجوار أخواتها _poShownName/
+       _poReqName في النواة، وتقرؤها بطاقاتُ القائمة والتقارير ووحدةُ الاستعاضة. */
+    const IDX_CEILING = 37628;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -1005,6 +1009,12 @@ function substituteBudget() {
   T("حقول الطلب تُحفظ", HTML.includes("isSubstitute,") && HTML.includes("substituteAccountId,"));
   T("قسم النموذج موجود", HTML.includes('id="np-is-substitute"') && HTML.includes('id="np-substitute-account"'));
   T("يقرأ المصدر الموحّد للمشاريع (رسمية + يدوية)", src.includes("_allProjectOptions"));
+  // قائمة «طلبات الشراء المستعاضة» تعرض اسم البند المورَّد فعلاً (المرساة بعد
+  // الاستبدال) لا ملخّص الإنشاء p.itemName — وبحثُها يجد الاسمين معاً
+  T("★ عمود البنود من poItemsLabel وp.itemName احتياط",
+    src.includes('(typeof poItemsLabel==="function" ? poItemsLabel(p) : "") ||'));
+  T("★ بحث الوحدة يشمل الاسم المحلول من المرساة",
+    src.includes('typeof _poShownName==="function"') && src.includes("res && res!==raw ? raw+\" \"+res : raw"));
   T("الترشيح التلقائي بالمفتاح الموحّد", HTML.includes("function _npProjKeyForSub()") && HTML.includes("__CUSTOM__:"));
 
   /* v18.9.2766 — شارةُ «مستعاض» في كل بطاقةٍ يظهر فيها الطلب.
@@ -3316,7 +3326,7 @@ function poItemNameFollowsCatalog() {
   if (a >= 0 && b > a) {
     try {
       M = new Function("_catalogItems", "_catResolveId", "_catSearchNorm",
-        HTML.slice(a, b) + "\nreturn {_poShownName,_poShownCode,_poReqName};")(
+        HTML.slice(a, b) + "\nreturn {_poShownName,_poShownCode,_poReqName,poItemsLabel};")(
         [{ id: "C1", name: "محبس PVC بلاستيك 1 بوصة سنامة", code: "PLMB-306" }],
         id => id || null,
         s => String(s || "").trim().toLowerCase().replace(/\s+/g, " "));
@@ -3345,6 +3355,17 @@ function poItemNameFollowsCatalog() {
       M._poShownName({ itemName: "تفلون" }) === "تفلون" &&
       M._poShownCode({ itemName: "تفلون" }) === "" &&
       M._poReqName({ itemName: "تفلون" }) === "");
+    // القوائم الخارجية: الاسم الظاهر من بنود الطلب (المرساة الفعلية) لا من p.itemName
+    T("★ poItemsLabel: بندٌ واحدٌ مستبدَل — الظاهر اسمُ ما ورُد فعلاً لا ما طُلب",
+      M.poItemsLabel({ itemName: "جهاز اكسس كنترول",
+                       items: [{ itemId: "C1", itemName: "جهاز اكسس كنترول" }] })
+        === "محبس PVC بلاستيك 1 بوصة سنامة");
+    T("poItemsLabel: طلبٌ قديمٌ بلا مصفوفة بنود — يبقى p.itemName احتياطاً",
+      M.poItemsLabel({ itemName: "قديم" }) === "قديم" && M.poItemsLabel(null) === "");
+    T("poItemsLabel: تعدّد البنود — بصيغة ملخّص الإنشاء «اسم (كمية وحدة)»",
+      M.poItemsLabel({ items: [{ itemId: "C1", itemName: "x", qty: 2, unit: "قطعة" },
+                               { itemName: "تفلون", qty: 1, unit: "لفة" }] })
+        === "محبس PVC بلاستيك 1 بوصة سنامة (2 قطعة) | تفلون (1 لفة)");
   }
 
   // ── حرّاس المسار: العرض والطباعة والتخزين ──
@@ -3366,6 +3387,16 @@ function poItemNameFollowsCatalog() {
   T("★ ما طلبه المشرف يُحفَظ في requestedItemName عند أول دهس",
     HTML.includes("requestedItemName: _reqNm, // v18.9xb") &&
     HTML.includes("const _reqNm = it.requestedItemName || ((_nm0 && _nm1 && _nm0 !== _nm1) ? _nm0 : \"\");"));
+  // القوائم الخارجية (بطاقة الطلب · تقرير الشاشة · تقرير الـPDF · تصدير Excel)
+  // تقرأ الاسم عبر poItemsLabel/_poShownName — لا p.itemName/item.itemName الخام
+  T("★ بطاقة الطلب تعرض ما ورُد فعلاً (poItemsLabel و_poShownName)",
+    HTML.includes('`${esc(poItemsLabel(p))} — ${p.qty||""}') &&
+    HTML.includes("${p.items.map(i=>esc(_poShownName(i))).join(' | ')}"));
+  T("★ تقرير الـPDF وتصدير Excel يعرضان ما ورُد فعلاً",
+    HTML.includes(":esc(poItemsLabel(p))}</td>") &&
+    HTML.includes('"المادة/الخدمة":_poShownName(item),'));
+  T("★ بحث قائمة الطلبات يجد الطلب باسم البند المورَّد أيضاً",
+    HTML.includes("!poItemsLabel(p).toLowerCase().includes(q) &&"));
   T("★ صفّ السند يحمل الاسم والكود المعياريَّين (يتّسق مع سجلّ المخزون)",
     HTML.includes("itemName: _anchor ? _resolveItemName(_anchor, it.itemName||\"\") : (it.itemName||\"\"),") &&
     HTML.includes("itemCode: _anchor ? _resolveItemCode(_anchor, it.itemCode||\"\") : (it.itemCode||\"\"),"));
@@ -5981,8 +6012,8 @@ function comprehensiveReviewV18_9vl() {
   // ── #2 (H1): تهريب حقول تقرير الطلبات ──
   T("★ #2: تقرير الطلبات يهرّب رقم الطلب (esc(p.id))",
     HTML.includes('border-radius:4px">${esc(p.id)}</span></td>'));
-  T("★ #2: تقرير الطلبات يهرّب اسم المادة (esc(p.itemName))",
-    HTML.includes(':`${esc(p.itemName)}`}</td>'));
+  T("★ #2: تقرير الطلبات يهرّب اسم المادة (esc(poItemsLabel(p)))",
+    HTML.includes(':`${esc(poItemsLabel(p))}`}</td>'));
   T("★ #2: تقرير الطلبات يهرّب طالب المواد (esc(p.supervisor))",
     HTML.includes('${esc(p.supervisor||"—")}</td>'));
 

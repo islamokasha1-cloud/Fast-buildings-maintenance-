@@ -327,8 +327,14 @@
   }
   function _poText(p){
     if(!p) return "";
+    // اسم البند الخام + المحلول من مرساة الكتالوج (بعد الاستبدال هما مختلفان) —
+    // فيجد البحثُ الطلبَ بما طُلب وبما ورُد فعلاً.
     var items = Array.isArray(p.items)
-      ? p.items.map(function(i){ return (i && (i.itemName || i.name)) || ""; }).join(" ") : "";
+      ? p.items.map(function(i){
+          var raw = (i && (i.itemName || i.name)) || "";
+          var res = (i && typeof _poShownName==="function") ? _poShownName(i) : "";
+          return res && res!==raw ? raw+" "+res : raw;
+        }).join(" ") : "";
     return [p.id, p.itemName, items, p.vendorName, p.notes].join(" ");
   }
   function _matchPO(p, state, f){
@@ -848,7 +854,11 @@
       var closed = !dead && _isClosed(p);
       var cost = closed ? _actualCost(p) : _estTotal(p);
       var sell = cost*(1+s.margin/100);
-      var items = p.itemName || (Array.isArray(p.items)&&p.items.length?(p.items.length+" بند"):"—");
+      // ما ورُد فعلاً لا ملخّصُ الإنشاء: بعد الاستبدال يعرض تفصيلُ الطلب البندَ
+      // المورَّد بينما p.itemName باقٍ على المطلوب القديم — poItemsLabel تشتقّ
+      // الاسم من بنود الطلب عبر المرساة (نواة index.html)، وp.itemName احتياط.
+      var items = (typeof poItemsLabel==="function" ? poItemsLabel(p) : "") ||
+        p.itemName || (Array.isArray(p.items)&&p.items.length?(p.items.length+" بند"):"—");
       // الطلب الميّت لا يُظهر سعر بيع/ربح (لا يدخل أي رصيد) — شرطة بدل رقمٍ وهمي
       var moneyCells = money
         ? (dead
