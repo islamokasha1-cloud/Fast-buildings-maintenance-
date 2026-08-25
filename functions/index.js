@@ -229,7 +229,6 @@ exports.externalApi = onRequest(
     makeExternalApiHandler({
       db,
       logger,
-      FieldPath: admin.firestore.FieldPath,
       getApiKey: () => EXTERNAL_API_KEY.value(),
       purchasesCollection: cfg.PURCHASES_COLLECTION,
     })(req, res)

@@ -13088,6 +13088,24 @@ function externalPurchaseApiGuards() {
     IDXFN.includes('defineSecret("EXTERNAL_API_KEY")') &&
     IDXFN.includes("exports.externalApi = onRequest(") &&
     IDXFN.includes("secrets: [EXTERNAL_API_KEY]"));
+
+  // ── (٦) درسُ الإنتاج: القائمةُ لا تُرتَّب على __name__ تنازلياً ──
+  // الإنتاجُ يرفضها ("Firestore does not support descending key scans") والمحاكي
+  // يتساهل فلا يمسكها فحصٌ حيّ — يحرسها فحصُ نصٍّ هنا: الترتيب على حقل id المخزَّن
+  // (= معرّف المستند)، وفهارسُ المرشّحات المركّبة معلنةٌ في firestore.indexes.json.
+  const XSRC = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "functions/lib/external-api.js"), "utf8"); } catch { return ""; } })();
+  T("★★ القائمة تُرتَّب على حقل id المخزَّن لا على مفتاح المستند تنازلياً",
+    XSRC.includes('q.orderBy("id", "desc")') && !XSRC.includes("FieldPath.documentId()"));
+  const IDXJ = (() => { try { return JSON.parse(fs.readFileSync(path.resolve(path.dirname(IDX), "firestore.indexes.json"), "utf8")); } catch { return { indexes: [] }; } })();
+  const _poIdx = (IDXJ.indexes || []).filter(ix => ix.collectionGroup === "global_purchases");
+  const _hasIdx = (first) => _poIdx.some(ix => {
+    const f = ix.fields || [];
+    return f.length === first.length + 1 &&
+      first.every((n, i) => f[i].fieldPath === n && f[i].order === "ASCENDING") &&
+      f[f.length - 1].fieldPath === "id" && f[f.length - 1].order === "DESCENDING";
+  });
+  T("★★ فهارس القائمة المركّبة معلنة (status+id · projectId+id · projectId+status+id)",
+    _hasIdx(["status"]) && _hasIdx(["projectId"]) && _hasIdx(["projectId", "status"]));
 }
 
 /* ══ التشغيل ══ */
