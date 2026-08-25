@@ -25,7 +25,11 @@
    (٢) **الاتفاقُ الصغير لا يستحقّ عقداً.** دون عتبة `PAY_ORDER_THRESHOLD` (٣٠٠٠
        افتراضاً) يُسدَّد للمقاول بـ**أمر دفع** — مسارٌ مختصرٌ بلا بنودٍ ولا مستخلصات.
        والعتبةُ **تسمح ولا تُلزم**: إصدارُ عقدٍ كاملٍ لمبلغٍ صغيرٍ يبقى ممكناً بخيار
-       صريح، أمّا فوقَ العتبة فأمرُ الدفع **ممنوع** — وإلا صار باباً خلفياً للعقود.
+       صريح. وفوقَ العتبة لا يمرّ أمرُ الدفع إلا **بإقرارٍ صريحٍ يُختم على الوثيقة**
+       (`overThresholdAck` — طلبُ المالك): البابُ يُفتح عمداً معلَناً لا سهواً،
+       والمبلغُ يمرّ على بوّابات الاعتماد كلِّها والتنفيذيِّ فوق سقفه.
+       وسدادُه **على دفعات** (`payments[]`): يبقى مفتوحاً «بانتظار السداد» حتى
+       يكتمل مبلغُه — وكلُّ دفعةٍ بإيصالها، وما خرج منه مصروفٌ منذ خروجه.
    (٣) **التوجيه كلُّه في دالةٍ نقيةٍ واحدة `crqNextStage`** تُستدعى عند الإنشاء وبعد
        كلّ اعتمادٍ وبعد كلّ إعادة إرسال — للعقد ولأمر الدفع معاً، فلا مساران يفترقان.
        وبوّابةُ التنفيذي تُحسب من **القيمة** لا من اختيار المُنشئ، واعتمادُه **يسقط**
@@ -58,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2890";
+var MODULE_BUILD = "v18.9.2893";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -96,7 +100,7 @@ var PAY_ORDER_THRESHOLD = 3000;
 /* ── وسمُ الارتباط (نوعُ ما نتعاقد عليه) ── */
 var ENGAGEMENTS = {
   contract:  { key:"contract",  lbl:"عقد / أمر إسناد", icon:"fileText", hint:"بنودٌ ومستخلصاتٌ ومحتجزُ ضمان" },
-  pay_order: { key:"pay_order", lbl:"أمر دفع",         icon:"banknote", hint:"مبلغٌ واحدٌ يُسدَّد مرةً واحدة" }
+  pay_order: { key:"pay_order", lbl:"أمر دفع",         icon:"banknote", hint:"مبلغٌ يُسدَّد دفعةً واحدةً أو على دفعات" }
 };
 
 /* ── صفةُ الطرف: منشأةٌ أم شخصٌ طبيعيّ ──
@@ -433,13 +437,73 @@ function linesTotal(lines, mode){
   return out;
 }
 
-/* هل يجوز لهذا المبلغ مسارُ أمر الدفع المختصر؟
-   **دون** العتبة فقط. وفوقها ممنوعٌ قطعاً — وإلا صار أمرُ الدفع باباً خلفياً
-   يتجاوز بنودَ العقد ومحتجزَ الضمان والمستخلصات. */
+/* هل يجوز لهذا المبلغ مسارُ أمر الدفع المختصر **بلا إقرار**؟
+   **دون** العتبة فقط. وفوقها لا يمرّ إلا **بإقرارٍ صريحٍ يُختم على الوثيقة**
+   (`overThresholdAck` — طلبُ المالك): العتبةُ تبقى حاجزاً يمنع الانزلاقَ الصامت،
+   والإقرارُ المسجَّلُ باسم صاحبه يفتح البابَ عمداً لا سهواً — والمبلغُ الكبيرُ
+   يمرّ على بوّابات الاعتماد نفسِها (والتنفيذيِّ فوق سقفه) كأيّ التزام. */
 function payOrderAllowed(value, threshold){
   var v = Number(value), t = Number(threshold);
   if(!isFinite(v) || !isFinite(t) || t<=0) return false;
   return v > 0 && v < t;
+}
+
+/* ════ سدادُ أمر الدفع على دفعات — الدوالُّ النقية ════   (طلبُ المالك)
+
+   كان السدادُ ضربةً واحدة: `payment` واحدٌ يُغلق الطلب. والواقعُ أن أمرَ الدفع
+   يُسدَّد نسبةً ثم نسبةً — فالمصدرُ الآن **مصفوفةُ `payments`**، ويبقى الأمرُ
+   «بانتظار السداد» حتى يكتمل المبلغ فيُغلق. نهجُ سداد الدفعة المقدمة نفسُه.
+   • `crqPaidTotal` — المسدَّدُ فعلاً: مجموعُ الدفعات؛ و`payment` القديمُ احتياطٌ
+     للوثائق التي سبقت الدفعات، والمغلقُ القديمُ بلا أيّهما قيمتُه كلُّها.
+   • `crqPayDue`   — المتبقّي المستحقّ. وبهما تقرأ الموازنةُ والرصيدُ المستعاض
+     **ما خرج من الخزينة فعلاً** ولو كان الأمرُ ما زال مفتوحاً. */
+function crqPaidTotal(req){
+  var r = req || {};
+  var sum = 0;
+  (Array.isArray(r.payments) ? r.payments : []).forEach(function(p){
+    sum += Number((p||{}).amount) || 0;
+  });
+  if(sum > 0) return r2(sum);
+  if(r.payment && r.payment.amount != null) return r2(Number(r.payment.amount)||0);
+  return r.status === "crq_paid" ? r2(Number(r.value)||0) : 0;
+}
+function crqPayDue(req){
+  var r = req || {};
+  return r2(Math.max(0, r2(Number(r.value)||0) - crqPaidTotal(r)));
+}
+
+/* ════ خطةُ صرف الدفعات — **منشئُ الطلب هو من يحدّدها** ════   (طلبُ المالك)
+
+   نسبُ الدفعات ليست قرارَ المالية: المنشئُ يكتبها في الطلب نفسِه (٥٠٪ ثم ٥٠٪…)
+   فيوقّع المعتمِدون عليها مع القيمة، والماليةُ **تنفّذ الدفعةَ التالية وفق الخطة
+   حرفياً** — «مُسدِّدةٌ لا مُقرِّرة»، وهو مبدأُ الوحدة نفسُه في كل بوّابة.
+   • `normPaymentPlan` — تطبيعُ الخطة: نسبٌ موجبةٌ وحدَها (تقبل أرقاماً أو {pct}).
+   • `paymentPlanOk`   — الخطةُ الصالحة: دفعةٌ فأكثر ومجموعُها ١٠٠٪ بالضبط.
+   • `crqPlanInstallment` — الدفعةُ التالية المستحقّة: مبلغُها نسبتُها من القيمة،
+     و**الأخيرةُ تلتهم فروقَ التقريب** فتساوي المتبقّي بالضبط — فلا يبقى في
+     الأمر هللةٌ عالقةٌ لا تُغلقه ولا تُصرف. لا خطةَ على الوثيقة ⇒ null
+     (مبلغٌ حرّ — سلوكُ الوثائق القديمة ومسارات الـAPI). */
+function normPaymentPlan(plan){
+  return (Array.isArray(plan)?plan:[]).map(function(p){
+    return r2(Number((p && p.pct != null) ? p.pct : p) || 0);
+  }).filter(function(p){ return p > 0; });
+}
+function paymentPlanOk(plan){
+  var l = normPaymentPlan(plan);
+  if(!l.length) return false;
+  var s = 0; l.forEach(function(p){ s += p; });
+  return Math.abs(r2(s) - 100) <= 0.01;
+}
+function crqPlanInstallment(req){
+  var r = req || {};
+  var plan = normPaymentPlan(r.paymentPlan);
+  if(!plan.length) return null;
+  var i = Array.isArray(r.payments) ? r.payments.length : 0;
+  var due = crqPayDue(r);
+  if(i >= plan.length || due <= 0) return null;   // استُنفدت الخطة أو اكتمل السداد
+  if(i === plan.length - 1) return { index:i, count:plan.length, pct:plan[i], amount:due };
+  return { index:i, count:plan.length, pct:plan[i],
+           amount: Math.min(due, r2(r2(Number(r.value)||0) * plan[i] / 100)) };
 }
 
 /* ════ تفقيطُ المبلغ — «المبلغُ كتابةً» على أمر الدفع ════
@@ -854,9 +918,17 @@ function payOrderPrintState(req){
   if(st === "crq_paid")
     return { key:"paid",  cls:"ok",   lbl:"مسدَّد — مغلق",
              note:"سُدِّد هذا الأمر وأُغلق. هذه نسخةٌ للحفظ لا أمرُ صرفٍ جديد." };
-  if(st === "crq_pending_pay")
+  if(st === "crq_pending_pay"){
+    // المسدَّدُ جزئياً يقولها الورقةُ بصراحة — فلا يُصرَف المتبقّي مرتين على سندٍ
+    // يوحي أن شيئاً لم يُدفع بعد.
+    var _pp = crqPaidTotal(req);
+    if(_pp > 0)
+      return { key:"due", cls:"ok", lbl:"معتمَد — سُدِّد جزئياً",
+               note:"سُدِّد "+money(_pp)+" ر.س والمتبقّي "+money(crqPayDue(req))+
+                    " ر.س. الأمرُ مفتوحٌ حتى اكتمال السداد — لا يُصرَف فوق المتبقّي." };
     return { key:"due",   cls:"ok",   lbl:"معتمَد — صالحٌ للصرف",
              note:"اكتملت بوّاباتُ الاعتماد. للمالية صرفُه وتسجيلُ إيصاله على المنصّة." };
+  }
   if(st === "crq_cancelled")
     return { key:"void",  cls:"bad",  lbl:"ملغى — لا يُصرَف",
              note:"أُلغي هذا الأمر على المنصّة. أيُّ نسخةٍ منه لاغيةٌ." };
@@ -1692,11 +1764,14 @@ function contractRollup(projectKey, requests, contracts, extracts, changes){
     return out.byCat[key];
   }
 
-  // (١) قيدَ الاعتماد — من طلبات التعاقد غير المنتهية
+  // (١) قيدَ الاعتماد — من طلبات التعاقد غير المنتهية.
+  // أمرُ الدفع المسدَّدُ جزئياً: ما سُدِّد منه صار مصروفاً (البند ٤) فلا يبقى
+  // هنا إلا **متبقّيه** — وإلا حُسب الريالُ مرتين: معلّقاً ومصروفاً معاً.
   (Array.isArray(requests)?requests:[]).forEach(function(r){
     if(docProjectKey(r) !== projectKey) return;
     if(!reqIsPending(r)) return;
     var v = r2(r.value);
+    if(r.engagement === "pay_order") v = r2(Math.max(0, v - crqPaidTotal(r)));
     bucket(r.budgetCategoryKey).pending += v;
     out.total.pending += v;
   });
@@ -1733,11 +1808,15 @@ function contractRollup(projectKey, requests, contracts, extracts, changes){
     out.total.pending += v;
   });
 
-  // (٤) أوامرُ الدفع المسدَّدة — مصروفٌ تعاقديٌّ لا عقدَ له
+  // (٤) المسدَّدُ من أوامر الدفع — مصروفٌ تعاقديٌّ لا عقدَ له. **والدفعةُ الجزئية
+  // مصروفٌ منذ خروجها**: أمرٌ ما زال مفتوحاً وقد سُدِّد نصفُه — نصفُه خرج من
+  // الخزينة فعلاً (قاعدةُ «المالُ المدفوعُ مصروفٌ أبداً» نفسُها في العقود أعلاه).
+  // (والمغلقُ القديمُ قد لا يحمل حقلَ engagement — و«مسدَّد» لا تبلغها إلا أوامرُ الدفع)
   (Array.isArray(requests)?requests:[]).forEach(function(r){
     if(docProjectKey(r) !== projectKey) return;
-    if(r.status !== "crq_paid") return;
-    var v = r2((r.payment||{}).amount != null ? r.payment.amount : r.value);
+    if(r.engagement !== "pay_order" && r.status !== "crq_paid") return;
+    var v = crqPaidTotal(r);
+    if(v <= 0) return;
     bucket(r.budgetCategoryKey).spent += v;
     out.total.spent += v;
   });
@@ -1791,12 +1870,16 @@ function substituteRollup(accountId, requests, contracts, extracts){
                 vendorName:r.vendorName||"", status:r.status||"", statusLbl:CRQ_STATUS[r.status]||r.status||"—",
                 value:val, spent:0, state:"idle" };
     if(r.status === "crq_paid"){
-      var paid = r2((r.payment||{}).amount != null ? (r.payment||{}).amount : r.value);
+      var paid = crqPaidTotal(r);
       out.spent += paid; out.spentCount++;
       row.spent = paid; row.state = "spent";
     } else if(reqIsPending(r)){
-      out.pending += val; out.liveCount++;
-      row.state = "live";
+      /* أمرُ الدفع المسدَّدُ جزئياً: ما خرج مصروفٌ منذ خروجه (قاعدةُ العقود
+         نفسُها أدناه)، ولا يبقى معلّقاً إلا متبقّيه — فلا يُعدّ الريالُ مرتين. */
+      var part = (eng === "pay_order") ? crqPaidTotal(r) : 0;
+      if(part > 0){ out.spent += part; out.spentCount++; }
+      out.pending += r2(Math.max(0, val - part)); out.liveCount++;
+      row.spent = part; row.state = "live";
     }
     out.docs.push(row);
   });
@@ -2517,16 +2600,38 @@ function _pushTimeline(doc, event, code, note){
   return doc;
 }
 
-/* الإنشاء: القيمةُ تُحسب من البنود، والحالةُ من `crqNextStage` — لا من الشاشة. */
+/* الإنشاء: القيمةُ تُحسب من البنود، والحالةُ من `crqNextStage` — لا من الشاشة.
+   وأمرُ الدفع فوق العتبة لا يمرّ إلا بإقرارٍ صريح (طلبُ المالك): العلَمُ يُختم على
+   الوثيقة باسم صاحبه ووقتِه والعتبةِ لحظتَها — فيقرأ كلُّ معتمِدٍ أن التجاوز عمدٌ
+   معلَنٌ لا سهو، ويبقى الأثرُ في الخطّ الزمنيّ. */
 function createRequest(draft){
   var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال بقاعدة البيانات"));
   return genReqId().then(function(id){
     var doc = Object.assign({}, draft);
     doc.value = crqValueOf(doc);
+    var overAck = doc.overThreshold === true; delete doc.overThreshold;
+    if(doc.engagement==="pay_order" && !payOrderAllowed(doc.value, payOrderThreshold())){
+      if(!overAck) return Promise.reject(new Error(
+        "أمر الدفع عند "+money0(payOrderThreshold())+" ر.س فأكثر يلزمه إقرارٌ صريح بالتجاوز — أو حوّله إلى عقد"));
+      doc.overThresholdAck = { by:_me(), byUser:_meUser(), at:_now(), threshold:payOrderThreshold() };
+    }
+    /* خطةُ صرف الدفعات — يحدّدها المنشئ هنا وتُجمَّد على الوثيقة: نسبٌ مجموعُها
+       ١٠٠٪ وإلا رُفض الإنشاء. ولغير أمر الدفع لا معنى لها فلا تُخزَّن. */
+    if(doc.engagement === "pay_order" && doc.paymentPlan != null){
+      doc.paymentPlan = normPaymentPlan(doc.paymentPlan);
+      if(!paymentPlanOk(doc.paymentPlan))
+        return Promise.reject(new Error("خطة صرف الدفعات: نسبٌ موجبةٌ مجموعُها ١٠٠٪ بالضبط"));
+    } else if(doc.paymentPlan != null) delete doc.paymentPlan;
     doc.createdAt=_now(); doc.createdBy=_me(); doc.createdByUser=_meUser();
     doc.status = crqNextStage(doc, ceoThreshold());
     _pushTimeline(doc, "إنشاء الطلب", "created",
       (ENGAGEMENTS[doc.engagement]||{}).lbl + " — " + money(doc.value) + " ر.س");
+    if(doc.overThresholdAck)
+      _pushTimeline(doc, "أمر دفع فوق العتبة — بإقرارٍ صريح", "over_threshold",
+        money(doc.value)+" ر.س والعتبة "+money0(doc.overThresholdAck.threshold)+" ر.س");
+    if(Array.isArray(doc.paymentPlan) && doc.paymentPlan.length > 1)
+      _pushTimeline(doc, "خطة صرف الدفعات — حدّدها منشئ الطلب", "payment_plan",
+        doc.paymentPlan.map(function(p){ return p+"٪"; }).join(" ثم "));
     return database.collection(REQUESTS_COL()).doc(id).set(doc).then(function(){
       doc.id=id; _mirror(_reqs, doc, true);
       _audit("إنشاء طلب تعاقد", id+" — "+(doc.vendorName||"")+" — "+money(doc.value)+" ر.س");
@@ -2589,7 +2694,13 @@ function actOnRequest(id, action, note){
   });
 }
 
-/* تسجيلُ سداد أمر الدفع — **المالية فقط وبإيصالٍ إلزاميّ**، ويُغلق الطلب. */
+/* تسجيلُ سداد أمر الدفع — **المالية فقط وبإيصالٍ إلزاميّ لكلّ دفعة**.
+   (طلبُ المالك) السدادُ **على دفعات**: كلُّ دفعةٍ بمبلغها وإيصالها تُلحَق بمصفوفة
+   `payments`، ويبقى الأمرُ «بانتظار السداد» مفتوحاً حتى يكتمل المبلغ فيُغلق —
+   نهجُ سداد الدفعة المقدمة نفسُه. و`payment` القديمُ يبقى مكتوباً **بالمجموع
+   التراكميّ** وآخرِ إيصال، فكلُّ قارئٍ قديمٍ (الموازنة · الرصيد المستعاض · سند
+   الصرف) يرى الرقمَ الصحيح ولو لم يُحدَّث. والدفعةُ لا تتجاوز المتبقّي: سندٌ
+   بمبلغٍ فوق قيمته بابُ صرفٍ بلا اعتماد. */
 function payRequest(id, payload){
   var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
   if(!payload || !payload.receiptUrl) return Promise.reject(new Error("إيصال السداد إلزامي"));
@@ -2603,12 +2714,38 @@ function payRequest(id, payload){
       /* والسدادُ تحت فصل المهام كبقية البوّابات — بل هو أولاها: هنا يخرج المال. */
       var pmode = crqActMode(r, r.status, role, _meUser(), _me(), _users());
       if(pmode === "blocked") throw new Error("اعتمدتَ هذا الطلب في بوّابةٍ سابقة — السدادُ لغيرك");
-      r.payment = { amount:r2(payload.amount!=null?payload.amount:r.value), ref:payload.ref||"",
-                    receiptUrl:payload.receiptUrl, at:_now(), by:_me() };
-      r.status = "crq_paid";
+      var due = crqPayDue(r);
+      /* منشئُ الطلب هو من يحدّد نسبَ الدفعات: خطةٌ على الوثيقة تقفل مبلغَ الدفعة
+         التالية — الماليةُ تنفّذها حرفياً لا تختار. وبلا خطةٍ (وثائقُ قديمة) يبقى
+         المبلغُ حراً في حدود المتبقّي. */
+      var inst = crqPlanInstallment(r), amt;
+      if(inst){
+        amt = inst.amount;
+        if(payload.amount != null && Math.abs(r2(payload.amount) - amt) > 0.01)
+          throw new Error("منشئ الطلب حدّد خطة الصرف — الدفعة "+(inst.index+1)+" من "+inst.count+
+                          " هي "+inst.pct+"٪ ("+money(amt)+" ر.س) لا غير");
+      } else {
+        amt = r2(payload.amount != null ? payload.amount : due);
+      }
+      if(!(amt > 0)) throw new Error("مبلغ الدفعة إلزامي — اكتب كم يُسدَّد فعلاً");
+      if(amt > due + 0.01) throw new Error("الدفعة أكبر من المتبقّي ("+money(due)+" ر.س) — لا يُسدَّد فوق قيمة الأمر");
+      if(!Array.isArray(r.payments)) r.payments = [];
+      r.payments.push({ id:"PAY-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),
+        amount:amt, ref:payload.ref||"", receiptUrl:payload.receiptUrl,
+        at:_now(), by:_me(), byUser:_meUser() });
+      var paid = 0; r.payments.forEach(function(p){ paid += Number((p||{}).amount)||0; });
+      paid = r2(paid);
+      // الملخّصُ القديم = المجموعُ التراكميّ وآخرُ إيصال — لقرّاء ما قبل الدفعات
+      r.payment = { amount:paid, ref:payload.ref||"", receiptUrl:payload.receiptUrl, at:_now(), by:_me() };
+      var done = paid >= r2(Number(r.value)||0) - 0.01;
+      r.status = done ? "crq_paid" : "crq_pending_pay";
       var pdlg = (pmode === "delegate") ? " · نيابةً — لا يوجد غيرُك يملك السداد" : "";
       if(pmode === "delegate") r.delegatedApproval = true;
-      _pushTimeline(r, "سداد أمر الدفع", "paid", money(r.payment.amount)+" ر.س"+(payload.ref?(" — "+payload.ref):"")+pdlg);
+      _pushTimeline(r, done ? "سداد أمر الدفع — اكتمل" : "سداد دفعة من أمر الدفع", "paid",
+        money(amt)+" ر.س"+
+        (inst?(" (الدفعة "+(inst.index+1)+" من "+inst.count+" — "+inst.pct+"٪ وفق خطة المنشئ)"):"")+
+        (payload.ref?(" — "+payload.ref):"")+
+        " · المسدَّد "+money(paid)+" من "+money(r.value)+" ر.س"+pdlg);
       r.updatedAt=_now(); r.updatedBy=_me();
       var out=Object.assign({},r); delete out.id;
       t.set(ref, out, { merge:true });
@@ -2617,7 +2754,8 @@ function payRequest(id, payload){
   }).then(function(r){
     var i=_reqs.findIndex(function(x){ return x.id===id; });
     if(i>=0) _reqs[i]=r;
-    _audit("سداد أمر دفع", id+" — "+money(r.payment.amount)+" ر.س");
+    _audit("سداد أمر دفع", id+" — دفعة "+money((r.payments[r.payments.length-1]||{}).amount)+
+      " ر.س · المسدَّد "+money(crqPaidTotal(r))+" من "+money(r.value)+" ر.س");
     return r;
   });
 }
@@ -2753,8 +2891,9 @@ function editRequestLines(id, lines, reason){
       r.lines = clean;
       r.value = crqValueOf(r);
       if(r.value <= 0) throw new Error("قيمة الطلب صفر — راجع الكميات والأسعار");
-      if(r.engagement==="pay_order" && !payOrderAllowed(r.value, payOrderThreshold()))
-        throw new Error("أمر الدفع لا يجوز عند "+money0(payOrderThreshold())+" ر.س فأكثر — حوّله إلى عقد");
+      // فوق العتبة يمرّ **ما وُلد بإقرارٍ صريح** وحدَه — والتعديلُ لا يفتح الباب
+      if(r.engagement==="pay_order" && !payOrderAllowed(r.value, payOrderThreshold()) && !r.overThresholdAck)
+        throw new Error("أمر الدفع عند "+money0(payOrderThreshold())+" ر.س فأكثر يلزمه إقرارٌ صريح عند الإنشاء — حوّله إلى عقد");
       var next = crqRevalidate(r);              // ما بطَل من التوقيعات يسقط وحدَه
       next.status = crqNextStage(next, th);
       next.id = id; next.updatedAt=_now(); next.updatedBy=_me();
@@ -4884,7 +5023,14 @@ function reqTileHTML(r){
       ' <span class="ct-dot">·</span> '+_esc(_projName(r))+'</div>'+
     (docSubstituteId(r)?'<div style="margin-top:5px">'+substituteChip(r,true)+'</div>':'')+
     '<div class="ct-tile-foot">'+
-      '<div class="ct-money"><span class="num">'+money(r.value)+'</span> <small>ر.س</small></div>'+
+      '<div class="ct-money"><span class="num">'+money(r.value)+'</span> <small>ر.س</small>'+
+        // أمرُ الدفع المسدَّدُ جزئياً يقولها في القائمة — لا داخل البطاقة وحدها
+        (function(){
+          if(r.engagement!=="pay_order" || r.status!=="crq_pending_pay") return "";
+          var pp=crqPaidTotal(r);
+          return pp>0 ? ' <span class="ct-doc s-soon">سُدِّد <span class="num">'+money(pp)+'</span> — بقي <span class="num">'+money(crqPayDue(r))+'</span></span>' : "";
+        })()+
+      '</div>'+
       '<div class="ct-tile-who">'+_esc(r.vendorName||"—")+(owner?' <span class="ct-dot">·</span> عند '+_esc(owner.lbl):'')+'</div>'+
     '</div>'+
   '</div>';
@@ -4905,7 +5051,7 @@ function newRequest(){
     isSubstitute:false, substituteAccountId:"",
     advance:{pct:0,recoveryPct:0}, retention:{pct:0,releaseOn:"completion"},
     penalty:{mode:"amount",perDayAmount:0,capAmount:0}, warranty:{months:0}, value:0,
-    attachFiles:[]
+    attachFiles:[], overThreshold:false, payPlan:[100]
   };
   paintReqs();
   loadProjectData(_draftLoadKey());
@@ -4926,6 +5072,45 @@ function setReqProject(sel){
   paintReqs(); loadProjectData(_draftLoadKey());
 }
 function setEngagement(v){ syncReqDraft(); if(!_rDraft) return; _rDraft.engagement=v; paintReqs(); }
+/* إقرارُ تجاوز العتبة — `syncReqDraft` أولاً فلا تضيع كتابةٌ في الحقول عند إعادة الرسم. */
+function setOverTh(v){ syncReqDraft(); if(!_rDraft) return; _rDraft.overThreshold=!!v; paintReqs(); }
+
+/* ── خطةُ صرف الدفعات في النموذج ──
+   الإضافةُ والحذفُ يعيدان الرسم (نقرُ زرٍّ لا كتابة)، أمّا الكتابةُ في نسبةٍ
+   فتُحدَّث مبالغُها وسطرُ المجموع **في مكانها** — إعادةُ رسمٍ كاملةٌ عند كل رقمٍ
+   كانت ستُفقد التركيزَ من الحقل وسطَ الكتابة. */
+function addPlanRow(){
+  syncReqDraft(); if(!_rDraft) return;
+  if(!Array.isArray(_rDraft.payPlan) || !_rDraft.payPlan.length) _rDraft.payPlan=[100];
+  _rDraft.payPlan.push(0);
+  paintReqs();
+}
+function delPlanRow(i){
+  syncReqDraft(); if(!_rDraft) return;
+  (_rDraft.payPlan||[]).splice(i,1);
+  if(!(_rDraft.payPlan||[]).length) _rDraft.payPlan=[100];
+  paintReqs();
+}
+function planInput(){
+  if(!_rDraft) return;
+  var pcts=[];
+  document.querySelectorAll(".ct-plan-pct").forEach(function(inp){
+    pcts[parseInt(inp.dataset.i,10)] = Number(inp.value)||0;
+  });
+  _rDraft.payPlan = pcts;
+  var tot = linesTotal(_rDraft.lines, _rDraft.vatMode).total;
+  document.querySelectorAll(".ct-plan-amt").forEach(function(td){
+    var i=parseInt(td.dataset.i,10);
+    td.textContent = money(r2(tot*(pcts[i]||0)/100));
+  });
+  var s = r2(pcts.reduce(function(a,b){ return a+(b||0); },0));
+  var el=document.getElementById("ct-plan-sum");
+  if(el){
+    var ok = Math.abs(s-100) <= 0.01;
+    el.style.color = ok ? "var(--success)" : "var(--danger)";
+    el.innerHTML = 'المجموع: <span class="num">'+s+'</span>٪'+(ok?' ✓':' — يجب أن يبلغ ١٠٠٪');
+  }
+}
 function setReqVendor(vid){
   syncReqDraft(); if(!_rDraft) return;
   var v=vendorById(vid);
@@ -4964,6 +5149,14 @@ function syncReqDraft(){
   if(document.getElementById("ct-r-cat"))   d.budgetCategoryKey=v("ct-r-cat");
   var sbc=document.getElementById("ct-r-sub");
   if(sbc){ d.isSubstitute = !!sbc.checked; d.substituteAccountId = d.isSubstitute ? v("ct-r-subacc") : ""; }
+  var oth=document.getElementById("ct-r-overth");
+  if(oth) d.overThreshold = !!oth.checked;
+  var pl=document.querySelectorAll(".ct-plan-pct");
+  if(pl.length){
+    var pp=[];
+    pl.forEach(function(inp){ pp[parseInt(inp.dataset.i,10)]=Number(inp.value)||0; });
+    d.payPlan=pp;
+  }
   if(document.getElementById("ct-r-mproj")) d.projectName=v("ct-r-mproj");
   if(document.getElementById("ct-r-dur"))   d.durationDays=n("ct-r-dur");
   if(document.getElementById("ct-r-start")) d.startDate=v("ct-r-start");
@@ -5006,17 +5199,57 @@ function reqFormHTML(){
 
   var back='<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.cancelRequest()">'+_icn("rotateCcw")+' إلغاء</button>';
 
-  /* اختيارُ نوع الارتباط — العتبةُ **تسمح ولا تُلزم**، وفوقها أمرُ الدفع مقفلٌ بنصٍّ
-     يشرح السبب بدل زرٍّ ميّتٍ بلا تفسير. */
+  /* اختيارُ نوع الارتباط — العتبةُ **تسمح ولا تُلزم**، وفوقها لا يُقفل أمرُ الدفع
+     بل يُفتح **بإقرارٍ صريح** (طلبُ المالك): مربّعُ الإقرار أدناه، والعلَمُ يُختم
+     على الوثيقة باسم صاحبه فيراه كلُّ معتمِد. */
+  var overTh = (d.engagement==="pay_order" && !payOk && tot.total>0);
   var engCards = Object.keys(ENGAGEMENTS).map(function(k){
-    var e=ENGAGEMENTS[k], locked = (k==="pay_order" && !payOk && tot.total>0);
-    return '<label class="ct-pick'+(d.engagement===k?" on":"")+(locked?" off":"")+'">'+
-      '<input type="radio" name="ct-eng" '+(d.engagement===k?"checked":"")+(locked?" disabled":"")+
+    var e=ENGAGEMENTS[k], over = (k==="pay_order" && !payOk && tot.total>0);
+    return '<label class="ct-pick'+(d.engagement===k?" on":"")+'">'+
+      '<input type="radio" name="ct-eng" '+(d.engagement===k?"checked":"")+
         ' onchange="contracts.setEngagement(\''+k+'\')">'+
       '<span class="ct-pick-t">'+_icn(e.icon,"ic-sm")+' '+_esc(e.lbl)+'</span>'+
-      '<span class="ct-pick-s">'+_esc(locked ? ("لا يجوز فوق "+money0(payTh)+" ر.س") : e.hint)+'</span>'+
+      '<span class="ct-pick-s">'+_esc(over ? ("فوق "+money0(payTh)+" ر.س — يلزمه إقرارٌ صريح") : e.hint)+'</span>'+
     '</label>';
   }).join("");
+  /* مربّعُ الإقرار — لا يظهر إلا حين يلزم، ونصُّه يسمّي ما يُتنازل عنه بالاسم:
+     لا بنودَ عقدٍ ولا محتجزَ ضمانٍ ولا مستخلصات — والاعتماداتُ كلُّها باقية. */
+  /* خطةُ صرف الدفعات — **منشئُ الطلب هو من يحدّدها** (طلبُ المالك): نسبٌ مجموعُها
+     ١٠٠٪، يوقّع عليها المعتمِدون مع القيمة، والماليةُ تنفّذها دفعةً دفعةً حرفياً. */
+  var planRows = (d.payPlan||[]).map(function(p,i){
+    var amt = r2(tot.total * (Number(p)||0) / 100);
+    return '<tr>'+
+      '<td style="font-weight:700">'+(i+1)+'</td>'+
+      '<td><input class="form-input num ct-plan-pct" data-i="'+i+'" type="number" step="any" min="0" max="100" value="'+_esc(p)+'" oninput="contracts.planInput()" style="min-width:80px"></td>'+
+      '<td class="num ct-plan-amt" data-i="'+i+'">'+money(amt)+'</td>'+
+      '<td>'+((d.payPlan||[]).length>1?'<button class="btn btn-delete" onclick="contracts.delPlanRow('+i+')">'+_icn("trash","ic-sm")+'</button>':'')+'</td>'+
+    '</tr>';
+  }).join("");
+  var planSum = r2((d.payPlan||[]).reduce(function(s,p){ return s+(Number(p)||0); },0));
+  var planOk  = Math.abs(planSum-100) <= 0.01;
+  var planSec = !isPay ? '' :
+    '<div class="card ct-sec">'+
+      '<div class="ct-sec-h">'+_icn("banknote","ic-sm")+' خطة صرف الدفعات'+
+        '<span class="ct-sec-lock">أنت من يحدّد نسبَ الدفعات — المالية تنفّذها حرفياً دفعةً بإيصالها، والأمرُ مفتوحٌ حتى تكتمل</span>'+
+        '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.addPlanRow()">'+_icn("plus","ic-sm")+' دفعة</button></div>'+
+      '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+
+        '<th style="width:40px">#</th><th>نسبة الدفعة ٪</th><th>مبلغها من القيمة الحالية</th><th></th>'+
+      '</tr></thead><tbody>'+planRows+'</tbody></table></div>'+
+      '<div id="ct-plan-sum" style="margin-top:8px;font-size:12px;font-weight:800;color:'+(planOk?'var(--success)':'var(--danger)')+'">'+
+        'المجموع: <span class="num">'+planSum+'</span>٪'+(planOk?' ✓':' — يجب أن يبلغ ١٠٠٪')+'</div>'+
+    '</div>';
+
+  var overThBox = overTh
+    ? '<div class="ct-note '+(d.overThreshold?'':'warn')+'" style="display:block">'+
+        '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-weight:700">'+
+          '<input type="checkbox" id="ct-r-overth" '+(d.overThreshold?'checked':'')+
+            ' onchange="contracts.setOverTh(this.checked)" style="margin-top:3px">'+
+          '<span>'+_icn("alertTriangle","ic-sm")+' أُقرّ بإنشاء أمر دفعٍ بقيمة '+money0(tot.total)+
+            ' ر.س رغم تجاوزه عتبةَ '+money0(payTh)+' ر.س — بلا بنود عقدٍ ولا محتجز ضمانٍ ولا مستخلصات، '+
+            'ويمرّ على بوّابات الاعتماد كلِّها (والتنفيذيِّ فوق سقفه)، ويُختم الإقرارُ باسمي على الطلب.</span>'+
+        '</label>'+
+      '</div>'
+    : '';
 
   // بنودُ المقايسة
   var boqRows = items.length ? items.map(function(it,i){
@@ -5127,7 +5360,9 @@ function reqFormHTML(){
     substituteLinkHTML(d, ref) +
     eligNote +
     '<div class="ct-picks">'+engCards+'</div>'+
+    overThBox +
   '</div>'+
+  planSec +
   (isPay || !items.length ? '' :
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("book","ic-sm")+' بنود المقايسة — '+_esc(_projName(ref))+
@@ -5297,8 +5532,11 @@ function submitRequest(){
   var total=crqValueOf(d);
   if(total<=0){ _toast("⚠ قيمة الطلب صفر — راجع الكميات والأسعار","warn"); return; }
   if(d.isSubstitute && !d.substituteAccountId){ _toast("⚠ اختر حساب البند المستعاض","warn"); return; }
-  if(d.engagement==="pay_order" && !payOrderAllowed(total,payOrderThreshold())){
-    _toast("⚠ أمر الدفع لا يجوز عند "+money0(payOrderThreshold())+" ر.س فأكثر — حوّله إلى عقد","warn"); return;
+  if(d.engagement==="pay_order" && !payOrderAllowed(total,payOrderThreshold()) && !d.overThreshold){
+    _toast("⚠ أمر الدفع عند "+money0(payOrderThreshold())+" ر.س فأكثر يلزمه إقرارٌ صريح — فعِّل مربّع الإقرار أو حوّله إلى عقد","warn"); return;
+  }
+  if(d.engagement==="pay_order" && !paymentPlanOk(d.payPlan)){
+    _toast("⚠ خطة صرف الدفعات: نسبٌ موجبةٌ مجموعُها ١٠٠٪ بالضبط — راجع الخطة","warn"); return;
   }
   var btn=document.getElementById("ct-r-send"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الإرسال…"; }
   // الشكلُ القياسيُّ للمشروع يُثبَّت هنا مرةً واحدة — ولا يُخزَّن معرّفُ العرض الداخليّ
@@ -5306,6 +5544,8 @@ function submitRequest(){
   var payload=Object.assign({}, d, ref);
   delete payload.projectSel;
   delete payload.attachFiles;   // ملفاتُ المتصفّح لا تُكتب في Firestore — تُرفَع بعد الإنشاء برقم الطلب
+  delete payload.payPlan;       // حقلُ المسوّدة — يُخزَّن مطبَّعاً باسم paymentPlan
+  if(d.engagement==="pay_order") payload.paymentPlan = normPaymentPlan(d.payPlan);
   createRequest(payload).then(function(id){
     /* المرفقاتُ بعد الإنشاء: فشلُ رفعِ ملفٍّ لا يُسقط طلباً أُنشئ فعلاً — يُقال
        صراحةً ويبقى بابُ الإضافة من البطاقة مفتوحاً (نهجُ مستندات الأطراف). */
@@ -5392,6 +5632,19 @@ function reqCardHTML(id){
     infoCell("الطرف", vendorCell(r.vendorId, r.vendorName))+
     infoCell("المشروع", _esc(_projName(r))+(r.isCustomProject?' <span class="ct-doc s-none">يدويّ</span>':""))+
     infoCell("نوع الارتباط", _icn(eng.icon,"ic-sm")+" "+_esc(eng.lbl))+
+    (r.overThresholdAck?infoCell("فوق عتبة أمر الدفع",
+      '<span class="ct-doc s-soon">'+_icn("alertTriangle","ic-sm")+' بإقرار '+_esc(r.overThresholdAck.by||"")+
+      ' — العتبة '+money0(r.overThresholdAck.threshold)+' ر.س</span>'):"")+
+    (function(){
+      // خطةُ الصرف كما حدّدها المنشئ — والمسدَّدُ منها موسومٌ ✓ فيقرؤها كلُّ معتمِد
+      if(r.engagement!=="pay_order") return "";
+      var _plan=normPaymentPlan(r.paymentPlan);
+      if(!_plan.length) return "";
+      var _pc=Array.isArray(r.payments)?r.payments.length:0;
+      return infoCell("خطة الصرف (حدّدها المنشئ)", _plan.map(function(p,i){
+        return '<span class="ct-doc '+(i<_pc?'s-ok':'s-soon')+'">'+p+'٪'+(i<_pc?' ✓':'')+'</span>';
+      }).join(' '));
+    })()+
     (docSubstituteId(r)?infoCell("البند المستعاض", substituteChip(r)):"")+
     infoCell("وضع الضريبة", _esc((VAT_MODES[normVatMode(r.vatMode)]||{}).short||"—"))+
     infoCell("مدة التنفيذ", r.durationDays?(money0(r.durationDays)+" يوماً"):"—")+
@@ -5450,9 +5703,26 @@ function reqCardHTML(id){
       (e.note?' — '+_esc(e.note):'')+'</div></div></div>';
   }).join("") || '<div style="color:var(--muted);font-size:12px">—</div>';
 
-  var payBox = r.payment ? '<div class="ct-note">'+_icn("banknote","ic-sm")+' سُدِّد '+money(r.payment.amount)+' ر.س'+
-    (r.payment.ref?(' — '+_esc(r.payment.ref)):'')+' · '+_esc(r.payment.by||"")+
-    (r.payment.receiptUrl?' · <a class="ct-link" href="'+_esc(r.payment.receiptUrl)+'" target="_blank" rel="noopener">'+_icn("paperclip","ic-sm")+' الإيصال</a>':'')+'</div>' : "";
+  /* بيانُ السداد — دفعةً دفعةً (طلبُ المالك): كلُّ دفعةٍ بمبلغها وإيصالها ومَن
+     سجّلها، وسطرُ المجموع يقول كم سُدِّد وكم بقي والأمرُ مفتوحٌ أو اكتمل.
+     والوثائقُ القديمةُ بلا مصفوفةٍ تُعرَض من ملخّصها القديم كما كانت. */
+  var _pays = Array.isArray(r.payments) && r.payments.length ? r.payments
+            : (r.payment && r.payment.amount!=null ? [r.payment] : []);
+  var _paidT = crqPaidTotal(r), _dueT = crqPayDue(r);
+  var payBox = _pays.length ? '<div class="ct-note" style="display:block">'+
+    _pays.map(function(p,i){
+      return '<div'+(i?' style="margin-top:4px"':'')+'>'+_icn("banknote","ic-sm")+
+        ' دفعة <span class="num">'+money(p.amount)+'</span> ر.س'+
+        (p.ref?(' — '+_esc(p.ref)):'')+' · '+_esc(p.by||"")+
+        ' · '+_esc(String(p.at||"").slice(0,16).replace("T"," "))+
+        (p.receiptUrl?' · <a class="ct-link" href="'+_esc(p.receiptUrl)+'" target="_blank" rel="noopener">'+_icn("paperclip","ic-sm")+' الإيصال</a>':'')+
+      '</div>';
+    }).join("")+
+    '<div style="margin-top:6px;font-weight:800">المسدَّد <span class="num">'+money(_paidT)+'</span> من <span class="num">'+money(r.value)+'</span> ر.س'+
+      (r.status==="crq_paid" ? ' — اكتمل السداد ✓'
+        : ' — المتبقّي <span class="num">'+money(_dueT)+'</span> ر.س والأمرُ مفتوح')+
+    '</div>'+
+  '</div>' : "";
 
   var waiting = owner && !crqIsFinal(r.status)
     ? '<div class="ct-note '+(mine && mode!=="blocked" ?"warn":"")+'">'+_icn("timer","ic-sm")+' '+
@@ -5904,15 +6174,36 @@ function doRewind(){
   });
 }
 
-/* سدادُ أمر الدفع — الإيصالُ إلزاميّ، وفشلُ رفعه **لا يُسجّل سداداً بلا إثبات**. */
+/* سدادُ أمر الدفع — الإيصالُ إلزاميّ، وفشلُ رفعه **لا يُسجّل سداداً بلا إثبات**.
+   (طلبُ المالك) والسدادُ **على دفعات**: المبلغُ الافتراضيُّ المتبقّي كلُّه، وأزرارُ
+   النسب تكتبه نسبةً من قيمة الأمر (مقصوصةً على المتبقّي) — والدفعةُ الجزئية تُبقي
+   الأمرَ مفتوحاً «بانتظار السداد» حتى يكتمل المبلغ. */
 function openPay(){
   var r=requestById(_rOpen); if(!r) return;
   var el=document.getElementById("page-"+PAGE_REQS); if(!el) return;
+  var paid=crqPaidTotal(r), due=crqPayDue(r);
   var box=document.createElement("div");
   box.className="card ct-sec"; box.id="ct-pay-box";
-  box.innerHTML='<div class="ct-sec-h">'+_icn("banknote","ic-sm")+' تسجيل السداد</div>'+
+  var pctBtns=[25,50,75].map(function(p){
+    return '<button type="button" class="btn btn-ghost btn-sm" onclick="contracts.setPayPct('+p+')" style="font-size:11px;padding:3px 10px">'+p+'٪</button>';
+  }).join(" ")+' <button type="button" class="btn btn-ghost btn-sm" onclick="contracts.setPayPct(100)" style="font-size:11px;padding:3px 10px">المتبقّي كاملاً</button>';
+  /* الخطةُ على الوثيقة تحكم: مبلغُ الدفعة التالية مقفولٌ على ما حدّده المنشئ —
+     الماليةُ تنفّذ لا تختار. وبلا خطةٍ (وثائقُ قديمة) يبقى المبلغُ حراً بالأزرار. */
+  var inst=crqPlanInstallment(r);
+  var amtField = inst
+    ? field("مبلغ هذه الدفعة — وفق خطة المنشئ",
+        '<input class="form-input num" id="ct-pay-amt" type="number" step="any" value="'+_esc(inst.amount)+'" readonly style="background:var(--surface2)">'+
+        '<div style="margin-top:6px;font-size:11px;color:var(--muted)">الدفعة '+(inst.index+1)+' من '+inst.count+' — '+inst.pct+'٪ حدّدها منشئ الطلب، ولا يُقبل غيرُها.</div>')
+    : field("مبلغ هذه الدفعة",
+        '<input class="form-input num" id="ct-pay-amt" type="number" step="any" max="'+_esc(due)+'" value="'+_esc(due)+'">'+
+        '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:11px;color:var(--muted)">نسبةً من القيمة:</span> '+pctBtns+'</div>');
+  box.innerHTML='<div class="ct-sec-h">'+_icn("banknote","ic-sm")+' تسجيل دفعة سداد</div>'+
+    '<div class="ct-note" style="display:block">'+_icn("banknote","ic-sm")+
+      ' قيمة الأمر <b class="num">'+money(r.value)+'</b> ر.س'+
+      (paid>0?' · سُدِّد <b class="num">'+money(paid)+'</b> ر.س':'')+
+      ' · المتبقّي <b class="num">'+money(due)+'</b> ر.س — الدفعةُ الجزئية تُبقي الأمرَ مفتوحاً حتى اكتمال السداد.</div>'+
     '<div class="ct-form-row">'+
-      field("المبلغ المسدَّد", '<input class="form-input num" id="ct-pay-amt" type="number" step="any" value="'+_esc(r.value)+'">')+
+      amtField+
       field("مرجع التحويل", '<input class="form-input" id="ct-pay-ref" placeholder="رقم العملية">')+
     '</div>'+
     '<div class="ct-form-row">'+
@@ -5921,11 +6212,21 @@ function openPay(){
     '</div>'+
     '<div class="ct-save-bar" style="position:static">'+
       '<button class="btn btn-ghost btn-sm" onclick="contracts.closePay()">إلغاء</button>'+
-      '<button class="btn btn-success btn-sm" id="ct-pay-btn" onclick="contracts.doPay()">'+_icn("save","ic-sm")+' تسجيل السداد</button>'+
+      '<button class="btn btn-success btn-sm" id="ct-pay-btn" onclick="contracts.doPay()">'+_icn("save","ic-sm")+' تسجيل الدفعة</button>'+
     '</div>';
   var old=document.getElementById("ct-pay-box"); if(old) old.remove();
   el.insertBefore(box, el.children[2] || null);
   box.scrollIntoView({behavior:"smooth", block:"center"});
+}
+/* نسبةُ الدفعة تُحسب من **قيمة الأمر** (هي ما يطلبه الناس: «ادفعوا ٥٠٪ منه»)
+   وتُقصّ على المتبقّي فلا يُكتب فوقه رقمٌ مرفوض. */
+function setPayPct(p){
+  var r=requestById(_rOpen); if(!r) return;
+  if(crqPlanInstallment(r)) return;   // خطةُ المنشئ تحكم المبلغ — لا اختيارَ حراً
+  var el=document.getElementById("ct-pay-amt"); if(!el) return;
+  var due=crqPayDue(r);
+  var amt=(Number(p)>=100) ? due : Math.min(due, r2(r2(Number(r.value)||0)*(Number(p)||0)/100));
+  el.value=amt;
 }
 function closePay(){ var b=document.getElementById("ct-pay-box"); if(b) b.remove(); }
 function doPay(){
@@ -5938,11 +6239,13 @@ function doPay(){
   uploadVendorDoc(r.id, f[0], "receipt").then(function(att){
     if(!att || !att.url) throw new Error("تعذّر رفع الإيصال");
     return payRequest(r.id, { amount:amt, ref:ref, receiptUrl:att.url });
-  }).then(function(){
-    closePay(); paintReqs(); _toast("✅ سُجِّل السداد وأُغلق الطلب","success");
+  }).then(function(res){
+    closePay(); paintReqs();
+    if(res && res.status==="crq_paid") _toast("✅ اكتمل السداد وأُغلق الطلب","success");
+    else _toast("✅ سُجِّلت الدفعة — المتبقّي "+money(crqPayDue(res))+" ر.س والأمرُ مفتوح","success");
   }).catch(function(e){
     console.warn("contracts/doPay",e);
-    if(btn){ btn.disabled=false; btn.innerHTML=_icn("save","ic-sm")+" تسجيل السداد"; }
+    if(btn){ btn.disabled=false; btn.innerHTML=_icn("save","ic-sm")+" تسجيل الدفعة"; }
     _toast("⚠ "+(e&&e.message?e.message:"تعذّر تسجيل السداد")+" — لم يُسجَّل سدادٌ بلا إيصال","warn");
   });
 }
@@ -7682,12 +7985,33 @@ function printPayOrder(id){
       '<div class="sg-x">التوقيع</div></div>';
   }).join("");
 
-  var p = r.payment || {};
-  var paidBox = p.at ? '<h2>بيانُ السداد</h2><table class="kv">'+
-      '<tr><td>المبلغ المسدَّد</td><td class="n">'+money(p.amount)+' ر.س</td></tr>'+
-      '<tr><td>مرجع التحويل</td><td class="n">'+_esc(p.ref||"—")+'</td></tr>'+
-      '<tr><td>سجّله</td><td class="t">'+_esc(p.by||"—")+'</td></tr>'+
-      '<tr><td>تاريخ السداد</td><td class="n">'+_esc(dt(p.at))+'</td></tr>'+
+  /* بيانُ السداد دفعةً دفعةً (طلبُ المالك) — الورقةُ التي تخرج للمحاسبة تحمل كلَّ
+     دفعةٍ بمرجعها ومسجِّلها، وسطرَ المجموع والمتبقّي. والقديمُ بلا مصفوفةٍ يُقرأ
+     من ملخّصه كدفعةٍ واحدة. */
+  var _pl = Array.isArray(r.payments) && r.payments.length ? r.payments
+          : (r.payment && r.payment.at ? [r.payment] : []);
+  var _pt = crqPaidTotal(r), _pd = crqPayDue(r);
+  /* خطةُ الصرف على الورقة نفسِها — المنشئُ حدّدها والمعتمِدون وقّعوا عليها،
+     فتقرؤها المحاسبةُ والمراجعةُ من السند لا من الشاشة. تظهر ولو قبل أول دفعة. */
+  var _plan = normPaymentPlan(r.paymentPlan);
+  var planBox = _plan.length ? '<h2>خطةُ صرف الدفعات — حدّدها منشئ الطلب</h2>'+
+    '<table class="kv">'+_plan.map(function(p,i){
+      var _paidRow = i < _pl.length;
+      return '<tr><td>الدفعة '+(i+1)+' — '+p+'٪</td><td class="n">'+
+        money(r2(r2(Number(r.value)||0)*p/100))+' ر.س'+(_paidRow?' — سُدِّدت ✓':'')+'</td></tr>';
+    }).join("")+'</table>' : "";
+  var paidBox = _pl.length ? '<h2>بيانُ السداد</h2>'+
+    '<table><thead><tr><th style="width:36px">#</th><th>المبلغ</th><th>مرجع التحويل</th><th>سجّله</th><th>التاريخ</th></tr></thead><tbody>'+
+    _pl.map(function(p,i){
+      return '<tr><td style="text-align:center;color:#64748b">'+(i+1)+'</td>'+
+        '<td style="text-align:center;font-weight:700">'+money(p.amount)+' ر.س</td>'+
+        '<td style="text-align:center">'+_esc(p.ref||"—")+'</td>'+
+        '<td style="text-align:center">'+_esc(p.by||"—")+'</td>'+
+        '<td style="text-align:center">'+_esc(dt(p.at))+'</td></tr>';
+    }).join("")+'</tbody></table>'+
+    '<table class="sum"><tr><td>المسدَّد</td><td class="n">'+money(_pt)+' ر.س</td></tr>'+
+      (r.status==="crq_paid" ? '<tr><td>الحالة</td><td class="n">اكتمل السداد ✓</td></tr>'
+        : '<tr><td>المتبقّي المستحقّ</td><td class="n">'+money(_pd)+' ر.س</td></tr>')+
     '</table>' : "";
 
   var html='<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'+
@@ -7770,6 +8094,7 @@ function printPayOrder(id){
   vatRow+'<tr><td>المطلوب صرفه ('+_esc(vm.short||"")+')</td><td class="n">'+money(val)+' ر.س</td></tr></table>'+
   '<div class="words"><div class="wl">المبلغ كتابةً</div><div class="wv">'+_esc(amountWords(val))+'</div></div>'+
 
+  planBox+
   paidBox+
 
   '<h2>الاعتمادات والتوقيعات</h2><div class="sign">'+sigCells+'</div>'+
@@ -8819,7 +9144,8 @@ window.contracts = {
   // طلبات التعاقد [المرحلة ٢]
   renderReqs: renderReqs, startReqSync: startReqSync, stopReqSync: stopReqSync, retryReqs: retryReqs,
   newRequest: newRequest, cancelRequest: cancelRequestForm, submitRequest: submitRequest,
-  setReqProject: setReqProject, setEngagement: setEngagement, setReqVendor: setReqVendor,
+  setReqProject: setReqProject, setEngagement: setEngagement, setOverTh: setOverTh, setReqVendor: setReqVendor,
+  addPlanRow: addPlanRow, delPlanRow: delPlanRow, planInput: planInput,
   toggleBoqLine: toggleBoqLine, addFreeLine: addFreeLine, delReqLine: delReqLine,
   addCandidate: addCandidate, delCandidate: delCandidate, recalc: recalc,
   toggleSubstitute: toggleSubstitute,
@@ -8937,6 +9263,11 @@ window.contracts = {
   _lineTotal: lineTotal,
   _linesTotal: linesTotal,
   _payOrderAllowed: payOrderAllowed,
+  _crqPaidTotal: crqPaidTotal,
+  _crqPayDue: crqPayDue,
+  _normPaymentPlan: normPaymentPlan,
+  _paymentPlanOk: paymentPlanOk,
+  _crqPlanInstallment: crqPlanInstallment,
   _penaltyIsPct: penaltyIsPct, _penaltyPerDay: penaltyPerDay, _penaltyCap: penaltyCap,
   _normPenalty: normPenalty, _penaltyText: penaltyText,
   _crqNextStage: crqNextStage,

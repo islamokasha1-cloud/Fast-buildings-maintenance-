@@ -644,11 +644,12 @@ check('★ الإجمالي المرسوم = المحسوب (بلا ضريبة �
 check('★ تجاوزُ بند الموازنة يُحذَّر منه ولا يمنع',
   ((await page.textContent('#page-contract-requests')) || '').includes('تجاوزٌ يُسجَّل ولا يمنع'));
 
-// أمرُ الدفع مقفلٌ فوق العتبة
-check('★ أمرُ الدفع مقفلٌ فوق ٣٠٠٠ بنصٍّ يشرح السبب',
+// أمرُ الدفع فوق العتبة لم يعد مقفلاً — يُعلَن أنه يلزمه إقرارٌ صريح (طلبُ المالك)
+check('★ أمرُ الدفع فوق ٣٠٠٠ غيرُ مقفل ويُعلَن لزومُ الإقرار الصريح',
   await page.evaluate(() => {
     const off = document.querySelector('#page-contract-requests .ct-pick.off');
-    return !!off && off.textContent.includes('لا يجوز فوق');
+    const picks = document.querySelector('#page-contract-requests .ct-picks');
+    return !off && !!picks && /يلزمه إقرارٌ صريح/.test(picks.textContent);
   }));
 
 // إشعارُ بوّابة التنفيذي
@@ -992,6 +993,176 @@ const wrongGate = await page.evaluate(async (id) => {
   return msg;
 }, payStages.id);
 check('★ دورٌ لا يملك البوّابة يُرفض في طبقة البيانات', /ليست لدورك/.test(wrongGate), wrongGate);
+
+/* ── (طلبُ المالك) السدادُ على دفعات: الأمرُ يبقى مفتوحاً حتى يكتمل مبلغُه ──
+   الدفعُ بهويةِ ماليةٍ لم تعتمد بوّابةً سابقة — فصلُ المهام على حقيقته لا نيابةً.
+   أمرُ الـ1500 يُدفع جزئياً **ويبقى مفتوحاً** (تعدّه بطاقةُ «بانتظار السداد» لاحقاً)،
+   والإغلاقُ بالدفعة المتمّمة يُفحَص على أمرٍ ثانٍ مستقلّ. */
+const partial = await page.evaluate(async (id) => {
+  const real = { user: currentUser.user, name: currentUser.name, role: currentUser.role };
+  currentUser.user = 'fin-check'; currentUser.name = 'مالية الفحص'; currentUser.role = 'finance';
+  const out = {};
+  try {
+    await window.contracts._pay(id, { amount: 500, ref: 'TRX-1', receiptUrl: 'https://example.com/r1.pdf' });
+    const r = window.contracts.requestById(id);
+    out.first = { status: r.status, paid: window.contracts._crqPaidTotal(r),
+                  due: window.contracts._crqPayDue(r), count: (r.payments || []).length };
+    try { await window.contracts._pay(id, { amount: 5000, receiptUrl: 'https://example.com/rX.pdf' }); out.overpay = 'مرّ فوق المتبقّي'; }
+    catch (e) { out.overpay = e.message; }
+  } catch (e) { out.err = e.message; }
+  currentUser.user = real.user; currentUser.name = real.name; currentUser.role = real.role;
+  return out;
+}, payStages.id);
+check('★★ دفعةُ ٥٠٠ من ١٥٠٠ تُسجَّل والأمرُ يبقى «بانتظار السداد» مفتوحاً',
+  !partial.err && partial.first && partial.first.status === 'crq_pending_pay' &&
+  partial.first.paid === 500 && partial.first.due === 1000 && partial.first.count === 1,
+  partial.err || JSON.stringify(partial.first));
+check('★ ودفعةٌ فوق المتبقّي تُرفض — لا يُسدَّد فوق قيمة الأمر',
+  /أكبر من المتبقّي/.test(partial.overpay || ''), partial.overpay);
+
+/* وسندُ صرف المفتوح جزئياً يقولها بصراحة — لا يُصرَف المتبقّي مرتين */
+const partPrint = await page.evaluate((id) => {
+  let c = ''; const ro = window.open;
+  window.open = function () { return { document: { write(h) { c = h; }, close() { } }, focus() { }, print() { }, close() { } }; };
+  window.contracts.printPayOrder(id); window.open = ro; return c;
+}, payStages.id);
+check('★★ سندُ صرف المفتوح جزئياً موسومٌ «سُدِّد جزئياً» ويطبع المتبقّي وبيانَ الدفعات',
+  /سُدِّد جزئياً/.test(partPrint) && /بيانُ السداد/.test(partPrint) &&
+  /TRX-1/.test(partPrint) && /المتبقّي المستحقّ/.test(partPrint));
+
+/* أمرٌ ثانٍ يُغلَق بدفعتين — الدفعةُ المتمّمة تُغلقه وسندُه يحمل بيانَها كاملاً */
+const closed = await page.evaluate(async () => {
+  const id = await window.contracts._create({
+    engagement: 'pay_order', projectId: 'hail', title: 'إصلاح نافذة', vendorId: 'VND-0006',
+    vendorName: 'راجو كومار', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'z', desc: 'إصلاح نافذة', unit: 'عدد', qty: 1, unitPrice: 800 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  });
+  await window.contracts._act(id, 'approve', '');
+  await window.contracts._act(id, 'approve', '');
+  const real = { user: currentUser.user, name: currentUser.name, role: currentUser.role };
+  currentUser.user = 'fin-check'; currentUser.name = 'مالية الفحص'; currentUser.role = 'finance';
+  const out = { id };
+  try {
+    await window.contracts._pay(id, { amount: 300, ref: 'TRX-A', receiptUrl: 'https://example.com/a.pdf' });
+    await window.contracts._pay(id, { amount: 500, ref: 'TRX-B', receiptUrl: 'https://example.com/b.pdf' });
+    const r = window.contracts.requestById(id);
+    out.status = r.status; out.paid = window.contracts._crqPaidTotal(r); out.count = (r.payments || []).length;
+  } catch (e) { out.err = e.message; }
+  currentUser.user = real.user; currentUser.name = real.name; currentUser.role = real.role;
+  return out;
+});
+check('★★ والدفعةُ المتمّمة تُغلق الأمر (مسدَّد — مغلق) بدفعتيه في السجلّ',
+  !closed.err && closed.status === 'crq_paid' && closed.paid === 800 && closed.count === 2,
+  closed.err || JSON.stringify(closed));
+const paidPrint = await page.evaluate((id) => {
+  let c = ''; const ro = window.open;
+  window.open = function () { return { document: { write(h) { c = h; }, close() { } }, focus() { }, print() { }, close() { } }; };
+  window.contracts.printPayOrder(id); window.open = ro; return c;
+}, closed.id);
+check('★ سندُ صرف المغلق يطبع بيانَ السداد دفعةً دفعةً (TRX-A · TRX-B) وسطرَ الاكتمال',
+  /بيانُ السداد/.test(paidPrint) && /TRX-A/.test(paidPrint) && /TRX-B/.test(paidPrint) &&
+  /اكتمل السداد/.test(paidPrint) && /مسدَّد — مغلق/.test(paidPrint));
+
+/* ── (طلبُ المالك) أمرُ دفعٍ فوق العتبة — بإقرارٍ صريح ── */
+const overTh = await page.evaluate(async () => {
+  const base = {
+    engagement: 'pay_order', projectId: 'hail', title: 'أعمال فوق العتبة', vendorId: 'VND-0006',
+    vendorName: 'راجو كومار', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'y', desc: 'أعمال', unit: 'عدد', qty: 1, unitPrice: 5000 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  };
+  const out = {};
+  try { await window.contracts._create(Object.assign({}, base)); out.noAck = 'مرّ بلا إقرار'; }
+  catch (e) { out.noAck = e.message; }
+  const id = await window.contracts._create(Object.assign({}, base, { overThreshold: true }));
+  const r = window.contracts.requestById(id);
+  out.ack = r.overThresholdAck || null;
+  out.status = r.status;
+  out.overFlagGone = !('overThreshold' in r);
+  /* ويمرّ على البوّابات كلِّها — والتنفيذيِّ فوق سقفه (٢٠٠٠ في الفحص) — ثم يُسدَّد */
+  out.stages = [r.status];
+  await window.contracts._act(id, 'approve', '');
+  out.stages.push(window.contracts.requestById(id).status);
+  await window.contracts._act(id, 'approve', '');
+  out.stages.push(window.contracts.requestById(id).status);
+  await window.contracts._act(id, 'approve', '');
+  out.stages.push(window.contracts.requestById(id).status);
+  const real = { user: currentUser.user, name: currentUser.name, role: currentUser.role };
+  currentUser.user = 'fin-check'; currentUser.name = 'مالية الفحص'; currentUser.role = 'finance';
+  try { await window.contracts._pay(id, { amount: 5000, ref: 'TRX-C', receiptUrl: 'https://example.com/c.pdf' }); }
+  catch (e) { out.payErr = e.message; }
+  currentUser.user = real.user; currentUser.name = real.name; currentUser.role = real.role;
+  out.final = window.contracts.requestById(id).status;
+  return out;
+});
+check('★★ فوق العتبة بلا إقرارٍ يُرفض في طبقة البيانات', /إقرارٌ صريح/.test(overTh.noAck), overTh.noAck);
+check('★★ وبالإقرار يُنشأ ويُختم العلَمُ باسم صاحبه وعتبته، ويدخل مسارَ الاعتماد',
+  overTh.ack && overTh.ack.by && overTh.ack.threshold === 3000 &&
+  overTh.status === 'crq_pending_pm' && overTh.overFlagGone,
+  JSON.stringify(overTh.ack || {}));
+check('★★ ويمرّ على بوّابات الاعتماد كلِّها والتنفيذيِّ فوق سقفه ثم يُسدَّد ويُغلق',
+  overTh.stages.join(' → ') === 'crq_pending_pm → crq_pending_proc → crq_pending_ceo → crq_pending_pay' &&
+  !overTh.payErr && overTh.final === 'crq_paid',
+  overTh.payErr || (overTh.stages.join(' → ') + ' ⇒ ' + overTh.final));
+
+/* ── (طلبُ المالك) خطةُ صرف الدفعات: منشئُ الطلب يحدّد النسب والماليةُ تنفّذها حرفياً ── */
+const plan = await page.evaluate(async () => {
+  const out = {};
+  const base = {
+    engagement: 'pay_order', projectId: 'hail', title: 'صيانة بخطة دفعات', vendorId: 'VND-0006',
+    vendorName: 'راجو كومار', vatMode: 'none', budgetCategoryKey: 'subcontractor',
+    lines: [{ id: 'p', desc: 'صيانة', unit: 'عدد', qty: 1, unitPrice: 1500 }],
+    candidates: [], advance: {}, retention: {}, penalty: {}, warranty: {}
+  };
+  try { await window.contracts._create(Object.assign({}, base, { paymentPlan: [40, 30] })); out.badPlan = 'مرّت خطة ٧٠٪'; }
+  catch (e) { out.badPlan = e.message; }
+  const id = await window.contracts._create(Object.assign({}, base, { paymentPlan: [40, 60] }));
+  await window.contracts._act(id, 'approve', '');
+  await window.contracts._act(id, 'approve', '');
+  const real = { user: currentUser.user, name: currentUser.name, role: currentUser.role };
+  currentUser.user = 'fin-check'; currentUser.name = 'مالية الفحص'; currentUser.role = 'finance';
+  try {
+    try { await window.contracts._pay(id, { amount: 500, receiptUrl: 'https://example.com/p0.pdf' }); out.wrongAmt = 'مرّ مبلغٌ مخالف'; }
+    catch (e) { out.wrongAmt = e.message; }
+    await window.contracts._pay(id, { receiptUrl: 'https://example.com/p1.pdf', ref: 'TRX-P1' });
+    let r = window.contracts.requestById(id);
+    out.first = { status: r.status, amt: r.payments[0].amount, due: window.contracts._crqPayDue(r) };
+    await window.contracts._pay(id, { receiptUrl: 'https://example.com/p2.pdf', ref: 'TRX-P2' });
+    r = window.contracts.requestById(id);
+    out.last = { status: r.status, amts: r.payments.map(p => p.amount) };
+  } catch (e) { out.err = e.message; }
+  currentUser.user = real.user; currentUser.name = real.name; currentUser.role = real.role;
+  return out;
+});
+check('★★ خطةٌ لا يبلغ مجموعُها ١٠٠٪ تُرفض عند الإنشاء', /١٠٠٪/.test(plan.badPlan), plan.badPlan);
+check('★★ مبلغٌ يخالف الخطةَ يُرفض — منشئُ الطلب هو من حدّد النسب',
+  /منشئ الطلب حدّد خطة الصرف/.test(plan.wrongAmt || ''), plan.wrongAmt);
+check('★★ الدفعةُ الأولى تُنفَّذ بنسبة المنشئ (٤٠٪ = ٦٠٠) والأمرُ يبقى مفتوحاً',
+  !plan.err && plan.first && plan.first.status === 'crq_pending_pay' &&
+  plan.first.amt === 600 && plan.first.due === 900,
+  plan.err || JSON.stringify(plan.first));
+check('★★ والثانيةُ (٦٠٪ = ٩٠٠) تُغلق الأمرَ بدفعتَي الخطة',
+  plan.last && plan.last.status === 'crq_paid' && JSON.stringify(plan.last.amts) === '[600,900]',
+  JSON.stringify(plan.last || {}));
+
+/* نموذجُ الإنشاء: قسمُ الخطة يظهر لأمر الدفع والافتراضُ دفعةٌ واحدة ١٠٠٪ */
+const planUI = await page.evaluate(async () => {
+  window.contracts.backToReqs();
+  window.contracts.newRequest();
+  await new Promise(r => setTimeout(r, 300));
+  window.contracts.setEngagement('pay_order');
+  await new Promise(r => setTimeout(r, 300));
+  const txt = (document.getElementById('page-contract-requests') || {}).textContent || '';
+  const d = window.contracts._draft();
+  const out = { hasSec: /خطة صرف الدفعات/.test(txt), def: JSON.stringify(d ? d.payPlan : null),
+                sumOk: /١٠٠٪|100/.test(((document.getElementById('ct-plan-sum') || {}).textContent) || '') };
+  window.contracts.cancelRequest();
+  await new Promise(r => setTimeout(r, 200));
+  return out;
+});
+check('★ نموذجُ أمر الدفع يعرض قسمَ «خطة صرف الدفعات» والافتراضُ دفعةٌ واحدة ١٠٠٪',
+  planUI.hasSec && planUI.def === '[100]', JSON.stringify(planUI));
 
 /* ── تعديلُ بنود الطلب — للأدمن (طلبُ المالك) ──
    العهدُ الأصليُّ «وقّع المعتمِدُ على رقمٍ وسُدِّد غيرُه» يبقى: الفحصُ يتحقّق أن
@@ -1638,8 +1809,10 @@ const payMove = await page.evaluate(async (pid) => {
 check('★★ سدادُ أمر الدفع (بإيصال) أخرجه من تبويب «أوامر الدفع»',
   payMove.st === 'crq_paid' && payMove.before === 2 && payMove.after === 1 && payMove.gone,
   JSON.stringify(payMove));
-check('★★ وظهر في تبويب «مسدَّدة» وبطاقتُه تعدّه بقيمته (1,500)',
-  payMove.inPaid && payMove.nPaid === 1 && /مسدَّدة/.test(payMove.stTxt) && /1,500/.test(payMove.stTxt),
+/* في التبويب المسدَّد الآن أربعة: أمرُ الـ1500 (أُغلق هنا بدفعته المتمّمة — بلا مبلغٍ
+   يُسدَّد المتبقّي 1000) + مسدَّدو فحوص الدفعات أعلاه: 800 و5000 وذو الخطة 1500 = 8,800. */
+check('★★ وظهر في تبويب «مسدَّدة» مع مسدَّدي فحوص الدفعات وبقيمتها معاً (8,800)',
+  payMove.inPaid && payMove.nPaid === 4 && /مسدَّدة/.test(payMove.stTxt) && /8,800/.test(payMove.stTxt),
   JSON.stringify(payMove));
 await page.screenshot({ path: `${SHOTS}/12h-pay-paid-tab.png`, fullPage: true });
 await page.evaluate(async () => { window.contracts.reqTab('requests'); await new Promise(r => setTimeout(r, 400)); });
