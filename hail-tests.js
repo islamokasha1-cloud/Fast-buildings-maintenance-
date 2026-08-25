@@ -6859,6 +6859,27 @@ function hrPaymentsTests() {
   T("★ فشل الحفظ يرجع الدور والصلاحيات كما كانا (لا حالة نصفية)",
     /u\.role=oldRole; u\.permissions=oldPerms;/.test(HTML));
 
+  /* ── بطاقة لوحة المشتريات: «سداد الموارد البشرية بانتظار إجراءك» ──
+     المعتمِد يفتح لوحة المشتريات أول يومه — فالمتوقّف عليه يُعرض هناك بعد بطاقة
+     طلبات الشراء مباشرةً، لا خلف صفحةٍ لا يفتحها إلا قصداً. */
+  T("★★ بطاقة «بانتظار إجراءك» للسداد موجودة وتُبنى من pendingForMe نفسِها (مصدر عدّاد السايدبار)",
+    /function renderMyTasks\(\)/.test(src) &&
+    /سداد الموارد البشرية بانتظار إجراءك/.test(src) &&
+    /function renderMyTasks\(\)[\s\S]{0,1200}var items=pendingForMe\(\);/.test(src));
+  T("★★ واللفُّ يستدعي الأصل ولا يستبدله (بطاقة طلبات الشراء تبقى كما هي)",
+    /function hookMyTasks\(\)[\s\S]{0,400}var orig = window\.renderPOMyTasks;[\s\S]{0,300}orig\.apply\(this, arguments\)/.test(src));
+  T("★ واللفُّ مرةً واحدة مهما أُعيد الرسم", /window\.__hrpMyTasksHooked/.test(src));
+  T("★ والموضع ثابت بعد بطاقة طلبات الشراء مباشرةً (قبل بطاقة التعاقدات) مهما كان ترتيب اللفّات",
+    /getElementById\("po-my-tasks-card"\)/.test(src) &&
+    /if\(anchor\.nextSibling!==host\) anchor\.parentNode\.insertBefore\(host, anchor\.nextSibling\);/.test(src));
+  T("★ والعرض محكوم بـcanView — لا بيانات موارد بشرية لمن لا يملك فتح الوحدة",
+    /function renderMyTasks\(\)[\s\S]{0,900}if\(!canView\(\)\)\{ host\.style\.display="none"; host\.innerHTML=""; return; \}/.test(src));
+  T("★ واللفّ يُركَّب من startSync (تستدعيه النواة عند مزامنة المشتريات) والبطاقة تتحدّث مع كل لقطة",
+    /function startSync\(\)\{\s*_navToggle\(\);\s*hookMyTasks\(\);/.test(src) &&
+    /_badge\(\);[\s\S]{0,200}renderMyTasks\(\); \}catch\(e\)\{\}/.test(src));
+  T("والوحدة لا تطلب من index.html حاويةً ثابتة",
+    !/id="hrp-my-tasks-card"/.test(HTML) && /MYTASK_ID = "hrp-my-tasks-card"/.test(src));
+
   // ── بصمة البناء تطابق الإصدار ──
   const hrBuild = (src.match(/var MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
   T("★ MODULE_BUILD في hr-payments.js يطابق APP_VERSION (يُرفَعان معاً)",
