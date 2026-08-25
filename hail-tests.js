@@ -7212,9 +7212,10 @@ function hrPaymentNotificationTests(src) {
   T("★ صاحب الطلب يُنبَّه بالرفض والإعادة والإغلاق — لا بإلغائه هو",
     /HRP_NOTIFY_REQUESTER = new Set\(\[\s*"hrp_hrm_rejected",\s*"hrp_pm_rejected",\s*"hrp_ceo_rejected",\s*"hrp_finance_returned",\s*"hrp_closed",\s*\]\)/.test(cfgSrc) &&
     !/HRP_NOTIFY_REQUESTER[\s\S]{0,240}hrp_cancelled/.test(cfgSrc));
-  T("★ سداد المالية يُنبّه دورَي الموارد البشرية (مسؤولاً ومديراً) — لا الحالات الأخرى",
-    /HRP_STATUS_NOTIFY_ROLES = \{\s*hrp_closed: \["hr_officer", "hr_manager"\],\s*\}/.test(cfgSrc) &&
-    !/HRP_STATUS_NOTIFY_ROLES = \{[\s\S]{0,200}?(hrp_pending|hrp_cancelled|hrp_hrm|hrp_pm|hrp_ceo|hrp_finance_returned)/.test(cfgSrc));
+  T("★ سداد المالية يُنبّه دورَي الموارد البشرية، والإعادةُ للتصحيح مديرَها — لا حالات الانتظار",
+    /HRP_STATUS_NOTIFY_ROLES = \{\s*hrp_closed: \["hr_officer", "hr_manager"\],/.test(cfgSrc) &&
+    /hrp_finance_returned: \["hr_manager"\],\s*\}/.test(cfgSrc) &&
+    !/HRP_STATUS_NOTIFY_ROLES = \{[\s\S]{0,600}?(hrp_pending|hrp_cancelled|hrp_hrm_rejected|hrp_pm_rejected|hrp_ceo_rejected)/.test(cfgSrc));
 
   // تسميات نوعية العمل نسختان (واجهة/خادم) — الحارس يمنع انحرافهما.
   const uiKeys = (src.match(/\{k:"([a-z_]+)",\s*l:/g) || []).map(m => m.match(/k:"([a-z_]+)"/)[1]);
@@ -7411,12 +7412,14 @@ function hrPaymentNotificationTests(src) {
     T("★ ثم تُنبَّه المالية بالسداد",
       of("toFinance").length === 1 && of("toFinance")[0].to === "0503333333" && of("toFinance")[0].params[0] === "سدادك");
     T("★ تغيّرُ حقلٍ بلا تغيّر حالة لا يُرسل شيئاً", of("noStatusChange").length === 0);
-    T("★★ الإعادة للتصحيح تصل صاحب الطلب (مطابقةً على createdByUser)",
-      of("returned").length === 1 && of("returned")[0].to === "0504444444" &&
-      of("returned")[0].params[2] === "مُعاد من المالية للتصحيح",
-      JSON.stringify((of("returned")[0] || {}).params));
+    T("★★ الإعادة للتصحيح تصل صاحب الطلب (مطابقةً على createdByUser) ومدير الموارد البشرية",
+      of("returned").length === 2 &&
+      of("returned")[0].to === "0504444444" &&
+      of("returned").some(m => m.to === "0507777777") &&
+      of("returned").every(m => m.params[2] === "مُعاد من المالية للتصحيح"),
+      of("returned").map(m => m.to).join(",") || "لا شيء");
     T("★★ إعادةٌ ثانيةٌ بنفس الانتقال تصل ثانيةً (لا تُبتلع كتكرار — M14)",
-      of("returnedAgain").length === 1);
+      of("returnedAgain").length === 2);
     T("★★ سداد المالية يصل صاحب الطلب ومدير الموارد البشرية على جوّاليهما",
       of("closed").length === 2 &&
       of("closed").some(m => m.to === "0504444444") &&
@@ -7457,8 +7460,9 @@ function hrPaymentNotificationTests(src) {
     T("★★ رقمٌ أُدخل من لوحة المشروع (المركزيُّ خالٍ) تصله رسالةُ السداد أيضاً",
       out2.length === 1 && out2[0].to === "0503333333", out2.map(m => m.to).join(",") || "لا شيء");
     await routeHrPayment(at("hrp_pending_finance"), at("hrp_finance_returned", "p2"), d2);
-    T("★ وصاحبُ الطلب كذلك يُوجَد في مستند المشروع",
-      out2.length === 2 && out2[1].to === "0504444444", out2.map(m => m.to).join(","));
+    T("★ وصاحبُ الطلب ومديرُ الموارد كذلك يُوجَدان في مستند المشروع",
+      out2.length === 3 && out2[1].to === "0504444444" && out2[2].to === "0507777777",
+      out2.map(m => m.to).join(","));
   })());
 
   /* ── الرابط العميق: زرّ «فتح الطلب» يوصل لوحدة السداد لا لقائمة المشتريات ── */
