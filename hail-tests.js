@@ -480,7 +480,11 @@ function predelivery() {
        القوائم الخارجية تعرض اسم البند المطلوب لا المورَّد بعد الاستبدال).
        **إصلاحُ عرضِ منطقٍ قائمٍ في مكانه**: الدالة بجوار أخواتها _poShownName/
        _poReqName في النواة، وتقرؤها بطاقاتُ القائمة والتقارير ووحدةُ الاستعاضة. */
-    const IDX_CEILING = 37628;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37628 إلى 37640 — ‏١١ سطراً لصلاحية إنشاء خطة PPM للمشرف
+       (طلب المالك): دالتا `ppmRoleCanCreate`/`ppmCanCreate` وتعليقُ حدودهما.
+       **تعديلُ صلاحياتِ شاشةٍ قائمة في مكانها** — حرّاسُ الإنشاء الأربعة كلُّهم
+       في وحدة PPM داخل النواة، ونقلُ الدالة وحدَها يفصلها عمّن يقرؤها. */
+    const IDX_CEILING = 37640;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -13124,6 +13128,47 @@ function vendorPOIssuance() {
    (١) معادلاتُ البند مطابقةٌ لـ`addPurchaseItem` حرفياً — lineTotal + vat === itemCost
    دائماً، والتقريبُ عند المصدر فلا يتسرّب العائم. (٢) الحالةُ `pending_pm` حصراً
    مهما أرسل النظامُ الخارجي — الباب يُدخل الدورةَ من أولها ولا يتجاوزها أبداً. */
+/* ════════════════════════════════════════════════════════════════════
+   خطط PPM: المشرف يُنشئ خطة صيانة — والتعديل والحذف للمسؤول وحده
+   (طلب المالك) — الدالة النقية ppmRoleCanCreate تُفحص هنا مباشرةً،
+   ومواضع الاستدعاء الأربعة تُحرس نصّياً حتى لا يرتدّ أحدها إلى admin فقط.
+   ════════════════════════════════════════════════════════════════════ */
+function ppmSupervisorCreateGuards() {
+  H("خطط PPM — صلاحية الإنشاء للمشرف (والتعديل/الحذف للمسؤول)");
+
+  // ── (١) الدالة النقية: تُستخرج من index.html وتُنفَّذ فعلاً ──
+  const m = HTML.match(/function ppmRoleCanCreate\(role\)\{[^\n]*\}/);
+  T("ppmRoleCanCreate موجودة (دالة نقية على الدور)", !!m);
+  if (m) {
+    const can = new Function(m[0] + "; return ppmRoleCanCreate;")();
+    T("★ المسؤول والمشرف (عربي «مشرف» وإنجليزي supervisor) يُنشئون",
+      can("admin") === true && can("مشرف") === true && can("supervisor") === true);
+    T("★ الفني والزائر ومَن بلا دور لا يُنشئون",
+      !can("فني") && !can("technician") && !can("viewer") && !can("") && !can(undefined));
+  }
+
+  // ── (٢) مواضع الإنشاء الأربعة تمرّ كلها بـ ppmCanCreate ──
+  T("★ زر «خطة جديدة» يظهر بـ ppmCanCreate لا بشرط admin",
+    /addBtn\.style\.display=ppmCanCreate\(\)\?"":"none";/.test(HTML));
+  T("★ فتح نافذة الإضافة محروس بـ ppmCanCreate",
+    /function openAddPPMModal\(\)\{\s*\n\s*if\(!ppmCanCreate\(\)\)/.test(HTML));
+  T("★ الإضافة الجماعية لأصول الدور محروسة بـ ppmCanCreate",
+    /async function ppmAddAllFloorAssets\(\)\{\s*\n\s*if\(!ppmCanCreate\(\)\)/.test(HTML));
+  T("★ savePPMPlan: فرع الإضافة بـ ppmCanCreate وفرع التعديل admin وحده",
+    /const _editingPPM = !!document\.getElementById\("ppm-edit-id"\)\.value;/.test(HTML) &&
+    /if\(_editingPPM\)\{\s*\n\s*if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML) &&
+    /\} else if\(!ppmCanCreate\(\)\)/.test(HTML));
+
+  // ── (٣) التعديل والحذف لم يتوسّعا ──
+  T("★ openEditPPMModal ما زال للمسؤول وحده",
+    /function openEditPPMModal\(id\)\{\s*\n\s*if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML));
+  T("★ deletePPMPlan ما زال للمسؤول وحده",
+    /function deletePPMPlan\(id\)\{\s*\n\s*if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML));
+  T("★ أزرار التعديل/الحذف على البطاقة ما زالت بشرط isAdmin",
+    /\$\{isAdmin\?`<button class="btn btn-ghost btn-sm" onclick="event\.stopPropagation\(\);openEditPPMModal/.test(HTML) &&
+    /\$\{isAdmin\?`<button class="btn btn-delete btn-sm" onclick="event\.stopPropagation\(\);deletePPMPlan/.test(HTML));
+}
+
 function externalPurchaseApiGuards() {
   H("واجهة النظام الخارجي (external-api) — الحساب والتحقّق والدورة");
   let X = null;
@@ -13306,6 +13351,7 @@ function externalPurchaseApiGuards() {
   printIconSizeGuards();
   vendorPOIssuance();
   externalPurchaseApiGuards();
+  ppmSupervisorCreateGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
