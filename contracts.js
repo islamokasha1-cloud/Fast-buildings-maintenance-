@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2905";
+var MODULE_BUILD = "v18.9.2907";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -807,17 +807,16 @@ function docProjectKey(doc){
    وحدَها:
    • الوثيقةُ الرسمية: مشروعُها `projectId` هو الفيصل — طلبٌ سُجِّل على مشروعٍ
      يظهر عنده أياً كان المشروعُ المفتوحُ لحظةَ إنشائه.
-   • اليدويةُ (بلا مشروعٍ رسميّ): وسمُ الإنشاء `ownerProjectId` — يُختم على كل
-     وثيقةٍ جديدةٍ بمشروع التشغيل لحظةَ الإنشاء وينتقل من الطلب إلى عقده.
-   • اليدويةُ القديمةُ بلا وسم: تظهر في كل المشاريع — إخفاؤها تخمينٌ يُضيع وثائقَ
-     ماليةً صامتاً، وظهورُها الزائد يُصحَّح بفتحها مرةً (لا وسيلةَ لاستنتاج صاحبها).
+   • اليدويةُ (بلا مشروعٍ رسميّ): **في المشتريات المركزية وحدَها** — قرارُ المالك
+     بعد v18.9.2905: المشروعُ اليدويُّ ليس جزءاً من أيّ مشروعِ تشغيل، فوثائقُه
+     تُدار من الوضع المركزيّ ولا تظهر داخل المشاريع (وسطرُ نطاقٍ في القائمتين
+     يقول أين هي — فالغيابُ بلا تفسيرٍ يُقرأ فقداً في البيانات).
    • بلا مشروعٍ حاليٍّ (وضعٌ مركزيّ/شاشاتٌ عامة): الكل. */
 function ctDocInTenant(d, tenantId){
   if(!tenantId || !d) return true;
   var manual = d.isCustomProject === true || d.projectId === MANUAL_ID || !d.projectId;
-  if(!manual) return d.projectId === tenantId;
-  if(d.ownerProjectId) return d.ownerProjectId === tenantId;
-  return true;
+  if(manual) return false;
+  return d.projectId === tenantId;
 }
 function _tenantId(){
   try{ return (typeof CURRENT_PROJECT!=="undefined" && CURRENT_PROJECT && CURRENT_PROJECT.id) || ""; }
@@ -1147,8 +1146,6 @@ function contractFromRequest(req, contractId, now, by, clauses){
     // شكلُ المشروع القياسيّ يُنقَل كما هو — لا يُعاد اشتقاقُه فينحرف
     projectId: r.projectId || "", isCustomProject: r.isCustomProject === true,
     projectName: r.projectName || "",
-    // وسمُ مشروع التشغيل ينتقل من الطلب لعقده — به يُحصَر اليدويُّ في مشروعه (ctDocInTenant)
-    ownerProjectId: r.ownerProjectId || "",
     budgetCategoryKey: r.budgetCategoryKey || "",   // قد يكون فارغاً — الربطُ اختياريّ
     // رصيدُ «البند المستعاض» يُختار مرةً على الطلب ويُورَث حرفياً — لا يُسأل ثانيةً
     isSubstitute: r.isSubstitute === true, substituteAccountId: r.substituteAccountId || "",
@@ -2650,8 +2647,6 @@ function createRequest(draft){
         return Promise.reject(new Error("خطة صرف الدفعات: نسبٌ موجبةٌ مجموعُها ١٠٠٪ بالضبط"));
     } else if(doc.paymentPlan != null) delete doc.paymentPlan;
     doc.createdAt=_now(); doc.createdBy=_me(); doc.createdByUser=_meUser();
-    // وسمُ مشروع التشغيل لحظةَ الإنشاء — به تُنسَب الوثيقةُ اليدويةُ لمشروعها (ctDocInTenant)
-    doc.ownerProjectId = _tenantId();
     doc.status = crqNextStage(doc, ceoThreshold());
     _pushTimeline(doc, "إنشاء الطلب", "created",
       (ENGAGEMENTS[doc.engagement]||{}).lbl + " — " + money(doc.value) + " ر.س");
@@ -4966,6 +4961,14 @@ function reqListHTML(){
       '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="showPage(\''+PAGE_CTRS+'\')">'+
       _icn("briefcase","ic-sm")+' فتح العقود</button></div>'
     : "";
+  /* اليدويةُ المحجوبةُ عن هذا المشروع تُذكَر لا تُعرَض — الغيابُ بلا تفسيرٍ يُقرأ
+     فقداً في البيانات (نفسُ منطق سطرِ المحوَّل أعلاه). */
+  var hiddenManual = t ? _reqs.filter(function(r){ return !ctDocInTenant(r, t); }).filter(function(r){
+    return r.isCustomProject===true || r.projectId===MANUAL_ID || !r.projectId; }).length : 0;
+  var manualLine = hiddenManual
+    ? '<div class="ct-scope">'+_icn("cart","ic-sm")+' '+hiddenManual+
+      ' من طلبات المشاريع اليدوية تُدار من المشتريات المركزية — لا تظهر داخل المشاريع</div>'
+    : "";
 
   /* خياراتُ المشروع **من الطلبات نفسِها** لا من قائمة المشاريع: فكلُّ خيارٍ يقابله
      طلبٌ واحدٌ على الأقلّ، ولا يسقط طلبُ مشروعٍ حُذف من القائمة أو مشروعٍ يدويٍّ لم
@@ -5039,7 +5042,7 @@ function reqListHTML(){
     scopeLine = '<div class="ct-scope">عرض '+list.length+' من '+tabAll.length+' طلباً'+lbl+
       ' <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="contracts.clearReqFilters()">'+_icn("xCircle","ic-sm")+' مسح الفلاتر</button></div>';
   }
-  return head+tabsBar+strip+filters+scopeLine+convLine+body;
+  return head+tabsBar+strip+filters+scopeLine+convLine+manualLine+body;
 }
 
 function reqTileHTML(r){
@@ -6430,7 +6433,15 @@ function ctrListHTML(){
   } else {
     body='<div class="ct-grid">'+list.map(ctrTileHTML).join("")+'</div>';
   }
-  return head+tabsBar+strip+filters+body;
+  /* عقودُ المشاريع اليدوية المحجوبةُ عن هذا المشروع تُذكَر لا تُعرَض — كسطرِ
+     الطلبات: الغيابُ بلا تفسيرٍ يُقرأ فقداً في البيانات. */
+  var hiddenManual = t ? _ctrs.filter(function(c){ return !ctDocInTenant(c, t); }).filter(function(c){
+    return c.isCustomProject===true || c.projectId===MANUAL_ID || !c.projectId; }).length : 0;
+  var manualLine = hiddenManual
+    ? '<div class="ct-scope">'+_icn("cart","ic-sm")+' '+hiddenManual+
+      ' من عقود المشاريع اليدوية تُدار من المشتريات المركزية — لا تظهر داخل المشاريع</div>'
+    : "";
+  return head+tabsBar+strip+filters+manualLine+body;
 }
 
 /* بلاغُ المالك: «العقدُ لا يُظهر أنّ له مستخلصاً ولا عند مَن يقف». وكان المستخلصُ

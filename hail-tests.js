@@ -13306,22 +13306,23 @@ function contractsTenantScopeGuards() {
 
   T("★★ الوثيقة الرسمية تُنسب لمشروعها projectId أياً كان مشروعُ إنشائها",
     f({ projectId: "hail" }, "hail") === true &&
-    f({ projectId: "hail" }, "riyadh") === false &&
-    f({ projectId: "hail", ownerProjectId: "riyadh" }, "hail") === true);
-  T("★★ اليدوية الموسومة تُحصر بمشروع إنشائها — والقديمة بلا وسمٍ تظهر للكل",
-    f({ projectId: "__OTHER__", isCustomProject: true, ownerProjectId: "hail" }, "hail") === true &&
-    f({ projectId: "__OTHER__", isCustomProject: true, ownerProjectId: "hail" }, "riyadh") === false &&
-    f({ projectId: "__OTHER__", isCustomProject: true }, "riyadh") === true &&
-    f({}, "riyadh") === true);
+    f({ projectId: "hail" }, "riyadh") === false);
+  T("★★ اليدوية كلُّها في المشتريات المركزية وحدَها — لا تظهر داخل أي مشروع (قرار المالك)",
+    f({ projectId: "__OTHER__", isCustomProject: true }, "hail") === false &&
+    f({ projectId: "__OTHER__", isCustomProject: true, ownerProjectId: "hail" }, "hail") === false &&
+    f({}, "riyadh") === false &&
+    f({ projectId: "__OTHER__", isCustomProject: true }, "") === true);
   T("★ بلا مشروعٍ حاليٍّ (وضعٌ مركزيّ) يظهر الكل",
     f({ projectId: "hail" }, "") === true && f(null, "x") === true);
 
   T("★★ قائمتا الطلبات والعقود تُبنيان من النطاق لا من المصفوفة الخام",
     /var all=_reqs\.filter\(function\(r\)\{ return ctDocInTenant\(r, t\); \}\)/.test(src) &&
     /var all=_ctrs\.filter\(function\(c\)\{ return ctDocInTenant\(c, t\); \}\)/.test(src));
-  T("★ الإنشاء يختم ownerProjectId والعقد يرثه من طلبه",
-    /doc\.ownerProjectId = _tenantId\(\);/.test(src) &&
-    /ownerProjectId: r\.ownerProjectId \|\| ""/.test(src));
+  T("★ لا وسمَ ownerProjectId يُكتب بعد اليوم — حقلٌ لا يقرؤه أحد لا يُخزَّن",
+    !/ownerProjectId\s*=/.test(src) && !/ownerProjectId:\s*r\./.test(src));
+  T("★ اليدوية المحجوبة تُذكَر بسطر نطاقٍ في القائمتين لا تختفي صامتة",
+    /من طلبات المشاريع اليدوية تُدار من المشتريات المركزية/.test(src) &&
+    /من عقود المشاريع اليدوية تُدار من المشتريات المركزية/.test(src));
 }
 
 /* ════════════════════════════════════════════════════════════════════
