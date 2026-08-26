@@ -36,7 +36,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2909";
+  var MODULE_BUILD = "v18.9.2911";
 
   // ── معايير العينة والأعلام (قابلة للتعديل من هنا — تُخزَّن مع كل دورة) ──
   var FA_PCT            = 10;    // نسبة العينة العشوائية من طلبات الشهر المغلقة
@@ -389,6 +389,9 @@
   function startSync(){
     _navToggle();
     if(typeof db==="undefined" || !db) return;
+    // بوّابة الدور قبل الاشتراك: دورٌ لا يرى الشاشة لا يُنزِّل مجموعتَها عن كل جلسة
+    // (خفض قراءات Firestore — قياس ٢٦/٠٨). والشاشةُ تنادي startSync عند الفتح فلا يُحرم أهلُها.
+    if(!_canView()) return;
     if(_unsub) return; // idempotent — المستمعون العامون يُركَّبون مرة واحدة (v18.9sz)
     // (١) جلبٌ فوري بطلبٍ واحد يوازي فتح التيار: مصافحة تيار Watch قد تستغرق
     // ثوانيَ طويلة على اتصال بارد (أبلغها المستخدم: «جارٍ تحميل بنود التدقيق»
@@ -764,6 +767,7 @@
       host.innerHTML='<div class="card"><div class="fa-empty"><div class="fa-empty-ic">'+_icn("lock")+'</div>هذا القسم متاح للمالية والمشتريات والإدارة فقط.</div></div>';
       return;
     }
+    startSync(); // فُتحت الشاشة ولا مشترك (دورٌ لم يُحمَّل له مسبقاً)؟ رَكِّبه — الدالة idempotent
     // قبل وصول أول لقطة من Firestore: مؤشر تحميل — لا «لا توجد دورات» المضللة
     if(!_loaded){
       host.innerHTML=_heroHtml(

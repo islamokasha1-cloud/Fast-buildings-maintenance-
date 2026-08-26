@@ -273,7 +273,7 @@
   // ══ مزامنة فورية (onSnapshot المصدر الوحيد) ══
   function startSync(){
     if(typeof db==='undefined' || !db) return;
-    if(_unsub){ _unsub(); _unsub=null; }
+    if(_unsub) return; // idempotent — المستمعون العامون يُركَّبون مرة واحدة (v18.9sz)
     _unsub = db.collection(COLLECTION())
       .orderBy("name","asc")
       .onSnapshot(function(snap){
@@ -305,6 +305,7 @@
   }
 
   function render(){
+    startSync(); // فُتحت الشاشة ولا مشترك (دورٌ لم يُحمَّل له مسبقاً)؟ رَكِّبه — الدالة idempotent
     buildDOM();
     populateCategorySelects();
     paintStats();

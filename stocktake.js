@@ -159,7 +159,10 @@
 
   function startSync(){
     if(typeof db==="undefined" || !db) return;
-    if(_unsub) _unsub();
+    // بوّابة الدور قبل الاشتراك: دورٌ لا يرى الجرد لا يُنزِّل مجموعتَه عن كل جلسة
+    // (خفض قراءات Firestore — قياس ٢٦/٠٨). والشاشةُ تنادي startSync عند الفتح.
+    if(!_canView()) return;
+    if(_unsub) return; // idempotent — المستمعون العامون يُركَّبون مرة واحدة (v18.9sz)
     _unsub = db.collection(COLL())
       .orderBy("createdAt","desc").limit(200)
       .onSnapshot(snap=>{
@@ -178,6 +181,7 @@
       host.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px">🔒 لا تملك صلاحية عرض الجرد</div>`;
       return;
     }
+    startSync(); // فُتحت الشاشة ولا مشترك (دورٌ لم يُحمَّل له مسبقاً)؟ رَكِّبه — الدالة idempotent
     if(_curId){
       const t = _takes.find(x=>x.id===_curId);
       if(!t){ _curId=null; return render(); }

@@ -499,7 +499,12 @@ function predelivery() {
        (طلب المالك): دالتا `assetRoleCanEdit`/`assetCanEdit` وتفريقُ فرعَي
        saveAsset — مع استبدال إيموجي الوحدة بأيقونات SVG (حذفُ خريطة الإيموجي
        عوّض معظم الزيادة). **تعديلُ صلاحياتِ شاشةٍ قائمة في مكانها** (CLAUDE.md). */
-    const IDX_CEILING = 37768;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37768 إلى 37786 — ‏١٨ سطراً لبوّابة التحميل المسبق حسب الدور
+       (`_shouldPrewarmCatalog` وشرطُها في `startPurchaseSync`): **إصلاحُ كلفةِ
+       منطقٍ قائم في مكانه** (قياس ٢٦/٠٨: ‏1.1م قراءة/يوم) — الدالّةُ تقرأ
+       `currentUser`/`_permOn`/`_blockedPagesForUser` وتحرس نداءاتِ الإقلاع في
+       النواة نفسِها، فوضعُها في وحدةٍ يفصل الحارسَ عمّا يحرسه (CLAUDE.md). */
+    const IDX_CEILING = 37787;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -12159,6 +12164,53 @@ function loadTimeSurgeryGuards() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   بوّابةُ التحميل المسبق حسب الدور (قياس ٢٦/٠٨: ‏1.1م قراءة/يوم مقابل 1.9 ألف
+   كتابة — الكتالوجُ ~٦٦٠٠ وثيقةً كان يُنزَّل عن كل جلسةٍ لكل دور). العقدُ ذو
+   شقّين لا يصحّ أحدُهما بلا الآخر:
+   (١) البوّابة: لا تحميلَ مسبقاً لدورٍ لا يطرق الشاشة (viewer/observer/hr بلا
+       poRequest للكتالوج، وcanView الوحدةِ نفسِها للرقابة/السداد/الجرد).
+   (٢) شبكةُ الأمان: كلُّ شاشةٍ محجوبةِ التحميل تُشغّل مستمعَها بنفسها عند الفتح
+       — فحذفُ نداءِ startSync من render يحوّل البوّابةَ إلى شاشةٍ فارغةٍ صامتة.
+   ═══════════════════════════════════════════════════════════════════════ */
+function roleGatedPrewarmGuards() {
+  H("vNEXT) بوّابة التحميل المسبق حسب الدور: لا حمولةَ شاشةٍ لدورٍ لا يفتحها — والشاشةُ تُحمِّل نفسَها عند الفتح");
+
+  const ROOTP = path.dirname(IDX);
+  const rdP = f => { try { return fs.readFileSync(path.join(ROOTP, f), "utf8"); } catch { return ""; } };
+  const FA = rdP("finance-audit.js"), HRP = rdP("hr-payments.js"), ST = rdP("stocktake.js"),
+        LC = rdP("labor-catalog.js"), PA = rdP("price-analysis.js");
+
+  /* (١) البوّابة في النواة */
+  T("★★ _shouldPrewarmCatalog معرّفةٌ وتستثني أدوار العرض والمتابعة",
+    /function _shouldPrewarmCatalog\(\)/.test(HTML) &&
+    /u\.role==="viewer"\|\|u\.role==="observer"/.test(HTML));
+  T("★ والموارد البشرية بلا poRequest مستثناة",
+    /hr_officer"\|\|u\.role==="hr_manager"\)\s*&&\s*!_permOn\(u\.permissions,"poRequest"\)/.test(HTML));
+  T("★★ وعند أيّ خطأٍ تُحمِّل (الأمان الوظيفي قبل التوفير)",
+    /_shouldPrewarmCatalog[\s\S]{0,900}catch\(e\)\{ return true; \}/.test(HTML));
+  T("★★ تأجيلُ الكتالوج صار خلف البوّابة",
+    /if\(_shouldPrewarmCatalog\(\)\) _deferBoot\(\(\)=>\{ loadItemCatalog\(\); \}, "catalog"\);/.test(HTML));
+  T("★ والمصنعيات والتسعير والمستعاض خلفها كذلك",
+    /if\(_shouldPrewarmCatalog\(\)\)\{\s*if\(window\.laborCatalog[\s\S]{0,300}window\.substituteBudget\.startSync\(\);\s*\}/.test(HTML));
+
+  /* (١-ب) بوّابةُ canView داخل الوحدات نفسِها */
+  T("★★ finance-audit: startSync يخرج لدورٍ لا يرى الشاشة", /function startSync\(\)\{[\s\S]{0,600}if\(!_canView\(\)\) return;/.test(FA));
+  T("★★ hr-payments: startSync يخرج لدورٍ لا يرى الشاشة", /function startSync\(\)\{[\s\S]{0,700}if\(!canView\(\)\) return;/.test(HRP));
+  T("★★ stocktake: startSync يخرج لدورٍ لا يرى الجرد", /function startSync\(\)\{[\s\S]{0,600}if\(!_canView\(\)\) return;/.test(ST));
+
+  /* (٢) شبكةُ الأمان: الشاشةُ تُشغّل مستمعَها بنفسها — والدوالُّ idempotent فلا إعادةَ تنزيل */
+  T("★★ finance-audit: render يستدعي startSync بعد بوّابة العرض", /if\(!_canView\(\)\)\{[\s\S]{0,400}\}\s*\n\s*startSync\(\);/.test(FA));
+  T("★★ hr-payments: render يستدعي startSync بعد بوّابة العرض", /if\(!canView\(\)\)\{ el\.innerHTML=_lockHtml\(\); return; \}\s*\n\s*startSync\(\);/.test(HRP));
+  T("★★ stocktake: render يستدعي startSync بعد بوّابة العرض", /🔒 لا تملك صلاحية عرض الجرد[\s\S]{0,120}\}\s*\n\s*startSync\(\);/.test(ST));
+  T("★★ labor-catalog: render يستدعي startSync", /function render\(\)\{\s*\n\s*startSync\(\);/.test(LC));
+  T("★★ price-analysis: render يستدعي startSync", /function render\(\)\{\s*\n\s*startSync\(\);/.test(PA));
+  T("★ price-analysis: openPicker يستدعي startSync (يُنادى من شاشة التسعير)", /function openPicker\(mode, linkTarget\)\{\s*\n\s*startSync\(\);/.test(PA));
+  T("★★ labor-catalog: startSync صار idempotent", /if\(_unsub\) return;/.test(LC));
+  T("★★ price-analysis: startSync صار idempotent", /if\(_unsub\) return;/.test(PA));
+  T("★★ stocktake: startSync صار idempotent (لا فكَّ وإعادةَ تركيب)", /if\(_unsub\) return;/.test(ST) && !/if\(_unsub\) _unsub\(\);/.test(ST));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    نقلُ Firestore: لا فرضَ long-polling — الفرضُ تحوّطٌ ثبت فشلُه وبقيت كلفتُه
    v18.9pf فرض `experimentalForceLongPolling` تحوّطاً من ca9/b815. والقياسُ نقضه
    من الجهتين: الانهيارُ وقع في الإنتاج **والفرضُ مفعّل** (‏٨٧٥ assertion —
@@ -13560,6 +13612,7 @@ function externalPurchaseApiGuards() {
   dataLivesWithItsListener();
   transportNotThrottled();
   loadTimeSurgeryGuards();
+  roleGatedPrewarmGuards();
   catalogMustNotBeCapped();
   firestoreIndexContract();
   archiveScanSkipGuards();
