@@ -484,7 +484,12 @@ function predelivery() {
        (طلب المالك): دالتا `ppmRoleCanCreate`/`ppmCanCreate` وتعليقُ حدودهما.
        **تعديلُ صلاحياتِ شاشةٍ قائمة في مكانها** — حرّاسُ الإنشاء الأربعة كلُّهم
        في وحدة PPM داخل النواة، ونقلُ الدالة وحدَها يفصلها عمّن يقرؤها. */
-    const IDX_CEILING = 37640;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37640 إلى 37669 — ‏٢٩ سطراً لقصر طلبات الشراء على الموارد
+       البشرية لدورَيها (طلب المالك): وسمُ `hrRequest` عند الإنشاء، وتوسيعُ
+       `_poVisibleList` بـ`_poIsHRRequest`/`_hrUserNames`، وفتحُ باب المتابعة
+       لمدير الموارد البشرية. **تعديلُ صلاحياتِ وعرضِ منطقٍ قائم في مكانه** —
+       التضييقُ يلتصق بالقائمة والعدّاد واللوحة في النواة، ونقلُه يفصله عنها. */
+    const IDX_CEILING = 37669;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -8251,8 +8256,10 @@ function hrPurchaseRequestGuards() {
     gRole:  grab(/function _isGlobalOnlyRole\(role\)\{[\s\S]*?\n\}/),
     keys:   grab(/function _permKeysForUser\(u\)\{[\s\S]*?\n\}/),
     blocked:grab(/function _blockedPagesForUser\(\)\{[\s\S]*?\n\}/),
-    own:    grab(/function _hroOwnPOsOnly\(\)\{[\s\S]*?\n\}/),
+    own:    grab(/function _hrPOsOnly\(\)\{[\s\S]*?\n\}/),
     mine:   grab(/function _poCreatedByMe\(p\)\{[\s\S]*?\n\}/),
+    names:  grab(/function _hrUserNames\(\)\{[\s\S]*?\n\}/),
+    isHR:   grab(/function _poIsHRRequest\(p\)\{[\s\S]*?\n\}/),
     vis:    grab(/function _poVisibleList\(\)\{[\s\S]*?\n\}/),
   };
   const absent = Object.keys(parts).filter(k => !parts[k]);
@@ -8261,17 +8268,18 @@ function hrPurchaseRequestGuards() {
 
   const SRC = [parts.map, parts.labels, "const _PERM_KEYS = Object.keys(_PERM_LABELS);",
     parts.grant, parts.dual, parts.elig, parts.isGr, parts.on, parts.pages, parts.okPgs,
-    parts.gRole, parts.keys, parts.blocked, parts.own, parts.mine, parts.vis].join("\n");
+    parts.gRole, parts.keys, parts.blocked, parts.own, parts.mine, parts.names, parts.isHR,
+    parts.vis].join("\n");
   /* `window` يُحقن حقناً: المفتاحُ المزدوجُ يقرأ أدوارَه من وحدة التعاقدات، فالحارسُ
      يمدّها بالقائمة الحقيقية بدل أن ينسخها — ولو غابت لَعاد الاصطلاحُ الحاجبَ صامتاً. */
   const CTR_ROLES = ((CTR_PATH && (fs.readFileSync(CTR_PATH,"utf8")
     .match(/var VIEW_ROLES\s*=\s*\[([^\]]*)\]/) || [])[1]) || "")
     .split(",").map(s=>s.trim().replace(/^"|"$/g,"")).filter(Boolean);
   const WIN = { contracts:{ viewRoles:CTR_ROLES, roleEligible:r=>CTR_ROLES.indexOf(r)!==-1 } };
-  const mk = (currentUser, purchases) =>
-    new Function("currentUser", "purchases", "window",
+  const mk = (currentUser, purchases, users) =>
+    new Function("currentUser", "purchases", "USERS", "window",
       SRC + "\nreturn {blocked:_blockedPagesForUser,keys:_permKeysForUser,on:_permOn,grant:_permIsGrant,vis:_poVisibleList};")
-      (currentUser, purchases || [], WIN);
+      (currentUser, purchases || [], users || [], WIN);
 
   const basePerms = { tickets:true, ppm:true, assets:true, purchases:true, reports:true,
                       kpi:true, globalPurchases:true, cleaning:true, contracts:true };
@@ -8300,6 +8308,11 @@ function hrPurchaseRequestGuards() {
     "المحجوب: " + B(hrYes).join(","));
   T("★★ hrpo: وما عداهما يبقى مغلقاً وإن مُنح المفتاح (تقارير · تدقيق · رقابة · مستعاض)",
     ["purchase-reports","substitute-budget","po-audit","finance-audit"].every(p => B(hrYes).includes(p)));
+  T("★★ hrpo: مديرُ الموارد البشرية — بابُ المتابعة وحدَه مفتوح، والإنشاءُ وبقيةُ المسار محجوبة",
+    !B({role:"hr_manager"}).includes("purchases") &&
+    ["new-purchase","purchase-reports","substitute-budget","po-audit","finance-audit"]
+      .every(p => B({role:"hr_manager"}).includes(p)),
+    "المحجوب: " + B({role:"hr_manager"}).join(","));
 
   // ── (٣) ★★ مانحٌ لا حاجب: لا فتحَ بأثرٍ رجعيّ لمن لم يُمنح ──
   T("★★ hrpo: المفتاحُ مانحٌ — المستخدمُ القديمُ بلا حقل صلاحياتٍ لا يُفتح له شيء",
@@ -8335,23 +8348,40 @@ function hrPurchaseRequestGuards() {
   T("★ hrpo: ومسؤولُ المشتريات لا يمسّه الحجبُ الجديد",
     B({role:"procurement_officer",permissions:{}}).length === 0);
 
-  // ── (٥) ★★ القائمةُ واللوحةُ من مصدرٍ واحد — لا تضييقٌ هنا وتسريبٌ هناك ──
+  // ── (٥) ★★ القائمةُ واللوحةُ من مصدرٍ واحد — طلباتُ الموارد البشرية وحدَها ──
   const POS = [
-    { id:"PO-1", createdBy:"عبدالله آدم" },
-    { id:"PO-2", createdBy:"سعد" },
+    { id:"PO-1", createdBy:"عبدالله آدم" },                  // قديمٌ بلا وسمٍ — يُمسَك باسم منشئه من USERS
+    { id:"PO-2", createdBy:"سعد" },                           // طلبُ مشروعٍ — ليس موارد بشرية
     { id:"PO-3", createdByName:"عبدالله آدم" },
     { id:"PO-4", createdBy:"مشتريات" },
+    { id:"PO-5", createdBy:"موظفة موارد", hrRequest:true },   // موسومٌ لحظةَ الإنشاء (الأصل)
+    { id:"PO-6", createdBy:"مدير الموارد" },                  // قديمٌ لمدير الموارد — يُمسَك بالاسم أيضاً
   ];
-  T("★★ hrpo: المُنحُ يرى طلباتِه هو وحدَها (لا مشترياتِ الشركة كلَّها)",
-    JSON.stringify(mk(hrYes, POS).vis().map(p => p.id)) === JSON.stringify(["PO-1","PO-3"]),
+  const HR_USERS = [
+    { name:"عبدالله آدم", role:"hr_officer" },
+    { name:"مدير الموارد", role:"hr_manager" },
+    { name:"سعد", role:"supervisor" },
+  ];
+  T("★★ hrpo: المُنحُ يرى طلبات الموارد البشرية وحدَها — بالوسم وبالاسم معاً (لا مشتريات المشاريع)",
+    JSON.stringify(mk(hrYes, POS, HR_USERS).vis().map(p => p.id)) === JSON.stringify(["PO-1","PO-3","PO-5","PO-6"]),
+    mk(hrYes, POS, HR_USERS).vis().map(p => p.id).join(","));
+  T("★★ hrpo: ومديرُ الموارد البشرية يرى القائمةَ نفسَها (طلباتُ الموارد البشرية فقط)",
+    JSON.stringify(mk({role:"hr_manager",name:"مدير الموارد"}, POS, HR_USERS).vis().map(p => p.id))
+      === JSON.stringify(["PO-1","PO-3","PO-5","PO-6"]),
+    mk({role:"hr_manager",name:"مدير الموارد"}, POS, HR_USERS).vis().map(p => p.id).join(","));
+  T("★ hrpo: وقبل وصول قائمة USERS يبقى الوسمُ و«أنشأتُه أنا» احتياطاً — لا قائمةَ فارغة",
+    JSON.stringify(mk(hrYes, POS).vis().map(p => p.id)) === JSON.stringify(["PO-1","PO-3","PO-5"]),
     mk(hrYes, POS).vis().map(p => p.id).join(","));
   T("★ hrpo: وبقيةُ الأدوار ترى القائمةَ كاملةً بلا تغيير",
-    mk({role:"procurement_officer",permissions:{}}, POS).vis().length === 4 &&
-    mk({role:"admin",permissions:{}}, POS).vis().length === 4);
+    mk({role:"procurement_officer",permissions:{}}, POS, HR_USERS).vis().length === 6 &&
+    mk({role:"admin",permissions:{}}, POS, HR_USERS).vis().length === 6);
+  T("★★ hrpo: طلبُ الشراء يُوسَم `hrRequest` لحظةَ إنشائه من دورِ موارد بشرية",
+    /hrRequest: !!\(currentUser && \(currentUser\.role==="hr_officer" \|\| currentUser\.role==="hr_manager"\)\)/.test(HTML));
   T("★★ hrpo: العدّادُ ولوحةُ المؤشّرات تقرآن نفسَ المصدر (لا بطاقةٌ أوسعُ من القائمة)",
     /const visible = _poVisibleList\(\);/.test(HTML) &&
     /\$\{filtered\.length\} طلب من \$\{visible\.length\}/.test(HTML) &&
     /const _dashBase = _poVisibleList\(\);/.test(HTML) &&
+    /const _badgeSrc = _poVisibleList\(\);/.test(HTML) &&
     !/const dashData = fProject\s*\n\s*\? purchases\.filter/.test(HTML));
 
   // ── (٦) الحفظ لا يمحو مفتاحاً لم تُعرض خانتُه ──
@@ -8369,6 +8399,12 @@ function hrPurchaseRequestGuards() {
   T("★ hrpo: الصنفُ يُضبط من الصلاحية عند تحديث الهيدر ويُنزع عند الخروج",
     /classList\.toggle\("perm-po-request", !!\(currentUser && _permOn\(currentUser\.permissions,"poRequest"\)\)\)/.test(HTML) &&
     /classList\.remove\("perm-po-request"\)/.test(HTML));
+  T("★ hrpo: قاعدةُ CSS تفتح مجموعةَ الشراء لمدير الموارد البشرية وتُخفي عنه زرَّ الإنشاء",
+    /body\.role-hr-manager #hdr-grp-po\{display:flex!important\}/.test(HTML) &&
+    /body\.role-hr-manager #grp-po\{display:block!important\}/.test(HTML) &&
+    /body\.role-hr-manager #grp-po \.sidebar-nav-btn\[data-page="new-purchase"\]\{display:none!important\}/.test(HTML) &&
+    /classList\.toggle\("role-hr-manager", !!\(currentUser && currentUser\.role === "hr_manager"\)\)/.test(HTML) &&
+    /classList\.remove\("role-hr-manager"\)/.test(HTML));
   T("★ hrpo: وللمفتاح خانةٌ في «مستخدم جديد» غيرُ مؤشَّرةٍ (مانحٌ لا يُمنح تلقائياً)",
     /id="perm-poRequest"> طلب شراء/.test(HTML) && !/id="perm-poRequest"\s+checked/.test(HTML));
 }

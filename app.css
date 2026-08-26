@@ -139,6 +139,15 @@ body.role-hr-officer #grp-po .sidebar-nav-btn[data-page="purchase-reports"],
 body.role-hr-officer #grp-po .sidebar-nav-btn[data-page="substitute-budget"],
 body.role-hr-officer #grp-po .sidebar-nav-btn[data-page="po-audit"],
 body.role-hr-officer #grp-po .sidebar-nav-btn[data-page="finance-audit"]{display:none!important}
+/* ── مدير الموارد البشرية: بابُ المتابعة وحدَه — عرضُ طلبات الموارد البشرية بلا إنشاء ──
+   الصنفُ `role-hr-manager` يُضاف مع `role-hr-officer` (المشترك للدورين)، فقاعدتا
+   الإظهار أدناه تغلبان الإخفاءَ أعلاه بترتيب الورود، وزرُّ «طلب شراء جديد» يُخفى
+   عنه (الإنشاءُ لمسؤول الموارد البشرية الممنوح وحدَه)، وبقيةُ أزرار المسار مخفيةٌ
+   أصلاً بقواعد `role-hr-officer`. وهذا **إخفاءٌ فقط** — البوّابةُ الحقيقية في
+   `_blockedPagesForUser`، وقصرُ القائمة على طلبات الموارد البشرية في `_poVisibleList`. */
+body.role-hr-manager #hdr-grp-po{display:flex!important}
+body.role-hr-manager #grp-po{display:block!important}
+body.role-hr-manager #grp-po .sidebar-nav-btn[data-page="new-purchase"]{display:none!important}
 /* ملاحظة: لا نُجبر اتجاه السهم — يتبع حالة الطي/الفتح الفعلية تلقائياً مثل بقية المجموعات */
 
 /* في وضع Global: تغيير العنوان الفرعي للهيدر */
