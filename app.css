@@ -2571,6 +2571,14 @@ html[data-theme="dark"] #header .logo-img{background:#fff;border-radius:9px;padd
 .ast-stat.good{border-inline-start-color:var(--sla-ok)}.ast-stat.good .si{background:var(--sla-ok-bg);color:var(--sla-ok)}.ast-stat.good .sv{color:var(--sla-ok)}
 .ast-stat.warn{border-inline-start-color:var(--sla-warn)}.ast-stat.warn .si{background:var(--sla-warn-bg);color:var(--sla-warn)}.ast-stat.warn .sv{color:var(--sla-warn)}
 .ast-stat.crit{border-inline-start-color:var(--sla-crit)}.ast-stat.crit .si{background:var(--sla-crit-bg);color:var(--sla-crit)}.ast-stat.crit .sv{color:var(--sla-crit)}
+/* بلاطتا تغطية خطط الصيانة (سجل الأصول): بنفسجي PPM كما وسم `.a-tag.pm`، والنقر يُفلتر */
+.ast-stat.ppm{border-inline-start-color:#6d28d9}.ast-stat.ppm .si{background:#f5f3ff;color:#6d28d9}.ast-stat.ppm .sv{color:#6d28d9}
+html[data-theme="dark"] .ast-stat.ppm .si{background:#241a3a;color:#c4b5fd}
+.ast-stat.noppm{border-inline-start-color:var(--muted)}.ast-stat.noppm .sv{color:var(--muted)}
+.ast-stat.tile-on{outline:2px solid #6d28d9;outline-offset:-1px}
+/* ستُّ بلاطاتٍ لا أربع في سجل الأصول — الشبكة تقيس حاويها (كما شبكة المشتريات §أعلاه)
+   والـ media أدناه لا يسري هنا (الـ ID أعلى تحديداً) لكن minmax تعطي عمودين على الجوال */
+#assets-stat-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
 @media(max-width:760px){.ast-stats{grid-template-columns:1fr 1fr}}
 
 .asset-card .a-row{display:flex;gap:12px;align-items:flex-start}
@@ -2598,6 +2606,7 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
 .a-tag svg{width:13px;height:13px}
 .a-tag.tk{background:#eff6ff;color:var(--info)}html[data-theme="dark"] .a-tag.tk{background:#12233a;color:#7aa6ff}
 .a-tag.pm{background:#f5f3ff;color:#6d28d9}html[data-theme="dark"] .a-tag.pm{background:#241a3a;color:#c4b5fd}
+.a-tag.noppm{background:var(--surface2);color:var(--muted);border:1px dashed var(--border)}
 .a-actions{display:flex;flex-direction:column;gap:6px;align-items:stretch;flex-shrink:0}
 .a-actions .btn{display:inline-flex;align-items:center;gap:5px;justify-content:center}
 .a-actions .btn svg{width:13px;height:13px}
