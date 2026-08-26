@@ -7011,8 +7011,11 @@ function hrPaymentsTests() {
     !HR.HRP_FINAL.some(k => HR.HRP_BOUNCED.indexOf(k) >= 0));
 
   // (٨) نوعية الأعمال — قائمة مغلقة + «أخرى» بنصّ حرّ
-  T("قائمة نوعية الأعمال تشمل الإقامات ورخص العمل والتأشيرات والسلفة و«أخرى»",
-    ["residency","work_permit","visa","advance","other"].every(k => HR.WORK_TYPES.some(w => w.k === k)));
+  T("قائمة نوعية الأعمال تشمل الإقامات ورخص العمل والتأشيرات والسلفة وتصفية المستحقات و«أخرى»",
+    ["residency","work_permit","visa","advance","settlement","other"].every(k => HR.WORK_TYPES.some(w => w.k === k)));
+  T("«تصفية مستحقات» بنفس التسمية في الواجهة والخادم",
+    HR.workTypeLabel({ workType: "settlement" }) === "تصفية مستحقات" &&
+    fs.readFileSync(path.resolve(path.dirname(IDX), "functions/lib/config.js"), "utf8").includes('settlement: "تصفية مستحقات"'));
   T("★ «سلفة موظف» بنفس التسمية في الواجهة والخادم (طلب المالك — لا انحراف بين النسختين)",
     HR.workTypeLabel({ workType: "advance" }) === "سلفة موظف" &&
     fs.readFileSync(path.resolve(path.dirname(IDX), "functions/lib/config.js"), "utf8").includes('advance: "سلفة موظف"'));

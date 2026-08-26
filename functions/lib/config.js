@@ -207,6 +207,7 @@ const HRP_WORK_TYPES = {
   labor_office: "مكتب العمل / رسوم حكومية",
   passport: "جوازات / أحوال",
   advance: "سلفة موظف",
+  settlement: "تصفية مستحقات",
   other: "أخرى",
 };
 
