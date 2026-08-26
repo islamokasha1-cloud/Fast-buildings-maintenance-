@@ -62,7 +62,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2909";
+  var MODULE_BUILD = "v18.9.2911";
 
   function COLL(){
     var dev=false;
@@ -324,6 +324,9 @@
     _navToggle();
     hookMyTasks();   // النواة تستدعينا عند بدء مزامنة المشتريات — renderPOMyTasks معرّفة حينها
     if(typeof db==="undefined" || !db) return;
+    // بوّابة الدور قبل الاشتراك: دورٌ لا يرى طلبات السداد لا يُنزِّل مجموعتَها عن كل جلسة
+    // (خفض قراءات Firestore — قياس ٢٦/٠٨). الشاشةُ وبطاقةُ مهامّي تناديان startSync عند العرض.
+    if(!canView()) return;
     if(_unsub) return; // idempotent — المستمعون العامون يُركَّبون مرة واحدة (v18.9sz)
     // جلبةٌ فورية توازي فتح التيار: مصافحة Watch قد تطول على اتصال بارد.
     try{
@@ -1267,6 +1270,7 @@
     _injectCSS();
     _navToggle();
     if(!canView()){ el.innerHTML=_lockHtml(); return; }
+    startSync(); // فُتحت الشاشة ولا مشترك (دورٌ لم يُحمَّل له مسبقاً)؟ رَكِّبه — الدالة idempotent
     if(_curId){
       var r=byId(_curId);
       if(r){ el.innerHTML=_detailHtml(r); _badge(); return; }

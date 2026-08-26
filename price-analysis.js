@@ -600,7 +600,7 @@ table tfoot td{background:#f1f5f9;font-weight:800}
   // ══ مزامنة فورية ══
   function startSync(){
     if(typeof db==='undefined' || !db) return;
-    if(_unsub){ _unsub(); _unsub=null; }
+    if(_unsub) return; // idempotent — المستمعون العامون يُركَّبون مرة واحدة (v18.9sz)
     _unsub = db.collection(COLLECTION())
       .orderBy("name","asc")
       .onSnapshot(function(snap){
@@ -636,6 +636,7 @@ table tfoot td{background:#f1f5f9;font-weight:800}
   }
 
   function render(){
+    startSync(); // فُتحت الشاشة ولا مشترك (دورٌ لم يُحمَّل له مسبقاً)؟ رَكِّبه — الدالة idempotent
     buildDOM();
     populateCategorySelects();
     paintStats();
@@ -798,6 +799,7 @@ table tfoot td{background:#f1f5f9;font-weight:800}
 
   // ══ المنتقي المشترك ══
   function openPicker(mode, linkTarget){
+    startSync(); // المنتقي يُستدعى من شاشات أخرى (طلب التسعير) — رَكِّب المشترك إن غاب
     _pickerMode = mode;
     _pickerLinkTarget = linkTarget || null;
     const titleEl = document.getElementById("pa-picker-title");
