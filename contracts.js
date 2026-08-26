@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2903";
+var MODULE_BUILD = "v18.9.2905";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -799,6 +799,31 @@ function docProjectKey(doc){
   return String(d.projectId||"");
 }
 
+/* ── حصرُ العرض بمشروع التشغيل الحالي (طلبُ المالك: كلُّ مشروعٍ يرى تعاقداتِه
+   وطلباتِه وحدَها) ──
+   المجموعاتُ `global_*` تبقى عامدةً بمستمعٍ واحدٍ حيٍّ عبر تبديل المشاريع
+   (قرارُ v18.9sz — فكُّ المستمعين وإعادةُ تركيبهم يراكم خلل ca9/b815)، فالحصرُ
+   **عرضيٌّ وقتَ الرسم** كالمشتريات لا في الاستعلام. القاعدة — دالةٌ نقيةٌ تُختبَر
+   وحدَها:
+   • الوثيقةُ الرسمية: مشروعُها `projectId` هو الفيصل — طلبٌ سُجِّل على مشروعٍ
+     يظهر عنده أياً كان المشروعُ المفتوحُ لحظةَ إنشائه.
+   • اليدويةُ (بلا مشروعٍ رسميّ): وسمُ الإنشاء `ownerProjectId` — يُختم على كل
+     وثيقةٍ جديدةٍ بمشروع التشغيل لحظةَ الإنشاء وينتقل من الطلب إلى عقده.
+   • اليدويةُ القديمةُ بلا وسم: تظهر في كل المشاريع — إخفاؤها تخمينٌ يُضيع وثائقَ
+     ماليةً صامتاً، وظهورُها الزائد يُصحَّح بفتحها مرةً (لا وسيلةَ لاستنتاج صاحبها).
+   • بلا مشروعٍ حاليٍّ (وضعٌ مركزيّ/شاشاتٌ عامة): الكل. */
+function ctDocInTenant(d, tenantId){
+  if(!tenantId || !d) return true;
+  var manual = d.isCustomProject === true || d.projectId === MANUAL_ID || !d.projectId;
+  if(!manual) return d.projectId === tenantId;
+  if(d.ownerProjectId) return d.ownerProjectId === tenantId;
+  return true;
+}
+function _tenantId(){
+  try{ return (typeof CURRENT_PROJECT!=="undefined" && CURRENT_PROJECT && CURRENT_PROJECT.id) || ""; }
+  catch(e){ return ""; }
+}
+
 /* حالةُ ربط الطلب بالموازنة — ثلاثُ حالاتٍ لا اثنتان، ولكلٍّ رسالتُها:
    `linked`     — بندٌ مختارٌ وللمشروع موازنةٌ فيه ⇒ تُقارَن القيمةُ بالمخطَّط
    `no_budget`  — لا موازنةَ للمشروع أصلاً (يدويٌّ غالباً) ⇒ **لا لومَ ولا تحذير**
@@ -1122,6 +1147,8 @@ function contractFromRequest(req, contractId, now, by, clauses){
     // شكلُ المشروع القياسيّ يُنقَل كما هو — لا يُعاد اشتقاقُه فينحرف
     projectId: r.projectId || "", isCustomProject: r.isCustomProject === true,
     projectName: r.projectName || "",
+    // وسمُ مشروع التشغيل ينتقل من الطلب لعقده — به يُحصَر اليدويُّ في مشروعه (ctDocInTenant)
+    ownerProjectId: r.ownerProjectId || "",
     budgetCategoryKey: r.budgetCategoryKey || "",   // قد يكون فارغاً — الربطُ اختياريّ
     // رصيدُ «البند المستعاض» يُختار مرةً على الطلب ويُورَث حرفياً — لا يُسأل ثانيةً
     isSubstitute: r.isSubstitute === true, substituteAccountId: r.substituteAccountId || "",
@@ -2623,6 +2650,8 @@ function createRequest(draft){
         return Promise.reject(new Error("خطة صرف الدفعات: نسبٌ موجبةٌ مجموعُها ١٠٠٪ بالضبط"));
     } else if(doc.paymentPlan != null) delete doc.paymentPlan;
     doc.createdAt=_now(); doc.createdBy=_me(); doc.createdByUser=_meUser();
+    // وسمُ مشروع التشغيل لحظةَ الإنشاء — به تُنسَب الوثيقةُ اليدويةُ لمشروعها (ctDocInTenant)
+    doc.ownerProjectId = _tenantId();
     doc.status = crqNextStage(doc, ceoThreshold());
     _pushTimeline(doc, "إنشاء الطلب", "created",
       (ENGAGEMENTS[doc.engagement]||{}).lbl + " — " + money(doc.value) + " ر.س");
@@ -4851,7 +4880,10 @@ function reqStatSet(r, key){
 }
 
 function reqListHTML(){
-  var all=_reqs.slice(), role=_role(), q=normName(_rFilter.q), tab=reqCurTab();
+  /* نطاقُ المشروع الحالي أولاً (ctDocInTenant) — التبويبُ والشريطُ وخياراتُ
+     المشروع كلُّها تُبنى من داخله فلا يظهر لمشروعٍ ما ليس له. */
+  var t=_tenantId();
+  var all=_reqs.filter(function(r){ return ctDocInTenant(r, t); }), role=_role(), q=normName(_rFilter.q), tab=reqCurTab();
   /* فلترُ المشروع **نطاقٌ** لا تنقيبٌ داخل النطاق: يقرؤه التبويبُ والشريطُ والقائمةُ
      معاً، بينما الحالةُ والبحثُ تنقّب في القائمة وحدَها — وإلا صار الشريطُ يعدّ
      ما نقّبتَ عنه لا ما بقي أمامك، وبطاقاتُه (وهي فلاترُ الحالة) تصفّي نفسَها. */
@@ -6315,7 +6347,9 @@ function ctrTabOf(c){
 function ctrCurTab(){ return _cFilter.tab==="finished" ? "finished" : "running"; }
 
 function ctrListHTML(){
-  var all=_ctrs.slice(), q=normName(_cFilter.q), tab=ctrCurTab();
+  /* نفسُ نطاق المشروع الحالي المطبَّق على طلبات التعاقد (ctDocInTenant). */
+  var t=_tenantId();
+  var all=_ctrs.filter(function(c){ return ctDocInTenant(c, t); }), q=normName(_cFilter.q), tab=ctrCurTab();
   var scoped=all.filter(function(c){ return ctrTabOf(c)===tab; });
   var list=scoped.filter(function(c){
     if(_cFilter.status && c.status!==_cFilter.status) return false;
@@ -9164,6 +9198,7 @@ window.contracts = {
   _aiSuggestions: function(){ return _aiLines; },
   delEditLine: delEditLine, editLinesRecalc: editLinesRecalc, saveLines: saveLines, closePay: closePay, doPay: doPay,
   requests: requests, requestById: requestById,
+  _ctDocInTenant: ctDocInTenant,   // حصرُ العرض بمشروع التشغيل — دالةٌ نقيةٌ تُفحص بلا متصفّح
   // المخرَجُ الورقيُّ لأمر الدفع — سندُ الصرف
   printPay: printPay, printPayOrder: printPayOrder,
   _amountWords: amountWords,
