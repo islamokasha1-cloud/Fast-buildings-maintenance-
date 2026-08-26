@@ -13285,6 +13285,46 @@ function assetPPMCoverageGuards() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   التعاقدات: كلُّ مشروعِ تشغيلٍ يرى تعاقداتِه وطلباتِه وحدَها (طلب المالك)
+   — الدالة النقية ctDocInTenant تُنفَّذ هنا فعلاً عبر تحميل الوحدة بلا DOM،
+   ومواضعُ الحصر (القائمتان · ختمُ الإنشاء · وراثةُ العقد) تُحرس نصّياً.
+   ════════════════════════════════════════════════════════════════════ */
+function contractsTenantScopeGuards() {
+  H("التعاقدات — كل مشروع يرى تعاقداته وطلباته وحدها");
+  if (!CTR_PATH) { T("contracts.js موجود", false); return; }
+  const src = fs.readFileSync(CTR_PATH, "utf8");
+  const vm = require("vm");
+  const sandbox = { window: {}, console, document: undefined };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); }
+  catch (e) { T("★ تُحمَّل بلا DOM", false, String(e.message).slice(0, 120)); return; }
+  const C = sandbox.window.contracts;
+  T("★ الدالة النقية _ctDocInTenant معروضة على الواجهة",
+    !!C && typeof C._ctDocInTenant === "function");
+  if (!C || typeof C._ctDocInTenant !== "function") return;
+  const f = C._ctDocInTenant;
+
+  T("★★ الوثيقة الرسمية تُنسب لمشروعها projectId أياً كان مشروعُ إنشائها",
+    f({ projectId: "hail" }, "hail") === true &&
+    f({ projectId: "hail" }, "riyadh") === false &&
+    f({ projectId: "hail", ownerProjectId: "riyadh" }, "hail") === true);
+  T("★★ اليدوية الموسومة تُحصر بمشروع إنشائها — والقديمة بلا وسمٍ تظهر للكل",
+    f({ projectId: "__OTHER__", isCustomProject: true, ownerProjectId: "hail" }, "hail") === true &&
+    f({ projectId: "__OTHER__", isCustomProject: true, ownerProjectId: "hail" }, "riyadh") === false &&
+    f({ projectId: "__OTHER__", isCustomProject: true }, "riyadh") === true &&
+    f({}, "riyadh") === true);
+  T("★ بلا مشروعٍ حاليٍّ (وضعٌ مركزيّ) يظهر الكل",
+    f({ projectId: "hail" }, "") === true && f(null, "x") === true);
+
+  T("★★ قائمتا الطلبات والعقود تُبنيان من النطاق لا من المصفوفة الخام",
+    /var all=_reqs\.filter\(function\(r\)\{ return ctDocInTenant\(r, t\); \}\)/.test(src) &&
+    /var all=_ctrs\.filter\(function\(c\)\{ return ctDocInTenant\(c, t\); \}\)/.test(src));
+  T("★ الإنشاء يختم ownerProjectId والعقد يرثه من طلبه",
+    /doc\.ownerProjectId = _tenantId\(\);/.test(src) &&
+    /ownerProjectId: r\.ownerProjectId \|\| ""/.test(src));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    سجل الأصول: المشرف يعدّل تفاصيل الأصل — والإضافة والحذف للمسؤول وحده،
    وواجهة الوحدة بأيقونات SVG لا إيموجي (طلب المالك).
    ════════════════════════════════════════════════════════════════════ */
@@ -13519,6 +13559,7 @@ function externalPurchaseApiGuards() {
   ppmSupervisorCreateGuards();
   assetPPMCoverageGuards();
   assetSupervisorEditGuards();
+  contractsTenantScopeGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
