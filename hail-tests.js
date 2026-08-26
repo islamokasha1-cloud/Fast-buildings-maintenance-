@@ -489,7 +489,13 @@ function predelivery() {
        `_poVisibleList` بـ`_poIsHRRequest`/`_hrUserNames`، وفتحُ باب المتابعة
        لمدير الموارد البشرية. **تعديلُ صلاحياتِ وعرضِ منطقٍ قائم في مكانه** —
        التضييقُ يلتصق بالقائمة والعدّاد واللوحة في النواة، ونقلُه يفصله عنها. */
-    const IDX_CEILING = 37669;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37669 إلى 37762 — ‏٩٢ سطراً لتغطية خطط الصيانة في سجل الأصول
+       (طلب المالك): فلترُ «مشمول/بدون خطة» وبلاطتاه والدالةُ النقية
+       `assetsPPMCoverage`، وقسما «خطط الصيانة» و«سجل الصيانة» كاملَين في
+       تفاصيل الأصل، و`openAddPPMForAsset`. **تعديلُ شاشةٍ قائمة في مكانها**
+       (فلاتر renderAssets ونافذةُ التفاصيل كلاهما في النواة) — ونقلُ منطقٍ
+       قائمٍ إلى ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). */
+    const IDX_CEILING = 37762;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -13205,6 +13211,75 @@ function ppmSupervisorCreateGuards() {
     /\$\{isAdmin\?`<button class="btn btn-delete btn-sm" onclick="event\.stopPropagation\(\);deletePPMPlan/.test(HTML));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   سجل الأصول: فلتر تغطية خطط الصيانة + خطط الأصل وسجل صيانته في التفاصيل
+   (طلب المالك) — الدالة النقية assetsPPMCoverage تُنفَّذ هنا فعلاً،
+   ومواضع الواجهة (الفلتر · البلاطتان · قسما التفاصيل) تُحرس نصّياً.
+   ════════════════════════════════════════════════════════════════════ */
+function assetPPMCoverageGuards() {
+  H("سجل الأصول — تغطية خطط الصيانة وسجل الصيانة");
+
+  // ── (١) الدالة النقية: تُستخرج من index.html وتُنفَّذ فعلاً ──
+  const m = HTML.match(/function assetsPPMCoverage\(assetList, planList\)\{[\s\S]*?\n\}/);
+  T("assetsPPMCoverage موجودة (دالة نقية)", !!m);
+  if (m) {
+    const cov = new Function(m[0] + "; return assetsPPMCoverage;")();
+    const A = [{ id: "A" }, { id: "B" }, { id: "C" }];
+    const P = [{ assetId: "A" }, { assetId: "B", disabled: true }, { assetId: "" }, null];
+    const r = cov(A, P);
+    T("★★ الخطة الفعّالة وحدها تغطية — الموقوفة والفارغة لا تُحسبان",
+      r.covered.size === 1 && r.covered.has("A") &&
+      r.withPlan.length === 1 && r.withPlan[0].id === "A" &&
+      r.withoutPlan.length === 2 && r.withoutPlan.map(x => x.id).join() === "B,C");
+    const empty = cov([], []);
+    T("★ مدخلات فارغة أو ناقصة لا تكسرها",
+      empty.covered.size === 0 && cov(null, null).withPlan.length === 0);
+  }
+
+  // ── (٢) الفلتر في الترميز وفي renderAssets ──
+  T("★ فلتر «خطط الصيانة» في صفحة الأصول بقيمتَي with/without",
+    /<select class="form-select" id="asset-f-ppm" onchange="pgReset\('assets'\);renderAssets\(\)">/.test(HTML) &&
+    /<option value="with">مشمول بخطة صيانة<\/option>/.test(HTML) &&
+    /<option value="without">بدون خطة صيانة<\/option>/.test(HTML));
+  T("★★ renderAssets يُطبّق فرعَي الفلتر على مجموعة التغطية",
+    /if\(fPPM==="with"\s+&& !coverage\.covered\.has\(a\.id\)\) return false;/.test(HTML) &&
+    /if\(fPPM==="without" &&\s+coverage\.covered\.has\(a\.id\)\) return false;/.test(HTML));
+  T("★ بلاطتا التغطية تعدّان من الدالة النقية وتُفلتران بالنقر",
+    /setTxt\("ast-ppm-with",\s+coverage\.withPlan\.length\);/.test(HTML) &&
+    /setTxt\("ast-ppm-without", coverage\.withoutPlan\.length\);/.test(HTML) &&
+    /onclick="astPPMTileClick\('with'\)"/.test(HTML) &&
+    /onclick="astPPMTileClick\('without'\)"/.test(HTML));
+  T("★ النقر الثاني على البلاطة نفسها يلغي فلترها",
+    /sel\.value = \(sel\.value===v\) \? "" : v;/.test(HTML));
+  T("★ وسم البطاقة يعدّ الخطط الفعّالة وحدها ويُعلن غياب الخطة",
+    /ppmPlans\.filter\(p=>p\.assetId===a\.id && !p\.disabled\)\.length/.test(HTML) &&
+    /<span class="a-tag noppm">\$\{_svgIcon\("ban"\)\} بدون خطة صيانة<\/span>/.test(HTML));
+
+  // ── (٣) تفاصيل الأصل: كل الخطط وكل السجل — لا اقتطاع الخمسة القديم ──
+  T("★★ قسم «خطط الصيانة» في التفاصيل يعرض كل خطط الأصل والموقوفة في الذيل",
+    /🗓️ خطط الصيانة \(\$\{relPPMs\.length\}\)/.test(HTML) &&
+    /\.sort\(\(x,y\)=>\(!!x\.disabled - !!y\.disabled\) \|\| \(new Date\(x\.nextDueDate\)-new Date\(y\.nextDueDate\)\)\);/.test(HTML));
+  T("★★ قسم «سجل الصيانة» يعرض كل البلاغات ويميّز الوقائية من التصحيحية",
+    /🔧 سجل الصيانة \(\$\{relTickets\.length\}\)/.test(HTML) &&
+    /\$\{t\.ppmId\?'وقائية — من خطة':'تصحيحية'\}/.test(HTML) &&
+    /\$\{t\.closedAt\?` • أُغلق: \$\{fmtDateOnly\(t\.closedAt\)\}`:""\}/.test(HTML) &&
+    !/relTickets\.slice\(0,5\)/.test(HTML));
+  T("★ زر «خطة لهذا الأصل» محروس بـ ppmCanCreate وموصول بالنافذة",
+    /\$\{canCreatePPM\?`<button class="btn btn-ghost btn-sm" onclick="openAddPPMForAsset\('\$\{esc\(id\)\}'\)">/.test(HTML) &&
+    /function openAddPPMForAsset\(assetId\)\{\s*\n\s*const a=assets\.find\(x=>x\.id===assetId\); if\(!a\) return;\s*\n\s*if\(!ppmCanCreate\(\)\)/.test(HTML));
+
+  // ── (٤) لقطة الخطط تعيد رسم صفحة الأصول — وإلا بقيت التغطية على العدّ القديم ──
+  T("★ startPPMSync يعيد رسم صفحة الأصول عند وصول اللقطة",
+    /if\(document\.getElementById\("page-assets"\)\?\.classList\.contains\("active"\)\) renderAssets\(\);/.test(HTML));
+
+  // ── (٥) الأنماط: البلاطتان والوسم وشبكة الستّ بلاطات — في ورقة الأنماط لا الترميز ──
+  T("★ أنماط البلاطتين والوسم وشبكة سجل الأصول موجودة",
+    /\.ast-stat\.ppm\{border-inline-start-color:#6d28d9\}/.test(HTML) &&
+    /\.ast-stat\.noppm\{border-inline-start-color:var\(--muted\)\}/.test(HTML) &&
+    /\.a-tag\.noppm\{background:var\(--surface2\);color:var\(--muted\);border:1px dashed var\(--border\)\}/.test(HTML) &&
+    /#assets-stat-grid\{grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,150px\),1fr\)\)\}/.test(HTML));
+}
+
 function externalPurchaseApiGuards() {
   H("واجهة النظام الخارجي (external-api) — الحساب والتحقّق والدورة");
   let X = null;
@@ -13388,6 +13463,7 @@ function externalPurchaseApiGuards() {
   vendorPOIssuance();
   externalPurchaseApiGuards();
   ppmSupervisorCreateGuards();
+  assetPPMCoverageGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
