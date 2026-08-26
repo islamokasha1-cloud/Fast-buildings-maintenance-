@@ -495,7 +495,11 @@ function predelivery() {
        تفاصيل الأصل، و`openAddPPMForAsset`. **تعديلُ شاشةٍ قائمة في مكانها**
        (فلاتر renderAssets ونافذةُ التفاصيل كلاهما في النواة) — ونقلُ منطقٍ
        قائمٍ إلى ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). */
-    const IDX_CEILING = 37762;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37762 إلى 37768 — ‏٦ أسطرٍ صافية لصلاحية تعديل الأصل للمشرف
+       (طلب المالك): دالتا `assetRoleCanEdit`/`assetCanEdit` وتفريقُ فرعَي
+       saveAsset — مع استبدال إيموجي الوحدة بأيقونات SVG (حذفُ خريطة الإيموجي
+       عوّض معظم الزيادة). **تعديلُ صلاحياتِ شاشةٍ قائمة في مكانها** (CLAUDE.md). */
+    const IDX_CEILING = 37768;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -13257,10 +13261,10 @@ function assetPPMCoverageGuards() {
 
   // ── (٣) تفاصيل الأصل: كل الخطط وكل السجل — لا اقتطاع الخمسة القديم ──
   T("★★ قسم «خطط الصيانة» في التفاصيل يعرض كل خطط الأصل والموقوفة في الذيل",
-    /🗓️ خطط الصيانة \(\$\{relPPMs\.length\}\)/.test(HTML) &&
+    /<span class="sec-ic">\$\{_svgIcon\("calendarClock"\)\}<\/span> خطط الصيانة \(\$\{relPPMs\.length\}\)/.test(HTML) &&
     /\.sort\(\(x,y\)=>\(!!x\.disabled - !!y\.disabled\) \|\| \(new Date\(x\.nextDueDate\)-new Date\(y\.nextDueDate\)\)\);/.test(HTML));
   T("★★ قسم «سجل الصيانة» يعرض كل البلاغات ويميّز الوقائية من التصحيحية",
-    /🔧 سجل الصيانة \(\$\{relTickets\.length\}\)/.test(HTML) &&
+    /<span class="sec-ic">\$\{_svgIcon\("wrench"\)\}<\/span> سجل الصيانة \(\$\{relTickets\.length\}\)/.test(HTML) &&
     /\$\{t\.ppmId\?'وقائية — من خطة':'تصحيحية'\}/.test(HTML) &&
     /\$\{t\.closedAt\?` • أُغلق: \$\{fmtDateOnly\(t\.closedAt\)\}`:""\}/.test(HTML) &&
     !/relTickets\.slice\(0,5\)/.test(HTML));
@@ -13278,6 +13282,56 @@ function assetPPMCoverageGuards() {
     /\.ast-stat\.noppm\{border-inline-start-color:var\(--muted\)\}/.test(HTML) &&
     /\.a-tag\.noppm\{background:var\(--surface2\);color:var\(--muted\);border:1px dashed var\(--border\)\}/.test(HTML) &&
     /#assets-stat-grid\{grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,150px\),1fr\)\)\}/.test(HTML));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   سجل الأصول: المشرف يعدّل تفاصيل الأصل — والإضافة والحذف للمسؤول وحده،
+   وواجهة الوحدة بأيقونات SVG لا إيموجي (طلب المالك).
+   ════════════════════════════════════════════════════════════════════ */
+function assetSupervisorEditGuards() {
+  H("سجل الأصول — صلاحية التعديل للمشرف وأيقونات SVG");
+
+  // ── (١) الدالة النقية: تُستخرج من index.html وتُنفَّذ فعلاً ──
+  const m = HTML.match(/function assetRoleCanEdit\(role\)\{[^\n]*\}/);
+  T("assetRoleCanEdit موجودة (دالة نقية على الدور)", !!m);
+  if (m) {
+    const can = new Function(m[0] + "; return assetRoleCanEdit;")();
+    T("★ المسؤول والمشرف (عربي «مشرف» وإنجليزي supervisor) يعدّلون",
+      can("admin") === true && can("مشرف") === true && can("supervisor") === true);
+    T("★ الفني والزائر ومَن بلا دور لا يعدّلون",
+      !can("فني") && !can("technician") && !can("viewer") && !can("") && !can(undefined));
+  }
+
+  // ── (٢) مواضع التعديل تمرّ بـ assetCanEdit ──
+  T("★ فتح نافذة تعديل الأصل محروس بـ assetCanEdit",
+    /function openEditAssetModal\(id\)\{\s*\n\s*if\(!assetCanEdit\(\)\)/.test(HTML));
+  T("★★ saveAsset: فرع التعديل بـ assetCanEdit وفرع الإضافة admin وحده",
+    /const _editingAsset = !!document\.getElementById\("asset-edit-id"\)\.value;/.test(HTML) &&
+    /if\(_editingAsset\)\{\s*\n\s*if\(!assetCanEdit\(\)\)/.test(HTML) &&
+    /\} else if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML));
+  T("★ زر التعديل على البطاقة وفي التفاصيل بـ canEdit — والحذف بـ isAdmin وحده",
+    /\$\{canEdit\?`<div class="a-actions">/.test(HTML) &&
+    /\$\{isAdmin\?`<button class="btn btn-delete btn-sm" onclick="event\.stopPropagation\(\);deleteAsset/.test(HTML) &&
+    /\$\{canEdit\?`<button class="btn btn-warn btn-sm" onclick="closeModal\('modal-asset-detail'\);openEditAssetModal/.test(HTML));
+
+  // ── (٣) الإضافة والحذف لم يتوسّعا ──
+  T("★ openAddAssetModal ما زال للمسؤول وحده",
+    /function openAddAssetModal\(\)\{\s*\n\s*if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML));
+  T("★ deleteAsset ما زال للمسؤول وحده",
+    /function deleteAsset\(id\)\{\s*\n\s*if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML));
+  T("★ زر «إضافة أصل» يظهر للمسؤول وحده",
+    /addBtn\.style\.display=\(currentUser&&currentUser\.role==="admin"\)\?"":"none";/.test(HTML));
+
+  // ── (٤) واجهة الوحدة بأيقونات SVG — لا إيموجي ──
+  T("★ خريطة إيموجي الأنواع أُزيلت والعنوان يرسم أيقونة المنصة",
+    !/ASSET_TYPE_ICONS/.test(HTML) &&
+    /asset-detail-title"\)\.innerHTML=`\$\{_ic\(ASSET_ICON\[effectiveType\]\|\|"box"\)\}/.test(HTML));
+  T("★ ترويسة صفحة الأصول وأزراها بأيقونات SVG (ph-ico كصفحة PPM)",
+    /<div class="page-hero-title"><span class="ph-ico"><svg[^>]*><path d="M14\.7 6\.3a1 1 0 0 0 0 1\.4l1\.6/.test(HTML));
+  T("★ عناوين أقسام التفاصيل بأيقونات sec-ic وأسلوبها في الورقة",
+    /<span class="sec-ic">\$\{_svgIcon\("clipboardList"\)\}<\/span> بيانات الأصل/.test(HTML) &&
+    /<span class="sec-ic">\$\{_svgIcon\("shield"\)\}<\/span> الصيانة والضمان/.test(HTML) &&
+    /\.sec-ic svg\{width:13px;height:13px;stroke-width:2\.2\}/.test(HTML));
 }
 
 function externalPurchaseApiGuards() {
@@ -13464,6 +13518,7 @@ function externalPurchaseApiGuards() {
   externalPurchaseApiGuards();
   ppmSupervisorCreateGuards();
   assetPPMCoverageGuards();
+  assetSupervisorEditGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));

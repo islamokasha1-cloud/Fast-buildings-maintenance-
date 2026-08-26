@@ -2607,6 +2607,9 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
 .a-tag.tk{background:#eff6ff;color:var(--info)}html[data-theme="dark"] .a-tag.tk{background:#12233a;color:#7aa6ff}
 .a-tag.pm{background:#f5f3ff;color:#6d28d9}html[data-theme="dark"] .a-tag.pm{background:#241a3a;color:#c4b5fd}
 .a-tag.noppm{background:var(--surface2);color:var(--muted);border:1px dashed var(--border)}
+/* أيقونة عنوان قسم في نافذة تفاصيل الأصل — خطّية بلون النص بدل الإيموجي */
+.sec-ic{display:inline-flex;flex-shrink:0}
+.sec-ic svg{width:13px;height:13px;stroke-width:2.2}
 .a-actions{display:flex;flex-direction:column;gap:6px;align-items:stretch;flex-shrink:0}
 .a-actions .btn{display:inline-flex;align-items:center;gap:5px;justify-content:center}
 .a-actions .btn svg{width:13px;height:13px}
