@@ -13323,6 +13323,21 @@ function contractsTenantScopeGuards() {
   T("★ اليدوية المحجوبة تُذكَر بسطر نطاقٍ في القائمتين لا تختفي صامتة",
     /من طلبات المشاريع اليدوية تُدار من المشتريات المركزية/.test(src) &&
     /من عقود المشاريع اليدوية تُدار من المشتريات المركزية/.test(src));
+
+  /* ── نسبةُ سداد أمر الدفع ظاهرةٌ بوضوح + العنوان الموسَّع (طلب المالك) ── */
+  T("★ الدالة النقية _crqPaidPct معروضة وتحسب صحيحاً",
+    typeof C._crqPaidPct === "function" &&
+    C._crqPaidPct({ engagement:"pay_order", value:16100, payments:[{amount:8050}] }) === 50 &&
+    C._crqPaidPct({ value:1000, payments:[{amount:1500}] }) === 100 &&   // مسقوفةٌ بـ١٠٠
+    C._crqPaidPct({ value:0, payments:[{amount:5}] }) === 0 &&
+    C._crqPaidPct({ value:1000 }) === 0);
+  T("★★ شريط النسبة يُرسم في بلاطة القائمة وبطاقة الطلب معاً وبأنماطه في الورقة",
+    /payProgressHTML\(r, true\)\+/.test(src) &&
+    /waiting \+ sod \+ payProgressHTML\(r, false\) \+ payBox \+/.test(src) &&
+    /\.ct-payprog\{/.test(src) && /\.ct-payprog\.done \.bar i\{background:var\(--sla-ok\)\}/.test(src));
+  T("★ العنوان صار «طلبات التعاقد وأوامر الدفع» في رأس الصفحة والقائمة الجانبية",
+    /headHTML\("طلبات التعاقد وأوامر الدفع", "من المقايسة/.test(src) &&
+    /lbl:"طلبات التعاقد وأوامر الدفع" \}/.test(src));
 }
 
 /* ════════════════════════════════════════════════════════════════════
