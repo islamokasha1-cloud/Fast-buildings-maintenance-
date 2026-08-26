@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2907";
+var MODULE_BUILD = "v18.9.2909";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -504,6 +504,40 @@ function crqPlanInstallment(req){
   if(i === plan.length - 1) return { index:i, count:plan.length, pct:plan[i], amount:due };
   return { index:i, count:plan.length, pct:plan[i],
            amount: Math.min(due, r2(r2(Number(r.value)||0) * plan[i] / 100)) };
+}
+
+/* نسبةُ السداد المئوية — نقيّةٌ تُفحص بلا متصفّح: المسدَّدُ من قيمة الأمر،
+   مسقوفةٌ بـ١٠٠ (سدادٌ زائدٌ لا يرسم شريطاً فائضاً)، وقيمةٌ صفريةٌ ⇒ صفر. */
+function crqPaidPct(req){
+  var r = req || {};
+  var v = r2(Number(r.value)||0);
+  if(v <= 0) return 0;
+  return Math.min(100, r2(crqPaidTotal(r) * 100 / v));
+}
+
+/* شريطُ نسبة السداد على أمر الدفع (طلبُ المالك: النسبةُ واضحةٌ لا مدفونةٌ في
+   الأرقام) — يظهر متى كانت للأمر خطةُ دفعاتٍ أو سدادٌ فعليّ: شريطُ تقدّمٍ
+   ونسبةٌ مئويةٌ والمتبقّي، وفي البطاقة الكاملة الدفعةُ القادمةُ من الخطة.
+   compact لبلاطة القائمة، والكاملُ لبطاقة الطلب. */
+function payProgressHTML(r, compact){
+  if(!r || r.engagement !== "pay_order") return "";
+  var plan = normPaymentPlan(r.paymentPlan);
+  var paid = crqPaidTotal(r);
+  if(!plan.length && paid <= 0) return "";
+  var pct  = crqPaidPct(r);
+  var done = r.status === "crq_paid" || crqPayDue(r) <= 0;
+  var inst = crqPlanInstallment(r);
+  var lbl;
+  if(done) lbl = 'سُدِّد <span class="num">100</span>٪ — اكتمل ✓';
+  else{
+    lbl = 'المسدَّد <span class="num">'+pct+'</span>٪ — بقي <span class="num">'+money(crqPayDue(r))+'</span> ر.س';
+    if(!compact && inst)
+      lbl += ' · الدفعة القادمة <span class="num">'+inst.pct+'</span>٪ (<span class="num">'+money(inst.amount)+'</span> ر.س — دفعة '+(inst.index+1)+' من '+inst.count+')';
+  }
+  return '<div class="ct-payprog'+(compact?' sm':'')+(done?' done':'')+'">'+
+    '<span class="bar"><i style="width:'+pct+'%"></i></span>'+
+    '<span class="t">'+lbl+'</span>'+
+  '</div>';
 }
 
 /* ════ تفقيطُ المبلغ — «المبلغُ كتابةً» على أمر الدفع ════
@@ -4913,7 +4947,7 @@ function reqListHTML(){
 
   var actions = canCreateReq()
     ? '<button class="btn btn-primary btn-sm" onclick="contracts.newRequest()">'+_icn("plus")+' طلب تعاقد جديد</button>' : "";
-  var head = headHTML("طلبات التعاقد", "من المقايسة إلى عقدٍ ساري — أو أمرِ دفعٍ للاتفاق الصغير.", actions, "fileText");
+  var head = headHTML("طلبات التعاقد وأوامر الدفع", "من المقايسة إلى عقدٍ ساري — أو أمرِ دفعٍ للاتفاق الصغير.", actions, "fileText");
 
   /* شريطُ التبويبات — العدُّ من نطاق المشروع نفسِه، فلا تبويبٌ يَعِد بما لا يعرضه. */
   var tabsBar = '<div class="ct-tabs">'+REQ_TABS.map(function(t){
@@ -5057,15 +5091,10 @@ function reqTileHTML(r){
       ' <span class="ct-dot">·</span> <span class="num">'+_esc(r.id)+'</span>'+
       ' <span class="ct-dot">·</span> '+_esc(_projName(r))+'</div>'+
     (docSubstituteId(r)?'<div style="margin-top:5px">'+substituteChip(r,true)+'</div>':'')+
+    // نسبةُ سداد أمر الدفع تُقال في القائمة بشريطٍ واضح — لا داخل البطاقة وحدها
+    payProgressHTML(r, true)+
     '<div class="ct-tile-foot">'+
-      '<div class="ct-money"><span class="num">'+money(r.value)+'</span> <small>ر.س</small>'+
-        // أمرُ الدفع المسدَّدُ جزئياً يقولها في القائمة — لا داخل البطاقة وحدها
-        (function(){
-          if(r.engagement!=="pay_order" || r.status!=="crq_pending_pay") return "";
-          var pp=crqPaidTotal(r);
-          return pp>0 ? ' <span class="ct-doc s-soon">سُدِّد <span class="num">'+money(pp)+'</span> — بقي <span class="num">'+money(crqPayDue(r))+'</span></span>' : "";
-        })()+
-      '</div>'+
+      '<div class="ct-money"><span class="num">'+money(r.value)+'</span> <small>ر.س</small></div>'+
       '<div class="ct-tile-who">'+_esc(r.vendorName||"—")+(owner?' <span class="ct-dot">·</span> عند '+_esc(owner.lbl):'')+'</div>'+
     '</div>'+
   '</div>';
@@ -5610,7 +5639,7 @@ function submitRequest(){
 /* ── بطاقةُ الطلب ── */
 function reqCardHTML(id){
   var r=requestById(id);
-  if(!r) return headHTML("طلبات التعاقد","","", "fileText")+'<div class="card">تعذّر العثور على الطلب.</div>';
+  if(!r) return headHTML("طلبات التعاقد وأوامر الدفع","","", "fileText")+'<div class="card">تعذّر العثور على الطلب.</div>';
   var eng=ENGAGEMENTS[r.engagement]||ENGAGEMENTS.contract;
   var owner=crqGateOwner(r.status);
   var mine=crqCanAct(r.status,_role());
@@ -5767,7 +5796,7 @@ function reqCardHTML(id){
 
   return back +
     headHTML(r.title||r.id, reqBadge(r.status)+' <span class="ct-id num">'+_esc(r.id)+'</span>', tools, eng.icon) +
-    waiting + sod + payBox +
+    waiting + sod + payProgressHTML(r, false) + payBox +
     '<div class="card ct-sec">'+info+
       (r.scope?'<div class="ct-note" style="margin-top:12px">'+_esc(r.scope)+'</div>':'')+'</div>'+
     // في وضع التحرير يحلّ المحرّرُ محلَّ الجدول — لا جدولان لبنودٍ واحدة
@@ -6422,7 +6451,7 @@ function ctrListHTML(){
       '<div class="ct-empty-ic">'+_svg("briefcase")+'</div>'+
       '<div class="ct-empty-t">لا عقود بعد</div>'+
       '<div class="ct-empty-s">العقدُ يُولَد من طلبِ تعاقدٍ معتمَد — اعتمِد طلباً ثم اضغط «إنشاء العقد» من بطاقته.</div>'+
-      '<button class="btn btn-ghost btn-sm" style="margin-top:14px" onclick="showPage(\'contract-requests\')">'+_icn("fileText","ic-sm")+' طلبات التعاقد</button>'+
+      '<button class="btn btn-ghost btn-sm" style="margin-top:14px" onclick="showPage(\'contract-requests\')">'+_icn("fileText","ic-sm")+' طلبات التعاقد وأوامر الدفع</button>'+
     '</div>';
   } else if(!scoped.length){
     /* التبويبُ فارغٌ والبياناتُ موجودة — يُقال معناه لا «لا نتائج» تُقرأ عطلاً. */
@@ -8908,6 +8937,15 @@ function injectCSS(){
 /* المرشّحات */
 ".ct-filters{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-bottom:14px}",
 ".ct-scope{font-size:11.5px;color:var(--muted);font-weight:700;margin:-6px 0 12px}",
+/* شريطُ نسبة سداد أمر الدفع — توكنزُ SLA نفسُها: برتقاليٌّ ما دام مفتوحاً وأخضرُ عند الاكتمال */
+".ct-payprog{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 12px;margin-bottom:12px;font-size:12px;font-weight:700;color:var(--text)}",
+".ct-payprog .bar{flex:0 0 120px;height:8px;border-radius:99px;background:var(--surface2);border:1px solid var(--border);overflow:hidden;direction:ltr}",
+".ct-payprog .bar i{display:block;height:100%;background:var(--sla-warn);border-radius:99px;transition:width .3s}",
+".ct-payprog.done .bar i{background:var(--sla-ok)}",
+".ct-payprog.done{border-color:var(--sla-ok);color:var(--sla-ok)}",
+".ct-payprog .t{min-width:0}",
+".ct-payprog.sm{margin:7px 0 0;padding:5px 9px;font-size:10.5px;gap:8px;border-radius:8px}",
+".ct-payprog.sm .bar{flex-basis:70px;height:6px}",
 ".ct-filters .form-input{font-size:12.5px}",
 /* شبكةُ الأطراف */
 ".ct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:14px}",
@@ -9097,7 +9135,7 @@ function injectSidebarGroup(){
   grp.id = "grp-contracts";
   grp.style.maxHeight = "0";
 
-  [{ id:"nav-contract-reqs-btn", page:PAGE_REQS,    icon:"fileText", lbl:"طلبات التعاقد" },
+  [{ id:"nav-contract-reqs-btn", page:PAGE_REQS,    icon:"fileText", lbl:"طلبات التعاقد وأوامر الدفع" },
    { id:"nav-contracts-btn",     page:PAGE_CTRS,    icon:"briefcase",lbl:"العقود" },
    { id:"nav-vendors-btn",       page:PAGE_VENDORS, icon:"hardHat",  lbl:"سجل الأطراف" }].forEach(function(b){
     var btn = document.createElement("button");
@@ -9309,6 +9347,7 @@ window.contracts = {
   _lineTotal: lineTotal,
   _linesTotal: linesTotal,
   _payOrderAllowed: payOrderAllowed,
+  _crqPaidPct: crqPaidPct,   // نسبةُ السداد — دالةٌ نقيةٌ تُفحص بلا متصفّح
   _crqPaidTotal: crqPaidTotal,
   _crqPayDue: crqPayDue,
   _normPaymentPlan: normPaymentPlan,
