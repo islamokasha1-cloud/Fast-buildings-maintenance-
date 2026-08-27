@@ -7043,6 +7043,9 @@ function hrPaymentsTests() {
   T("★ «سلفة موظف» بنفس التسمية في الواجهة والخادم (طلب المالك — لا انحراف بين النسختين)",
     HR.workTypeLabel({ workType: "advance" }) === "سلفة موظف" &&
     fs.readFileSync(path.resolve(path.dirname(IDX), "functions/lib/config.js"), "utf8").includes('advance: "سلفة موظف"'));
+  T("★ «سداد بدل عمل إضافي» بنفس التسمية في الواجهة والخادم (طلب المالك — لا انحراف بين النسختين)",
+    HR.workTypeLabel({ workType: "overtime" }) === "سداد بدل عمل إضافي" &&
+    fs.readFileSync(path.resolve(path.dirname(IDX), "functions/lib/config.js"), "utf8").includes('overtime: "سداد بدل عمل إضافي"'));
   T("«أخرى» تعرض النص الحرّ المُدخل",
     HR.workTypeLabel({ workType: "other", workTypeOther: "رسوم شهادة صحية" }) === "رسوم شهادة صحية");
 
