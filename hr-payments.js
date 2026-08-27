@@ -62,7 +62,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2913";
+  var MODULE_BUILD = "v18.9.2915";
 
   function COLL(){
     var dev=false;
@@ -91,6 +91,7 @@
     {k:"passport",    l:"جوازات / أحوال",              icon:"book"},
     {k:"advance",     l:"سلفة موظف",                   icon:"banknote"},
     {k:"settlement",  l:"تصفية مستحقات",               icon:"receipt"},
+    {k:"overtime",    l:"سداد بدل عمل إضافي",          icon:"clock"},
     {k:"other",       l:"أخرى",                        icon:"folderOpen"}
   ];
   var _WT_MAP = (function(){ var m={}; WORK_TYPES.forEach(function(w){ m[w.k]=w; }); return m; })();

@@ -208,6 +208,7 @@ const HRP_WORK_TYPES = {
   passport: "جوازات / أحوال",
   advance: "سلفة موظف",
   settlement: "تصفية مستحقات",
+  overtime: "سداد بدل عمل إضافي",
   other: "أخرى",
 };
 
