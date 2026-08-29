@@ -62,7 +62,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2925";
+  var MODULE_BUILD = "v18.9.2928";
 
   function COLL(){
     var dev=false;
@@ -90,6 +90,7 @@
     {k:"labor_office",l:"مكتب العمل / رسوم حكومية",    icon:"landmark"},
     {k:"passport",    l:"جوازات / أحوال",              icon:"book"},
     {k:"advance",     l:"سلفة موظف",                   icon:"banknote"},
+    {k:"travel_ticket",l:"تذاكر السفر",                icon:"ticket"},
     {k:"settlement",  l:"تصفية مستحقات",               icon:"receipt"},
     {k:"overtime",    l:"سداد بدل عمل إضافي",          icon:"clock"},
     {k:"other",       l:"أخرى",                        icon:"folderOpen"}
