@@ -22,11 +22,22 @@
      ومقياسُ الغرامة — مرجعاً حاضراً أمام المستخدم لا ملفَّ إكسل على مكتبٍ ما.
    • حالةٌ صريحةٌ لكل مجموعة: **من أين ستأتي درجتها** وما الذي ينقص لحسابها.
 
+   ── المرحلة ٣ (سجلّ عدم المطابقة — NCR) ──
+   ٥١٫٥٪ من درجة البطاقة «تقاريرُ عدم مطابقة» يكتبها الطرفُ الآخر — فدورُ المنصة فيها
+   **دفاعيّ**: استقبالُ المخالفة وربطُها بمؤشرها (فيظهر أثرُها على درجة المؤشر
+   وحسميتُها فوراً)، وخطةُ تصحيحٍ بموعدٍ ومسؤول، وإغلاقٌ بدليل، و**ملفُّ اعتراضٍ**
+   يجمع سجلّات المنصة المؤرّخة قبل تاريخ المخالفة. كتالوجُ المؤشرات الـ٢٥ (KPIS)
+   منسوخٌ من ملف الاستشاري V3 حرفياً: معاملُ خصم كل تقرير، ومبلغُ الحسمية الأساس.
+   **قراران محاسبيان مُعلَنان لا مضمَران**: (١) عتبةُ الحسمية = الحدُّ الأدنى للسنة
+   (٧٠٪ س١ — خلية X6 في ملف الاستشاري)؛ (٢) عدّادُ التكرار يتصفّر بعد شهرِ امتثالٍ —
+   وهذا هو الاستفسار ٦ المفتوح مع الأمانة، فالافتراضُ الأرفقُ بنا مُعلَنٌ في الشاشة.
+
    ── ما ليس في هذه المرحلة (عمداً) ──
-   لا درجةَ محسوبة ولا غرامةَ مقدَّرة. حسابُ الدرجة يحتاج حقولاً غير موجودةٍ بعد
-   (زمن الاستجابة، تاريخ استحقاق الوقائي، سجلّ المخالفات) — وعرضُ رقمٍ قبلها يكون
-   **رقماً كاذباً**، وهو أسوأ من لا رقم في عقدٍ يُحاسَب عليه المال شهرياً.
-   المرحلة ٢: الحقول · المرحلة ٣: سجلّ عدم المطابقة · المرحلة ٤: الدرجة والغرامة الحيّة.
+   لا درجةَ كليّةً محسوبةً ولا غرامةَ شهريةً مقدَّرة. أرقامُ هذه المرحلة كلُّها
+   **على مستوى المؤشر الواحد** ومصدرُها سجلُّ مخالفاتٍ نُدخله بأيدينا — أما الدرجةُ
+   الكليّة فتحتاج بقيةَ المؤشرات المقاسة نسباً، وعرضُ رقمٍ قبلها يكون **رقماً
+   كاذباً**، وهو أسوأ من لا رقم في عقدٍ يُحاسَب عليه المال شهرياً.
+   المرحلة ٤: الدرجة والغرامة الحيّة و«ماذا لو».
    المرجع الكامل: docs/performance-project-type-plan.md و docs/consultant-kpi-mapping.md
 
    ── الهوية البصرية: لغة المنصة نفسها ──
@@ -34,16 +45,18 @@
    مقابل له فقط يُعرَّف هنا في طبقةٍ رقيقة — فتتبع الصفحةُ أيَّ تغييرٍ في هوية المنصة.
 
    ── ملاحظة تقنية مقصودة ──
-   لا onSnapshot ولا .get() في هذه المرحلة: كل ما تعرضه الصفحة مشتقٌّ من سجلّ المشروع
-   المحمَّل أصلاً في الذاكرة. لا مستمعَ جديداً مربوطاً بالمشروع بلا حاجة (انضباط
-   المستمعين في هذا النظام: تراكم targetId يُطلق خلل Firestore الداخلي ca9/b815).
+   **لا onSnapshot في هذه الوحدة إطلاقاً** (انضباط المستمعين: تراكم targetId يُطلق
+   خلل Firestore الداخلي ca9/b815 — درس v18.9sz، والوحدة خارج مسار فكّ switchProject).
+   سجلُّ المخالفات يُقرأ بـ`.get()` عند فتح الصفحة وبعد كل كتابة، بكاشٍ لكل مشروعٍ
+   وعمرٍ أدنى ٦٠ ثانية — بياناتٌ قليلةُ الحركة (مخالفاتٌ تُدخَل يدوياً) لا تستحق
+   مستمعاً حيّاً، والقراءةُ المدفوعةُ عند الحاجة أرخصُ وأسلمُ من مستمعٍ يُنسى.
    ═══════════════════════════════════════════════════════════════════════════ */
 (function(){
 "use strict";
 
 const PAGE_ID      = "performance";
-const VERSION      = "0.1";
-const MODULE_BUILD = "v18.9.2928";
+const VERSION      = "0.3";
+const MODULE_BUILD = "v18.9.2931";
 
 /* ════════════ خدمات النواة (قراءة بالاسم مع بدائل آمنة) ════════════ */
 function _esc(s){ try{ return (typeof esc==="function") ? esc(s) : String(s==null?"":s); }catch(e){ return String(s==null?"":s); } }
@@ -132,6 +145,112 @@ function _pct(n){ return Math.round(n*1000)/10; }
 function _money(n){ try{ return Number(n||0).toLocaleString("en-US"); }catch(e){ return String(n||0); } }
 
 /* ════════════════════════════════════════════════════════════
+   [المرحلة ٣] كتالوج المؤشرات الخمسة والعشرين — من ملف الاستشاري V3 حرفياً
+   (٢٠ موزوناً مجموعُ أوزانها ١ + ٥ مؤشراتِ حسميةٍ بلا وزن. ملاحظة: توثيقُنا
+   الداخلي لخّصها «١٨+٦=٢٤» — والعبرةُ بصفوف الملف نفسِه، وقد نُسخت كلُّها.)
+   ────────────────────────────────────────────────────────────
+   w:      وزن المؤشر في الدرجة الكلية (null = مؤشرُ حسميةٍ نقديةٍ بلا وزن).
+   ncrPct: خصمُ **كل تقرير عدم مطابقةٍ واحد** من درجة المؤشر (عمود F في الملف —
+           ١٪ أو ٢٪ أو ٥٪). null = مؤشرٌ يُقاس نسبةً من بيانات التشغيل لا بالتقارير،
+           فتُسجَّل مخالفتُه للتوثيق والاعتراض ولا يُحسب لها أثرُ درجةٍ هنا.
+   ded:    الحسميةُ التلقائية للشهر الأول بالريال (عمود Q) — تتصاعد ×١→×٣ بالتكرار.
+   البياناتُ بياناتٌ لا منطق: تُعدَّل هنا في موضعٍ واحد إن وصل ملحقٌ بأرقامٍ أخرى. */
+const KPIS = [
+  { id:"1.1", grp:"contract",   name:"تجديد شهادات ISO (9001/14001/45001)",              w:null,  ncrPct:null, ded:11000 },
+  { id:"1.2", grp:"contract",   name:"تحديث نظام إدارة وسجل الأصول",                      w:0.04,  ncrPct:0.02, ded:2750  },
+  { id:"1.3", grp:"contract",   name:"عمليات التفتيش المكتملة بتردد محدد",                w:0.04,  ncrPct:0.02, ded:2750  },
+  { id:"1.4", grp:"contract",   name:"التعاون والتواصل",                                  w:0.02,  ncrPct:0.02, ded:2750  },
+  { id:"1.5", grp:"contract",   name:"نسبة الرضا في الاستبيانات والتطبيقات الذكية",       w:null,  ncrPct:null, ded:2750  },
+  { id:"1.6", grp:"contract",   name:"نسبة التصحيحية إلى (التصحيحية+الوقائية)",           w:null,  ncrPct:null, ded:11000 },
+  { id:"2.1", grp:"hse",        name:"معدل وقوع الحوادث (AIR)",                           w:0.05,  ncrPct:null, ded:16500 },
+  { id:"2.2", grp:"hse",        name:"الامتثال لأنظمة التحكم في السلامة بالمواقع",        w:0.04,  ncrPct:0.02, ded:5500  },
+  { id:"2.3", grp:"hse",        name:"الامتثال للسلامة المهنية (ISO 45001)",              w:0.03,  ncrPct:0.02, ded:5500  },
+  { id:"2.4", grp:"hse",        name:"الامتثال للسلامة البيئية (ISO 14001)",              w:0.03,  ncrPct:0.02, ded:5500  },
+  { id:"2.5", grp:"hse",        name:"التدريب والتوعية للسلامة المهنية",                  w:null,  ncrPct:null, ded:11000 },
+  { id:"2.6", grp:"hse",        name:"التدريب والتوعية للسلامة البيئية",                  w:null,  ncrPct:null, ded:11000 },
+  { id:"3.1", grp:"response",   name:"الاستجابة لطلبات الإصلاح خلال المهل",               w:0.04,  ncrPct:null, ded:11000 },
+  { id:"3.2", grp:"response",   name:"توفير قطع الغيار/الموارد الثانوية في الوقت",        w:0.025, ncrPct:0.01, ded:11000 },
+  { id:"3.3", grp:"response",   name:"استعادة حالة الأصل بعد الحدث",                      w:0.04,  ncrPct:0.01, ded:5500  },
+  { id:"3.4", grp:"response",   name:"الاستجابة للطوارئ (دليل إدارة الأزمات)",            w:0.05,  ncrPct:0.02, ded:16500 },
+  { id:"3.5", grp:"response",   name:"معيار تقديم الخدمة مقابل خطة الاستجابة",            w:0.025, ncrPct:0.02, ded:5500  },
+  { id:"3.6", grp:"response",   name:"الرضا على الاستجابة / إغلاق بلاغات 940",            w:0.02,  ncrPct:0.01, ded:11000 },
+  { id:"4.1", grp:"preventive", name:"الالتزام ببرنامج الصيانة الوقائية المجدولة",        w:0.10,  ncrPct:null, ded:5500  },
+  { id:"4.2", grp:"preventive", name:"الالتزام ببرنامج الفحص/الروتينية المجدولة",         w:0.10,  ncrPct:null, ded:5500  },
+  { id:"4.3", grp:"preventive", name:"امتثال الجودة والمواد المستخدمة",                   w:0.10,  ncrPct:0.05, ded:5500  },
+  { id:"5.1", grp:"corrective", name:"كفاءة تحديد/توصيف العيوب",                          w:0.07,  ncrPct:0.02, ded:5500  },
+  { id:"5.2", grp:"corrective", name:"امتثال المواد عند إصلاح العيوب",                    w:0.07,  ncrPct:0.05, ded:5500  },
+  { id:"5.3", grp:"corrective", name:"إصلاح العيوب خلال الوقت المستهدف",                  w:0.06,  ncrPct:null, ded:5500  },
+  { id:"5.4", grp:"corrective", name:"متوسط الزمن بين الأعطال (MTBF)",                    w:0.05,  ncrPct:0.05, ded:5500  }
+];
+/* مضاعِفُ الحسمية بتكرار عدم الامتثال شهراً بعد شهر (الشهر ١…٥ فأكثر). */
+const DED_STEPS = [1, 1.5, 2, 2.5, 3];
+/* عتبةُ الحسمية الافتراضية (٧٠٪ — سنةٌ أولى). ثابتٌ محليٌّ لا قراءةَ من النواة:
+   الدوالُّ النقيّة تُنفَّذ في hail-tests بلا متصفّحٍ ولا نواة، والقيمةُ الفعلية
+   تمرّ من الشاشة عبر perfMinScore() وسيطاً. */
+const NCR_TH_DEFAULT = 0.70;
+
+/* ════════════ دوالُّ الحساب — نقيّةٌ ومعروضةٌ على الكائن ليفحصها hail-tests بلا متصفّح ════════════ */
+function kpiById(id){ for(let i=0;i<KPIS.length;i++) if(KPIS[i].id===id) return KPIS[i]; return null; }
+function ncrMonthKey(d){ const s=String(d||""); return /^\d{4}-\d{2}/.test(s) ? s.slice(0,7) : ""; }
+function prevMonthKey(ym){
+  const m=/^(\d{4})-(\d{2})$/.exec(String(ym||"")); if(!m) return "";
+  let y=+m[1], mo=+m[2]-1; if(mo<1){ mo=12; y--; }
+  return y+"-"+String(mo).padStart(2,"0");
+}
+/* درجةُ المؤشر بعد n تقريرَ عدم مطابقة = ١٠٠٪ − n×معامله، بأرضية صفر.
+   null لمؤشرٍ لا يُقاس بالتقارير — **ولا نُصطنع له درجةً**: رقمٌ بلا أساسٍ أسوأ من «—». */
+function kpiScoreAfterNCR(kpiId, count){
+  const k=kpiById(kpiId); if(!k || k.ncrPct==null) return null;
+  const n=Math.max(0, Math.floor(Number(count)||0));
+  return Math.max(0, Math.round((1 - n*k.ncrPct)*1000)/1000);
+}
+function dedMultiplier(streak){
+  const s=Math.max(1, Math.floor(Number(streak)||1));
+  return DED_STEPS[Math.min(s, DED_STEPS.length)-1];
+}
+function dedAmount(kpiId, streak){
+  const k=kpiById(kpiId); if(!k || !k.ded) return null;
+  return Math.round(k.ded * dedMultiplier(streak));
+}
+function ncrCountFor(list, kpiId, ym){
+  let n=0;
+  (list||[]).forEach(r=>{ if(r && r.kpi===kpiId && ncrMonthKey(r.date)===ym) n++; });
+  return n;
+}
+/* عدّادُ التكرار: كم شهراً متتالياً — منتهياً بالشهر المعطى — كان المؤشرُ فيه تحت عتبته؟
+   الافتراضُ المُعلَن (الاستفسار ٦): شهرُ امتثالٍ واحدٌ يقطع السلسلة ويُعيد العدّاد. */
+function ncrStreak(list, kpiId, ym, threshold){
+  const th = (threshold==null) ? NCR_TH_DEFAULT : threshold;
+  let s=0, cur=ym;
+  for(let i=0;i<12 && cur;i++){
+    const sc=kpiScoreAfterNCR(kpiId, ncrCountFor(list, kpiId, cur));
+    if(sc==null || sc>th) break;
+    s++; cur=prevMonthKey(cur);
+  }
+  return s;
+}
+/* التجميعُ الشهري: صفٌّ لكل مؤشرٍ عليه تقاريرُ هذا الشهر (أو سلسلةُ تكرارٍ حيّة)،
+   ومجاميعُ الشهر. impactPts = مجموعُ (وزن × ما فقده المؤشر) — أي **أثرُ التقارير
+   وحدها على الدرجة الكلية بالنقاط المئوية**، لا الدرجةَ الكليّة نفسَها. */
+function ncrRollup(list, ym, threshold){
+  const th=(threshold==null) ? NCR_TH_DEFAULT : threshold;
+  const rows=[];
+  let impactPts=0, dedTotal=0, monthCount=0;
+  KPIS.forEach(k=>{
+    const n=ncrCountFor(list, k.id, ym);
+    monthCount+=n;
+    const sc=kpiScoreAfterNCR(k.id, n);
+    const breached = sc!=null && sc<=th;
+    const streak = breached ? ncrStreak(list, k.id, ym, th) : 0;
+    const ded = breached ? dedAmount(k.id, streak) : null;
+    if(sc!=null && k.w) impactPts += k.w*(1-sc);
+    if(ded) dedTotal += ded;
+    if(n>0 || streak>0) rows.push({ id:k.id, name:k.name, grp:k.grp, w:k.w, count:n, score:sc, breached, streak, ded });
+  });
+  return { rows, monthCount, impactPts:Math.round(impactPts*1000)/1000, dedTotal };
+}
+
+/* ════════════════════════════════════════════════════════════
    العرض
    ════════════════════════════════════════════════════════════ */
 /* ════════════════════════════════════════════════════════════
@@ -192,6 +311,254 @@ function coverageHTML(){
   </div>`;
 }
 
+/* ════════════════════════════════════════════════════════════
+   [المرحلة ٣] سجلُّ عدم المطابقة — الحفظُ والقراءة
+   ────────────────────────────────────────────────────────────
+   مجموعةٌ لكل مشروع (<pid>_perf_ncrs) على نمط بلاغات المشروع — لا مجموعةً عامةً
+   تخلط مشاريع، فخلطُ بيانات مشروعين أخطرُ عطلٍ في هذه المنصّة. القراءةُ بـ.get()
+   بكاشٍ (لا onSnapshot — انظر ترويسة الملف)، والكتابةُ تُعيد الجلب قسراً.
+   ════════════════════════════════════════════════════════════ */
+function NCR_COLL(){
+  let base="";
+  try{ base=(typeof _pfx==="function") ? _pfx("perf_ncrs") : ""; }catch(e){ base=""; }
+  if(!base) base=(_projId()? _projId()+"_" : "")+"perf_ncrs";
+  let dev=false; try{ dev=(typeof IS_DEV!=="undefined" && IS_DEV); }catch(e){}
+  return dev ? base+"_dev" : base;
+}
+function _db(){ try{ return (typeof db!=="undefined" && db) ? db : null; }catch(e){ return null; } }
+function _audit(ev, detail){ try{ if(typeof logAudit==="function") logAudit(ev, detail); }catch(e){} }
+function _nowISO(){ return new Date().toISOString(); }
+function _todayYMD(){ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+/* من يُدخل المخالفات ويحرّرها: كلُّ ذي دورٍ عدا المشاهد والمراقب (نفسُ حدود الكتابة
+   العامة في قواعد Firestore). الحذفُ للأدمن وحده — محوُ مخالفةٍ محوُ أثرٍ تعاقديّ. */
+function _canEdit(){
+  if(!canView()) return false;
+  try{ if(typeof isViewer==="function" && isViewer()) return false; }catch(e){}
+  return true;
+}
+function _canDelete(){ try{ return typeof isAdmin==="function" && isAdmin(); }catch(e){ return false; } }
+
+let _ncr = { pid:"", list:[], loaded:false, err:false, at:0, fetching:false };
+function _ncrInvalidate(){ _ncr.at=0; }
+function _ncrFetch(force){
+  const pid=_projId(); if(!pid) return;
+  if(_ncr.pid!==pid) _ncr={ pid, list:[], loaded:false, err:false, at:0, fetching:false };
+  if(_ncr.fetching) return;
+  if(!force && _ncr.loaded && (Date.now()-_ncr.at)<60000) return;
+  const d=_db();
+  if(!d){ _ncr.loaded=true; return; }
+  _ncr.fetching=true;
+  d.collection(NCR_COLL()).orderBy("date","desc").limit(500).get().then(snap=>{
+    const arr=[]; snap.forEach(doc=>{ const x=doc.data(); if(x) arr.push(x); });
+    _ncr.list=arr; _ncr.loaded=true; _ncr.err=false; _ncr.at=Date.now(); _ncr.fetching=false;
+    _rerenderIfActive();
+  }).catch(()=>{
+    /* فشلُ القراءة يظهر صريحاً في الشاشة — لا فراغٌ يُقرأ «لا مخالفات». */
+    _ncr.fetching=false; _ncr.loaded=true; _ncr.err=true;
+    _rerenderIfActive();
+  });
+}
+function _rerenderIfActive(){
+  const pg=document.getElementById("page-"+PAGE_ID);
+  if(pg && pg.classList.contains("active")) render();
+}
+function _ncrById(id){ return _ncr.list.find(r=>r && r.id===id) || null; }
+function _ncrWrite(docData, ev, detail){
+  const d=_db();
+  if(!d){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return; }
+  d.collection(NCR_COLL()).doc(docData.id).set(docData, { merge:true }).then(()=>{
+    _audit(ev, detail);
+    _ncrFetch(true);
+  }).catch(()=>{ _toast("⚠ تعذّر الحفظ — أعد المحاولة","warn"); });
+}
+
+/* ════════════ إجراءات السجل (تُستدعى من onclick عبر performanceContract.*) ════════════ */
+function _modal(opts){
+  if(typeof showCustomModal!=="function"){ _toast("⚠ تعذّر فتح النافذة","warn"); return; }
+  showCustomModal(opts);
+}
+function _kpiOptionsHTML(sel){
+  const grpName={}; GROUPS.forEach(g=>grpName[g.key]=g.name);
+  const by={};
+  KPIS.forEach(k=>{ (by[k.grp]=by[k.grp]||[]).push(k); });
+  return GROUPS.map(g=>`<optgroup label="${_esc(g.no)} — ${_esc(g.name)}">`+
+    (by[g.key]||[]).map(k=>{
+      const eff = k.ncrPct!=null ? `كل تقرير −${_pct(k.ncrPct)}%` : "يُقاس نسبةً — توثيقٌ واعتراض";
+      return `<option value="${_esc(k.id)}" ${sel===k.id?"selected":""}>${_esc(k.id)} — ${_esc(k.name)} (${_esc(eff)})</option>`;
+    }).join("")+`</optgroup>`).join("");
+}
+function _buildingOptionsHTML(sel){
+  let bs=[]; try{ bs=Array.isArray(BUILDINGS)?BUILDINGS:[]; }catch(e){ bs=[]; }
+  return `<option value="">—</option>`+bs.map(b=>`<option ${b===sel?"selected":""}>${_esc(b)}</option>`).join("");
+}
+function ncrNew(){
+  if(!_isPerf()) return;
+  if(!_canEdit()){ _toast("⚠ لا صلاحية","warn"); return; }
+  _modal({
+    title:"🗂 تسجيل تقرير عدم مطابقة",
+    body:`<div style="font-size:12px;color:var(--muted);line-height:1.9;margin-bottom:10px">
+        سجِّل التقرير <b>يوم استلامه</b> بتاريخ التقرير نفسه — فالأثرُ يُحسب على شهر التاريخ،
+        وعدّادُ التكرار يُبنى عليه.</div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">تاريخ التقرير *</label>
+        <input class="form-input" type="date" id="pfn-date" value="${_todayYMD()}">
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">المؤشر الذي يخصم منه *</label>
+        <select class="form-select" id="pfn-kpi">${_kpiOptionsHTML("")}</select>
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">وصف المخالفة *</label>
+        <input class="form-input" id="pfn-desc" placeholder="نصُّ التقرير كما ورد من الاستشاري/الأمانة">
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">المبنى</label>
+        <select class="form-select" id="pfn-building">${_buildingOptionsHTML("")}</select>
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">الأصل / الموقع</label>
+        <input class="form-input" id="pfn-asset" placeholder="اختياري — مثال: مضخة الحريق — سطح المبنى أ">
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">مصدر التقرير</label>
+        <select class="form-select" id="pfn-source">
+          <option>الاستشاري</option><option>ممثل الأمانة</option><option>رصدٌ داخلي</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px">
+        <div class="form-group" style="flex:1;margin-bottom:0">
+          <label class="form-label">موعد التصحيح</label>
+          <input class="form-input" type="date" id="pfn-due">
+        </div>
+        <div class="form-group" style="flex:1;margin-bottom:0">
+          <label class="form-label">مسؤول التصحيح</label>
+          <input class="form-input" id="pfn-owner" placeholder="اسم المشرف/الفني">
+        </div>
+      </div>`,
+    okText:"🗂 سجِّل المخالفة",
+    onOk:()=>{
+      const v=id=>((document.getElementById(id)||{}).value||"").trim();
+      const date=v("pfn-date"), kpi=v("pfn-kpi"), desc=v("pfn-desc");
+      if(!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)){ _toast("⚠ أدخل تاريخ التقرير","warn"); return false; }
+      if(!kpiById(kpi)){ _toast("⚠ اختر المؤشر","warn"); return false; }
+      if(!desc){ _toast("⚠ اكتب وصف المخالفة","warn"); return false; }
+      const u=_user();
+      const rec={
+        id:"ncr_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,7),
+        date, kpi, desc,
+        building:v("pfn-building"), asset:v("pfn-asset"), source:v("pfn-source")||"الاستشاري",
+        status:"open", planDue:v("pfn-due"), planOwner:v("pfn-owner"),
+        createdAt:_nowISO(), createdBy:(u&&u.name)||"النظام"
+      };
+      _ncrWrite(rec, "تسجيل تقرير عدم مطابقة", "المؤشر "+kpi+" — "+desc.slice(0,80));
+      _toast("🗂 سُجّلت المخالفة على المؤشر "+kpi,"success");
+    }
+  });
+}
+function ncrClose(id){
+  const r=_ncrById(id); if(!r) return;
+  if(!_canEdit()){ _toast("⚠ لا صلاحية","warn"); return; }
+  _modal({
+    title:"✅ إغلاق المخالفة "+(r.kpi||""),
+    body:`<div style="font-size:12px;color:var(--muted);line-height:1.9;margin-bottom:10px">
+        الإغلاقُ بدليلٍ لا بقرار: اذكر ما نُفِّذ فعلاً وأين يجده المدقق (بلاغ · صورة · محضر).
+        <b>الإغلاقُ هنا لا يمحو أثرَ الشهر</b> — التقريرُ صدر وأثرُه على شهره باقٍ؛
+        الإغلاقُ يقطع تكرارَه في الأشهر التالية.</div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">دليل الإغلاق *</label>
+        <input class="form-input" id="pfc-note" placeholder="مثال: أُصلح ضمن البلاغ HT-1042 وأُرفقت صور الإنجاز">
+      </div>`,
+    okText:"✅ أغلق بدليل",
+    onOk:()=>{
+      const note=((document.getElementById("pfc-note")||{}).value||"").trim();
+      if(!note){ _toast("⚠ الإغلاق يحتاج دليلاً مكتوباً","warn"); return false; }
+      const u=_user();
+      _ncrWrite({ id:r.id, status:"closed", closeNote:note, closedAt:_nowISO(), closedBy:(u&&u.name)||"النظام" },
+        "إغلاق تقرير عدم مطابقة", "المؤشر "+(r.kpi||"")+" — "+note.slice(0,80));
+      _toast("✅ أُغلقت المخالفة","success");
+    }
+  });
+}
+/* الاعتراضُ المُسنَد: يجمع تلقائياً سجلّات المنصة المؤرّخة **قبل تاريخ التقرير أو يومَه**
+   على نفس المبنى/الأصل — صورةٌ وسجلٌّ يسبقان التقريرَ هما حجّةُ الردّ (المرجع: ق٣). */
+function ncrEvidence(r){
+  const out=[];
+  if(!r || !r.date) return out;
+  const cutoff=r.date+"T23:59:59";
+  const bld=(r.building||"").trim(), asset=(r.asset||"").trim().toLowerCase();
+  _tickets().forEach(t=>{
+    if(!t || !t.createdAt || t.createdAt>cutoff) return;
+    const sameB = bld && t.building===bld;
+    const sameA = asset && ((t.assetName||t.asset||"")+" "+(t.issue||t.title||"")).toLowerCase().includes(asset);
+    if(!sameB && !sameA) return;
+    out.push({
+      id:t.id, building:t.building||"", status:t.status||"",
+      createdAt:t.createdAt, closedAt:t.closedAt||"",
+      photos:(Array.isArray(t.photos)?t.photos.length:0) + (Array.isArray(t.completionPhotos)?t.completionPhotos.length:0)
+    });
+  });
+  out.sort((a,b)=> (b.createdAt||"").localeCompare(a.createdAt||""));
+  return out.slice(0,15);
+}
+function ncrDispute(id){
+  const r=_ncrById(id); if(!r) return;
+  if(!_canEdit()){ _toast("⚠ لا صلاحية","warn"); return; }
+  const ev=ncrEvidence(r);
+  const evRows = ev.length ? ev.map(e=>`<tr>
+      <td style="text-align:right;font-weight:700">${_esc(e.id)}</td>
+      <td>${_esc((e.createdAt||"").slice(0,10))}</td>
+      <td>${_esc(e.status)}</td>
+      <td>${e.photos||0} 📷</td>
+    </tr>`).join("")
+    : `<tr><td colspan="4" style="color:var(--muted)">لا سجلّات مطابقةً قبل تاريخ التقرير — الاعتراضُ سيعتمد على بيانك وحده.</td></tr>`;
+  _modal({
+    title:"🛡 اعتراضٌ مُسنَد — "+(r.kpi||""),
+    body:`<div style="font-size:12px;color:var(--muted);line-height:1.9;margin-bottom:10px">
+        سجلّاتُ المنصة على <b>${_esc(r.building||r.asset||"نطاق التقرير")}</b> المؤرّخةُ
+        قبل تاريخ التقرير (${_esc(r.date||"")}) — ما يسبق التقريرَ يصلح حجّةً:</div>
+      <div style="overflow-x:auto;margin-bottom:10px">
+        <table class="pf-tbl" style="min-width:0">
+          <thead><tr><th style="text-align:right">البلاغ</th><th>تاريخه</th><th>حالته</th><th>صور</th></tr></thead>
+          <tbody>${evRows}</tbody>
+        </table>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">نصّ الاعتراض *</label>
+        <input class="form-input" id="pfd-note" placeholder="مثال: العيب مسجَّل ومغلق في HT-1042 قبل التقرير بأسبوع">
+      </div>`,
+    okText:"🛡 سجِّل الاعتراض",
+    onOk:()=>{
+      const note=((document.getElementById("pfd-note")||{}).value||"").trim();
+      if(!note){ _toast("⚠ اكتب نصّ الاعتراض","warn"); return false; }
+      const u=_user();
+      _ncrWrite({ id:r.id, status:"disputed",
+          objection:{ at:_nowISO(), by:(u&&u.name)||"النظام", note, evidence:ev } },
+        "اعتراض على تقرير عدم مطابقة", "المؤشر "+(r.kpi||"")+" — أدلة: "+ev.length);
+      _toast("🛡 سُجّل الاعتراض ("+ev.length+" دليلاً)","success");
+    }
+  });
+}
+function ncrDelete(id){
+  const r=_ncrById(id); if(!r) return;
+  if(!_canDelete()){ _toast("⚠ الحذف للأدمن وحده","warn"); return; }
+  _modal({
+    title:"🗑 حذف قيد المخالفة",
+    body:`<div style="font-size:12.5px;line-height:1.9">حذفُ القيد يمحو أثرَه من العدّادات
+      — يصلح <b>لقيدٍ أُدخل خطأً</b> فقط، لا لمخالفةٍ صحيحةٍ نتمنى زوالَها.
+      المخالفة: <b>${_esc(r.kpi||"")}</b> — ${_esc((r.desc||"").slice(0,90))}</div>`,
+    okText:"🗑 احذف نهائياً",
+    onOk:()=>{
+      const d=_db(); if(!d){ _toast("⚠ لا اتصال","warn"); return false; }
+      d.collection(NCR_COLL()).doc(r.id).delete().then(()=>{
+        _audit("حذف قيد عدم مطابقة","المؤشر "+(r.kpi||"")+" — "+(r.desc||"").slice(0,60));
+        _ncrFetch(true);
+      }).catch(()=>_toast("⚠ تعذّر الحذف","warn"));
+      _toast("🗑 حُذف القيد","success");
+    }
+  });
+}
+function ncrReload(){ _ncrFetch(true); }
+
 function render(){
   const el=document.getElementById("page-"+PAGE_ID);
   if(!el) return;
@@ -203,12 +570,143 @@ function render(){
   const cfg=_cfg()||{}, y=_year(), m=_month(), minS=_minScore(), grace=_inGrace();
   const yIdx=Math.min(Math.max(y,1),AR_YEARS.length)-1;
 
+  _ncrFetch(false);
   el.innerHTML =
     heroHTML(cfg, y, m, minS, grace) +
+    ncrSectionHTML(minS) +
     coverageHTML() +
     scorecardHTML(yIdx) +
     penaltyHTML(cfg) +
     roadmapHTML();
+}
+
+/* ════════════════════════════════════════════════════════════
+   [المرحلة ٣] شاشة سجلّ عدم المطابقة
+   ════════════════════════════════════════════════════════════ */
+const NCR_STATUS = {
+  open:     { label:"مفتوحة",       cls:"pf-st-open" },
+  disputed: { label:"معترَضٌ عليها", cls:"pf-st-disp" },
+  closed:   { label:"مغلقةٌ بدليل",  cls:"pf-st-done" }
+};
+function ncrSectionHTML(minS){
+  const ymNow=ncrMonthKey(_todayYMD());
+  const th=(minS!=null)?minS:NCR_TH_DEFAULT;
+  const roll=ncrRollup(_ncr.list, ymNow, th);
+  const trial=_isTrial();
+  const monthLabel=new Date().toLocaleDateString("ar-SA-u-ca-gregory-nu-latn",{year:"numeric",month:"long"});
+
+  const loadNote = !_ncr.loaded
+    ? `<div class="pf-hint">جارٍ تحميل السجل…</div>`
+    : (_ncr.err ? `<div class="pf-note pf-note-warn">${_svg("alertTriangle",16)}
+        <div><b>تعذّرت قراءة سجلّ المخالفات.</b> ما تراه غير مكتمل — أعد المحاولة.
+        <button class="btn btn-sm" onclick="performanceContract.ncrReload()">↻ إعادة التحميل</button></div></div>` : "");
+
+  /* بطاقات الشهر */
+  const overduePlans=_ncr.list.filter(r=>r && r.status==="open" && r.planDue && r.planDue<_todayYMD()).length;
+  const tiles=`
+  <div class="stats-grid" style="margin-bottom:14px">
+    <div class="stat-tile">
+      <div class="st-label">تقارير ${_esc(monthLabel)}</div>
+      <div class="st-value">${roll.monthCount}</div>
+      <div class="st-sub">${_ncr.list.filter(r=>r&&r.status==="open").length} مفتوحةٌ إجمالاً</div>
+    </div>
+    <div class="stat-tile">
+      <div class="st-label">أثرُ التقارير على الدرجة</div>
+      <div class="st-value" style="color:${roll.impactPts>0?"var(--danger)":"var(--stage-done)"}">−${_pct(roll.impactPts)}</div>
+      <div class="st-sub">نقطةً مئويةً من المؤشرات الموزونة</div>
+    </div>
+    <div class="stat-tile">
+      <div class="st-label">حسمياتٌ مقدَّرة${trial?' <span class="pf-tag">تدريبيّ</span>':''}</div>
+      <div class="st-value" style="color:${roll.dedTotal>0?"var(--danger)":"var(--stage-done)"}">${_money(roll.dedTotal)}</div>
+      <div class="st-sub">ريال — للمؤشرات تحت عتبة ${_pct(th)}%</div>
+    </div>
+    <div class="stat-tile">
+      <div class="st-label">تصحيحاتٌ متأخرة</div>
+      <div class="st-value" style="color:${overduePlans?"var(--danger)":"var(--stage-done)"}">${overduePlans}</div>
+      <div class="st-sub">مخالفةٌ مفتوحةٌ تجاوزت موعدَ تصحيحها</div>
+    </div>
+  </div>`;
+
+  /* جدول الاتجاه: مؤشرٌ عليه حركةٌ هذا الشهر أو سلسلةُ تكرارٍ حيّة */
+  const trendRows=roll.rows.map(r=>{
+    const scoreTxt = r.score==null ? "—" : _pct(r.score)+"%";
+    const state = r.score==null
+      ? `<span class="pf-muted">توثيقٌ فقط</span>`
+      : (r.breached
+          ? `<span style="color:var(--danger);font-weight:800">تحت العتبة ×${dedMultiplier(r.streak)}</span>`
+          : (r.score<=th+0.10
+              ? `<span style="color:var(--warn);font-weight:800">يقترب</span>`
+              : `<span style="color:var(--stage-done);font-weight:800">آمن</span>`));
+    return `<tr>
+      <td style="text-align:right;white-space:normal"><b>${_esc(r.id)}</b> ${_esc(r.name)}</td>
+      <td>${r.count}</td>
+      <td>${scoreTxt}</td>
+      <td>${r.breached?r.streak:"—"}</td>
+      <td>${r.ded?_money(r.ded):"—"}</td>
+      <td>${state}</td>
+    </tr>`;
+  }).join("");
+  const trend = roll.rows.length ? `
+    <div class="pf-tbl-wrap">
+      <table class="pf-tbl">
+        <thead><tr>
+          <th style="text-align:right">المؤشر</th><th>تقارير الشهر</th><th>درجته</th>
+          <th>تكرارٌ متتالٍ</th><th>حسميته${trial?" (تدريبيّ)":""}</th><th>الحالة</th>
+        </tr></thead>
+        <tbody>${trendRows}</tbody>
+      </table>
+    </div>` : (_ncr.loaded && !_ncr.err ? `<div class="pf-hint" style="padding-top:4px">لا تقاريرَ هذا الشهر — الجدول يظهر مع أول تسجيل.</div>` : "");
+
+  /* السجل نفسه */
+  const listRows=_ncr.list.slice(0,60).map(r=>{
+    const st=NCR_STATUS[r.status]||NCR_STATUS.open;
+    const k=kpiById(r.kpi);
+    const acts=[
+      (r.status!=="closed" && _canEdit()) ? `<button class="btn btn-sm" onclick="performanceContract.ncrClose('${_esc(r.id)}')">✅ إغلاق</button>` : "",
+      (r.status==="open" && _canEdit())   ? `<button class="btn btn-sm" onclick="performanceContract.ncrDispute('${_esc(r.id)}')">🛡 اعتراض</button>` : "",
+      _canDelete() ? `<button class="btn btn-sm" onclick="performanceContract.ncrDelete('${_esc(r.id)}')">🗑</button>` : ""
+    ].filter(Boolean).join(" ");
+    return `<tr>
+      <td>${_esc(r.date||"")}</td>
+      <td><b>${_esc(r.kpi||"")}</b>${k&&k.ncrPct!=null?` <span class="pf-muted">−${_pct(k.ncrPct)}%</span>`:""}</td>
+      <td style="text-align:right;white-space:normal;max-width:260px">${_esc(r.desc||"")}
+        ${r.building?`<div class="pf-muted" style="font-size:10.5px">${_esc(r.building)}${r.asset?" — "+_esc(r.asset):""}</div>`:""}
+        ${r.status==="disputed"&&r.objection?`<div class="pf-muted" style="font-size:10.5px">🛡 ${_esc((r.objection.note||"").slice(0,70))} (${(r.objection.evidence||[]).length} دليلاً)</div>`:""}
+        ${r.status==="closed"&&r.closeNote?`<div class="pf-muted" style="font-size:10.5px">✅ ${_esc((r.closeNote||"").slice(0,70))}</div>`:""}</td>
+      <td>${_esc(r.source||"")}</td>
+      <td>${r.planDue?`${_esc(r.planDue)}${r.status==="open"&&r.planDue<_todayYMD()?' <span style="color:var(--danger);font-weight:800">متأخر</span>':""}`:"—"}</td>
+      <td><span class="pf-st ${st.cls}">${st.label}</span></td>
+      <td style="white-space:nowrap">${acts}</td>
+    </tr>`;
+  }).join("");
+  const list=_ncr.list.length?`
+    <div class="pf-tbl-wrap">
+      <table class="pf-tbl">
+        <thead><tr>
+          <th>التاريخ</th><th>المؤشر</th><th style="text-align:right">المخالفة</th>
+          <th>المصدر</th><th>موعد التصحيح</th><th>الحالة</th><th>إجراء</th>
+        </tr></thead>
+        <tbody>${listRows}</tbody>
+      </table>
+      ${_ncr.list.length>60?`<div class="pf-hint">يُعرض أحدث ٦٠ قيداً من ${_ncr.list.length}.</div>`:""}
+    </div>`:"";
+
+  return `
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">${_svg("clipboardCheck",16)} سجلّ عدم المطابقة (NCR)</div>
+      ${_canEdit()?`<button class="btn btn-primary btn-sm" onclick="performanceContract.ncrNew()">＋ تسجيل مخالفة</button>`:""}
+    </div>
+    <div class="pf-hint"><b>٥١٫٥٪ من درجة البطاقة تقاريرُ يكتبها الطرف الآخر</b> — فكلُّ تقريرٍ يُسجَّل
+      هنا يومَ وصوله، ويُربط بمؤشره فيظهر أثرُه فوراً، ويُغلق بدليلٍ أو يُعترَض عليه بسجلّاتٍ
+      تسبق تاريخه. <b>كسرُ التكرار أهمُّ من كل شيء</b>: مؤشرٌ سقط الشهرَ الماضي إنقاذُه هذا
+      الشهرَ يوفّر ثلثي حسميته. <span class="pf-muted">(عدّادُ التكرار يفترض التصفيرَ بعد شهرِ
+      امتثالٍ — الاستفسار ٦ المرفوع للأمانة، والعتبةُ حدُّ السنة الأدنى — الاستفسار ٢.)</span></div>
+    ${loadNote}
+    ${tiles}
+    ${trend}
+    ${list}
+  </div>`;
 }
 
 function heroHTML(cfg, y, m, minS, grace){
@@ -324,7 +822,7 @@ function roadmapHTML(){
   const steps=[
     { n:"١", t:"نوعُ المشروع", d:"عَلَمُ «عقد قائم على الأداء» وإعداداته، وهذا القسم.", done:true },
     { n:"٢", t:"الحقول التي تُغذّي المؤشرات", d:"«وصلتُ للموقع» · «رجعت الخدمة» · «توقف الساعة» · تاريخُ استحقاق المهمة الوقائية — والجدولُ المعتمد لم يعد ينزاح. تفتح ٢٨ درجةً من ١٠٠.", done:true },
-    { n:"٣", t:"سجلّ عدم المطابقة", d:"استقبالُ المخالفة وربطُها بالمؤشر، وأثرُها المحسوب فوراً، وملفُّ اعتراضٍ بالأدلة. يحمي ٥١٫٥ درجة.", done:false },
+    { n:"٣", t:"سجلّ عدم المطابقة", d:"استقبالُ المخالفة وربطُها بالمؤشر، وأثرُها المحسوب فوراً (درجةُ المؤشر · عدّادُ التكرار · الحسمية)، واعتراضٌ مُسنَدٌ بسجلّاتٍ تسبق التقرير. يحمي ٥١٫٥ درجة.", done:true },
     { n:"٤", t:"الدرجة والغرامة الحيّة", d:"الدرجةُ أثناء الشهر · الخصمُ المتوقَّع · عدّادا التكرار والإنذار · «ماذا لو».", done:false },
     { n:"٥", t:"السلامة والتوطين و٩٤٠", d:"سجلُّ الحوادث · تصاريحُ العمل · لوحةُ التوطين · بلاغاتُ ٩٤٠ · سجلُّ التدريب.", done:false }
   ];
@@ -395,6 +893,11 @@ function injectCSS(){
   #page-${PAGE_ID} .pf-cov-v{font-weight:900;font-size:18px;line-height:1}
   #page-${PAGE_ID} .pf-cov-h{font-size:10.5px;color:var(--muted);margin-top:5px;line-height:1.8}
   #page-${PAGE_ID} .pf-cov-foot{font-size:11.5px;color:var(--muted);margin-top:14px;padding-top:11px;border-top:1px solid var(--border);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  #page-${PAGE_ID} .pf-st{font-size:10px;font-weight:800;border-radius:99px;padding:2px 9px;white-space:nowrap}
+  #page-${PAGE_ID} .pf-st-open{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 35%,var(--border))}
+  #page-${PAGE_ID} .pf-st-disp{color:var(--primary);background:color-mix(in srgb,var(--primary) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--primary) 30%,var(--border))}
+  #page-${PAGE_ID} .pf-st-done{color:var(--stage-done);background:color-mix(in srgb,var(--stage-done) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--stage-done) 30%,var(--border))}
+  #page-${PAGE_ID} .card-header .btn{flex:0 0 auto}
   #page-${PAGE_ID} .pf-empty{text-align:center;padding:48px 20px;color:var(--muted)}
   #page-${PAGE_ID} .pf-empty-t{font-weight:800;font-size:15px;margin-bottom:7px;color:var(--text)}
   #page-${PAGE_ID} .pf-empty-s{font-size:12.5px;line-height:1.9}
@@ -517,6 +1020,20 @@ window.performanceContract = {
   groups: GROUPS,
   yearTarget,
   penaltyScale: PENALTY_SCALE,
+  // [المرحلة ٣] الكتالوج والدوالُّ النقيّة — يفحصها hail-tests بلا متصفّح
+  kpis: KPIS,
+  kpiById,
+  kpiScoreAfterNCR,
+  dedMultiplier,
+  dedAmount,
+  ncrMonthKey,
+  prevMonthKey,
+  ncrCountFor,
+  ncrStreak,
+  ncrRollup,
+  ncrEvidence,
+  // إجراءات الشاشة (onclick)
+  ncrNew, ncrClose, ncrDispute, ncrDelete, ncrReload,
   version: VERSION,
   build: MODULE_BUILD
 };

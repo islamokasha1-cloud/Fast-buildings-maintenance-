@@ -6282,6 +6282,125 @@ function perfContractPhase2() {
     !/monthlyScore|totalScore|computeScore|deviation\s*=/.test(PF));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   المرحلة ٣ للعقد القائم على الأداء — سجلّ عدم المطابقة (NCR)
+   العهدُ المحروس: الكتالوج منسوخٌ من ملف الاستشاري وأوزانُ موزوناته تجمع ١ ·
+   الحسابُ نقيٌّ ويُنفَّذ هنا فعلاً لا يُفحص بالنظر · لا onSnapshot في الوحدة ·
+   الكتابةُ مبوّابةٌ والحذفُ للأدمن · الاعتراضُ بسجلّاتٍ تسبق التقرير ·
+   ولا درجةَ كليّةً محسوبةً بعد (تبقى للمرحلة ٤).
+   ════════════════════════════════════════════════════════════════════ */
+function perfContractPhase3() {
+  H("المرحلة ٣) العقد القائم على الأداء — سجلّ عدم المطابقة (NCR)");
+  const PF_PATH = path.resolve(path.dirname(IDX), "performance-contract.js");
+  const PF = fs.existsSync(PF_PATH) ? fs.readFileSync(PF_PATH, "utf8") : "";
+  if (!PF) { T("★ p3: performance-contract.js موجودة", false); return; }
+
+  // ── بنيوياً: انضباط القراءة والكتابة ──
+  // الفحصُ السالب على الكود مجرَّداً من التعليقات (درس حارس v18.9ae): الترويسةُ
+  // تشرح قرارَ «لا onSnapshot» فتذكر الكلمة، ولا يصحّ أن يصطادها الحارسُ ظلماً.
+  const PF3_CODE = PF.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  T("★ p3: لا onSnapshot في الوحدة إطلاقاً (انضباط المستمعين — درس ca9/b815)",
+    !/onSnapshot/.test(PF3_CODE), "ظهر مستمعٌ حيّ — الوحدة خارج مسار فكّ switchProject");
+  T("★ p3: القراءة بكاشٍ بعمرٍ أدنى — لا جلبَ عند كل رسم",
+    /\(Date\.now\(\)-_ncr\.at\)<60000/.test(PF));
+  T("★ p3: فشلُ القراءة يظهر صريحاً لا فراغاً يُقرأ «لا مخالفات»",
+    /_ncr\.err=true;/.test(PF) && /تعذّرت قراءة سجلّ المخالفات/.test(PF));
+  T("★ p3: الكتابةُ تُبطل الكاش وتعيد الجلب قسراً",
+    /_audit\(ev, detail\);\s*\n\s*_ncrFetch\(true\);/.test(PF));
+  T("★ p3: مجموعةُ السجل لكل مشروعٍ عبر _pfx — لا مجموعةً عامةً تخلط مشاريع",
+    /_pfx\("perf_ncrs"\)/.test(PF));
+  T("★ p3: كاشُ السجل يُصفَّر عند تبديل المشروع (المعرّف جزءُ المفتاح)",
+    /if\(_ncr\.pid!==pid\) _ncr=\{ pid, list:\[\], loaded:false/.test(PF));
+
+  // ── بنيوياً: الصلاحيات وشروط الإدخال ──
+  T("★ p3: الحذف للأدمن وحده — محوُ مخالفةٍ محوُ أثرٍ تعاقديّ",
+    /function _canDelete\(\)\{ try\{ return typeof isAdmin==="function" && isAdmin\(\);/.test(PF) &&
+    /if\(!_canDelete\(\)\)\{ _toast\("⚠ الحذف للأدمن وحده","warn"\); return; \}/.test(PF));
+  T("★ p3: التسجيل يوجب تاريخاً صالحاً ومؤشراً من الكتالوج ووصفاً",
+    /if\(!date \|\| !\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(date\)\)/.test(PF) &&
+    /if\(!kpiById\(kpi\)\)\{ _toast\("⚠ اختر المؤشر","warn"\); return false; \}/.test(PF) &&
+    /if\(!desc\)\{ _toast\("⚠ اكتب وصف المخالفة","warn"\); return false; \}/.test(PF));
+  T("★ p3: الإغلاق يوجب دليلاً مكتوباً — إغلاقٌ بدليلٍ لا بقرار",
+    /الإغلاق يحتاج دليلاً مكتوباً/.test(PF));
+  T("★ p3: الاعتراض يجمع سجلّاتٍ تسبق تاريخ التقرير فقط (ما بعده ليس حجّة)",
+    /if\(!t \|\| !t\.createdAt \|\| t\.createdAt>cutoff\) return;/.test(PF));
+  T("★ p3: الحسمياتُ موسومةٌ «تدريبيّ» في وضع التجربة",
+    /حسمياتٌ مقدَّرة\$\{trial\?' <span class="pf-tag">تدريبيّ<\/span>':''\}/.test(PF));
+  T("★ p3: افتراضا الحساب مُعلَنان في الشاشة (الاستفساران ٢ و٦) لا مضمَران",
+    /الاستفسار ٦/.test(PF) && /الاستفسار ٢/.test(PF));
+  T("★ p3: ما زال لا درجةَ كليّةً محسوبةً (أثرُ التقارير نقاطاً لا درجةَ بطاقة)",
+    !/monthlyScore|totalScore|computeScore/.test(PF));
+
+  // ── تنفيذياً: الدوالُّ النقيّة تُشغَّل هنا فعلاً ──
+  const vm = require("vm");
+  const _el = () => ({ style:{}, classList:{ add(){}, remove(){}, toggle(){}, contains:()=>false }, appendChild(){}, setAttribute(){}, remove(){} });
+  const docStub = { readyState:"complete", head:_el(), body:_el(),
+    getElementById:()=>null, querySelector:()=>null, querySelectorAll:()=>[],
+    addEventListener:()=>{}, createElement:_el };
+  const sandbox = { window:{}, document:docStub, console, setTimeout:()=>0, clearTimeout:()=>{}, setInterval:()=>0, clearInterval:()=>{} };
+  vm.createContext(sandbox);
+  try { vm.runInContext(PF, sandbox); } catch (e) { T("★ p3: تُحمَّل الوحدة في صندوقٍ معزول", false, String(e.message).slice(0, 120)); return; }
+  const M = sandbox.window.performanceContract;
+  T("★ p3: الدوالُّ النقيّة معروضةٌ على الكائن للاختبار بلا متصفّح",
+    !!M && ["kpiById","kpiScoreAfterNCR","dedMultiplier","dedAmount","ncrMonthKey","prevMonthKey","ncrCountFor","ncrStreak","ncrRollup"].every(f=>typeof M[f]==="function"));
+  if (!M) return;
+
+  // الكتالوج يطابق ملف الاستشاري V3: ٢٥ صفاً، ٢٠ موزوناً مجموعُها ١، وأوزانُ كل
+  // مجموعةٍ تجمع وزنَ مجموعتها في GROUPS — فلا ينحرف الكتالوجان أحدُهما عن الآخر.
+  T("★ p3: الكتالوج ٢٥ مؤشراً (٢٠ موزوناً + ٥ حسميات) كملف الاستشاري",
+    Array.isArray(M.kpis) && M.kpis.length === 25 && M.kpis.filter(k=>k.w).length === 20);
+  T("★ p3: مجموع أوزان المؤشرات الموزونة = ١ بالضبط",
+    Math.abs(M.kpis.filter(k=>k.w).reduce((s,k)=>s+k.w,0) - 1) < 1e-9);
+  T("★ p3: أوزان مؤشرات كل مجموعةٍ تجمع وزنَ مجموعتها (لا انحرافَ بين الكتالوجين)",
+    M.groups.every(g => Math.abs(M.kpis.filter(k=>k.grp===g.key && k.w).reduce((s,k)=>s+k.w,0) - g.weight) < 1e-9));
+  T("★ p3: لكل مؤشرٍ حسميةٌ أساسٌ موجبة (عمود Q في ملف الاستشاري)",
+    M.kpis.every(k=>k.ded>0));
+  T("★ p3: معاملات الخصم من الملف حصراً (١٪/٢٪/٥٪ أو null للمقاس نسبةً)",
+    M.kpis.every(k=>k.ncrPct==null || [0.01,0.02,0.05].some(v=>Math.abs(k.ncrPct-v)<1e-12)));
+
+  // درجة المؤشر بعد n تقرير: ١٠٠٪ − n×المعامل بأرضية صفر — والمقاسُ نسبةً لا يُصطنع له رقم
+  T("★ p3: kpiScoreAfterNCR — ٦ تقارير على 4.3 (−٥٪ لكلٍّ) = ٧٠٪ بالضبط",
+    M.kpiScoreAfterNCR("4.3",6) === 0.7 && M.kpiScoreAfterNCR("4.3",0) === 1);
+  T("★ p3: kpiScoreAfterNCR — أرضيةُ الصفر (٢٥ تقريراً لا تُنتج درجةً سالبة)",
+    M.kpiScoreAfterNCR("4.3",25) === 0);
+  T("★ p3: kpiScoreAfterNCR — مؤشرٌ يُقاس نسبةً يُرجع null لا رقماً مُصطنَعاً",
+    M.kpiScoreAfterNCR("4.1",3) === null && M.kpiScoreAfterNCR("مجهول",1) === null);
+
+  // الحسمية: الأساس × مضاعِف التكرار (×١→×٣ بسقف) — أرقام المثال المحسوب في الملف
+  T("★ p3: مضاعِف التكرار ×١→×٣ بسقفٍ عند الشهر الخامس فما فوق",
+    M.dedMultiplier(1)===1 && M.dedMultiplier(2)===1.5 && M.dedMultiplier(3)===2 &&
+    M.dedMultiplier(4)===2.5 && M.dedMultiplier(5)===3 && M.dedMultiplier(9)===3);
+  T("★ p3: dedAmount يطابق مثال الاستشاري (1.2: ٢٧٥٠→٨٢٥٠ · 2.1: ١٦٥٠٠)",
+    M.dedAmount("1.2",1)===2750 && M.dedAmount("1.2",5)===8250 &&
+    M.dedAmount("2.1",1)===16500 && M.dedAmount("9.9",1)===null);
+
+  // مفاتيح الشهور وعدّاد التكرار
+  T("★ p3: ncrMonthKey يقصّ YYYY-MM ويرفض المدخل الفاسد",
+    M.ncrMonthKey("2026-08-15")==="2026-08" && M.ncrMonthKey("خطأ")==="" && M.ncrMonthKey(null)==="");
+  T("★ p3: prevMonthKey يعبر حدَّ السنة (2026-01 → 2025-12)",
+    M.prevMonthKey("2026-01")==="2025-12" && M.prevMonthKey("2026-08")==="2026-07");
+  const mk=(kpi,ym,n)=>Array.from({length:n},(_,i)=>({kpi,date:ym+"-"+String(i+2).padStart(2,"0")}));
+  const twoMonths=[...mk("4.3","2026-08",6), ...mk("4.3","2026-07",6)];
+  T("★ p3: عدّاد التكرار يعدّ الشهور المتتالية تحت العتبة (شهران ⇒ ٢ ⇒ ×١٫٥)",
+    M.ncrStreak(twoMonths,"4.3","2026-08",0.70)===2);
+  const gapMonths=[...mk("4.3","2026-08",6), ...mk("4.3","2026-06",6)];
+  T("★ p3: شهرُ امتثالٍ واحدٌ يقطع السلسلة (الافتراض المُعلَن — الاستفسار ٦)",
+    M.ncrStreak(gapMonths,"4.3","2026-08",0.70)===1);
+  T("★ p3: العتبة «أقل من أو يساوي» كملف الاستشاري (٧٠٪ بالضبط = تحت العتبة)",
+    M.ncrStreak(mk("4.3","2026-08",6),"4.3","2026-08",0.70)===1 &&
+    M.ncrStreak(mk("4.3","2026-08",5),"4.3","2026-08",0.70)===0);
+
+  // التجميع الشهري: يفلتر بالشهر، ويجمع أثرَ الموزونات نقاطاً، وحسمياتِ المخروقات فقط
+  const roll=M.ncrRollup([...twoMonths, {kpi:"1.2",date:"2026-08-20"}], "2026-08", 0.70);
+  T("★ p3: ncrRollup يفلتر بشهر القياس (٧ تقارير في آب لا ١٣)",
+    roll.monthCount===7);
+  T("★ p3: ncrRollup — أثرُ الموزونات نقاطاً (4.3: ٠٫١×٣٠٪ + 1.2: ٠٫٠٤×٢٪ = ٣٫١)",
+    Math.abs(roll.impactPts-0.031)<1e-9);
+  T("★ p3: ncrRollup — الحسميةُ للمخروق وحده وبمضاعِف تكراره (٥٥٠٠×١٫٥=٨٢٥٠)",
+    roll.dedTotal===8250 &&
+    roll.rows.find(r=>r.id==="4.3").ded===8250 && roll.rows.find(r=>r.id==="1.2").ded===null);
+}
+
 function deepReviewV18_9vu() {
   H("28) الفحص العميق — دفعة إصلاحات (v18.9vu)");
 
@@ -13783,6 +13902,7 @@ function externalPurchaseApiGuards() {
   deepReviewV18_9ad();
   perfContractPhase1();
   perfContractPhase2();
+  perfContractPhase3();
   tvWallGuards();
   aiErrorMessagesGuards();
   pcaiTruncatedOutputGuards();
