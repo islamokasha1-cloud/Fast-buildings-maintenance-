@@ -522,7 +522,11 @@ function predelivery() {
        (بلاغ المالك 29/08): pgBar يركّب «renderPpm» لقسم ppm والدالة renderPPM،
        فكانت أزرار صفحات الخطط ترمي ReferenceError أول ما تجاوزت 20 خطة.
        **إصلاح سطرٍ في موضع الدالة القائمة** — وتعديل pgBar المشترك أخطر. */
-    const IDX_CEILING = 37875;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37875 إلى 37878 — ‏٣ أسطرٍ في enterApp: استدعاء
+       hrPayments.refreshNav بعد إزالة وضع المشتريات المركزية (بلاغ المالك 29/08:
+       سداد الموارد البشرية لا يظهر داخل المشاريع) — منطقُ البوابة نفسُه في
+       hr-payments.js، والسطرُ هنا لأن تبديل الوضع حدثُ نواةٍ لا لقطةَ تُرافقه. */
+    const IDX_CEILING = 37878;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -7066,6 +7070,14 @@ function hrPaymentsTests() {
     /if\(anchor\.nextSibling!==host\) anchor\.parentNode\.insertBefore\(host, anchor\.nextSibling\);/.test(src));
   T("★ والعرض محكوم بـcanView — لا بيانات موارد بشرية لمن لا يملك فتح الوحدة",
     /function renderMyTasks\(\)[\s\S]{0,900}if\(!canView\(\)\)\{ host\.style\.display="none"; host\.innerHTML=""; return; \}/.test(src));
+  /* الوحدة ابنة المشتريات المركزية وحدها (قرار المالك 29/08): داخل مشروعٍ لا بطاقة
+     في لوحة المشتريات ولا مجموعة في السايدبار — global-purchases-mode هو الحكم. */
+  T("★★ البطاقة والسايدبار للوضع المركزي وحده — لا يظهران داخل المشاريع",
+    /function _inCentral\(\)\{ try\{ return document\.body\.classList\.contains\("global-purchases-mode"\); \}/.test(src) &&
+    /function renderMyTasks\(\)[\s\S]{0,1100}if\(!_inCentral\(\)\)\{ host\.style\.display="none"; host\.innerHTML=""; return; \}/.test(src) &&
+    /var ok=canView\(\) && _inCentral\(\);/.test(src));
+  T("★ ودخولُ مشروعٍ يُخفي المجموعة فوراً (refreshNav في enterApp بعد إزالة الوضع)",
+    /function enterApp\(found,opts\)\{[\s\S]{0,1500}classList\.remove\("global-purchases-mode"\);[\s\S]{0,400}hrPayments\.refreshNav\(\)/.test(HTML));
   T("★ واللفّ يُركَّب من startSync (تستدعيه النواة عند مزامنة المشتريات) والبطاقة تتحدّث مع كل لقطة",
     /function startSync\(\)\{\s*_navToggle\(\);\s*hookMyTasks\(\);/.test(src) &&
     /_badge\(\);[\s\S]{0,200}renderMyTasks\(\); \}catch\(e\)\{\}/.test(src));
@@ -7172,11 +7184,14 @@ function hrPaymentsTests() {
     !HR.HRP_FINAL.some(k => HR.HRP_BOUNCED.indexOf(k) >= 0));
 
   // (٨) نوعية الأعمال — قائمة مغلقة + «أخرى» بنصّ حرّ
-  T("قائمة نوعية الأعمال تشمل الإقامات ورخص العمل والتأشيرات والسلفة وتصفية المستحقات و«أخرى»",
-    ["residency","work_permit","visa","advance","settlement","other"].every(k => HR.WORK_TYPES.some(w => w.k === k)));
+  T("قائمة نوعية الأعمال تشمل الإقامات ورخص العمل والتأشيرات والسلفة وتذاكر السفر وتصفية المستحقات و«أخرى»",
+    ["residency","work_permit","visa","advance","travel_ticket","settlement","other"].every(k => HR.WORK_TYPES.some(w => w.k === k)));
   T("«تصفية مستحقات» بنفس التسمية في الواجهة والخادم",
     HR.workTypeLabel({ workType: "settlement" }) === "تصفية مستحقات" &&
     fs.readFileSync(path.resolve(path.dirname(IDX), "functions/lib/config.js"), "utf8").includes('settlement: "تصفية مستحقات"'));
+  T("«تذاكر السفر» بنفس التسمية في الواجهة والخادم",
+    HR.workTypeLabel({ workType: "travel_ticket" }) === "تذاكر السفر" &&
+    fs.readFileSync(path.resolve(path.dirname(IDX), "functions/lib/config.js"), "utf8").includes('travel_ticket: "تذاكر السفر"'));
   T("★ «سلفة موظف» بنفس التسمية في الواجهة والخادم (طلب المالك — لا انحراف بين النسختين)",
     HR.workTypeLabel({ workType: "advance" }) === "سلفة موظف" &&
     fs.readFileSync(path.resolve(path.dirname(IDX), "functions/lib/config.js"), "utf8").includes('advance: "سلفة موظف"'));

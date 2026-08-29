@@ -62,7 +62,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.2925";
+  var MODULE_BUILD = "v18.9.2928";
 
   function COLL(){
     var dev=false;
@@ -90,6 +90,7 @@
     {k:"labor_office",l:"مكتب العمل / رسوم حكومية",    icon:"landmark"},
     {k:"passport",    l:"جوازات / أحوال",              icon:"book"},
     {k:"advance",     l:"سلفة موظف",                   icon:"banknote"},
+    {k:"travel_ticket",l:"تذاكر السفر",                icon:"ticket"},
     {k:"settlement",  l:"تصفية مستحقات",               icon:"receipt"},
     {k:"overtime",    l:"سداد بدل عمل إضافي",          icon:"clock"},
     {k:"other",       l:"أخرى",                        icon:"folderOpen"}
@@ -225,6 +226,10 @@
   function canFinance(){return _role()==="finance" || _isAdmin(); }
   // العرض للأدوار المعنية وحدها — بيانات الموارد البشرية لا تخصّ المستودع ولا المشتريات.
   function canView(){ return canCreate() || canHRM() || canPM() || canCEO() || canFinance(); }
+  // الوحدة ابنةُ المشتريات المركزية وحدَها (قرار المالك 29/08): سدادُ الإقامات
+  // والتأشيرات مصروفٌ إداريّ عام لا يخصّ مشروعاً بعينه، فداخلَ مشروعٍ لا بطاقةَ
+  // له في لوحة المشتريات ولا مجموعةَ في السايدبار — تظهران في الوضع المركزي فقط.
+  function _inCentral(){ try{ return document.body.classList.contains("global-purchases-mode"); }catch(e){ return false; } }
   // صاحب الطلب — يعدّل ويعيد الإرسال ويلغي.
   function isOwner(req){
     if(!req) return false;
@@ -1137,10 +1142,11 @@
     }catch(e){}
   }
 
-  // إظهار مجموعة السايدبار لأصحاب الصلاحية فقط (مخفية افتراضياً في HTML).
+  // إظهار مجموعة السايدبار لأصحاب الصلاحية فقط (مخفية افتراضياً في HTML) —
+  // وفي وضع المشتريات المركزية وحدَه: داخل مشروعٍ تُخفى ولو ملك الدورُ الصلاحية.
   function _navToggle(){
     try{
-      var ok=canView();
+      var ok=canView() && _inCentral();
       ["hdr-grp-hrp","grp-hrp"].forEach(function(gid){
         var el=document.getElementById(gid);
         if(!el) return;
@@ -1162,7 +1168,8 @@
      المصدر الموحّد للحقيقة هو pendingForMe نفسُها التي تغذّي عدّاد السايدبار وتوست
      HailNotify — إن قالت إن الطلب بانتظارك فستجد زرَّ الإجراء في تفاصيله، فلا تعِد
      البطاقة بزرٍّ لن يوجد. والعرض محكوم بـcanView (بيانات الموارد البشرية حساسة —
-     لا تُعرض لمن لا يملك فتح الوحدة أصلاً). */
+     لا تُعرض لمن لا يملك فتح الوحدة أصلاً) وبـ_inCentral (لوحةُ مشتريات المشروع
+     تمرّ بالمُرسّم نفسِه، والسدادُ مصروفٌ عامّ لا شأنَ للمشروع به). */
   var MYTASK_ID = "hrp-my-tasks-card";
   function _daysSince(iso){
     if(!iso) return null;
@@ -1179,6 +1186,8 @@
     // فتقرأ العين دائماً: طلبات الشراء ثم سداد الموارد البشرية ثم التعاقدات.
     if(anchor.nextSibling!==host) anchor.parentNode.insertBefore(host, anchor.nextSibling);
     if(!canView()){ host.style.display="none"; host.innerHTML=""; return; }
+    // لوحة مشتريات المشروع ليست مكانها — البطاقة للوضع المركزي وحده (قرار المالك 29/08)
+    if(!_inCentral()){ host.style.display="none"; host.innerHTML=""; return; }
     startSync();
     var items=pendingForMe();
     if(!items.length){ host.style.display="none"; host.innerHTML=""; return; }
