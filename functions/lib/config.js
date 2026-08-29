@@ -207,6 +207,7 @@ const HRP_WORK_TYPES = {
   labor_office: "مكتب العمل / رسوم حكومية",
   passport: "جوازات / أحوال",
   advance: "سلفة موظف",
+  travel_ticket: "تذاكر السفر",
   settlement: "تصفية مستحقات",
   overtime: "سداد بدل عمل إضافي",
   other: "أخرى",
