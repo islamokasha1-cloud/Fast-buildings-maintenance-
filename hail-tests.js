@@ -9644,6 +9644,34 @@ function contractsPhase1() {
       /contracts\.filterReqs\(\\'status\\',\\''\+\(on\?"":key\)\+'\\'\)/.test(src));
   }
 
+  /* ════ مرفقاتُ المستخلص وملاحظةُ اعتماده ════   (طلبُ المالك ٢٩/٠٨)
+     محاضرُ القياس وصورُ الموقع تسند أرقامَ المستخلص، فتُرفَق عند الإنشاء أو من
+     بطاقته — **بنمط مرفقات الطلب حرفاً بحرف** لا نسخةً ثانيةً تنحرف. وملاحظةُ
+     المعتمِد خانةٌ في نافذة التأكيد نفسِها (v18.9xi) تُقيَّد في السجل الزمنيّ. */
+  {
+    T("★★ مرفقاتُ المستخلص: التسجيلُ معاملةٌ على الوثيقة الطازجة — نهائيٌّ لا يُرفَق له، والصلاحيةُ تُفحص هناك، والسجلُّ يوثّق",
+      /function addExtAttachments\(id, atts\)\{[\s\S]{0,900}runTransaction[\s\S]{0,900}لا تُضاف مرفقات[\s\S]{0,600}canAttachExt\(e\)[\s\S]{0,900}_pushTimeline\(e, "إضافة مرفق", "attached"/.test(src));
+    T("★★ والإرفاقُ لأدوار سلسلة المستخلص وحدِها — قاعدةُ extUpdateOk في الخادم نفسُها، فلا زرٌّ يعِد والقواعدُ ترفض",
+      /function canAttachExt\(e\)\{[\s\S]{0,200}\["project_manager","ceo","finance","admin"\]\.indexOf\(_role\(\)\)!==-1/.test(src));
+    T("★★ وحذفُ المرفق للأدمن أو لمن أضافه — وعلى غير النهائيّ، ويُسجَّل في الخطّ الزمني",
+      /function deleteExtAttachment\(id, attId\)\{[\s\S]{0,900}لا تُحذف مرفقاته[\s\S]{0,400}canDelExtAttach\(e, att\)[\s\S]{0,600}_pushTimeline\(e, "حذف مرفق", "attach_removed"/.test(src) &&
+      /function canDelExtAttach\(e, att\)\{[\s\S]{0,300}att\.byUser===_meUser\(\)/.test(src));
+    T("★★ وملفاتُ المتصفّح لا تصل Firestore — تُسقَط من وثيقة الإنشاء وتُرفَع بعده برقم المستخلص",
+      /delete doc\.attachFiles;/.test(src) &&
+      /contracts\/extAttachUpload/.test(src) && /addExtAttachments\(id, ok\)/.test(src));
+    T("★ وفشلُ رفعِ مرفقٍ لا يُسقط مستخلصاً أُنشئ فعلاً — يُعلَن ويُستدرَك من البطاقة",
+      /أُرسل المستخلص "\+id\+" لكن تعذّر رفع "\+failed\+" مرفق/.test(src));
+    T("★ والإرفاقُ من الشاشتين: مسوّدةُ المستخلص الجديد (multiple) وبطاقةُ القائم",
+      /id="ct-e-attadd"[^>]*multiple[^>]*contracts\.addExtDraftAttach\(this\)/.test(src) &&
+      /id="ct-x-attfile"[^>]*contracts\.pickExtAttach\(this\)/.test(src));
+    T("★★ ملاحظةُ اعتماد المستخلص: خانةٌ اختياريةٌ في نافذة التأكيد نفسِها (v18.9xi) — والرفضُ يبقى بسببٍ إلزاميّ",
+      /function extAct\(action\)\{[\s\S]{0,1200}input: isRej \? null : \{ label:"ملاحظة \/ تعليق \(اختياري\)"/.test(src) &&
+      /function extAct\(action\)\{[\s\S]{0,2200}سبب الرفض \(إلزامي\)/.test(src));
+    T("★★ والملاحظةُ تصل السجلَّ الزمنيَّ عبر actOnExtract لا تضيع في الشاشة",
+      /function extAct\(action\)\{[\s\S]{0,2400}actOnExtract\(_extOpen, action, note\)/.test(src) &&
+      /_pushTimeline\(e, "اعتماد — "[\s\S]{0,160}: note\);/.test(src));
+  }
+
   /* ════ الإرجاعُ إلى بوّابةٍ محدّدة — للأدمن ════   (طلبُ المالك)
      «رفض/إعادة» يُرجع للمُنشئ دائماً: خطوةٌ واحدةٌ للخلف مهما كان الخطأ. والإرجاعُ
      **ليس حالةً جديدة** بل مسحُ اعتماداتِ البوّابة وما بعدها ثمّ `crqNextStage`

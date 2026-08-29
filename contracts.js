@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2939";
+var MODULE_BUILD = "v18.9.2941";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -3328,6 +3328,7 @@ function createExtract(contract, draft){
 
   return genExtId().then(function(id){
     var doc = Object.assign({}, draft);
+    delete doc.attachFiles;   // ملفاتُ المتصفّح لا تُكتب في Firestore — تُرفَع بعد الإنشاء برقم المستخلص
     doc.contractId = contract.id;
     doc.createdAt=_now(); doc.createdBy=_me(); doc.createdByUser=_meUser();
     doc.status = extNextStage(doc, calc.net, ceoThreshold());
@@ -3573,6 +3574,80 @@ function signExtract(id, att){
     var i=_exts.findIndex(function(x){ return x.id===id; });
     if(i>=0) _exts[i]=e;
     _audit("توقيعُ مقاولٍ على مستخلص", id+" — "+money((e.signature||{}).net)+" ر.س");
+    return e;
+  });
+}
+
+/* ════ مرفقاتُ المستخلص — بنمط مرفقات الطلب نفسِه ════   (طلبُ المالك)
+   محاضرُ القياس وصورُ الموقع وكشوفُ الكميات تسند أرقامَ المستخلص، فتُرفَق به
+   عند الإنشاء أو من بطاقته القائمة. الرفعُ بـ`uploadVendorDoc` — بادئةُ Storage
+   القائمة `po/…` عمداً (درسُ hr-payments: مسارٌ جذريٌّ جديدٌ قد يُرفَض صامتاً).
+   والتسجيلُ **معاملةٌ على الوثيقة الطازجة**، والحذفُ يرفع الإشارةَ ويُبقي الملفَّ
+   في التخزين — كمرفقات الطلب حرفاً بحرف. والإرفاقُ **لا يمسّ الحالة**: لا اعتمادَ
+   يسقط ولا بوّابةَ تتقدّم، فقواعدُ الخادم القائمة (`extUpdateOk`) تُجيزه لأدوار
+   سلسلة المستخلص بلا تعديل. */
+function canAttachExt(e){
+  if(!e || extIsFinal(e.status)) return false;
+  return ["project_manager","ceo","finance","admin"].indexOf(_role())!==-1;
+}
+function canDelExtAttach(e, att){
+  if(!e || !att || extIsFinal(e.status)) return false;
+  if(_role()==="admin") return true;
+  return att.byUser ? att.byUser===_meUser() : att.by===_me();
+}
+function addExtAttachments(id, atts){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  var list=(Array.isArray(atts)?atts:[atts]).filter(function(a){ return a && a.url; });
+  if(!list.length) return Promise.resolve(null);
+  var ref=database.collection(EXTRACTS_COL()).doc(id);
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("المستخلص غير موجود");
+      var e=s.data()||{}; e.id=id;
+      if(extIsFinal(e.status)) throw new Error("المستخلص في حالةٍ نهائية — لا تُضاف مرفقات");
+      if(!canAttachExt(e)) throw new Error("إضافة المرفق لأدوار سلسلة اعتماد المستخلص");
+      if(!Array.isArray(e.attachments)) e.attachments=[];
+      list.forEach(function(a){
+        e.attachments.push({ id:"ATT-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),
+          url:String(a.url), storagePath:a.storagePath||"", name:String(a.name||"مرفق").slice(0,120),
+          at:_now(), by:_me(), byUser:_meUser() });
+      });
+      _pushTimeline(e, "إضافة مرفق", "attached",
+        list.map(function(a){ return String(a.name||"مرفق").slice(0,120); }).join(" · "));
+      e.updatedAt=_now(); e.updatedBy=_me();
+      var out=Object.assign({},e); delete out.id;
+      t.set(ref,out,{merge:true});
+      return e;
+    });
+  }).then(function(e){
+    var i=_exts.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _exts[i]=e; else _mirror(_exts, e, false);
+    _audit("إضافة مرفق لمستخلص", id+" — "+list.length+" ملفاً");
+    return e;
+  });
+}
+function deleteExtAttachment(id, attId){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  var ref=database.collection(EXTRACTS_COL()).doc(id);
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("المستخلص غير موجود");
+      var e=s.data()||{}; e.id=id;
+      var att=(e.attachments||[]).find(function(a){ return a && a.id===attId; });
+      if(!att) throw new Error("المرفق غير موجود");
+      if(extIsFinal(e.status)) throw new Error("المستخلص في حالةٍ نهائية — لا تُحذف مرفقاته");
+      if(!canDelExtAttach(e, att)) throw new Error("حذف المرفق للأدمن أو لمن أضافه");
+      e.attachments=e.attachments.filter(function(a){ return a.id!==attId; });
+      _pushTimeline(e, "حذف مرفق", "attach_removed", att.name||"مرفق");
+      e.updatedAt=_now(); e.updatedBy=_me();
+      var out=Object.assign({},e); delete out.id;
+      t.set(ref,out,{merge:true});
+      return e;
+    });
+  }).then(function(e){
+    var i=_exts.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _exts[i]=e; else _mirror(_exts, e, false);
+    _audit("حذف مرفق من مستخلص", id);
     return e;
   });
 }
@@ -6842,6 +6917,21 @@ function extFormHTML(c){
     '<div class="ct-sec-h">'+_icn("pieChart","ic-sm")+' سُلَّم الحساب</div>'+
     '<div id="ct-e-ladder">'+ladderHTML(calc,c)+'</div>'+
   '</div>'+
+  /* المرفقات (طلبُ المالك): تُختار هنا وتُرفَع **بعد** إنشاء المستخلص برقمه —
+     ملفاتُ المتصفّح لا تُكتب في Firestore، فتبقى في المسوّدة حتى الإرسال.
+     وفي وضع التعديل تُدار المرفقاتُ من بطاقة المستخلص نفسِها لا من النموذج. */
+  (d.editOf ? '' :
+  '<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("paperclip","ic-sm")+' المرفقات '+
+      '<span class="ct-sec-lock">محضرُ القياس · صورُ الموقع · أيُّ مستندٍ يسند الكميات</span>'+
+      '<input type="file" id="ct-e-attadd" style="display:none" accept="image/*,application/pdf" multiple onchange="contracts.addExtDraftAttach(this)">'+
+      '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="document.getElementById(\'ct-e-attadd\').click()">'+_icn("plus","ic-sm")+' إضافة مرفق</button></div>'+
+    ((d.attachFiles||[]).length ? (d.attachFiles||[]).map(function(f,i){
+      return '<div class="ct-att"><span>'+_icn("paperclip","ic-sm")+' '+_esc(f.name||"ملف")+'</span>'+
+        '<span class="ct-att-m"><span class="num">'+money0(Math.max(1,Math.round((f.size||0)/1024)))+'</span> ك.ب — يُرفَع مع الإرسال</span>'+
+        '<button class="btn btn-delete" onclick="contracts.delExtDraftAttach('+i+')">'+_icn("trash","ic-sm")+'</button></div>';
+    }).join("") : '<div style="color:var(--muted);font-size:12px">لا مرفقات — الإرفاق اختياريٌّ، ويمكن إضافته لاحقاً من بطاقة المستخلص.</div>')+
+  '</div>')+
   '<div class="ct-save-bar">'+
     '<button class="btn btn-ghost btn-sm" onclick="contracts.cancelExtract()">إلغاء</button>'+
     '<button class="btn btn-success btn-sm" id="ct-e-send"'+((g.ok && (!d.editOf || d.reason))?'':' disabled')+' onclick="contracts.submitExtract()">'+
@@ -6907,6 +6997,24 @@ function extCardHTML(c, id){
     sigNote='<div class="ct-note warn">'+_icn("alertTriangle","ic-sm")+
       ' لم تُرفع نسخةُ هذا المستخلص موقّعةً من المقاول — <b>ولا سدادَ قبلها</b>. اطبع المستخلصَ ووقّعه معه إقراراً بالكميات والخصومات، ثمّ ارفع النسخة.</div>';
 
+  /* المرفقات — تظهر الفقرةُ لمن يرى المستخلص، وزرُّ الإضافة لأدوار سلسلته فقط
+     (نمطُ بطاقة الطلب نفسُه: الملفُّ يُرفَع أولاً ثم يُسجَّل معاملةً). */
+  var xAtts=Array.isArray(e.attachments)?e.attachments:[];
+  var xAttRows=xAtts.map(function(a){
+    return '<div class="ct-att">'+
+      '<a class="ct-link" href="'+_esc(a.url)+'" target="_blank" rel="noopener">'+_icn("paperclip","ic-sm")+' '+_esc(a.name||"مرفق")+'</a>'+
+      '<span class="ct-att-m">'+_esc(a.by||"")+' · '+_esc(String(a.at||"").slice(0,16).replace("T"," "))+'</span>'+
+      (canDelExtAttach(e,a)?'<button class="btn btn-delete" title="حذف المرفق" onclick="contracts.delExtAttach(\''+_jq(a.id)+'\')">'+_icn("trash","ic-sm")+'</button>':'')+
+    '</div>';
+  }).join("");
+  var attSec=(xAtts.length||canAttachExt(e)) ? '<div class="card ct-sec">'+
+    '<div class="ct-sec-h">'+_icn("paperclip","ic-sm")+' المرفقات'+
+      (canAttachExt(e)?'<input type="file" id="ct-x-attfile" style="display:none" accept="image/*,application/pdf" onchange="contracts.pickExtAttach(this)">'+
+        '<button class="btn btn-ghost btn-sm" id="ct-x-attbtn" style="margin-inline-start:auto" onclick="document.getElementById(\'ct-x-attfile\').click()">'+_icn("plus","ic-sm")+' إضافة مرفق</button>':'')+
+    '</div>'+
+    (xAttRows||'<div style="color:var(--muted);font-size:12px">لا مرفقات — أرفق محضرَ القياس أو صورَ الموقع أو أيَّ مستندٍ يسند الكميات.</div>')+
+  '</div>' : "";
+
   return '<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.backToExts()">'+_icn("rotateCcw")+' كل المستخلصات</button>'+
   '<div class="ct-head"><div><h2 class="ct-title">'+_icn("banknote")+' '+_esc(e.id)+(e.isFinal?' <span class="ct-doc s-ok">ختاميّ</span>':'')+'</h2>'+
     '<div class="ct-sub">'+extBadge(e.status)+(owner&&!extIsFinal(e.status)?' <span class="ct-id">بانتظار '+_esc(owner.lbl)+'</span>':'')+' <span class="ct-id">'+_esc(e.period||"")+'</span></div></div>'+
@@ -6917,6 +7025,7 @@ function extCardHTML(c, id){
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("layers","ic-sm")+' البنود المنفَّذة</div>'+
     '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+LN_TH+'<th>البند</th><th>كمية العقد</th><th>المنفَّذ تراكمياً</th><th>نسبة الإنجاز</th><th>سعر الوحدة</th></tr></thead>'+
     '<tbody>'+lineRows+'</tbody></table></div></div>'+
+  attSec+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("scrollText","ic-sm")+' السجل</div><div class="ct-timeline">'+tl+'</div></div>';
 }
 
@@ -8624,7 +8733,7 @@ function newExtract(){
   var floor=prevCumByLine(_exts,c,null);
   _extOpen=null;
   _extDraft={ contractId:c.id, period:"", isFinal:false,
-    materialsIssued:0, penaltyAmount:0, ncDeduction:0,
+    materialsIssued:0, penaltyAmount:0, ncDeduction:0, attachFiles:[],
     lines:(c.lines||[]).map(function(l){
       return { lineId:l.id, desc:l.desc||"", unit:l.unit||"", unitPrice:Number(l.unitPrice)||0,
                cumQty: Number(floor[l.id])||0 };
@@ -8738,25 +8847,96 @@ function submitExtract(){
   var edit=d.editOf||null;
   if(edit && !d.reason){ _toast("⚠ سبب التعديل إلزامي","warn"); return; }
   var btn=document.getElementById("ct-e-send"); if(btn){ btn.disabled=true; btn.textContent=edit?"جارٍ الحفظ…":"جارٍ الإرسال…"; }
+  var files=edit?[]:(d.attachFiles||[]).slice();
   var job = edit ? editExtract(edit, d, d.reason).then(function(){ return edit; })
                  : createExtract(c, d);
   job.then(function(id){
-    _extDraft=null; _extOpen=id; paintCtrs();
-    _toast(edit ? "✅ حُفظ التعديل — عاد المستخلصُ للاعتماد" : ("✅ أُرسل المستخلص "+id),"success");
+    /* المرفقاتُ بعد الإنشاء (نهجُ الطلب): فشلُ رفعِ ملفٍّ لا يُسقط مستخلصاً أُنشئ
+       فعلاً — يُقال صراحةً ويبقى بابُ الإضافة من البطاقة مفتوحاً. */
+    var failed=0;
+    var up = !files.length ? Promise.resolve() :
+      Promise.all(files.map(function(f){
+        return uploadVendorDoc(id, f, "attachment")
+          .catch(function(e){ console.warn("contracts/extAttachUpload", e); failed++; return null; });
+      })).then(function(atts){
+        var ok=atts.filter(Boolean);
+        return ok.length ? addExtAttachments(id, ok).catch(function(e){
+          console.warn("contracts/extAttachSave", e); failed+=ok.length;
+        }) : null;
+      });
+    return Promise.resolve(up).then(function(){
+      _extDraft=null; _extOpen=id; paintCtrs();
+      if(failed) _toast("⚠ أُرسل المستخلص "+id+" لكن تعذّر رفع "+failed+" مرفق — أضِفه من بطاقة المستخلص","warn");
+      else _toast(edit ? "✅ حُفظ التعديل — عاد المستخلصُ للاعتماد" : ("✅ أُرسل المستخلص "+id),"success");
+    });
   }).catch(function(e){
     console.warn("contracts/submitExtract",e);
     if(btn){ btn.disabled=false; btn.innerHTML=_icn(edit?"save":"send","ic-sm")+(edit?" حفظ التعديل":" إرسال للاعتماد"); }
     _toast("⚠ "+(e&&e.message?e.message:"تعذّر الحفظ"),"warn");
   });
 }
+
+/* ── مرفقاتُ مسوّدة المستخلص: ملفاتٌ تُمسَك في الذاكرة حتى الإرسال (نهجُ الطلب) ── */
+function addExtDraftAttach(inp){
+  syncExtDraft(); if(!_extDraft) return;
+  var fs=inp&&inp.files?Array.prototype.slice.call(inp.files):[];
+  if(!fs.length) return;
+  if(!Array.isArray(_extDraft.attachFiles)) _extDraft.attachFiles=[];
+  var dropped=0;
+  fs.forEach(function(f){
+    if((f.size||0) > ATTACH_MAX_MB*1024*1024){ dropped++; return; }
+    _extDraft.attachFiles.push(f);
+  });
+  if(dropped) _toast("⚠ "+dropped+" ملفاً تجاوز "+ATTACH_MAX_MB+" م.ب فأُسقط","warn");
+  paintCtrs();
+}
+function delExtDraftAttach(i){ syncExtDraft(); if(!_extDraft) return; (_extDraft.attachFiles||[]).splice(i,1); paintCtrs(); }
+
+/* ── إضافةُ مرفقٍ من بطاقة المستخلص وحذفُه — نمطُ بطاقة الطلب نفسُه ── */
+var _extAttBusy=false;
+function pickExtAttach(inp){
+  var e=extractById(_extOpen); if(!e) return;
+  var f=inp&&inp.files&&inp.files[0]; if(!f) return;
+  if(_extAttBusy) return;
+  if((f.size||0) > ATTACH_MAX_MB*1024*1024){ _toast("⚠ حجم المرفق يتجاوز "+ATTACH_MAX_MB+" م.ب","warn"); inp.value=""; return; }
+  _extAttBusy=true;
+  var btn=document.getElementById("ct-x-attbtn"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الرفع…"; }
+  uploadVendorDoc(e.id, f, "attachment").then(function(att){
+    return addExtAttachments(e.id, [att]);
+  }).then(function(){
+    _extAttBusy=false; _toast("✅ أُضيف المرفق","success"); paintCtrs();
+  }).catch(function(err){
+    _extAttBusy=false;
+    console.warn("contracts/pickExtAttach", err);
+    _toast("⚠ تعذّر رفع المرفق — "+_errMsg(err),"warn");
+    paintCtrs();
+  });
+}
+function delExtAttach(attId){
+  var e=extractById(_extOpen); if(!e) return;
+  var att=(e.attachments||[]).find(function(a){ return a && a.id===attId; }); if(!att) return;
+  Promise.resolve(_confirm({ kind:"danger", icon:"🗑", okText:"حذف",
+    title:"حذف المرفق",
+    msg:'سيُحذف المرفق «'+(att.name||"مرفق")+'» من المستخلص. يبقى الحذفُ مسجّلاً في السجل الزمني.'
+  })).then(function(ok){
+    if(!ok) return;
+    return deleteExtAttachment(e.id, attId).then(function(){ _toast("✅ حُذف المرفق","success"); paintCtrs(); });
+  }).catch(function(err){ _toast("⚠ "+_errMsg(err),"warn"); });
+}
+
 function extAct(action){
   var e=extractById(_extOpen); if(!e) return;
   var isRej=action==="reject";
   Promise.resolve(_confirm({ kind:isRej?"reject":"approve",
     title:isRej?"رفض / إعادة المستخلص":"اعتماد المستخلص",
-    msg:isRej?"سيعود المستخلص لمُعِدّه للتصحيح.":"اعتماد المستخلص "+e.id+"؟" })).then(function(ok){
+    msg:isRej?"سيعود المستخلص لمُعِدّه للتصحيح.":"اعتماد المستخلص "+e.id+"؟",
+    /* ملاحظةُ المعتمِد (طلبُ المالك) — اختياريةٌ، تُقيَّد في السجل الزمنيّ للمستخلص
+       مع بوّابة الاعتماد (النهجُ نفسُه الذي في اعتماد الطلب v18.9xi). */
+    input: isRej ? null : { label:"ملاحظة / تعليق (اختياري)",
+                            placeholder:"تُقيَّد في سجلّ المستخلص مع الاعتماد" }
+  })).then(function(ok){
     if(!ok) return;
-    var note="";
+    var note = (!isRej && ok && ok.value) ? String(ok.value).trim() : "";
     if(isRej){ note=(window.prompt("سبب الرفض (إلزامي):")||"").trim(); if(!note){ _toast("⚠ السبب إلزامي","warn"); return; } }
     return actOnExtract(_extOpen, action, note).then(function(){ paintCtrs(); _toast(isRej?"✅ أُعيد":"✅ اعتُمد","success"); });
   }).catch(function(err){ _toast("⚠ "+(err&&err.message?err.message:"تعذّر الإجراء"),"warn"); });
@@ -9326,6 +9506,8 @@ window.contracts = {
   // المستخلصات [المرحلة ٤]
   startExtSync: startExtSync, stopExtSync: stopExtSync,
   newExtract: newExtract, cancelExtract: cancelExtract, submitExtract: submitExtract,
+  addExtDraftAttach: addExtDraftAttach, delExtDraftAttach: delExtDraftAttach,
+  pickExtAttach: pickExtAttach, delExtAttach: delExtAttach,
   extRecalc: extRecalc, applyPenalty: applyPenalty,
   openExt: openExt, backToExts: backToExts, extAct: extAct,
   openExtPay: openExtPay, closeExtPay: closeExtPay, doExtPay: doExtPay,
@@ -9369,6 +9551,8 @@ window.contracts = {
   _create: createRequest, _act: actOnRequest, _pay: payRequest, _cancel: cancelRequest,
   _addAttach: addReqAttachments, _delAttach: deleteReqAttachment,
   _canAttachReq: canAttachReq, _canDelAttach: canDelAttach,
+  _addExtAtts: addExtAttachments, _delExtAtt: deleteExtAttachment,
+  _canAttachExt: canAttachExt, _canDelExtAttach: canDelExtAttach,
   _delete: deleteRequest, _rewind: rewindRequest, _editLines: editRequestLines,
   _crqRewind: crqRewind, _crqRewindTargets: crqRewindTargets,
   _extRewind: extRewind, _extRewindTargets: extRewindTargets, _rewindExt: rewindExtract,
