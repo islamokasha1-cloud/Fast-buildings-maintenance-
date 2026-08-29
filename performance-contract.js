@@ -56,7 +56,7 @@
 
 const PAGE_ID      = "performance";
 const VERSION      = "0.3";
-const MODULE_BUILD = "v18.9.2931";
+const MODULE_BUILD = "v18.9.2933";
 
 /* ════════════ خدمات النواة (قراءة بالاسم مع بدائل آمنة) ════════════ */
 function _esc(s){ try{ return (typeof esc==="function") ? esc(s) : String(s==null?"":s); }catch(e){ return String(s==null?"":s); } }
@@ -248,6 +248,67 @@ function ncrRollup(list, ym, threshold){
     if(n>0 || streak>0) rows.push({ id:k.id, name:k.name, grp:k.grp, w:k.w, count:n, score:sc, breached, streak, ded });
   });
   return { rows, monthCount, impactPts:Math.round(impactPts*1000)/1000, dedTotal };
+}
+
+/* ════════════════════════════════════════════════════════════
+   [الرقابة الاستباقية] دوالُّ الحساب — نقيّةٌ ومعروضةٌ على الكائن
+   ────────────────────────────────────────────────────────────
+   المبدأ (من consultant-kpi-mapping §٣): «من يصل للاجتماع الشهري برقمه الموثّق
+   يناقش؛ ومن يصل بلا رقمٍ يوقّع على رقم غيره». هذه البطاقة تراقب المؤشراتِ ذات
+   الحسمية المباشرة **قبل** أن يكتبها الاستشاري: الشهادات (١٫١) · التدريب (٢٫٥/٢٫٦
+   — ١٤ ساعة/موظف سنوياً وعتبة ٩٠٪) · نسبة التصحيحية (١٫٦ — سقف ٣٠٪) · الرضا
+   الشهري (١٫٥ — عتبة ٩٠٪). القياسات الحدّية مُعلَنة: نسبة ١٫٦ تُحسب **بالعدد**
+   لا بالقيمة (الاستفسار ٤ المفتوح — القياسُ بالقيمة يحتاج تكلفةً على أمر العمل).
+   ════════════════════════════════════════════════════════════ */
+/* حالة شهادة: كم يوماً بقي؟ مستوياتُ الإنذار ٩٠/٦٠/٣٠ يوماً ثم «منتهية». */
+function certStatus(dateStr, todayStr){
+  const re=/^\d{4}-\d{2}-\d{2}$/;
+  if(!re.test(String(dateStr||"")) || !re.test(String(todayStr||""))) return null;
+  const days=Math.round((new Date(dateStr+"T12:00:00") - new Date(todayStr+"T12:00:00"))/86400000);
+  const level = days<0 ? "expired" : days<=30 ? "d30" : days<=60 ? "d60" : days<=90 ? "d90" : "ok";
+  return { days, level };
+}
+/* بدايةُ سنة العقد الجارية (يوم الذكرى الأخير) — نافذةُ قياس التدريب،
+   فالكراسة تقيسه «في ذكرى العقد من كل عام». */
+function contractYearStartISO(startDateStr, todayStr){
+  const re=/^\d{4}-\d{2}-\d{2}$/;
+  if(!re.test(String(startDateStr||"")) || !re.test(String(todayStr||""))) return null;
+  const s=startDateStr.split("-").map(Number);
+  const tY=Number(todayStr.slice(0,4));
+  const anniv=(y)=>{ const d=new Date(y, s[1]-1, s[2], 12); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+  let cand=anniv(tY);
+  if(cand>todayStr) cand=anniv(tY-1);
+  return cand<startDateStr ? startDateStr : cand;
+}
+/* تقدّم التدريب في سنة العقد الجارية: المستهدف ١٤ ساعة/موظف، والحسمية تحت ٩٠٪.
+   بلا عدد موظفين لا مستهدفَ — فتُعرض الساعات وحدها ولا يُصطنع «٪» كاذب. */
+function trainingProgress(records, windowStartYMD, todayYMD, staffCount, kind){
+  const hours=(records||[]).reduce((s,r)=>{
+    if(!r || !r.date) return s;
+    if(windowStartYMD && r.date<windowStartYMD) return s;
+    if(todayYMD && r.date>todayYMD) return s;
+    if(kind && r.kind!==kind) return s;
+    const h=Number(r.hours); return s + (Number.isFinite(h)&&h>0 ? h : 0);
+  },0);
+  const staff=Math.max(0, Math.floor(Number(staffCount)||0));
+  const target=staff*14;
+  const pct=target ? Math.round(hours/target*1000)/1000 : null;
+  const level = pct==null ? "na" : pct>=0.9 ? "ok" : pct>=0.7 ? "warn" : "low";
+  return { hours:Math.round(hours*10)/10, staff, target, pct, level };
+}
+/* نسبة ١٫٦: التصحيحية ÷ (التصحيحية + الوقائية) **بالعدد** — سقفُ العقد ٣٠٪. */
+function ratio16(corrCount, prevCount){
+  const c=Math.max(0,Number(corrCount)||0), p=Math.max(0,Number(prevCount)||0);
+  if(c+p===0) return { pct:null, level:"na" };
+  const pct=Math.round(c/(c+p)*1000)/1000;
+  return { pct, level: pct>0.30 ? "danger" : pct>0.25 ? "warn" : "ok" };
+}
+/* رضا الشهر: متوسط تقييمات (١–٥) نسبةً — وعتبة العقد ٩٠٪. بلا تقييماتٍ «—». */
+function satisfactionMonthly(ratings){
+  const rs=(ratings||[]).map(Number).filter(r=>Number.isFinite(r)&&r>0);
+  if(!rs.length) return { pct:null, n:0, level:"na" };
+  const pct=Math.round(rs.reduce((a,b)=>a+b,0)/rs.length/5*1000)/1000;
+  return { pct, n:rs.length, level: pct>=0.9 ? "ok" : pct>=0.8 ? "warn" : "low" };
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -559,6 +620,161 @@ function ncrDelete(id){
 }
 function ncrReload(){ _ncrFetch(true); }
 
+/* ════════════════════════════════════════════════════════════
+   [الرقابة الاستباقية] الحفظُ والقراءة — نفسُ عهد سجلّ المخالفات:
+   مجموعتان لكل مشروع، قراءةٌ بـ.get() بكاش، ولا onSnapshot.
+   ════════════════════════════════════════════════════════════ */
+function CMP_COLL(){
+  let base=""; try{ base=(typeof _pfx==="function") ? _pfx("perf_compliance") : ""; }catch(e){ base=""; }
+  if(!base) base=(_projId()? _projId()+"_" : "")+"perf_compliance";
+  let dev=false; try{ dev=(typeof IS_DEV!=="undefined" && IS_DEV); }catch(e){}
+  return dev ? base+"_dev" : base;
+}
+function TRN_COLL(){
+  let base=""; try{ base=(typeof _pfx==="function") ? _pfx("perf_trainings") : ""; }catch(e){ base=""; }
+  if(!base) base=(_projId()? _projId()+"_" : "")+"perf_trainings";
+  let dev=false; try{ dev=(typeof IS_DEV!=="undefined" && IS_DEV); }catch(e){}
+  return dev ? base+"_dev" : base;
+}
+let _cmp = { pid:"", state:{}, trainings:[], loaded:false, err:false, at:0, fetching:false };
+function _cmpFetch(force){
+  const pid=_projId(); if(!pid) return;
+  if(_cmp.pid!==pid) _cmp={ pid, state:{}, trainings:[], loaded:false, err:false, at:0, fetching:false };
+  if(_cmp.fetching) return;
+  if(!force && _cmp.loaded && (Date.now()-_cmp.at)<60000) return;
+  const d=_db();
+  if(!d){ _cmp.loaded=true; return; }
+  _cmp.fetching=true;
+  Promise.all([
+    d.collection(CMP_COLL()).doc("state").get(),
+    d.collection(TRN_COLL()).orderBy("date","desc").limit(400).get()
+  ]).then(([st,snap])=>{
+    _cmp.state=(st && st.exists && st.data()) || {};
+    const arr=[]; snap.forEach(doc=>{ const x=doc.data(); if(x) arr.push(x); });
+    _cmp.trainings=arr; _cmp.loaded=true; _cmp.err=false; _cmp.at=Date.now(); _cmp.fetching=false;
+    _rerenderIfActive();
+  }).catch(()=>{
+    _cmp.fetching=false; _cmp.loaded=true; _cmp.err=true;
+    _rerenderIfActive();
+  });
+}
+/* تحرير تواريخ الشهادات وعدد العاملين — مُدخلاتُ الرقابة اليدوية القليلة. */
+function cmpEditState(){
+  if(!_isPerf()) return;
+  if(!_canEdit()){ _toast("⚠ لا صلاحية","warn"); return; }
+  const s=_cmp.state||{}, certs=s.certs||{};
+  const certRow=(id,label)=>`
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">${label}</label>
+        <input class="form-input" type="date" id="pfe-${id}" value="${_esc(certs[id]||"")}">
+      </div>`;
+  _modal({
+    title:"🛡 إعدادات الرقابة الاستباقية",
+    body:`<div style="font-size:12px;color:var(--muted);line-height:1.9;margin-bottom:10px">
+        تواريخُ <b>انتهاء</b> الشهادات كما في الوثائق — والتنبيه يبدأ قبل ٩٠ يوماً.
+        وعددُ العاملين هو مقامُ مستهدف التدريب (١٤ ساعة لكل عامل سنوياً).</div>
+      ${certRow("c9001","ISO 9001 (الجودة) — تاريخ الانتهاء")}
+      ${certRow("c14001","ISO 14001 (البيئة) — تاريخ الانتهاء")}
+      ${certRow("c45001","ISO 45001 (السلامة المهنية) — تاريخ الانتهاء")}
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">عدد العاملين بالمشروع</label>
+        <input class="form-input" type="number" min="0" step="1" id="pfe-staff" value="${_esc(s.staffCount!=null?String(s.staffCount):"")}">
+      </div>`,
+    okText:"💾 احفظ الإعدادات",
+    onOk:()=>{
+      const v=id=>((document.getElementById(id)||{}).value||"").trim();
+      const re=/^\d{4}-\d{2}-\d{2}$/;
+      const certsNew={};
+      [["c9001","ISO 9001"],["c14001","ISO 14001"],["c45001","ISO 45001"]].forEach(([id])=>{
+        const d=v("pfe-"+id);
+        if(d && re.test(d)) certsNew[id]=d;
+      });
+      const staff=parseInt(v("pfe-staff"),10);
+      const u=_user();
+      const d=_db(); if(!d){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
+      d.collection(CMP_COLL()).doc("state").set({
+        certs:certsNew,
+        staffCount:(Number.isFinite(staff)&&staff>0)?staff:0,
+        updatedAt:_nowISO(), updatedBy:(u&&u.name)||"النظام"
+      },{merge:true}).then(()=>{
+        _audit("تحديث إعدادات الرقابة الاستباقية","شهادات: "+Object.keys(certsNew).length+" · عاملون: "+(staff||0));
+        _cmpFetch(true);
+      }).catch(()=>_toast("⚠ تعذّر الحفظ","warn"));
+      _toast("💾 حُفظت الإعدادات","success");
+    }
+  });
+}
+/* تسجيل تدريبٍ منفَّذ — الساعاتُ تُحسب على نافذة سنة العقد الجارية. */
+function cmpAddTraining(){
+  if(!_isPerf()) return;
+  if(!_canEdit()){ _toast("⚠ لا صلاحية","warn"); return; }
+  _modal({
+    title:"🎓 تسجيل تدريبٍ منفَّذ",
+    body:`<div style="font-size:12px;color:var(--muted);line-height:1.9;margin-bottom:10px">
+        سجِّل التدريب يومَ تنفيذه بساعاته <b>الإجمالية</b> (عدد الحضور × مدة الجلسة) —
+        فالمستهدف السنوي يُقاس بإجمالي الساعات مقابل ١٤ ساعةً لكل عامل.</div>
+      <div style="display:flex;gap:10px">
+        <div class="form-group" style="flex:1;margin-bottom:10px">
+          <label class="form-label">تاريخ التنفيذ *</label>
+          <input class="form-input" type="date" id="pft-date" value="${_todayYMD()}">
+        </div>
+        <div class="form-group" style="flex:1;margin-bottom:10px">
+          <label class="form-label">إجمالي الساعات *</label>
+          <input class="form-input" type="number" min="0.5" step="0.5" id="pft-hours" placeholder="مثال: 24">
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">النوع *</label>
+        <select class="form-select" id="pft-kind">
+          <option value="مهنية">سلامة مهنية (المؤشر ٢٫٥)</option>
+          <option value="بيئية">سلامة بيئية (المؤشر ٢٫٦)</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">الموضوع والحضور</label>
+        <input class="form-input" id="pft-topic" placeholder="مثال: إخلاء وإطفاء — 12 فنياً × ساعتان">
+      </div>`,
+    okText:"🎓 سجِّل التدريب",
+    onOk:()=>{
+      const v=id=>((document.getElementById(id)||{}).value||"").trim();
+      const date=v("pft-date"), hours=parseFloat(v("pft-hours")), kind=v("pft-kind");
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ _toast("⚠ أدخل تاريخ التنفيذ","warn"); return false; }
+      if(!Number.isFinite(hours) || hours<=0){ _toast("⚠ أدخل الساعات","warn"); return false; }
+      const u=_user();
+      const rec={
+        id:"trn_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,7),
+        date, hours, kind:(kind==="بيئية"?"بيئية":"مهنية"), topic:v("pft-topic"),
+        createdAt:_nowISO(), createdBy:(u&&u.name)||"النظام"
+      };
+      const d=_db(); if(!d){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return false; }
+      d.collection(TRN_COLL()).doc(rec.id).set(rec).then(()=>{
+        _audit("تسجيل تدريب",""+rec.kind+" — "+rec.hours+" ساعة");
+        _cmpFetch(true);
+      }).catch(()=>_toast("⚠ تعذّر الحفظ","warn"));
+      _toast("🎓 سُجّل التدريب","success");
+    }
+  });
+}
+function cmpDeleteTraining(id){
+  const r=_cmp.trainings.find(x=>x&&x.id===id); if(!r) return;
+  if(!_canDelete()){ _toast("⚠ الحذف للأدمن وحده","warn"); return; }
+  _modal({
+    title:"🗑 حذف قيد التدريب",
+    body:`<div style="font-size:12.5px;line-height:1.9">حذفُ قيدٍ أُدخل خطأً:
+      <b>${_esc(r.kind||"")}</b> — ${_esc(String(r.hours||""))} ساعة بتاريخ ${_esc(r.date||"")}</div>`,
+    okText:"🗑 احذف",
+    onOk:()=>{
+      const d=_db(); if(!d){ _toast("⚠ لا اتصال","warn"); return false; }
+      d.collection(TRN_COLL()).doc(r.id).delete().then(()=>{
+        _audit("حذف قيد تدريب", r.kind+" — "+r.hours+" ساعة");
+        _cmpFetch(true);
+      }).catch(()=>_toast("⚠ تعذّر الحذف","warn"));
+      _toast("🗑 حُذف القيد","success");
+    }
+  });
+}
+function cmpReload(){ _cmpFetch(true); }
+
 function render(){
   const el=document.getElementById("page-"+PAGE_ID);
   if(!el) return;
@@ -571,13 +787,117 @@ function render(){
   const yIdx=Math.min(Math.max(y,1),AR_YEARS.length)-1;
 
   _ncrFetch(false);
+  _cmpFetch(false);
   el.innerHTML =
     heroHTML(cfg, y, m, minS, grace) +
+    proactiveHTML(cfg) +
     ncrSectionHTML(minS) +
     coverageHTML() +
     scorecardHTML(yIdx) +
     penaltyHTML(cfg) +
     roadmapHTML();
+}
+
+/* ════════════════════════════════════════════════════════════
+   [الرقابة الاستباقية] الشاشة — كلُّ نقطةٍ ذاتِ حسميةٍ مباشرة بحالتها
+   **قبل** أن يكتبها الاستشاري. ألوانُ الحالة من مستويات الدوال النقية.
+   ════════════════════════════════════════════════════════════ */
+const _CMP_LEVELS = {
+  ok:      { txt:"آمن",            col:"var(--stage-done)" },
+  d90:     { txt:"٩٠ يوماً",       col:"var(--warn)" },
+  d60:     { txt:"٦٠ يوماً",       col:"var(--warn)" },
+  d30:     { txt:"٣٠ يوماً ⚠",     col:"var(--danger)" },
+  expired: { txt:"منتهية ❌",       col:"var(--danger)" },
+  warn:    { txt:"يقترب",          col:"var(--warn)" },
+  low:     { txt:"تحت المستهدف",   col:"var(--danger)" },
+  danger:  { txt:"تجاوز السقف",    col:"var(--danger)" },
+  na:      { txt:"—",              col:"var(--muted)" }
+};
+function _cmpRow(icon, label, hint, valueTxt, level){
+  const lv=_CMP_LEVELS[level]||_CMP_LEVELS.na;
+  return `<div class="pf-cmp">
+    <div class="pf-cmp-i">${_svg(icon,15)}</div>
+    <div style="flex:1;min-width:0">
+      <div class="pf-cmp-l">${label}</div>
+      <div class="pf-cmp-h">${hint}</div>
+    </div>
+    <div class="pf-cmp-v" style="color:${lv.col}">${valueTxt}</div>
+    <div class="pf-cmp-s" style="color:${lv.col}">${_esc(lv.txt)}</div>
+  </div>`;
+}
+function proactiveHTML(cfg){
+  const s=_cmp.state||{}, certs=s.certs||{};
+  const today=_todayYMD();
+
+  const loadNote = !_cmp.loaded ? `<div class="pf-hint">جارٍ تحميل بيانات الرقابة…</div>`
+    : (_cmp.err ? `<div class="pf-note pf-note-warn">${_svg("alertTriangle",16)}
+        <div><b>تعذّرت قراءة بيانات الرقابة.</b>
+        <button class="btn btn-sm" onclick="performanceContract.cmpReload()">↻ إعادة التحميل</button></div></div>` : "");
+
+  /* الشهادات الثلاث (١٫١) */
+  const certDefs=[["c9001","ISO 9001 — الجودة"],["c14001","ISO 14001 — البيئة"],["c45001","ISO 45001 — السلامة"]];
+  const certRows=certDefs.map(([id,label])=>{
+    const st=certStatus(certs[id], today);
+    const val = st ? (st.days<0 ? "منذ "+Math.abs(st.days)+" يوماً" : "بعد "+st.days+" يوماً") : "لم يُدخَل";
+    return _cmpRow("shield", label,
+      "المؤشر ١٫١ — حسمية ١١–٢٠ ألف ريال/شهادة سنوياً (التعارض ٥ مفتوح)"+(certs[id]?" · تنتهي "+_esc(certs[id]):""),
+      _esc(val), st?st.level:"na");
+  }).join("");
+
+  /* التدريب (٢٫٥/٢٫٦) على نافذة سنة العقد الجارية */
+  const winStart=contractYearStartISO((cfg&&cfg.startDate)||"", today);
+  const trnKinds=[["مهنية","التدريب — سلامة مهنية","المؤشر ٢٫٥"],["بيئية","التدريب — سلامة بيئية","المؤشر ٢٫٦"]];
+  const trnRows=trnKinds.map(([kind,label,ind])=>{
+    const p=trainingProgress(_cmp.trainings, winStart, today, s.staffCount, kind);
+    const val = p.pct!=null ? _pct(p.pct)+"% ("+p.hours+" من "+p.target+" ساعة)"
+              : (p.hours+" ساعة"+(p.staff?"":" — أدخِل عدد العاملين للمستهدف"));
+    return _cmpRow("users", label,
+      ind+" — المستهدف ١٤ ساعة/عامل في سنة العقد، والحسمية تحت ٩٠٪ (١١ ألف ريال)"+(winStart?" · منذ "+_esc(winStart):""),
+      _esc(val), p.level);
+  }).join("");
+
+  /* نسبة ١٫٦ لشهرنا — بالعدد (الاستفسار ٤ مُعلَن) */
+  const c=coverage();
+  const prevCount=c.total-c.corrective;
+  const r16=ratio16(c.corrective, prevCount);
+  const r16Row=_cmpRow("activity","نسبة التصحيحية إلى الإجمالية — هذا الشهر",
+    "المؤشر ١٫٦ — سقف العقد ٣٠٪، وتُحسب هنا بالعدد لا بالقيمة (الاستفسار ٤ المفتوح) · تصحيحية "+c.corrective+" · وقائية "+prevCount,
+    r16.pct!=null?_pct(r16.pct)+"%":"لا بلاغات بعد", r16.level);
+
+  /* رضا الشهر (١٫٥) من تقييمات الإغلاق */
+  const n=new Date(); const mStart=new Date(n.getFullYear(), n.getMonth(), 1);
+  const ratings=_tickets().filter(t=>t && !_isOp(t) && t.status==="مغلق" && t.closedAt && new Date(t.closedAt)>=mStart).map(t=>t.rating);
+  const sat=satisfactionMonthly(ratings);
+  const satRow=_cmpRow("checkCircle","رضا المستفيدين — هذا الشهر",
+    "المؤشر ١٫٥ — عتبة العقد ٩٠٪ والحسمية ١٠ آلاف ريال · من تقييمات إغلاق البلاغات ("+sat.n+" تقييماً)",
+    sat.pct!=null?_pct(sat.pct)+"%":"لا تقييمات بعد — درِّب المشرفين على تقييم كل إغلاق", sat.level);
+
+  return `
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">${_svg("shield",16)} الرقابة الاستباقية — قبل أن يكتبها الاستشاري</div>
+      ${_canEdit()?`<div style="display:flex;gap:7px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="performanceContract.cmpEditState()">⚙ الشهادات والعاملون</button>
+        <button class="btn btn-primary btn-sm" onclick="performanceContract.cmpAddTraining()">🎓 تسجيل تدريب</button>
+      </div>`:""}
+    </div>
+    <div class="pf-hint">من يصل للاجتماع الشهري برقمه الموثّق يناقش؛ ومن يصل بلا رقمٍ يوقّع على رقم غيره.
+      هذه النقاط ذاتُ حسميةٍ نقديةٍ مباشرة — راقبها هنا وأغلقها <b>قبل</b> أن تصير تقريرَ عدم مطابقة.
+      وجولاتُ التفتيش والسلامة تُدار من <b>خطط الصيانة الدورية</b> (خطة «جولة تفتيش سلامة» لكل موقع)
+      فتُغذّي مؤشرَي ٤٫١/٤٫٢ وتحميك في ٥٫١.</div>
+    ${loadNote}
+    <div class="pf-cmps">
+      ${certRows}
+      ${trnRows}
+      ${r16Row}
+      ${satRow}
+    </div>
+    ${_cmp.trainings.length?`<div class="pf-cov-foot">${_svg("clipboardCheck",13)}
+      آخر تدريب: <b>${_esc(_cmp.trainings[0].date||"")}</b> — ${_esc(_cmp.trainings[0].kind||"")}
+      (${_esc(String(_cmp.trainings[0].hours||""))} ساعة)
+      ${_canDelete()?`<button class="btn btn-sm" onclick="performanceContract.cmpDeleteTraining('${_esc(_cmp.trainings[0].id)}')">🗑</button>`:""}
+      · إجمالي القيود: ${_cmp.trainings.length}</div>`:""}
+  </div>`;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -824,7 +1144,7 @@ function roadmapHTML(){
     { n:"٢", t:"الحقول التي تُغذّي المؤشرات", d:"«وصلتُ للموقع» · «رجعت الخدمة» · «توقف الساعة» · تاريخُ استحقاق المهمة الوقائية — والجدولُ المعتمد لم يعد ينزاح. تفتح ٢٨ درجةً من ١٠٠.", done:true },
     { n:"٣", t:"سجلّ عدم المطابقة", d:"استقبالُ المخالفة وربطُها بالمؤشر، وأثرُها المحسوب فوراً (درجةُ المؤشر · عدّادُ التكرار · الحسمية)، واعتراضٌ مُسنَدٌ بسجلّاتٍ تسبق التقرير. يحمي ٥١٫٥ درجة.", done:true },
     { n:"٤", t:"الدرجة والغرامة الحيّة", d:"الدرجةُ أثناء الشهر · الخصمُ المتوقَّع · عدّادا التكرار والإنذار · «ماذا لو».", done:false },
-    { n:"٥", t:"السلامة والتوطين و٩٤٠", d:"سجلُّ الحوادث · تصاريحُ العمل · لوحةُ التوطين · بلاغاتُ ٩٤٠ · سجلُّ التدريب.", done:false }
+    { n:"٥", t:"السلامة والتوطين و٩٤٠", d:"سجلُّ الحوادث · تصاريحُ العمل · لوحةُ التوطين · بلاغاتُ ٩٤٠. (سُبقت منها الشهاداتُ والتدريبُ ونسبةُ ١٫٦ والرضا — في بطاقة «الرقابة الاستباقية».)", done:false }
   ];
   return `
   <div class="card">
@@ -893,6 +1213,14 @@ function injectCSS(){
   #page-${PAGE_ID} .pf-cov-v{font-weight:900;font-size:18px;line-height:1}
   #page-${PAGE_ID} .pf-cov-h{font-size:10.5px;color:var(--muted);margin-top:5px;line-height:1.8}
   #page-${PAGE_ID} .pf-cov-foot{font-size:11.5px;color:var(--muted);margin-top:14px;padding-top:11px;border-top:1px solid var(--border);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  #page-${PAGE_ID} .pf-cmps{display:flex;flex-direction:column;gap:9px}
+  #page-${PAGE_ID} .pf-cmp{display:flex;gap:11px;align-items:center;border:1px solid var(--border);border-radius:11px;padding:10px 12px}
+  #page-${PAGE_ID} .pf-cmp-i{width:26px;height:26px;flex:0 0 auto;border-radius:8px;display:flex;align-items:center;justify-content:center;background:var(--surface2);color:var(--muted);border:1px solid var(--border)}
+  #page-${PAGE_ID} .pf-cmp-l{font-weight:800;font-size:12.5px;line-height:1.5}
+  #page-${PAGE_ID} .pf-cmp-h{font-size:10.5px;color:var(--muted);line-height:1.75;margin-top:2px}
+  #page-${PAGE_ID} .pf-cmp-v{font-weight:900;font-size:13px;flex:0 0 auto;white-space:nowrap}
+  #page-${PAGE_ID} .pf-cmp-s{font-size:10px;font-weight:800;flex:0 0 auto;border:1px solid var(--border);border-radius:99px;padding:2px 8px;white-space:nowrap;background:var(--surface2)}
+  @media(max-width:560px){ #page-${PAGE_ID} .pf-cmp{flex-wrap:wrap} #page-${PAGE_ID} .pf-cmp-v{font-size:12px} }
   #page-${PAGE_ID} .pf-st{font-size:10px;font-weight:800;border-radius:99px;padding:2px 9px;white-space:nowrap}
   #page-${PAGE_ID} .pf-st-open{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 35%,var(--border))}
   #page-${PAGE_ID} .pf-st-disp{color:var(--primary);background:color-mix(in srgb,var(--primary) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--primary) 30%,var(--border))}
@@ -1032,8 +1360,15 @@ window.performanceContract = {
   ncrStreak,
   ncrRollup,
   ncrEvidence,
+  // [الرقابة الاستباقية] الدوالُّ النقيّة
+  certStatus,
+  contractYearStartISO,
+  trainingProgress,
+  ratio16,
+  satisfactionMonthly,
   // إجراءات الشاشة (onclick)
   ncrNew, ncrClose, ncrDispute, ncrDelete, ncrReload,
+  cmpEditState, cmpAddTraining, cmpDeleteTraining, cmpReload,
   version: VERSION,
   build: MODULE_BUILD
 };
