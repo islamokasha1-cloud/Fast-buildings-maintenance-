@@ -526,7 +526,12 @@ function predelivery() {
        hrPayments.refreshNav بعد إزالة وضع المشتريات المركزية (بلاغ المالك 29/08:
        سداد الموارد البشرية لا يظهر داخل المشاريع) — منطقُ البوابة نفسُه في
        hr-payments.js، والسطرُ هنا لأن تبديل الوضع حدثُ نواةٍ لا لقطةَ تُرافقه. */
-    const IDX_CEILING = 37878;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37878 إلى 37935 — ‏٥٧ سطراً في بطاقة «المالية — السداد» القائمة
+       (طلب المالك 29/08): قسمٌ يعرض دفعات العقود وأوامر الدفع المعلّقة عند
+       المالية. **تعديلُ بطاقةٍ قائمةٍ في مكانها**: التجميعُ والحسابُ في وحدة
+       التعاقدات (`contracts.financePayables`) والبطاقةُ ترسم نتيجتَه فقط —
+       ونقلُ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). */
+    const IDX_CEILING = 37935;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -2730,6 +2735,14 @@ function financialInvariants() {
       /function clearPOFilters\(\)[\s\S]{0,900}window\._poFinanceView\s*=\s*""/.test(HTML));
     T("★ v18.9ua: البطاقات أزرارٌ حقيقية (لوحةُ المفاتيح تبلغها)",
       HTML.includes('class="po-fin-chip') && HTML.includes('aria-pressed='));
+    // ── دفعات العقود وأوامر الدفع المعلّقة عند المالية في البطاقة نفسِها (طلب المالك) ──
+    T("★★ البطاقة تقرأ contracts.financePayables وتعرض قسم التعاقدات المعلّقة، وتظهر ولو خلت المشتريات",
+      HTML.includes("contracts.financePayables===\"function\"") &&
+      HTML.includes("دفعات العقود وأوامر الدفع — بانتظار سداد المالية") &&
+      HTML.includes("if(!pending.length && !paid.length && !ctrPay.length)"));
+    T("★ صفوف التعاقدات تفتح مستندَها في صفحته (openReqFrom/openCtrFrom/openExtFrom) ولا تدخل في رقاقات فلترة طلبات الشراء",
+      /const _ctrOpenJS = it => \{\s*\n\s*const fn = it\.kind==="ctr" \? "openCtrFrom" : \(it\.kind==="ext" \? "openExtFrom" : "openReqFrom"\);/.test(HTML) &&
+      !HTML.includes('_poFinanceCardFilter(\'ctrPay\''));
   }
 
   // ── v18.9ts — تنظيف منخفض (L7/L9/L10/L11) ──
@@ -9822,6 +9835,38 @@ function contractsPhase1() {
     C._advancePayable({ status: "ctr_closed", advance: { amount: 1000, paid: 0 } }) === false &&
     C._advancePayable({ status: "ctr_completed", advance: { amount: 1000, paid: 0 } }) === false &&
     C._advancePayable({ status: "ctr_active", advance: { amount: 1000, paid: 1000 } }) === false);
+  /* ════ ما ينتظر سدادَ المالية من جهة التعاقدات — تقرؤه بطاقة «المالية — السداد» (طلبُ المالك) ════
+     أوامرُ الدفع المعلّقة والدفعاتُ المقدمةُ المستحقّة والمستخلصاتُ بانتظار السداد —
+     من الدوالّ الحارسة نفسِها، لا نسخةٍ منها. */
+  {
+    const fpReqs = [
+      { id: "R1", status: "crq_pending_pay", title: "أمر الـ1500", value: 1500, payments: [{ amount: 500 }], updatedAt: "2026-08-02" },
+      { id: "R2", status: "crq_pending_finance", value: 900 },   // اعتمادُ المالية لا سدادُها — لا يدخل
+      { id: "R3", status: "crq_paid", value: 700 }
+    ];
+    const fpCtrs = [
+      { id: "C1", status: "ctr_active", title: "تجاليد", advance: { amount: 14025, paid: 0 }, updatedAt: "2026-08-01" },
+      { id: "C2", status: "ctr_closed", advance: { amount: 1000, paid: 0 } },      // مقفل — لا مطالبة
+      { id: "C3", status: "ctr_active", title: "عقد المستخلص", advance: { amount: 5000 } }  // قديمٌ بلا paid — لا مطالبةَ وهمية
+    ];
+    const fpExts = [
+      { id: "E1", contractId: "C3", status: "ext_pending_finance", settled: { net: 25000 }, updatedAt: "2026-08-03" },
+      { id: "E2", contractId: "C3", status: "ext_paid", settled: { net: 9000 } }
+    ];
+    const fp = C._financePayables(fpReqs, fpCtrs, fpExts);
+    T("★★ financePayables: أمرُ الدفع المعلّق والمقدمةُ المستحقّة والمستخلصُ وحدَها — لا معتمدٌ ولا مسدَّدٌ ولا مقفلٌ ولا قديمٌ غيرُ متتبَّع",
+      fp.length === 3 && fp.map(x => x.id).sort().join(",") === "C1,E1,R1", JSON.stringify(fp.map(x => x.id)));
+    T("★★ financePayables: المتبقّي من الدوالّ الحارسة نفسِها (1500 سُدِّد منه 500 ⇐ 1000 · المقدمة 14025 · صافي المستخلص 25000)",
+      fp.find(x => x.id === "R1").due === 1000 && fp.find(x => x.id === "C1").due === 14025 && fp.find(x => x.id === "E1").due === 25000);
+    T("★ financePayables: الأقدمُ أولاً، والمستخلصُ يحمل عنوانَ عقده ومعرّفَه وعلمَ نقص التوقيع",
+      fp[0].id === "C1" && fp.find(x => x.id === "E1").title === "عقد المستخلص" &&
+      fp.find(x => x.id === "E1").ctr === "C3" && fp.find(x => x.id === "E1").needsSig === true);
+    T("★ financePayables: لكلّ صنفٍ تسميتُه المعروضة",
+      fp.find(x => x.id === "R1").lbl === "أمر دفع" && fp.find(x => x.id === "C1").lbl === "دفعة مقدمة" && fp.find(x => x.id === "E1").lbl === "مستخلص");
+    T("★ financePayablesLive محكومةٌ بصلاحية عرض التعاقدات — لا تسرُّبَ أرقامٍ عبر بطاقة المشتريات",
+      /function financePayablesLive\(\)\{\s*\n\s*if\(!canView\(\)\) return \[\];/.test(src));
+  }
+
   T("★★ وسدادُها معاملةٌ للمالية وبإيصالٍ وبسقف المتبقّي — والمبلغُ الفعليُّ إلزاميٌّ ويُدوَّن في السجل",
     /function payAdvance\(id, payload\)\{[\s\S]{0,300}إيصال السداد إلزامي[\s\S]{0,200}مبلغ السداد إلزامي[\s\S]{0,300}سداد الدفعة المقدمة للمالية فقط[\s\S]{0,1200}يتجاوز المتبقّي[\s\S]{0,900}_pushTimeline\(c, "سداد دفعة مقدمة", "advance_paid"/.test(src));
   T("★ والمدفوعُ فعلاً من المقدمة مصروفٌ في التجميعَين (الموازنةُ والبندُ المستعاض) بلا ازدواج",
