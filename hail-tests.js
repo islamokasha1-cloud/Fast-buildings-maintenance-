@@ -510,7 +510,15 @@ function predelivery() {
        في نافذةٍ قائمة في مكانها** لا ميزةٌ جديدة — التوليد يقرأ حقول النافذة
        (`ppm-freq` · `ppm-asset` · `ppm-edit-id`) ومصفوفة `assets` في النواة،
        ونقلُ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). */
-    const IDX_CEILING = 37817;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37817 إلى 37870 — ‏٥٣ سطراً لموعد الاستحقاق الثاني في نافذة
+       خطة PPM (طلب المالك): تقويم ثانٍ يمتلئ تلقائياً بالاستحقاق الأول + فترة
+       التكرار ويقبل التعديل، ويُستهلك مرة واحدة عند توليد أول بلاغ. **تعديلُ
+       نافذةٍ ومحرّكِ جدولةٍ قائمَين في مكانهما**: الدالتان النقيتان تقرآن
+       `PPM_FREQ_DAYS` و`ppmNextDue` في النواة، والاستهلاك داخل موضعَي التقديم
+       (`autoCreatePPMTicket` · `confirmPPMTicket`) — ونقلُ منطقٍ قائمٍ إلى
+       ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). ومعه إصلاحُ ReferenceError
+       قائم: رسالة نجاح confirmPPMTicket كانت تقرأ `nextDate` غير المعرَّف. */
+    const IDX_CEILING = 37870;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -6222,7 +6230,7 @@ function perfContractPhase2() {
     const iA = HTML.indexOf("scheduledFor: plan.nextDueDate");
     const jA = HTML.indexOf("ppmPlans[planIdx].nextDueDate=nextISO;");
     const iB = HTML.indexOf("scheduledFor: p.nextDueDate");
-    const jB = HTML.indexOf("p.nextDueDate  = ppmNextDue(p, now);");
+    const jB = HTML.indexOf("p.nextDueDate  = _adv.nextISO;");
     return iA > 0 && jA > iA && iB > 0 && jB > iB;
   })(), "لو قُدّمت الخطة أولاً لحُفظ استحقاقُ الدورة **التالية** بدل الحالية");
 
@@ -13374,7 +13382,7 @@ function ppmAutoNameGuards() {
 
   // ── (٢) التوصيل: تغيير التكرار أو الأصل يعيد التوليد ──
   T("★ تغيير التكرار أو الأصل في النافذة يعيد توليد الاسم (onchange موصول)",
-    /id="ppm-freq" onchange="ppmNameAutoFill\(\)"/.test(HTML) &&
+    /id="ppm-freq" onchange="ppmNameAutoFill\(\);ppmSecondDueAutoFill\(\)"/.test(HTML) &&
     /id="ppm-asset" onchange="ppmNameAutoFill\(\)"/.test(HTML));
   T("★★ التوليد لا يلمس اسماً كتبه المستخدم ولا وضعَ التعديل",
     /function ppmNameAutoFill\(\)\{\s*\n\s*if\(document\.getElementById\("ppm-edit-id"\)\.value\) return;/.test(HTML) &&
@@ -13396,7 +13404,7 @@ function ppmNextDueFieldGuards() {
   T("★ الحقل مسمّى «تاريخ الاستحقاق القادم» إلزامياً مع شرح توليد أول بلاغ",
     /تاريخ الاستحقاق القادم <span style="color:var\(--danger\)">\*<\/span>/.test(HTML) &&
     /يتولّد أول بلاغ للخطة في هذا التاريخ/.test(HTML) &&
-    /<input class="form-input" type="date" id="ppm-start-date">/.test(HTML));
+    /<input class="form-input" type="date" id="ppm-start-date" onchange="ppmSecondDueAutoFill\(\)">/.test(HTML));
   T("★★ ما يُختار في الحقل هو ما يُكتب في nextDueDate — في الإنشاء المفرد والجماعي",
     /nextDueDate: new Date\(start\)\.toISOString\(\),/.test(HTML) &&
     /nextDueDate:new Date\(start\)\.toISOString\(\),/.test(HTML));
@@ -13407,6 +13415,72 @@ function ppmNextDueFieldGuards() {
   T("★ الحفظ بلا تاريخ يُرفض برسالة باسم الحقل الصريح",
     (HTML.match(/toast\("⚠ اختر تاريخ الاستحقاق القادم","warn"\)/g) || []).length >= 2 &&
     !/اختر تاريخ أول تنفيذ/.test(HTML));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   خطط PPM: موعد الاستحقاق الثاني في نافذة الخطة (طلب المالك) —
+   تقويم ثانٍ يمتلئ تلقائياً بالاستحقاق الأول + فترة التكرار (شهري ⇐ +٣٠ ·
+   ربع سنوي ⇐ +٩٠…) ويقبل التعديل، ويُستهلَك مرة واحدة عند توليد أول بلاغ
+   ثم تعود الدورات إلى مرساة ppmNextDue. الدالتان النقيتان تُنفَّذان هنا
+   فعلاً مع محرّك الجدولة الحقيقي، والتوصيل والاستهلاك يُحرسان نصّياً.
+   ════════════════════════════════════════════════════════════════════ */
+function ppmSecondDueGuards() {
+  H("خطط PPM — موعد الاستحقاق الثاني");
+
+  // ── (١) الدالتان النقيتان: تُستخرجان مع محرّك الجدولة وتُنفَّذان فعلاً ──
+  const parts = [
+    /const PPM_FREQ_DAYS = \{[\s\S]*?\};/,
+    /function ppmNextDue\(plan, fromISO\)\{[\s\S]*?\n\}/,
+    /function ppmSecondDueDefault\(startYMD, freq\)\{[\s\S]*?\n\}/,
+    /function ppmConsumeSecondDue\(plan, fromISO\)\{[\s\S]*?\n\}/,
+  ].map(r => (HTML.match(r) || [null])[0]);
+  T("ppmSecondDueDefault وppmConsumeSecondDue موجودتان (نقيتان) مع محرّك الجدولة", parts.every(Boolean));
+  if (parts.every(Boolean)) {
+    const F = new Function(parts.join("\n") + "; return {ppmSecondDueDefault, ppmConsumeSecondDue};")();
+    T("★★ الافتراضي = الاستحقاق الأول + فترة التكرار (شهري +٣٠ · ربع سنوي +٩٠)",
+      F.ppmSecondDueDefault("2026-09-01", "شهري") === "2026-10-01" &&
+      F.ppmSecondDueDefault("2026-09-01", "ربع سنوي") === "2026-11-30" &&
+      F.ppmSecondDueDefault("2026-09-01", "سنوي") === "2027-09-01");
+    T("★ بلا تاريخ أول أو بتاريخ فاسد: لا افتراضي ولا كسر",
+      F.ppmSecondDueDefault("", "شهري") === "" && F.ppmSecondDueDefault("خطأ", "شهري") === "");
+    const fut = new Date(Date.now() + 45 * 864e5).toISOString();
+    const a = F.ppmConsumeSecondDue({ secondDueDate: fut, nextDueDate: new Date().toISOString(), freq: "شهري" });
+    T("★★ الموعد الثاني المستقبلي يُستهلَك: يصير هو الاستحقاق التالي حرفياً",
+      a.usedSecond === true && a.nextISO === fut);
+    const b = F.ppmConsumeSecondDue({ secondDueDate: "2020-01-01", nextDueDate: new Date().toISOString(), freq: "شهري" });
+    T("★★ موعد ثانٍ في الماضي لا يُعتمد — يسقط إلى مرساة ppmNextDue وبتاريخ مستقبلي",
+      b.usedSecond === false && new Date(b.nextISO) > new Date());
+    const c = F.ppmConsumeSecondDue({ nextDueDate: new Date().toISOString(), freq: "شهري" });
+    T("★ خطة بلا موعد ثانٍ: السلوك القديم كما هو (المرساة وحدها)", c.usedSecond === false);
+  }
+
+  // ── (٢) الحقل والتوصيل ──
+  T("★ تقويم «موعد الاستحقاق الثاني» في النافذة مع شرح أنه تلقائي وقابل للتعديل",
+    /<input class="form-input" type="date" id="ppm-second-date">/.test(HTML) &&
+    /موعد الاستحقاق الثاني/.test(HTML) &&
+    /تلقائياً حسب التكرار، ويقبل التعديل/.test(HTML));
+  T("★ تغيير الاستحقاق الأول أو التكرار يعيد ملء الافتراضي — واختيار المستخدم لا يُمَسّ",
+    /id="ppm-start-date" onchange="ppmSecondDueAutoFill\(\)"/.test(HTML) &&
+    /id="ppm-freq" onchange="ppmNameAutoFill\(\);ppmSecondDueAutoFill\(\)"/.test(HTML) &&
+    /if\(!inp \|\| \(inp\.value && inp\.value !== inp\.dataset\.auto\)\) return;/.test(HTML));
+
+  // ── (٣) الحفظ والتحقّق — في الإنشاء المفرد والجماعي ──
+  T("★★ الموعد الثاني يُخزَّن في الخطة (secondDueDate) في المسارين — والفارغ null",
+    (HTML.match(/secondDueDate: second \? new Date\(second\)\.toISOString\(\) : null,/g) || []).length >= 2);
+  T("★ موعد ثانٍ لا يلي الأول يُرفض برسالة صريحة في المسارين",
+    (HTML.match(/موعد الاستحقاق الثاني يجب أن يكون بعد تاريخ الاستحقاق القادم/g) || []).length >= 2);
+  T("★ وضع التعديل يحمّل الموعد الثاني المخزَّن — والفارغ يبقى فارغاً (على المرساة)",
+    /_esd\.value=p\.secondDueDate\?new Date\(p\.secondDueDate\)\.toISOString\(\)\.slice\(0,10\):"";/.test(HTML));
+
+  // ── (٤) الاستهلاك مرة واحدة في موضعَي التقديم — ثم يُمحى ──
+  T("★★ التوليد التلقائي والاعتماد اليدوي كلاهما يستهلك الموعد الثاني ويمحوه",
+    /if\(_adv\.usedSecond\) ppmPlans\[planIdx\]\.secondDueDate=null;/.test(HTML) &&
+    /if\(_adv\.usedSecond\) p\.secondDueDate = null;/.test(HTML));
+  T("★ رسالة نجاح الاعتماد تقرأ استحقاق الخطة المحدَّث لا متغيّراً غير معرَّف (إصلاح ReferenceError)",
+    /fmtDateOnly\(p\.nextDueDate\)\}`, "success"\)/.test(HTML) &&
+    !/nextDate\.toISOString/.test(HTML));
+  T("★ بطاقة الخطة تعرض الموعد الثاني حين يكون محدَّداً",
+    /الثاني: \$\{fmtDateOnly\(p\.secondDueDate\)\}/.test(HTML));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -13702,6 +13776,7 @@ function externalPurchaseApiGuards() {
   assetPPMCoverageGuards();
   ppmAutoNameGuards();
   ppmNextDueFieldGuards();
+  ppmSecondDueGuards();
   assetSupervisorEditGuards();
   contractsTenantScopeGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
