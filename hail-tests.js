@@ -6399,6 +6399,46 @@ function perfContractPhase3() {
   T("★ p3: ncrRollup — الحسميةُ للمخروق وحده وبمضاعِف تكراره (٥٥٠٠×١٫٥=٨٢٥٠)",
     roll.dedTotal===8250 &&
     roll.rows.find(r=>r.id==="4.3").ded===8250 && roll.rows.find(r=>r.id==="1.2").ded===null);
+
+  /* ── الرقابة الاستباقية: المؤشراتُ ذاتُ الحسمية المباشرة تُراقَب قبل المخالفة ──
+     العهد: لا رقمَ مُصطنَعاً (مقامٌ صفرٌ ⇒ null لا صفراً) · نافذةُ التدريب سنةُ
+     العقد بذكراها · عتباتُ العقد نفسُها (٩٠٪ تدريب/رضا · ٣٠٪ نسبة ١٫٦ · ٩٠/٦٠/٣٠
+     يوماً للشهادات) · والدوالُّ تُنفَّذ هنا فعلاً. */
+  T("★ ر.س: الدوالُّ النقيّة للرقابة معروضةٌ على الكائن",
+    ["certStatus","contractYearStartISO","trainingProgress","ratio16","satisfactionMonthly"].every(f=>typeof M[f]==="function"));
+  T("★ ر.س: حالة الشهادة — مستويات ٩٠/٦٠/٣٠ يوماً ثم «منتهية» والمدخلُ الفاسد null",
+    JSON.stringify(M.certStatus("2026-12-01","2026-08-29"))==='{"days":94,"level":"ok"}' &&
+    M.certStatus("2026-11-20","2026-08-29").level==="d90" &&
+    M.certStatus("2026-10-20","2026-08-29").level==="d60" &&
+    M.certStatus("2026-09-20","2026-08-29").level==="d30" &&
+    M.certStatus("2026-08-01","2026-08-29").level==="expired" &&
+    M.certStatus("","2026-08-29")===null && M.certStatus("2026-01-01","خطأ")===null);
+  T("★ ر.س: بدايةُ سنة العقد = آخرُ ذكرى (لا أولَ يناير) ولا تسبق بدايةَ العقد",
+    M.contractYearStartISO("2024-03-10","2026-08-29")==="2026-03-10" &&
+    M.contractYearStartISO("2025-11-15","2026-08-29")==="2025-11-15" &&
+    M.contractYearStartISO("2026-10-01","2026-08-29")==="2026-10-01");
+  T("★ ر.س: التدريب — يفلتر بالنافذة والنوع، والمستهدف ١٤×العاملين، وتحت ٩٠٪ ليس آمناً", (()=>{
+    const recs=[{date:"2026-05-01",hours:60,kind:"مهنية"},{date:"2026-06-01",hours:40,kind:"بيئية"},
+                {date:"2025-01-01",hours:99,kind:"مهنية"},{date:"2026-07-01",hours:-5,kind:"مهنية"}];
+    const p=M.trainingProgress(recs,"2026-03-10","2026-08-29",10,"مهنية");
+    const ok=M.trainingProgress([{date:"2026-05-01",hours:130,kind:"مهنية"}],"2026-01-01","2026-08-29",10,"مهنية");
+    return p.hours===60 && p.target===140 && p.level==="low" && ok.level==="ok";
+  })());
+  T("★ ر.س: التدريب بلا عدد عاملين — الساعاتُ تُعرض ولا يُصطنع «٪» كاذب",
+    M.trainingProgress([{date:"2026-05-01",hours:9,kind:"مهنية"}],"2026-01-01","2026-08-29",0,null).pct===null);
+  T("★ ر.س: نسبة ١٫٦ — سقف ٣٠٪ (يقترب فوق ٢٥٪ · تجاوزٌ فوق ٣٠٪ · مقامٌ صفرٌ null)",
+    M.ratio16(2,8).level==="ok" && M.ratio16(3,7).level==="warn" &&
+    M.ratio16(4,6).level==="danger" && M.ratio16(0,0).pct===null);
+  T("★ ر.س: رضا الشهر — متوسطُ التقييمات نسبةً بعتبة ٩٠٪، والصفرُ وغيرُ المقيَّم مستبعدان",
+    JSON.stringify(M.satisfactionMonthly([5,4,5,0,null]))==='{"pct":0.933,"n":3,"level":"ok"}' &&
+    M.satisfactionMonthly([]).pct===null && M.satisfactionMonthly([4,4,4]).level==="warn");
+  T("★ ر.س: بيانات الرقابة بنفس عهد السجل — كاشٌ لكل مشروعٍ ولا onSnapshot",
+    /if\(_cmp\.pid!==pid\) _cmp=\{ pid, state:\{\}, trainings:\[\]/.test(PF) &&
+    /\(Date\.now\(\)-_cmp\.at\)<60000/.test(PF));
+  T("★ ر.س: نسبة ١٫٦ مُعلَنٌ في الشاشة أنها بالعدد لا بالقيمة (الاستفسار ٤)",
+    /بالعدد لا بالقيمة \(الاستفسار ٤/.test(PF));
+  T("★ ر.س: حذفُ قيد التدريب للأدمن وحده",
+    /function cmpDeleteTraining\(id\)\{[\s\S]{0,200}?_canDelete\(\)/.test(PF));
 }
 
 function deepReviewV18_9vu() {
