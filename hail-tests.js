@@ -13385,6 +13385,31 @@ function ppmAutoNameGuards() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   خطط PPM: تاريخ الاستحقاق القادم في نافذة الخطة (طلب المالك) —
+   الحقل الذي يملؤه المستخدم هو نفسه nextDueDate الذي تعرضه بطاقة الخطة
+   ويقرؤه التوليد التلقائي، والتسمية تقولها صراحةً — لا «تاريخ أول تنفيذ»
+   الغامضة. يُحرس المسار الكامل: التسمية ⇐ الكتابة عند الإنشاء (المفرد
+   والجماعي) ⇐ التحميل عند التعديل ⇐ التحقّق الإلزامي.
+   ════════════════════════════════════════════════════════════════════ */
+function ppmNextDueFieldGuards() {
+  H("خطط PPM — تاريخ الاستحقاق القادم في نافذة الخطة");
+  T("★ الحقل مسمّى «تاريخ الاستحقاق القادم» إلزامياً مع شرح توليد أول بلاغ",
+    /تاريخ الاستحقاق القادم <span style="color:var\(--danger\)">\*<\/span>/.test(HTML) &&
+    /يتولّد أول بلاغ للخطة في هذا التاريخ/.test(HTML) &&
+    /<input class="form-input" type="date" id="ppm-start-date">/.test(HTML));
+  T("★★ ما يُختار في الحقل هو ما يُكتب في nextDueDate — في الإنشاء المفرد والجماعي",
+    /nextDueDate: new Date\(start\)\.toISOString\(\),/.test(HTML) &&
+    /nextDueDate:new Date\(start\)\.toISOString\(\),/.test(HTML));
+  T("★★ وضع التعديل يحمّل استحقاق الخطة القائم في الحقل نفسه (قابل للتغيير)",
+    /document\.getElementById\("ppm-start-date"\)\.value=p\.nextDueDate\?new Date\(p\.nextDueDate\)\.toISOString\(\)\.slice\(0,10\):"";/.test(HTML));
+  T("★ فتح نافذة الإضافة يمهّد الحقل بتاريخ اليوم",
+    /document\.getElementById\("ppm-start-date"\)\.value=new Date\(\)\.toISOString\(\)\.slice\(0,10\);/.test(HTML));
+  T("★ الحفظ بلا تاريخ يُرفض برسالة باسم الحقل الصريح",
+    (HTML.match(/toast\("⚠ اختر تاريخ الاستحقاق القادم","warn"\)/g) || []).length >= 2 &&
+    !/اختر تاريخ أول تنفيذ/.test(HTML));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    التعاقدات: كلُّ مشروعِ تشغيلٍ يرى تعاقداتِه وطلباتِه وحدَها (طلب المالك)
    — الدالة النقية ctDocInTenant تُنفَّذ هنا فعلاً عبر تحميل الوحدة بلا DOM،
    ومواضعُ الحصر (القائمتان · ختمُ الإنشاء · وراثةُ العقد) تُحرس نصّياً.
@@ -13676,6 +13701,7 @@ function externalPurchaseApiGuards() {
   ppmSupervisorCreateGuards();
   assetPPMCoverageGuards();
   ppmAutoNameGuards();
+  ppmNextDueFieldGuards();
   assetSupervisorEditGuards();
   contractsTenantScopeGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
