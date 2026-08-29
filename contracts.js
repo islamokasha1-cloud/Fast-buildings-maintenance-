@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2933";
+var MODULE_BUILD = "v18.9.2939";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -7205,6 +7205,48 @@ function myPendingItems(role){
   return out;
 }
 
+/* ── ما ينتظر **سدادَ المالية** من جهة التعاقدات — لبطاقة «المالية — السداد» ──
+   (طلبُ المالك): بطاقةُ السداد في المشتريات كانت تعرض طلبات الشراء وحدَها،
+   بينما تقف عندها أيضاً أوامرُ دفعٍ ودفعاتٌ مقدمةٌ ومستخلصاتٌ لا تُرى إلا بدخول
+   صفحات التعاقدات. المصدرُ **الدوالُّ نفسُها** التي تحرس أزرارَ السداد
+   (`crqPayDue` · `advancePayable` · حالة `ext_pending_finance`) لا نسخةٌ منها —
+   فالرقمُ في البطاقة هو الرقمُ على الزرّ. نقيةٌ تأخذ المصفوفاتِ وسائطَ
+   ليفحصها `hail-tests.js` بلا متصفّح. */
+function financePayables(reqs, ctrs, exts){
+  var out = [];
+  (Array.isArray(reqs)?reqs:[]).forEach(function(r){
+    if(r && r.status === "crq_pending_pay")
+      out.push({ kind:"req", id:r.id, lbl:"أمر دفع", title:r.title||r.vendorName||"",
+                 due:crqPayDue(r), total:r2(Number(r.value)||0), at:r.updatedAt||r.createdAt||"" });
+  });
+  var byId = {};
+  (Array.isArray(ctrs)?ctrs:[]).forEach(function(c){
+    if(!c) return;
+    byId[c.id] = c;
+    if(advancePayable(c))
+      out.push({ kind:"ctr", id:c.id, lbl:"دفعة مقدمة", title:c.title||c.vendorName||"",
+                 due:advanceDueOf(c), total:r2(Number((c.advance||{}).amount)||0), at:c.updatedAt||c.createdAt||"" });
+  });
+  (Array.isArray(exts)?exts:[]).forEach(function(e){
+    if(!e || e.status !== "ext_pending_finance") return;
+    var c = byId[e.contractId];
+    var net = r2(Number((e.settled||{}).net)||0);
+    out.push({ kind:"ext", id:e.id, lbl:"مستخلص", title:(c&&(c.title||c.vendorName))||e.contractId||"",
+               due:net, total:net, ctr:e.contractId||"", at:e.updatedAt||e.createdAt||"",
+               /* الماليةُ لا تصرف مستخلصاً بلا نسخةٍ موقّعة — البطاقةُ تقول ما ينقص لا اسمَ البوّابة */
+               needsSig: !extSignature(e) });
+  });
+  out.sort(function(a,b){ return String(a.at||"").localeCompare(String(b.at||"")); });
+  return out;
+}
+/* القراءةُ الحيّة لبطاقة المشتريات: تُشغّل المزامنةَ وتحترم صلاحيةَ العرض —
+   من لا يرى التعاقدات لا تتسرّب إليه أرقامُها عبر بطاقةٍ أخرى. */
+function financePayablesLive(){
+  if(!canView()) return [];
+  startReqSync(); startCtrSync(); startExtSync();
+  return financePayables(_reqs, _ctrs, _exts);
+}
+
 function _daysSince(iso){
   if(!iso) return null;
   var t = new Date(String(iso)).getTime();
@@ -9312,6 +9354,8 @@ window.contracts = {
   renderMyTasks: renderMyTasks, hookMyTasks: hookMyTasks,
   // الأداء ولوحة المعلومات [المرحلتان ١٠ و١١]
   renderDashCard: renderDashCard, hookDash: hookDash, openCtrsPage: openCtrsPage,
+  // ما ينتظر سدادَ المالية من جهة التعاقدات — تقرؤه بطاقةُ «المالية — السداد» في المشتريات
+  financePayables: financePayablesLive, _financePayables: financePayables,
   _vendorScorecard: vendorScorecard, _dashSummary: dashSummary, _ctrLateDays: ctrLateDays,
   _linkPurchase: linkPurchase, _poCandidatesFor: poCandidatesFor,
   _poLinkedTo: poLinkedTo, _myPendingItems: myPendingItems,
