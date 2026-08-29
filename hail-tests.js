@@ -518,7 +518,11 @@ function predelivery() {
        (`autoCreatePPMTicket` · `confirmPPMTicket`) — ونقلُ منطقٍ قائمٍ إلى
        ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). ومعه إصلاحُ ReferenceError
        قائم: رسالة نجاح confirmPPMTicket كانت تقرأ `nextDate` غير المعرَّف. */
-    const IDX_CEILING = 37870;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37870 إلى 37875 — ‏٥ أسطرٍ لجسر `renderPpm` وتعليقِ علّته
+       (بلاغ المالك 29/08): pgBar يركّب «renderPpm» لقسم ppm والدالة renderPPM،
+       فكانت أزرار صفحات الخطط ترمي ReferenceError أول ما تجاوزت 20 خطة.
+       **إصلاح سطرٍ في موضع الدالة القائمة** — وتعديل pgBar المشترك أخطر. */
+    const IDX_CEILING = 37875;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -13484,6 +13488,27 @@ function ppmSecondDueGuards() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   ترقيم الصفحات (pgBar): الاسم المركّب render<Section> يجب أن يوجد لكل قسم —
+   pgBar يبني onclick بتكبير أول حرف («ppm» ⇐ renderPpm)، واسمٌ لا يوجد =
+   أزرار صفحات ميتة برمية ReferenceError لا تظهر إلا حين يتجاوز القسم صفحةً
+   واحدة (علّة 29/08: خطط PPM بلغت 39 فظهر الشريط ومات). حارس منهجي: يرصد
+   كل استدعاءات pgBar ويطابقها — فقسمٌ جديد باسمٍ لا يُركَّب يسقط هنا فوراً.
+   ════════════════════════════════════════════════════════════════════ */
+function pgBarTargetsGuards() {
+  H("ترقيم الصفحات — لكل قسم pgBar دالةُ رسمٍ بالاسم المركّب");
+  const sections = [...new Set([...HTML.matchAll(/pgBar\("([A-Za-z]+)"/g)].map(m => m[1]))];
+  T("أقسام pgBar مرصودة (6 على الأقل)", sections.length >= 6, sections.join(" · "));
+  const missing = sections.filter(s => {
+    const fn = "render" + s.charAt(0).toUpperCase() + s.slice(1);
+    return !(new RegExp("function " + fn + "\\(")).test(HTML);
+  });
+  T("★★ الاسم المركّب موجود لكل قسم — وإلا فأزرار صفحاته ميتة (ReferenceError)",
+    missing.length === 0, missing.length ? ("الناقص: " + missing.map(s => "render" + s.charAt(0).toUpperCase() + s.slice(1)).join(", ")) : "كل الأقسام موصولة");
+  T("★ جسر renderPpm ⇐ renderPPM قائم (قسم ppm لا يتبع نمط التكبير)",
+    /function renderPpm\(\)\{ renderPPM\(\); \}/.test(HTML));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    التعاقدات: كلُّ مشروعِ تشغيلٍ يرى تعاقداتِه وطلباتِه وحدَها (طلب المالك)
    — الدالة النقية ctDocInTenant تُنفَّذ هنا فعلاً عبر تحميل الوحدة بلا DOM،
    ومواضعُ الحصر (القائمتان · ختمُ الإنشاء · وراثةُ العقد) تُحرس نصّياً.
@@ -13777,6 +13802,7 @@ function externalPurchaseApiGuards() {
   ppmAutoNameGuards();
   ppmNextDueFieldGuards();
   ppmSecondDueGuards();
+  pgBarTargetsGuards();
   assetSupervisorEditGuards();
   contractsTenantScopeGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
