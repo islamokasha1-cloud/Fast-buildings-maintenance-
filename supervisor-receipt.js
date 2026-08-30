@@ -30,7 +30,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2957";
+const MODULE_BUILD = "v18.9.2959";
 const MAX_PHOTOS   = 6;
 const MAX_PHOTO_MB = 10;
 
@@ -130,7 +130,7 @@ function open(poId){
     <div style="background:var(--surface,#fff);border-radius:12px;width:100%;max-width:640px;max-height:92vh;overflow-y:auto;direction:rtl;padding:20px">
       <div style="font-size:15px;font-weight:800;margin-bottom:4px">👷 محضر استلام المشرف — ${_esc(poId)}</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
-        طالب المواد: <b>${_esc(p.supervisor||"—")}</b>${prevCnt?` · محاضر سابقة: ${prevCnt}`:""}
+        طالب المواد: <b>${_esc(p.supervisor||"—")}</b>${p.receivingSupervisor?` · المشرف المستلم: <b>${_esc(p.receivingSupervisor)}</b>`:""}${prevCnt?` · محاضر سابقة: ${prevCnt}`:""}
         — التوثيق ميدانيٌّ فقط؛ الرصيد يدخله المستودع عند التدقيق.
       </div>
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:8px;overflow:hidden">

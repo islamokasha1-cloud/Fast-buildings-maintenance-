@@ -275,6 +275,40 @@ head("٥) البتُّ في البند الإضافي — مرحلتان بحا�
   check("★★ مشرفٌ مسجَّلٌ بدور supervisor اللاتيني يصل أيضاً (لا يسقط نصفُ المشرفين)",
     sent.length === 1 && sent[0].to === "966500000006",
     JSON.stringify(sent.map((s) => s.to)));
+
+  // (ح) «المشرف المستلم» المحدَّد على الطلب يقبض الرسالة وحدَه — لا بثَّ للبقية
+  const USERS_TWO = { "meta/users": { users: [
+    { user: "admin", name: "الأدمن", role: "admin", phone: "966500000001", waOptIn: true },
+    { user: "sup",  name: "مشرف الموقع", role: "مشرف", phone: "966500000005", waOptIn: true },
+    { user: "sup3", name: "مشرف آخر",    role: "مشرف", phone: "966500000007", waOptIn: true },
+  ] } };
+  sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "proc_executing" }),
+    po({ status: "sv_receiving", receivingSupervisorUser: "sup3", receivingSupervisor: "مشرف آخر" }),
+    deps(fakeDb(USERS_TWO, sent)));
+  check("★★ المشرفُ المستلمُ المحدَّد على الطلب يقبض الرسالة وحدَه",
+    sent.length === 1 && sent[0].to === "966500000007" && sent[0].recipientRef === "named:sup3",
+    JSON.stringify(sent.map((s) => s.recipientRef + "/" + s.to)));
+
+  // (ط) طلبٌ أقدم يحمل الاسمَ وحدَه (بلا معرّف) — المطابقةُ بالاسم تعمل
+  sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "proc_executing" }),
+    po({ status: "sv_receiving", receivingSupervisor: "مشرف آخر" }),
+    deps(fakeDb(USERS_TWO, sent)));
+  check("★ والتحديدُ بالاسم وحده يصل صاحبَه", sent.length === 1 && sent[0].to === "966500000007",
+    JSON.stringify(sent.map((s) => s.to)));
+
+  // (ي) محدَّدٌ غيرُ مسجَّلٍ أو بلا رقمٍ مفعَّل ⇒ ارتدادٌ لبثّ الدور — لا إشعارَ يضيع
+  sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "proc_executing" }),
+    po({ status: "sv_receiving", receivingSupervisorUser: "ghost" }),
+    deps(fakeDb(USERS_TWO, sent)));
+  check("★★ محدَّدٌ بلا رقمٍ مفعَّل ⇒ بثٌّ لكل المشرفين (الارتدادُ يحفظ الإشعار)",
+    sent.length === 2 && sent.every((s) => s.recipientRef === "role:مشرف"),
+    JSON.stringify(sent.map((s) => s.to)));
 }
 
 console.log(out.join("\n"));

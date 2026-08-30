@@ -6,7 +6,7 @@
  */
 const cfg = require("./config");
 const { enqueue } = require("./outbox");
-const { findByRole, findRequester } = require("./recipients");
+const { findByRole, findRequester, findNamedRecipient } = require("./recipients");
 
 /** اسم المشروع من مستند الطلب (مع بدائل). */
 function projectName(po) {
@@ -70,14 +70,29 @@ async function routePurchase(before, after, { db, logger, isEnabled }) {
   // غيرُ معروفةٍ تصل مدير المشاريع بدل أن تسقط بصمت.
   const route = cfg.PO_ROUTING[newKey] || cfg.PO_ROUTING[newStatus];
   if (route) {
-    const recipients = await findByRole(db, route.role, projectId);
+    /* المشرفُ المستلمُ المحدَّد على الطلب (receivingSupervisor/-User — يختاره
+       مُنشئ الطلب) يقبض رسالةَ الاستلام الميداني **وحدَه** بدل بثّ كل المشرفين؛
+       فإن لم يوجد له رقمٌ مفعَّلٌ ارتددنا للبثّ بالدور فلا يضيع الإشعار. */
+    let recipients = null;
+    let recipientRef = `role:${route.role}`;
+    if (newKey === "sv_receiving" && (after.receivingSupervisorUser || after.receivingSupervisor)) {
+      const named = await findNamedRecipient(
+        db, { user: after.receivingSupervisorUser, name: after.receivingSupervisor }, projectId);
+      if (named.length) {
+        recipients = named;
+        recipientRef = `named:${after.receivingSupervisorUser || after.receivingSupervisor}`;
+      } else {
+        logger.info(`wa(po): المشرف المستلم المحدَّد بلا رقمٍ مفعَّل (${poId}) — بثٌّ للدور`);
+      }
+    }
+    if (!recipients) recipients = await findByRole(db, route.role, projectId);
     if (!recipients.length) {
       logger.info(`wa(po): لا مستلم للدور ${route.role} (طلب ${poId}) — تخطّي`);
     }
     for (const r of recipients) {
       const { queued } = await enqueue(db, {
         to: r.phone,
-        recipientRef: `role:${route.role}`,
+        recipientRef,
         template: cfg.PO.approvalTemplate,
         lang: cfg.PO.lang,
         // {{1}}الإجراء {{2}}المشروع {{3}}رقم الطلب {{4}}مقدّم الطلب {{5}}عدد البنود

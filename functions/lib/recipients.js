@@ -163,4 +163,29 @@ async function findRequesterAnywhere(db, po) {
   return null;
 }
 
-module.exports = { findByRole, findRequester, findByRoleAnywhere, findRequesterAnywhere };
+/**
+ * مستلمٌ واحدٌ محدَّدٌ بالمعرّف أو الاسم — «المشرف المستلم» المختار على طلب الشراء.
+ * يُبحث في مستند مشروع الطلب ثم المركزي (مصدرا التوجيه نفساهما)، والمطابقة على
+ * `user` أولاً ثم `name` (الطلبات الأقدم قد تحمل الاسم وحده). يُرجع مصفوفةً
+ * بعنصرٍ واحدٍ أو فارغةً — والمستدعي يرتدّ لبثّ الدور عند الفراغ فلا يضيع الإشعار.
+ */
+async function findNamedRecipient(db, target, projectId) {
+  const user = String((target && target.user) || "").trim();
+  const name = String((target && target.name) || "").trim();
+  if (!user && !name) return [];
+  const docs = ["meta/users"];
+  if (projectId) docs.unshift(`meta/${projectId}_users`);
+  for (const path of docs) {
+    const users = await _readUsersDoc(db, path);
+    const u = users.find((x) => {
+      if (!x) return false;
+      if (user && (String(x.user) === user || String(x.name) === user)) return true;
+      if (name && (String(x.user) === name || String(x.name) === name)) return true;
+      return false;
+    });
+    if (u && u.phone && u.waOptIn === true) return [{ name: u.name || u.user || "", phone: u.phone }];
+  }
+  return [];
+}
+
+module.exports = { findByRole, findRequester, findByRoleAnywhere, findRequesterAnywhere, findNamedRecipient };
