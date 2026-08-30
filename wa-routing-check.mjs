@@ -57,7 +57,8 @@ const USERS = {
     { user: "fin",   name: "المالية",      role: "finance",             phone: "966500000002", waOptIn: true },
     { user: "proc",  name: "المشتريات",    role: "procurement_officer", phone: "966500000003", waOptIn: true },
     { user: "pm2",   name: "مديرٌ بلا رقم", role: "project_manager" },          // بلا هاتف
-    { user: "ceo",   name: "التنفيذيّ",     role: "ceo",  phone: "966500000004", waOptIn: false } // بلا موافقة
+    { user: "ceo",   name: "التنفيذيّ",     role: "ceo",  phone: "966500000004", waOptIn: false }, // بلا موافقة
+    { user: "sup",   name: "مشرف الموقع",   role: "مشرف", phone: "966500000005", waOptIn: true }   // الدور بمفتاحه العربي
   ] },
 };
 const logger = { info() {}, warn() {}, error() {} };
@@ -238,6 +239,42 @@ head("٥) البتُّ في البند الإضافي — مرحلتان بحا�
     JSON.stringify(sent.map((s) => s.event.type)));
   check("★★ ولا رسالةَ اعتمادٍ على الإقفال (لا معتمِدَ بعد البتّ)",
     sent.every((s) => s.event.type !== "po_approval_needed"));
+
+  // (هـ) استلامُ المشرف الميداني (sv_receiving) — الدورُ بمفتاحه العربي «مشرف»
+  sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "proc_executing" }),
+    po({ status: "sv_receiving" }),
+    deps(fakeDb(USERS, sent)));
+  check("★★ «تم الشراء» ⇒ رسالةُ استلامٍ ميدانيٍّ للمشرف (دورُه العربي «مشرف» يصل)",
+    sent.length === 1 && sent[0].recipientRef === "role:مشرف" && sent[0].to === "966500000005",
+    JSON.stringify(sent.map((s) => s.recipientRef + "/" + s.to)));
+  check("★ ونصُّ الإجراء يسمّي الاستلامَ الميداني",
+    /استلامك الميداني/.test(sent[0].params[0]), sent[0].params[0]);
+
+  // (و) تحويلُ المشرف للمستودع ⇒ رسالةُ الاستلام المعتادة للمستودع — المسارُ القديم سليم
+  sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "sv_receiving" }),
+    po({ status: "wh_receiving" }),
+    deps(fakeDb(USERS, sent)));
+  check("★★ التحويلُ للمستودع بعد المشرف يُرسِل للمستودع كما كان",
+    sent.length === 1 && sent[0].recipientRef === "role:warehouse_manager",
+    JSON.stringify(sent.map((s) => s.recipientRef)));
+
+  // (ز) الدورُ بصيغته اللاتينية supervisor (يُسجَّل بصيغتين — v18.9wj) يصل أيضاً
+  const USERS_LATIN = { "meta/users": { users: [
+    { user: "admin", name: "الأدمن", role: "admin", phone: "966500000001", waOptIn: true },
+    { user: "sup2", name: "مشرف لاتيني", role: "supervisor", phone: "966500000006", waOptIn: true },
+  ] } };
+  sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "proc_executing" }),
+    po({ status: "sv_receiving" }),
+    deps(fakeDb(USERS_LATIN, sent)));
+  check("★★ مشرفٌ مسجَّلٌ بدور supervisor اللاتيني يصل أيضاً (لا يسقط نصفُ المشرفين)",
+    sent.length === 1 && sent[0].to === "966500000006",
+    JSON.stringify(sent.map((s) => s.to)));
 }
 
 console.log(out.join("\n"));
