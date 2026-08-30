@@ -30,7 +30,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2951";
+const MODULE_BUILD = "v18.9.2957";
 const MAX_PHOTOS   = 6;
 const MAX_PHOTO_MB = 10;
 
