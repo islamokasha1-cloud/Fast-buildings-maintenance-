@@ -547,7 +547,12 @@ function predelivery() {
        كما توجب القاعدة، وهذه الأسطرُ ما لا يعيش خارج النواة — الحالةُ الجديدة
        في PO_STATUS/PO_STAGES/STAGE_ORDER، وتحويلُ doNotifyWarehouse، ومفتاحُ
        الإعدادات، وأزرارُ/أقسامُ الاستدعاء `window.supervisorReceipt`. */
-    const IDX_CEILING = 38057;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 38057 إلى 38130 — ‏٧٣ سطراً لحقل «المشرف المستلم للمواد» (طلب
+       المالك 30/08): إضافةُ حقلٍ إلى **نموذج طلب الشراء القائم** في النواة
+       (النموذج والمسودة والتصفير وsubmitPurchase وتعديل الأدمن كلُّها هنا) —
+       ودالةُ التعبئة `_fillRecvSupervisorSelect` تقرأ USERS وCURRENT_PROJECT
+       من نطاق النواة، ونقلُ تعديلِ نموذجٍ قائمٍ إلى وحدةٍ ممنوع (CLAUDE.md). */
+    const IDX_CEILING = 38130;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -8608,6 +8613,32 @@ function supervisorReceiptGuards() {
   const cfgSrc = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "functions", "lib", "config.js"), "utf8"); } catch (e) { return ""; } })();
   T("★★ واتساب: sv_receiving ⇐ دور «مشرف» (المفتاح العربي كما في meta/users)",
     /sv_receiving:\s*\{\s*role:\s*"مشرف",\s*action:\s*"استلامك الميداني"\s*\}/.test(cfgSrc));
+
+  /* ── «المشرف المستلم للمواد» على الطلب (طلب المالك 30/08 — المتابعة) ──
+     يُختار عند إنشاء الطلب فتصله رسالةُ «استلامك الميداني» وحدَه؛ وبلا تحديدٍ
+     يبقى البثُّ لكل مشرفي المشروع. wa-routing-check يُنفّذ المسارَ فعلاً —
+     وهذه حراسُ الربط في الواجهة والخادم. */
+  T("★ حقلا «المشرف المستلم» في نموذج الطلب الجديد وتعديل الأدمن",
+    /id="np-recv-supervisor"/.test(HTML) && /id="pae-recv-supervisor"/.test(HTML));
+  T("★ القائمة من مصدري التوجيه نفسيهما (USERS + المركزي) وبصيغتي الدور",
+    /function _fillRecvSupervisorSelect\(/.test(HTML) &&
+    /u\.role==="مشرف" \|\| u\.role==="supervisor"/.test(HTML));
+  T("★★ الإنشاء والتعديل يحفظان المعرّفَ والاسمَ معاً على الطلب",
+    /receivingSupervisor: recvSup\.name,/.test(HTML) &&
+    /receivingSupervisorUser: recvSup\.user,/.test(HTML) &&
+    /pf\.receivingSupervisor=_rs\.name; pf\.receivingSupervisorUser=_rs\.user;/.test(HTML));
+  T("★ الحقلُ في مسودة النموذج وقائمةِ التصفير (لا يضيع ولا يعلق من طلبٍ سابق)",
+    /"np-recv-supervisor","np-date"/.test(HTML) &&
+    /"np-supervisor","np-recv-supervisor","np-item-cost"/.test(HTML));
+  T("★ تفاصيل الطلب ونافذة المحضر تعرضان المشرفَ المستلم",
+    /المشرف المستلم:<\/span> \$\{esc\(p\.receivingSupervisor\)\}/.test(HTML) &&
+    /المشرف المستلم: <b>\$\{_esc\(p\.receivingSupervisor\)\}<\/b>/.test(src));
+  const purSrc = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "functions", "lib", "purchases.js"), "utf8"); } catch (e) { return ""; } })();
+  const recSrc = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "functions", "lib", "recipients.js"), "utf8"); } catch (e) { return ""; } })();
+  T("★★ الخادم: المحدَّدُ يقبض وحدَه والفراغُ يرتدّ لبثّ الدور (findNamedRecipient)",
+    /findNamedRecipient\(\s*\n?\s*db, \{ user: after\.receivingSupervisorUser, name: after\.receivingSupervisor \}, projectId\)/.test(purSrc) &&
+    /async function findNamedRecipient\(db, target, projectId\)/.test(recSrc) &&
+    /findNamedRecipient \};$/m.test(recSrc));
 }
 
 function pcNameOverrideGuards() {
