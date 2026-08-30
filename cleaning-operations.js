@@ -42,7 +42,7 @@
 
 const PAGE_ID = "cleaning-ops";
 const VERSION = "0.1";
-const MODULE_BUILD = "v18.9.2941";
+const MODULE_BUILD = "v18.9.2944";
 
 /* ════════════ ثوابت النطاق ════════════ */
 // أنواع عمل النظافة الافتراضية — بذرةٌ أولية تُعدَّل من إعدادات المشروع كالمعتاد.
@@ -3798,6 +3798,11 @@ function injectSidebarButton(){
 const CLEANING_HIDDEN_GROUPS = ["assets","inventory","catalog","rfq"];
 function applyNavGroupVisibility(){
   const hide=isCleaningProject();
+  /* صنفُ الجسم co-cleaning يشغّل قواعد الإخفاء في injectCSS (حقلُ «عامل النظافة
+     المسؤول» وأزرارُ تعيين الفني — طلب المالك 30/08): إخفاءٌ بالأنماط لا حذفٌ من
+     الـDOM، فتبقى عناصر النواة موجودةً لدوالّها، ويُرفَع بإزالة الصنف عند الخروج.
+     المكانُ هنا لأن هذه الدالة تُستدعى عند كل تبديل مشروعٍ ومن مراقب الـDOM. */
+  try{ document.body.classList.toggle("co-cleaning", hide); }catch(e){}
   CLEANING_HIDDEN_GROUPS.forEach(g=>{
     ["hdr-grp-"+g, "grp-"+g].forEach(id=>{
       const el=document.getElementById(id);
@@ -3965,6 +3970,17 @@ function injectCSS(){
 .co-sup-m .v{display:block;font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:900;line-height:1.15}
 .co-sup-m .s{display:block;font-size:9.5px;font-weight:700;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
 #${EXEC_ID},#${DAILY_ID}{direction:rtl}
+/* بلاغات النظافة بلا «فني مسؤول» (طلب المالك 30/08): عاملُ التنفيذ يُدار من جدول
+   التشغيل اليومي لا من البلاغ، فحقلُ «عامل النظافة المسؤول» في نموذج البلاغ وأزرارُ
+   «تعيين فني / تغيير الفني» (onclick يستدعي openAssign) وسطرُ الفني في البطاقات
+   والتفاصيل — كلُّها تُخفى في مشاريع النظافة وحدَها. إخفاءٌ لا حذف: مشاريعُ الصيانة
+   لا تتأثّر، والعناصرُ باقيةٌ في الـDOM لدوالّ النواة. محدِّد d-fact مقيَّدٌ بـ
+   #detail-body لأن d-facts تُستعمل أيضاً في تفاصيل طلب الشراء (طالب المواد أوّلها). */
+body.co-cleaning #n-tech-group{display:none!important}
+body.co-cleaning button[onclick*="openAssign"]{display:none!important}
+body.co-cleaning .ticket-meta > span:first-child{display:none!important}
+body.co-cleaning .tcm-meta > span:first-child{display:none!important}
+body.co-cleaning #detail-body .d-facts .d-fact:first-child{display:none!important}
 /* إصلاحُ خللٍ في النواة (يصيب مشاريع الصيانة أيضاً): الحالةُ الفارغة في أرشيف البلاغات
    تضع أيقونةً بلا أبعاد داخل حاويةٍ تضبط font-size فقط — وfont-size لا يحجّم SVG، فيتمدّد
    ليملأ عرض البطاقة. سطرٌ واحد يعيدها لحجمها المقصود، بلا مسّ أي منطق. */

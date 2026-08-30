@@ -13,7 +13,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js"></script>
 <!-- طابور الرفع المؤجَّل للصور (مشترك مع النظام الرئيسي) -->
-<script src="photo-queue.js?v=18.9.2941"></script>
+<script src="photo-queue.js?v=18.9.2944"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -1361,6 +1361,7 @@ function startRealtimeSync(){
         photos:      d.data().photos||[],
         maintType:   d.data().maintType||"تصحيحية",
         ticketPhoto: d.data().ticketPhoto||null,
+        ticketPhotos:d.data().ticketPhotos||[],
         reporter:    d.data().reporter||null,
         timeline:    d.data().timeline||[]
       }));
@@ -1553,8 +1554,9 @@ function openDetail(id){
   const slaPct=Math.min(100,Math.round(usedH/slaH*100));
   const slaClass=slaPct>=100?"sla-over":slaPct>=80?"sla-warn":"sla-ok";
 
-  // Photos
-  const allPhotos=[...(t.ticketPhoto?[t.ticketPhoto]:[]),...(t.photos||[])];
+  // Photos — صور البلاغ المتعددة (ticketPhotos) مع التوافق مع الحقل المفرد القديم
+  const _tp=(Array.isArray(t.ticketPhotos)&&t.ticketPhotos.filter(Boolean).length)?t.ticketPhotos.filter(Boolean):(t.ticketPhoto?[t.ticketPhoto]:[]);
+  const allPhotos=[..._tp,...(t.photos||[])];
 
   // Timeline
   const tl=(t.timeline||[]).slice().reverse();
