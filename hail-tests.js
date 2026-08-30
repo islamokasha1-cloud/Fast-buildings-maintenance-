@@ -531,7 +531,13 @@ function predelivery() {
        المالية. **تعديلُ بطاقةٍ قائمةٍ في مكانها**: التجميعُ والحسابُ في وحدة
        التعاقدات (`contracts.financePayables`) والبطاقةُ ترسم نتيجتَه فقط —
        ونقلُ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). */
-    const IDX_CEILING = 37935;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 37935 إلى 37958 — ‏٢٣ سطراً لتعدُّد صور البلاغ الواحد (طلب
+       المالك 30/08): حقلُ الرفع القائم في نموذج البلاغ صار يقبل أكثر من صورة
+       (`pendingTicketPhotos[]` · `ticketPhotos` · `ticketPhotosOf`). **تعديلُ
+       سلوكِ حقلٍ قائمٍ في مكانه**: منطقُ الرفع والعرض كلُّه في النواة
+       (submitTicket · openDetail · التقرير المصوّر · نافذة التعديل)، ونقلُه
+       إلى وحدةٍ بحجّة تعديله ممنوع (CLAUDE.md). */
+    const IDX_CEILING = 37958;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -8142,8 +8148,8 @@ function photoQueueGuards() {
   T("★ aj: إغلاق البلاغ يُدرج الفاشلة في الطابور ويعدّ ما دخل فعلاً",
     /_deferred=readyPhotos\.filter\(p=>!p\.storageUrl\)\.filter\(p=>_queuePhoto\(p, id, "photos", "arrayUnion"\)\)/.test(HTML));
   T("aj: إنشاء البلاغ · تعديل صورته · تعديل صور الإغلاق · الخلفية — كلُّها تُدرج",
-    /_queuePhoto\(pendingTicketPhoto, id, "ticketPhoto", "set"\)/.test(HTML) &&
-    /_queuePhoto\(pendingEditPhoto, t\.id, "ticketPhoto", "set"\)/.test(HTML) &&
+    /_queuePhoto\(p, id, "ticketPhotos", "arrayUnion"\)/.test(HTML) &&
+    /_queuePhoto\(pendingEditPhoto, t\.id, "ticketPhotos", "arrayUnion"\)/.test(HTML) &&
     /editClosingPendingNew\.filter\([^)]*\)\.forEach\(p=>_queuePhoto\(p, t\.id, "photos", "arrayUnion"\)\)/.test(HTML) &&
     /else _queuePhoto\(p, ticketId, "photos", "arrayUnion"\)/.test(HTML));
   T("★ aj: تطبيق الفنيين يُدرج أيضاً (الميدانُ أضعفُ شبكةً من المكتب)",
@@ -13812,6 +13818,68 @@ function contractsTenantScopeGuards() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   صور البلاغ المتعددة + بلاغات النظافة بلا «فني مسؤول» (طلب المالك 30/08)
+   الحرّاس: أكثر من صورةٍ للبلاغ الواحد (ticketPhotos والأولى في ticketPhoto
+   للتوافق) · العرضُ عبر ticketPhotosOf فتظهر صور القديم والجديد سواء ·
+   وفي مشاريع النظافة يُخفى حقل العامل المسؤول وأزرار التعيين (إخفاءٌ لا حذف).
+   ════════════════════════════════════════════════════════════════════ */
+function ticketMultiPhotoGuards() {
+  H("صور البلاغ المتعددة + إلغاء الفني المسؤول في بلاغات النظافة");
+
+  // ── (١) الدالة النقية ticketPhotosOf: تُستخرج من index.html وتُنفَّذ فعلاً ──
+  const m = HTML.match(/function ticketPhotosOf\(t\)\{[\s\S]*?\n\}/);
+  T("★ ticketPhotosOf موجودة في النواة", !!m);
+  if (m) {
+    const vm = require("vm");
+    const sb = {}; vm.createContext(sb);
+    try {
+      vm.runInContext(m[0] + "; this._f = ticketPhotosOf;", sb);
+      const f = sb._f;
+      T("★★ المصفوفة الجديدة تتقدّم على الحقل المفرد القديم",
+        JSON.stringify(f({ ticketPhotos: ["a", "b"], ticketPhoto: "x" })) === '["a","b"]');
+      T("★★ البلاغ القديم (حقلٌ مفرد بلا مصفوفة) ما زال يعرض صورته",
+        JSON.stringify(f({ ticketPhoto: "x" })) === '["x"]' &&
+        JSON.stringify(f({ ticketPhotos: [], ticketPhoto: "x" })) === '["x"]');
+      T("★ بلا صور: مصفوفةٌ فارغة، والقيم الفارغة تُرشَّح ولا يتسرّب null",
+        JSON.stringify(f({})) === "[]" && JSON.stringify(f(null)) === "[]" &&
+        JSON.stringify(f({ ticketPhotos: [null, "a", ""] })) === '["a"]');
+    } catch (e) { T("ticketPhotosOf تُنفَّذ", false, String(e.message).slice(0, 100)); }
+  }
+
+  // ── (٢) النموذج يقبل أكثر من صورة والإرسال يحفظ المصفوفة والأولى معاً ──
+  T("★ حقل رفع صورة البلاغ يقبل تعدّد الملفات (multiple)",
+    /id="n-ticket-photo" accept="image\/\*" multiple/.test(HTML));
+  T("★★ التسجيل يحفظ ticketPhotos كاملةً والأولى في ticketPhoto للتوافق",
+    /ticketPhoto:ticketPhotoUrls\[0\]\|\|null,ticketPhotos:ticketPhotoUrls/.test(HTML));
+  T("★ الصورة المتعذّرة تدخل الطابور المؤجَّل بإلحاقٍ لا استبدال (arrayUnion)",
+    /_queuePhoto\(p, id, "ticketPhotos", "arrayUnion"\)/.test(HTML));
+  T("★ للحدّ الأقصى حارس (لا رفعَ بلا سقف)",
+    /TICKET_PHOTOS_MAX/.test(HTML) && /room=TICKET_PHOTOS_MAX-pendingTicketPhotos\.length/.test(HTML));
+  T("تطبيع التحميل من Firestore يضمّ ticketPhotos (المزامنة والأرشيف)",
+    (HTML.match(/ticketPhotos:\s*d\.data\(\)\.ticketPhotos\|\|\[\]/g) || []).length >= 2);
+  T("★ العرض كلُّه عبر ticketPhotosOf: التفاصيل · التقرير المصوّر · PPTX · العدّاد",
+    (HTML.match(/ticketPhotosOf\(t\)/g) || []).length >= 5 &&
+    /const ticketPhotoArr=ticketPhotosOf\(t\);/.test(HTML));
+  const TECH3 = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "tech-app.html"), "utf8"); } catch { return ""; } })();
+  T("تطبيق الفنيين يعرض صور البلاغ المتعددة أيضاً",
+    !TECH3 || (/ticketPhotos:d\.data\(\)\.ticketPhotos\|\|\[\]/.test(TECH3) && /t\.ticketPhotos\.filter\(Boolean\)/.test(TECH3)));
+
+  // ── (٣) بلاغات النظافة: حقل العامل المسؤول وأزرار التعيين تُخفى (لا تُحذف) ──
+  const CO3 = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "cleaning-operations.js"), "utf8"); } catch { return ""; } })();
+  T("★ cleaning-operations.js موجودة", !!CO3);
+  T("★★ صنف co-cleaning يُخفي حقل «عامل النظافة المسؤول» وأزرار تعيين الفني",
+    /body\.co-cleaning #n-tech-group\{display:none!important\}/.test(CO3) &&
+    /body\.co-cleaning button\[onclick\*="openAssign"\]\{display:none!important\}/.test(CO3));
+  T("★ سطرُ الفني يُخفى في بطاقات البلاغات والتفاصيل — ومحدِّد التفاصيل مقيَّد بالنافذة",
+    /body\.co-cleaning \.ticket-meta > span:first-child\{display:none!important\}/.test(CO3) &&
+    /body\.co-cleaning #detail-body \.d-facts \.d-fact:first-child\{display:none!important\}/.test(CO3));
+  T("★★ الصنف يُدار من applyNavGroupVisibility (تبديل المشروع ومراقب الـDOM)",
+    /classList\.toggle\("co-cleaning", hide\)/.test(CO3));
+  T("★ الإخفاء بالأنماط لا بحذف العناصر من النواة (حقل n-tech باقٍ للصيانة)",
+    /id="n-tech-group"/.test(HTML) && /id="n-tech"/.test(HTML));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    سجل الأصول: المشرف يعدّل تفاصيل الأصل — والإضافة والحذف للمسؤول وحده،
    وواجهة الوحدة بأيقونات SVG لا إيموجي (طلب المالك).
    ════════════════════════════════════════════════════════════════════ */
@@ -14053,6 +14121,7 @@ function externalPurchaseApiGuards() {
   pgBarTargetsGuards();
   assetSupervisorEditGuards();
   contractsTenantScopeGuards();
+  ticketMultiPhotoGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));

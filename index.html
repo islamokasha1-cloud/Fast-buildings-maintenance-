@@ -554,10 +554,10 @@
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span> صورة البلاغ (اختياري)</label>
+          <label class="form-label"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span> صور البلاغ (اختياري)</label>
           <div class="photo-upload-area" onclick="document.getElementById('n-ticket-photo').click()">
-            <input type="file" id="n-ticket-photo" accept="image/*" onchange="handleTicketPhotoUpload(event)">
-            <div style="font-size:13px;color:var(--muted)"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span> اضغط لإضافة صورة للبلاغ</div>
+            <input type="file" id="n-ticket-photo" accept="image/*" multiple onchange="handleTicketPhotoUpload(event)">
+            <div style="font-size:13px;color:var(--muted)"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span> اضغط لإضافة صور للبلاغ — يمكن اختيار أكثر من صورة</div>
           </div>
           <div id="n-ticket-photo-preview" class="photo-previews"></div>
         </div>
@@ -5595,7 +5595,7 @@ async function exportPhotoReportToPPTX(){
       if(t.workDone) descRuns.push({text:"\n✅ "+t.workDone,options:{fontSize:10,color:"0A7C59",breakLine:true}});
       slide.addText(descRuns,{x:x+0.1,y:y+HEAD_H+INFO_H,w:w-0.2,h:DESC_H,align:"right",valign:"top",fontFace:"Arial"});
 
-      const ticketPhotoArr=t.ticketPhoto?[t.ticketPhoto]:[];
+      const ticketPhotoArr=ticketPhotosOf(t);
       const closingPhotos=t.photos&&t.photos.length?t.photos:[];
       const allPhotos=[...ticketPhotoArr,...closingPhotos].slice(0,4);
 
@@ -5728,7 +5728,7 @@ function loadData(onDone){
               if(d){try{
                 const p=JSON.parse(d);
                 if(Array.isArray(p)&&p.length>0){
-                  tickets=p.map(t=>({...t,photos:t.photos||[],maintType:t.maintType||"تصحيحية",ticketPhoto:t.ticketPhoto||null,reporter:t.reporter||null}));
+                  tickets=p.map(t=>({...t,photos:t.photos||[],maintType:t.maintType||"تصحيحية",ticketPhoto:t.ticketPhoto||null,ticketPhotos:t.ticketPhotos||[],reporter:t.reporter||null}));
                   counter=parseInt(localStorage.getItem("hail_main_c")||String(tickets.length));
                   migrated=true;
                   // تقسيم على دفعات بحد أقصى 499 (حد Firestore)
@@ -5748,7 +5748,7 @@ function loadData(onDone){
           }
           done();
         } else {
-          tickets=snap.docs.map(d=>({...d.data(),photos:d.data().photos||[],maintType:d.data().maintType||"تصحيحية",ticketPhoto:d.data().ticketPhoto||null,reporter:d.data().reporter||null,timeline:d.data().timeline||[]}));
+          tickets=snap.docs.map(d=>({...d.data(),photos:d.data().photos||[],maintType:d.data().maintType||"تصحيحية",ticketPhoto:d.data().ticketPhoto||null,ticketPhotos:d.data().ticketPhotos||[],reporter:d.data().reporter||null,timeline:d.data().timeline||[]}));
           tickets.sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
           // إزالة أي تكرار في الـ IDs من Firestore (نادر لكن ممكن)
           const _seenLd=new Map();
@@ -5822,6 +5822,7 @@ function startRealtimeSync(){
       photos:       d.data().photos||[],
       maintType:    d.data().maintType||"تصحيحية",
       ticketPhoto:  d.data().ticketPhoto||null,
+      ticketPhotos: d.data().ticketPhotos||[],
       reporter:     d.data().reporter||null,
       timeline:     d.data().timeline||[]
     }));
@@ -5936,7 +5937,7 @@ function mk(id,building,workType,priority,desc,location,tech,supervisor,status,c
   const t={id,building,workType,priority,desc,location:location||"",maintType:maintType||"تصحيحية",tech:tech||null,supervisor,status,
     createdAt:new Date(created).toISOString(),
     closedAt:closed?new Date(closed).toISOString():null,
-    workDone:workDone||null,photoRef:photoRef||null,reopenCount:0,photos:[],ticketPhoto:null,reporter:null,timeline:[]};
+    workDone:workDone||null,photoRef:photoRef||null,reopenCount:0,photos:[],ticketPhoto:null,ticketPhotos:[],reporter:null,timeline:[]};
   t.timeline.push({event:"تم تسجيل البلاغ",by:supervisor,at:t.createdAt,icon:"📩"});
   if(tech) t.timeline.push({event:"تم تعيين الفني: "+tech,by:"النظام",at:t.createdAt,icon:"👷"});
   if(status==="مغلق") t.timeline.push({event:"تم إغلاق البلاغ",by:tech||supervisor,at:t.closedAt,icon:"✅"});
@@ -7843,9 +7844,9 @@ async function submitTicket(){
 
   if(!building||!workType||!priority||!desc){ toast("⚠ تعبئة الحقول المطلوبة","warn"); return; }
 
-  // Wait for ticket photo upload if pending
-  if(pendingTicketPhoto&&pendingTicketPhoto.uploading){
-    toast("⏳ انتظر... جاري رفع صورة البلاغ","warn");
+  // Wait for ticket photos upload if pending
+  if(pendingTicketPhotos.some(p=>p.uploading)){
+    toast("⏳ انتظر... جاري رفع صور البلاغ","warn");
     return;
   }
 
@@ -7857,12 +7858,14 @@ async function submitTicket(){
   // v18.9aj — لا يُحفَظ رابطٌ محلّيٌّ (blob:) في قاعدة البيانات إطلاقاً: يموت مع
   // التبويب فيصير صورةً مكسورةً أبداً على كل جهازٍ آخر. الصورةُ التي تعذّر رفعُها
   // تدخل طابورَ الرفع المؤجَّل بجسمها الكامل وتلحق بالبلاغ حين تعود الشبكة.
-  const ticketPhotoUrl=pendingTicketPhoto?(pendingTicketPhoto.storageUrl||null):null;
-  if(pendingTicketPhoto&&ticketPhotoUrl) pendingTicketPhoto.finalizedUrl=ticketPhotoUrl;
-  if(pendingTicketPhoto&&!ticketPhotoUrl) _queuePhoto(pendingTicketPhoto, id, "ticketPhoto", "set");
+  const ticketPhotoUrls=[];
+  const _deferredTicketPhotos=pendingTicketPhotos.filter(p=>{
+    if(p.storageUrl){ p.finalizedUrl=p.storageUrl; ticketPhotoUrls.push(p.storageUrl); return false; }
+    return _queuePhoto(p, id, "ticketPhotos", "arrayUnion");
+  });
   const t={id,building,workType,priority,desc,location,tech:tech||null,supervisor:supervisor||"—",
     status:tech?"قيد التنفيذ":"مفتوح",createdAt:now,closedAt:null,workDone:null,photoRef:null,reopenCount:0,
-    photos:[],ticketPhoto:ticketPhotoUrl,maintType:maintType||"تصحيحية",notes,reporter:reporter||null,
+    photos:[],ticketPhoto:ticketPhotoUrls[0]||null,ticketPhotos:ticketPhotoUrls,maintType:maintType||"تصحيحية",notes,reporter:reporter||null,
     createdBy:(currentUser&&currentUser.user)||null,createdByName:(currentUser&&currentUser.name)||null,
     assetId:assetId||null,
     assignedAt: tech?now:null,   // v18.9ad — M14: إسنادٌ لحظةَ الإنشاء يحمل طابعه أيضاً
@@ -7871,7 +7874,8 @@ async function submitTicket(){
     ]};
   tickets.push(t);
   logAudit("إنشاء بلاغ جديد","رقم البلاغ: "+t.id+" — المبنى: "+building+" — "+workType);
-  pendingTicketPhoto=null;
+  if(_deferredTicketPhotos.length>0) toast("📥 "+_deferredTicketPhotos.length+" صورة لم تصل للخادم — حُفظت على الجهاز وتُرفَع تلقائياً عند عودة الشبكة","warn");
+  pendingTicketPhotos=[];
   renderTicketPhotoPreview();
   clearForm(); updateHeader();
   toast("✅ تم تسجيل البلاغ "+t.id,"success");
@@ -7894,7 +7898,7 @@ function clearForm(){
   ["n-location","n-desc","n-notes","n-date","n-time","n-reporter"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
   clearSelectedAsset();
   document.getElementById("tech-label").textContent="الفني المسؤول";
-  pendingTicketPhoto=null;
+  pendingTicketPhotos=[];
   renderTicketPhotoPreview();
 }
 
@@ -8031,13 +8035,13 @@ function openDetail(id){
         <div class="d-ai-title">🤖 أدوات الذكاء الاصطناعي</div>
         <div class="d-ai-btns">
           <button class="ai-btn" id="ai-triage-btn" onclick="aiTriageTicket('${esc(t.id)}')">🏷 تصنيف وفرز ذكي</button>
-          ${t.ticketPhoto?`<button class="ai-btn" id="ai-photo-btn" onclick="aiAnalyzeTicketPhoto('${esc(t.id)}')">🖼 تحليل صورة العطل</button>`:""}
+          ${ticketPhotosOf(t).length?`<button class="ai-btn" id="ai-photo-btn" onclick="aiAnalyzeTicketPhoto('${esc(t.id)}')">🖼 تحليل صورة العطل</button>`:""}
           <button class="ai-btn" id="ai-recur-btn" onclick="aiFindRecurring('${esc(t.id)}')">🔁 بلاغات مشابهة</button>
         </div>
         <div id="detail-ai-result" class="ai-md" style="display:none;margin-top:10px;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px"></div>
       </div>
     </div>
-    ${t.ticketPhoto?`<div style="margin-bottom:14px"><div style="font-size:10px;color:var(--info);font-weight:700;margin-bottom:6px">📷 صورة البلاغ</div><div><img src="${safeUrl(t.ticketPhoto)}" onclick="openLightbox('${safeUrl(t.ticketPhoto)}')" alt="صورة البلاغ" style="max-width:100%;border-radius:8px;cursor:pointer;max-height:200px;object-fit:contain"></div></div>`:""}
+    ${(tpAll=>tpAll.length?`<div style="margin-bottom:14px"><div style="font-size:10px;color:var(--info);font-weight:700;margin-bottom:6px">📷 ${tpAll.length>1?`صور البلاغ (${tpAll.length})`:"صورة البلاغ"}</div><div class="photos-grid">${tpAll.map(src=>`<img src="${safeUrl(src)}" onerror="window.imgBroken&&imgBroken(this)" onclick="openLightbox('${safeUrl(src)}')" alt="صورة البلاغ">`).join("")}</div></div>`:"")(ticketPhotosOf(t))}
     ${t.photos&&t.photos.length>0?`<div style="margin-bottom:14px"><div style="font-size:10px;color:var(--accent);font-weight:700;margin-bottom:6px">📷 صور الإغلاق (${t.photos.length})</div><div class="photos-grid">${t.photos.map(src=>`<img src="${safeUrl(src)}" onerror="window.imgBroken&&imgBroken(this)" onclick="openLightbox('${safeUrl(src)}')" alt="صورة الإغلاق">`).join("")}</div></div>`:""}
     ${t.workDone?`<div class="work-done-box"><div style="font-size:10px;color:var(--accent);font-weight:700;margin-bottom:4px">✅ العمل المنجز</div>${esc(t.workDone)}${t.photoRef?`<div style="font-size:11px;color:var(--muted);margin-top:4px">📸 مرجع الصورة: <b>${esc(t.photoRef)}</b></div>`:""}</div>`:""}
     ${(t.checklist&&t.checklist.length)?`
@@ -8085,40 +8089,36 @@ function openDetail(id){
   openModal("modal-detail");
 }
 
-let pendingTicketPhoto = null; // single photo for new ticket
+/* صورُ البلاغ عند التسجيل — **أكثر من صورةٍ للبلاغ الواحد** (طلب المالك 30/08).
+   الأولى تبقى في `ticketPhoto` (يقرؤها الذكاء الاصطناعي وتقارير PPTX والتطبيقات
+   القديمة بلا تغيير)، والكلُّ في `ticketPhotos` — والعرضُ يقرأ عبر ticketPhotosOf()
+   فتظهر صورُ البلاغات القديمة (حقلٌ مفرد) والجديدة (مصفوفة) سواء. */
+let pendingTicketPhotos = [];
+const TICKET_PHOTOS_MAX = 6;
 
 function handleTicketPhotoUpload(e){
   const files=Array.from(e.target.files);
+  e.target.value="";
   if(!files.length) return;
-  const f=files[0];
-  const preview=URL.createObjectURL(f);
-  pendingTicketPhoto={preview, storageUrl:null, uploading:true, error:false, finalizedUrl:null};
-  const photoObj=pendingTicketPhoto;
+  const room=TICKET_PHOTOS_MAX-pendingTicketPhotos.length;
+  if(room<=0){ toast("⚠ الحد الأقصى "+TICKET_PHOTOS_MAX+" صور للبلاغ الواحد","warn"); return; }
+  if(files.length>room) toast("⚠ أُخذت أول "+room+" — الحد الأقصى "+TICKET_PHOTOS_MAX+" صور للبلاغ","warn");
+  files.slice(0,room).forEach(f=>startTicketPhotoUpload(f));
   renderTicketPhotoPreview();
+}
 
-  // لو نجح الرفع بعد المهلة وبعد إنشاء البلاغ بالنسخة المحلية —
-  // استبدل صورة البلاغ المحفوظة بالرابط الدائم
-  const onLateSuccess=(url)=>{
-    photoObj.storageUrl=url;
-    photoObj.error=false;
-    if(photoObj.finalizedUrl){
-      const t=tickets.find(x=>x.ticketPhoto===photoObj.finalizedUrl);
-      if(t){
-        t.ticketPhoto=url;
-        photoObj.finalizedUrl=url;
-        saveData(t.id);
-        toast("✅ تم استكمال رفع صورة البلاغ "+t.id+" بنجاح","success");
-      }
-    }
-    if(pendingTicketPhoto===photoObj) renderTicketPhotoPreview();
-  };
+function startTicketPhotoUpload(f){
+  const preview=URL.createObjectURL(f);
+  const photoObj={preview, storageUrl:null, uploading:true, error:false, finalizedUrl:null};
+  pendingTicketPhotos.push(photoObj);
 
   compressImage(f).then(blob=>{
-    if(!blob){ pendingTicketPhoto.uploading=false; pendingTicketPhoto.error=true; renderTicketPhotoPreview(); return; }
+    if(!blob){ photoObj.uploading=false; photoObj.error=true; renderTicketPhotoPreview(); return; }
     if(storage){
-      const ts=Date.now();
+      // لاحقةٌ عشوائية: عدّة صورٍ تُختار معاً تتشارك Date.now() فتتطامس مساراتها
+      const ts=Date.now()+"_"+Math.random().toString(36).slice(2,8);
       const _path=`tickets/new/${ts}.jpg`;
-      pendingTicketPhoto.blob=blob; pendingTicketPhoto.path=_path;   // v18.9aj — وقودُ الطابور المؤجَّل
+      photoObj.blob=blob; photoObj.path=_path;   // v18.9aj — وقودُ الطابور المؤجَّل
       const ref=storage.ref(_path);
 
       let timedOut=false;
@@ -8128,7 +8128,7 @@ function handleTicketPhotoUpload(e){
         photoObj.uploading=false;
         photoObj.error=true;
         toast("⚠ تأخر رفع صورة البلاغ — يمكنك الإرسال الآن","warn");
-        if(pendingTicketPhoto===photoObj) renderTicketPhotoPreview();
+        renderTicketPhotoPreview();
       },45000);
 
       (window._firebaseAuthReady||Promise.resolve()).then(()=>ref.put(blob,{contentType:"image/jpeg"}))
@@ -8136,45 +8136,56 @@ function handleTicketPhotoUpload(e){
         .then(url=>{
           clearTimeout(timeoutId);
           URL.revokeObjectURL(photoObj.preview);
+          // نجاحٌ بعد المهلة وبعد التسجيل: الصورةُ دخلت الطابورَ المؤجَّل عند الإرسال
+          // وهو يُلحقها بالبلاغ (arrayUnion) — فلا نكتبها هنا كي لا تتكرّر.
           photoObj.uploading=false;
-          if(timedOut){ onLateSuccess(url); }
-          else { photoObj.storageUrl=url; photoObj.storagePath=_path; photoObj.error=false; if(pendingTicketPhoto===photoObj) renderTicketPhotoPreview(); }
+          photoObj.storageUrl=url; photoObj.storagePath=_path; photoObj.error=false;
+          renderTicketPhotoPreview();
         })
         .catch(err=>{
           clearTimeout(timeoutId);
           photoObj.uploading=false;
           photoObj.error=true;
-          toast("⚠ خطأ في رفع صورة البلاغ","warn");
-          if(pendingTicketPhoto===photoObj) renderTicketPhotoPreview();
+          if(!timedOut) toast("⚠ خطأ في رفع صورة البلاغ","warn");
+          renderTicketPhotoPreview();
         });
     } else {
-      pendingTicketPhoto.uploading=false;
+      photoObj.uploading=false;
       renderTicketPhotoPreview();
     }
   }).catch(err=>{
     console.error("Photo processing error:",err);
-    if(pendingTicketPhoto){
-      pendingTicketPhoto.uploading=false;
-      pendingTicketPhoto.error=true;
-      renderTicketPhotoPreview();
-    }
+    photoObj.uploading=false;
+    photoObj.error=true;
+    renderTicketPhotoPreview();
     toast("⚠ تعذرت معالجة صورة البلاغ — يمكنك حذفها والمتابعة","warn");
   });
-  e.target.value="";
+}
+
+function removeTicketPhoto(i){
+  const p=pendingTicketPhotos[i];
+  if(p&&p.preview){ try{ URL.revokeObjectURL(p.preview); }catch(e){} }
+  pendingTicketPhotos.splice(i,1);
+  renderTicketPhotoPreview();
 }
 
 function renderTicketPhotoPreview(){
   const el=document.getElementById("n-ticket-photo-preview");
   if(!el) return;
-  if(!pendingTicketPhoto){ el.innerHTML=""; return; }
-  const p=pendingTicketPhoto;
-  el.innerHTML=`<div class="photo-thumb">
+  el.innerHTML=pendingTicketPhotos.map((p,i)=>`<div class="photo-thumb">
     <img src="${safeUrl(p.storageUrl||p.preview)}" onclick="openLightbox('${safeUrl(p.storageUrl||p.preview)}')" alt="معاينة الصورة">
     ${p.uploading?`<div class="upload-progress-badge">⏳</div>`:""}
     ${p.error?`<div class="upload-progress-badge" style="background:#b92c2c">⚠</div>`:""}
     ${(!p.uploading&&!p.error)?`<div class="upload-progress-badge" style="background:#0a7c59">✓</div>`:""}
-    <button class="rm-photo" onclick="pendingTicketPhoto=null;renderTicketPhotoPreview()">✕</button>
-  </div>`;
+    <button class="rm-photo" onclick="removeTicketPhoto(${i})">✕</button>
+  </div>`).join("");
+}
+
+/* كل صور البلاغ للعرض: المصفوفة إن وُجدت، وإلا الحقل المفرد القديم */
+function ticketPhotosOf(t){
+  const a=(t&&Array.isArray(t.ticketPhotos))?t.ticketPhotos.filter(Boolean):[];
+  if(a.length) return a.slice();
+  return (t&&t.ticketPhoto)?[t.ticketPhoto]:[];
 }
 let pendingPhotos=[];
 // كل عنصر: {preview, storageUrl, uploading, error}
@@ -9550,7 +9561,11 @@ function removeFromPhotoReport(ticketId){
 
 function removePhotoFromCard(ticketId,kind,idx){
   const t=photoReportTickets.find(x=>x.id===ticketId); if(!t) return;
-  if(kind==="main"){ t.ticketPhoto=null; }
+  if(kind==="main"){
+    // الحذف يمسّ نسخة العرض وحدها (photoReportTickets) لا البلاغ المخزَّن
+    const a=ticketPhotosOf(t); a.splice(idx,1);
+    t.ticketPhotos=a; t.ticketPhoto=a[0]||null;
+  }
   else { t.photos.splice(idx,1); }
   renderPhotoReportOutput(photoReportTickets);
 }
@@ -9669,9 +9684,9 @@ function renderPhotoReportOutput(filteredList){
     if(t&&t._agg&&window.cleaningOps&&typeof window.cleaningOps._aggCardHTML==="function"){
       try{ return window.cleaningOps._aggCardHTML(t); }catch(e){ console.warn("prAggCard",e); }
     }
-    // Include ticketPhoto in the photos to show
+    // Include ticket photos in the photos to show
     const closingPhotos=t.photos&&t.photos.length?t.photos:[];
-    const ticketPhotoArr=t.ticketPhoto?[t.ticketPhoto]:[];
+    const ticketPhotoArr=ticketPhotosOf(t);
     const allPhotos=[...ticketPhotoArr,...closingPhotos];
     const cols=allPhotos.length>=2?2:1;
 
@@ -9682,7 +9697,7 @@ function renderPhotoReportOutput(filteredList){
 
     const photoArea=allPhotos.length
       ?`<div class="pr-photos-grid" style="display:grid;grid-template-columns:repeat(${cols},1fr);grid-auto-rows:1fr;gap:3px;flex:1;min-height:0;overflow:hidden">
-          ${ticketPhotoArr.length?`<div class="pr-photo-wrap" style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fff8e1;border-radius:4px"><img src="${ticketPhotoArr[0]}" onerror="window.imgBroken&&imgBroken(this)" onclick="openLightbox('${ticketPhotoArr[0]}')" alt="صورة البلاغ" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;cursor:pointer;display:block"><div style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;font-size:8px;padding:1px 4px;border-radius:3px">صورة البلاغ</div><button class="pr-photo-del" onclick="removePhotoFromCard('${esc(t.id)}','main',0)">✕</button></div>`:""}
+          ${ticketPhotoArr.map((src,i)=>`<div class="pr-photo-wrap" style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fff8e1;border-radius:4px"><img src="${safeUrl(src)}" onerror="window.imgBroken&&imgBroken(this)" onclick="openLightbox('${safeUrl(src)}')" alt="صورة البلاغ" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;cursor:pointer;display:block"><div style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;font-size:8px;padding:1px 4px;border-radius:3px">صورة البلاغ</div><button class="pr-photo-del" onclick="removePhotoFromCard('${esc(t.id)}','main',${i})">✕</button></div>`).join("")}
           ${closingPhotos.map((src,i)=>`<div class="pr-photo-wrap" style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f0f4fb;border-radius:4px"><img src="${safeUrl(src)}" onerror="window.imgBroken&&imgBroken(this)" onclick="openLightbox('${safeUrl(src)}')" alt="صورة الإغلاق" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;cursor:pointer;display:block"><button class="pr-photo-del" onclick="removePhotoFromCard('${esc(t.id)}','closing',${i})">✕</button></div>`).join("")}
         </div>`
       :t.photoRef
@@ -9735,7 +9750,7 @@ function renderPhotoReportOutput(filteredList){
   // بمتوسّط ٨٥ ك.ب للصورة عند PHOTO_MAX_PX=1280). فالتقديرُ = عددُ الصور × ٨٥ ك.ب +
   // ~٤٠٠ ك.ب للنصّ والرسوم. يُعرَض قبل الضغط على «طباعة» فلا يفاجئ الحجمُ أحداً،
   // و`no-print` تُخفيه من الملف نفسه.
-  const _prPhotoCount=filteredList.reduce((a,t)=>a+(t.ticketPhoto?1:0)+((t.photos||[]).filter(Boolean).length),0);
+  const _prPhotoCount=filteredList.reduce((a,t)=>a+ticketPhotosOf(t).length+((t.photos||[]).filter(Boolean).length),0);
   const _prSizeMB=(_prPhotoCount*85/1024+0.4).toFixed(1);
   const _prHeavy=_prPhotoCount>80;   // ~٧ م.ب — ما فوقه يُتعب البريد والهاتف
   const _prSizeBar=`<div class="no-print" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:700;background:${_prHeavy?"rgba(192,57,43,.10)":"var(--surface2,#f0f4fb)"};border:1px solid ${_prHeavy?"#c0392b":"var(--border,#dde3ed)"};color:var(--text,#334155)">
@@ -9890,7 +9905,7 @@ function openEditTicket(id){
   if(_xt) _xt.value=t.closedAt?new Date(t.closedAt).toTimeString().slice(0,5):'';
 
   pendingEditPhoto=null;
-  renderEditPhotoPreview(t.ticketPhoto||null);
+  renderEditPhotoPreview(ticketPhotosOf(t)[0]||null);
   const epInput=document.getElementById("edit-photo");if(epInput)epInput.value="";
 
   editClosingExisting=[...(t.photos||[])];
@@ -9951,6 +9966,7 @@ function handleEditPhotoUpload(e){
       const t=tickets.find(x=>x.id===id);
       if(t&&t.ticketPhoto===photoObj.finalizedUrl){
         t.ticketPhoto=url;
+        if(Array.isArray(t.ticketPhotos)&&t.ticketPhotos.length) t.ticketPhotos[0]=url;
         photoObj.finalizedUrl=url;
         saveData(t.id);
         toast("✅ تم استكمال رفع صورة البلاغ "+id+" بنجاح","success");
@@ -10140,16 +10156,20 @@ function saveEditTicket(){
       if(!isNaN(_xDt)) t.closedAt=_xDt.toISOString();
     }
 
-    // تطبيق صورة البلاغ الجديدة/المحذوفة إن وُجدت
+    // تطبيق صورة البلاغ الجديدة/المحذوفة إن وُجدت — النافذة تُدير الصورة الأولى
+    // (الرئيسية) وحدها، وبقيّةُ صور البلاغ (إن تعدّدت) تبقى كما هي.
     if(pendingEditPhoto){
+      const _tp=ticketPhotosOf(t);
       if(pendingEditPhoto.removed){
-        t.ticketPhoto=null;
+        _tp.shift();
+        t.ticketPhotos=_tp; t.ticketPhoto=_tp[0]||null;
       } else {
         const url=pendingEditPhoto.storageUrl||null;   // v18.9aj
         if(url){
-          t.ticketPhoto=url;
+          if(_tp.length) _tp[0]=url; else _tp.push(url);
+          t.ticketPhotos=_tp; t.ticketPhoto=url;
           pendingEditPhoto.finalizedUrl=url;
-        } else _queuePhoto(pendingEditPhoto, t.id, "ticketPhoto", "set");
+        } else _queuePhoto(pendingEditPhoto, t.id, "ticketPhotos", "arrayUnion");
       }
     }
 
@@ -10292,7 +10312,7 @@ function renderSystemStats(){
   let photosCount=0;
   tickets.forEach(t=>{
     if(Array.isArray(t.photos)) photosCount+=t.photos.length;
-    if(t.ticketPhoto) photosCount++;
+    photosCount+=ticketPhotosOf(t).length;
     if(t.closePhoto) photosCount++;
   });
 
@@ -33984,6 +34004,7 @@ async function autoCreatePPMTicket(plan){
     createdAt: now,
     updatedAt: now,
     ticketPhoto: null,
+    ticketPhotos: [],
     photos: [],
     timeline:[{event:"تم إنشاء البلاغ تلقائياً عند تسجيل خطة PPM",by:(currentUser&&currentUser.name)||"النظام",at:now,icon:"🗓️"}]
   };
@@ -34121,6 +34142,7 @@ async function confirmPPMTicket(){
     createdAt: now,
     updatedAt: now,
     ticketPhoto: null,
+    ticketPhotos: [],
     photos: [],
     timeline:[{event:"تم إنشاء البلاغ تلقائياً من خطة PPM",by:(currentUser&&currentUser.name)||"النظام",at:now,icon:"🗓️"}]
   };
@@ -34601,16 +34623,17 @@ _ticketAICtx(t)+
 // ── 2) تحليل صورة العطل ──
 async function aiAnalyzeTicketPhoto(id){
   const t = tickets.find(x=>x.id===id); if(!t) return;
-  if(!t.ticketPhoto){ toast("⚠ لا توجد صورة لهذا البلاغ","warn"); return; }
+  const _tPhoto = ticketPhotosOf(t)[0] || null;   // الصورة الرئيسية (الأولى) هي المحلَّلة
+  if(!_tPhoto){ toast("⚠ لا توجد صورة لهذا البلاغ","warn"); return; }
   const btn = document.getElementById("ai-photo-btn");
   if(btn) btn.disabled = true;
   _detailAIBusy("جارٍ قراءة الصورة وتحليلها");
   try{
     if(!_ANTHROPIC_PROXY_URL){ await _ensureAIProxy(); }
-    const isPdf = t.ticketPhoto.toLowerCase().includes(".pdf") || t.ticketPhoto.includes("application%2Fpdf");
+    const isPdf = _tPhoto.toLowerCase().includes(".pdf") || _tPhoto.includes("application%2Fpdf");
     let b64, type;
     try{
-      const r = await _fileToBase64WithFallback(t.ticketPhoto);
+      const r = await _fileToBase64WithFallback(_tPhoto);
       b64 = r.b64; type = r.type;
     }catch(fe){
       throw new Error("تعذّر تحميل الصورة — تحقق من إعدادات CORS على التخزين");
