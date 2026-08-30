@@ -3997,6 +3997,41 @@ function auditRound2() {
     }
   }
 
+  /* ── H3-فنيون: بوّابةُ الذكاء تعرف الفنيَّ دون أن تمنحه دوراً ──
+     إغلاقُ v8 أسقط «الصياغة الاحترافية» في تطبيق الفنيين: التطبيقُ يصادق Firebase
+     **مجهولاً** ولا يرسل توكيناً، فكلُّ نداءٍ يُردّ 401 ويظهر للفنيّ «مفتاح الذكاء
+     الاصطناعي غير صالح» — وليس مفتاحاً أصلاً. العلاجُ توكينٌ خادميُّ التحقق
+     (tech + PIN مخزَّن عبر /login) يحمل ادّعاء `tech` **بلا حقل role**: فقواعدُ
+     Firestore تفتح لـ`hasRole()` قراءةً وكتابةً واسعتين على النظام الرئيسي،
+     وتوكينُ الفنيّ لبوّابة الذكاء وحدها. هذه الحرّاسُ تمنع ثلاثةَ ارتدادات:
+     توكيناً بدورٍ يوسّع صلاحياتِ الفنيّ صمتاً، وقبولَ الأرقام الافتراضية المنشورة
+     في المصدر العلنيّ، ودخولاً مجهولاً يدهس الجلسةَ الموثّقةَ عند كل تحميل. */
+  {
+    const fsX = require("fs"), pathX = require("path");
+    const wpX = pathX.resolve(pathX.dirname(IDX), "worker/hail-ai-proxy.js");
+    const WX = fsX.existsSync(wpX) ? fsX.readFileSync(wpX, "utf8") : "";
+    const tpX = pathX.resolve(pathX.dirname(IDX), "tech-app.html");
+    const TAX = fsX.existsSync(tpX) ? fsX.readFileSync(tpX, "utf8") : "";
+    T("★ tech-ai: الـWorker يصادق الفنيَّ خادمياً بنفس تجزئة التطبيق",
+      /async function handleTechLogin\(/.test(WX) && WX.includes("hail-tech-v1|"));
+    T("★★ tech-ai: توكينُ الفنيّ بلا حقل role — لا يفتح hasRole() في القواعد",
+      /mintCustomToken\(env, uid, \{ tech: name, name: name \}\)/.test(WX));
+    T("★ tech-ai: المخزونُ الغائب/الفارغ يُرفض (لا ارتدادَ لرقمٍ افتراضيّ)",
+      /if \(stored == null \|\| stored === ""\) return false;/.test(WX) &&
+      !/DEFAULT_PIN|DEFAULT_ADMIN_PIN/.test(WX));
+    T("★ tech-ai: بوّابةُ الذكاء تقبل ادّعاء tech بجانب role",
+      /idClaims\.role \|\| idClaims\.tech/.test(WX));
+    T("★ tech-ai: التطبيقُ يرفق توكينَ الهويّة مع نداء الصياغة",
+      TAX.includes('headers["Authorization"]="Bearer "+tk'));
+    T("★ tech-ai: لا دخولَ مجهولاً يدهس جلسةً محفوظة (مشروطٌ بغياب المستخدم)",
+      /onAuthStateChanged\(u=>\{ off\(\); if\(!u\) firebase\.auth\(\)\.signInAnonymously/.test(TAX));
+    T("★ tech-ai: رفضُ بوّابة الـWorker يُشرح ولا يلبس ثوبَ «مفتاح غير صالح»",
+      /e\.error==="unauthorized"\) throw new Error\("WORKER_UNAUTHORIZED"\)/.test(TAX) &&
+      /WORKER_UNAUTHORIZED/.test(TAX.match(/function _aiErrAr\(m\)\{[\s\S]*?\n\}/)[0]));
+    T("★ tech-ai: التوكينُ يُطلب بعد نجاح PIN بلا انتظارٍ يرهن الدخول",
+      /_aiMintTechToken\(techName, _pinForAIToken\);\s*\n\s*enterApp\(\);/.test(TAX));
+  }
+
   /* ── H3: نداءُ مُرحِّل الذكاء يحمل هويّةً يتحقّق منها الخادم ── */
   {
     const ai = HTML.indexOf("async function _callAnthropicAPI(");
