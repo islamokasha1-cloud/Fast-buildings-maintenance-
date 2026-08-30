@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2946";
+var MODULE_BUILD = "v18.9.2948";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -3304,15 +3304,25 @@ function genExtId(){
 }
 
 /* سياقُ حساب المستخلص — يُجمَع مرةً ويُمرَّر لـ`extNet`، فلا تُحسب أرقامُه مرتين. */
-function extCtx(ext, contract){
+function extCtx(ext, contract, exts){
   return {
-    prevGross: prevGrossOf(_exts, contract, ext && ext.id),
+    prevGross: prevGrossOf(exts||_exts, contract, ext && ext.id),
     materialsIssued: Number((ext||{}).materialsIssued)||0,
     penaltyAmount:   Number((ext||{}).penaltyAmount)||0,
     ncDeduction:     Number((ext||{}).ncDeduction)||0
   };
 }
 function extCalc(ext, contract){ return extNet(ext, contract, extCtx(ext, contract)); }
+/* الصافي المستحقُّ للمستخلص كما تعرضه شاشتُه وزرُّ سداده: لقطةُ السداد إن
+   وُجدت (تُكتب في payExtract وقتَ الصرف)، وإلا الحسابُ الحيُّ من البنود.
+   كانت بطاقةُ «المالية — السداد» وملخّصُ اللوحة و«بانتظار إجراءك» تقرأ
+   `settled.net` وحدَه — وهو لا يوجد قبل السداد — فيظهر المستخلصُ المعلّق
+   بمتبقٍّ صفر. نقيةٌ: تأخذ قائمةَ المستخلصات وسيطاً لحساب prevGross منها
+   لا من حالة الوحدة، فيفحصها hail-tests بلا متصفّح. */
+function extDueNet(e, c, exts){
+  if(e && e.settled) return r2(Number(e.settled.net)||0);
+  return r2(extNet(e, c, extCtx(e, c, exts)).net);
+}
 
 function createExtract(contract, draft){
   var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال بقاعدة البيانات"));
@@ -7191,7 +7201,7 @@ function dashSummary(contracts, extracts, today){
     if(!c) return;
     if(c.status==="ctr_pending_signature") out.pendingSign++;
     if(!ctrIsCommitted(c)) return;
-    live[c.id] = 1;
+    live[c.id] = c;   // العقدُ نفسُه لا علَمٌ — يقرؤه حسابُ صافي المستخلص المعلّق أدناه
     out.active++;
     out.value += contractValue(c);
     var late = ctrLateDays(c, today);
@@ -7201,7 +7211,7 @@ function dashSummary(contracts, extracts, today){
   (Array.isArray(extracts)?extracts:[]).forEach(function(e){
     if(!e || !live[e.contractId]) return;
     if(e.status==="ext_paid") paid[e.contractId] = r2((paid[e.contractId]||0) + r2((e.payment||{}).amount));
-    if(e.status==="ext_pending_finance"){ out.awaitingPay++; out.awaitingPayAmt += r2((e.settled||{}).net); }
+    if(e.status==="ext_pending_finance"){ out.awaitingPay++; out.awaitingPayAmt += extDueNet(e, live[e.contractId], extracts); }
   });
   (Array.isArray(contracts)?contracts:[]).forEach(function(c){
     if(!c || !live[c.id]) return;
@@ -7296,7 +7306,7 @@ function myPendingItems(role){
       var egate=(extGateOwner(e.status)||{}).lbl||"";
       if(e.status==="ext_pending_finance" && !extSignature(e)) egate="بانتظار نسخةٍ موقّعةٍ من المقاول";
       out.push({ kind:"ext", id:e.id, lbl:"مستخلص", title:(c&&(c.title||c.vendorName))||e.contractId||"",
-                 value:r2((e.settled||{}).net), gate:egate,
+                 value:extDueNet(e, c, _exts), gate:egate,
                  at:e.updatedAt||e.createdAt||"", ctr:e.contractId });
     }
   });
@@ -7339,7 +7349,9 @@ function financePayables(reqs, ctrs, exts){
   (Array.isArray(exts)?exts:[]).forEach(function(e){
     if(!e || e.status !== "ext_pending_finance") return;
     var c = byId[e.contractId];
-    var net = r2(Number((e.settled||{}).net)||0);
+    /* الصافي الحيُّ لا `settled.net` — تلك اللقطةُ تُكتب وقتَ السداد فقط،
+       فقراءتُها هنا كانت تعرض المستخلصَ المعلّق بمتبقٍّ صفر */
+    var net = extDueNet(e, c, exts);
     out.push({ kind:"ext", id:e.id, lbl:"مستخلص", title:(c&&(c.title||c.vendorName))||e.contractId||"",
                due:net, total:net, ctr:e.contractId||"", at:e.updatedAt||e.createdAt||"",
                /* الماليةُ لا تصرف مستخلصاً بلا نسخةٍ موقّعة — البطاقةُ تقول ما ينقص لا اسمَ البوّابة */
@@ -9537,7 +9549,7 @@ window.contracts = {
   // الأداء ولوحة المعلومات [المرحلتان ١٠ و١١]
   renderDashCard: renderDashCard, hookDash: hookDash, openCtrsPage: openCtrsPage,
   // ما ينتظر سدادَ المالية من جهة التعاقدات — تقرؤه بطاقةُ «المالية — السداد» في المشتريات
-  financePayables: financePayablesLive, _financePayables: financePayables,
+  financePayables: financePayablesLive, _financePayables: financePayables, _extDueNet: extDueNet,
   _vendorScorecard: vendorScorecard, _dashSummary: dashSummary, _ctrLateDays: ctrLateDays,
   _linkPurchase: linkPurchase, _poCandidatesFor: poCandidatesFor,
   _poLinkedTo: poLinkedTo, _myPendingItems: myPendingItems,
