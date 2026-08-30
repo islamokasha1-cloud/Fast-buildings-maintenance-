@@ -170,13 +170,17 @@ async function checkRecipients(db) {
     project_manager: "مدير المشاريع", ceo: "المدير التنفيذي", finance: "المالية",
     hr_officer: "مسؤول الموارد البشرية", hr_manager: "مدير الموارد البشرية",
     procurement_officer: "مسؤول المشتريات",
-    warehouse_manager: "مسؤول المستودعات", admin: "الأدمن (الدورُ الاحتياطيّ)",
+    warehouse_manager: "مسؤول المستودعات",
+    "مشرف": "المشرف الميداني (استلام المواد)",
+    admin: "الأدمن (الدورُ الاحتياطيّ)",
   };
   const found = {};
   const scan = (users, src) => (users || []).forEach((u) => {
-    if (!u || !ROLES[u.role]) return;
+    // دورُ المشرف يُسجَّل بصيغتين («مشرف»/supervisor — v18.9wj) كما في recipients.js
+    const rk = u && u.role === "supervisor" ? "مشرف" : u && u.role;
+    if (!u || !ROLES[rk]) return;
     if (!u.phone || u.waOptIn !== true) return;
-    (found[u.role] = found[u.role] || []).push((u.name || u.user) + " (" + src + ")");
+    (found[rk] = found[rk] || []).push((u.name || u.user) + " (" + src + ")");
   });
 
   try {
