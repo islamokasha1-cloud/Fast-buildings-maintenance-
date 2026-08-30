@@ -10136,10 +10136,13 @@ function contractsPhase1() {
     const fpCtrs = [
       { id: "C1", status: "ctr_active", title: "تجاليد", advance: { amount: 14025, paid: 0 }, updatedAt: "2026-08-01" },
       { id: "C2", status: "ctr_closed", advance: { amount: 1000, paid: 0 } },      // مقفل — لا مطالبة
-      { id: "C3", status: "ctr_active", title: "عقد المستخلص", advance: { amount: 5000 } }  // قديمٌ بلا paid — لا مطالبةَ وهمية
+      { id: "C3", status: "ctr_active", title: "عقد المستخلص", vatMode: "none", advance: { amount: 5000 } }  // قديمٌ بلا paid — لا مطالبةَ وهمية
     ];
+    /* شكلُ البيانات الحقيقيّ (طلب المالك 30/08): المستخلصُ المعلّق **بلا `settled`**
+       — تلك لقطةُ السداد تُكتب في `payExtract` وقتَ الصرف فقط. الشكلُ القديم هنا
+       (settled على معلّق) هو الذي أخفى العلّة: البطاقةُ كانت تعرض متبقّياً صفراً. */
     const fpExts = [
-      { id: "E1", contractId: "C3", status: "ext_pending_finance", settled: { net: 25000 }, updatedAt: "2026-08-03" },
+      { id: "E1", contractId: "C3", status: "ext_pending_finance", lines: [{ cumQty: 1, unitPrice: 25000 }], updatedAt: "2026-08-03" },
       { id: "E2", contractId: "C3", status: "ext_paid", settled: { net: 9000 } }
     ];
     const fp = C._financePayables(fpReqs, fpCtrs, fpExts);
@@ -10154,6 +10157,26 @@ function contractsPhase1() {
       fp.find(x => x.id === "R1").lbl === "أمر دفع" && fp.find(x => x.id === "C1").lbl === "دفعة مقدمة" && fp.find(x => x.id === "E1").lbl === "مستخلص");
     T("★ financePayablesLive محكومةٌ بصلاحية عرض التعاقدات — لا تسرُّبَ أرقامٍ عبر بطاقة المشتريات",
       /function financePayablesLive\(\)\{\s*\n\s*if\(!canView\(\)\) return \[\];/.test(src));
+
+    /* ════ extDueNet — جذرُ «المستخلص المعلّق بمتبقٍّ صفر» (طلب المالك 30/08) ════
+       ثلاثةُ مواضع كانت تقرأ `settled.net` على مستخلصٍ معلّق وهو لا يوجد قبل
+       السداد: بطاقةُ «المالية — السداد» وملخّصُ اللوحة و«بانتظار إجراءك». */
+    T("★★ extDueNet: مستخلصٌ معلّقٌ بلا settled ⇐ الصافي الحيُّ من بنوده لا صفر",
+      C._extDueNet({ id: "EX", status: "ext_pending_finance", lines: [{ cumQty: 2, unitPrice: 100 }] },
+        { id: "CC", vatMode: "none" }, []) === 200);
+    T("★ extDueNet: لقطةُ السداد إن وُجدت تتقدّم (دليلٌ محفوظٌ لا يُعاد حسابه)",
+      C._extDueNet({ settled: { net: 123.45 } }, null, []) === 123.45);
+    T("★ extDueNet: المستخلصُ السابق المعتمدُ يُخصم — قيمةُ الفترة لا التراكميّ",
+      C._extDueNet({ id: "EB", contractId: "CC", lines: [{ cumQty: 1, unitPrice: 25000 }] },
+        { id: "CC", vatMode: "none" },
+        [{ id: "EA", contractId: "CC", status: "ext_paid", lines: [{ cumQty: 1, unitPrice: 10000 }] }]) === 15000);
+    T("★ extDueNet: عقدٌ غيرُ محمَّلٍ لا يُسقط الحساب (صافٍ من البنود بوضع الضريبة الافتراضي)",
+      typeof C._extDueNet({ lines: [{ cumQty: 1, unitPrice: 115 }] }, null, []) === "number");
+    T("★★ والمواضعُ الثلاثة تقرأ extDueNet لا settled.net العارية",
+      /var net = extDueNet\(e, c, exts\);/.test(src) &&
+      /out\.awaitingPayAmt \+= extDueNet\(e, live\[e\.contractId\], extracts\);/.test(src) &&
+      /value:extDueNet\(e, c, _exts\)/.test(src) &&
+      !/r2\(\(e\.settled\|\|\{\}\)\.net\)/.test(src));
   }
 
   T("★★ وسدادُها معاملةٌ للمالية وبإيصالٍ وبسقف المتبقّي — والمبلغُ الفعليُّ إلزاميٌّ ويُدوَّن في السجل",
@@ -11589,6 +11612,8 @@ function contractsPhase1() {
       d.remaining === 50000 + 8000, String(d.remaining));
     T("★ ويرصد المستخلصاتِ المنتظِرةَ للسداد",
       C._dashSummary(CS10, EX10.concat([{ id:"E4", contractId:"C2", status:"ext_pending_finance", settled:{net:7000} }]), TODAY).awaitingPay === 1);
+    T("★★ ومبلغُها الحيُّ يُرصد ولو لم تُكتب لقطةُ سدادٍ بعد (كان صفراً — طلب المالك 30/08)",
+      C._dashSummary(CS10, EX10.concat([{ id:"E5", contractId:"C2", status:"ext_pending_finance", lines:[{cumQty:1,unitPrice:1150}] }]), TODAY).awaitingPayAmt === 1150);
     T("★ ويرصد العقودَ بانتظار التوقيع",
       C._dashSummary(CS10.concat([{ id:"CX", vendorId:"V1", status:"ctr_pending_signature", value:1 }]), EX10, TODAY).pendingSign === 1);
     T("★ ويرصد المتأخّرَ عن مدّته", d.late >= 0 && typeof d.lateMax === "number");
