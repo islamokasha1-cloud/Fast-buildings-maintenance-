@@ -559,7 +559,14 @@ function predelivery() {
        **إصلاحُ سلوكِ ميزةٍ قائمةٍ في مكانها** (`_pcSupplierCardHtml` ·
        `_pcBuildGroupRecord` · `_pcGroupsFromPO` · المصفوفة التفصيلية ·
        الطباعة)، ونقلُها إلى وحدةٍ بحجّة تعديلها ممنوع (CLAUDE.md). */
-    const IDX_CEILING = 38158;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 38158 إلى 38272 — ‏١١٤ سطراً لبوّابة مدير المشاريع على مقارنة
+       الأسعار (طلب المالك 30/08): حالةٌ جديدة `pending_pm_cmp` بين المشتريات
+       والتنفيذي. **تعديلُ سلسلةِ اعتماداتٍ قائمةٍ في مكانها**: الحالةُ في
+       PO_STATUS/PO_STAGES/STAGE_ORDER، والصلاحيةُ في `getAvailableStatuses`،
+       والختمُ والسجلُّ في `doUpdatePurchaseStatus`، والوجهةُ في
+       `savePriceComparison` و`doSendToFinance` — كلُّها نواةٌ في هذا الملف،
+       ونقلُ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). */
+    const IDX_CEILING = 38272;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -3558,7 +3565,8 @@ function poCEOStampBound() {
     // الوصلُ بسطرٍ جديد: كلُّ قطعةٍ تنتهي عند سطر `//` تعليقاً، فوصلُها بلا فاصلٍ
     // يبتلع أوّلَ سطرٍ من التالية داخل التعليق.
     A = new Function([grab("getPOTotal"), grab("poCEOCovers"), grab("poClearCEOStamp"),
-      "return {getPOTotal, poCEOCovers, poClearCEOStamp, PO_PRE_CEO_STATUSES};"].join("\n"))();
+      grab("poPmCmpCovers"), grab("poClearPmCmpStamp"),
+      "return {getPOTotal, poCEOCovers, poClearCEOStamp, poPmCmpCovers, poClearPmCmpStamp, PO_PRE_CEO_STATUSES};"].join("\n"))();
   } catch (e) { T("تُبنى دوالّ ختم التنفيذي", false, String(e.message).slice(0, 140)); return; }
   T("تُبنى دوالّ ختم التنفيذي", typeof A.poCEOCovers === "function" && typeof A.poClearCEOStamp === "function");
 
@@ -3626,9 +3634,9 @@ function poCEOStampBound() {
   // ══ (د) إبطالُ الختم بالرجوع — يُنفَّذ ══
   const mClr = upd.match(/let _ceoStampCleared = false;[\s\S]*?\n  \}/);
   if (!mClr) { T("يُستخرج قيدُ إبطال الختم بالرجوع", false, "تغيّرت صياغته"); return; }
-  const revert = new Function("p", "oldStatus", "newStatus", "normalizePOStatus", "PO_PRE_CEO_STATUSES", "poClearCEOStamp",
+  const revert = new Function("p", "oldStatus", "newStatus", "normalizePOStatus", "PO_PRE_CEO_STATUSES", "poClearCEOStamp", "poClearPmCmpStamp",
     mClr[0] + "\nreturn {p, _ceoStampCleared};");
-  const R = (from, to) => revert(po(2639, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 }), from, to, s => s, A.PO_PRE_CEO_STATUSES, A.poClearCEOStamp);
+  const R = (from, to) => revert(po(2639, { ceoApprovedAt: "x", ceoApprovedAmount: 2639 }), from, to, s => s, A.PO_PRE_CEO_STATUSES, A.poClearCEOStamp, A.poClearPmCmpStamp);
   const rBack = R("wh_receiving", "wh_reviewed");
   T("★★ عينُ PO-202608-0155: الرجوعُ لـ«تمت مراجعة المستودع» يُسقط الختم",
     rBack._ceoStampCleared === true && A.poCEOCovers(rBack.p) === false);
@@ -8743,6 +8751,130 @@ function pcNameOverrideGuards() {
    المورد المختار. وg.nameOverrides تبقى قراءةً للسجلات السابقة.
    الحارس يُنفّذ دورة الحفظ والقراءة فعلاً — لا قراءةَ سطورٍ وحدها.
    ════════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════════
+   بوّابة مدير المشاريع على مقارنة الأسعار — pending_pm_cmp (طلب المالك 30/08)
+
+   الطلب: «في الطلبات التي يقوم مسؤول المشتريات بمقارنة أسعار فيها، أحتاج
+   إضافة اعتماد لمدير المشاريع بعد مقارنة الأسعار وقبل اعتماد المدير التنفيذي».
+   الجذر: المقارنة يختار فيها مسؤول المشتريات المورّدَ لكل بند، وكانت تقفز إلى
+   pending_ceo مباشرةً — فيصل التنفيذيَّ اختيارٌ لم يرَه صاحب المشروع.
+   القرار: حالةٌ جديدة `pending_pm_cmp` بين المشتريات والتنفيذي، تُقام **فقط**
+   على طلبٍ فيه مقارنةٌ مستعملة؛ وختمٌ مقرونٌ بالمبلغ (pmCmpApproved*) يسقط
+   بحفظ مقارنةٍ جديدة وبالرجوع إلى ما قبل البوّابة.
+   الحارس ينفّذ الدوالّ الحقيقية — لا يقرأ سطورها.
+   ════════════════════════════════════════════════════════════════════ */
+function poPmComparisonGateGuards() {
+  H("بوّابة مدير المشاريع على مقارنة الأسعار — pending_pm_cmp");
+
+  const grab = n => (HTML.match(new RegExp("function " + n + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}")) || [])[0] || "";
+
+  // ── (أ) الحالة معرَّفة ومركّبة في كل خرائط المسار ──
+  T("★ الحالة معرَّفة بمسمّاها",
+    /pending_pm_cmp: "بانتظار اعتماد مدير المشاريع لمقارنة الأسعار"/.test(HTML));
+  T("★★ موضعها بين المشتريات والتنفيذي في PO_STAGES وSTAGE_ORDER معاً",
+    /\{key:"pending_pm_cmp",[^\n]*st:\["pending_pm_cmp"\]\}/.test(HTML) &&
+    /"pending_proc","pending_pm_cmp","pending_ceo","pending_finance"/.test(HTML));
+  T("★ الراكد يسمّي صاحبه، والشارة والعدّاد والفلتر تعرفها",
+    /pending_pm_cmp: "مدير المشاريع"/.test(HTML) &&
+    /"pending_pm_cmp":\s*\{cls:"b-po-approval",\s*icon:"briefcase"\}/.test(HTML) &&
+    /p\.status==="pending_pm_cmp"\|\|/.test(HTML) &&
+    /<option value="pending_pm_cmp">/.test(HTML));
+
+  // ── (ب) قرارُ الوجهة poCeoGateTarget — يُنفَّذ ──
+  let G;
+  try {
+    G = new Function([grab("poPmCmpCovers"), grab("poClearPmCmpStamp"), grab("poCeoGateTarget"),
+      "function getPOTotal(p){ return p._total||0; }",
+      "return {target:poCeoGateTarget, covers:poPmCmpCovers, clear:poClearPmCmpStamp};"].join("\n"))();
+  } catch (e) { T("تُبنى دوالّ البوّابة", false, String(e.message).slice(0, 140)); return; }
+  T("تُبنى دوالّ البوّابة", typeof G.target === "function" && typeof G.covers === "function");
+
+  // poHasPriceComparison تُحقن كبديلٍ مضبوط — المحكُّ المنطقي لا شكلُ الوثيقة
+  const tgt = (hasCmp, extra) => new Function("p", [
+    "function poHasPriceComparison(){ return " + (!!hasCmp) + "; }",
+    "function getPOTotal(q){ return q._total||0; }",
+    grab("poPmCmpCovers"), grab("poCeoGateTarget"),
+    "return poCeoGateTarget(p);"].join("\n"))(Object.assign({ _total: 5000 }, extra || {}));
+  T("★★ الجذر نفسه: طلبٌ فيه مقارنة يذهب لمدير المشاريع لا للتنفيذي",
+    tgt(true) === "pending_pm_cmp", tgt(true));
+  T("★★ وطلبٌ بلا مقارنة يمضي للتنفيذي كما كان — لا بوّابةَ على ما لا مقارنةَ فيه",
+    tgt(false) === "pending_ceo", tgt(false));
+  T("★ ومقارنةٌ اعتمدها مدير المشاريع بمبلغٍ يغطّي لا تُعاد إليه",
+    tgt(true, { pmCmpApprovedAt: "T0", pmCmpApprovedAmount: 5000 }) === "pending_ceo");
+  T("★★ لكن قيمةً تجاوزت سقفَ الختم تعود للبوّابة (لا شيك على بياض)",
+    tgt(true, { pmCmpApprovedAt: "T0", pmCmpApprovedAmount: 2000 }) === "pending_pm_cmp");
+  T("★ وختمٌ بلا مبلغٍ لا يُعتدّ به — نفس عُرف ختم التنفيذي",
+    tgt(true, { pmCmpApprovedAt: "T0" }) === "pending_pm_cmp");
+
+  // ── (ج) الختم: يُكتب بمبلغه واسمه، ويُمحى بقيمةٍ فارغةٍ لا بـ delete ──
+  const upd = grab("doUpdatePurchaseStatus");
+  const mStamp = upd.match(/if\(oldStatus==="pending_pm_cmp" && newStatus==="pending_ceo"\)\{[\s\S]*?\n  \}/);
+  if (!mStamp) { T("★ يُستخرج قيدُ ختم اعتماد المقارنة", false, "تغيّرت صياغته"); return; }
+  const stamp = new Function("p", "oldStatus", "newStatus", "now", "currentUser", "getPOTotal",
+    mStamp[0] + "\nreturn p;");
+  const st = stamp({ _total: 4800 }, "pending_pm_cmp", "pending_ceo", "T9", { name: "مدير المشاريع" }, p => p._total);
+  T("★★ اعتمادُ المقارنة يُختم بمبلغه واسمِ من اعتمده",
+    st.pmCmpApprovedAmount === 4800 && st.pmCmpApprovedBy === "مدير المشاريع" && st.pmCmpApprovedAt === "T9");
+  const st2 = stamp({ _total: 4800 }, "pending_proc", "pending_ceo", "TX", { name: "م" }, p => p._total);
+  T("★ وانتقالٌ لا يمرّ بالبوّابة لا يُنتج ختماً", !st2.pmCmpApprovedAt);
+  const cl = { pmCmpApprovedAt: "x", pmCmpApprovedAmount: 9, pmCmpApprovedBy: "م" };
+  T("★★ المحوُ بقيمةٍ فارغةٍ لا بـ delete (merge:true لا يمحو حقلاً محذوفاً محلياً)",
+    G.clear(cl) === true && G.clear(cl) === false &&
+    ("pmCmpApprovedAt" in cl) && cl.pmCmpApprovedAt === "" && cl.pmCmpApprovedAmount === 0);
+
+  // ── (د) المسارات الثلاثة كلُّها تقرأ المصدر الواحد — لا مسارَ يتسلّل ──
+  T("★★ حفظُ المقارنة يُحيلها للبوّابة (لا للتنفيذي)",
+    /const newStatus=isRequired\?"pending_pm_cmp":p\.status;/.test(HTML));
+  T("★★ ومقارنةٌ تُحفَظ من جديدٍ تُسقط ختمَها — وإلّا: خُذ الاعتماد ثم بدّل المورّد",
+    /pmCmpApprovedAt:"", pmCmpApprovedAmount:0, pmCmpApprovedBy:""/.test(grab("savePriceComparison")));
+  T("★★ والإحالةُ عبر المالية والإحالةُ المباشرة تقرآن poCeoGateTarget لا تكتبان الوجهة",
+    /const target = goCEO \? poCeoGateTarget\(p\) : "pending_finance";/.test(HTML) &&
+    /const _gate = poCeoGateTarget\(po\);/.test(HTML));
+
+  // ── (هـ) الصلاحية: مدير المشاريع وحدَه يبتّ في البوّابة ──
+  const gas = grab("getAvailableStatuses");
+  const acts = (role, status) => {
+    const f = new Function("role", "currentStatus", "po", "PO_CEO_THRESHOLD", "getPOTotal", "poCeoGateTarget",
+      gas.slice(gas.indexOf("{") + 1, gas.lastIndexOf("}")).replace(/const role = [^\n]*\n/, ""));
+    return f(role, status, { _total: 5000 }, 2000, p => p._total, () => "pending_pm_cmp") || [];
+  };
+  const pmActs = acts("project_manager", "pending_pm_cmp").map(x => x.v);
+  T("★★ مدير المشاريع يعتمد المقارنة أو يعيدها للمشتريات — وهما وحدهما",
+    pmActs.length === 2 && pmActs.includes("pending_ceo") && pmActs.includes("pending_proc"),
+    JSON.stringify(pmActs));
+  T("★★ ولا يملك أحدٌ سواه البتَّ فيها (المشتريات والتنفيذي والمستودع بلا إجراء)",
+    ["procurement_officer", "ceo", "warehouse_manager", "finance"]
+      .every(r => acts(r, "pending_pm_cmp").length === 0));
+  T("★ والتنفيذيُّ يبقى صاحبَ بوّابته وحدَه بعدها",
+    acts("ceo", "pending_ceo").length === 2);
+  T("★ والأدمن يملك الحالة يدوياً (تصحيح الطلبات العالقة)",
+    acts("admin", "pending_proc").some(x => x.v === "pending_pm_cmp"));
+
+  // ── (و) سببُ الإعادة إلزاميّ — «أعِدها» بلا سببٍ تُعاد كما هي ──
+  T("★★ إعادةُ المقارنة للمشتريات سببُها إلزاميّ",
+    /normalizePOStatus\(p\.status\)==="pending_pm_cmp" && newStatus==="pending_proc" && !notes/.test(upd));
+
+  // ── (ز) البابان يحرسان معاً، والسقوط قيدٌ في السجل لا حدثٌ صامت ──
+  T("★★ نافذةُ تعديل المسؤول تُسقط ختمَ المقارنة كما تُسقط ختمَ التنفيذي",
+    /PO_PRE_CEO_STATUSES\.includes\(normalizePOStatus\(pf\.status\)\) && poClearPmCmpStamp\(pf\)/.test(HTML));
+  T("★ والرجوعُ إلى ما قبل البوّابة يُسقطه في doUpdatePurchaseStatus",
+    /_pmCmpStampCleared = poClearPmCmpStamp\(p\);/.test(upd) &&
+    PO_PRE_CEO_STATUSES_HAS("pending_pm_cmp"));
+  T("★ وسقوطُه قيدٌ في السجل من البابين",
+    (HTML.match(/سقط اعتماد مدير المشاريع لمقارنة الأسعار — رجع الطلب إلى ما قبل بوّابته/g) || []).length >= 2);
+
+  // ── (ح) التوجيه الخادمي: البوّابة تُنبّه مدير المشاريع ──
+  const cfgSrc = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "functions", "lib", "config.js"), "utf8"); } catch (e) { return ""; } })();
+  T("★★ واتساب: pending_pm_cmp ⇐ دور project_manager (وإلّا بوّابةٌ لا يعلم بها صاحبُها)",
+    /pending_pm_cmp: \{ role: "project_manager", action: "اعتمادك لمقارنة الأسعار" \}/.test(cfgSrc));
+  T("★ وإشعارُ الواجهة يسمّي البوّابة",
+    /newStatus==="pending_pm_cmp"/.test(grab("_sendPurchaseWorkflowNotif")));
+}
+function PO_PRE_CEO_STATUSES_HAS(k) {
+  const m = HTML.match(/const PO_PRE_CEO_STATUSES = \[([\s\S]*?)\];/);
+  return !!m && m[1].includes('"' + k + '"');
+}
+
 function pcSupplierItemNameGuards() {
   H("مقارنة الأسعار — اسم البند لكل مورد");
 
@@ -14482,6 +14614,7 @@ function externalPurchaseApiGuards() {
   pcaiTruncatedOutputGuards();
   pcNameOverrideGuards();
   pcSupplierItemNameGuards();
+  poPmComparisonGateGuards();
   supervisorReceiptGuards();
   hrPurchaseRequestGuards();
   photoQueueGuards();
