@@ -13,7 +13,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js"></script>
 <!-- طابور الرفع المؤجَّل للصور (مشترك مع النظام الرئيسي) -->
-<script src="photo-queue.js?v=18.9.2950"></script>
+<script src="photo-queue.js?v=18.9.2951"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -710,7 +710,7 @@ const firebaseConfig = {
 // ── App Check: مفتاح موقع reCAPTCHA Enterprise — الصق قيمتك هنا فقط ──
 const RECAPTCHA_SITE_KEY = "6Lf-MEQtAAAAAAcvx6wGbqjS5OLeKK4m4sNXrCqJ";
 
-const APP_VERSION = "5.22";
+const APP_VERSION = "5.23";
 let COLLECTION = "hail_tickets";   // v5.22: يتغيّر بحسب المشروع المختار (X_tickets)
 const ATTENDANCE_COLLECTION = "attendance";
 const DEFAULT_PIN = "1234";
@@ -819,7 +819,10 @@ function initFirebase(){
         window.photoQueue.start();
       }
     }catch(_pq){ console.warn("photoQueue init:", _pq); }
-    firebase.auth().signInAnonymously().catch(e=>console.warn("Auth:",e));
+    // v5.23: لا دخولَ مجهولاً فوق جلسةٍ محفوظة — signInAnonymously غيرُ المشروط
+    // كان يستبدل مستخدمَ توكين الفنيّ الموثّق (الذي يفتح الصياغة الذكية) بمجهولٍ
+    // جديدٍ عند كلّ تحميل. ندخل مجهولاً فقط حين لا جلسةَ مستعادة.
+    { const off = firebase.auth().onAuthStateChanged(u=>{ off(); if(!u) firebase.auth().signInAnonymously().catch(e=>console.warn("Auth:",e)); }); }
   }catch(e){ console.error("Firebase init:",e); }
 }
 
@@ -989,10 +992,13 @@ async function attemptLogin(){
   }
 
   // Success
+  const _pinForAIToken = pinBuffer;   // يُلتقط قبل التصفير — لتوثيق جلسة الذكاء أدناه
   currentTech={name:techName, specialty:isAdminName?"⚙️ مدير النظام":techSpecialty(techName), isAdmin, projectId:_activeProjectId};
   localStorage.setItem("tech_session", JSON.stringify(currentTech));
   document.getElementById("login-error").classList.remove("show");
   pinBuffer=""; updatePinDots();
+  // v5.23: بلا انتظار — الدخولُ لا يُرهَن بشبكة الميدان، والتوكينُ يلحق في الخلفية
+  _aiMintTechToken(techName, _pinForAIToken);
   enterApp();
 }
 
@@ -1637,11 +1643,45 @@ async function _resolveAIProxy(){
   return _aiProxyUrl;
 }
 
+// v5.23 — توثيق جلسة الذكاء: الـWorker (v9) يرفض نداءَ الذكاء بلا توكينٍ يحمل
+// ادّعاءً معتمداً، والدخولُ المجهول لا يحمل شيئاً. بعد نجاح PIN نطلب من الـWorker
+// توكيناً خادميَّ التحقق (بلا حقل role عمداً — انظر ترويسة الـWorker) ونستبدل به
+// المجهول. فشلُه لا يعطّل الدخول: كلُّ شيءٍ يعمل إلا زرّ الصياغة، ويشرح _aiErrAr السبب.
+async function _aiMintTechToken(name, pin){
+  try{
+    const url = (await _resolveAIProxy()).replace(/\/+$/,"") + "/login";
+    const ctrl = new AbortController();
+    const tid = setTimeout(()=>ctrl.abort(), 12000);
+    let res;
+    try{
+      res = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"},
+        signal:ctrl.signal, body:JSON.stringify({ tech:name, pin:pin }) });
+    }finally{ clearTimeout(tid); }
+    if(res && res.ok){
+      const d = await res.json().catch(()=>null);
+      if(d && d.token){ await firebase.auth().signInWithCustomToken(d.token); return; }
+    }
+    console.warn("tech ai token:", res ? "HTTP "+res.status : "لا ردّ");
+  }catch(e){ console.warn("tech ai token:", (e && e.message) || e); }
+  // لا توكين لهذا الفنيّ — أسقِط توكيناً موروثاً من فنيٍّ سابقٍ على الجهاز نفسِه
+  // (وإلا خرجت الصياغةُ باسم غيره)، ويكفي الرجوعُ للمجهول.
+  try{
+    const u = firebase.auth().currentUser;
+    const r = u ? await u.getIdTokenResult() : null;
+    if(r && r.claims && r.claims.tech && r.claims.tech !== name) await firebase.auth().signInAnonymously();
+  }catch(_e){}
+}
+
 // يترجم رسالة خطأ Anthropic الخام (إنجليزية، تصل كما هي عبر الـ Worker) إلى
 // سببٍ عربيٍّ وحلٍّ واضح — نفس منطق `_aiErrAr` في النظام الرئيسي.
 // يعيد "" حين لا مطابقة، فتبقى الرسالة الأصلية كما هي.
 function _aiErrAr(m){
   m = String(m||"");
+  // v5.23: رفضُ بوّابة الـWorker (لا توكين/توكينٌ بلا ادّعاء) كان يلبس ثوبَ
+  // «مفتاح غير صالح» عبر نمط HTTP 401 العام أدناه — وهو تشخيصٌ مضلّل: المفتاحُ
+  // سليمٌ والمرفوضُ هويّةُ الجلسة. يُميَّز بجسم الردّ في _aiText ويُشرح هنا.
+  if(/WORKER_UNAUTHORIZED/.test(m))
+    return "الصياغة الذكية تتطلّب توثيق الدخول — اخرج ثم ادخل برقمك السرّي مجدداً. فإن استمرّت الرسالة فرقمُك ما زال الافتراضيّ (اطلب من المسؤول ضبطَ رقمٍ خاصٍّ بك) أو لم يُنشَر تحديثُ الخادم";
   if(/credit balance is too low|insufficient[ _]?credits?|purchase credits/i.test(m))
     return "نفد رصيد حساب Anthropic — الصياغة الذكية متوقّفة حتى يشحن المسؤول الرصيد. (النظام سليم؛ اكتب وصف العمل يدوياً)";
   if(/rate[ _]?limit|HTTP 429/i.test(m))
@@ -1661,15 +1701,25 @@ async function _aiText(messages, maxTokens){
   const ctrl = new AbortController();
   const tid = setTimeout(()=>ctrl.abort(), 60000);
   try{
+    const headers = {"Content-Type":"application/json"};
+    // v5.23: هويّةُ Firebase ترافق النداء — الـWorker يرفض المجهول (H3).
+    // توكينُ المجهول يُرسَل أيضاً بلا ضرر؛ القبولُ بادّعاء التوكين لا بوجوده.
+    try{
+      const u = firebase.auth().currentUser;
+      if(u){ const tk = await u.getIdToken(); if(tk) headers["Authorization"]="Bearer "+tk; }
+    }catch(_e){}
     const res = await fetch(url, {
       method:"POST",
-      headers:{"Content-Type":"application/json"},
+      headers:headers,
       signal:ctrl.signal,
       body:JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:maxTokens||800, messages:messages })
     });
     clearTimeout(tid);
     if(!res.ok){
       const e = await res.json().catch(()=>({}));
+      // 401 بجسم {error:"unauthorized"} = رفضُ بوّابة الـWorker لهويّة الجلسة،
+      // لا خطأُ مفتاح Anthropic — يُميَّز كي لا يضلّل _aiErrAr المستخدمَ.
+      if(res.status===401 && e && e.error==="unauthorized") throw new Error("WORKER_UNAUTHORIZED");
       throw new Error((e && e.error && e.error.message) || ("HTTP "+res.status));
     }
     const data = await res.json();

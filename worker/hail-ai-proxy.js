@@ -1,7 +1,19 @@
 // ============================================================================
-//  hail-ai-proxy — Worker v8   ← نسخةُ المستودع = **ما هو منشورٌ فعلاً** على Cloudflare
-//  (نُشِر ١٤ أغسطس ٢٠٢٦ · تحقُّقٌ حيّ: بلا توكِن ⟵ 401، وموظّفٌ مُصادَقٌ ⟵ يعمل)
+//  hail-ai-proxy — Worker v9   ← نسخةُ المستودع = **ما يجب نشرُه** على Cloudflare
 //  ⚠ لا أسرارَ في هذا الملف — كلُّها من env (Settings ▸ Variables ▸ Secrets).
+//  جديد في v9 (فتحُ الصياغة الذكية لتطبيق الفنيين دون فتح المُرحِّل):
+//    • v8 أغلق مسارَ الذكاء على من يحمل توكيناً بدور — فسقط تطبيقُ الفنيين الذي
+//      يصادق Firebase **مجهولاً**: كلُّ نداء صياغةٍ يُردّ 401 ويظهر للفنيّ خطأً
+//      «مفتاح الذكاء الاصطناعي غير صالح» وهو ليس مفتاحاً أصلاً.
+//    • /login صار يقبل شكلاً ثانياً: { tech: "<اسم الفني>", pin: "1234" } —
+//      يتحقّق من PIN **خادمياً** مقابل `technicians/{name}` (بنفس تجزئة التطبيق
+//      `h$sha256("hail-tech-v1|name|pin")` مع توافقٍ رجعيٍّ للصريح)، أو مقابل
+//      `meta/settings.adminPin` لمدير النظام (ولأيّ اسمٍ — كما يفعل التطبيق).
+//    • **التوكينُ الصادر بلا حقل `role` عمداً**: قواعد Firestore تمنح `hasRole()`
+//      قراءةً وكتابةً واسعتين على النظام الرئيسي، وتوكينُ الفنيّ لبوّابة الذكاء
+//      وحدها. يحمل ادّعاء `tech` — وبوّابةُ الذكاء أدناه تقبل `role` **أو** `tech`.
+//    • **الرقمان الافتراضيان لا يُقبلان هنا**: منشوران في مصدر التطبيق العلنيّ،
+//      وقبولُهما يعيد فتحَ المُرحِّل لكلّ من قرأه (وهو عينُ ما أغلقه v8).
 //  جديد في v8 (إغلاق H3 — الوسيط كان مفتوحاً لمن يعرف عنوانه):
 //    • مسار الذكاء صار يطلب هويّة: ترويسة Authorization: Bearer <Firebase ID token>
 //      يُتحقَّق منها بمفاتيح Google العامة (توقيع + جهة الإصدار + المشروع + الصلاحية).
@@ -127,7 +139,7 @@ export default {
     // تُوضَع قبل فحص POST حتى يتمكّن المراقب (الذي يستخدم GET) من الوصول إليها.
     if (path.endsWith("/health") && (request.method === "GET" || request.method === "HEAD")) {
       return new Response(
-        JSON.stringify({ status: "ok", service: "hail-ai-proxy", v: "8" }),
+        JSON.stringify({ status: "ok", service: "hail-ai-proxy", v: "9" }),
         { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders(origin) } }
       );
     }
@@ -177,8 +189,10 @@ async function handleAI(request, env, origin, ip) {
   const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   const idClaims = idToken ? await verifyIdToken(idToken, env) : null;
 
-  if (idClaims && idClaims.role) {
-    console.log("ai-auth: ✅ مقبول | الدور:", idClaims.role, "| المستخدم:", idClaims.u || idClaims.name || "—");
+  // v9: توكينُ تطبيق الفنيين يحمل `tech` بلا `role` (عمداً — انظر الترويسة)
+  if (idClaims && (idClaims.role || idClaims.tech)) {
+    console.log("ai-auth: ✅ مقبول | الدور:", idClaims.role || ("tech:" + idClaims.tech),
+                "| المستخدم:", idClaims.u || idClaims.name || "—");
   } else {
     console.log("ai-auth: ⛔ مرفوض |", idToken ? "توكن غير صالح أو منتهٍ أو بلا دور" : "بلا توكن إطلاقاً",
                 "| الوضع:", AI_AUTH_ENFORCE ? "يرفض (المرحلة ب)" : "يسجّل فقط (المرحلة أ)");
@@ -305,6 +319,12 @@ async function handleLogin(request, env, origin, ip) {
   try { body = await request.json(); }
   catch { return json({ error: "bad_json" }, 400, origin); }
 
+  // v9: الشكل الثاني — دخول تطبيق الفنيين (tech + pin). يمرّ من نفس محدِّد
+  // المعدّل وفحص الأسرار أعلاه، ولا يمسّ عقدَ user/pass القائم بحرف.
+  if (body.tech !== undefined) {
+    return await handleTechLogin(body, env, origin);
+  }
+
   const user = (body.user || "").trim();
   const pass = (body.pass || "").trim(); // يطابق .trim() في دالة دخول الواجهة
   const dev = body.dev === true; // اختبار على مستندات *_dev
@@ -358,6 +378,57 @@ async function handleLogin(request, env, origin, ip) {
       projects: Array.isArray(found.projects) ? found.projects : [],
     },
   }, 200, origin);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+//  v9: دخول تطبيق الفنيين — تحقُّقُ PIN خادمياً وتوكينُ ذكاءٍ **بلا دور**
+//  يطابق منطقَ التطبيق: `technicians/{name}.pin` (مُجزّأ h$… أو صريح قديم)،
+//  و`meta/settings.adminPin` لمدير النظام ولأيّ اسمٍ (المفتاح العام للمدير).
+//  لا يقبل الرقمين الافتراضيين ("1234"/"0000") — منشوران في مصدرٍ علنيّ.
+// ──────────────────────────────────────────────────────────────────────────
+async function handleTechLogin(body, env, origin) {
+  const name = String(body.tech || "").trim();
+  const pin = String(body.pin || "").trim();
+  if (!name || !pin) return json({ error: "bad_credentials" }, 401, origin);
+
+  const accessToken = await getAccessToken(env);
+  const base = `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents`;
+  async function readField(docPath, field) {
+    try {
+      const res = await fetch(`${base}/${docPath}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!res.ok) return null;
+      return decodeField(await res.json(), field);
+    } catch { return null; }
+  }
+
+  let ok = false;
+  if (name === "مدير النظام") {
+    ok = await techPinMatches(pin, await readField("meta/settings", "adminPin"), "__admin__");
+  } else {
+    ok = await techPinMatches(pin, await readField(`technicians/${encodeURIComponent(name)}`, "pin"), name);
+    if (!ok) {
+      // رقمُ المدير يفتح أيَّ اسم — نفسُ سلوك شاشة الدخول في التطبيق
+      ok = await techPinMatches(pin, await readField("meta/settings", "adminPin"), "__admin__");
+    }
+  }
+  if (!ok) return json({ error: "bad_credentials" }, 401, origin);
+
+  const uid = "tech_" + await sha256hex(name);
+  // ⚠ بلا حقل role عمداً: hasRole() في قواعد Firestore تفتح النظامَ الرئيسيَّ
+  // كلَّه، وهذا التوكينُ لبوّابة الذكاء وحدها (تقبل ادّعاء tech).
+  const customToken = await mintCustomToken(env, uid, { tech: name, name: name });
+  return json({ token: customToken, profile: { name: name, tech: true } }, 200, origin);
+}
+
+// نفسُ عقد `_pinMatches` في tech-app.html: h$sha256("hail-tech-v1|owner|pin")
+// للمُجزّأ، ومساواةٌ نصّيةٌ للصريح القديم. المخزونُ الفارغ/الغائب = رفض.
+async function techPinMatches(entered, stored, owner) {
+  if (stored == null || stored === "") return false;
+  const s = String(stored);
+  if (s.indexOf("h$") === 0) {
+    return ("h$" + await sha256hex("hail-tech-v1|" + (owner || "") + "|" + String(entered))) === s;
+  }
+  return String(entered) === s;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
