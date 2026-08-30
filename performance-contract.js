@@ -56,7 +56,7 @@
 
 const PAGE_ID      = "performance";
 const VERSION      = "0.3";
-const MODULE_BUILD = "v18.9.2959";
+const MODULE_BUILD = "v18.9.2961";
 
 /* ════════════ خدمات النواة (قراءة بالاسم مع بدائل آمنة) ════════════ */
 function _esc(s){ try{ return (typeof esc==="function") ? esc(s) : String(s==null?"":s); }catch(e){ return String(s==null?"":s); } }

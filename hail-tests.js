@@ -552,7 +552,14 @@ function predelivery() {
        (النموذج والمسودة والتصفير وsubmitPurchase وتعديل الأدمن كلُّها هنا) —
        ودالةُ التعبئة `_fillRecvSupervisorSelect` تقرأ USERS وCURRENT_PROJECT
        من نطاق النواة، ونقلُ تعديلِ نموذجٍ قائمٍ إلى وحدةٍ ممنوع (CLAUDE.md). */
-    const IDX_CEILING = 38130;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 38130 إلى 38158 — ‏٢٨ سطراً لاسم البند لكل مورد في مقارنة الأسعار
+       (بلاغ المالك 30/08): الحقلُ المشترك g.nameOverrides كان يمحو اسمَ موردٍ
+       باسمِ الذي كُتب بعده فلا تظهر الأسماء في النتائج — صار الاسمُ على عنصر
+       المورد نفسِه `suppliers[].items[].name` ويُعرض في خليّته في كل المواضع.
+       **إصلاحُ سلوكِ ميزةٍ قائمةٍ في مكانها** (`_pcSupplierCardHtml` ·
+       `_pcBuildGroupRecord` · `_pcGroupsFromPO` · المصفوفة التفصيلية ·
+       الطباعة)، ونقلُها إلى وحدةٍ بحجّة تعديلها ممنوع (CLAUDE.md). */
+    const IDX_CEILING = 38158;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -8649,13 +8656,14 @@ function pcNameOverrideGuards() {
   const parts = {
     _pcUid: one("_pcUid"), _pcGroupIdxs: one("_pcGroupIdxs"), _pcSupRead: one("_pcSupRead"),
     _pcNameOv: one("_pcNameOv"), _pcNameOvRead: one("_pcNameOvRead"),
+    _pcSupItemName: one("_pcSupItemName"),
     _pcAutoDecision: multi("_pcAutoDecision"), _pcCoverage: multi("_pcCoverage"),
     _pcBestCombination: multi("_pcBestCombination"),
     _pcGroupsFromPO: multi("_pcGroupsFromPO"), _pcBuildGroupRecord: multi("_pcBuildGroupRecord"),
   };
   const missing = Object.keys(parts).filter(k => !parts[k]);
   T("★ pc-name: دوالُّ الدورة كلُّها مستخرَجة من index.html", missing.length === 0,
-    missing.length ? "مفقود: " + missing.join("، ") : "10 دوال");
+    missing.length ? "مفقود: " + missing.join("، ") : "11 دالة");
   if (missing.length) return;
   const F = new Function(Object.values(parts).join("\n")
     + "\nreturn {fromPO:_pcGroupsFromPO, build:_pcBuildGroupRecord, ovRead:_pcNameOvRead, ov:_pcNameOv};")();
@@ -8720,6 +8728,102 @@ function pcNameOverrideGuards() {
     /في طلب الشراء/.test(one("_pcNameNoteHtml") || ""));
   T("pc-name: أسماءُ طلب الشراء نفسُها لا تُعدَّل (pcCommitItemName لا يكتب في items)",
     (() => { const c = multi("pcCommitItemName") || ""; return !!c && !/items\[ai\]\.itemName\s*=/.test(c) && /g\.nameOverrides/.test(c); })());
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   مقارنة الأسعار — اسم البند لكل مورد (بلاغ المالك 30/08 — vNEXT)
+
+   البلاغ: مسؤول المشتريات يكتب اسم البند كما ورد في عرض **كل** مورد، لكن
+   نتائج المقارنة لا تُظهر هذه الأسماء. والجذر: g.nameOverrides حقلٌ واحدٌ
+   مشتركٌ للمجموعة — كلُّ كتابةٍ لموردٍ تمحو كتابةَ الذي قبله، فلا يصل الحفظَ
+   والعرضَ إلا آخرُ الأسماء.
+   القرار: الاسم على عنصر المورد نفسِه suppliers[].items[].name — يُحفظ
+   ويُقرأ ويُعرض لكل موردٍ في خليّته (بطاقة المورد · جدول المقارنة ·
+   المصفوفة التفصيلية · الطباعة · خيارات القرار)، وقرارُ الترسية يحمل تسميةَ
+   المورد المختار. وg.nameOverrides تبقى قراءةً للسجلات السابقة.
+   الحارس يُنفّذ دورة الحفظ والقراءة فعلاً — لا قراءةَ سطورٍ وحدها.
+   ════════════════════════════════════════════════════════════════════ */
+function pcSupplierItemNameGuards() {
+  H("مقارنة الأسعار — اسم البند لكل مورد");
+
+  const one = n => (HTML.match(new RegExp("function " + n + "\\([^)]*\\)\\{[^\\n]*\\}")) || [])[0];
+  const multi = n => (HTML.match(new RegExp("function " + n + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}")) || [])[0];
+  const parts = {
+    _pcUid: one("_pcUid"), _pcGroupIdxs: one("_pcGroupIdxs"), _pcSupRead: one("_pcSupRead"),
+    _pcNameOv: one("_pcNameOv"), _pcNameOvRead: one("_pcNameOvRead"),
+    _pcSupItemName: one("_pcSupItemName"),
+    _pcAutoDecision: multi("_pcAutoDecision"), _pcCoverage: multi("_pcCoverage"),
+    _pcBestCombination: multi("_pcBestCombination"),
+    _pcGroupsFromPO: multi("_pcGroupsFromPO"), _pcBuildGroupRecord: multi("_pcBuildGroupRecord"),
+  };
+  const missing = Object.keys(parts).filter(k => !parts[k]);
+  T("★ pc-supname: دوالُّ الدورة كلُّها مستخرَجة من index.html", missing.length === 0,
+    missing.length ? "مفقود: " + missing.join("، ") : "11 دالة");
+  if (missing.length) return;
+  const F = new Function(Object.values(parts).join("\n")
+    + "\nreturn {fromPO:_pcGroupsFromPO, build:_pcBuildGroupRecord, supNm:_pcSupItemName};")();
+
+  const items = [
+    { itemName: "مناديل رول 150متر", qty: 600, unit: "رول" },
+    { itemName: "OWES HAND WASH 30 LTR", qty: 300, unit: "لتر" },
+  ];
+  const g = {
+    id: "g1", label: "مواد نظافة", itemIndices: [0, 1],
+    suppliers: [
+      { name: "عالم الريتاج", notes: "", items: [
+        { idx: 0, unitPrice: "3.41", name: "مناديل ناين" },
+        { idx: 1, unitPrice: "1.22", name: "صابون جسرين" }] },
+      { name: "اسرار الاسرار", notes: "", items: [
+        { idx: 0, unitPrice: "4.17", name: "مناديل السرار الفاخرة" },
+        { idx: 1, unitPrice: "1.50", name: "OWES HAND WASH 30 LTR" }] },
+    ],
+    rationale: "", aiSummary: "", summary: null, _sel: {}, nameOverrides: {},
+  };
+  const rec = F.build(g, items).record;
+
+  // (١) الجذر نفسُه: اسمُ كل موردٍ يُحفظ على حدة — لا يمحو أحدُهما الآخر
+  T("★★ pc-supname: اسمُ كلِّ موردٍ للبند يُحفظ على حدة — لا يمحو أحدُهما الآخر",
+    rec.suppliers[0].items[0].name === "مناديل ناين"
+    && rec.suppliers[1].items[0].name === "مناديل السرار الفاخرة",
+    JSON.stringify(rec.suppliers.map(s => s.items[0].name)));
+
+  // (٢) الدورة الكاملة: ما حُفظ يعود كما هو عند إعادة فتح المقارنة
+  const g2 = F.fromPO({ items, priceComparisons2: [rec] })[0];
+  T("★ pc-supname: الأسماء تنجو من دورة الحفظ والقراءة كاملةً — لكل موردٍ اسمُه",
+    F.supNm(g2.suppliers[0], 0) === "مناديل ناين"
+    && F.supNm(g2.suppliers[1], 0) === "مناديل السرار الفاخرة"
+    && F.supNm(g2.suppliers[0], 1) === "صابون جسرين");
+
+  // (٣) قرارُ الترسية يحمل تسمية المورد المختار (الأرخص = عالم الريتاج)
+  const d0 = rec.decisions.find(d => d.itemIndex === 0);
+  T("★ pc-supname: القرار يحمل تسميةَ المورد المختار + اسمَ الطلب الأصلي + علَم المغايرة",
+    !!d0 && d0.selectedSupplier === "عالم الريتاج" && d0.itemName === "مناديل ناين"
+    && d0.poItemName === "مناديل رول 150متر" && d0.nameChanged === true,
+    JSON.stringify(d0));
+
+  // (٤) تسميةُ المورد المطابقةُ لاسم الطلب لا تُعلَّم مغايرةً
+  const dSame = F.build({ ...g, _sel: { 1: 1 } }, items).record.decisions.find(d => d.itemIndex === 1);
+  T("pc-supname: تسميةُ المورد المطابقةُ لاسم الطلب لا تُعلَّم مغايرةً",
+    !!dSame && dSame.selectedSupplier === "اسرار الاسرار"
+    && dSame.itemName === "OWES HAND WASH 30 LTR" && dSame.nameChanged === false);
+
+  // (٥) القارئ الرجعي: سجلٌ محفوظٌ قبل الميزة (بلا حقل name) يُقرأ فارغاً لا انهيار
+  const legacyRec = { ...rec, suppliers: rec.suppliers.map(s => ({ name: s.name, items: s.items.map(x => ({ idx: x.idx, unitPrice: x.unitPrice })) })) };
+  const gOld = F.fromPO({ items, priceComparisons2: [legacyRec] })[0];
+  T("pc-supname: سجلٌ قديمٌ بلا حقل name يُقرأ باسمٍ فارغ لا انهيار",
+    !!gOld && F.supNm(gOld.suppliers[0], 0) === "");
+
+  // (٦) مواضعُ العرض تقرأ تسمية المورد في خليّته — حضورٌ في المصدر
+  T("★ pc-supname: خلايا المورد تعرض تسميته (البطاقة · المقارنة · المصفوفة التفصيلية · الطباعة · خيارات القرار)",
+    /_pcSupItemName\(sup,ai\)/.test(multi("_pcSupplierCardHtml") || "")
+    && /_pcSupItemName\(s,ai\)/.test(multi("_pcRenderCompareTable") || "")
+    && /_pcSupItemName\(s,ai\)/.test(multi("_buildPCDetailMatrix") || "")
+    && /_pcSupItemName\(s, ai\)/.test(multi("_buildPCGroupPrintTable") || "")
+    && /_pcSupItemName\(s,ai\)/.test(multi("_pcRenderDecisions") || ""));
+
+  // (٧) الكتابة على عنصر المورد وحده — لا كتابةَ على الحقل المشترك ولا على أسماء الطلب
+  T("★ pc-supname: pcCommitItemName يكتب على عنصر المورد وحده ولا يمسّ أسماء الطلب",
+    (() => { const c = multi("pcCommitItemName") || ""; return !!c && /_pcSupEntry\(sup,ai\)\.name/.test(c) && !/items\[ai\]\.itemName\s*=/.test(c) && !/g\.nameOverrides\[ai\]\s*=/.test(c); })());
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -14377,6 +14481,7 @@ function externalPurchaseApiGuards() {
   aiErrorMessagesGuards();
   pcaiTruncatedOutputGuards();
   pcNameOverrideGuards();
+  pcSupplierItemNameGuards();
   supervisorReceiptGuards();
   hrPurchaseRequestGuards();
   photoQueueGuards();
