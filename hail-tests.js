@@ -542,7 +542,12 @@ function predelivery() {
        المغايرة في كل مواضع العرض والحفظ. **إضافةُ حقلٍ إلى ميزةٍ قائمة** تعيش
        كلُّها في index.html (`_pcSupplierCardHtml` · `_pcBuildGroupRecord` ·
        `_pcGroupsFromPO` · الطباعة)، ونقلُها إلى وحدةٍ بحجّة تعديلها ممنوع. */
-    const IDX_CEILING = 38025;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 38025 إلى 38057 — ‏٣٢ سطراً هي **خطاطيفُ** مرحلة استلام المشرف
+       (طلب المالك 30/08): الميزةُ نفسُها وحدةٌ مستقلة `supervisor-receipt.js`
+       كما توجب القاعدة، وهذه الأسطرُ ما لا يعيش خارج النواة — الحالةُ الجديدة
+       في PO_STATUS/PO_STAGES/STAGE_ORDER، وتحويلُ doNotifyWarehouse، ومفتاحُ
+       الإعدادات، وأزرارُ/أقسامُ الاستدعاء `window.supervisorReceipt`. */
+    const IDX_CEILING = 38057;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -3627,7 +3632,8 @@ function poCEOStampBound() {
   const nw = grab("doNotifyWarehouse");
   const iGuard = nw.indexOf("_poFreshStatus(poId)");
   const iUp    = nw.indexOf("_poUploadFile(");
-  const iWrite = nw.indexOf('p.status = "wh_receiving"');
+  // vNEXT: الكتابة صارت عبر _target (استلام المشرف حين مفعّل، وإلا المستودع)
+  const iWrite = nw.indexOf("p.status = _target");
   T("★★ «تم الشراء» صار يقرأ الحالة طازجةً من الخادم", iGuard > 0);
   T("★★ والفحصُ قبل رفع الملف — فلا مرفقٌ يتيمٌ لطلبٍ سيُرفض", iGuard > 0 && iUp > 0 && iGuard < iUp);
   T("★★ وقبل كتابة الحالة", iGuard > 0 && iWrite > 0 && iGuard < iWrite);
@@ -8473,6 +8479,102 @@ function pcaiTruncatedOutputGuards() {
    الحارس: يُنفّذ _pcBuildGroupRecord و_pcGroupsFromPO فعلاً ويطابق الدورة
    الكاملة حفظاً وقراءة — لا قراءةَ سطور.
    ════════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════════
+   استلام المشرف الميداني — supervisor-receipt.js + مرحلة sv_receiving (vNEXT)
+
+   الحاجة (طلب المالك 30/08): البضاعة تصل الموقع قبل تدقيق المستودع ولا أثرَ
+   لمن استلمها ولا لما وصل. القرار: مرحلة sv_receiving بين «تم الشراء» واستلام
+   المستودع — محاضرُ جزئيةٌ متراكمة بصورٍ اختيارية (مع تنبيه)، توثيقٌ ميدانيٌّ
+   لا حركةُ مخزون، وتحويلٌ مباشرٌ موثَّقٌ للطلبات بلا توريدٍ ميداني.
+   ════════════════════════════════════════════════════════════════════ */
+function supervisorReceiptGuards() {
+  H("استلام المشرف الميداني — supervisor-receipt.js ومرحلة sv_receiving");
+  const vm = require("vm");
+  const SVR_PATH = path.resolve(path.dirname(IDX), "supervisor-receipt.js");
+  if (!fs.existsSync(SVR_PATH)) { T("supervisor-receipt.js موجود", false); return; }
+  const src = fs.readFileSync(SVR_PATH, "utf8");
+  try { new vm.Script(src); T("صياغة supervisor-receipt.js سليمة", true); }
+  catch (e) { T("صياغة supervisor-receipt.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  T("الوسم في index.html مع cache-buster", /<script src="supervisor-receipt\.js\?v=/.test(HTML));
+  const svrBuild = (src.match(/const MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
+  T("★ MODULE_BUILD يطابق APP_VERSION", svrBuild === VER, `MODULE_BUILD=${svrBuild}  APP_VERSION=${VER}`);
+
+  // ── تحميلٌ بلا DOM — الدوال النقية تعمل وحدها ──
+  const sandbox = { window: {}, console, document: undefined };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); }
+  catch (e) { T("★ تُحمَّل بلا DOM", false, String(e.message).slice(0, 120)); return; }
+  const S = sandbox.window.supervisorReceipt;
+  T("★ تعرّض window.supervisorReceipt ودوالَّها النقية",
+    S && typeof S._deliverables === "function" && typeof S._cum === "function" &&
+    typeof S._rows === "function" && typeof S._complete === "function");
+  if (!S) return;
+
+  // ── الحساب النقي: المطلوب/التراكمي/المتبقي/الاكتمال ──
+  const items = [
+    { itemName: "تيوب 50*50", unit: "قطعة", qty: 5 },
+    { itemName: "مغطى من المخزون", unit: "قطعة", qty: 3, _fullyCoveredByStock: true },
+    { itemName: "صاج أسود", unit: "لوح", qty: 2 },
+    { itemName: "بند صفري", unit: "", qty: 0 },
+  ];
+  const del = S._deliverables(items);
+  T("★★ بنود التوريد: المغطى كاملاً من المخزون والصفريُّ لا يدخلان (لا انتظارَ لما لن يصل)",
+    del.length === 2 && del[0].idx === 0 && del[1].idx === 2, JSON.stringify(del));
+
+  const receipts = [
+    { items: [{ idx: 0, qty: 2 }, { idx: 2, qty: 1 }] },
+    { items: [{ idx: 0, qty: 1.5 }] },
+  ];
+  const cum = S._cum(receipts);
+  T("★ التراكمي يجمع المحاضر ويقرّب لثلاث منازل", cum[0] === 3.5 && cum[2] === 1, JSON.stringify(cum));
+
+  const p1 = { items, svReceipts: receipts };
+  const rows = S._rows(p1);
+  T("★★ الصفوف: المتبقي = المطلوب − التراكمي ولا ينزل تحت الصفر",
+    rows.find(r => r.idx === 0).rem === 1.5 && rows.find(r => r.idx === 2).rem === 1 &&
+    S._rows({ items, svReceipts: [{ items: [{ idx: 0, qty: 99 }] }] }).find(r => r.idx === 0).rem === 0);
+  T("★★ الاكتمال: كلُّ بنود التوريد بلا متبقٍّ — والجزئيُّ ليس اكتمالاً",
+    S._complete(p1) === false &&
+    S._complete({ items, svReceipts: [{ items: [{ idx: 0, qty: 5 }, { idx: 2, qty: 2 }] }] }) === true);
+  T("★ طلبٌ بلا بنود توريدٍ لا «يكتمل» تلقائياً (حالتُه التحويل المباشر الموثَّق)",
+    S._complete({ items: [{ itemName: "خدمة", qty: 0 }], svReceipts: [] }) === false);
+
+  // ── المحضر توثيقٌ لا حركةُ مخزون: الوحدة لا تكتب رصيداً ولا سندَ GRN ──
+  T("★★ الوحدة لا تمسّ المخزون ولا سندات المستودع (توثيقٌ ميدانيٌّ فقط)",
+    !/_inventoryItems|inv_movements|grnDocs\s*[.=]|logInventoryMovement/.test(src));
+
+  // ── ربط النواة ──
+  T("★ الحالة معرّفة ومسمّاة", /sv_receiving:\s*"بانتظار استلام المشرف"/.test(HTML));
+  T("★★ «تم الشراء» يوجّه للمشرف حين مفعّل وللمستودع حين معطّل — من مفتاح الإعدادات",
+    /const _toSv = window\.SUPERVISOR_RECEIPT_ENABLED !== false;/.test(HTML) &&
+    /const _target = _toSv \? "sv_receiving" : "wh_receiving";/.test(HTML) &&
+    /supervisorReceiptEnabled !== false/.test(HTML));
+  T("★ المرحلة في مساري العرض والقياس (PO_STAGES + STAGE_ORDER قبل استلام المستودع)",
+    /\{key:"sv_receiving",\s*lbl:"استلام المشرف"/.test(HTML) &&
+    /"sv_receiving","wh_receiving","wh_auditing","pending_extra","closed"/.test(HTML));
+  T("★ الراكد يسمّي صاحبه", /sv_receiving\s*:\s*"المشرف الميداني"/.test(HTML));
+  T("★ أزرار المرحلة: استلام المشرف لمن يملكه، والتحويل المباشر للمشتريات/الأدمن موثَّقاً",
+    /supervisorReceipt\.open\('/.test(HTML) &&
+    /supervisorReceipt\.directTransfer\('/.test(HTML) &&
+    /supervisorReceipt\.canReceive\(\)/.test(HTML));
+  T("★ المحاضر تُعرض في التفاصيل والتدقيق والطباعة",
+    /supervisorReceipt\.sectionHtml\(p\)/.test(HTML) &&
+    /supervisorReceipt\.auditHtml\(p\)/.test(HTML) &&
+    /supervisorReceipt\.printHtml\(p\)/.test(HTML));
+  T("★ الصور اختياريةٌ مع تنبيهٍ صريح لا منع (قرار المالك)",
+    /استلام بلا صور/.test(src) && /حفظ بلا صور/.test(src));
+  T("★ لا استلامَ فوق المتبقي ولا حفظَ على حالةٍ متغيّرة (قراءة طازجة قبل الكتابة)",
+    /Math\.min\(t\.qty,row\.rem\)/.test(src) && /_poFreshStatus/.test(src));
+  T("★★ الكتابة على النسخة الحيّة بعد كل await (مستمعُ اللقطات قد يستبدل الكائن)",
+    /const live=_po\(poId\)\|\|p;/.test(src) && /savePurchaseAwait\(poId\)/.test(src));
+
+  // ── التوجيه الخادمي: واتساب المشرف بدوره العربي ──
+  const cfgSrc = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "functions", "lib", "config.js"), "utf8"); } catch (e) { return ""; } })();
+  T("★★ واتساب: sv_receiving ⇐ دور «مشرف» (المفتاح العربي كما في meta/users)",
+    /sv_receiving:\s*\{\s*role:\s*"مشرف",\s*action:\s*"استلامك الميداني"\s*\}/.test(cfgSrc));
+}
+
 function pcNameOverrideGuards() {
   H("مقارنة الأسعار — تعديل اسم البند يدوياً");
 
@@ -14209,6 +14311,7 @@ function externalPurchaseApiGuards() {
   aiErrorMessagesGuards();
   pcaiTruncatedOutputGuards();
   pcNameOverrideGuards();
+  supervisorReceiptGuards();
   hrPurchaseRequestGuards();
   photoQueueGuards();
   versionStampGuards();
