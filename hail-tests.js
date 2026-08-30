@@ -537,7 +537,12 @@ function predelivery() {
        سلوكِ حقلٍ قائمٍ في مكانه**: منطقُ الرفع والعرض كلُّه في النواة
        (submitTicket · openDetail · التقرير المصوّر · نافذة التعديل)، ونقلُه
        إلى وحدةٍ بحجّة تعديله ممنوع (CLAUDE.md). */
-    const IDX_CEILING = 37958;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 37958 إلى 38025 — ‏٦٦ سطراً لتعديل اسم البند يدوياً داخل مقارنة
+       الأسعار البندية (طلب المالك 30/08): `g.nameOverrides` + زرُّ ✏ وملاحظةُ
+       المغايرة في كل مواضع العرض والحفظ. **إضافةُ حقلٍ إلى ميزةٍ قائمة** تعيش
+       كلُّها في index.html (`_pcSupplierCardHtml` · `_pcBuildGroupRecord` ·
+       `_pcGroupsFromPO` · الطباعة)، ونقلُها إلى وحدةٍ بحجّة تعديلها ممنوع. */
+    const IDX_CEILING = 38025;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -8459,6 +8464,97 @@ function pcaiTruncatedOutputGuards() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   مقارنة الأسعار — تعديل اسم البند يدوياً داخل المقارنة (vNEXT)
+
+   الحاجة: عرضُ المورد قد يسمّي البند باسمٍ مغايرٍ لاسمه في طلب الشراء.
+   القرار: g.nameOverrides[absIdx] للعرض وسجلِّ المقارنة وحدهما — p.items لا
+   يُمسّ، ويُحفَظ التعديلُ فقط إن غايَر الأصلَ فعلاً، ومع كل قرارٍ يُحفَظ
+   poItemName الأصلي وعلَمُ nameChanged توثيقاً للمغايرة.
+   الحارس: يُنفّذ _pcBuildGroupRecord و_pcGroupsFromPO فعلاً ويطابق الدورة
+   الكاملة حفظاً وقراءة — لا قراءةَ سطور.
+   ════════════════════════════════════════════════════════════════════ */
+function pcNameOverrideGuards() {
+  H("مقارنة الأسعار — تعديل اسم البند يدوياً");
+
+  const one = n => (HTML.match(new RegExp("function " + n + "\\([^)]*\\)\\{[^\\n]*\\}")) || [])[0];
+  const multi = n => (HTML.match(new RegExp("function " + n + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}")) || [])[0];
+  const parts = {
+    _pcUid: one("_pcUid"), _pcGroupIdxs: one("_pcGroupIdxs"), _pcSupRead: one("_pcSupRead"),
+    _pcNameOv: one("_pcNameOv"), _pcNameOvRead: one("_pcNameOvRead"),
+    _pcAutoDecision: multi("_pcAutoDecision"), _pcCoverage: multi("_pcCoverage"),
+    _pcBestCombination: multi("_pcBestCombination"),
+    _pcGroupsFromPO: multi("_pcGroupsFromPO"), _pcBuildGroupRecord: multi("_pcBuildGroupRecord"),
+  };
+  const missing = Object.keys(parts).filter(k => !parts[k]);
+  T("★ pc-name: دوالُّ الدورة كلُّها مستخرَجة من index.html", missing.length === 0,
+    missing.length ? "مفقود: " + missing.join("، ") : "10 دوال");
+  if (missing.length) return;
+  const F = new Function(Object.values(parts).join("\n")
+    + "\nreturn {fromPO:_pcGroupsFromPO, build:_pcBuildGroupRecord, ovRead:_pcNameOvRead, ov:_pcNameOv};")();
+
+  const items = [
+    { itemName: "مناديل رول 150متر", qty: 600, unit: "رول" },
+    { itemName: "OWES HAND WASH 30 LTR", qty: 300, unit: "لتر" },
+    { itemName: "صابون", qty: 10, unit: "حبة" },
+  ];
+  const g = {
+    id: "g1", label: "مواد نظافة", itemIndices: [0, 1, 2],
+    suppliers: [
+      { name: "عالم الريتاج", notes: "", items: [{ idx: 0, unitPrice: "2" }, { idx: 1, unitPrice: "3" }, { idx: 2, unitPrice: "4" }] },
+      { name: "مورد آخر", notes: "", items: [{ idx: 0, unitPrice: "2.5" }, { idx: 1, unitPrice: "2.8" }, { idx: 2, unitPrice: "5" }] },
+    ],
+    rationale: "", aiSummary: "", summary: null, _sel: {},
+    // 1: تعديلٌ حقيقي — يُحفظ · 2: مطابقٌ للأصل — يُسقَط · 0: بياضٌ — يُسقَط
+    nameOverrides: { 0: "   ", 1: "أويس غسول أيدي ٣٠ لتر", 2: "صابون" },
+  };
+  const rec = F.build(g, items).record;
+
+  // (١) يُحفَظ التعديلُ المغايرُ وحدَه — المطابقُ والبياضُ يسقطان
+  T("★ pc-name: السجل يحفظ التعديلَ المغايرَ وحده (لا المطابقَ ولا البياض)",
+    JSON.stringify(Object.keys(rec.nameOverrides)) === JSON.stringify(["1"])
+    && rec.nameOverrides[1] === "أويس غسول أيدي ٣٠ لتر",
+    "المحفوظ: " + JSON.stringify(rec.nameOverrides));
+
+  // (٢) القرار يحمل الاسمَ المعروض + الأصلَ + علَمَ المغايرة
+  const d1 = rec.decisions.find(d => d.itemIndex === 1);
+  const d0 = rec.decisions.find(d => d.itemIndex === 0);
+  T("★ pc-name: قرارُ البند المعدَّل يحمل الاسمَ الجديد والأصلَ وعلَم nameChanged",
+    !!d1 && d1.itemName === "أويس غسول أيدي ٣٠ لتر" && d1.poItemName === "OWES HAND WASH 30 LTR" && d1.nameChanged === true,
+    JSON.stringify(d1));
+  T("pc-name: قرارُ البند غير المعدَّل باسم الطلب وعلَمُه false",
+    !!d0 && d0.itemName === "مناديل رول 150متر" && d0.nameChanged === false);
+
+  // (٣) الدورة الكاملة: ما حُفظ يعود كما هو عند إعادة فتح المقارنة
+  const g2 = F.fromPO({ items, priceComparisons2: [rec] })[0];
+  T("★ pc-name: الاسم المعدَّل ينجو من دورة الحفظ والقراءة كاملةً",
+    F.ov(g2, 1) === "أويس غسول أيدي ٣٠ لتر" && F.ov(g2, 0) === "" && F.ov(g2, 2) === "");
+
+  // (٤) مفاتيح Firestore النصية تُطبَّع أرقاماً والهراءُ يُسقَط
+  const norm = F.ovRead({ "1": " اسم ", "abc": "y", "2": "", "3": null });
+  T("pc-name: التطبيع — مفاتيحُ نصيةٌ تصير أرقاماً والفارغُ والهراءُ يسقطان",
+    JSON.stringify(norm) === JSON.stringify({ 1: "اسم" }));
+
+  // (٥) القارئ الرجعي (priceComparison2 القديم بلا nameOverrides) لا ينكسر
+  const gOld = F.fromPO({ items, priceComparison2: { suppliers: g.suppliers, decisions: [] } })[0];
+  T("pc-name: المقارنة القديمة بلا nameOverrides تُقرأ بكائنٍ فارغ لا انهيار",
+    !!gOld && JSON.stringify(gOld.nameOverrides) === "{}");
+
+  // (٦) مواضعُ العرض تقرأ الاسمَ المعدَّل وتُرفق الملاحظة — حضورٌ في المصدر
+  const supCard = multi("_pcSupplierCardHtml") || "";
+  T("★ pc-name: بطاقة المورد تعرض الاسمَ المعدَّل وزرَّ ✏ والملاحظة",
+    /pcEditItemName\(/.test(supCard) && /_pcNameOv\(g,ai\)/.test(supCard) && /_pcNameNoteHtml/.test(supCard));
+  T("pc-name: جدول المقارنة والقرارات والمصفوفة التفصيلية والطباعة تقرأ الاسمَ المعدَّل",
+    /_pcNameOv/.test(multi("_pcRenderCompareTable") || "")
+    && /_pcNameOv/.test(multi("_pcRenderDecisions") || "")
+    && /_pcNameOv/.test(multi("_buildPCDetailMatrix") || "")
+    && /_pcNameOv/.test(multi("_buildPCGroupPrintTable") || ""));
+  T("pc-name: الملاحظة تسمّي الأصل صراحةً «في طلب الشراء»",
+    /في طلب الشراء/.test(one("_pcNameNoteHtml") || ""));
+  T("pc-name: أسماءُ طلب الشراء نفسُها لا تُعدَّل (pcCommitItemName لا يكتب في items)",
+    (() => { const c = multi("pcCommitItemName") || ""; return !!c && !/items\[ai\]\.itemName\s*=/.test(c) && /g\.nameOverrides/.test(c); })());
+}
+
+/* ════════════════════════════════════════════════════════════════════
    صلاحيةُ «طلب شراء» لمسؤول الموارد البشرية (بلاغ المالك — v18.9ub)
 
    البلاغ: نافذةُ الصلاحيات تعرض له عشرَ خاناتٍ مؤشَّرة، «لكن فعلياً لا يظهر
@@ -14087,6 +14183,7 @@ function externalPurchaseApiGuards() {
   tvWallGuards();
   aiErrorMessagesGuards();
   pcaiTruncatedOutputGuards();
+  pcNameOverrideGuards();
   hrPurchaseRequestGuards();
   photoQueueGuards();
   versionStampGuards();
