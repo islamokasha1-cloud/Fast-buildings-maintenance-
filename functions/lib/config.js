@@ -74,6 +74,7 @@ const PO = {
  * من ينتظر دوره الآن يُنبَّه (رسالة واحدة لكل مرحلة).
  * الأسماء مطابقة لرموز الحالة الفعلية في index.html (دالة أزرار الإجراء) — تحقّق 2026-07-26.
  * المسار: pending_pm→(اعتماد)→pm_approved→(مستودع)→wh_reviewed→(مشتريات)→
+ *         [pending_pm_cmp إن كانت فيه مقارنة أسعار]→
  *         pending_ceo/pending_finance/proc_executing→wh_receiving→closed.
  */
 const PO_ROUTING = {
@@ -82,6 +83,9 @@ const PO_ROUTING = {
   wh_review: { role: "warehouse_manager", action: "مراجعتك" }, // مرادف قديم لنفس المرحلة
   wh_reviewed: { role: "procurement_officer", action: "اعتمادك" }, // بعد اعتماد المستودع
   pending_proc: { role: "procurement_officer", action: "اعتمادك" }, // مرادف قديم
+  // v18.9: بوّابةُ مدير المشاريع على مقارنة الأسعار — بين المشتريات والتنفيذي.
+  // مقارنةٌ أُجريت ⇒ يعتمد مديرُ المشاريع اختيارَ المورّد قبل أن يراه التنفيذي.
+  pending_pm_cmp: { role: "project_manager", action: "اعتمادك لمقارنة الأسعار" },
   pending_ceo: { role: "ceo", action: "اعتمادك" },
   pending_finance: { role: "finance", action: "سدادك" },
   finance_returned: { role: "procurement_officer", action: "متابعتك" }, // المالية أعادته
