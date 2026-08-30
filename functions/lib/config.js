@@ -86,6 +86,9 @@ const PO_ROUTING = {
   pending_finance: { role: "finance", action: "سدادك" },
   finance_returned: { role: "procurement_officer", action: "متابعتك" }, // المالية أعادته
   proc_executing: { role: "procurement_officer", action: "بدء التنفيذ" }, // تنفيذ الشراء
+  // استلام المشرف الميداني قبل المستودع — دور «مشرف» بمفتاحه العربي كما يُخزَّن
+  // في meta/users (لا مفتاح إنجليزي له)، والارتداد للأدمن عند غياب رقمٍ مسجَّل.
+  sv_receiving: { role: "مشرف", action: "استلامك الميداني" },
   wh_receiving: { role: "warehouse_manager", action: "استلامك" }, // إشعار المستودع بالاستلام
   // v18.9xb: البتُّ في البند الإضافي **مرحلتان** — مدير المشاريع أولاً، ثم المدير
   // التنفيذي إن كان إجمالي الطلب فوق العتبة — وحالةُ الطلب تبقى `pending_extra`

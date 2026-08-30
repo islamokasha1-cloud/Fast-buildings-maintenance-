@@ -16,6 +16,7 @@ on:
       - 'performance-contract.js'
       - 'finance-audit.js'
       - 'vendor-po.js'
+      - 'supervisor-receipt.js'
       - 'hr-payments.js'
       - 'contracts.js'
       - 'HailNotify.js'

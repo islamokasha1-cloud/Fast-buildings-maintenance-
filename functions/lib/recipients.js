@@ -8,6 +8,15 @@
 
 const { ROLE_FALLBACK } = require("./config");
 
+/* دورُ المشرف يُسجَّل بصيغتين في meta/users («مشرف» العربية وsupervisor اللاتينية —
+   الجذرُ موثَّق في v18.9wj)، والمطابقةُ الحرفية كانت ستُسقط نصفَ المشرفين بصمت.
+   المكافئاتُ هنا وحدَها — بقيةُ الأدوار مطابقةٌ حرفية كما كانت. */
+const ROLE_EQUIV = { "مشرف": ["مشرف", "supervisor"], supervisor: ["مشرف", "supervisor"] };
+function roleMatches(userRole, role) {
+  const set = ROLE_EQUIV[role];
+  return set ? set.includes(userRole) : userRole === role;
+}
+
 /** يقرأ مصفوفة users من مستند meta واحد بأمان. */
 async function _readUsersDoc(db, path) {
   try {
@@ -36,7 +45,7 @@ async function findByRole(db, role, projectId, _noFallback) {
   for (const path of docs) {
     const users = await _readUsersDoc(db, path);
     for (const u of users) {
-      if (!u || u.role !== role) continue;
+      if (!u || !roleMatches(u.role, role)) continue;
       if (!u.phone || u.waOptIn !== true) continue;
       const key = String(u.phone).replace(/[^\d]/g, "");
       if (!key || seen.has(key)) continue;
@@ -88,7 +97,7 @@ async function findByRoleAnywhere(db, role, _noFallback) {
     if (!pid) continue;
     const users = await _readUsersDoc(db, `meta/${pid}_users`);
     for (const u of users) {
-      if (!u || u.role !== role) continue;
+      if (!u || !roleMatches(u.role, role)) continue;
       if (!u.phone || u.waOptIn !== true) continue;
       const key = String(u.phone).replace(/[^\d]/g, "");
       if (!key || seen.has(key)) continue;

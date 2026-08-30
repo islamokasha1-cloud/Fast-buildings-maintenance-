@@ -1158,6 +1158,86 @@ check('15د) ★ وحالةُ المزامنة معروضةٌ في مكان ال
 check('15هـ) ★ والمستخدم يُخبَر بالسبب', s15.toldUser===true);
 check('15و) ★★ وبعد وصول اللقطة يعمل التوليد (الحارسُ يمنع ولا يُعطِّل)', s15.afterReady===true);
 
+/* ══ سيناريو 16: استلام المشرف الميداني — «تم الشراء» ⇒ المشرف ⇒ محاضر جزئية ⇒ المستودع ══ */
+log('\n=== السيناريو 16: استلام المشرف الميداني (sv_receiving) ══');
+const s16 = await page.evaluate(async ()=>{
+  const out={};
+  window.isAdmin              = ()=> !!(currentUser && currentUser.role==='admin');
+  window.isProcurementOfficer = ()=> !!(currentUser && currentUser.role==='procurement_officer');
+  out.confirms=0;
+  window.showConfirm = async ()=>{ out.confirms++; return true; };   // تنبيه «بلا صور» يُعتمد
+  const toasts=[]; window.toast=(m)=>toasts.push(String(m));
+  window.renderPurchases=()=>{}; window.updatePurchaseBadge=()=>{};
+  window.addNotification=()=>{}; window.logAudit=()=>{}; window.closeModal=()=>{};
+  window.SUPERVISOR_RECEIPT_ENABLED = true;
+  const PC=PURCHASES_COLLECTION();
+
+  // (أ) «تم الشراء» من المشتريات ⇒ استلام المشرف لا المستودع
+  currentUser={name:'مسؤول المشتريات', role:'procurement_officer'};
+  const PO={ id:'PO-SVR', building:'مبنى ٢', status:'proc_executing', supervisor:'مشرف الموقع',
+    items:[{ itemName:'مناديل رول', qty:5, unit:'كرتون', unitCost:10, itemCost:50 },
+           { itemName:'مغطى من المخزون', qty:3, unit:'حبة', _fullyCoveredByStock:true },
+           { itemName:'صابون', qty:2, unit:'حبة', unitCost:4, itemCost:8 }],
+    timeline:[], createdAt:'2026-01-02T08:00:00' };
+  purchases=[PO];
+  window.__store[PC+'/PO-SVR']=Object.assign({},PO);
+  // المحاكي يبثّ اللقطات فيعيد مستمعُ النواة بناءَ purchases — فتُقرأ الحالة طازجةً دائماً
+  const cur=()=>purchases.find(x=>x.id==='PO-SVR')||window.__store[PC+'/PO-SVR']||{};
+  openNotifyWarehouseModal('PO-SVR');           // تبني حقول nw-invno/nw-file الحقيقية
+  await doNotifyWarehouse('PO-SVR');
+  out.afterBuy = cur().status;
+  out.storedAfterBuy = (window.__store[PC+'/PO-SVR']||{}).status;
+
+  // (ب) دورٌ لا يملك الاستلام لا يفتح النافذة
+  currentUser={name:'فني', role:'technician'};
+  supervisorReceipt.open('PO-SVR');
+  out.wrongRoleModal = (document.getElementById('modal-sv-receipt')||{style:{display:'none'}}).style.display||'none';
+
+  // (ج) المشرف: محضرٌ جزئيٌّ بلا صور — البند المغطى من المخزون لا يظهر أصلاً
+  currentUser={name:'مشرف الموقع', role:'مشرف'};
+  supervisorReceipt.open('PO-SVR');
+  const inputs=document.querySelectorAll('#modal-sv-receipt .sv-qty');
+  out.rowCount=inputs.length;
+  document.querySelector('#modal-sv-receipt .sv-qty[data-idx="0"]').value='2';
+  document.querySelector('#modal-sv-receipt .sv-qty[data-idx="2"]').value='0';
+  await supervisorReceipt.save();
+  out.afterPartial = cur().status;
+  out.receipts1 = (cur().svReceipts||[]).length;
+  out.partialItems = JSON.stringify(((cur().svReceipts||[])[0]||{}).items||[]);
+
+  // (د) محضرٌ ثانٍ يكمل — وكميةٌ فوق المتبقي تُقصّ لسقفه
+  supervisorReceipt.open('PO-SVR');
+  document.querySelector('#modal-sv-receipt .sv-qty[data-idx="0"]').value='99';   // المتبقي 3
+  await supervisorReceipt.save();
+  out.afterComplete = cur().status;
+  out.receipts2 = (cur().svReceipts||[]).length;
+  const cum={}; (cur().svReceipts||[]).forEach(r=>(r.items||[]).forEach(x=>{cum[x.idx]=(cum[x.idx]||0)+x.qty;}));
+  out.cum0=cum[0]; out.cum2=cum[2];
+  out.completeEvent = (cur().timeline||[]).some(t=>t&&t.event&&t.event.indexOf('اكتمل استلام المشرف')>=0);
+
+  // (هـ) التحويل المباشر (خدمة بلا توريدٍ ميداني) — للمشتريات، موثَّقاً
+  currentUser={name:'مسؤول المشتريات', role:'procurement_officer'};
+  const PO2={ id:'PO-SVR2', building:'م', status:'sv_receiving', items:[{itemName:'خدمة تركيب', qty:1, unit:'خدمة'}], timeline:[] };
+  purchases.push(PO2);
+  window.__store[PC+'/PO-SVR2']=Object.assign({},PO2);
+  await supervisorReceipt.directTransfer('PO-SVR2');
+  const cur2=()=>purchases.find(x=>x.id==='PO-SVR2')||window.__store[PC+'/PO-SVR2']||{};
+  out.directStatus = cur2().status;
+  out.directLogged = (cur2().timeline||[]).some(t=>t&&t.event&&t.event.indexOf('تحويل مباشر للمستودع')>=0);
+  return out;
+});
+check('16أ) ★★ «تم الشراء» يوجّه لاستلام المشرف لا المستودع (المفتاح مفعّل)', s16.afterBuy==='sv_receiving', 'الحالة='+s16.afterBuy);
+check('16أ) والحالة ثبتت في المخزن', s16.storedAfterBuy==='sv_receiving');
+check('16ب) ★ دورٌ لا يملك الاستلام لا تُفتح له النافذة', s16.wrongRoleModal!=='flex', 'display='+s16.wrongRoleModal);
+check('16ج) ★ البند المغطى كاملاً من المخزون لا يُعرض للاستلام (صفّان لا ثلاثة)', s16.rowCount===2, 'الصفوف='+s16.rowCount);
+check('16ج) ★★ محضرٌ جزئيٌّ يبقي الطلب عند المشرف', s16.afterPartial==='sv_receiving' && s16.receipts1===1, 'الحالة='+s16.afterPartial);
+check('16ج) والكمياتُ الصفرية لا تدخل المحضر', s16.partialItems.indexOf('"qty":2')>=0 && s16.partialItems.indexOf('"idx":2')<0, s16.partialItems);
+check('16ج) ★ الحفظ بلا صور مرّ بتنبيهٍ صريح (اختياريةٌ لا ممنوعة)', s16.confirms>=1, 'تأكيدات='+s16.confirms);
+check('16د) ★★ اكتمالُ الكميات يحيل للمستودع تلقائياً', s16.afterComplete==='wh_receiving' && s16.receipts2===2, 'الحالة='+s16.afterComplete);
+check('16د) ★★ الكميةُ فوق المتبقي تُقصّ لسقفه (99 ⇒ 3، التراكمي 5 لا 101)', s16.cum0===5 && s16.cum2===2, 'تراكمي='+s16.cum0+'/'+s16.cum2);
+check('16د) وقيدُ الاكتمال في السجل', s16.completeEvent===true);
+check('16هـ) ★ التحويل المباشر يحيل للمستودع بقيد تجاوزٍ موثَّق', s16.directStatus==='wh_receiving' && s16.directLogged===true, 'الحالة='+s16.directStatus);
+
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
 if(boot.length) log('(أخطاء إقلاع غير حرجة: '+boot.length+' — متوقّعة من غياب CDN)');
