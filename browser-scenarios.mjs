@@ -1310,6 +1310,23 @@ const s17 = await page17.evaluate(async ()=>{
   const pageHost=document.getElementById('po-my-tasks-card');
   out.pageStillWorks = !!pageHost && pageHost.innerHTML.indexOf('PO-DL-2')>=0
                        && pageHost.innerHTML.indexOf('_poStageFilter')>=0;
+
+  /* (هـ) وثيقةُ المحضر — زرُّها على البطاقة، والورقةُ تُبنى بترويسة الشركة
+     من أصولٍ حقيقيةٍ في المستند (طلب المالك 31/08). */
+  const poDoc={ id:'PO-DOC-1', projectName:'مشروع حائل', building:'المبنى', vendor:'مورد أ',
+    items:[{itemName:'جلبة',unit:'قطعة',qty:5}],
+    status:'wh_receiving',
+    svReceipts:[{ref:'SVR-01',by:'أسامة السادات',at:'2026-08-31T10:00:00Z',
+      notes:'حالة جيدة',photos:[{url:'x'}],items:[{idx:0,qty:5}]}] };
+  const sec = supervisorReceipt.sectionHtml(poDoc);
+  out.docBtnInSection = sec.indexOf("printReceipt('PO-DOC-1','SVR-01')")>=0;
+  out.docBtnInAudit   = supervisorReceipt.auditHtml(poDoc).indexOf("printReceipt('PO-DOC-1','SVR-01')")>=0;
+  const paper = supervisorReceipt.paperHTML(poDoc,'SVR-01');
+  out.docHasPaper  = paper.indexOf('محضر استلام ميداني')>=0 && paper.indexOf('SVR-01')>=0;
+  out.docHasSigns  = paper.indexOf('مسؤول المستودع')>=0 && paper.indexOf('مدير المشروع')>=0;
+  // الورقةُ الرسمية تُقرأ من contracts المعروضة — مصدرٌ واحدٌ لهيئة أوراق الشركة
+  out.docLetterhead = paper.indexOf('letterhead-header')>=0 || paper.indexOf('class="company"')>=0;
+  out.docLhOn = paper.indexOf('class="lh lh-h"')>=0;   // هل انعقدت الورقةُ الرسمية فعلاً؟
   return out;
 });
 await page17.close();
@@ -1327,6 +1344,10 @@ check('17د) ★ وصفُّ الطلب يفتح تفاصيلَه من مكانه
 check('17د) ★ ولا رأسَ مرحلةٍ يُصفّي قائمةً محجوبةً عنه', s17.dashNoFilter===true);
 check('17د) ★ ولا تظهر لمن لا مهمّةَ له', s17.dashHiddenForOthers===true);
 check('17د) ★★ وبطاقةُ صفحة المشتريات كما كانت — مضيفان لا منطقان', s17.pageStillWorks===true);
+check('17هـ) ★★ زرُّ «طباعة المحضر» على البطاقة — في التفاصيل ونافذة التدقيق', s17.docBtnInSection===true && s17.docBtnInAudit===true, 'تفاصيل='+s17.docBtnInSection+' تدقيق='+s17.docBtnInAudit);
+check('17هـ) ★★ والورقةُ تُبنى وثيقةً مستقلّةً بعنوانها ورقمها', s17.docHasPaper===true);
+check('17هـ) ★★ وفيها خاناتُ التوقيع الثلاث', s17.docHasSigns===true);
+check('17هـ) ★★ وتحمل الورقةَ الرسميةَ للشركة (ترويسة/تذييل/علامة مائية من contracts)', s17.docLhOn===true, 'ورقةٌ رسمية='+s17.docLhOn+' هيئةٌ ما='+s17.docLetterhead);
 
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
