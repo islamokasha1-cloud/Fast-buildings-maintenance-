@@ -2695,6 +2695,49 @@ check('★ المستخلصُ الثاني يقرأ «سابقاً» محسوب�
   ext2.prev > 0 && ext2.calc.prevGross === ext2.prev && ext2.calc.period === ext2.calc.gross - ext2.prev,
   JSON.stringify({ prev: ext2.prev, period: ext2.calc.period }));
 
+/* ── المقدمةُ المسدَّدةُ تُخصَم من المستخلص ولو كان حقلُ الاسترداد صفراً ──
+   (بلاغُ المالك: «المفروض الدفعة المقدمة المسددة تخصم من المستخلصات»). الفحصُ في
+   متصفّحٍ حقيقيّ لأن الارتدادَ **يختفي بصمت**: `rung` لا يرسم صفّاً قيمتُه صفر،
+   فالسُّلَّمُ يبدو سليماً وقد سقط منه الخصمُ كلُّه. فالقياسُ على **المرسوم**: صفُّ
+   الاسترداد موجودٌ، ونسبتُه المرسومةُ = المحسوبة، ومبلغُه المرسومُ = المحسوب. */
+const advDeduct = await page.evaluate(async (o) => {
+  const c = window.contracts.contractById(o.cid);
+  const keep = { pct: c.advance.recoveryPct, rec: c.advance.recovered };
+  // شكلُ عقد البلاغ حرفياً: مقدمةٌ سُدِّدت، وحقلُ الاسترداد صفرٌ، ولم يُستردّ منها شيء
+  c.advance.recoveryPct = 0; c.advance.recovered = 0;
+  const e = window.contracts.extractById(o.eid);
+  const pct = window.contracts._advanceRecoveryPctOf(c);
+  const derived = window.contracts._advanceRecoveryDerived(c);
+  const calc = window.contracts._extCalc(e, c);
+  window.contracts.openCtr(o.cid); window.contracts.ctrTab('overview');
+  await new Promise(r => setTimeout(r, 600));
+  const card = (document.getElementById('page-contracts-list').textContent || '').replace(/\s+/g, ' ');
+  window.contracts.openExtFrom(o.eid, o.cid);
+  await new Promise(r => setTimeout(r, 800));
+  const rows = [...document.querySelectorAll('.ct-ladder .ct-rung')].map(x => x.textContent.replace(/\s+/g, ' ').trim());
+  const row = rows.find(t => t.includes('استرداد الدفعة المقدمة')) || '';
+  // ونسبةٌ مكتوبةٌ صراحةً تسبق المشتقّة — التلقائيُّ للسهو لا ليُلغي شرطاً موقَّعاً
+  c.advance.recoveryPct = 20;
+  const written = window.contracts._advanceRecoveryPctOf(c);
+  c.advance.recoveryPct = keep.pct; c.advance.recovered = keep.rec;
+  return { pct, derived, written, rec: calc.advanceRecovery, row, card,
+           paid: window.contracts._advancePaidOf(c), done: c.advance.recovered };
+}, { cid: conv.cid, eid: ext2.id });
+check('★★★ حقلُ الاسترداد صفرٌ ⇒ النسبةُ النافذةُ نسبةُ المقدمة نفسُها، والخصمُ يقع فعلاً',
+  advDeduct.pct > 0 && advDeduct.derived === true && advDeduct.rec > 0,
+  JSON.stringify({ pct: advDeduct.pct, rec: advDeduct.rec, paid: advDeduct.paid, done: advDeduct.done }));
+check('★★★ وصفُّ الاسترداد **مرسومٌ** في سُلَّم المستخلص: نسبتُه ومبلغُه = المحسوب',
+  advDeduct.row.includes(advDeduct.pct + '٪') &&
+  advDeduct.row.includes(advDeduct.rec.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })),
+  advDeduct.row + ' · محسوب ' + advDeduct.rec);
+check('★★ وبطاقةُ العقد تقول الوتيرةَ ومن أين جاءت — لا رقمَ يظهر بلا مصدر',
+  /يُخصَم/.test(advDeduct.card) && /بنسبة المقدمة نفسِها/.test(advDeduct.card) &&
+  advDeduct.card.includes('تُستردّ ' + advDeduct.pct + '٪ من كل مستخلص (بنسبة المقدمة'));
+check('★★ ونسبةٌ مكتوبةٌ في العقد تسبق المشتقّة', advDeduct.written === 20, String(advDeduct.written));
+await page.screenshot({ path: `${SHOTS}/22c-advance-recovery.png`, fullPage: true });
+await page.evaluate((cid) => { window.contracts.openCtr(cid); window.contracts.ctrTab('extracts'); }, conv.cid);
+await page.waitForTimeout(600);
+
 // الختاميُّ يُنهي العقد فنّياً
 const finalPay = await page.evaluate(async (eid) => {
   await window.contracts._actExt(eid, 'approve', '');
