@@ -573,7 +573,13 @@ function predelivery() {
        «بانتظار إجراءك». ولا وحدةَ تستضيفها: نقلُ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة
        إصلاحه ممنوع (CLAUDE.md) — ووحدةُ `supervisor-receipt.js` تملك المحضرَ نفسَه
        لا حارسَ الصفحات ولا جدولَ الإجراءات. */
-    const IDX_CEILING = 38310;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 38310 إلى 38328 — ‏18 سطراً لبطاقة «بانتظار إجراءك» على اللوحة الرئيسية
+       (طلب المالك 31/08): **مضيفٌ ثانٍ لا منطقٌ ثانٍ** — `<div>` فارغٌ في اللوحة،
+       ووسيطُ `hostId` في `renderPOMyTasks` القائمة، وسطرا استدعاءٍ (رسمُ اللوحة +
+       لقطةُ المشتريات). تعديلٌ على منطقٍ قائمٍ في موضعه؛ ونسخُ البطاقة إلى وحدةٍ
+       يشقّها مصدرَين — وهو ما تتجنّبه البطاقةُ أصلاً (مصدرُها `getAvailableStatuses`
+       نفسُها التي تبني الأزرار). */
+    const IDX_CEILING = 38328;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -7610,10 +7616,14 @@ function hrPaymentNotificationTests(src) {
     /findRequesterAnywhere\(db, after\)/.test(hrpSrc) &&
     /async function findByRoleAnywhere\(db, role, _noFallback\)/.test(recSrc) &&
     /async function findRequesterAnywhere\(db, po\)/.test(recSrc));
-  T("★ ولا تُمسح مستنداتُ المشاريع إلا عند خلوّ المركزيّ، وبسقفٍ صريح",
+  /* والقاعدةُ تُصاغ قاعدةً لا عدداً: **كلُّ** مسحٍ لمستندات المشاريع مسقوفٌ — فدالّةٌ
+     رابعةٌ تُضاف غداً بلا سقفٍ تُسقط الفحص، بدل أن يُحدَّث رقمٌ ثابتٌ يدوياً. */
+  T("★ ولا تُمسح مستنداتُ المشاريع إلا عند خلوّ الأقرب، وكلُّ مسحٍ مسقوف",
     /const central = await findByRole\(db, role, "", true\);\s*\n\s*if \(central\.length\) return central;/.test(recSrc) &&
     /const MAX_PROJECT_DOCS = 25;/.test(recSrc) &&
-    (recSrc.match(/projects\.slice\(0, MAX_PROJECT_DOCS\)/g) || []).length === 2);
+    (recSrc.match(/for \(const p of projects/g) || []).length > 0 &&
+    (recSrc.match(/for \(const p of projects/g) || []).length ===
+      (recSrc.match(/projects\.slice\(0, MAX_PROJECT_DOCS\)/g) || []).length);
   T("★★ ولوحةُ الأدمن داخل المشروع تُزامن الرقمَ مركزياً كشاشة المشتريات",
     /async function adminSaveUserWa[\s\S]{0,1400}?await _upsertUserCentral\(u\)/.test(HTML) &&
     /async function puSaveUserWa[\s\S]{0,1400}?await _upsertUserCentral\(u\)/.test(HTML));
@@ -8657,10 +8667,24 @@ function supervisorReceiptGuards() {
     /المشرف المستلم: <b>\$\{_esc\(p\.receivingSupervisor\)\}<\/b>/.test(src));
   const purSrc = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "functions", "lib", "purchases.js"), "utf8"); } catch (e) { return ""; } })();
   const recSrc = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "functions", "lib", "recipients.js"), "utf8"); } catch (e) { return ""; } })();
-  T("★★ الخادم: المحدَّدُ يقبض وحدَه والفراغُ يرتدّ لبثّ الدور (findNamedRecipient)",
-    /findNamedRecipient\(\s*\n?\s*db, \{ user: after\.receivingSupervisorUser, name: after\.receivingSupervisor \}, projectId\)/.test(purSrc) &&
-    /async function findNamedRecipient\(db, target, projectId\)/.test(recSrc) &&
-    /findNamedRecipient \};$/m.test(recSrc));
+  /* ══ تكليفُ شخصٍ بعينه لا بثٌّ لكلّ المشرفين (قرار المالك 31/08) ══
+     (١) المحدَّدُ يُبحَث عنه **أينما سُجِّل** — لا في مستند مشروع الطلب والمركزيِّ وحدهما،
+         فقائمةُ الاختيار أوسعُ من موضعَي البحث فكان يُختار ولا يُوجَد.
+     (٢) وبلا مشرفٍ محدَّدٍ (أو بلا رقمٍ له) **لا بثَّ للدور** — الدورُ الاحتياطيّ وحدَه،
+         فلا تقف المرحلةُ بلا عالمٍ بها ولا تُغرَق أجهزةُ كلّ المشرفين. */
+  T("★★ الخادم: المحدَّدُ يقبض وحدَه ويُبحَث عنه في أيّ مشروع (findNamedRecipientAnywhere)",
+    /const named = \(target\.user \|\| target\.name\)\s*\n\s*\? await findNamedRecipientAnywhere\(db, target, projectId\)/.test(purSrc) &&
+    /async function findNamedRecipientAnywhere\(db, target, projectId\)/.test(recSrc) &&
+    /findNamedRecipient, findNamedRecipientAnywhere,/.test(recSrc));
+  T("★★ ولا بثَّ لكلّ المشرفين عند غياب المحدَّد — الدورُ الاحتياطيّ وحدَه",
+    /if \(newKey === "sv_receiving"\) \{/.test(purSrc) &&
+    /const fb = cfg\.ROLE_FALLBACK;\s*\n\s*recipients = fb \? await findByRole\(db, fb, projectId, true\) : \[\];/.test(purSrc) &&
+    // ولا يبقى مسارٌ يبثّ للمشرفين في هذه المرحلة: بثُّ الدور بعدها مشروطٌ بـ!recipients
+    /recipientRef = `fallback:\$\{fb \|\| "—"\}`;/.test(purSrc) &&
+    /if \(!recipients\) recipients = await findByRole\(db, route\.role, projectId\);/.test(purSrc));
+  T("★ والمحدَّدُ يُطابَق بالمعرّف أو الاسم من مصدرٍ واحدٍ تقرؤه النسختان",
+    /function _matchesTarget\(x, user, name\)/.test(recSrc) &&
+    (recSrc.match(/_matchesTarget\(x, user, name\)/g) || []).length === 3);
 
   /* ══ «رابطُ واتساب يقول للمشرف: لا صلاحيةَ لك» (بلاغ المالك 31/08) ══
      الرسالةُ تصل، و«فتح الطلب» يقذفه إلى اللوحة برسالة حجبٍ ولا يرى الطلب. جذران:
@@ -8697,6 +8721,19 @@ function supervisorReceiptGuards() {
     /v!=="__WAREHOUSE_AUDIT__"&&v!=="__SUPERVISOR_RECEIPT__"&&/.test(HTML));
   T("★ بطاقةُ «بانتظار إجراءك» تسمّي دورَ المشرف بصيغتيه",
     /supervisor:"المشرف الميداني", "مشرف":"المشرف الميداني"/.test(HTML));
+  /* ولمّا كانت البطاقةُ تعيش في صفحة المشتريات وحدَها، بقي المحجوبُ عنه لا يعرف
+     بمهمّته إلا برسالة واتساب. **مضيفٌ ثانٍ لا منطقٌ ثانٍ** على اللوحة الرئيسية. */
+  T("★★ «بانتظار إجراءك» لها مضيفٌ على اللوحة يُرسَم مع اللوحة ومع كل لقطة",
+    /<div id="po-my-tasks-card-dash"/.test(HTML) &&
+    /renderPOMyTasks\(_poVisibleList\(\), "po-my-tasks-card-dash"\)/.test(HTML) &&
+    (HTML.match(/renderPOMyTasks\(_poVisibleList\(\), "po-my-tasks-card-dash"\)/g) || []).length === 2);
+  T("★ ومضيفان لا منطقان — `renderPOMyTasks` واحدةٌ تكتب في المطلوب بمعرّفه",
+    /function renderPOMyTasks\(dashData, hostId\)\{/.test(HTML) &&
+    /const onDash = hostId === "po-my-tasks-card-dash";/.test(HTML) &&
+    (HTML.match(/function renderPOMyTasks\(/g) || []).length === 1);
+  T("★ ولا رأسُ مرحلةٍ على اللوحة يُصفّي قائمةً قد تكون محجوبة",
+    /\$\{onDash\?"":`onclick="_poStageFilter\('\$\{g\.key\}','\)"`\}/.test(HTML) ||
+    /onDash\?"":`onclick="_poStageFilter/.test(HTML));
 }
 
 function pcNameOverrideGuards() {

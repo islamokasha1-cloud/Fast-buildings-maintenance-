@@ -163,11 +163,20 @@ async function findRequesterAnywhere(db, po) {
   return null;
 }
 
+/* مطابقةُ المستخدم بالمعرّف أو الاسم — **مصدرٌ واحد** تقرؤه النسختان (القريبةُ
+   والشاملة)، فلا تفترق إحداهما عن الأخرى في من تعدّه «هو». */
+function _matchesTarget(x, user, name) {
+  if (!x) return false;
+  if (user && (String(x.user) === user || String(x.name) === user)) return true;
+  if (name && (String(x.user) === name || String(x.name) === name)) return true;
+  return false;
+}
+
 /**
  * مستلمٌ واحدٌ محدَّدٌ بالمعرّف أو الاسم — «المشرف المستلم» المختار على طلب الشراء.
  * يُبحث في مستند مشروع الطلب ثم المركزي (مصدرا التوجيه نفساهما)، والمطابقة على
  * `user` أولاً ثم `name` (الطلبات الأقدم قد تحمل الاسم وحده). يُرجع مصفوفةً
- * بعنصرٍ واحدٍ أو فارغةً — والمستدعي يرتدّ لبثّ الدور عند الفراغ فلا يضيع الإشعار.
+ * بعنصرٍ واحدٍ أو فارغة.
  */
 async function findNamedRecipient(db, target, projectId) {
   const user = String((target && target.user) || "").trim();
@@ -177,15 +186,51 @@ async function findNamedRecipient(db, target, projectId) {
   if (projectId) docs.unshift(`meta/${projectId}_users`);
   for (const path of docs) {
     const users = await _readUsersDoc(db, path);
-    const u = users.find((x) => {
-      if (!x) return false;
-      if (user && (String(x.user) === user || String(x.name) === user)) return true;
-      if (name && (String(x.user) === name || String(x.name) === name)) return true;
-      return false;
-    });
+    const u = users.find((x) => _matchesTarget(x, user, name));
     if (u && u.phone && u.waOptIn === true) return [{ name: u.name || u.user || "", phone: u.phone }];
   }
   return [];
 }
 
-module.exports = { findByRole, findRequester, findByRoleAnywhere, findRequesterAnywhere, findNamedRecipient };
+/**
+ * نظيرُ `findNamedRecipient` **أينما سُجِّل الرقم** — كـ`findByRoleAnywhere` تماماً.
+ *
+ * الجذر (بلاغ المالك 31/08): «الرسالة تصل المشرف المحدَّد في الطلب أيّاً كان مسجَّلاً
+ * على أيّ مشروع». المشرفُ يُختار من قائمةٍ تجمع مستخدمي المشروع الحالي **والمركزي**،
+ * لكنّ البحثَ عنه وقتَ الإرسال كان في هذين الموضعين وحدَهما — فمشرفٌ رقمُه مسجَّلٌ في
+ * مستند مشروعٍ آخر (لوحةُ الأدمن داخل المشروع تكتب هناك وحدَه) **يُختار ولا يُوجَد**.
+ * وهو الفرقُ الذي عالجته `findByRoleAnywhere` للأدوار، ولم يُعالَج للمحدَّد بالاسم.
+ *
+ * الترتيبُ نفسُه: القريبُ أوّلاً (مستندُ مشروع الطلب ثم المركزي — الحالةُ الغالبة
+ * بقراءتين)، ولا تُمسح مستنداتُ بقيّة المشاريع إلا إن **لم يوجد**، وبالسقف الصريح
+ * نفسِه (`MAX_PROJECT_DOCS`) فلا تتحوّل إلى قراءةٍ مفتوحةٍ مع نموّ المشاريع.
+ */
+async function findNamedRecipientAnywhere(db, target, projectId) {
+  const near = await findNamedRecipient(db, target, projectId);
+  if (near.length) return near;
+
+  const user = String((target && target.user) || "").trim();
+  const name = String((target && target.name) || "").trim();
+  if (!user && !name) return [];
+
+  let projects = [];
+  try {
+    const snap = await db.doc("meta/projects").get();
+    if (snap.exists && Array.isArray(snap.data().projects)) projects = snap.data().projects;
+  } catch (_) {
+    return []; // تعذّرت قراءة المشاريع ⇒ ما فُحص هو كلُّ ما لدينا
+  }
+  for (const p of projects.slice(0, MAX_PROJECT_DOCS)) {
+    const pid = p && (p.id || p.projectId);
+    if (!pid || String(pid) === String(projectId || "")) continue; // فُحص للتوّ
+    const users = await _readUsersDoc(db, `meta/${pid}_users`);
+    const u = users.find((x) => _matchesTarget(x, user, name));
+    if (u && u.phone && u.waOptIn === true) return [{ name: u.name || u.user || "", phone: u.phone }];
+  }
+  return [];
+}
+
+module.exports = {
+  findByRole, findRequester, findByRoleAnywhere, findRequesterAnywhere,
+  findNamedRecipient, findNamedRecipientAnywhere,
+};

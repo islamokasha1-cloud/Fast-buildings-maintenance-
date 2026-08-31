@@ -240,14 +240,21 @@ head("٥) البتُّ في البند الإضافي — مرحلتان بحا�
   check("★★ ولا رسالةَ اعتمادٍ على الإقفال (لا معتمِدَ بعد البتّ)",
     sent.every((s) => s.event.type !== "po_approval_needed"));
 
-  // (هـ) استلامُ المشرف الميداني (sv_receiving) — الدورُ بمفتاحه العربي «مشرف»
+  /* ══ (هـ) استلامُ المشرف الميداني (sv_receiving) — تكليفُ شخصٍ لا بثُّ دور ══
+     قرارُ المالك 31/08: «تصل الرسالةُ للمشرف المحدَّد في الطلب أيّاً كان مسجَّلاً على
+     أيّ مشروع، وإذا لم يُسجَّل مشرفٌ في الطلب لا تُرسَل رسائلُ للجميع». فالبثُّ للدور
+     سقط من هذه المرحلة وحدَها، وبديلُه الدورُ الاحتياطيّ (رسالةٌ واحدةٌ للأدمن) كي لا
+     تقف المرحلةُ بلا عالمٍ بها. */
   sent = [];
   await fresh().pur.routePurchase(
     po({ status: "proc_executing" }),
     po({ status: "sv_receiving" }),
     deps(fakeDb(USERS, sent)));
-  check("★★ «تم الشراء» ⇒ رسالةُ استلامٍ ميدانيٍّ للمشرف (دورُه العربي «مشرف» يصل)",
-    sent.length === 1 && sent[0].recipientRef === "role:مشرف" && sent[0].to === "966500000005",
+  check("★★ بلا مشرفٍ محدَّدٍ على الطلب: لا رسالةَ لأيّ مشرف (لا بثَّ للجميع)",
+    sent.every((s) => s.to !== "966500000005"),
+    JSON.stringify(sent.map((s) => s.recipientRef + "/" + s.to)));
+  check("★★ بل رسالةٌ واحدةٌ للدور الاحتياطيّ — فلا تقف المرحلةُ بلا عالمٍ بها",
+    sent.length === 1 && sent[0].recipientRef === "fallback:admin" && sent[0].to === "966500000001",
     JSON.stringify(sent.map((s) => s.recipientRef + "/" + s.to)));
   check("★ ونصُّ الإجراء يسمّي الاستلامَ الميداني",
     /استلامك الميداني/.test(sent[0].params[0]), sent[0].params[0]);
@@ -258,11 +265,11 @@ head("٥) البتُّ في البند الإضافي — مرحلتان بحا�
     po({ status: "sv_receiving" }),
     po({ status: "wh_receiving" }),
     deps(fakeDb(USERS, sent)));
-  check("★★ التحويلُ للمستودع بعد المشرف يُرسِل للمستودع كما كان",
+  check("★★ التحويلُ للمستودع بعد المشرف يُرسِل للمستودع كما كان (بثُّ الدور باقٍ خارج مرحلة المشرف)",
     sent.length === 1 && sent[0].recipientRef === "role:warehouse_manager",
     JSON.stringify(sent.map((s) => s.recipientRef)));
 
-  // (ز) الدورُ بصيغته اللاتينية supervisor (يُسجَّل بصيغتين — v18.9wj) يصل أيضاً
+  // (ز) المحدَّدُ يُطابَق بمعرّفه/اسمه لا بدوره — فمشرفٌ بالدور اللاتيني supervisor يصل
   const USERS_LATIN = { "meta/users": { users: [
     { user: "admin", name: "الأدمن", role: "admin", phone: "966500000001", waOptIn: true },
     { user: "sup2", name: "مشرف لاتيني", role: "supervisor", phone: "966500000006", waOptIn: true },
@@ -270,9 +277,9 @@ head("٥) البتُّ في البند الإضافي — مرحلتان بحا�
   sent = [];
   await fresh().pur.routePurchase(
     po({ status: "proc_executing" }),
-    po({ status: "sv_receiving" }),
+    po({ status: "sv_receiving", receivingSupervisorUser: "sup2", receivingSupervisor: "مشرف لاتيني" }),
     deps(fakeDb(USERS_LATIN, sent)));
-  check("★★ مشرفٌ مسجَّلٌ بدور supervisor اللاتيني يصل أيضاً (لا يسقط نصفُ المشرفين)",
+  check("★★ مشرفٌ مسجَّلٌ بدور supervisor اللاتيني يصله تحديدُه (المطابقةُ بالهوية لا بالدور)",
     sent.length === 1 && sent[0].to === "966500000006",
     JSON.stringify(sent.map((s) => s.to)));
 
@@ -300,15 +307,36 @@ head("٥) البتُّ في البند الإضافي — مرحلتان بحا�
   check("★ والتحديدُ بالاسم وحده يصل صاحبَه", sent.length === 1 && sent[0].to === "966500000007",
     JSON.stringify(sent.map((s) => s.to)));
 
-  // (ي) محدَّدٌ غيرُ مسجَّلٍ أو بلا رقمٍ مفعَّل ⇒ ارتدادٌ لبثّ الدور — لا إشعارَ يضيع
+  /* (ي) **المحدَّدُ مسجَّلٌ على مشروعٍ آخر** — طلبُ المالك 31/08 الصريح.
+     قائمةُ الاختيار في الواجهة تجمع مستخدمي المشروع والمركزيَّ، ولوحةُ الأدمن داخل
+     المشروع تكتب الرقمَ في مستند مشروعها وحدَه — فمشرفٌ كان **يُختار ولا يُوجَد**. */
+  const USERS_OTHER_PROJ = {
+    "meta/users": { users: [
+      { user: "admin", name: "الأدمن", role: "admin", phone: "966500000001", waOptIn: true },
+    ] },
+    "meta/projects": { projects: [{ id: "hail" }, { id: "riyadh" }] },
+    "meta/riyadh_users": { users: [
+      { user: "sup9", name: "مشرف الرياض", role: "مشرف", phone: "966500000009", waOptIn: true },
+    ] },
+  };
+  sent = [];
+  await fresh().pur.routePurchase(
+    po({ status: "proc_executing" }),
+    po({ status: "sv_receiving", receivingSupervisorUser: "sup9", receivingSupervisor: "مشرف الرياض" }),
+    deps(fakeDb(USERS_OTHER_PROJ, sent)));
+  check("★★ المشرفُ المحدَّدُ المسجَّلُ على مشروعٍ آخر تصله الرسالة (لا يُختار ولا يُوجَد)",
+    sent.length === 1 && sent[0].to === "966500000009" && sent[0].recipientRef === "named:sup9",
+    JSON.stringify(sent.map((s) => s.recipientRef + "/" + s.to)));
+
+  // (ك) محدَّدٌ غيرُ مسجَّلٍ أو بلا رقمٍ مفعَّل ⇒ الاحتياطيُّ وحدَه — ولا بثَّ للمشرفين
   sent = [];
   await fresh().pur.routePurchase(
     po({ status: "proc_executing" }),
     po({ status: "sv_receiving", receivingSupervisorUser: "ghost" }),
     deps(fakeDb(USERS_TWO, sent)));
-  check("★★ محدَّدٌ بلا رقمٍ مفعَّل ⇒ بثٌّ لكل المشرفين (الارتدادُ يحفظ الإشعار)",
-    sent.length === 2 && sent.every((s) => s.recipientRef === "role:مشرف"),
-    JSON.stringify(sent.map((s) => s.to)));
+  check("★★ محدَّدٌ بلا رقمٍ مفعَّل ⇒ لا بثَّ للمشرفين، والاحتياطيُّ وحدَه يُنبَّه",
+    sent.length === 1 && sent[0].recipientRef === "fallback:admin" && sent[0].to === "966500000001",
+    JSON.stringify(sent.map((s) => s.recipientRef + "/" + s.to)));
 }
 
 console.log(out.join("\n"));
