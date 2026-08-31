@@ -1255,6 +1255,7 @@ const s17 = await page17.evaluate(async ()=>{
   const out={}; const toasts=[]; window.toast=(m)=>toasts.push(String(m));
   const PC=PURCHASES_COLLECTION();
   const mkPO=(id)=>({ id, building:'مبنى الأمانة', projectId:'hail', status:'sv_receiving',
+    vendor:'مورد الطلب المقترح',
     supervisor:'محمد داوود', receivingSupervisor:'أسامة السادات', receivingSupervisorUser:'osama',
     items:[{ itemName:'كابل', qty:4, unit:'متر', unitCost:5, itemCost:20 }],
     timeline:[], createdAt:'2026-08-30T08:00:00' });
@@ -1327,6 +1328,20 @@ const s17 = await page17.evaluate(async ()=>{
   // الورقةُ الرسمية تُقرأ من contracts المعروضة — مصدرٌ واحدٌ لهيئة أوراق الشركة
   out.docLetterhead = paper.indexOf('letterhead-header')>=0 || paper.indexOf('class="company"')>=0;
   out.docLhOn = paper.indexOf('class="lh lh-h"')>=0;   // هل انعقدت الورقةُ الرسمية فعلاً؟
+
+  /* (و) المورد الفعلي يكتبه المستلم — والاختلافُ عن مورد الطلب يُبرَز */
+  supervisorReceipt.open('PO-DL-2');
+  const vIn = document.getElementById('sv-vendor');
+  out.vendorFieldShown = !!vIn && vIn.value==='';        // حاضرٌ وفارغٌ لا معبَّأٌ سلفاً
+  if(vIn){ supervisorReceipt._sameVendor(); out.sameVendorFills = vIn.value.length>0; }
+  supervisorReceipt.close();
+  const poV={ id:'PO-V', vendor:'مورد الطلب', items:[{itemName:'ج',unit:'قطعة',qty:2}],
+    status:'wh_receiving',
+    svReceipts:[{ref:'SVR-01',by:'أ',at:'2026-08-31T10:00:00Z',vendor:'مورد آخر',photos:[],items:[{idx:0,qty:2}]}] };
+  out.vendorChipDiff = supervisorReceipt.sectionHtml(poV).indexOf('≠ مورد الطلب')>=0;
+  const pv = supervisorReceipt.paperHTML(poV,'SVR-01');
+  out.paperTwoVendors = pv.indexOf('المورد في الطلب')>=0 && pv.indexOf('المورد الفعلي')>=0
+                        && pv.indexOf('يخالف مورد الطلب')>=0;
   return out;
 });
 await page17.close();
@@ -1348,6 +1363,10 @@ check('17هـ) ★★ زرُّ «طباعة المحضر» على البطاقة
 check('17هـ) ★★ والورقةُ تُبنى وثيقةً مستقلّةً بعنوانها ورقمها', s17.docHasPaper===true);
 check('17هـ) ★★ وفيها خاناتُ التوقيع الثلاث', s17.docHasSigns===true);
 check('17هـ) ★★ وتحمل الورقةَ الرسميةَ للشركة (ترويسة/تذييل/علامة مائية من contracts)', s17.docLhOn===true, 'ورقةٌ رسمية='+s17.docLhOn+' هيئةٌ ما='+s17.docLetterhead);
+check('17و) ★★ حقلُ «المورد الفعلي» حاضرٌ في نافذة الاستلام وفارغٌ لا معبَّأٌ سلفاً', s17.vendorFieldShown===true);
+check('17و) ★ وزرُّ «هو نفسه ✓» يملؤه بفعلٍ صريح', s17.sameVendorFills===true);
+check('17و) ★★ واختلافُه عن مورد الطلب يُبرَز على البطاقة', s17.vendorChipDiff===true);
+check('17و) ★★ والورقةُ تفصل الموردَين وتُعلن المخالفة', s17.paperTwoVendors===true);
 
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));

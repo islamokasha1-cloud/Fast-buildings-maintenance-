@@ -8634,8 +8634,12 @@ function supervisorReceiptGuards() {
     /supervisorReceipt\.sectionHtml\(p\)/.test(HTML) &&
     /supervisorReceipt\.auditHtml\(p\)/.test(HTML) &&
     /supervisorReceipt\.printHtml\(p\)/.test(HTML));
+  /* الصورُ (ومعها اسمُ المورد الفعلي) اختياريةٌ **بتنبيهٍ صريحٍ لا منع** — قرارُ
+     المالك. والتنبيهُ واحدٌ يجمع النواقص: نافذتان متتاليتان تُنقَران نقراً. */
   T("★ الصور اختياريةٌ مع تنبيهٍ صريح لا منع (قرار المالك)",
-    /استلام بلا صور/.test(src) && /حفظ بلا صور/.test(src));
+    /if\(!_files\.length\) miss\.push\("صورٌ للمستلَم"\);/.test(src) &&
+    /محضرٌ ناقصُ التوثيق/.test(src) && /حفظ رغم النقص/.test(src) &&
+    !/return;\s*\}\s*\/\/ منعُ الحفظ/.test(src));
   T("★ لا استلامَ فوق المتبقي ولا حفظَ على حالةٍ متغيّرة (قراءة طازجة قبل الكتابة)",
     /Math\.min\(t\.qty,row\.rem\)/.test(src) && /_poFreshStatus/.test(src));
   T("★★ الكتابة على النسخة الحيّة بعد كل await (مستمعُ اللقطات قد يستبدل الكائن)",
@@ -8730,7 +8734,7 @@ function supervisorReceiptGuards() {
     typeof S._cumUpTo === "function");
   T("★ وزرُّ الطباعة على بطاقة المحضر — في التفاصيل ونافذة التدقيق معاً",
     /supervisorReceipt\.printReceipt\('\$\{_esc\(poId\)\}','\$\{_esc\(r\.ref\|\|""\)\}'\)/.test(src) &&
-    /_recHtml\(r,false,p\.id\)/.test(src) && /_recHtml\(r,true,p&&p\.id\)/.test(src));
+    /_recHtml\(r,false,p\.id,p\.vendor\)/.test(src) && /_recHtml\(r,true,p&&p\.id,p&&p\.vendor\)/.test(src));
 
   /* **أهمُّ حارسٍ فيها:** الورقةُ لقطةُ لحظتها. لو حُسب التراكميُّ والمتبقّي من
      حالة الطلب الحاضرة لتبدّلت أرقامُ ورقةٍ وُقّعت أمسِ بمجرّد تسجيل محضرٍ ثانٍ —
@@ -8762,6 +8766,41 @@ function supervisorReceiptGuards() {
     /لم تُرفَق صورٌ/.test(paper2) && !/لم تُرفَق صورٌ/.test(paper1));
   T("★ ومحضرٌ لا وجودَ له يُعيد فراغاً — لا ورقةَ بلا مصدر",
     S.paperHTML(poDoc, "SVR-99") === "" && S.paperHTML(null, "SVR-01") === "");
+
+  /* ══ المورد الفعلي — يكتبه المستلم (طلب المالك 31/08) ══
+     ورقةُ الطلب تحمل المورد **المقترح**، وقد يسلّم غيرُه. وورقةٌ تُوقَّع تنسب
+     التوريدَ لمن لم يورّد أسوأُ من ورقةٍ لا تذكره: الفاتورةُ والسعرُ والضمانُ
+     كلُّها تتبع مَن ورّد فعلاً. */
+  T("★ حقلُ المورد الفعلي في نافذة الاستلام — ولا يُملأ سلفاً بمورد الطلب",
+    /id="sv-vendor"/.test(src) && /supervisorReceipt\._sameVendor\(\)/.test(src) &&
+    !/id="sv-vendor"[^>]*value="/.test(src));
+  T("★★ ويُخزَّن في المحضر ويدخل سطرَ السجل",
+    /by:_me\(\), at:now, notes, vendor, photos, items:taken/.test(src) &&
+    /vendor\?\("المورد الفعلي: "\+vendor\):"⚠ بلا اسم مورد"/.test(src));
+  T("★ والنقصُ تنبيهٌ واحدٌ يجمع الصورَ والمورد — لا نافذتان تُنقَران نقراً",
+    /const miss=\[\];/.test(src) && /miss\.push\("اسمُ المورد الفعلي"\)/.test(src) &&
+    (src.match(/await showConfirm\(\{ title:"محضرٌ ناقصُ التوثيق"/g) || []).length === 1);
+
+  T("★★ الاختلافُ عن مورد الطلب هو الخبر — ويُقارَن بلا تخمينٍ ولا تطبيع",
+    S._vendorMismatch({ vendor: "أ" }, "ب") === true &&
+    S._vendorMismatch({ vendor: "أ" }, "أ") === false &&
+    S._vendorMismatch({ vendor: " أ " }, "أ") === false &&   // الفراغاتُ وحدَها تُتساهَل
+    S._vendorMismatch({}, "أ") === false && S._vendorMismatch({ vendor: "أ" }, "") === false);
+
+  const poV = { id: "P", vendor: "مورد الطلب",
+    items: [{ itemName: "ج", unit: "قطعة", qty: 2 }],
+    svReceipts: [
+      { ref: "SVR-01", by: "أ", at: "2026-08-31T10:00:00Z", vendor: "مورد آخر", photos: [], items: [{ idx: 0, qty: 2 }] },
+      { ref: "SVR-02", by: "أ", at: "2026-09-01T10:00:00Z", photos: [], items: [] },
+    ] };
+  const pv1 = S.paperHTML(poV, "SVR-01"), pv2 = S.paperHTML(poV, "SVR-02");
+  T("★★ الورقةُ تفصل «المورد في الطلب» عن «المورد الفعلي» وتُعلن مخالفتَه",
+    /المورد في الطلب/.test(pv1) && /المورد الفعلي \(أثبته المستلم\)/.test(pv1) &&
+    /يخالف مورد الطلب/.test(pv1));
+  T("★ وغيابُ الاسم يُعلَن في الورقة لا يُملأ بمورد الطلب صامتاً",
+    /لم يُثبته المستلم/.test(pv2) && !/يخالف مورد الطلب/.test(pv2));
+  T("★ وفقرةُ المحضر في ورقة طلب الشراء تحمله كذلك",
+    /المورد الفعلي: مورد آخر \(يخالف مورد الطلب\)/.test(S.printHtml(poV)));
   /* ولمّا كانت البطاقةُ تعيش في صفحة المشتريات وحدَها، بقي المحجوبُ عنه لا يعرف
      بمهمّته إلا برسالة واتساب. **مضيفٌ ثانٍ لا منطقٌ ثانٍ** على اللوحة الرئيسية. */
   T("★★ «بانتظار إجراءك» لها مضيفٌ على اللوحة يُرسَم مع اللوحة ومع كل لقطة",
