@@ -6,7 +6,7 @@
  */
 const cfg = require("./config");
 const { enqueue } = require("./outbox");
-const { findByRole, findRequester, findNamedRecipient } = require("./recipients");
+const { findByRole, findRequester, findNamedRecipientAnywhere } = require("./recipients");
 
 /** اسم المشروع من مستند الطلب (مع بدائل). */
 function projectName(po) {
@@ -70,19 +70,37 @@ async function routePurchase(before, after, { db, logger, isEnabled }) {
   // غيرُ معروفةٍ تصل مدير المشاريع بدل أن تسقط بصمت.
   const route = cfg.PO_ROUTING[newKey] || cfg.PO_ROUTING[newStatus];
   if (route) {
-    /* المشرفُ المستلمُ المحدَّد على الطلب (receivingSupervisor/-User — يختاره
-       مُنشئ الطلب) يقبض رسالةَ الاستلام الميداني **وحدَه** بدل بثّ كل المشرفين؛
-       فإن لم يوجد له رقمٌ مفعَّلٌ ارتددنا للبثّ بالدور فلا يضيع الإشعار. */
+    /* ══ الاستلامُ الميدانيُّ تكليفٌ لشخصٍ بعينه — لا بثٌّ لكلّ المشرفين ══
+       قرارُ المالك 31/08، شطران:
+       (١) «تصل الرسالةُ المشرفَ المحدَّد في الطلب **أيّاً كان مسجَّلاً على أيّ مشروع**»
+           — فالبحثُ صار `findNamedRecipientAnywhere`: مستندُ مشروع الطلب ثمّ المركزي
+           (الحالةُ الغالبة بقراءتين)، ثمّ بقيّةُ مستندات المشاريع عند الفراغ. وقائمةُ
+           الاختيار في الواجهة تجمع المشروعَ والمركزيَّ معاً، فمشرفٌ **يُختار ولا
+           يُوجَد** أسوأُ من ألّا يُعرض أصلاً.
+       (٢) «وإذا لم يُسجَّل مشرفٌ في طلب الشراء لا تُرسَل رسائلُ للجميع» — فبثُّ الدور
+           سقط من هذه المرحلة وحدَها. وبديلُه ليس الصمت: **الدورُ الاحتياطيّ** (الأدمن)
+           يقبض رسالةً واحدةً كي لا تقف المرحلةُ بلا عالمٍ بها — وهو نفسُ مبدأ
+           `ROLE_FALLBACK` الموثَّق في config: الإشعارُ الضائعُ بصمتٍ أسوأُ عيبٍ ممكن،
+           ورسالةٌ واحدةٌ لمن يملك كلَّ بوّابةٍ ليست «رسائلَ للجميع».
+       وبقيةُ المراحل على بثِّ الدور كما كانت — لا مستلمَ **مسمّى** فيها أصلاً. */
     let recipients = null;
     let recipientRef = `role:${route.role}`;
-    if (newKey === "sv_receiving" && (after.receivingSupervisorUser || after.receivingSupervisor)) {
-      const named = await findNamedRecipient(
-        db, { user: after.receivingSupervisorUser, name: after.receivingSupervisor }, projectId);
+    if (newKey === "sv_receiving") {
+      const target = { user: after.receivingSupervisorUser, name: after.receivingSupervisor };
+      const named = (target.user || target.name)
+        ? await findNamedRecipientAnywhere(db, target, projectId)
+        : [];
       if (named.length) {
         recipients = named;
-        recipientRef = `named:${after.receivingSupervisorUser || after.receivingSupervisor}`;
+        recipientRef = `named:${target.user || target.name}`;
       } else {
-        logger.info(`wa(po): المشرف المستلم المحدَّد بلا رقمٍ مفعَّل (${poId}) — بثٌّ للدور`);
+        const why = (target.user || target.name)
+          ? `المشرف المستلم «${target.user || target.name}» بلا رقمٍ مفعَّلٍ في أيّ مشروع`
+          : "لا مشرفَ مستلماً محدَّداً على الطلب";
+        const fb = cfg.ROLE_FALLBACK;
+        recipients = fb ? await findByRole(db, fb, projectId, true) : [];
+        recipientRef = `fallback:${fb || "—"}`;
+        logger.info(`wa(po): ${why} (${poId}) — لا بثَّ للمشرفين؛ ${recipients.length ? "الدورُ الاحتياطيّ " + fb : "ولا مستلمَ احتياطيّ"}`);
       }
     }
     if (!recipients) recipients = await findByRole(db, route.role, projectId);

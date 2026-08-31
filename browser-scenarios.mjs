@@ -1290,6 +1290,26 @@ const s17 = await page17.evaluate(async ()=>{
   out.needsMyAction = poNeedsMyAction(purchases[0]);
   currentUser={ name:'المالية', role:'finance' };
   out.financeActions = getAvailableStatuses('sv_receiving', purchases[0]).map(o=>o.v);
+
+  /* (د) وبطاقةُ «بانتظار إجراءك» على **اللوحة الرئيسية** — المحجوبةُ عنه صفحةُ
+     المشتريات كان لا يعرف بمهمّته إلا برسالة واتساب (طلب المالك 31/08). */
+  currentUser={ name:'أسامة السادات', user:'osama', role:'مشرف', permissions:{ purchases:false } };
+  renderPOMyTasks(_poVisibleList(), "po-my-tasks-card-dash");
+  const dashHost=document.getElementById('po-my-tasks-card-dash');
+  out.dashShown   = !!dashHost && dashHost.style.display!=='none' && dashHost.innerHTML.length>0;
+  out.dashHasPO   = !!dashHost && dashHost.innerHTML.indexOf('PO-DL-2')>=0;
+  out.dashOpensPO = !!dashHost && dashHost.innerHTML.indexOf("openPurchaseDetail('PO-DL-2')")>=0;
+  out.dashNoFilter= !!dashHost && dashHost.innerHTML.indexOf('_poStageFilter')<0;   // لا تصفيةَ لقائمةٍ محجوبة
+  // ولا تظهر لمن لا مهمّةَ له
+  currentUser={ name:'المالية', role:'finance' };
+  renderPOMyTasks(_poVisibleList(), "po-my-tasks-card-dash");
+  out.dashHiddenForOthers = document.getElementById('po-my-tasks-card-dash').style.display==='none';
+  // وبطاقةُ صفحة المشتريات لم تُمسّ (مضيفان لا منطقان)
+  currentUser={ name:'أسامة السادات', user:'osama', role:'مشرف', permissions:{ purchases:false } };
+  renderPOMyTasks(_poVisibleList());
+  const pageHost=document.getElementById('po-my-tasks-card');
+  out.pageStillWorks = !!pageHost && pageHost.innerHTML.indexOf('PO-DL-2')>=0
+                       && pageHost.innerHTML.indexOf('_poStageFilter')>=0;
   return out;
 });
 await page17.close();
@@ -1302,6 +1322,11 @@ check('17ب) ★ ومن لم تُحجب عنه الصفحةُ يُنقل إلى 
 check('17ج) ★★ `getAvailableStatuses` تعطي المشرفَ إجراءً في مرحلته', (s17.svActions||[]).includes('__SUPERVISOR_RECEIPT__'), JSON.stringify(s17.svActions));
 check('17ج) ★★ فتَعُدّه بطاقةُ «بانتظار إجراءك» (poNeedsMyAction)', s17.needsMyAction===true);
 check('17ج) ★ ولا يُمنح لدورٍ لا يستلم ميدانياً', !(s17.financeActions||[]).includes('__SUPERVISOR_RECEIPT__'), JSON.stringify(s17.financeActions));
+check('17د) ★★ وبطاقةُ «بانتظار إجراءك» تظهر له على اللوحة الرئيسية', s17.dashShown===true && s17.dashHasPO===true, 'ظهرت='+s17.dashShown+' فيها الطلب='+s17.dashHasPO);
+check('17د) ★ وصفُّ الطلب يفتح تفاصيلَه من مكانه', s17.dashOpensPO===true);
+check('17د) ★ ولا رأسَ مرحلةٍ يُصفّي قائمةً محجوبةً عنه', s17.dashNoFilter===true);
+check('17د) ★ ولا تظهر لمن لا مهمّةَ له', s17.dashHiddenForOthers===true);
+check('17د) ★★ وبطاقةُ صفحة المشتريات كما كانت — مضيفان لا منطقان', s17.pageStillWorks===true);
 
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
