@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2965";
+var MODULE_BUILD = "v18.9.2967";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1118,8 +1118,9 @@ function financialClauses(contract){
 
   if(Number(adv.pct)>0){
     out.push({ key:"_fin_adv", category:"general", title:"الدفعة المقدمة",
+      /* الاستردادُ **يُنصّ عليه دائماً** — لا شرطَ يمنح سلفةً ويسكت عن ردّها. */
       body:"يُصرف للطرف الثاني دفعة مقدمة قدرها "+adv.pct+"٪ من قيمة العقد ("+money(advanceAmountOf(c))+" ريال)"+
-           (Number(adv.recoveryPct)>0 ? "، تُستردّ بخصم "+adv.recoveryPct+"٪ من قيمة أعمال كل مستخلص حتى استيفائها كاملة" : "")+"." });
+           (advanceRecoveryPctOf(c)>0 ? "، تُستردّ بخصم "+advanceRecoveryPctOf(c)+"٪ من قيمة أعمال كل مستخلص حتى استيفائها كاملة" : "")+"." });
   }
   if(Number(ret.pct)>0){
     out.push({ key:"_fin_ret", category:"quality", title:"محتجز الضمان",
@@ -1226,6 +1227,40 @@ function advanceAmountOf(contract){
   var c = contract || {}, pct = Number((c.advance||{}).pct);
   if(!isFinite(pct) || pct <= 0) return 0;
   return r2(contractValue(c) * pct / 100);
+}
+
+/* ════ نسبةُ استردادِ المقدمة **النافذة** ════   (بلاغُ المالك 31/08)
+   «المفروض الدفعة المقدمة المسدَّدة تُخصم من المستخلصات».
+   **الجذر.** كان الاستردادُ معلَّقاً على حقلٍ مُدخَلٍ وحدَه (`advance.recoveryPct`)،
+   وصفرُه يعني **لا استرداد أبداً** — فعقدٌ بدفعةٍ مقدمةٍ ٥٠٪ وحقلِ استردادٍ صفرٍ
+   يصرف نصفَ قيمته سلفةً ثم لا يستردّ منها ريالاً: المقدمةُ هبةٌ لا سلفة. وليس في
+   المنصّة بابٌ آخرُ يستردّها، فالصفرُ **سهوٌ لا سياسة**.
+   **القاعدة.** المقدمةُ سلفةٌ على العمل، فتُستردّ بوتيرة العمل: نسبةُ المقدمة من
+   **قاعدة الأعمال بلا ضريبة** هي نسبةُ الخصم من كل مستخلص — فتنطفئ المقدمةُ تماماً
+   عند اكتمال العمل ١٠٠٪، لا قبلَه فيُثقَل المقاول، ولا بعدَه فيبقى دَينٌ بلا عملٍ
+   يُخصَم منه. والمقامُ **بلا ضريبة** لأن أعمالَ المستخلص تُقاس بلا ضريبةٍ أصلاً
+   (`vatSplit(...).base`): مقامٌ شاملُ الضريبةِ يترك جزءاً من المقدمة أبداً بلا استرداد.
+   **والمكتوبُ يسبق المشتقّ.** نسبةٌ صريحةٌ في العقد (> 0) هي النافذة — التلقائيُّ
+   للسهو لا ليُلغي شرطاً وُقِّع عليه. */
+function contractWorkBase(contract){
+  return r2(vatSplit(contractValue(contract), (contract||{}).vatMode).base);
+}
+function advanceRecoveryPctOf(contract){
+  var c = contract || {}, a = c.advance || {};
+  var p = Number(a.recoveryPct);
+  if(isFinite(p) && p > 0) return p;                 // المكتوبُ في العقد يسبق
+  var amt = Number(a.amount);
+  if(!isFinite(amt) || amt <= 0) amt = advanceAmountOf(c);   // مسوّدةٌ لم يُختم مبلغُها بعد
+  if(!(amt > 0)) return 0;                           // لا مقدمةَ ⇒ لا استرداد
+  var base = contractWorkBase(c);
+  if(!(base > 0)) return 0;
+  return r2(Math.min(100, amt / base * 100));
+}
+/* هل جاءت النسبةُ من الاشتقاق لا من حقلِ العقد؟ الشاشةُ تقولها صراحةً — رقمٌ
+   ظهر بلا أن يكتبه أحدٌ يجب أن يُعرَف من أين جاء. */
+function advanceRecoveryDerived(contract){
+  var p = Number(((contract||{}).advance||{}).recoveryPct);
+  return !(isFinite(p) && p > 0) && advanceRecoveryPctOf(contract) > 0;
 }
 
 /* ════ سدادُ الدفعة المقدمة — الدوالُّ النقية ════   (طلبُ المالك)
@@ -1583,7 +1618,9 @@ function extNet(ext, contract, ctx){
   //       يُستردّ منها إلا نصفُها، وما لم يُسدَّد شيءٌ فلا استرداد. والعقودُ القديمة
   //       (بلا حقل `paid` — سبقت التتبّع) تبقى بسقف دفعة العقد: مستخلصاتُها
   //       التاريخية بُنيت عليه، وتصفيرُها بأثرٍ رجعيٍّ يكسر أرقاماً مسدَّدة.
-  var advPct = Number((c.advance||{}).recoveryPct); if(!isFinite(advPct)) advPct = 0;
+  //       والنسبةُ **النافذة** لا الحقلُ الخام: صفرُ الحقل سهوٌ، والمقدمةُ تُستردّ
+  //       بنسبتها من قاعدة الأعمال فتنطفئ عند اكتمال العمل (`advanceRecoveryPctOf`).
+  var advPct = advanceRecoveryPctOf(c);
   var advTotal = Number((c.advance||{}).amount); if(!isFinite(advTotal)) advTotal = 0;
   var advDone  = Number((c.advance||{}).recovered); if(!isFinite(advDone)) advDone = 0;
   var advCap   = ((c.advance||{}).paid == null) ? advTotal : Math.min(advTotal, advancePaidOf(c));
@@ -5536,7 +5573,8 @@ function reqFormHTML(){
         '<span class="ct-sec-lock">تُقرَّ هنا لتراها المالية — وتغييرُها بعد اعتمادها يُعيد الطلب إليها</span></div>'+
       '<div class="ct-form-row">'+
         field("الدفعة المقدمة %", '<input class="form-input num" id="ct-r-adv" type="number" step="any" value="'+_esc((d.advance||{}).pct||0)+'">')+
-        field("تُستردّ من كل مستخلص %", '<input class="form-input num" id="ct-r-advrec" type="number" step="any" value="'+_esc((d.advance||{}).recoveryPct||0)+'">')+
+        field("تُستردّ من كل مستخلص %", '<input class="form-input num" id="ct-r-advrec" type="number" step="any" value="'+_esc((d.advance||{}).recoveryPct||0)+'">'+
+          '<div class="ct-hint">اتركها صفراً ⇐ تُستردّ المقدمةُ بنسبتها من قيمة العقد، فتنطفئ عند اكتمال العمل.</div>')+
       '</div>'+
       '<div class="ct-form-row">'+
         field("محتجز الضمان %", '<input class="form-input num" id="ct-r-ret" type="number" step="any" value="'+_esc((d.retention||{}).pct||0)+'">')+
@@ -6794,7 +6832,11 @@ function ctrOverviewHTML(c){
         : '<div class="ct-note">'+_icn("checkCircle","ic-sm")+' سُدِّدت الدفعة المقدمة — <b class="num">'+money(advPaid)+'</b> ر.س'+
           (advPaid+0.01<adv?' من أصل <span class="num">'+money(adv)+'</span> ر.س (سُدِّد أقلُّ من دفعة العقد)':'')+'</div>')+
       pays+
-      '<div class="ct-note" style="margin-top:8px">'+_icn("rotateCcw","ic-sm")+' المسترَدُّ من المستخلصات حتى الآن: <span class="num">'+money((c.advance||{}).recovered||0)+'</span> ر.س — والاستردادُ بسقفِ المسدَّد فعلاً.</div>'+
+      '<div class="ct-note" style="margin-top:8px">'+_icn("rotateCcw","ic-sm")+' يُخصَم <b class="num">'+advanceRecoveryPctOf(c)+'٪</b> من أعمال كل مستخلص'+
+        (advanceRecoveryDerived(c)?' (بنسبة المقدمة نفسِها — لم تُكتب نسبةٌ في العقد)':'')+
+        ' — استُردّ حتى الآن <span class="num">'+money((c.advance||{}).recovered||0)+'</span> ر.س، ويتبقّى <b class="num">'+
+        money(Math.max(0, r2(Math.min(advPaid, Number((c.advance||{}).amount)||0) - (Number((c.advance||{}).recovered)||0))))+
+        '</b> ر.س — والاستردادُ بسقفِ المسدَّد فعلاً.</div>'+
     '</div>';
   }
 
@@ -6840,7 +6882,8 @@ function ctrOverviewHTML(c){
   apprSec+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("shield","ic-sm")+' الشروط التجارية</div>'+
     '<div class="ct-info">'+
-      infoCell("الدفعة المقدمة", ((c.advance||{}).pct||0)+"٪ — تُستردّ "+((c.advance||{}).recoveryPct||0)+"٪ من كل مستخلص")+
+      infoCell("الدفعة المقدمة", ((c.advance||{}).pct||0)+"٪ — تُستردّ "+advanceRecoveryPctOf(c)+"٪ من كل مستخلص"+
+        (advanceRecoveryDerived(c)?" (بنسبة المقدمة — لم تُكتب نسبةٌ في العقد)":""))+
       infoCell("محتجز الضمان", ((c.retention||{}).pct||0)+"٪ — يُفرَج "+(((c.retention||{}).releaseOn)==="warranty_end"?"بعد انتهاء الضمان":"عند الاستلام الابتدائي"))+
       infoCell("غرامة التأخير", _esc(penaltyText(c.penalty, contractValue(c))))+
       infoCell("المُفرَج من المحتجز", money((c.retention||{}).released||0)+" ر.س")+
@@ -6942,7 +6985,7 @@ function ladderHTML(calc, c){
     '<div class="ct-rung sum"><span class="rl">أعمال الفترة</span><span class="rv num">'+money(calc.period)+'</span></div>'+
     rung(vatLbl, calc.vat, 1, calc.mode!=="none")+
     rung("محتجز الضمان", calc.retention, -1, false)+
-    rung("استرداد الدفعة المقدمة", calc.advanceRecovery, -1, false)+
+    rung("استرداد الدفعة المقدمة "+advanceRecoveryPctOf(c)+"٪", calc.advanceRecovery, -1, false)+
     rung("غرامة التأخير", calc.penalty, -1, false)+
     rung("مواد مصروفة من مستودعنا", calc.materials, -1, false)+
     rung("خصم عدم مطابقة / جودة", calc.nonConformity, -1, false)+
@@ -8495,7 +8538,7 @@ function extractPaperHTML(e, c, opt){
     rung("أعمال الفترة", calc.period, 0, "mid")+
     (calc.mode==="none" ? "" : rung("ض.ق.م "+Math.round(VAT_RATE*100)+"٪ على أعمال الفترة", calc.vat, 1, "vat"))+
     rung("محتجز الضمان "+(Number((c.retention||{}).pct)||0)+"٪", calc.retention, -1, "")+
-    rung("استرداد الدفعة المقدمة "+(Number((c.advance||{}).recoveryPct)||0)+"٪", calc.advanceRecovery, -1, "")+
+    rung("استرداد الدفعة المقدمة "+advanceRecoveryPctOf(c)+"٪", calc.advanceRecovery, -1, "")+
     rung("غرامة التأخير", calc.penalty, -1, "")+
     rung("مواد مصروفة له من مستودعنا", calc.materials, -1, "")+
     rung("خصم عدم مطابقة / جودة", calc.nonConformity, -1, "")+
@@ -9471,6 +9514,7 @@ function injectCSS(){
 ".ct-form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}",
 ".ct-field{display:flex;flex-direction:column;gap:5px}",
 ".ct-field-l{font-size:11px;color:var(--muted);font-weight:700}",
+".ct-hint{font-size:10.5px;color:var(--muted);font-weight:600;line-height:1.6}",
 ".ct-file{font-size:11px;padding:4px}",
 /* الملفُّ المختارُ يُعلَن باسمه: حقلُ الملفّ لا يُملأ برمجياً، فلولا هذه الشارةُ
    لبدا الحقلُ فارغاً بعد إعادة الرسم والملفُّ محفوظٌ في المسوّدة. */
@@ -9657,6 +9701,8 @@ window.contracts = {
   _advancePaidOf: advancePaidOf, _advanceDueOf: advanceDueOf, _advancePayable: advancePayable,
   _voidAdvancePayment: voidAdvancePayment,
   _advanceRecoveredOf: advanceRecoveredOf, _advanceVoidableOf: advanceVoidableOf, _advVoidable: advVoidable,
+  _contractWorkBase: contractWorkBase, _advanceRecoveryPctOf: advanceRecoveryPctOf,
+  _advanceRecoveryDerived: advanceRecoveryDerived,
   openAdvPay: openAdvPay, closeAdvPay: closeAdvPay, doAdvPay: doAdvPay,
   openAdvVoid: openAdvVoid, closeAdvVoid: closeAdvVoid, doAdvVoid: doAdvVoid,
   contractsList: contractsList, contractById: contractById, contractForRequest: contractForRequest,

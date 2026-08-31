@@ -10517,6 +10517,64 @@ function contractsPhase1() {
   T("★★ والعقدُ القديم (بلا حقل paid) على سلوكه التاريخيّ — السقفُ دفعةُ العقد",
     C._extNet(ext, { ...ctr, advance: { amount: 10000, recoveryPct: 20, recovered: 0 } },
       { prevGross: 0 }).advanceRecovery === 6000);
+  /* ════ الدفعةُ المقدمةُ المسدَّدةُ تُخصَم من المستخلصات (بلاغُ المالك) ════
+     صفرُ حقلِ الاسترداد كان يعني «لا استرداد أبداً» — فالمقدمةُ هبةٌ لا سلفة.
+     الحارسُ يمسك الارتدادَ: أن يعود الاستردادُ صفراً على عقدٍ سُدِّدت مقدمتُه. */
+  T("★★ advanceRecoveryPctOf: المكتوبُ في العقد يسبق، والصفرُ يُشتقّ بنسبة المقدمة من قاعدة الأعمال",
+    // نسبةٌ صريحةٌ ⇒ هي النافذة (لا يُلغي التلقائيُّ شرطاً وُقِّع عليه)
+    C._advanceRecoveryPctOf({ value: 100000, vatMode: "none", advance: { pct: 10, amount: 10000, recoveryPct: 20 } }) === 20 &&
+    // صفرٌ ⇒ نسبةُ المقدمة نفسُها (14,025 من 28,050 = 50٪) — عقدُ البلاغ حرفياً
+    C._advanceRecoveryPctOf({ value: 28050, vatMode: "none", advance: { pct: 50, amount: 14025, recoveryPct: 0 } }) === 50 &&
+    // ووضعُ «شامل الضريبة»: المقامُ بلا ضريبة (28,050 ÷ 1.15) فتنطفئ المقدمةُ تماماً
+    C._advanceRecoveryPctOf({ value: 28050, vatMode: "incl", advance: { pct: 50, amount: 14025 } }) === 57.5 &&
+    // مسوّدةٌ لم يُختم مبلغُها بعد ⇒ يُشتقّ من النسبة
+    C._advanceRecoveryPctOf({ value: 28050, vatMode: "none", advance: { pct: 50 } }) === 50 &&
+    // لا مقدمةَ ⇒ لا استرداد
+    C._advanceRecoveryPctOf({ value: 28050, vatMode: "none", advance: {} }) === 0 &&
+    C._advanceRecoveryPctOf({ value: 0, advance: { pct: 50, amount: 1000 } }) === 0);
+  T("★ advanceRecoveryDerived: الشاشةُ تعرف أنّ النسبة مشتقّةٌ لا مكتوبة",
+    C._advanceRecoveryDerived({ value: 28050, vatMode: "none", advance: { pct: 50, amount: 14025 } }) === true &&
+    C._advanceRecoveryDerived({ value: 28050, vatMode: "none", advance: { pct: 50, amount: 14025, recoveryPct: 20 } }) === false &&
+    C._advanceRecoveryDerived({ value: 28050, vatMode: "none", advance: {} }) === false);
+  T("★ contractWorkBase: قاعدةُ الأعمال بلا ضريبة — مقامُ نسبة الاسترداد",
+    C._contractWorkBase({ value: 28050, vatMode: "none" }) === 28050 &&
+    C._contractWorkBase({ value: 28050, vatMode: "excl" }) === 28050 &&
+    C._contractWorkBase({ value: 1150, vatMode: "incl" }) === 1000);
+  T("★★★ extNet: مقدمةٌ سُدِّدت وحقلُ الاسترداد صفرٌ ⇒ تُخصَم من المستخلص فعلاً (لا صفراً)",
+    (() => {
+      // عقدُ البلاغ: 28,050 بلا ضريبة · مقدمةٌ 50٪ سُدِّدت كاملةً · حقلُ الاسترداد صفر
+      const c = { value: 28050, vatMode: "none", retention: { pct: 0 }, penalty: {},
+                  advance: { pct: 50, amount: 14025, recoveryPct: 0, recovered: 0, paid: 14025, payments: [] } };
+      const ext = { lines: [{ cumQty: 1, unitPrice: 10000 }] };
+      const n = C._extNet(ext, c, { prevGross: 0 });
+      // 50٪ من أعمال الفترة 10,000 ⇒ 5,000 مستردّة، والصافي 5,000
+      return n.advanceRecovery === 5000 && n.net === 5000;
+    })());
+  T("★★ ولا يُستردّ فوق ما سُدِّد فعلاً ولا فوق ما تبقّى من المقدمة",
+    (() => {
+      const base = { value: 28050, vatMode: "none", retention: { pct: 0 }, penalty: {} };
+      const ext = { lines: [{ cumQty: 1, unitPrice: 28050 }] };
+      // سُدِّد نصفُ المقدمة (7,000) ⇒ لا يُستردّ إلا 7,000 ولو بلغت النسبةُ أكثر
+      const half = C._extNet(ext, { ...base, advance: { pct: 50, amount: 14025, recovered: 0, paid: 7000 } }, { prevGross: 0 });
+      // ولم يُسدَّد شيءٌ ⇒ لا استرداد أصلاً
+      const none = C._extNet(ext, { ...base, advance: { pct: 50, amount: 14025, recovered: 0, paid: 0 } }, { prevGross: 0 });
+      // وما استُردّ سابقاً يُخصَم من السقف
+      const rest = C._extNet(ext, { ...base, advance: { pct: 50, amount: 14025, recovered: 14000, paid: 14025 } }, { prevGross: 0 });
+      return half.advanceRecovery === 7000 && none.advanceRecovery === 0 && rest.advanceRecovery === 25;
+    })());
+  T("★★ والاستردادُ التلقائيُّ ينطفئ تماماً عند اكتمال العمل — لا قبلَه ولا بعدَه",
+    (() => {
+      const c = { value: 28050, vatMode: "none", retention: { pct: 0 }, penalty: {},
+                  advance: { pct: 50, amount: 14025, recovered: 0, paid: 14025 } };
+      // مستخلصٌ يغطّي العقدَ كلَّه ⇒ يستردّ المقدمةَ كاملةً بالضبط
+      const full = C._extNet({ lines: [{ cumQty: 1, unitPrice: 28050 }] }, c, { prevGross: 0 });
+      return full.advanceRecovery === 14025;
+    })());
+  T("★ وشرطُ العقد المطبوع والسُّلَّمُ والبطاقةُ يقولون النسبةَ النافذة لا الحقلَ الخام",
+    /advanceRecoveryPctOf\(c\)>0 \? "، تُستردّ بخصم "\+advanceRecoveryPctOf\(c\)/.test(src) &&
+    (src.match(/rung\("استرداد الدفعة المقدمة "\+advanceRecoveryPctOf\(c\)\+"٪"/g) || []).length === 2 &&
+    /تُستردّ "\+advanceRecoveryPctOf\(c\)\+"٪ من كل مستخلص"/.test(src) &&
+    !/Number\(\(c\.advance\|\|\{\}\)\.recoveryPct\)\|\|0/.test(src));
   T("★ advancePaidOf/advanceDueOf: المسدَّدُ والمتبقّي من الحقول — والقديمُ لا مطالبةَ وهميةً عليه",
     C._advancePaidOf({ advance: { amount: 10000, paid: 4000 } }) === 4000 &&
     C._advanceDueOf({ advance: { amount: 10000, paid: 4000 }, status: "ctr_active" }) === 6000 &&
