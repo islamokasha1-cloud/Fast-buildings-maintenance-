@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2962";
+var MODULE_BUILD = "v18.9.2965";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1252,6 +1252,33 @@ var ADV_PAY_STATUSES = ["ctr_pending_signature","ctr_active","ctr_suspended"];
 function advancePayable(contract){
   var c = contract || {};
   return ADV_PAY_STATUSES.indexOf(c.status) !== -1 && advanceDueOf(c) > 0;
+}
+
+/* ════ تصحيحُ قيدِ سدادٍ أُدخل بالخطأ ════   (طلبُ المالك)
+   المحاسبُ يخطئ في المبلغ، والخطأُ **لا يُمحى بل يُعكَس**: القيدُ يبقى في السجلّ
+   موسوماً بالإلغاء وسببِه ومَن ألغاه، ويُخصَم مبلغُه من المسدَّد. ثم يُسجَّل القيدُ
+   الصحيح — فالتعديلُ عندنا «إلغاءٌ وإعادةُ تسجيل» لا كتابةٌ فوق رقمٍ سابق: الرقمُ
+   الممحوُّ إيصالٌ صُرف بموجبه مالٌ، ومحوُه يترك سداداً بلا أثرٍ يُراجَع.
+   • السقفُ **المسترَدُّ من المستخلصات**: لا يُلغى قيدٌ يهبط بالمسدَّد تحت ما استُردّ
+     فعلاً منه — وإلا صار الاستردادُ أكبرَ من دفعةٍ لم تُسدَّد. */
+function advanceRecoveredOf(contract){
+  var r = Number(((contract||{}).advance||{}).recovered);
+  return (isFinite(r) && r > 0) ? r2(r) : 0;
+}
+/* أقصى ما يجوز إلغاؤه من المسدَّد الآن — المسدَّدُ ناقصَ ما استُردّ منه. */
+function advanceVoidableOf(contract){
+  return r2(Math.max(0, r2(advancePaidOf(contract) - advanceRecoveredOf(contract))));
+}
+/* هل يُلغى هذا القيدُ بعينِه؟ قيدٌ قائمٌ (غير ملغىً) ومبلغُه ضمن المتاح للإلغاء،
+   والعقدُ غيرُ نهائيّ. مصدرٌ واحدٌ يقرؤه الزرُّ والمعاملةُ معاً. */
+function advVoidable(contract, payment){
+  var c = contract || {}, p = payment || {};
+  if(ctrIsFinal(c.status)) return false;
+  if((c.advance||{}).paid == null) return false;
+  if(p.voided === true) return false;
+  var amt = Number(p.amount);
+  if(!isFinite(amt) || amt <= 0) return false;
+  return amt <= advanceVoidableOf(c) + 0.01;
 }
 
 /* حالاتُ العقد: مَن يملك الانتقال، وأيُّها نهائيّ. */
@@ -3232,6 +3259,58 @@ function payAdvance(id, payload){
     if(i>=0) _ctrs[i]=c;
     _audit("سداد دفعة مقدمة", id+" — "+money(amt)+" ر.س");
     _notify("سداد دفعة مقدمة", id+" — "+money(amt)+" ر.س", id);
+    return c;
+  });
+}
+
+/* ════ إلغاءُ قيدِ سدادٍ للمقدمة — تصحيحُ خطأِ المحاسب ════   (طلبُ المالك)
+   المعاملةُ تُعيد قراءةَ الوثيقة الطازجة وتُطابق القيدَ **بختمِ وقتِه** لا بموضعِه
+   وحدَه: لو أُضيف قيدٌ من جهازٍ آخر بين العرضِ والضغط، فُهرسُ الصفّ نفسُه قد يشير
+   إلى قيدٍ آخر — فالمطابقةُ بالوقت تُسقط الإلغاءَ بدل أن تُلغي البريء. */
+function voidAdvancePayment(id, payload){
+  var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال"));
+  var p = payload || {};
+  var reason = String(p.reason||"").trim();
+  if(!reason) return Promise.reject(new Error("سبب الإلغاء إلزامي — يبقى في السجل"));
+  var idx = Number(p.index);
+  if(!isFinite(idx) || idx < 0) return Promise.reject(new Error("قيد السداد غير محدَّد"));
+  var role=_role();
+  if(["finance","admin"].indexOf(role) === -1) return Promise.reject(new Error("إلغاء قيد السداد للمالية فقط"));
+  var ref=database.collection(CONTRACTS_COL()).doc(id);
+  var voided=0;
+  return database.runTransaction(function(t){
+    return t.get(ref).then(function(s){
+      if(!s.exists) throw new Error("العقد غير موجود");
+      var c=s.data()||{}; c.id=id;
+      if(ctrIsFinal(c.status)) throw new Error("العقد في حالةٍ نهائية — لا يُعدَّل قيدُ سدادِه");
+      var a=Object.assign({}, c.advance||{});
+      if(a.paid == null) throw new Error("هذا العقد لا يتتبّع سداد المقدمة (أُنشئ قبل الميزة)");
+      var pays=(Array.isArray(a.payments)?a.payments:[]).slice();
+      var e=pays[idx];
+      if(!e) throw new Error("قيد السداد غير موجود");
+      if(p.at && String(e.at||"") !== String(p.at)) throw new Error("تغيّرت قيودُ السداد — أعد فتح العقد ثم حاول");
+      if(e.voided === true) throw new Error("هذا القيد ملغىً بالفعل");
+      var amt=r2(Number(e.amount)); if(!(amt > 0)) throw new Error("قيدٌ بلا مبلغ — لا يُلغى");
+      var room=advanceVoidableOf(c);
+      if(amt > room + 0.01)
+        throw new Error("لا يُلغى: استُردّ من المستخلصات "+money(advanceRecoveredOf(c))+" ر.س، والمتاح للإلغاء "+money(room)+" ر.س");
+      pays[idx]=Object.assign({}, e, { voided:true, voidReason:reason, voidedAt:_now(), voidedBy:_me(), voidedByUser:_meUser() });
+      a.payments=pays;
+      a.paid=r2(Math.max(0, r2((Number(a.paid)||0) - amt)));
+      c.advance=a; voided=amt;
+      _pushTimeline(c, "إلغاء قيد سداد الدفعة المقدمة", "advance_void",
+        money(amt)+" ر.س"+(e.ref?(" — "+e.ref):"")+" · "+reason+
+        " · المسدَّدُ الآن "+money(a.paid)+" من "+money(Number(a.amount)||0)+" ر.س");
+      c.updatedAt=_now(); c.updatedBy=_me();
+      var out=Object.assign({},c); delete out.id;
+      t.set(ref,out,{merge:true});
+      return c;
+    });
+  }).then(function(c){
+    var i=_ctrs.findIndex(function(x){ return x.id===id; });
+    if(i>=0) _ctrs[i]=c;
+    _audit("إلغاء قيد سداد دفعة مقدمة", id+" — "+money(voided)+" ر.س — "+reason);
+    _notify("إلغاء قيد سداد دفعة مقدمة", id+" — "+money(voided)+" ر.س — "+reason, id);
     return c;
   });
 }
@@ -6687,9 +6766,21 @@ function ctrOverviewHTML(c){
   var advTracked=(c.advance||{}).paid!=null && adv>0;
   var advNote="";
   if(advTracked){
-    var pays=(Array.isArray((c.advance||{}).payments)?(c.advance||{}).payments:[]).map(function(p){
+    /* القيدُ الملغى **يبقى معروضاً** مشطوباً بسببِه ومَن ألغاه — الحذفُ من الشاشة
+       يترك سداداً حدث ثم اختفى بلا أثرٍ يُراجَع. وزرُّ التصحيح على القيد القائم
+       وحدَه، وبالشرط نفسِه الذي تحرس به المعاملةُ الإلغاء (`advVoidable`). */
+    var mayVoid=["finance","admin"].indexOf(_role())!==-1;
+    var pays=(Array.isArray((c.advance||{}).payments)?(c.advance||{}).payments:[]).map(function(p,i){
+      if(p && p.voided===true)
+        return '<div class="ct-att"><span style="opacity:.62">'+_icn("xCircle","ic-sm")+
+          ' <s>سُدِّد <b class="num">'+money(p.amount)+'</b> ر.س'+(p.ref?' — <span class="num">'+_esc(p.ref)+'</span>':'')+'</s>'+
+          ' <b>ملغى</b> — '+_esc(p.voidReason||"")+'</span>'+
+          '<span class="ct-att-m">ألغاه '+_esc(p.voidedBy||"")+' · '+_esc(String(p.voidedAt||"").slice(0,16).replace("T"," "))+
+          (p.receiptUrl?' · <a class="ct-link" href="'+_esc(p.receiptUrl)+'" target="_blank" rel="noopener">'+_icn("paperclip","ic-sm")+' الإيصال</a>':'')+'</span></div>';
       return '<div class="ct-att"><span>'+_icn("banknote","ic-sm")+' سُدِّد <b class="num">'+money(p.amount)+'</b> ر.س'+
-        (p.ref?' — <span class="num">'+_esc(p.ref)+'</span>':'')+'</span>'+
+        (p.ref?' — <span class="num">'+_esc(p.ref)+'</span>':'')+
+        (mayVoid && advVoidable(c,p)
+          ? ' <button class="btn btn-ghost btn-sm" onclick="contracts.openAdvVoid('+i+')">'+_icn("rotateCcw","ic-sm")+' تصحيح القيد</button>' : '')+'</span>'+
         '<span class="ct-att-m">'+_esc(p.by||"")+' · '+_esc(String(p.at||"").slice(0,16).replace("T"," "))+
         (p.receiptUrl?' · <a class="ct-link" href="'+_esc(p.receiptUrl)+'" target="_blank" rel="noopener">'+_icn("paperclip","ic-sm")+' الإيصال</a>':'')+'</span></div>';
     }).join("");
@@ -8736,6 +8827,58 @@ function doAdvPay(){
   });
 }
 
+/* ── تصحيحُ قيدِ سدادِ المقدمة — إلغاءٌ بسببٍ ثم إعادةُ تسجيلٍ بالمبلغ الصحيح ──
+   بعد الإلغاء يُفتح صندوقُ السداد تلقائياً ما دامت الدفعةُ مستحقّةً: الخطأُ في
+   الرقم لا في وجودِ السداد، فمَن جاء ليصحّح يحتاج أن يكتب الصحيحَ في النفَس نفسِه. */
+function openAdvVoid(i){
+  var c=contractById(_cOpen); if(!c) return;
+  var idx=Number(i);
+  var p=(Array.isArray((c.advance||{}).payments)?(c.advance||{}).payments:[])[idx];
+  if(!p) return _toast("⚠ قيد السداد غير موجود","warn");
+  if(["finance","admin"].indexOf(_role())===-1) return _toast("⚠ إلغاء قيد السداد للمالية فقط","warn");
+  if(!advVoidable(c,p))
+    return _toast("⚠ لا يُلغى هذا القيد — استُردّ من المستخلصات "+money(advanceRecoveredOf(c))+" ر.س","warn");
+  var el=document.getElementById("page-"+PAGE_CTRS); if(!el) return;
+  closeAdvPay();
+  var old=document.getElementById("ct-advvoid"); if(old) old.remove();
+  var box=document.createElement("div");
+  box.className="card ct-sec"; box.id="ct-advvoid";
+  box.dataset.idx=String(idx); box.dataset.at=String(p.at||"");
+  box.innerHTML='<div class="ct-sec-h">'+_icn("rotateCcw","ic-sm")+' تصحيح قيد سداد الدفعة المقدمة</div>'+
+    '<div class="ct-note warn">'+_icn("alertCircle","ic-sm")+' سيُلغى قيدُ <b class="num">'+money(p.amount)+'</b> ر.س'+
+      (p.ref?' (<span class="num">'+_esc(p.ref)+'</span>)':'')+' المسجَّلُ في '+
+      _esc(String(p.at||"").slice(0,16).replace("T"," "))+'. <b>القيدُ لا يُمحى</b> — يبقى في السجل مشطوباً بسببِه، '+
+      'ويعود المبلغُ مستحقّاً فتسجّل السدادَ الصحيح بإيصالِه.</div>'+
+    '<div class="ct-form-row">'+
+      field("سبب الإلغاء <b>(إلزاميّ)</b>", '<input class="form-input" id="ct-advv-why" placeholder="مثال: أُدخل المبلغ خطأً — الصحيح 7,000 ر.س">')+
+      '<div></div>'+
+    '</div>'+
+    '<div class="ct-save-bar" style="position:static">'+
+      '<button class="btn btn-ghost btn-sm" onclick="contracts.closeAdvVoid()">تراجع</button>'+
+      '<button class="btn btn-danger btn-sm" id="ct-advv-btn" onclick="contracts.doAdvVoid()">'+_icn("rotateCcw","ic-sm")+' إلغاء القيد</button>'+
+    '</div>';
+  el.insertBefore(box, el.children[2]||null);
+  box.scrollIntoView({behavior:"smooth",block:"center"});
+}
+function closeAdvVoid(){ var b=document.getElementById("ct-advvoid"); if(b) b.remove(); }
+function doAdvVoid(){
+  var c=contractById(_cOpen); if(!c) return;
+  var box=document.getElementById("ct-advvoid"); if(!box) return;
+  var why=String((document.getElementById("ct-advv-why")||{}).value||"").trim();
+  if(!why){ _toast("⚠ سبب الإلغاء إلزامي — يبقى في السجل","warn"); return; }
+  var btn=document.getElementById("ct-advv-btn"); if(btn){ btn.disabled=true; btn.textContent="جارٍ الإلغاء…"; }
+  voidAdvancePayment(c.id, { index:Number(box.dataset.idx), at:box.dataset.at, reason:why })
+  .then(function(cc){
+    closeAdvVoid(); paintCtrs();
+    _toast("✅ أُلغي القيد — المتبقّي "+money(advanceDueOf(cc))+" ر.س، سجِّل السداد الصحيح","success");
+    if(advancePayable(cc) && ["finance","admin"].indexOf(_role())!==-1) openAdvPay();
+  }).catch(function(e){
+    console.warn("contracts/doAdvVoid",e);
+    if(btn){ btn.disabled=false; btn.innerHTML=_icn("rotateCcw","ic-sm")+" إلغاء القيد"; }
+    _toast("⚠ "+_errMsg(e),"warn");
+  });
+}
+
 /* ── أفعالُ المستخلص ── */
 function newExtract(){
   var c=contractById(_cOpen); if(!c) return;
@@ -9512,7 +9655,10 @@ window.contracts = {
   _sign: signContract, _saveClauses: saveContractClauses,
   _payAdvance: payAdvance,
   _advancePaidOf: advancePaidOf, _advanceDueOf: advanceDueOf, _advancePayable: advancePayable,
+  _voidAdvancePayment: voidAdvancePayment,
+  _advanceRecoveredOf: advanceRecoveredOf, _advanceVoidableOf: advanceVoidableOf, _advVoidable: advVoidable,
   openAdvPay: openAdvPay, closeAdvPay: closeAdvPay, doAdvPay: doAdvPay,
+  openAdvVoid: openAdvVoid, closeAdvVoid: closeAdvVoid, doAdvVoid: doAdvVoid,
   contractsList: contractsList, contractById: contractById, contractForRequest: contractForRequest,
   _convert: convertToContract, _transit: transitContract, _deleteCtr: deleteContract,
   // المستخلصات [المرحلة ٤]

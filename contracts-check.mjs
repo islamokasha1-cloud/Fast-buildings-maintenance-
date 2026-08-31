@@ -2020,6 +2020,71 @@ check('★★ والبطاقةُ تعرض المسدَّدَ الفعليَّ ب
   /المسدَّد من المقدمة/.test(advPay.txt) && /ADV-1/.test(advPay.txt) && /ADV-2/.test(advPay.txt) &&
   /سُدِّدت الدفعة المقدمة/.test(advPay.txt));
 await page.screenshot({ path: `${SHOTS}/18c-advance-paid.png`, fullPage: true });
+
+/* ── تصحيحُ قيدٍ أُدخل بالخطأ: إلغاءٌ بسببٍ ثم إعادةُ تسجيلٍ بالمبلغ الصحيح ──
+   (بلاغُ المالك: «تم إدخال الدفعة المقدمة بالخطأ عن طريق المحاسب»). الفحصُ في
+   متصفّحٍ حقيقيّ لأن الخطرَ في **الأثر لا في الحساب**: أن يُمحى القيدُ من الشاشة،
+   أو يُخصَم مبلغُه مرّتين، أو يهبط المسدَّدُ تحت ما استُردّ في المستخلصات. */
+const advVoid = await page.evaluate(async (cid) => {
+  const out = {};
+  const real = currentUser.role;
+  currentUser.role = 'project_manager';
+  try { await window.contracts._voidAdvancePayment(cid, { index: 1, reason: 'خطأ' }); out.role = 'مرّ بغير المالية'; }
+  catch (e) { out.role = e.message; }
+  currentUser.role = real;
+  try { await window.contracts._voidAdvancePayment(cid, { index: 1, reason: '' }); out.noWhy = 'مرّ بلا سبب'; }
+  catch (e) { out.noWhy = e.message; }
+  // ختمُ وقتٍ لا يطابق القيدَ — بلا تاريخٍ محفور (حارسُ `tb` يمنعه في هذا الملف)
+  try { await window.contracts._voidAdvancePayment(cid, { index: 1, at: 'ختمٌ-لا-يطابق', reason: 'خطأ' }); out.stale = 'مرّ بقيدٍ متغيّر'; }
+  catch (e) { out.stale = e.message; }
+
+  const before = window.contracts.contractById(cid);
+  const at1 = (before.advance.payments || [])[1].at;
+  await window.contracts._voidAdvancePayment(cid, { index: 1, at: at1, reason: 'أُدخل المبلغ خطأً — الصحيح 500' });
+  const c1 = window.contracts.contractById(cid);
+  out.paid = window.contracts._advancePaidOf(c1);
+  out.due = window.contracts._advanceDueOf(c1);
+  out.n = (c1.advance.payments || []).length;
+  out.voided = (c1.advance.payments || [])[1].voided === true;
+  out.why = (c1.advance.payments || [])[1].voidReason || '';
+  out.tl = ((c1.timeline || []).slice(-1)[0] || {});
+  out.payable = window.contracts._advancePayable(c1);
+  // لا يُلغى القيدُ نفسُه مرّتين فيُخصَم مبلغُه مرّتين
+  try { await window.contracts._voidAdvancePayment(cid, { index: 1, at: at1, reason: 'ثانيةً' }); out.twice = 'مرّ مرّتين'; }
+  catch (e) { out.twice = e.message; }
+  // ولا يُلغى قيدٌ يهبط بالمسدَّد تحت ما استُردّ في المستخلصات
+  const c2 = window.contracts.contractById(cid);
+  const keepRec = c2.advance.recovered;
+  c2.advance.recovered = 1360;
+  out.roomBlocked = window.contracts._advVoidable(c2, (c2.advance.payments || [])[0]) === false;
+  c2.advance.recovered = keepRec;
+  // ثم يُسجَّل الرقمُ الصحيح على المتبقّي الذي عاد
+  await window.contracts._payAdvance(cid, { amount: 500, ref: 'ADV-2-FIX', receiptUrl: 'https://example.test/adv2fix.pdf' });
+  const c3 = window.contracts.contractById(cid);
+  out.fixedPaid = window.contracts._advancePaidOf(c3);
+  window.contracts.ctrTab('overview');
+  await new Promise(r => setTimeout(r, 600));
+  out.txt = document.getElementById('page-contracts-list').textContent || '';
+  return out;
+}, conv.cid);
+check('★★ إلغاءُ القيد للمالية وحدَها وبسببٍ إلزاميّ، ولا يمرّ على قيدٍ تغيّر تحته',
+  /للمالية فقط/.test(advVoid.role) && /سبب الإلغاء إلزامي/.test(advVoid.noWhy) && /تغيّرت قيودُ السداد/.test(advVoid.stale),
+  JSON.stringify({ r: advVoid.role, w: advVoid.noWhy, s: advVoid.stale }));
+check('★★★ الإلغاءُ خصم 2,000 من المسدَّد فعاد المتبقّي مستحقّاً — والقيدُ باقٍ في السجل موسوماً بسببِه',
+  advVoid.paid === 1360 && advVoid.due === 2000 && advVoid.n === 2 && advVoid.voided === true &&
+  /الصحيح 500/.test(advVoid.why) && advVoid.payable === true,
+  JSON.stringify({ p: advVoid.paid, d: advVoid.due, n: advVoid.n, v: advVoid.voided }));
+check('★★ وقيدُ السجل يقول ما أُلغي وسببَه والمسدَّدَ بعده',
+  advVoid.tl.code === 'advance_void' && /2,000\.00/.test(advVoid.tl.note) &&
+  /الصحيح 500/.test(advVoid.tl.note) && /المسدَّدُ الآن 1,360\.00/.test(advVoid.tl.note),
+  JSON.stringify(advVoid.tl));
+check('★★★ ولا يُلغى القيدُ مرّتين فيُخصَم مبلغُه مرّتين، ولا يهبط المسدَّدُ تحت ما استُردّ',
+  /ملغىً بالفعل/.test(advVoid.twice) && advVoid.roomBlocked === true, advVoid.twice);
+check('★★★ ثم سُجِّل الرقمُ الصحيح 500 على المتبقّي الذي عاد — 1,860 مسدَّداً',
+  advVoid.fixedPaid === 1860, String(advVoid.fixedPaid));
+check('★★ والبطاقةُ تعرض القيدَ الملغى مشطوباً بسببِه، والقيدَ الصحيحَ بمرجعه',
+  /ملغى/.test(advVoid.txt) && /الصحيح 500/.test(advVoid.txt) && /ADV-2-FIX/.test(advVoid.txt));
+await page.screenshot({ path: `${SHOTS}/18d-advance-voided.png`, fullPage: true });
 await page.evaluate(() => window.contracts.ctrTab('overview'));
 await page.waitForTimeout(800);
 check('والبطاقةُ صارت تعرض توقيعَه ومرفقَه',

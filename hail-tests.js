@@ -10528,6 +10528,35 @@ function contractsPhase1() {
     C._advancePayable({ status: "ctr_closed", advance: { amount: 1000, paid: 0 } }) === false &&
     C._advancePayable({ status: "ctr_completed", advance: { amount: 1000, paid: 0 } }) === false &&
     C._advancePayable({ status: "ctr_active", advance: { amount: 1000, paid: 1000 } }) === false);
+  /* ════ تصحيحُ قيدِ سدادٍ أُدخل بالخطأ — إلغاءٌ لا محو (طلبُ المالك) ════
+     الحارسُ يمسك الارتدادَ الماليّ الحقيقيّ: أن يهبط المسدَّدُ تحت ما استُردّ منه
+     في المستخلصات، فيصير استردادٌ قائمٌ على دفعةٍ لم تُسدَّد. */
+  T("★ advanceVoidableOf: المتاح للإلغاء = المسدَّد ناقصَ ما استُردّ من المستخلصات",
+    C._advanceVoidableOf({ advance: { amount: 14025, paid: 14025, recovered: 0 } }) === 14025 &&
+    C._advanceVoidableOf({ advance: { amount: 14025, paid: 14025, recovered: 4000 } }) === 10025 &&
+    C._advanceVoidableOf({ advance: { amount: 14025, paid: 14025, recovered: 14025 } }) === 0 &&
+    C._advanceVoidableOf({ advance: { amount: 1000 } }) === 0 &&
+    C._advanceRecoveredOf({ advance: { recovered: 4000 } }) === 4000 &&
+    C._advanceRecoveredOf({}) === 0);
+  T("★ advVoidable: القيدُ القائمُ وحدَه، وبسقفِ المتاح، وعلى عقدٍ غيرِ نهائيّ",
+    C._advVoidable({ status: "ctr_active", advance: { amount: 14025, paid: 14025, recovered: 0 } }, { amount: 14025 }) === true &&
+    // استُردّ 4000 من المستخلصات ⇒ قيدُ 14025 لا يُلغى كاملاً
+    C._advVoidable({ status: "ctr_active", advance: { amount: 14025, paid: 14025, recovered: 4000 } }, { amount: 14025 }) === false &&
+    C._advVoidable({ status: "ctr_active", advance: { amount: 14025, paid: 14025, recovered: 4000 } }, { amount: 10000 }) === true &&
+    // ملغىً بالفعل ⇒ لا يُلغى مرّتين فيُخصم مبلغُه مرّتين
+    C._advVoidable({ status: "ctr_active", advance: { amount: 1000, paid: 1000 } }, { amount: 1000, voided: true }) === false &&
+    // عقدٌ مقفلٌ أو مفسوخ ⇒ لا يُمسّ قيدُ سدادِه
+    C._advVoidable({ status: "ctr_closed", advance: { amount: 1000, paid: 1000 } }, { amount: 1000 }) === false &&
+    C._advVoidable({ status: "ctr_terminated", advance: { amount: 1000, paid: 1000 } }, { amount: 1000 }) === false &&
+    // عقدٌ قديمٌ بلا تتبّعٍ ⇒ لا قيدَ يُلغى أصلاً
+    C._advVoidable({ status: "ctr_active", advance: { amount: 1000 } }, { amount: 1000 }) === false);
+  T("★ voidAdvancePayment: سببٌ إلزاميٌّ · للمالية وحدَها · مطابقةُ القيد بوقتِه · خصمُ المبلغ وأثرٌ في السجل",
+    /function voidAdvancePayment\(id, payload\)\{[\s\S]{0,400}سبب الإلغاء إلزامي[\s\S]{0,400}إلغاء قيد السداد للمالية فقط[\s\S]{0,900}تغيّرت قيودُ السداد[\s\S]{0,300}ملغىً بالفعل[\s\S]{0,600}a\.paid=r2\(Math\.max\(0, r2\(\(Number\(a\.paid\)\|\|0\) - amt\)\)\);[\s\S]{0,300}_pushTimeline\(c, "إلغاء قيد سداد الدفعة المقدمة", "advance_void"/.test(src) &&
+    // السقفُ في المعاملة نفسِها لا في الزرّ وحدَه
+    /var room=advanceVoidableOf\(c\);[\s\S]{0,200}throw new Error\("لا يُلغى/.test(src));
+  T("★ القيدُ الملغى يبقى معروضاً مشطوباً بسببِه — لا يُحذف من الشاشة",
+    /p\.voided===true[\s\S]{0,400}<s>سُدِّد[\s\S]{0,300}ملغى<\/b> — '\+_esc\(p\.voidReason/.test(src) &&
+    /mayVoid && advVoidable\(c,p\)[\s\S]{0,200}contracts\.openAdvVoid\(/.test(src));
   /* ════ ما ينتظر سدادَ المالية من جهة التعاقدات — تقرؤه بطاقة «المالية — السداد» (طلبُ المالك) ════
      أوامرُ الدفع المعلّقة والدفعاتُ المقدمةُ المستحقّة والمستخلصاتُ بانتظار السداد —
      من الدوالّ الحارسة نفسِها، لا نسخةٍ منها. */
