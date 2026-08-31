@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.2969";
+var MODULE_BUILD = "v18.9.2973";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1120,7 +1120,9 @@ function financialClauses(contract){
     out.push({ key:"_fin_adv", category:"general", title:"الدفعة المقدمة",
       /* الاستردادُ **يُنصّ عليه دائماً** — لا شرطَ يمنح سلفةً ويسكت عن ردّها. */
       body:"يُصرف للطرف الثاني دفعة مقدمة قدرها "+adv.pct+"٪ من قيمة العقد ("+money(advanceAmountOf(c))+" ريال)"+
-           (advanceRecoveryPctOf(c)>0 ? "، تُستردّ بخصم "+advanceRecoveryPctOf(c)+"٪ من قيمة أعمال كل مستخلص حتى استيفائها كاملة" : "")+"." });
+           (Number(adv.recoveryPct)>0
+             ? "، تُستردّ بخصم "+adv.recoveryPct+"٪ من قيمة أعمال كل مستخلص حتى استيفائها كاملة"
+             : "، تُستردّ بالخصم من مستخلصات الطرف الثاني ابتداءً من أوّل مستخلص وبما يتّسع له، حتى استيفائها كاملة")+"." });
   }
   if(Number(ret.pct)>0){
     out.push({ key:"_fin_ret", category:"quality", title:"محتجز الضمان",
@@ -1229,38 +1231,66 @@ function advanceAmountOf(contract){
   return r2(contractValue(c) * pct / 100);
 }
 
-/* ════ نسبةُ استردادِ المقدمة **النافذة** ════   (بلاغُ المالك 31/08)
-   «المفروض الدفعة المقدمة المسدَّدة تُخصم من المستخلصات».
+/* ════ استردادُ المقدمة — المبلغُ النافذ ════   (بلاغُ المالك 31/08)
+   «المفروض الدفعة المقدمة المسدَّدة تُخصم من المستخلصات… المفروض يخصم الدفعة
+   المسدَّدة بالفعل اللي هي 11,900 ريال».
    **الجذر.** كان الاستردادُ معلَّقاً على حقلٍ مُدخَلٍ وحدَه (`advance.recoveryPct`)،
-   وصفرُه يعني **لا استرداد أبداً** — فعقدٌ بدفعةٍ مقدمةٍ ٥٠٪ وحقلِ استردادٍ صفرٍ
-   يصرف نصفَ قيمته سلفةً ثم لا يستردّ منها ريالاً: المقدمةُ هبةٌ لا سلفة. وليس في
-   المنصّة بابٌ آخرُ يستردّها، فالصفرُ **سهوٌ لا سياسة**.
-   **القاعدة.** المقدمةُ سلفةٌ على العمل، فتُستردّ بوتيرة العمل: نسبةُ المقدمة من
-   **قاعدة الأعمال بلا ضريبة** هي نسبةُ الخصم من كل مستخلص — فتنطفئ المقدمةُ تماماً
-   عند اكتمال العمل ١٠٠٪، لا قبلَه فيُثقَل المقاول، ولا بعدَه فيبقى دَينٌ بلا عملٍ
-   يُخصَم منه. والمقامُ **بلا ضريبة** لأن أعمالَ المستخلص تُقاس بلا ضريبةٍ أصلاً
-   (`vatSplit(...).base`): مقامٌ شاملُ الضريبةِ يترك جزءاً من المقدمة أبداً بلا استرداد.
-   **والمكتوبُ يسبق المشتقّ.** نسبةٌ صريحةٌ في العقد (> 0) هي النافذة — التلقائيُّ
-   للسهو لا ليُلغي شرطاً وُقِّع عليه. */
-function contractWorkBase(contract){
-  return r2(vatSplit(contractValue(contract), (contract||{}).vatMode).base);
+   وصفرُه يعني **لا استرداد أبداً** — فعقدٌ بمقدمةٍ ٥٠٪ وحقلِ استردادٍ صفرٍ يصرف
+   نصفَ قيمته سلفةً ثم لا يستردّ منها ريالاً: المقدمةُ هبةٌ لا سلفة. وليس في المنصّة
+   بابٌ آخرُ يستردّها، فالصفرُ **سهوٌ لا سياسة**.
+   **القاعدة (قرارُ المالك).** بلا نسبةٍ مكتوبةٍ في العقد، يُستردّ **كلُّ ما تبقّى
+   من المسدَّد فعلاً** من أوّل مستخلصٍ يتّسع له — لا نسبةً منه ولا تقسيطاً: السلفةُ
+   دَينٌ على المقاول، وأسرعُ ردٍّ يسمح به العملُ هو الأصل، وما لا يتّسع له هذا
+   المستخلصُ يُرحَّل إلى التالي بلا ضياع.
+   **ثلاثةُ سقوفٍ يقف عندها المبلغ:**
+   • **ما سُدِّد فعلاً** (`advancePaidOf`) ناقصَ ما استُردّ — لا يُستردّ ما لم يُدفع.
+     والعقودُ القديمة (بلا حقل `paid`) تبقى بسقف دفعة العقد: مستخلصاتُها التاريخية
+     بُنيت عليه، وتصفيرُها بأثرٍ رجعيٍّ يكسر أرقاماً مسدَّدة.
+   • **أعمالُ الفترة** — لا يُخصَم من عملٍ لم يُنجَز.
+   • **وصافي المستخلص لا يهبط تحت الصفر**: الاستردادُ يتأخّر خلفَ بقية الخصوم
+     (محتجزٌ · غرامةٌ · موادُّ · عدمُ مطابقة)، فمستخلصٌ صغيرٌ لا يخرج بصافٍ سالبٍ
+     يستحيل تحصيلُه — والباقي يُرحَّل، فلا يسقط ريالٌ من الدَّين.
+   **والمكتوبُ يسبق التلقائيّ.** نسبةٌ صريحةٌ في العقد (> 0) تُقسّط الاستردادَ
+   بها — التلقائيُّ للسهو لا ليُلغي شرطاً وُقِّع عليه. */
+function advanceRecoveryCapOf(contract){
+  var c = contract || {}, a = c.advance || {};
+  var total = Number(a.amount); if(!isFinite(total)) total = 0;
+  var cap = (a.paid == null) ? r2(total) : r2(Math.min(r2(total), advancePaidOf(c)));
+  return r2(Math.max(0, r2(cap - advanceRecoveredOf(c))));
 }
-function advanceRecoveryPctOf(contract){
+/* `room` = ما يتّسع له الصافي بعد بقية الخصوم (اختياريّ — تمرّره `extNet`). */
+function advanceRecoveryOf(contract, period, room){
+  var c = contract || {}, a = c.advance || {};
+  var per = r2(Math.max(0, Number(period)||0));
+  var left = advanceRecoveryCapOf(c);
+  if(!(left > 0) || !(per > 0)) return 0;
+  var pct = Number(a.recoveryPct);
+  var want;
+  if(isFinite(pct) && pct > 0) want = r2(per * pct / 100);             // المكتوبُ يُقسّط
+  /* التلقائيُّ **للمسدَّد الموثَّق وحدَه**: `paid` هو دليلُنا أنّ مالاً خرج فعلاً.
+     والعقدُ القديم (بلا الحقل — سبق التتبّع) لا دليلَ عندنا على سداده ولا على
+     ما استُردّ منه خارج المنصّة، فخصمُ مبلغٍ لم نره خطرٌ أكبرُ من تركِه: يبقى
+     على سلوكه التاريخيّ — لا يستردّ إلّا بنسبةٍ مكتوبةٍ في عقده. */
+  else if(a.paid != null && advancePaidOf(c) > 0) want = per;          // كلُّ ما يسمح به العمل
+  else return 0;
+  var amt = r2(Math.min(want, left, per));
+  if(room != null) amt = r2(Math.max(0, Math.min(amt, r2(Number(room)||0))));
+  return amt;
+}
+/* هل الاستردادُ تلقائيٌّ (كاملُ المتبقّي) لا بنسبةٍ مكتوبةٍ في العقد؟ الشاشةُ
+   تقولها صراحةً — رقمٌ ظهر بلا أن يكتبه أحدٌ يجب أن يُعرَف من أين جاء. */
+function advanceRecoveryDerived(contract){
   var c = contract || {}, a = c.advance || {};
   var p = Number(a.recoveryPct);
-  if(isFinite(p) && p > 0) return p;                 // المكتوبُ في العقد يسبق
-  var amt = Number(a.amount);
-  if(!isFinite(amt) || amt <= 0) amt = advanceAmountOf(c);   // مسوّدةٌ لم يُختم مبلغُها بعد
-  if(!(amt > 0)) return 0;                           // لا مقدمةَ ⇒ لا استرداد
-  var base = contractWorkBase(c);
-  if(!(base > 0)) return 0;
-  return r2(Math.min(100, amt / base * 100));
+  return !(isFinite(p) && p > 0) && a.paid != null && advancePaidOf(c) > 0;
 }
-/* هل جاءت النسبةُ من الاشتقاق لا من حقلِ العقد؟ الشاشةُ تقولها صراحةً — رقمٌ
-   ظهر بلا أن يكتبه أحدٌ يجب أن يُعرَف من أين جاء. */
-function advanceRecoveryDerived(contract){
+/* عنوانُ صفِّ الاسترداد في السُّلَّم — بنسبتِه إن كُتبت، وإلّا بقاعدتِه. */
+function advanceRecoveryLabel(contract){
   var p = Number(((contract||{}).advance||{}).recoveryPct);
-  return !(isFinite(p) && p > 0) && advanceRecoveryPctOf(contract) > 0;
+  if(isFinite(p) && p > 0) return "استرداد الدفعة المقدمة "+p+"٪";
+  return advanceRecoveryDerived(contract)
+    ? "استرداد الدفعة المقدمة — كامل المتبقّي من المسدَّد"
+    : "استرداد الدفعة المقدمة";
 }
 
 /* ════ سدادُ الدفعة المقدمة — الدوالُّ النقية ════   (طلبُ المالك)
@@ -1613,29 +1643,24 @@ function extNet(ext, contract, ctx){
   var retPct = Number((c.retention||{}).pct); if(!isFinite(retPct)) retPct = 0;
   var retention = r2(period * retPct / 100);
 
-  // (٥) − استردادُ الدفعة المقدمة — بنسبةٍ من أعمال الفترة، وبسقفِ ما تبقّى منها.
-  //       والسقفُ **ما دُفع فعلاً** لا ما كُتب في العقد: دفعةٌ سُدِّد نصفُها لا
-  //       يُستردّ منها إلا نصفُها، وما لم يُسدَّد شيءٌ فلا استرداد. والعقودُ القديمة
-  //       (بلا حقل `paid` — سبقت التتبّع) تبقى بسقف دفعة العقد: مستخلصاتُها
-  //       التاريخية بُنيت عليه، وتصفيرُها بأثرٍ رجعيٍّ يكسر أرقاماً مسدَّدة.
-  //       والنسبةُ **النافذة** لا الحقلُ الخام: صفرُ الحقل سهوٌ، والمقدمةُ تُستردّ
-  //       بنسبتها من قاعدة الأعمال فتنطفئ عند اكتمال العمل (`advanceRecoveryPctOf`).
-  var advPct = advanceRecoveryPctOf(c);
-  var advTotal = Number((c.advance||{}).amount); if(!isFinite(advTotal)) advTotal = 0;
-  var advDone  = Number((c.advance||{}).recovered); if(!isFinite(advDone)) advDone = 0;
-  var advCap   = ((c.advance||{}).paid == null) ? advTotal : Math.min(advTotal, advancePaidOf(c));
-  var advanceRecovery = r2(Math.min(r2(period * advPct / 100), Math.max(0, r2(advCap - advDone))));
-
-  // (٦) − غرامةُ التأخير (بسقفها من قيمة العقد إن حُدِّد)
+  // (٥) − غرامةُ التأخير (بسقفها من قيمة العقد إن حُدِّد)
   var penalty = r2(Math.max(0, Number(x.penaltyAmount)||0));
   var penCap = penaltyCap(c.penalty, contractValue(c));
   if(penCap > 0) penalty = r2(Math.min(penalty, penCap));
 
-  // (٧) − الموادُّ المصروفةُ له من مستودعنا
+  // (٦) − الموادُّ المصروفةُ له من مستودعنا
   var materials = r2(Math.max(0, Number(x.materialsIssued)||0));
 
-  // (٨) − خصومُ عدم المطابقة / الجودة / السلامة
+  // (٧) − خصومُ عدم المطابقة / الجودة / السلامة
   var nonConformity = r2(Math.max(0, Number(x.ncDeduction)||0));
+
+  /* (٨) − استردادُ الدفعة المقدمة — **آخرُ الخصوم رتبةً** لا أوّلَها.
+     قاعدتُه في `advanceRecoveryOf`: كاملُ المتبقّي من المسدَّد ما لم تُكتب نسبةٌ
+     في العقد. وتأخيرُه هنا مقصود: يُحسب على ما **يتّسع له الصافي** بعد بقية
+     الخصوم، فلا يخرج مستخلصٌ بصافٍ سالبٍ يستحيل تحصيلُه — والباقي يُرحَّل إلى
+     المستخلص التالي، فلا يسقط ريالٌ من الدَّين. */
+  var advRoom = r2(Math.max(0, r2(withVat - r2(retention + penalty + materials + nonConformity))));
+  var advanceRecovery = advanceRecoveryOf(c, period, advRoom);
 
   var deductions = r2(retention + advanceRecovery + penalty + materials + nonConformity);
   var net = r2(withVat - deductions);
@@ -5574,7 +5599,7 @@ function reqFormHTML(){
       '<div class="ct-form-row">'+
         field("الدفعة المقدمة %", '<input class="form-input num" id="ct-r-adv" type="number" step="any" value="'+_esc((d.advance||{}).pct||0)+'">')+
         field("تُستردّ من كل مستخلص %", '<input class="form-input num" id="ct-r-advrec" type="number" step="any" value="'+_esc((d.advance||{}).recoveryPct||0)+'">'+
-          '<div class="ct-hint">اتركها صفراً ⇐ تُستردّ المقدمةُ بنسبتها من قيمة العقد، فتنطفئ عند اكتمال العمل.</div>')+
+          '<div class="ct-hint">اتركها صفراً ⇐ يُستردّ كاملُ المسدَّد من أوّل مستخلصٍ يتّسع له. واكتب نسبةً لتقسيط الاسترداد.</div>')+
       '</div>'+
       '<div class="ct-form-row">'+
         field("محتجز الضمان %", '<input class="form-input num" id="ct-r-ret" type="number" step="any" value="'+_esc((d.retention||{}).pct||0)+'">')+
@@ -6832,11 +6857,12 @@ function ctrOverviewHTML(c){
         : '<div class="ct-note">'+_icn("checkCircle","ic-sm")+' سُدِّدت الدفعة المقدمة — <b class="num">'+money(advPaid)+'</b> ر.س'+
           (advPaid+0.01<adv?' من أصل <span class="num">'+money(adv)+'</span> ر.س (سُدِّد أقلُّ من دفعة العقد)':'')+'</div>')+
       pays+
-      '<div class="ct-note" style="margin-top:8px">'+_icn("rotateCcw","ic-sm")+' يُخصَم <b class="num">'+advanceRecoveryPctOf(c)+'٪</b> من أعمال كل مستخلص'+
-        (advanceRecoveryDerived(c)?' (بنسبة المقدمة نفسِها — لم تُكتب نسبةٌ في العقد)':'')+
+      '<div class="ct-note" style="margin-top:8px">'+_icn("rotateCcw","ic-sm")+' '+
+        (advanceRecoveryDerived(c)
+          ? 'يُخصَم <b>كاملُ المتبقّي من المسدَّد</b> من أوّل مستخلصٍ يتّسع له (لم تُكتب نسبةٌ في العقد)'
+          : 'يُخصَم <b class="num">'+(Number((c.advance||{}).recoveryPct)||0)+'٪</b> من أعمال كل مستخلص')+
         ' — استُردّ حتى الآن <span class="num">'+money((c.advance||{}).recovered||0)+'</span> ر.س، ويتبقّى <b class="num">'+
-        money(Math.max(0, r2(Math.min(advPaid, Number((c.advance||{}).amount)||0) - (Number((c.advance||{}).recovered)||0))))+
-        '</b> ر.س — والاستردادُ بسقفِ المسدَّد فعلاً.</div>'+
+        money(advanceRecoveryCapOf(c))+'</b> ر.س — والاستردادُ بسقفِ المسدَّد فعلاً.</div>'+
     '</div>';
   }
 
@@ -6882,8 +6908,10 @@ function ctrOverviewHTML(c){
   apprSec+
   '<div class="card ct-sec"><div class="ct-sec-h">'+_icn("shield","ic-sm")+' الشروط التجارية</div>'+
     '<div class="ct-info">'+
-      infoCell("الدفعة المقدمة", ((c.advance||{}).pct||0)+"٪ — تُستردّ "+advanceRecoveryPctOf(c)+"٪ من كل مستخلص"+
-        (advanceRecoveryDerived(c)?" (بنسبة المقدمة — لم تُكتب نسبةٌ في العقد)":""))+
+      infoCell("الدفعة المقدمة", ((c.advance||{}).pct||0)+"٪ — "+
+        (Number((c.advance||{}).recoveryPct)>0
+          ? "تُستردّ "+(c.advance||{}).recoveryPct+"٪ من كل مستخلص"
+          : "يُستردّ كاملُ المسدَّد من أوّل مستخلصٍ يتّسع له"))+
       infoCell("محتجز الضمان", ((c.retention||{}).pct||0)+"٪ — يُفرَج "+(((c.retention||{}).releaseOn)==="warranty_end"?"بعد انتهاء الضمان":"عند الاستلام الابتدائي"))+
       infoCell("غرامة التأخير", _esc(penaltyText(c.penalty, contractValue(c))))+
       infoCell("المُفرَج من المحتجز", money((c.retention||{}).released||0)+" ر.س")+
@@ -6985,7 +7013,7 @@ function ladderHTML(calc, c){
     '<div class="ct-rung sum"><span class="rl">أعمال الفترة</span><span class="rv num">'+money(calc.period)+'</span></div>'+
     rung(vatLbl, calc.vat, 1, calc.mode!=="none")+
     rung("محتجز الضمان", calc.retention, -1, false)+
-    rung("استرداد الدفعة المقدمة "+advanceRecoveryPctOf(c)+"٪", calc.advanceRecovery, -1, false)+
+    rung(advanceRecoveryLabel(c), calc.advanceRecovery, -1, false)+
     rung("غرامة التأخير", calc.penalty, -1, false)+
     rung("مواد مصروفة من مستودعنا", calc.materials, -1, false)+
     rung("خصم عدم مطابقة / جودة", calc.nonConformity, -1, false)+
@@ -8538,7 +8566,7 @@ function extractPaperHTML(e, c, opt){
     rung("أعمال الفترة", calc.period, 0, "mid")+
     (calc.mode==="none" ? "" : rung("ض.ق.م "+Math.round(VAT_RATE*100)+"٪ على أعمال الفترة", calc.vat, 1, "vat"))+
     rung("محتجز الضمان "+(Number((c.retention||{}).pct)||0)+"٪", calc.retention, -1, "")+
-    rung("استرداد الدفعة المقدمة "+advanceRecoveryPctOf(c)+"٪", calc.advanceRecovery, -1, "")+
+    rung(advanceRecoveryLabel(c), calc.advanceRecovery, -1, "")+
     rung("غرامة التأخير", calc.penalty, -1, "")+
     rung("مواد مصروفة له من مستودعنا", calc.materials, -1, "")+
     rung("خصم عدم مطابقة / جودة", calc.nonConformity, -1, "")+
@@ -9701,8 +9729,8 @@ window.contracts = {
   _advancePaidOf: advancePaidOf, _advanceDueOf: advanceDueOf, _advancePayable: advancePayable,
   _voidAdvancePayment: voidAdvancePayment,
   _advanceRecoveredOf: advanceRecoveredOf, _advanceVoidableOf: advanceVoidableOf, _advVoidable: advVoidable,
-  _contractWorkBase: contractWorkBase, _advanceRecoveryPctOf: advanceRecoveryPctOf,
-  _advanceRecoveryDerived: advanceRecoveryDerived,
+  _advanceRecoveryCapOf: advanceRecoveryCapOf, _advanceRecoveryOf: advanceRecoveryOf,
+  _advanceRecoveryDerived: advanceRecoveryDerived, _advanceRecoveryLabel: advanceRecoveryLabel,
   openAdvPay: openAdvPay, closeAdvPay: closeAdvPay, doAdvPay: doAdvPay,
   openAdvVoid: openAdvVoid, closeAdvVoid: closeAdvVoid, doAdvVoid: doAdvVoid,
   contractsList: contractsList, contractById: contractById, contractForRequest: contractForRequest,
