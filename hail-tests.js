@@ -10599,62 +10599,75 @@ function contractsPhase1() {
       { prevGross: 0 }).advanceRecovery === 6000);
   /* ════ الدفعةُ المقدمةُ المسدَّدةُ تُخصَم من المستخلصات (بلاغُ المالك) ════
      صفرُ حقلِ الاسترداد كان يعني «لا استرداد أبداً» — فالمقدمةُ هبةٌ لا سلفة.
-     الحارسُ يمسك الارتدادَ: أن يعود الاستردادُ صفراً على عقدٍ سُدِّدت مقدمتُه. */
-  T("★★ advanceRecoveryPctOf: المكتوبُ في العقد يسبق، والصفرُ يُشتقّ بنسبة المقدمة من قاعدة الأعمال",
-    // نسبةٌ صريحةٌ ⇒ هي النافذة (لا يُلغي التلقائيُّ شرطاً وُقِّع عليه)
-    C._advanceRecoveryPctOf({ value: 100000, vatMode: "none", advance: { pct: 10, amount: 10000, recoveryPct: 20 } }) === 20 &&
-    // صفرٌ ⇒ نسبةُ المقدمة نفسُها (14,025 من 28,050 = 50٪) — عقدُ البلاغ حرفياً
-    C._advanceRecoveryPctOf({ value: 28050, vatMode: "none", advance: { pct: 50, amount: 14025, recoveryPct: 0 } }) === 50 &&
-    // ووضعُ «شامل الضريبة»: المقامُ بلا ضريبة (28,050 ÷ 1.15) فتنطفئ المقدمةُ تماماً
-    C._advanceRecoveryPctOf({ value: 28050, vatMode: "incl", advance: { pct: 50, amount: 14025 } }) === 57.5 &&
-    // مسوّدةٌ لم يُختم مبلغُها بعد ⇒ يُشتقّ من النسبة
-    C._advanceRecoveryPctOf({ value: 28050, vatMode: "none", advance: { pct: 50 } }) === 50 &&
-    // لا مقدمةَ ⇒ لا استرداد
-    C._advanceRecoveryPctOf({ value: 28050, vatMode: "none", advance: {} }) === 0 &&
-    C._advanceRecoveryPctOf({ value: 0, advance: { pct: 50, amount: 1000 } }) === 0);
-  T("★ advanceRecoveryDerived: الشاشةُ تعرف أنّ النسبة مشتقّةٌ لا مكتوبة",
-    C._advanceRecoveryDerived({ value: 28050, vatMode: "none", advance: { pct: 50, amount: 14025 } }) === true &&
-    C._advanceRecoveryDerived({ value: 28050, vatMode: "none", advance: { pct: 50, amount: 14025, recoveryPct: 20 } }) === false &&
-    C._advanceRecoveryDerived({ value: 28050, vatMode: "none", advance: {} }) === false);
-  T("★ contractWorkBase: قاعدةُ الأعمال بلا ضريبة — مقامُ نسبة الاسترداد",
-    C._contractWorkBase({ value: 28050, vatMode: "none" }) === 28050 &&
-    C._contractWorkBase({ value: 28050, vatMode: "excl" }) === 28050 &&
-    C._contractWorkBase({ value: 1150, vatMode: "incl" }) === 1000);
-  T("★★★ extNet: مقدمةٌ سُدِّدت وحقلُ الاسترداد صفرٌ ⇒ تُخصَم من المستخلص فعلاً (لا صفراً)",
+     والقاعدةُ التي أقرّها المالك: **كاملُ المتبقّي من المسدَّد** من أوّل مستخلصٍ
+     يتّسع له، لا نسبةً منه ولا تقسيطاً. الحارسُ يمسك الارتدادَ في الاتجاهين:
+     أن يعود الاستردادُ صفراً، أو أن يُقسَّط فيتأخّر ردُّ السلفة. */
+  T("★★ advanceRecoveryCapOf: المتبقّي = ما سُدِّد فعلاً ناقصَ ما استُردّ",
+    C._advanceRecoveryCapOf({ advance: { amount: 11900, paid: 11900, recovered: 0 } }) === 11900 &&
+    C._advanceRecoveryCapOf({ advance: { amount: 11900, paid: 11900, recovered: 4000 } }) === 7900 &&
+    // سُدِّد نصفُها ⇒ لا يُستردّ إلا نصفُها (لا يُستردّ ما لم يُدفع)
+    C._advanceRecoveryCapOf({ advance: { amount: 11900, paid: 5000, recovered: 0 } }) === 5000 &&
+    C._advanceRecoveryCapOf({ advance: { amount: 11900, paid: 0 } }) === 0 &&
+    // عقدٌ قديمٌ بلا تتبّع ⇒ بسقف دفعة العقد كما كان
+    C._advanceRecoveryCapOf({ advance: { amount: 11900, recovered: 1900 } }) === 10000 &&
+    C._advanceRecoveryCapOf({}) === 0);
+  T("★★★ والتلقائيُّ للمسدَّد الموثَّق وحدَه — العقدُ القديم (بلا `paid`) على سلوكه التاريخيّ",
+    // لا دليلَ على سدادِه ولا على ما استُردّ منه خارج المنصّة ⇒ لا يُخصَم إلّا بنسبةٍ مكتوبة
+    C._advanceRecoveryOf({ advance: { amount: 5000, recovered: 0 } }, 25000) === 0 &&
+    C._advanceRecoveryOf({ advance: { amount: 5000, recovered: 0, recoveryPct: 20 } }, 25000) === 5000 &&
+    C._advanceRecoveryDerived({ advance: { amount: 5000 } }) === false &&
+    C._advanceRecoveryLabel({ advance: { amount: 5000 } }) === "استرداد الدفعة المقدمة");
+  T("★★★ advanceRecoveryOf: بلا نسبةٍ مكتوبةٍ ⇒ **كاملُ المتبقّي** لا نسبةٌ منه",
+    // عقدُ البلاغ حرفياً: مقدمةٌ 11,900 مسدَّدة · أعمالُ الفترة 16,660 ⇒ يُخصَم 11,900
+    C._advanceRecoveryOf({ advance: { amount: 11900, paid: 11900, recovered: 0 } }, 16660) === 11900 &&
+    // ونسبةٌ مكتوبةٌ تُقسّط: 50٪ من 16,660
+    C._advanceRecoveryOf({ advance: { amount: 11900, paid: 11900, recovered: 0, recoveryPct: 50 } }, 16660) === 8330 &&
+    // ولا يُخصَم من عملٍ لم يُنجَز: فترةٌ 5,000 ⇒ 5,000 والباقي يُرحَّل
+    C._advanceRecoveryOf({ advance: { amount: 11900, paid: 11900, recovered: 0 } }, 5000) === 5000 &&
+    // ولا استردادَ بلا سدادٍ ولا بلا عمل
+    C._advanceRecoveryOf({ advance: { amount: 11900, paid: 0 } }, 16660) === 0 &&
+    C._advanceRecoveryOf({ advance: { amount: 11900, paid: 11900 } }, 0) === 0);
+  T("★★★ ولا يخرج المستخلصُ بصافٍ سالبٍ: الاستردادُ يقف عند ما يتّسع له الصافي",
+    C._advanceRecoveryOf({ advance: { amount: 11900, paid: 11900, recovered: 0 } }, 16660, 4000) === 4000 &&
+    C._advanceRecoveryOf({ advance: { amount: 11900, paid: 11900, recovered: 0 } }, 16660, 0) === 0 &&
+    C._advanceRecoveryOf({ advance: { amount: 11900, paid: 11900, recovered: 0 } }, 16660, -5) === 0 &&
+    C._advanceRecoveryOf({ advance: { amount: 11900, paid: 11900, recovered: 0 } }, 16660, 99999) === 11900);
+  T("★ advanceRecoveryDerived/Label: الشاشةُ تقول أنّ الاستردادَ تلقائيٌّ لا بنسبةٍ مكتوبة",
+    C._advanceRecoveryDerived({ advance: { amount: 11900, paid: 11900 } }) === true &&
+    C._advanceRecoveryDerived({ advance: { amount: 11900, paid: 11900, recoveryPct: 50 } }) === false &&
+    C._advanceRecoveryDerived({ advance: {} }) === false &&
+    C._advanceRecoveryLabel({ advance: { amount: 11900, paid: 11900 } }) === "استرداد الدفعة المقدمة — كامل المتبقّي من المسدَّد" &&
+    C._advanceRecoveryLabel({ advance: { recoveryPct: 50 } }) === "استرداد الدفعة المقدمة 50٪");
+  T("★★★ extNet: عقدُ البلاغ — مقدمةٌ 11,900 مسدَّدة وحقلُ الاسترداد صفرٌ ⇒ تُخصَم كاملةً",
     (() => {
-      // عقدُ البلاغ: 28,050 بلا ضريبة · مقدمةٌ 50٪ سُدِّدت كاملةً · حقلُ الاسترداد صفر
-      const c = { value: 28050, vatMode: "none", retention: { pct: 0 }, penalty: {},
-                  advance: { pct: 50, amount: 14025, recoveryPct: 0, recovered: 0, paid: 14025, payments: [] } };
-      const ext = { lines: [{ cumQty: 1, unitPrice: 10000 }] };
-      const n = C._extNet(ext, c, { prevGross: 0 });
-      // 50٪ من أعمال الفترة 10,000 ⇒ 5,000 مستردّة، والصافي 5,000
-      return n.advanceRecovery === 5000 && n.net === 5000;
+      const c = { value: 23800, vatMode: "none", retention: { pct: 0 }, penalty: {},
+                  advance: { pct: 50, amount: 11900, recoveryPct: 0, recovered: 0, paid: 11900, payments: [] } };
+      // 70٪ من 1,400 م² × 17 ر.س ⇒ أعمالُ الفترة 16,660
+      const n = C._extNet({ lines: [{ cumQty: 980, unitPrice: 17 }] }, c, { prevGross: 0 });
+      return n.period === 16660 && n.advanceRecovery === 11900 && n.net === 4760;
     })());
-  T("★★ ولا يُستردّ فوق ما سُدِّد فعلاً ولا فوق ما تبقّى من المقدمة",
+  T("★★ ومستخلصٌ لا يتّسع للمتبقّي يستردّ ما يتّسع له ويُرحّل الباقي — لا صافيَ سالباً",
     (() => {
-      const base = { value: 28050, vatMode: "none", retention: { pct: 0 }, penalty: {} };
-      const ext = { lines: [{ cumQty: 1, unitPrice: 28050 }] };
-      // سُدِّد نصفُ المقدمة (7,000) ⇒ لا يُستردّ إلا 7,000 ولو بلغت النسبةُ أكثر
-      const half = C._extNet(ext, { ...base, advance: { pct: 50, amount: 14025, recovered: 0, paid: 7000 } }, { prevGross: 0 });
-      // ولم يُسدَّد شيءٌ ⇒ لا استرداد أصلاً
-      const none = C._extNet(ext, { ...base, advance: { pct: 50, amount: 14025, recovered: 0, paid: 0 } }, { prevGross: 0 });
-      // وما استُردّ سابقاً يُخصَم من السقف
-      const rest = C._extNet(ext, { ...base, advance: { pct: 50, amount: 14025, recovered: 14000, paid: 14025 } }, { prevGross: 0 });
-      return half.advanceRecovery === 7000 && none.advanceRecovery === 0 && rest.advanceRecovery === 25;
+      const c = { value: 23800, vatMode: "none", retention: { pct: 5 }, penalty: {},
+                  advance: { pct: 50, amount: 11900, recovered: 0, paid: 11900 } };
+      // أعمالُ فترةٍ 5,000 · محتجزٌ 250 ⇒ المتّسعُ 4,750 وحدَه، والصافي صفر
+      const n = C._extNet({ lines: [{ cumQty: 5000, unitPrice: 1 }] }, c, { prevGross: 0 });
+      return n.period === 5000 && n.retention === 250 && n.advanceRecovery === 4750 && n.net === 0;
     })());
-  T("★★ والاستردادُ التلقائيُّ ينطفئ تماماً عند اكتمال العمل — لا قبلَه ولا بعدَه",
+  T("★★ والمستخلصُ التالي يستكمل ما رُحِّل — لا يسقط ريالٌ من الدَّين",
     (() => {
-      const c = { value: 28050, vatMode: "none", retention: { pct: 0 }, penalty: {},
-                  advance: { pct: 50, amount: 14025, recovered: 0, paid: 14025 } };
-      // مستخلصٌ يغطّي العقدَ كلَّه ⇒ يستردّ المقدمةَ كاملةً بالضبط
-      const full = C._extNet({ lines: [{ cumQty: 1, unitPrice: 28050 }] }, c, { prevGross: 0 });
-      return full.advanceRecovery === 14025;
+      const c = { value: 23800, vatMode: "none", retention: { pct: 0 }, penalty: {},
+                  advance: { pct: 50, amount: 11900, recovered: 4750, paid: 11900 } };
+      const n = C._extNet({ lines: [{ cumQty: 10000, unitPrice: 1 }] }, c, { prevGross: 5000 });
+      return n.period === 5000 && n.advanceRecovery === 5000 && C._advanceRecoveryCapOf(c) === 7150;
     })());
-  T("★ وشرطُ العقد المطبوع والسُّلَّمُ والبطاقةُ يقولون النسبةَ النافذة لا الحقلَ الخام",
-    /advanceRecoveryPctOf\(c\)>0 \? "، تُستردّ بخصم "\+advanceRecoveryPctOf\(c\)/.test(src) &&
-    (src.match(/rung\("استرداد الدفعة المقدمة "\+advanceRecoveryPctOf\(c\)\+"٪"/g) || []).length === 2 &&
-    /تُستردّ "\+advanceRecoveryPctOf\(c\)\+"٪ من كل مستخلص"/.test(src) &&
-    !/Number\(\(c\.advance\|\|\{\}\)\.recoveryPct\)\|\|0/.test(src));
+  T("★ والسُّلَّمُ والبطاقةُ وشرطُ العقد يقولون القاعدةَ النافذة لا الحقلَ الخام",
+    (src.match(/rung\(advanceRecoveryLabel\(c\), calc\.advanceRecovery/g) || []).length === 2 &&
+    /كاملُ المتبقّي من المسدَّد<\/b> من أوّل مستخلصٍ يتّسع له/.test(src) &&
+    /يُستردّ كاملُ المسدَّد من أوّل مستخلصٍ يتّسع له/.test(src) &&
+    /تُستردّ بالخصم من مستخلصات الطرف الثاني ابتداءً من أوّل مستخلص/.test(src) &&
+    // والاستردادُ آخرُ الخصوم رتبةً — يُحسب على ما يتّسع له الصافي
+    /var advRoom = r2\(Math\.max\(0, r2\(withVat - r2\(retention \+ penalty \+ materials \+ nonConformity\)\)\)\);\s*\n\s*var advanceRecovery = advanceRecoveryOf\(c, period, advRoom\);/.test(src));
   T("★ advancePaidOf/advanceDueOf: المسدَّدُ والمتبقّي من الحقول — والقديمُ لا مطالبةَ وهميةً عليه",
     C._advancePaidOf({ advance: { amount: 10000, paid: 4000 } }) === 4000 &&
     C._advanceDueOf({ advance: { amount: 10000, paid: 4000 }, status: "ctr_active" }) === 6000 &&
