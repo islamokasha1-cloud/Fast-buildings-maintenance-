@@ -566,7 +566,14 @@ function predelivery() {
        والختمُ والسجلُّ في `doUpdatePurchaseStatus`، والوجهةُ في
        `savePriceComparison` و`doSendToFinance` — كلُّها نواةٌ في هذا الملف،
        ونقلُ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة تعديله ممنوع (CLAUDE.md). */
-    const IDX_CEILING = 38272;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 38272 إلى 38310 — ‏٣٨ سطراً لإصلاح «رابطُ واتساب يقول للمشرف: لا
+       صلاحيةَ لك» (بلاغ المالك 31/08). كلُّه **تعديلٌ على منطقٍ قائمٍ في موضعه**:
+       `_openPendingPO` (الرابطُ العميق) · `getAvailableStatuses` (مصدرُ حقيقة
+       الإجراءات) · `doUpdatePurchaseStatus` (اعتراضُ السنتينل) · خريطةُ تسميات
+       «بانتظار إجراءك». ولا وحدةَ تستضيفها: نقلُ منطقٍ قائمٍ إلى ملفٍّ جديدٍ بحجّة
+       إصلاحه ممنوع (CLAUDE.md) — ووحدةُ `supervisor-receipt.js` تملك المحضرَ نفسَه
+       لا حارسَ الصفحات ولا جدولَ الإجراءات. */
+    const IDX_CEILING = 38310;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -8654,6 +8661,42 @@ function supervisorReceiptGuards() {
     /findNamedRecipient\(\s*\n?\s*db, \{ user: after\.receivingSupervisorUser, name: after\.receivingSupervisor \}, projectId\)/.test(purSrc) &&
     /async function findNamedRecipient\(db, target, projectId\)/.test(recSrc) &&
     /findNamedRecipient \};$/m.test(recSrc));
+
+  /* ══ «رابطُ واتساب يقول للمشرف: لا صلاحيةَ لك» (بلاغ المالك 31/08) ══
+     الرسالةُ تصل، و«فتح الطلب» يقذفه إلى اللوحة برسالة حجبٍ ولا يرى الطلب. جذران:
+     (١) الرابطُ كان يمرّ بـ`showPage("purchases")`، وهي محجوبةٌ عمّن لا يملك مفتاحَ
+         `purchases` — فيبتلعها الحارسُ وتضيع المهمّة.
+     (٢) `getAvailableStatuses` — مصدرُ حقيقة الإجراءات — بلا فرعٍ للمشرف، فمرحلتُه
+         وحدَها لا تُعَدّ في «بانتظار إجراءك» ولا تظهر في «تحديث الحالة». */
+  T("★★ الرابطُ العميق لا يمرّ بصفحةٍ محجوبة — يفتح الطلبَ في مكانه",
+    /_pageBlocked = typeof _blockedPagesForUser==="function" && _blockedPagesForUser\(\)\.has\("purchases"\)/.test(HTML) &&
+    /if\(!_pageBlocked\)\{ try\{ showPage\("purchases"\); \}catch\(e\)\{\} \}/.test(HTML) &&
+    /openPurchaseDetail\(poId\); \}catch\(e\)\{ console\.warn\("deep link open failed:",e\); \} \}, _pageBlocked\?60:350\)/.test(HTML));
+
+  // الإجراءُ في مصدر الحقيقة نفسِه — تشغيلاً لا مطابقةَ نصّ
+  {
+    const _i = HTML.indexOf("function getAvailableStatuses(");
+    const _src = _i >= 0 ? HTML.slice(_i, HTML.indexOf("\nfunction ", _i + 10)) : "";
+    const build = (role) => {
+      const win = { supervisorReceipt: { canReceive: () => role === "admin" || role === "مشرف" || role === "supervisor" } };
+      return new Function("currentUser", "getPOTotal", "PO_CEO_THRESHOLD", "window", "supervisorReceipt",
+        _src + "\nreturn getAvailableStatuses;")({ role }, () => 1000, 50000, win, win.supervisorReceipt);
+    };
+    const svOpts = build("مشرف")("sv_receiving", {}).map(o => o.v);
+    T("★★ المشرفُ يملك إجراءً في مرحلته (فتُعَدّ في «بانتظار إجراءك» ويقبلها حارسُ التحديث)",
+      svOpts.includes("__SUPERVISOR_RECEIPT__"));
+    T("★ وبالصيغة الإنجليزية للدور كذلك",
+      build("supervisor")("sv_receiving", {}).map(o => o.v).includes("__SUPERVISOR_RECEIPT__"));
+    T("★★ ولا يُمنح لدورٍ لا يستلم ميدانياً (المالية) ولا في غير مرحلته",
+      !build("finance")("sv_receiving", {}).map(o => o.v).includes("__SUPERVISOR_RECEIPT__") &&
+      !build("مشرف")("wh_receiving", {}).map(o => o.v).includes("__SUPERVISOR_RECEIPT__"));
+  }
+  T("★★ السنتينل يفتح نافذة المحضر ولا يُكتب حالةً (اعتراضٌ + استثناءٌ من allowed)",
+    /if\(newStatus === "__SUPERVISOR_RECEIPT__"\)\{/.test(HTML) &&
+    /closeModal\("modal-purchase-update"\);\n\s*if\(window\.supervisorReceipt\) supervisorReceipt\.open\(poId\);/.test(HTML) &&
+    /v!=="__WAREHOUSE_AUDIT__"&&v!=="__SUPERVISOR_RECEIPT__"&&/.test(HTML));
+  T("★ بطاقةُ «بانتظار إجراءك» تسمّي دورَ المشرف بصيغتيه",
+    /supervisor:"المشرف الميداني", "مشرف":"المشرف الميداني"/.test(HTML));
 }
 
 function pcNameOverrideGuards() {

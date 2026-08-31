@@ -1238,6 +1238,71 @@ check('16د) ★★ الكميةُ فوق المتبقي تُقصّ لسقفه (
 check('16د) وقيدُ الاكتمال في السجل', s16.completeEvent===true);
 check('16هـ) ★ التحويل المباشر يحيل للمستودع بقيد تجاوزٍ موثَّق', s16.directStatus==='wh_receiving' && s16.directLogged===true, 'الحالة='+s16.directStatus);
 
+/* ══ سيناريو 17: رابطُ واتساب «فتح الطلب» في يد المشرف المحجوبةِ عنه صفحةُ المشتريات ══
+   بلاغُ المالك 31/08: الرسالةُ تصل، والضغطُ على «فتح الطلب» يقذفه إلى اللوحة برسالة
+   «🔒 ليس لديك صلاحية الوصول لهذه الصفحة» والطلبُ لا يظهر. الرابطُ تكليفٌ بطلبٍ بعينه
+   لا استعراضٌ لقائمة، فيُفتح الطلبُ في مكانه بأزراره كاملة.
+
+   **صفحةٌ ثانيةٌ نظيفة**: السيناريوهاتُ السابقة تستبدل `openModal`/`openPurchaseDetail`
+   بمُزيّفاتٍ في نفس الصفحة، فقياسُ «هل ظهر الطلبُ فعلاً» عليها يقيس المزيَّف. ══════ */
+log('\n=== السيناريو 17: الرابط العميق للمشرف المحجوبةِ عنه صفحةُ المشتريات ══');
+const page17 = await browser.newPage();
+await page17.addInitScript(MOCK_FIREBASE);
+page17.on('pageerror', e=>boot.push(String(e.message).slice(0,120)));
+await page17.goto('file://'+process.cwd()+'/index.html', { waitUntil:'domcontentloaded', timeout:20000 });
+await page17.waitForTimeout(3000);
+const s17 = await page17.evaluate(async ()=>{
+  const out={}; const toasts=[]; window.toast=(m)=>toasts.push(String(m));
+  const PC=PURCHASES_COLLECTION();
+  const mkPO=(id)=>({ id, building:'مبنى الأمانة', projectId:'hail', status:'sv_receiving',
+    supervisor:'محمد داوود', receivingSupervisor:'أسامة السادات', receivingSupervisorUser:'osama',
+    items:[{ itemName:'كابل', qty:4, unit:'متر', unitCost:5, itemCost:20 }],
+    timeline:[], createdAt:'2026-08-30T08:00:00' });
+  const reset=()=>{ document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    document.getElementById('page-dashboard').classList.add('active');
+    const m=document.getElementById('modal-purchase-detail'); if(m) m.classList.remove('open');
+    toasts.length=0; };
+
+  // (أ) المشرفُ الذي أُلغي عنه مفتاحُ «المشتريات» — الحالةُ المُبلَّغة بالضبط
+  currentUser={ name:'أسامة السادات', user:'osama', role:'مشرف', permissions:{ purchases:false } };
+  purchases=[mkPO('PO-DL-1')]; window.__store[PC+'/PO-DL-1']=Object.assign({},purchases[0]);
+  out.pageBlocked = _blockedPagesForUser().has('purchases');
+  reset(); window._pendingPO='PO-DL-1';
+  try{ _openPendingPO(); }catch(e){ out.err=String(e&&e.message); }
+  await new Promise(r=>setTimeout(r,400));
+  out.deniedToast = toasts.some(m=>m.indexOf('صلاحية الوصول لهذه الصفحة')>=0);
+  out.detailOpen  = document.getElementById('modal-purchase-detail').classList.contains('open');
+  out.stayedPut   = !document.getElementById('page-purchases').classList.contains('active');
+  out.titleShown  = (document.getElementById('po-detail-title').textContent||'').indexOf('PO-DL-1')>=0;
+  out.receiveBtn  = (document.getElementById('po-detail-footer').innerHTML||'').indexOf("supervisorReceipt.open('PO-DL-1')")>=0;
+
+  // (ب) ومن لم تُحجب عنه الصفحةُ يُنقل إلى القائمة كما كان — الطلبُ في سياقه
+  currentUser={ name:'أسامة السادات', user:'osama', role:'مشرف', permissions:{ purchases:true } };
+  purchases=[mkPO('PO-DL-2')]; window.__store[PC+'/PO-DL-2']=Object.assign({},purchases[0]);
+  reset(); window._pendingPO='PO-DL-2';
+  try{ _openPendingPO(); }catch(e){ out.err2=String(e&&e.message); }
+  await new Promise(r=>setTimeout(r,700));
+  out.movedToList = document.getElementById('page-purchases').classList.contains('active');
+  out.detailOpen2 = document.getElementById('modal-purchase-detail').classList.contains('open');
+
+  // (ج) والمرحلةُ إجراءٌ في مصدر الحقيقة — تُعَدّ في «بانتظار إجراءك» ويقبلها حارسُ التحديث
+  out.svActions = getAvailableStatuses('sv_receiving', purchases[0]).map(o=>o.v);
+  out.needsMyAction = poNeedsMyAction(purchases[0]);
+  currentUser={ name:'المالية', role:'finance' };
+  out.financeActions = getAvailableStatuses('sv_receiving', purchases[0]).map(o=>o.v);
+  return out;
+});
+await page17.close();
+check('17أ) صفحةُ المشتريات محجوبةٌ فعلاً عن هذا المشرف (شرطُ البلاغ)', s17.pageBlocked===true);
+check('17أ) ★★ الرابطُ لا يعود برسالة «ليس لديك صلاحية الوصول لهذه الصفحة»', s17.deniedToast===false);
+check('17أ) ★★ بل يُفتح الطلبُ نفسُه في مكانه', s17.detailOpen===true && s17.titleShown===true, 'مودال='+s17.detailOpen+' عنوان='+s17.titleShown);
+check('17أ) ★ ولا يُقذف إلى صفحةٍ محجوبة', s17.stayedPut===true);
+check('17أ) ★★ وزرُّ «استلام المشرف» حاضرٌ فيه (الرابطُ يوصل إلى الإجراء لا إلى العرض)', s17.receiveBtn===true);
+check('17ب) ★ ومن لم تُحجب عنه الصفحةُ يُنقل إلى القائمة كما كان', s17.movedToList===true && s17.detailOpen2===true, 'القائمة='+s17.movedToList+' مودال='+s17.detailOpen2);
+check('17ج) ★★ `getAvailableStatuses` تعطي المشرفَ إجراءً في مرحلته', (s17.svActions||[]).includes('__SUPERVISOR_RECEIPT__'), JSON.stringify(s17.svActions));
+check('17ج) ★★ فتَعُدّه بطاقةُ «بانتظار إجراءك» (poNeedsMyAction)', s17.needsMyAction===true);
+check('17ج) ★ ولا يُمنح لدورٍ لا يستلم ميدانياً', !(s17.financeActions||[]).includes('__SUPERVISOR_RECEIPT__'), JSON.stringify(s17.financeActions));
+
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
 if(boot.length) log('(أخطاء إقلاع غير حرجة: '+boot.length+' — متوقّعة من غياب CDN)');
