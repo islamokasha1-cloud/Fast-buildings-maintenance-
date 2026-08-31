@@ -30,7 +30,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2979";
+const MODULE_BUILD = "v18.9.2982";
 const MAX_PHOTOS   = 6;
 const MAX_PHOTO_MB = 10;
 
@@ -156,6 +156,17 @@ function open(poId){
         <div id="sv-photo-previews" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div>
       </div>
 
+      <div style="margin-top:12px">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">🏪 المورد الفعلي <span style="font-weight:400;color:var(--muted)">(من سلّم البضاعة فعلاً)</span></div>
+        <input class="form-input" id="sv-vendor" placeholder="اكتب اسم المورد الذي سلّم فعلاً..." style="font-size:12px;width:100%">
+        <div style="font-size:10.5px;color:var(--muted);margin-top:4px">
+          مورد الطلب: <b>${_esc(p.vendor||"—")}</b>${p.vendor?`
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 7px;margin-inline-start:6px"
+            onclick="supervisorReceipt._sameVendor()">هو نفسه ✓</button>`:""}
+          — قد يورّد غيرُ المقترح في الطلب، والورقةُ تنسب التوريدَ لمن تكتبه هنا.
+        </div>
+      </div>
+
       <div style="margin-top:10px">
         <input class="form-input" id="sv-notes" placeholder="ملاحظات الاستلام (حالة البضاعة، نواقص، أضرار...)" style="font-size:12px;width:100%">
       </div>
@@ -199,6 +210,14 @@ function _renderPreviews(){
 }
 function _rmPhoto(i){ _files.splice(i,1); _renderPreviews(); }
 
+/* «هو نفسه ✓» يملأ الحقلَ بمورد الطلب. ولمَ لا يُملأ سلفاً؟ لأنّ الحقلَ المعبَّأ
+   يُمرَّر بلا قراءة، فيعود بنا إلى العيب نفسِه: ورقةٌ تنسب التوريدَ لمن لم يورّد
+   لأنّ أحداً لم ينتبه. الملءُ بضغطةٍ **فعلٌ صريح** يُثبته صاحبُه. */
+function _sameVendor(){
+  const p=_po(_openPoId), inp=document.getElementById("sv-vendor");
+  if(inp && p){ inp.value = p.vendor||""; inp.focus(); }
+}
+
 /* ════════ الحفظ ════════ */
 async function save(){
   const poId=_openPoId;
@@ -224,16 +243,25 @@ async function save(){
   const force=!!document.getElementById("sv-force")?.checked;
   const forceReason=(document.getElementById("sv-force-reason")?.value||"").trim();
   const notes=(document.getElementById("sv-notes")?.value||"").trim();
+  const vendor=(document.getElementById("sv-vendor")?.value||"").trim();
 
   if(!typed.length && !force){ _toast("⚠ أدخل كميةً مستلمةً واحدةً على الأقل — أو علّم «تحويل رغم النقص»","warn"); return; }
 
-  // الصور اختيارية — مع تنبيه (قرار المالك): تأكيدٌ صريح لا منع
-  if(!_files.length && typed.length){
-    try{
-      await showConfirm({ title:"استلام بلا صور", icon:"📷",
-        msg:"لم تُرفَق أي صورة للمحضر. الصورُ دليلُ ما وصل الموقعَ فعلاً عند أي خلاف — هل تريد الحفظ بدونها؟",
-        okText:"حفظ بلا صور", okClass:"btn-warning" });
-    }catch(e){ return; }
+  /* الصورُ واسمُ المورد اختياريان — بتنبيهٍ صريحٍ لا منع (قرار المالك في الصور،
+     ويطّرد في المورد: قد يسلّم سائقٌ بلا ورقةٍ فلا يُعرف الاسمُ لحظتَها، ومنعُ
+     الحفظ حينها يُضيّع المحضرَ كلَّه). **وتنبيهٌ واحدٌ يجمعهما** — نافذتان
+     متتاليتان تُقرَآن نقراً لا قراءة، فيسقط أثرُ التنبيه أصلاً. */
+  if(typed.length){
+    const miss=[];
+    if(!_files.length) miss.push("صورٌ للمستلَم");
+    if(!vendor)        miss.push("اسمُ المورد الفعلي");
+    if(miss.length){
+      try{
+        await showConfirm({ title:"محضرٌ ناقصُ التوثيق", icon:"📷",
+          msg:"لم يُذكر في المحضر: "+miss.join(" و")+".\n\nوهما دليلُ ما وصل ومَن ورّده عند أي خلاف — والورقةُ تُوقَّع بما فيها. هل تريد الحفظ هكذا؟",
+          okText:"حفظ رغم النقص", okClass:"btn-warning" });
+      }catch(e){ return; }
+    }
   }
 
   const btn=document.getElementById("sv-save-btn");
@@ -266,14 +294,15 @@ async function save(){
   const now=new Date().toISOString();
   if(!Array.isArray(live.svReceipts)) live.svReceipts=[];
   const rec={ ref:"SVR-"+String(live.svReceipts.length+1).padStart(2,"0"),
-              by:_me(), at:now, notes, photos, items:taken };
+              by:_me(), at:now, notes, vendor, photos, items:taken };
   live.svReceipts.push(rec);
   if(!Array.isArray(live.timeline)) live.timeline=[];
 
   const takenStr=taken.map(t=>t.name+" ("+t.qty+" "+(t.unit||"")+")").join("، ");
   live.timeline.push({ event:"استلام ميداني — محضر المشرف "+rec.ref, code:"sv_receipt",
     by:rec.by, at:now, icon:"👷",
-    notes:[takenStr, photos.length?("صور: "+photos.length):"⚠ بلا صور", notes].filter(Boolean).join(" — ") });
+    notes:[takenStr, vendor?("المورد الفعلي: "+vendor):"⚠ بلا اسم مورد",
+           photos.length?("صور: "+photos.length):"⚠ بلا صور", notes].filter(Boolean).join(" — ") });
 
   const complete=svComplete(live);
   const moved=complete||force;
@@ -335,14 +364,29 @@ async function directTransfer(poId){
 }
 
 /* ════════ العرض: تفاصيل الطلب · نافذة التدقيق · الطباعة ════════ */
-function _recHtml(r, compact, poId){
+/* اختلافُ المورد الفعلي عن مورد الطلب هو **الخبر** لا الاسمُ نفسُه: توريدٌ من
+   غير المعتمَد يمسّ الفاتورةَ والسعرَ والضمان، فيُبرَز حيث يقع لا يُترك ليُقارَن
+   بالعين. والمقارنةُ متساهلةٌ في الفراغات وحدَها — لا نُطبّع اسماً ولا نخمّن. */
+function _vendorMismatch(r, poVendor){
+  const a=String((r&&r.vendor)||"").trim(), b=String(poVendor||"").trim();
+  return !!(a && b && a!==b);
+}
+function _vendorChip(r, poVendor){
+  if(!r) return "";
+  if(!r.vendor) return `<span style="color:#b45309;font-weight:700"> · ⚠ بلا اسم مورد</span>`;
+  const diff=_vendorMismatch(r, poVendor);
+  return ` · <span style="${diff?"background:#fef3c7;color:#92400e;border-radius:5px;padding:0 5px;font-weight:800":"color:var(--muted)"}">`
+    +`🏪 ${_esc(r.vendor)}${diff?" ≠ مورد الطلب":""}</span>`;
+}
+
+function _recHtml(r, compact, poId, poVendor){
   const lines=(r.items||[]).map(t=>_esc(t.name)+" <b style='font-family:monospace'>"+t.qty+"</b> "+_esc(t.unit||"")).join(" · ");
   const thumbs=(r.photos||[]).map(ph=>`<a href="${_esc(ph.url)}" target="_blank"><img src="${_esc(ph.url)}" style="width:${compact?44:64}px;height:${compact?44:64}px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"></a>`).join("");
   // زرُّ الوثيقة — في التفاصيل ونافذة التدقيق معاً (بطاقةٌ واحدةٌ تخدمهما)
   const prn = poId ? `<button class="btn btn-ghost btn-sm" style="font-size:10.5px;padding:2px 8px;float:inline-start"
       onclick="supervisorReceipt.printReceipt('${_esc(poId)}','${_esc(r.ref||"")}')">🖨 طباعة المحضر</button>` : "";
   return `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:6px;background:var(--surface2)">
-    <div style="font-size:11px">${prn}<b>👷 ${_esc(r.ref||"محضر")}</b> — ${_esc(r.by||"—")} · ${_esc(String(r.at||"").slice(0,10))}
+    <div style="font-size:11px">${prn}<b>👷 ${_esc(r.ref||"محضر")}</b> — ${_esc(r.by||"—")} · ${_esc(String(r.at||"").slice(0,10))}${_vendorChip(r, poVendor)}
       ${!(r.photos||[]).length?'<span style="color:#b45309;font-weight:700"> · ⚠ بلا صور</span>':""}</div>
     ${lines?`<div style="font-size:11px;margin-top:3px">${lines}</div>`:""}
     ${r.notes?`<div style="font-size:10.5px;color:var(--muted);margin-top:3px">${_esc(r.notes)}</div>`:""}
@@ -361,7 +405,7 @@ function sectionHtml(p){
   const progress=rows.length?`<span style="font-size:10.5px;background:${done===rows.length?"#dcfce7;color:#166534":"#fef3c7;color:#92400e"};border-radius:6px;padding:2px 8px;font-weight:700">${done}/${rows.length} بند مكتمل الاستلام</span>`:"";
   return `<div class="d-sec" style="margin-top:14px">
     <div class="d-sec-label">استلام المشرف الميداني (${recs.length} محضر) ${progress}</div>
-    ${recs.length?recs.map(r=>_recHtml(r,false,p.id)).join(""):`<div style="font-size:11.5px;color:var(--muted)">لا محاضر بعد — بانتظار استلام المشرف للتوريد.</div>`}
+    ${recs.length?recs.map(r=>_recHtml(r,false,p.id,p.vendor)).join(""):`<div style="font-size:11.5px;color:var(--muted)">لا محاضر بعد — بانتظار استلام المشرف للتوريد.</div>`}
   </div>`;
 }
 
@@ -371,7 +415,7 @@ function auditHtml(p){
   if(!recs.length) return "";
   return `<div style="margin-top:8px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px">
     <div style="font-size:11.5px;font-weight:800;color:#92400e">👷 استلام المشرف الميداني — ${recs.length} محضر (قارن به ما تدقّقه)</div>
-    ${recs.map(r=>_recHtml(r,true,p&&p.id)).join("")}
+    ${recs.map(r=>_recHtml(r,true,p&&p.id,p&&p.vendor)).join("")}
   </div>`;
 }
 
@@ -382,8 +426,11 @@ function printHtml(p){
   const rows=recs.map(r=>{
     const lines=(r.items||[]).map(t=>String(t.name||"")+" ("+t.qty+" "+(t.unit||"")+")").join("، ");
     const imgs=(r.photos||[]).map(ph=>`<img src="${String(ph.url||"")}" style="height:80px;border-radius:6px;border:1px solid #e2e8f0;margin:2px">`).join("");
+    const vLine = r.vendor
+      ? " · المورد الفعلي: "+String(r.vendor)+(_vendorMismatch(r,p&&p.vendor)?" (يخالف مورد الطلب)":"")
+      : " · بلا اسم مورد";
     return `<div style="border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px;margin-top:6px">
-      <div style="font-size:10px"><b>${String(r.ref||"محضر")}</b> — ${String(r.by||"—")} · ${String(r.at||"").slice(0,10)}${!(r.photos||[]).length?" · بلا صور":""}</div>
+      <div style="font-size:10px"><b>${String(r.ref||"محضر")}</b> — ${String(r.by||"—")} · ${String(r.at||"").slice(0,10)}${vLine}${!(r.photos||[]).length?" · بلا صور":""}</div>
       ${lines?`<div style="font-size:10px;margin-top:2px">${lines}</div>`:""}
       ${r.notes?`<div style="font-size:9px;color:#64748b;margin-top:2px">${String(r.notes)}</div>`:""}
       ${imgs?`<div style="margin-top:4px">${imgs}</div>`:""}
@@ -466,7 +513,10 @@ function paperHTML(p, ref){
       <tr><td>رقم طلب الشراء</td><td class="n">${_esc(p.id)}</td></tr>
       <tr><td>المشروع</td><td class="t">${_esc(_projOf(p))}</td></tr>
       <tr><td>الموقع / المبنى</td><td class="t">${_esc(p.building||"—")}</td></tr>
-      <tr><td>المورد</td><td class="t">${_esc(p.vendor||"—")}</td></tr>
+      <tr><td>المورد في الطلب</td><td class="t">${_esc(p.vendor||"—")}</td></tr>
+      <tr><td>المورد الفعلي (أثبته المستلم)</td><td class="t">${
+        rec.vendor ? _esc(rec.vendor)+(_vendorMismatch(rec,p.vendor)?' <b style="color:#92400e">— يخالف مورد الطلب</b>':"")
+                   : '<span style="color:#92400e;font-weight:700">لم يُثبته المستلم</span>'}</td></tr>
       <tr><td>المستلم الميدانيّ</td><td class="t">${_esc(rec.by||"—")}</td></tr>
       <tr><td>تاريخ الاستلام</td><td class="n">${_esc(_dt(rec.at))}</td></tr>
       <tr><td>رقم المحضر</td><td class="n">${_esc(rec.ref||"—")}${recs.length>1?` (من ${recs.length} محاضر على الطلب)`:""}</td></tr>
@@ -568,8 +618,9 @@ window.supervisorReceipt = {
   enabled:_enabled,
   sectionHtml, auditHtml, printHtml,
   printReceipt, paperHTML,
-  _rmPhoto,
+  _rmPhoto, _sameVendor,
   // نقية — لفحوص hail-tests
+  _vendorMismatch,
   _deliverables:svDeliverables, _cum:svCum, _cumUpTo:svCumUpTo, _rows:svRows, _complete:svComplete,
   MODULE_BUILD
 };
