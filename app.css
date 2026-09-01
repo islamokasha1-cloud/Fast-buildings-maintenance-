@@ -2565,7 +2565,15 @@ html[data-theme="dark"] #header .logo-img{background:#fff;border-radius:9px;padd
 .ast-stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow);border-inline-start:4px solid var(--muted);display:flex;align-items:center;gap:11px}
 .ast-stat .si{width:38px;height:38px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--surface2);color:var(--muted)}
 .ast-stat .si svg{width:19px;height:19px}
-.ast-stat .sv{font-family:'JetBrains Mono',monospace;font-size:23px;font-weight:800;line-height:1}
+/* الرقمُ الطويل (مبلغٌ بالريال) كان **يفيض من البطاقة ويُقصّ**: العمودُ مرن،
+   وابنُ الفلكس الحاملُ للرقم بلا `min-width:0` فلا ينكمش دون عرض محتواه، فيخرج
+   الرقمُ من الصندوق ويقصّه حاويه. الحلُّ ثلاثيّ: يَنكمش الابن، ويتدرّج مقاسُ
+   الرقم بطوله (`sv-l`/`sv-xl` يضعهما الراسم)، وحذفٌ بثلاث نقاطٍ ملاذاً أخيراً
+   فلا يزحف رقمٌ شاذٌّ على البطاقة المجاورة. */
+.ast-stat>div{min-width:0}
+.ast-stat .sv{font-family:'JetBrains Mono',monospace;font-size:23px;font-weight:800;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ast-stat .sv.sv-l{font-size:17px}
+.ast-stat .sv.sv-xl{font-size:14px}
 .ast-stat .sl{font-size:11px;color:var(--muted);font-weight:600;margin-top:3px}
 .ast-stat.total{border-inline-start-color:var(--primary)}.ast-stat.total .si{color:var(--primary)}.ast-stat.total .sv{color:var(--primary)}
 .ast-stat.good{border-inline-start-color:var(--sla-ok)}.ast-stat.good .si{background:var(--sla-ok-bg);color:var(--sla-ok)}.ast-stat.good .sv{color:var(--sla-ok)}
