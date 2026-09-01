@@ -1789,6 +1789,10 @@
             <option value="priced">له سعر</option>
             <option value="noprice">بلا سعر</option>
           </select>
+          <select class="form-select" id="inv-price-filter" onchange="renderInventory()" title="بلا أسعار: تُحذف أعمدةُ سعر الوحدة والقيمة والربط من الشاشة ومن Excel ومن الورقة المطبوعة معاً" style="font-size:13px;width:175px">
+            <option value="1">مسعَّر — سعر وقيمة</option>
+            <option value="0">بلا أسعار — كمّيّات فقط</option>
+          </select>
           <button class="btn btn-ghost btn-sm" onclick="resetInventoryFilters()" title="مسح الفلاتر" style="font-size:12px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg> مسح</button>
         </div>
       </div>
@@ -17152,6 +17156,17 @@ function _invCatalogOf(it){ const M=_invPricing(); return M ? M.catalogOf(it) : 
 function _invUnitPrice(it,lastIn){ const M=_invPricing(); return M ? M.unitPrice(it,lastIn) : {price:null, src:"—", cat:null, via:""}; }
 function _invLastInMap(){ const M=_invPricing(); return M ? M.lastInMap() : {}; }
 
+/* هل تُعرَض الأسعار؟ — **محكَمٌ واحدٌ لثلاثة مستهلكين**: الشاشةُ وتصديرُ Excel
+   والورقةُ المطبوعة. وهو **وضعُ عرضٍ لا وضعُ تصدير**: لو حكم التصديرَ وحدَه لصارت
+   حالةٌ خفيّةٌ تُغيّر ما ينتجه الزرُّ بلا أثرٍ على الشاشة — يضغط المستخدم «PDF»
+   فيخرج غيرُ ما يرى. والخاصيّةُ التي يحرسها هذا الملفّ أصلاً (مصدرٌ واحدٌ لفلترة
+   المخزون) هي نفسُها هنا: **المُصدَّرُ = المعروض**، فما اختفى عن العين اختفى عن
+   الورقة. والافتراضُ مسعَّر — فلا يفقد أحدٌ أرقامَه بلا أن يطلب ذلك. */
+function _invPriced(){
+  const el=document.getElementById("inv-price-filter");
+  return !el || el.value!=="0";
+}
+
 // ── عرض رصيد المخزون ──
 // v18.9lz: فئة الصنف الفعلية — من وثيقة المخزون، وإلا من بند الكتالوج المرتبط
 // (نفسُ رابطة السعر: ربطٌ يدويّ ← المعرّف ← الكود ← الاسم — لا مطابقةٌ ثانية)
@@ -17613,6 +17628,7 @@ function renderInventory(){
   });
   _totalValue = Math.round(_totalValue*100)/100;
   const _money2 = n => Number(n||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const _priced = _invPriced();   // المحكَم الواحد — الشاشةُ وExcel والورقةُ تتبعه معاً
 
   const {items:pgItems, totalPages:_invTotalPages, total:_invTotal} = pgSlice("inventory", items);
   const rows = pgItems.map(it=>{
@@ -17648,7 +17664,7 @@ function renderInventory(){
         </div>
       </td>
       <td style="text-align:center;padding:12px 10px;font-weight:600;color:var(--text-secondary)">${esc(it.unit||"—")}</td>
-      <td style="text-align:center;padding:12px 10px">
+      ${!_priced?"":`<td style="text-align:center;padding:12px 10px">
         ${_p.price==null
           ? `<span style="font-size:11px;color:#b45309;background:#fef3c7;padding:2px 8px;border-radius:4px">بلا سعر</span>`
           : `<div style="font-weight:700;font-size:13px;font-family:'JetBrains Mono',monospace;direction:ltr">${_money2(_p.price)}</div>
@@ -17663,7 +17679,7 @@ function renderInventory(){
         ${_p.cat
           ? `<span style="font-size:10px;background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;display:inline-block" title="مرتبطٌ بـ«${esc(_p.cat.name||"")}» — درجة الربط: ${esc(INV_LINK_VIA[_p.via]||_p.via||"—")}">${esc(INV_LINK_VIA[_p.via]||"مربوط")}</span>`
           : `<span style="font-size:10px;background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:4px;display:inline-block" title="لا بند كتالوج مطابق — اربطه يدوياً من قائمة الصف">غير مربوط</span>`}
-      </td>
+      </td>`}
       <td style="text-align:center;padding:12px 10px">
         <span style="font-size:12px;color:var(--text-secondary)">${_ic("warehouse","ic-sm ic-muted")} ${esc(it.warehouseName||"—")}</span>
       </td>
@@ -17683,9 +17699,9 @@ function renderInventory(){
       <div class="ast-stat total"><span class="si">${_svgIcon("package")}</span><div><div class="sv">${totalItems}</div><div class="sl">إجمالي الأصناف</div></div></div>
       ${lowStock>0?`<div class="ast-stat warn"><span class="si">${_svgIcon("alertTriangle")}</span><div><div class="sv">${lowStock}</div><div class="sl">رصيد منخفض</div></div></div>`:""}
       ${outOfStock>0?`<div class="ast-stat crit"><span class="si">${_svgIcon("alertCircle")}</span><div><div class="sv">${outOfStock}</div><div class="sl">نفد المخزون</div></div></div>`:""}
-      <div class="ast-stat" title="قيمة المفلتَر كلِّه لا الصفحة المعروضة — والأصنافُ بلا سعرٍ خارجها، فهي حدٌّ أدنى"><span class="si">${_svgIcon("banknote")}</span><div><div class="sv ${_astStatSize(_money2(_totalValue))}" style="direction:ltr">${_money2(_totalValue)}</div><div class="sl">قيمة المخزون (ر.س)</div></div></div>
+      ${!_priced?"":`<div class="ast-stat" title="قيمة المفلتَر كلِّه لا الصفحة المعروضة — والأصنافُ بلا سعرٍ خارجها، فهي حدٌّ أدنى"><span class="si">${_svgIcon("banknote")}</span><div><div class="sv ${_astStatSize(_money2(_totalValue))}" style="direction:ltr">${_money2(_totalValue)}</div><div class="sl">قيمة المخزون (ر.س)</div></div></div>
       ${_noPrice>0?`<div class="ast-stat warn"><span class="si">${_svgIcon("alertTriangle")}</span><div><div class="sv">${_noPrice}</div><div class="sl">بلا سعر (خارج القيمة)</div></div></div>`:""}
-      ${_unlinked>0?`<div class="ast-stat warn"><span class="si">${_svgIcon("link")}</span><div><div class="sv">${_unlinked}</div><div class="sl">غير مربوط بالكتالوج</div></div></div>`:""}
+      ${_unlinked>0?`<div class="ast-stat warn"><span class="si">${_svgIcon("link")}</span><div><div class="sv">${_unlinked}</div><div class="sl">غير مربوط بالكتالوج</div></div></div>`:""}`}
     </div>
     <div style="overflow-x:auto">
       <table class="data-table" style="width:100%;border-collapse:collapse">
@@ -17694,9 +17710,9 @@ function renderInventory(){
           <th style="text-align:center;padding:10px 14px;background:var(--surface2)">الكود</th>
           <th style="text-align:center;padding:10px 14px;background:var(--surface2)">الكمية المتاحة</th>
           <th style="text-align:center;padding:10px 14px;background:var(--surface2)">الوحدة</th>
-          <th style="text-align:center;padding:10px 14px;background:var(--surface2)" title="آخر وارد ← وثيقة الصنف ← الكتالوج">سعر الوحدة (ر.س)</th>
+          ${!_priced?"":`<th style="text-align:center;padding:10px 14px;background:var(--surface2)" title="آخر وارد ← وثيقة الصنف ← الكتالوج">سعر الوحدة (ر.س)</th>
           <th style="text-align:center;padding:10px 14px;background:var(--surface2)">القيمة (ر.س)</th>
-          <th style="text-align:center;padding:10px 14px;background:var(--surface2)">الربط بالكتالوج</th>
+          <th style="text-align:center;padding:10px 14px;background:var(--surface2)">الربط بالكتالوج</th>`}
           <th style="text-align:center;padding:10px 14px;background:var(--surface2)">المستودع</th>
           <th style="text-align:center;padding:10px 14px;background:var(--surface2)">آخر تحديث</th>
           <th style="text-align:center;padding:10px 14px;background:var(--surface2)">إجراء</th>
@@ -18215,6 +18231,7 @@ function openEditInventoryQtyModal(itemId, itemName, currentQty, unit){
 // ── مسح كل فلاتر رصيد المخزون ──
 function resetInventoryFilters(){
   ["inv-search","inv-cat-filter","inv-warehouse-filter","inv-stock-filter","inv-unit-filter","inv-link-filter"].forEach(idf=>{ const el=document.getElementById(idf); if(el) el.value=""; });
+  { const _pf=document.getElementById("inv-price-filter"); if(_pf) _pf.value="1"; }   // المسح يعود إلى المسعَّر (الافتراضي)
   pgReset("inventory"); renderInventory();
 }
 
@@ -18514,33 +18531,41 @@ async function exportInventoryExcel(){
        يختلف الرقمُ المصدَّرُ عن الرقم المعروض. والبلا سعرٍ يُصدَّر خليّةً فارغة
        لا صفراً: صفرٌ في عمود القيمة يُجمَع فيكذب، والفراغُ يُعلن نفسَه. */
     const _lastIn=_invLastInMap();
+    /* الأعمدةُ السعريةُ تُبنى أو لا تُبنى — **لا تُبنى ثم تُحذف**: الحذفُ اللاحق
+       يترك المفتاحَ في صفٍّ واحدٍ شاذٍّ فيعود العمودُ للورقة كلِّها. والمحكَمُ
+       نفسُه الذي يرسم الشاشة (`_invPriced`)، فالورقةُ لا تحمل ما لا يراه مُصدِّرُها. */
+    const _priced = _invPriced();
     const rows = items.map(it=>{
       const p=_invUnitPrice(it,_lastIn), qty=parseFloat(it.currentQty)||0;
-      return {
+      const base = {
         "اسم المادة":   it.itemName||"",
         "الكود":        it.itemCode||"",
         "الفئة":        _invResolvedCat(it)||"",
         "الكمية المتاحة": qty,
-        "الوحدة":       it.unit||"",
+        "الوحدة":       it.unit||""
+      };
+      if(_priced) Object.assign(base, {
         "سعر الوحدة (ر.س)": p.price==null?"":p.price,
         "مصدر السعر":   p.src,
         "القيمة (ر.س)": p.price==null?"":Math.round(qty*p.price*100)/100,
         "بند الكتالوج": p.cat?(p.cat.name||""):"",
         "كود الكتالوج": p.cat?(p.cat.code||""):"",
-        "الربط":        p.cat?(INV_LINK_VIA[p.via]||"مربوط"):"غير مربوط",
+        "الربط":        p.cat?(INV_LINK_VIA[p.via]||"مربوط"):"غير مربوط"
+      });
+      return Object.assign(base, {
         "المستودع":     it.warehouseName||"",
         "آخر تحديث":   it.lastUpdated?fmtDate(it.lastUpdated):""
-      };
+      });
     });
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws["!cols"] = [
-      {wch:28},{wch:16},{wch:16},{wch:16},{wch:10},{wch:16},{wch:14},
-      {wch:16},{wch:28},{wch:16},{wch:14},{wch:20},{wch:20}
-    ];
+    ws["!cols"] = _priced
+      ? [{wch:28},{wch:16},{wch:16},{wch:16},{wch:10},{wch:16},{wch:14},
+         {wch:16},{wch:28},{wch:16},{wch:14},{wch:20},{wch:20}]
+      : [{wch:28},{wch:16},{wch:16},{wch:16},{wch:10},{wch:20},{wch:20}];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "رصيد المخزون");
     XLSX.writeFile(wb, `رصيد_المخزون_${new Date().toISOString().slice(0,10)}.xlsx`);
-    logAudit("تصدير رصيد المخزون Excel","عدد الأصناف: "+rows.length);
+    logAudit("تصدير رصيد المخزون Excel","عدد الأصناف: "+rows.length+" — "+(_priced?"مسعَّر":"بلا أسعار"));
     toast("✅ تم تصدير رصيد المخزون","success");
   }catch(err){
     console.error("exportInventoryExcel error:",err);
@@ -18568,6 +18593,7 @@ function exportInventoryPDF(){
   });
   _pdfValue = Math.round(_pdfValue*100)/100;
   const _whLabel = (document.getElementById("inv-warehouse-filter")?.value||"").trim();
+  const _priced  = _invPriced();   // نفسُ محكَم الشاشة وExcel — ورقةٌ لا تحمل ما لا يراه طابعُها
 
   const tableRows = items.map(it=>{
     const _p  = _invUnitPrice(it,_lastIn);
@@ -18582,9 +18608,9 @@ function exportInventoryPDF(){
         <span style="background:${qtyBg};color:${qtyColor};padding:3px 12px;border-radius:12px;font-weight:700">${qty.toLocaleString("en-US",{maximumFractionDigits:3})}</span>
       </td>
       <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:center">${esc(it.unit||"—")}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:center;font-family:monospace;direction:ltr">${_p.price==null?'<span style="color:#b45309;font-family:Cairo,sans-serif">بلا سعر</span>':_m2(_p.price)}</td>
+      ${!_priced?"":`<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:center;font-family:monospace;direction:ltr">${_p.price==null?'<span style="color:#b45309;font-family:Cairo,sans-serif">بلا سعر</span>':_m2(_p.price)}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:center;font-size:10px;color:#64748b">${esc(_p.src)}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:center;font-family:monospace;direction:ltr;font-weight:700">${_p.price==null?"—":_m2(qty*_p.price)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:center;font-family:monospace;direction:ltr;font-weight:700">${_p.price==null?"—":_m2(qty*_p.price)}</td>`}
       <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:center;font-size:11px;color:#64748b">${esc(it.warehouseName||"—")}</td>
     </tr>`;
   }).join("");
@@ -18635,7 +18661,7 @@ tbody tr:nth-child(even){background:#f8fafc}
     ${logoSrc?`<img src="${logoSrc}" class="company-logo" alt="شعار الشركة">`:''}
     <div>
       <div class="company">شركة المباني السريعة للمقاولات</div>
-      <div class="subtitle">رصيد المخزون</div>
+      <div class="subtitle">رصيد المخزون${_whLabel?" — "+esc(_whLabel):""}${_priced?"":" · بلا أسعار (كمّيّات فقط)"}</div>
     </div>
   </div>
   <div class="date-badge">تاريخ التقرير<br><strong>${printDate}</strong></div>
@@ -18644,10 +18670,10 @@ tbody tr:nth-child(even){background:#f8fafc}
   <div class="stat"><div class="stat-num">${totalItems}</div><div class="stat-lbl">إجمالي الأصناف${_whLabel?" — "+esc(_whLabel):""}</div></div>
   ${lowStock>0?`<div class="stat warn"><div class="stat-num">${lowStock}</div><div class="stat-lbl">رصيد منخفض</div></div>`:""}
   ${outOfStock>0?`<div class="stat danger"><div class="stat-num">${outOfStock}</div><div class="stat-lbl">نفد المخزون</div></div>`:""}
-  <div class="stat"><div class="stat-num" style="font-family:monospace;direction:ltr">${_m2(_pdfValue)}</div><div class="stat-lbl">قيمة المخزون (ر.س)</div></div>
-  ${_pdfNoPrice>0?`<div class="stat warn"><div class="stat-num">${_pdfNoPrice}</div><div class="stat-lbl">بلا سعر — خارج القيمة</div></div>`:""}
+  ${!_priced?"":`<div class="stat"><div class="stat-num" style="font-family:monospace;direction:ltr">${_m2(_pdfValue)}</div><div class="stat-lbl">قيمة المخزون (ر.س)</div></div>
+  ${_pdfNoPrice>0?`<div class="stat warn"><div class="stat-num">${_pdfNoPrice}</div><div class="stat-lbl">بلا سعر — خارج القيمة</div></div>`:""}`}
 </div>
-${_pdfNoPrice>0?`<div style="font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:7px 12px;margin-bottom:12px">⚠ ${_pdfNoPrice} صنفاً بلا سعرٍ في أيّ مصدر (آخر وارد · وثيقة الصنف · الكتالوج) — قيمتُه خارج الإجمالي، فالقيمة أعلاه <b>حدٌّ أدنى</b> لا رقمٌ نهائي.</div>`:""}
+${(_priced&&_pdfNoPrice>0)?`<div style="font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:7px 12px;margin-bottom:12px">⚠ ${_pdfNoPrice} صنفاً بلا سعرٍ في أيّ مصدر (آخر وارد · وثيقة الصنف · الكتالوج) — قيمتُه خارج الإجمالي، فالقيمة أعلاه <b>حدٌّ أدنى</b> لا رقمٌ نهائي.</div>`:""}
 <table>
   <thead><tr>
     <th style="text-align:right">المادة</th>
@@ -18655,9 +18681,9 @@ ${_pdfNoPrice>0?`<div style="font-size:11px;color:#92400e;background:#fef3c7;bor
     <th>الفئة</th>
     <th>الكمية المتاحة</th>
     <th>الوحدة</th>
-    <th>سعر الوحدة</th>
+    ${!_priced?"":`<th>سعر الوحدة</th>
     <th>مصدر السعر</th>
-    <th>القيمة (ر.س)</th>
+    <th>القيمة (ر.س)</th>`}
     <th>المستودع</th>
   </tr></thead>
   <tbody>${tableRows}</tbody>
