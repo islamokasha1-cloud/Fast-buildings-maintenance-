@@ -10,6 +10,7 @@ on:
       - 'price-analysis.js'
       - 'stocktake.js'
       - 'inventory-reports.js'
+      - 'inventory-pricing.js'
       - 'substitute-budget.js'
       - 'project-management.js'
       - 'cleaning-operations.js'

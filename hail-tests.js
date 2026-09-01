@@ -584,7 +584,16 @@ function predelivery() {
        وتعليقُ حدودهما. **تعديلُ صلاحياتِ شاشةٍ قائمة في مكانها** — حرّاسُ
        التعديل والحذف الأربعة كلُّهم في وحدة PPM داخل النواة بجوار
        `ppmRoleCanCreate`، ونقلُ الدالة وحدَها يفصلها عمّن يقرؤها (CLAUDE.md). */
-    const IDX_CEILING = 38338;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 38338 إلى 38484 — ‏١٤٦ سطراً لربط بنود المخزون بأسعار البنود
+       (طلب المالك 01/09). **ومحرّكُ الربط والتسعير نفسُه لم يدخل هنا**: خرج إلى
+       وحدةٍ مستقلّةٍ `inventory-pricing.js` كما تقضي CLAUDE.md (كتلةٌ جديدةٌ
+       قائمةٌ بنفسها = ملفُّ وحدة)، ولم يبقَ في النواة إلا: خمسةُ أسطرِ نداءٍ
+       مختصرةٍ للوحدة، وتعديلاتٌ **في موضعها** على منطقٍ قائم — أعمدةُ السعر
+       والقيمة والربط في `renderInventory`، وفلترُ الربط في `_inventoryFiltered`،
+       وأعمدةُ `exportInventoryExcel` و`exportInventoryPDF`، ووضعُ «الربط» في
+       منتقي الكتالوج القائم. ونقلُ أيٍّ من هذه إلى ملفٍّ بحجّة تعديلها ممنوع
+       (CLAUDE.md) — هي أجزاءٌ من شاشةٍ ودالّتَي تصديرٍ تعيش كلُّها هنا. */
+    const IDX_CEILING = 38484;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -2040,6 +2049,38 @@ function inventoryReportsTests() {
   T("★ بلا سعرٍ في أيّ مصدر: null لا صفر (لا تُصفَّر القيمةُ بصمت)",
     noP.price === null && noP.src === "—");
 
+  /* ★★ الربطُ اليدويُّ الصريح (`catalogItemId`) يسبق الكودَ والاسمَ هنا أيضاً —
+     وإلا سعّرَ التقريرُ الصنفَ ببندٍ غيرِ الذي رُبط به في شاشة الرصيد، فيقول
+     الوجهان رقمين لصنفٍ واحد. (الاحتياطُ المحلّيُّ وحدَه هو ما يُنفَّذ هنا:
+     صندوقٌ بلا `window.inventoryPricing`.) */
+  const catIdx2 = { byId: { "K9": { id: "K9", unitPrice: 33 } },
+                    byCode: { "c1": { unitPrice: 7 } }, byName: {} };
+  T("★★ الربطُ الصريح يسبق الكودَ في وحدة التقارير كذلك",
+    IR._priceOf("A", { catalogItemId: "K9", itemCode: "C1" }, {}, catIdx2).price === 33);
+  T("★ و`_catalogIndex` تبني byId (بلا معرّفٍ لا رابطةَ صريحةَ أصلاً)",
+    /const byId=\{\}, byCode=\{\}, byName=\{\}/.test(src) && /byId\[c\.id\]=c/.test(src));
+  T("★ `_catLinkOf` مكشوفةٌ للفحص وتقرأ رابطتَها من وحدة التسعير أوّلاً",
+    typeof IR._catLinkOf === "function" && /window\.inventoryPricing/.test(src));
+
+  /* ════ الأعمدةُ الجديدة: القيمةُ صنفاً صنفاً داخل المستودع ════
+     «ملخّص المستودعات» يعطي إجماليَّ المستودع، ولا يقول **أيُّ صنفٍ** يحمل
+     القيمة. هذه الأعمدةُ هي جوابُ «كم تساوي المواد في مستودعٍ بعينه» مفصَّلاً. */
+  T("★ «حركة المخزون في فترة»: سعرُ الوحدة ومصدرُه وقيمةُ الرصيد الختامي",
+    /\{k:"price",   l:"سعر الوحدة"/.test(src) &&
+    /\{k:"value",   l:"قيمة الختامي \(ر\.س\)"/.test(src) &&
+    src.includes('l:"قيمة الأرصدة الختامية (ر.س)"'));
+  T("★ والقيمةُ هناك = الختاميُّ × السعر (لا الافتتاحيُّ ولا الوارد)",
+    /value: p\.price==null\?"" : _r3\(_num\(a\.closing\)\*p\.price\)/.test(src));
+  T("★ «الحدّ الأدنى والنافد»: تكلفةُ سدّ النقص = النقص × السعر",
+    /\{k:"refill",l:"تكلفة سدّ النقص \(ر\.س\)"/.test(src) &&
+    /refill: p\.price==null\?"" : _r3\(gap\*p\.price\)/.test(src));
+  T("★ «بطاقة الصنف»: قيمةُ الرصيد الختامي وسعرُ الوحدة في ترويستها",
+    src.includes('l:"قيمة الرصيد الختامي (ر.س)"') && src.includes('" · سعر الوحدة: "'));
+  T("★ «ملخّص المستودعات»: عمودُ «بلا ربط بالكتالوج» (بابُ العمل على ما يُنقص القيمة)",
+    /\{k:"unlinked",l:"بلا ربط بالكتالوج"/.test(src) && /unlinkedAll\+\+/.test(src));
+  T("★★ وكلُّ عمودِ قيمةٍ جديدٍ يُصاحبه تحفّظُ «بلا سعر» (رقمٌ ناقصٌ مُعلَنٌ لا صامت)",
+    (src.match(/صنفاً بلا سعرٍ في أيّ مصدر/g) || []).length >= 4);
+
   // ════ السكون ومعدّل الاستهلاك ════
   const nowMs = new Date("2026-08-31T00:00:00.000Z").getTime();
   T("_stale: عمرُ السكون بالأيام",
@@ -2197,6 +2238,241 @@ function inventoryReportsTests() {
     T("★ التوكيدُ في نصّ التحفّظ يُهرَّب قبل تحويله (لا وسمَ من البيانات)",
       src.includes('_esc(s).replace(/\\*\\*([^*]+)\\*\\*/g, "<b>$1</b>")'));
   }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   13-ج) ربط المخزون بأسعار البنود (inventory-pricing.js)
+
+   الوحدةُ تجيب سؤالاً واحداً: **بأيّ سعرٍ يُقوَّم صنفُ المخزون، ولماذا؟**
+   وخطرُها أنّ خطأها **صامتٌ بالكامل**: رابطةٌ تشير إلى بندِ كتالوجٍ خاطئ لا
+   تُنتج خطأً ولا تحذيراً — تُنتج **رقمَ قيمةٍ يبدو سليماً** فيُوقَّع عليه.
+   فهذه الحرّاسُ تُنفّذ الدوالَّ لا تقرؤها:
+     • سلّمُ الربط بترتيبه: ربطٌ يدويّ ← المعرّف ← الكود ← الاسم — وكلُّ درجةٍ
+       **تُسمّى** في المخرَج، ودرجةٌ أعلى تسبق ما دونها ولو تعارضا.
+     • سلّمُ السعر: آخرُ وارد ← وثيقةُ الصنف ← الكتالوج — والبلا سعرٍ `null`
+       لا صفر (صفرٌ صامتٌ يُجمَع في القيمة فيكذب).
+     • **والحارسُ الأهمّ**: `inventoryPricing.unitPrice` و`_priceOf` في وحدة
+       التقارير تُعطيان **الرقمَ نفسَه** على المُدخَل نفسِه. فما دام هذا أخضرَ
+       لا تقول شاشةُ الرصيد سعراً ويقول التقريرُ غيرَه.
+     • والمدموجُ لا يُربَط به بندٌ جديد (بالكود ولا بالاسم)، والربطُ الصريحُ إليه
+       يُتبَع إلى وجهته — وإلا سُعِّر الصنفُ ببندٍ ميّت.
+   ════════════════════════════════════════════════════════════════════ */
+function inventoryPricingTests() {
+  H("13-ج) ربط المخزون بأسعار البنود (inventory-pricing.js)");
+  const IVP = path.resolve(path.dirname(IDX), "inventory-pricing.js");
+  if (!fs.existsSync(IVP)) { T("inventory-pricing.js موجود", false, "لم يُعثر على الملف"); return; }
+  const vm = require("vm");
+  const src = fs.readFileSync(IVP, "utf8");
+
+  try { new vm.Script(src); T("صياغة inventory-pricing.js سليمة", true); }
+  catch (e) { T("صياغة inventory-pricing.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  // ── التسجيل: الوسم · الختم · سجلُّ الوحدات القديمة · مسارات CI ──
+  T("الوسم موجود في index.html", /<script src="inventory-pricing\.js\?v=/.test(HTML));
+  T("★ الوسم قبل inventory-reports.js (وحدةُ التقارير تقرأ سعرَها منها)",
+    HTML.indexOf('src="inventory-pricing.js?v=') < HTML.indexOf('src="inventory-reports.js?v='));
+  const ivpBuild = (src.match(/const MODULE_BUILD = "(v[\d.a-z]+)"/) || [])[1];
+  T("★ MODULE_BUILD يطابق APP_VERSION (يُرفَعان معاً)", ivpBuild === VER,
+    `MODULE_BUILD=${ivpBuild}  APP_VERSION=${VER}`);
+  T("الوحدة تُصدّر build على واجهتها العامة", /build: MODULE_BUILD/.test(src));
+  T("★ مسجّلةٌ في كاشف الوحدات القديمة (وإلا مرّ تقادُمُها صامتاً)",
+    HTML.includes('{name:"inventory-pricing.js", get:function(){ return window.inventoryPricing; }}'));
+  {
+    const wf = path.resolve(path.dirname(IDX), ".github/workflows/hail-tests.yml");
+    T("★ مُدرَجةٌ في مسارات CI (وإلا لم يفحصها push مباشر)",
+      fs.existsSync(wf) && fs.readFileSync(wf, "utf8").includes("'inventory-pricing.js'"));
+  }
+
+  // ── تحميلُ الوحدة في صندوقٍ معزول: لا نواةَ، فالاحتياطاتُ الداخلية هي ما يُنفَّذ ──
+  const sandbox = { window: {}, console, document: { getElementById: () => null } };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); }
+  catch (e) { T("تُحمَّل inventory-pricing", false, String(e.message).slice(0, 120)); return; }
+  const IP = sandbox.window.inventoryPricing;
+  T("الدوالُّ النقيّة مكشوفةٌ على الواجهة",
+    !!(IP && typeof IP.nameKey === "function" && typeof IP.catalogOf === "function"
+       && typeof IP.unitPrice === "function" && typeof IP.lastInMap === "function"
+       && typeof IP.catalogIndex === "function"));
+  if (!IP || !IP.catalogOf) return;
+
+  /* ════ التطبيع: **جامعٌ** لا بديل — ما كانت تطابقه أيٌّ من المطابقتين
+     القديمتين يجب أن يبقى مطابَقاً بعد التوحيد، وإلا سقط ربطٌ كان قائماً. ════ */
+  T("★ nameKey يوحّد الهمزة والتاء المربوطة والألف المقصورة والمسافات",
+    IP.nameKey("أنبوب  حديدية") === IP.nameKey("انبوب حديديه") &&
+    IP.nameKey("مجرى") === IP.nameKey("مجري"),
+    IP.nameKey("أنبوب  حديدية"));
+  T("★ nameKey يُسقط التشكيل والتطويل (اسمٌ مشكولٌ في الكتالوج يُطابَق)",
+    IP.nameKey("كَابِلْ") === IP.nameKey("كابل") && IP.nameKey("كــابل") === IP.nameKey("كابل"));
+  T("nameKey على الفارغ لا ينفجر", IP.nameKey(null) === "" && IP.nameKey(undefined) === "");
+
+  // ════ سلّمُ الربط: كلُّ درجةٍ تُسمّى، والأعلى يسبق ما دونه ولو تعارضا ════
+  const CAT = [
+    { id: "K1", code: "C1", name: "كابل نحاس", type: "مواد كهربائية", unitPrice: 7 },
+    { id: "K2", code: "C2", name: "أنبوب", type: "مواد سباكة", unitPrice: 11 },
+    { id: "K3", code: "C3", name: "لمبة", type: "مواد كهربائية", unitPrice: 0 },
+    { id: "KM", code: "CM", name: "قديم مدموج", unitPrice: 99, mergedInto: "K2" }
+  ];
+  const of = (it) => IP.catalogOf(it, CAT);
+  T("درجة «المعرّف»: itemId يطابق بند الكتالوج",
+    of({ id: "d1", itemId: "K1" }).c.id === "K1" && of({ id: "d2", itemId: "K1" }).via === "id");
+  T("درجة «الكود» (بلا حساسيةٍ لحالة الأحرف)",
+    of({ id: "d3", itemCode: "c1" }).c.id === "K1" && of({ id: "d4", itemCode: "C1" }).via === "code");
+  T("درجة «الاسم» بالتطبيع الجامع",
+    of({ id: "d5", itemName: "كابل  نحاس" }).c.id === "K1" && of({ id: "d6", itemName: "كابل نحاس" }).via === "name");
+  T("★★ الربطُ اليدويُّ يسبق الكودَ والاسمَ ولو تعارضا (وهو نقطةُ الميزة كلِّها)",
+    of({ id: "d7", catalogItemId: "K2", itemCode: "C1", itemName: "كابل نحاس" }).c.id === "K2" &&
+    of({ id: "d8", catalogItemId: "K2", itemCode: "C1" }).via === "link");
+  T("★ المعرّفُ يسبق الكودَ المتعارض",
+    of({ id: "d9", itemId: "K2", itemCode: "C1" }).c.id === "K2");
+  T("★ بلا مطابقةٍ في أيّ درجة: c=null و via=\"\" (لا ربطَ مزعوم)",
+    of({ id: "dz", itemName: "شيءٌ لا وجود له" }).c === null &&
+    of({ id: "dz2", itemName: "شيءٌ لا وجود له" }).via === "");
+  T("صنفٌ فارغٌ (null) لا ينفجر", IP.catalogOf(null, CAT).c === null);
+
+  // ════ المدموج: لا يُربَط به جديد، والربطُ الصريحُ إليه يُتبَع إلى وجهته ════
+  T("★ المدموجُ لا يُطابَق بالكود ولا بالاسم (بندٌ ميّتٌ لا يُسعِّر شيئاً)",
+    of({ id: "m1", itemCode: "CM" }).c === null && of({ id: "m2", itemName: "قديم مدموج" }).c === null);
+  {
+    // بلا `_catResolveId` في الصندوق: الربطُ الصريحُ يصل الوثيقةَ نفسَها من byId
+    const r = of({ id: "m3", catalogItemId: "KM" });
+    T("★ الربطُ الصريحُ إلى مدموجٍ يصل وثيقتَه (وفي التطبيق يُتبَع إلى وجهته عبر _catResolveId)",
+      r.c !== null && r.c.id === "KM" && r.via === "link");
+  }
+
+  // ════ الخبيئة تبطل عند تبدّل مصفوفة الكتالوج (لقطةٌ جديدة = أسعارٌ جديدة) ════
+  {
+    const it = { id: "cch", itemCode: "C1" };
+    const before = IP.unitPrice(it, {}, CAT).price;
+    const CAT2 = CAT.map(c => ({ ...c, unitPrice: c.unitPrice * 2 }));
+    const after = IP.unitPrice(it, {}, CAT2).price;
+    T("★★ خبيئةُ الربط تبطل مع لقطةِ كتالوجٍ جديدة (وإلا بقي السعرُ القديم أبداً)",
+      before === 7 && after === 14, `قبل=${before} بعد=${after}`);
+  }
+
+  // ════ سلّمُ السعر ومصدرُه ════
+  const P = (it, li) => IP.unitPrice(it, li || {}, CAT);
+  T("سعرُ الكتالوج حين لا وارد ولا سعرَ وثيقة",
+    P({ id: "p1", itemCode: "C1" }).price === 7 && P({ id: "p2", itemCode: "C1" }).src === "الكتالوج");
+  T("سعرُ وثيقة الصنف يسبق الكتالوج",
+    P({ id: "p3", itemCode: "C1", unitPrice: 9 }).price === 9 &&
+    P({ id: "p4", itemCode: "C1", unitPrice: 9 }).src === "وثيقة الصنف");
+  T("★ آخرُ واردٍ يسبق الجميع (سعرُ الوثيقة يُكتب مرّةً ولا يُحدَّث عند الاستلام)",
+    P({ id: "p5", itemCode: "C1", unitPrice: 9 }, { p5: { price: 15 } }).price === 15 &&
+    P({ id: "p6", itemCode: "C1", unitPrice: 9 }, { p6: { price: 15 } }).src === "آخر وارد");
+  T("★★ بلا سعرٍ في أيّ مصدر: null لا صفر (صفرٌ صامتٌ يُجمَع في القيمة فيكذب)",
+    P({ id: "p7", itemName: "مجهول" }).price === null && P({ id: "p8", itemName: "مجهول" }).src === "—");
+  T("★ سعرُ كتالوجٍ = صفر لا يُعتمَد سعراً (بندٌ بلا سعرٍ مُدخَل)",
+    P({ id: "p9", itemCode: "C3" }).price === null);
+  T("★ واردٌ بسعرٍ صفرٍ لا يُزيح سعرَ الوثيقة (السند الصفريُّ ليس سعراً)",
+    P({ id: "pa", itemCode: "C1", unitPrice: 9 }, { pa: { price: 0 } }).price === 9);
+  T("★ خريطةُ الوارد تُقرأ بمعرّف الوثيقة وبـitemId كليهما (سجلٌّ قديمٌ يحمل الثاني)",
+    P({ id: "pb", itemId: "K9", itemCode: "C1" }, { K9: { price: 21 } }).price === 21);
+  T("المخرَج يحمل بندَ الكتالوج ودرجةَ الربط مع السعر (لا استعلامَ ثانٍ)",
+    P({ id: "pc", itemCode: "C1" }).cat.id === "K1" && P({ id: "pd", itemCode: "C1" }).via === "code");
+  T("صنفٌ فارغٌ يُرجع بلا سعرٍ بلا انفجار", IP.unitPrice(null, {}, CAT).price === null);
+
+  // ════ خريطةُ آخر وارد: آخرُ سعرٍ موجبٍ لا آخرُ سجلٍّ مطلقاً ════
+  {
+    const m = IP.lastInMap([
+      { type: "in", itemId: "A", unitPrice: 12, date: "2026-08-02" },
+      { type: "manual_in", itemId: "A", unitPrice: 15, date: "2026-08-09" },
+      { type: "in", itemId: "A", unitPrice: 0, date: "2026-08-20" },   // صفرٌ لا يمحو
+      { type: "out", itemId: "A", unitPrice: 99, date: "2026-08-25" }, // الصادرُ ليس سعرَ شراء
+      { type: "in", itemId: "", unitPrice: 5, date: "2026-08-26" }     // بلا هويّة
+    ]);
+    T("★ lastInMap: آخرُ سعرٍ موجبٍ من الوارد وحدَه (الصفرُ والصادرُ مُستبعَدان)",
+      m.A && m.A.price === 15 && Object.keys(m).length === 1, JSON.stringify(m));
+  }
+
+  /* ════════════════════════════════════════════════════════════════
+     ★★★ الحارسُ الحاسم: **رقمٌ واحدٌ للشاشة والتقرير**
+     لا مقارنةَ نصٍّ ولا تفتيشَ سطر — تُحمَّل الوحدتان معاً وتُنفَّذ دالّتا
+     السعر على المُدخَل نفسِه، ويُقارَن الخارجُ. فلو انحرف سلّمُ إحداهما يوماً،
+     سقط هذا الفحصُ قبل أن يقول رقمان مختلفان لنفس الصنف.
+     ════════════════════════════════════════════════════════════════ */
+  if (IVR_PATH) {
+    const sb2 = {
+      window: { inventoryPricing: IP }, console,
+      document: { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+                  addEventListener: () => {}, createElement: () => ({ style: {}, classList: { add() {}, remove() {} }, appendChild() {}, setAttribute() {} }) },
+      setTimeout: () => 0, clearTimeout: () => {}
+    };
+    vm.createContext(sb2);
+    let IR2 = null;
+    try { vm.runInContext(fs.readFileSync(IVR_PATH, "utf8"), sb2); IR2 = sb2.window.inventoryReports; } catch (e) {}
+    if (IR2 && typeof IR2._priceOf === "function") {
+      /* الكتالوجُ يُنصَّب **حالةَ نواةٍ عامّة** في صندوق وحدة التسعير — كما هو في
+         المتصفّح — فتقرؤه الوحدتان من مكانٍ واحدٍ بلا وسيطٍ يُمرَّر يدوياً. وهذا
+         شرطُ صدق الفحص: لو مرَّرناه صراحةً لأحدهما دون الآخر لقارنّا مُدخَلين. */
+      sandbox._catalogItems = CAT;
+      const CASES = [
+        { it: { id: "s1", itemCode: "C1" },                        li: {} },
+        { it: { id: "s2", itemCode: "C1", unitPrice: 9 },           li: {} },
+        { it: { id: "s3", itemCode: "C1", unitPrice: 9 },           li: { s3: { price: 15 } } },
+        { it: { id: "s4", itemName: "كابل  نحاس" },                 li: {} },
+        { it: { id: "s5", catalogItemId: "K2", itemCode: "C1" },    li: {} },
+        { it: { id: "s6", itemName: "لا وجود له" },                 li: {} },
+        { it: { id: "s7", itemCode: "C3" },                         li: {} },
+        { it: { id: "s8", itemCode: "CM" },                         li: {} }
+      ];
+      const diff = CASES.filter(k => {
+        const a = IP.unitPrice({ ...k.it }, k.li);
+        const b = IR2._priceOf(k.it.id, { ...k.it }, k.li, null);
+        return a.price !== b.price || a.src !== b.src;
+      });
+      T("★★★ سعرُ الشاشة = سعرُ التقرير على المُدخَل نفسِه (سلّمٌ واحدٌ لا سلّمان)",
+        diff.length === 0, diff.length ? "اختلفت: " + diff.map(k => k.it.id).join("، ") : CASES.length + " حالةً متطابقة");
+      T("★ وحدةُ التقارير تقرأ رابطتَها من inventoryPricing لا من نسخةٍ ثانية",
+        /window\.inventoryPricing/.test(fs.readFileSync(IVR_PATH, "utf8")) &&
+        /function _catLinkOf\(/.test(fs.readFileSync(IVR_PATH, "utf8")));
+    } else {
+      T("★★★ سعرُ الشاشة = سعرُ التقرير (تعذّر تحميل وحدة التقارير)", false, "لم تُحمَّل");
+    }
+  }
+
+  /* ════ وصلُ النواة: الأسماءُ المختصرةُ تنادي الوحدةَ ولا تعيد منطقَها ════ */
+  T("★ النواة تنادي الوحدة عبر _invPricing (لا نسخةَ منطقٍ ثانيةٍ في index.html)",
+    HTML.includes("function _invPricing(){ return (typeof window!==\"undefined\" && window.inventoryPricing) ? window.inventoryPricing : null; }") &&
+    HTML.includes("function _invCatalogOf(it){ const M=_invPricing(); return M ? M.catalogOf(it) : {c:null, via:\"\"}; }") &&
+    HTML.includes("function _invUnitPrice(it,lastIn){ const M=_invPricing();"));
+  T("★ وغيابُ الوحدة يُرجع «بلا سعر» ولا يكسر الشاشة (كاشٌ قديمٌ أو ٤٠٤)",
+    /return M \? M\.unitPrice\(it,lastIn\) : \{price:null/.test(HTML));
+  T("★ الفئةُ صارت من رابطة السعر نفسِها (لا مطابقةٌ ثانيةٌ في _invResolvedCat)",
+    /function _invResolvedCat\(it\)\{[\s\S]{0,240}?_invCatalogOf\(it\)\.c/.test(HTML) &&
+    !/_catalogItems\.find\(c=>c\.id===\(it\.itemId\|\|it\.id\)\)/.test(HTML));
+
+  /* ════ شاشةُ الرصيد: السعرُ والقيمةُ والربطُ أعمدةٌ ظاهرة، والقيمةُ على
+     **كلِّ المفلتَر** لا على الصفحة المعروضة (وإلا صارت رقمَ صفحةٍ لا مستودع) ════ */
+  T("★ أعمدةُ السعر والقيمة والربط في جدول رصيد المخزون",
+    HTML.includes(">سعر الوحدة (ر.س)</th>") && HTML.includes(">القيمة (ر.س)</th>") &&
+    HTML.includes(">الربط بالكتالوج</th>"));
+  T("★★ «قيمة المخزون» تُحسب على items كلِّها قبل pgSlice (لا على الصفحة)",
+    HTML.indexOf("let _totalValue = 0, _noPrice = 0, _unlinked = 0;") <
+    HTML.indexOf('const {items:pgItems, totalPages:_invTotalPages, total:_invTotal} = pgSlice("inventory", items);') &&
+    HTML.includes("items.forEach(it=>{\n    if(!_invCatalogOf(it).c) _unlinked++;"));
+  T("★ الأصنافُ بلا سعرٍ تُعدُّ وتُعلَن ولا تُحتسب صفراً في القيمة",
+    /if\(p\.price==null\)\{ _noPrice\+\+; return; \}/.test(HTML) && HTML.includes(">بلا سعر (خارج القيمة)<"));
+  T("★ فلترُ الربط/السعر موجودٌ ويشمله زرُّ المسح",
+    HTML.includes('id="inv-link-filter"') &&
+    HTML.includes('"inv-unit-filter","inv-link-filter"].forEach'));
+  T("★ الفلترُ يُطبَّق في المصدر الموحّد _inventoryFiltered (فالتصدير والورقة يتبعانه)",
+    /if\(linkFilter\)\{[\s\S]{0,400}?linkFilter==="unlinked"/.test(HTML));
+  T("★ قائمةُ الصف تفتح الربط اليدوي، وفكُّ الربط يظهر للمربوط يدوياً وحدَه",
+    HTML.includes("openInvLinkCatalogPicker('${eid}')") &&
+    HTML.includes("${it.catalogItemId?`<button class=\"row-menu-item\" role=\"menuitem\" onclick=\"event.stopPropagation();_closeRowMenu();unlinkInventoryCatalog('${eid}')\""));
+  T("★★ منتقي الكتالوج يعود إلى وضع «إضافة» عند الإغلاق (وإلا سرق وضعُ الربط الاختيارَ التالي)",
+    /function _invPickerClose\(\)\{\s*_invPickerMode="add"; _invPickerLinkId="";/.test(HTML) &&
+    HTML.includes('onclick="_invPickerClose()"'));
+
+  // ════ التصدير والورقة: نفسُ الأرقام ونفسُ الفلاتر ════
+  T("★ تصدير Excel يحمل السعر ومصدرَه والقيمة وبندَ الكتالوج",
+    HTML.includes('"سعر الوحدة (ر.س)": p.price==null?"":p.price') &&
+    HTML.includes('"مصدر السعر":   p.src,') &&
+    HTML.includes('"بند الكتالوج": p.cat?(p.cat.name||""):""'));
+  T("★★ الورقةُ المطبوعة تتبع فلاتر الشاشة (كانت تطبع كلَّ المستودعات مهما اختار المستخدم)",
+    /function exportInventoryPDF\(\)\{[\s\S]{0,600}?const items = _inventoryFiltered\(\);/.test(HTML));
+  T("★ والورقةُ تُعلن «بلا سعر» وتقول إنّ القيمة حدٌّ أدنى لا رقمٌ نهائيّ",
+    HTML.includes(">قيمة المخزون (ر.س)</div>") && HTML.includes("فالقيمة أعلاه <b>حدٌّ أدنى</b> لا رقمٌ نهائي"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -14864,6 +15140,7 @@ function externalPurchaseApiGuards() {
   writeRaceRoot();
   stocktakeTests();
   inventoryReportsTests();
+  inventoryPricingTests();
   vendorSummary();
   vendorNameUnify();
   actualCostFromItems();
