@@ -9407,11 +9407,17 @@ function tvWallGuards() {
     const today = new Date().toISOString().slice(0, 10);
     const month = today.slice(0, 7);
     const prevMonth = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() - 1, 1).toISOString().slice(0, 7); })();
+    /* يومُ المؤرشَف: **يومٌ من هذا الشهر غيرُ اليوم**. كان محفوراً «١» فكان الفحصُ
+       يسقط في أوّل كلِّ شهر: يومَ ١ يصير المؤرشَفُ «مُنشأً اليوم» فيُعدّ رابعاً في
+       `newToday` والفحصُ ينتظر ثلاثة (رُصد ٠١/٠٩ — والفحصُ نفسُه أخضرُ في ٣١/٠٨).
+       الشرطُ المقصود من هذا الصفّ «مؤرشفٌ داخلَ شهر الحساب» لا يومٌ بعينه، والشهرُ
+       يُطابَق ببادئته فأيُّ يومٍ منه يفي — فيكفي ألّا يقع على اليوم. */
+    const archDay = today.slice(8) === "01" ? "02" : "01";
     const rows = [
       { id: "T1", status: "مفتوح",       createdAt: today + "T08:00:00.000Z" },                                     // نشط + اليوم + متأخر
       { id: "T2", status: "قيد التنفيذ", createdAt: today + "T09:00:00.000Z" },                                     // نشط + اليوم + قيد التنفيذ
       { id: "T3", status: "مغلق",        createdAt: today + "T07:00:00.000Z", closedAt: today + "T10:00:00.000Z" }, // أُغلق اليوم
-      { id: "T4", status: "مفتوح",       createdAt: month + "-01T08:00:00.000Z", archived: true },                  // مؤرشف ⇒ خارج النشط
+      { id: "T4", status: "مفتوح",       createdAt: `${month}-${archDay}T08:00:00.000Z`, archived: true },          // مؤرشف ⇒ خارج النشط
       { id: "T5", status: "مغلق",        createdAt: prevMonth + "-05T08:00:00.000Z", closedAt: prevMonth + "-06T08:00:00.000Z" }, // شهرٌ سابق
     ];
     const F = new Function("_tvwall", "isOverdue", "tvHealth",
@@ -9421,6 +9427,8 @@ function tvWallGuards() {
     T("★ ag: المؤرشف لا يُحسب نشطاً", m.openN === 2 && rows[3].archived === true);
     T("★ ag: المتأخر من isOverdue وحدها", m.overdue === 1);
     T("★ ag: قيد التنفيذ يُعدّ من المفتوحة", m.prog === 1);
+    T("★ ag: يومُ المؤرشَف ليس اليوم أبداً (وإلا انكسر الفحصُ أوّلَ كلِّ شهر)",
+      archDay !== today.slice(8), `archDay=${archDay} today=${today.slice(8)}`);
     T("★ ag: بلاغاتُ اليوم = المُنشأة اليوم (بما فيها المغلق اليوم)", m.newToday === 3, "newToday=" + m.newToday);
     T("★ ag: أُغلقت اليوم = المغلقة بطابع إغلاقٍ اليوم", m.closedToday === 1);
     T("★ ag: إنجازُ الشهر من بلاغات الشهر وحدها (٤ منها ١ مغلق)",
