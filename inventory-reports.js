@@ -50,7 +50,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.2986";
+  const MODULE_BUILD = "v18.9.2989";
 
   const HOST_ID   = "page-inventory-reports";
   const READ_CAP  = 5000;    // سقف الحركات المقروءة لكل توليد — يُعلَن عند بلوغه
@@ -78,7 +78,8 @@
   let _f = {                         // معايير التقرير
     kind:"movement", from:"", to:"", wh:"", cat:"", docId:"",
     q:"", qLabel:"",                 // نصُّ بحث الصنف والاسمُ المعروضُ للمختار
-    threshold:LOW_DEF, staleDays:90, groupBy:"project"
+    threshold:LOW_DEF, staleDays:90, groupBy:"project",
+    priced:true                      // مسعَّر (أعمدةُ السعر والقيمة) أم كمّيّاتٌ وحدَها
   };
   let _out    = null;                // التقرير المولَّد حالياً {kind,title,cols,rows,...}
   let _sheets = {};                  // كل ما وُلّد في هذه الجلسة: kind → التقرير (لتصدير Excel متعدد الأوراق)
@@ -479,7 +480,7 @@
     _capCaveat(capped, caveats);
     if(!item) caveats.push("الصنفُ المختار لا وثيقةَ رصيدٍ له الآن (محذوف أو مدموج) — الافتتاحيُّ محسوبٌ من رصيدٍ حاليٍّ = صفر.");
     if(!mine.length) caveats.push("لا حركةَ لهذا الصنف داخل الفترة — الافتتاحيُّ والختاميُّ متساويان.");
-    if(_p.price==null) caveats.push("لا سعرَ لهذا الصنف في أيّ مصدر (آخر وارد · وثيقة الصنف · بند الكتالوج المرتبط) — لا قيمةَ تُحسب. اربطه ببند الكتالوج من شاشة رصيد المخزون.");
+    if(_p.price==null) caveats.push({money:true, t:"لا سعرَ لهذا الصنف في أيّ مصدر (آخر وارد · وثيقة الصنف · بند الكتالوج المرتبط) — لا قيمةَ تُحسب. اربطه ببند الكتالوج من شاشة رصيد المخزون."});
 
     return {
       title: KINDS.card + " — " + ((item&&item.itemName) || (roll&&roll.name) || "صنف"),
@@ -501,7 +502,7 @@
         {v:_fmt(roll?roll.inQty:0),        l:"وارد",    cls:"good", ic:"download"},
         {v:_fmt(roll?roll.outQty:0),       l:"صادر",    cls:"crit", ic:"packageMinus"},
         {v:_fmt(_close),                   l:"رصيد ختامي", ic:"clipboardCheck"},
-        {v:_p.price==null?"—":_money(_r3(_close*_p.price)), l:"قيمة الرصيد الختامي (ر.س)", ic:"banknote"},
+        {v:_p.price==null?"—":_money(_r3(_close*_p.price)), l:"قيمة الرصيد الختامي (ر.س)", ic:"banknote", money:true},
         {v:String(rows.length),            l:"عدد الحركات", ic:"activity"}
       ],
       caveats
@@ -558,8 +559,8 @@
     if(noLog) caveats.push("تحفّظٌ على الافتتاحيّ: "+_fmt(noLog)+" صنفاً له رصيدٌ ولا حركةَ له داخل الفترة المقروءة — افتتاحيُّه = رصيدُه الحاليُّ نفسُه.");
     if(orphans) caveats.push(_fmt(orphans)+" صنفاً تحرّك في الفترة ولا وثيقةَ رصيدٍ له الآن (محذوف أو مدموج) — أُدرِج بهويّته من السجل.");
     caveats.push("«النقل» عمودٌ مستقلٌّ (± صافي) لأنه ليس شراءً ولا استهلاكاً، و«الاستخدام المباشر» غيرُ محتسَبٍ هنا إطلاقاً (لم يدخل المستودع) — انظر تقرير الاستهلاك.");
-    caveats.push("«القيمة» = الرصيدُ الختاميُّ × سعرِ الوحدة، وترتيبُ مصادر السعر: آخر وارد بسعر > 0 ← سعرُ وثيقة الصنف ← سعرُ بند الكتالوج المرتبط. والمصدرُ عمودٌ ظاهرٌ فلا يُخفى الاختيار.");
-    if(noPrice) caveats.push(_fmt(noPrice)+" صنفاً بلا سعرٍ في أيّ مصدر — قيمتُه فارغةٌ لا صفر، فإجماليُّ القيمة **حدٌّ أدنى**. اربطه ببند الكتالوج من شاشة رصيد المخزون.");
+    caveats.push({money:true, t:"«القيمة» = الرصيدُ الختاميُّ × سعرِ الوحدة، وترتيبُ مصادر السعر: آخر وارد بسعر > 0 ← سعرُ وثيقة الصنف ← سعرُ بند الكتالوج المرتبط. والمصدرُ عمودٌ ظاهرٌ فلا يُخفى الاختيار."});
+    if(noPrice) caveats.push({money:true, t:_fmt(noPrice)+" صنفاً بلا سعرٍ في أيّ مصدر — قيمتُه فارغةٌ لا صفر، فإجماليُّ القيمة **حدٌّ أدنى**. اربطه ببند الكتالوج من شاشة رصيد المخزون."});
 
     return {
       title: KINDS.movement,
@@ -586,8 +587,8 @@
         {v:_fmt(sum("inQty")),    l:"إجمالي الوارد", cls:"good", ic:"download"},
         {v:_fmt(sum("outQty")),   l:"إجمالي الصادر", cls:"crit", ic:"packageMinus"},
         {v:_fmtSign(sum("adjNet")), l:"صافي التسويات", ic:"wrench"},
-        {v:_money(sum("value")),  l:"قيمة الأرصدة الختامية (ر.س)", ic:"banknote"},
-        {v:String(noPrice),       l:"بلا سعر", cls:"warn", ic:"alertCircle"}
+        {v:_money(sum("value")),  l:"قيمة الأرصدة الختامية (ر.س)", ic:"banknote", money:true},
+        {v:String(noPrice),       l:"بلا سعر", cls:"warn", ic:"alertCircle", money:true}
       ],
       caveats
     };
@@ -627,7 +628,7 @@
     const caveats=[];
     _capCaveat(capped, caveats);
     if(fromLastUpdated) caveats.push(_fmt(fromLastUpdated)+" صنفاً لا حركةَ له داخل الفترة المقروءة — قِيس سكونُه بحقل «آخر تحديث» على وثيقة الرصيد (يتغيّر أيضاً بتعديل البيانات، فهو حدٌّ أدنى للسكون لا رقمٌ قاطع).");
-    if(noPrice) caveats.push(_fmt(noPrice)+" صنفاً بلا سعرٍ في أيّ مصدر — قيمتُه فارغةٌ لا صفر، فالقيمةُ المجمَّدةُ أدناه **حدٌّ أدنى**.");
+    if(noPrice) caveats.push({money:true, t:_fmt(noPrice)+" صنفاً بلا سعرٍ في أيّ مصدر — قيمتُه فارغةٌ لا صفر، فالقيمةُ المجمَّدةُ أدناه **حدٌّ أدنى**."});
 
     return {
       title: KINDS.stale,
@@ -648,8 +649,8 @@
       rows,
       stats: [
         {v:String(rows.length), l:"أصناف راكدة", cls:"warn", ic:"hourglass"},
-        {v:_money(frozen),      l:"قيمة مجمَّدة (ر.س)", ic:"banknote"},
-        {v:String(noPrice),     l:"بلا سعر", ic:"alertCircle"}
+        {v:_money(frozen),      l:"قيمة مجمَّدة (ر.س)", ic:"banknote", money:true},
+        {v:String(noPrice),     l:"بلا سعر", ic:"alertCircle", money:true}
       ],
       caveats
     };
@@ -693,8 +694,8 @@
     _capCaveat(capped, caveats);
     caveats.push("لا يوجد حقلُ «حدٍّ أدنى» لكل صنفٍ في النظام — العتبةُ هنا **عامةٌ مُدخَلة** ("+_fmt(th)+") تُطبَّق على كل الأصناف بلا تمييز.");
     caveats.push("معدّلُ الاستهلاك = الصادرُ في الفترة ÷ "+_fmt(days)+" يوماً. «الاستخدام المباشر» غيرُ محتسَبٍ (لم يُصرَف من المستودع)، والنقلُ كذلك.");
-    caveats.push("«تكلفة سدّ النقص» = النقصُ عن العتبة × سعرِ الوحدة — **تقديرٌ استرشاديٌّ** بسعرٍ قديم لا عرضُ مورد؛ وترتيبُ مصادره: آخر وارد ← وثيقة الصنف ← بند الكتالوج المرتبط.");
-    if(noPrice) caveats.push(_fmt(noPrice)+" صنفاً بلا سعرٍ في أيّ مصدر — تكلفتُه فارغةٌ لا صفر، فالإجماليُّ **حدٌّ أدنى**.");
+    caveats.push({money:true, t:"«تكلفة سدّ النقص» = النقصُ عن العتبة × سعرِ الوحدة — **تقديرٌ استرشاديٌّ** بسعرٍ قديم لا عرضُ مورد؛ وترتيبُ مصادره: آخر وارد ← وثيقة الصنف ← بند الكتالوج المرتبط."});
+    if(noPrice) caveats.push({money:true, t:_fmt(noPrice)+" صنفاً بلا سعرٍ في أيّ مصدر — تكلفتُه فارغةٌ لا صفر، فالإجماليُّ **حدٌّ أدنى**."});
 
     return {
       title: KINDS.reorder,
@@ -719,8 +720,8 @@
         {v:String(out),                l:"نفد",     cls:"crit", ic:"alertCircle"},
         {v:String(rows.length-out),    l:"منخفض",   cls:"warn", ic:"alertTriangle"},
         {v:String(rows.length),        l:"يحتاج إعادة طلب", ic:"cart"},
-        {v:_money(_r3(rows.reduce((sm,r)=>sm+_num(r.refill),0))), l:"تكلفة سدّ النقص (ر.س)", ic:"banknote"},
-        {v:String(noPrice),            l:"بلا سعر", cls:"warn", ic:"alertCircle"}
+        {v:_money(_r3(rows.reduce((sm,r)=>sm+_num(r.refill),0))), l:"تكلفة سدّ النقص (ر.س)", ic:"banknote", money:true},
+        {v:String(noPrice),            l:"بلا سعر", cls:"warn", ic:"alertCircle", money:true}
       ],
       caveats
     };
@@ -779,7 +780,7 @@
     _capCaveat(capped, caveats);
     caveats.push("يشمل **الصادر** من المستودع و**الاستخدام المباشر** (بندٌ اشتُري وسُلّم للموقع بلا دخول المستودع) — فهو استهلاكٌ على المشروع وإن لم يمسّ رصيداً.");
     if(_f.wh) caveats.push("عند تحديد مستودع: «الاستخدام المباشر» مُستبعَدٌ كلَّه — لا مستودعَ له أصلاً.");
-    if(noPrice) caveats.push(_fmt(noPrice)+" سطراً بلا سعرٍ في أيّ مصدر — قيمتُه فارغةٌ لا صفر، فالإجماليُّ **حدٌّ أدنى**.");
+    if(noPrice) caveats.push({money:true, t:_fmt(noPrice)+" سطراً بلا سعرٍ في أيّ مصدر — قيمتُه فارغةٌ لا صفر، فالإجماليُّ **حدٌّ أدنى**."});
 
     const gLabel = _f.groupBy==="recipient" ? "المستلم" : (_f.groupBy==="order" ? "أمر الصرف / الطلب" : "المشروع / الموقع");
     return {
@@ -800,8 +801,8 @@
       stats: [
         {v:String(groups),      l:gLabel, ic:"folderOpen"},
         {v:String(rows.length), l:"سطور", ic:"scroll"},
-        {v:_money(total),       l:"إجمالي القيمة (ر.س)", ic:"banknote"},
-        {v:String(noPrice),     l:"بلا سعر", ic:"alertCircle"}
+        {v:_money(total),       l:"إجمالي القيمة (ر.س)", ic:"banknote", money:true},
+        {v:String(noPrice),     l:"بلا سعر", ic:"alertCircle", money:true}
       ],
       caveats
     };
@@ -838,9 +839,9 @@
     const caveats=[];
     _capCaveat(capped, caveats);
     caveats.push("لا عمودَ «كمية إجمالية»: الأصنافُ بوحداتٍ مختلفة (قطعة · متر · لتر · طن)، وجمعُها رقمٌ بلا معنى.");
-    if(noPriceAll) caveats.push(_fmt(noPriceAll)+" صنفاً بلا سعرٍ في أيّ مصدر — خارج القيمة تماماً، فكلُّ قيمةٍ أدناه **حدٌّ أدنى** لا رقمٌ محاسبيّ.");
-    caveats.push("ترتيبُ مصادر السعر: آخر وارد بسعر > 0 ← سعرُ وثيقة الصنف ← الكتالوج. (سعرُ وثيقة الصنف يُكتب مرّةً عند الإنشاء ولا يُحدَّث عند الاستلام، فسعرُ الوارد أطزجُ منه.)");
-    if(unlinkedAll) caveats.push(_fmt(unlinkedAll)+" صنفاً لا بندَ كتالوجٍ مرتبطاً به (لا بالمعرّف ولا بالكود ولا بالاسم) — فالكتالوجُ لا يُسعّره، وهو الاحتياطُ الأخير. اربطه يدوياً من قائمة صفّه في شاشة رصيد المخزون.");
+    if(noPriceAll) caveats.push({money:true, t:_fmt(noPriceAll)+" صنفاً بلا سعرٍ في أيّ مصدر — خارج القيمة تماماً، فكلُّ قيمةٍ أدناه **حدٌّ أدنى** لا رقمٌ محاسبيّ."});
+    caveats.push({money:true, t:"ترتيبُ مصادر السعر: آخر وارد بسعر > 0 ← سعرُ وثيقة الصنف ← الكتالوج. (سعرُ وثيقة الصنف يُكتب مرّةً عند الإنشاء ولا يُحدَّث عند الاستلام، فسعرُ الوارد أطزجُ منه.)"});
+    if(unlinkedAll) caveats.push({money:true, t:_fmt(unlinkedAll)+" صنفاً لا بندَ كتالوجٍ مرتبطاً به (لا بالمعرّف ولا بالكود ولا بالاسم) — فالكتالوجُ لا يُسعّره، وهو الاحتياطُ الأخير. اربطه يدوياً من قائمة صفّه في شاشة رصيد المخزون."});
 
     return {
       title: KINDS.warehouse,
@@ -859,9 +860,9 @@
       stats: [
         {v:String(rows.length),                          l:"مستودعات", ic:"warehouse"},
         {v:String(rows.reduce((s,r)=>s+_num(r.items),0)),l:"أصناف", ic:"package"},
-        {v:_money(total),                                l:"القيمة الإجمالية (ر.س)", ic:"banknote"},
-        {v:String(noPriceAll),                           l:"بلا سعر", cls:"warn", ic:"alertCircle"},
-        {v:String(unlinkedAll),                          l:"بلا ربط بالكتالوج", cls:"warn", ic:"link"}
+        {v:_money(total),                                l:"القيمة الإجمالية (ر.س)", ic:"banknote", money:true},
+        {v:String(noPriceAll),                           l:"بلا سعر", cls:"warn", ic:"alertCircle", money:true},
+        {v:String(unlinkedAll),                          l:"بلا ربط بالكتالوج", cls:"warn", ic:"link", money:true}
       ],
       caveats
     };
@@ -959,6 +960,37 @@
     consumption:_buildConsumption, warehouse:_buildWarehouse, adjust:_buildAdjust
   };
 
+  /* ════════ الوضع غير المسعَّر — «كمّيّاتٌ بلا أسعار» ════════
+     كثيرٌ من قرّاء التقرير لا يُطلعون على التكلفة (مشرفُ موقعٍ · مقاولُ باطنٍ ·
+     ورقةٌ تُعلَّق في المستودع)، وطباعةُ ورقةٍ تحمل أسعارَ الشراء لمن لا يعنيه
+     تسريبٌ لا خدمة. والوضعُ **نزعٌ بعد البناء لا فرعٌ في كلّ بانٍ**: البناةُ
+     السبعة يبقون كما هم بحسابٍ واحدٍ لا حسابين، ونقطةٌ واحدةٌ تحذف. فلا يمكن أن
+     يظهر عمودٌ سعريٌّ في وضعٍ غير مسعَّر لأنّ بانياً نُسي.
+
+     والحذفُ **بوسمٍ صريح** لا بمطابقة نصّ: الأعمدةُ بمفاتيحها في `PRICE_COLS`،
+     والبطاقاتُ والتحفّظاتُ بعلَم `money:true` تحمله هي نفسُها. فبطاقةٌ سعريةٌ
+     جديدةٌ تُضاف غداً بلا علَمٍ تظهر في الوضعين — وحارسُ اختبارٍ يمنع ذلك. */
+  const PRICE_COLS = ["price","psrc","value","refill","noPrice","unlinked"];
+
+  function _stripPrices(rep){
+    if(!rep) return rep;
+    const drop={}; PRICE_COLS.forEach(k=>{ drop[k]=true; });
+    const cols=(rep.cols||[]).filter(c=>!drop[c.k]);
+    /* والصفوفُ تُنقّى أيضاً لا الأعمدةُ وحدَها: `rows` هي ما يبني ورقةَ Excel
+       (`_sheetRows` تمرّ على المفاتيح)، فتركُ السعر في الصفّ يُسرّبه إلى الملفّ
+       بينما الشاشةُ نظيفة — وهو أسوأُ من إظهاره صراحةً. */
+    const rows=(rep.rows||[]).map(r=>{
+      const o={}; Object.keys(r).forEach(k=>{ if(!drop[k]) o[k]=r[k]; }); return o;
+    });
+    return Object.assign({}, rep, {
+      cols, rows,
+      stats   : (rep.stats||[]).filter(x=>!x.money),
+      caveats : (rep.caveats||[]).filter(c=>!(c && typeof c==="object" && c.money)),
+      subtitle: (rep.subtitle?rep.subtitle+" · ":"")+"بلا أسعار (كمّيّات فقط)",
+      unpriced: true
+    });
+  }
+
   /* ════════════════════════════════════════════════════════════════════
      ٥) التوليد
      ════════════════════════════════════════════════════════════════════ */
@@ -987,7 +1019,11 @@
     try{
       const {logs, capped} = await _loadLogs(b);
       const takes = (_f.kind==="adjust") ? await _loadStocktakes(b) : [];
-      const rep = _withSeq(BUILDERS[_f.kind]({logs, capped, b, takes}));
+      /* النزعُ **قبل** `_withSeq`: عمودُ «م» يُحقن في الصدارة، وحقنُه ثم الحذفُ
+         يترك ترقيماً على أعمدةٍ زالت. الترتيب: ابنِ ← انزع ← رقّم. */
+      let _built = BUILDERS[_f.kind]({logs, capped, b, takes});
+      if(!_f.priced) _built = _stripPrices(_built);
+      const rep = _withSeq(_built);
       rep.kind      = _f.kind;
       rep.kindName  = KINDS[_f.kind];
       rep.params    = _paramsList();
@@ -1017,6 +1053,7 @@
     if(_f.kind==="stale")       p.push(["حدّ السكون (يوم)",String(_f.staleDays)]);
     if(_f.kind==="reorder"||_f.kind==="warehouse") p.push(["العتبة",String(_f.threshold)]);
     if(_f.kind==="consumption") p.push(["التجميع",_f.groupBy==="recipient"?"المستلم":_f.groupBy==="order"?"أمر الصرف":"المشروع/الموقع"]);
+    p.push(["الأسعار",_f.priced?"مسعَّر (سعر الوحدة والقيمة)":"بلا أسعار (كمّيّات فقط)"]);
     p.push(["وقت التوليد",_shortDate(new Date().toISOString())]);
     p.push(["مولِّد التقرير",(typeof currentUser!=="undefined"&&currentUser&&currentUser.name)||"—"]);
     return p;
@@ -1134,14 +1171,21 @@
   /* شريطُ الإحصاء — `.ast-stat` كما تستعملها شاشاتُ الأصول والمخزون: أيقونةٌ في
      رقاقةٍ ٣٨px ثم القيمةُ ثم التسمية. وكانت الأيقونةُ ناقصةً فبدت البطاقاتُ
      نصفَ بطاقة. */
+  // مقاسُ الرقم بطوله — دالّةُ النواة `_astStatSize` هي المصدر، وهذه نسختُها
+  // الاحتياطية لِما لا نواةَ فيه (صندوقُ الفحص). العتباتُ في مكانٍ واحدٍ هناك.
+  function _svSize(v){
+    try{ if(typeof _astStatSize==="function") return _astStatSize(v); }catch(e){}
+    const n=String(v==null?"":v).length;
+    return n>=12 ? "sv-xl" : (n>=9 ? "sv-l" : "");
+  }
   function _statsHTML(rep){
     if(!rep.stats || !rep.stats.length) return "";
     const t=rep.stats.map(s=>
       `<div class="ast-stat ${s.cls||"total"}">
          <span class="si">${_svg(s.ic||"barChart")}</span>
-         <div><div class="sv">${_esc(s.v)}</div><div class="sl">${_esc(s.l)}</div></div>
+         <div><div class="sv ${_svSize(s.v)}">${_esc(s.v)}</div><div class="sl">${_esc(s.l)}</div></div>
        </div>`).join("");
-    return `<div class="ast-stats" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));padding:14px 16px;margin-bottom:0;border-bottom:1px solid var(--border)">${t}</div>`;
+    return `<div class="ast-stats" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));padding:14px 16px;margin-bottom:0;border-bottom:1px solid var(--border)">${t}</div>`;
   }
 
   /* التوكيدُ في نصّ التحفّظ يحمل معنى («ناقصة» · «حدٌّ أدنى») فلا يُسطَّح. يُهرَّب
@@ -1150,9 +1194,12 @@
     return _esc(s).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
   }
 
+  // تحفّظٌ قد يكون نصّاً أو `{t, money:true}` — والوسمُ يجعله قابلاً للحذف في
+  // الوضع غير المسعَّر بلا مطابقةِ نصٍّ هشّة.
+  function _cavText(c){ return (c && typeof c==="object") ? String(c.t||"") : String(c==null?"":c); }
   function _caveatsHTML(rep){
     if(!rep.caveats || !rep.caveats.length) return "";
-    const li=rep.caveats.map(c=>`<li>${_emph(c)}</li>`).join("");
+    const li=rep.caveats.map(c=>`<li>${_emph(_cavText(c))}</li>`).join("");
     return `<div class="info-box ivr-cav" style="margin:14px 16px">
       <div class="section-label" style="margin-bottom:6px">حدودُ القراءة وتحفّظاتُها</div>
       <ul>${li}</ul></div>`;
@@ -1233,6 +1280,10 @@
         ${fld("إلى تاريخ", `<input class="form-input" type="date" value="${_esc(_f.to)}" onchange="${IR}._setq('to',this.value)">`)}
         ${fld("المستودع", `<select class="form-select" onchange="${IR}._set('wh',this.value)">${whOpts}</select>`)}
         ${fld("الفئة", `<select class="form-select" onchange="${IR}._set('cat',this.value)">${catOpts}</select>`)}
+        ${fld("الأسعار", `<select class="form-select" onchange="${IR}._set('priced',this.value)" title="بلا أسعار: تُحذف أعمدةُ سعر الوحدة والقيمة ومصدرِ السعر من الشاشة ومن Excel ومن الورقة المطبوعة">
+          <option value="1"${_f.priced?" selected":""}>مسعَّر — سعر الوحدة والقيمة</option>
+          <option value="0"${_f.priced?"":" selected"}>بلا أسعار — كمّيّات فقط</option>
+        </select>`)}
         ${itemPicker}${staleBox}${thBox}${grpBox}
         <div class="ivr-acts">
           <button class="btn btn-primary btn-sm" id="invrep-gen" onclick="${IR}.generate()">${_icn("barChart")} توليد التقرير</button>
@@ -1370,7 +1421,11 @@
   /* يعيد الرسم — الحقولُ المشروطة (منتقي الصنف · حدُّ السكون · العتبة · التجميع)
      تظهر وتختفي بنوع التقرير، ومنتقي الصنف يتبع فلترَي المستودع والفئة. */
   function _set(k,v){
-    _f[k] = (k==="staleDays") ? _num(v) : v;
+    /* `priced` علَمٌ منطقيّ تصله قيمةُ `<option>` نصّاً — و`"0"` **نصٌّ صادق**،
+       فبلا هذا السطر كان «بلا أسعار» يبقى مسعَّراً بصمت. */
+    if(k==="priced")            _f.priced = !(v===false || v==="0" || v===0 || v==="false");
+    else if(k==="staleDays")    _f[k] = _num(v);
+    else                        _f[k] = v;
     render();
   }
   function _setq(k,v){                      // يخزّن بلا إعادة رسم (لا يقطع الكتابة)
@@ -1378,7 +1433,7 @@
   }
   function _reset(){
     _f={kind:_f.kind, from:"", to:"", wh:"", cat:"", docId:"", q:"", qLabel:"",
-        threshold:LOW_DEF, staleDays:90, groupBy:"project"};
+        threshold:LOW_DEF, staleDays:90, groupBy:"project", priced:true};
     _defaultPeriod(); _out=null; render();
   }
 
@@ -1629,6 +1684,7 @@ ${on?_lhCSS():""}
     // دوالُّ نقيّة — مكشوفةٌ لفحوص hail-tests وسيناريوهات المتصفّح
     _invReady,
     _effects, _net, _bounds, _openingMap, _rollup, _priceOf, _lastInPrices, _catLinkOf,
+    _stripPrices, PRICE_COLS, _svSize, _cavText,
     _itemMatch, _pickList, _snorm, _pickLabel,
     _stale, _periodDays, _catalogIndex, _sheetRows, _safeSheetName, _withSeq,
     _state: ()=>({f:{..._f}, out:_out, sheets:Object.keys(_sheets)}),

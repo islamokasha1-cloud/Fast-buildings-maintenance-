@@ -593,7 +593,11 @@ function predelivery() {
        وأعمدةُ `exportInventoryExcel` و`exportInventoryPDF`، ووضعُ «الربط» في
        منتقي الكتالوج القائم. ونقلُ أيٍّ من هذه إلى ملفٍّ بحجّة تعديلها ممنوع
        (CLAUDE.md) — هي أجزاءٌ من شاشةٍ ودالّتَي تصديرٍ تعيش كلُّها هنا. */
-    const IDX_CEILING = 38484;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ورُفع من 38484 إلى 38492 — ‏٨ أسطرٍ لدالّة `_astStatSize` (مقاسُ رقم بطاقة
+       الإحصاء بطوله) وتعليقِها. **مكانُها النواةُ لا وحدةٌ**: `.ast-stat` كلاسُ
+       المنصّة تستعمله شاشاتُ الأصول والمخزون والتقارير، فالعتبةُ صفةُ الكلاس لا
+       صفةُ تقريرِ مخزون — ووحدةُ التقارير تناديها من هنا بدل أن تحفر عتبةً ثانية. */
+    const IDX_CEILING = 38492;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -1829,10 +1833,15 @@ function inventoryReportsTests() {
   /* ══ ★★ v18.9.2743: عمودُ «م» في تقارير المخزون — مرّةً واحدةً لا سبعاً ══ */
   {
     const ivr2 = IVR_PATH ? fs.readFileSync(IVR_PATH, "utf8") : "";
+    /* نقطةُ التوليد **واحدة**: البانِي يُنادى مرّةً، ثم يمرّ مخرَجُه على نزع
+       الأسعار (اختيارياً) ثم على `_withSeq`. الحارسُ يُثبت وحدةَ النقطة لا شكلَ
+       السطر: نداءُ البانِي مرّةً واحدةً في الملفّ كلِّه، و`_withSeq` تلفُّ نتيجتَه. */
     T("★★ ln: العمودُ يُضاف على المخرَج لا في كل بانٍ (سبعةُ مواضعَ تُنسى إحداها)",
       /const SEQ_COL = \{k:"_n", l:"م", al:"center", w:5\};/.test(ivr2) &&
       /function _withSeq\(rep\)\{/.test(ivr2) &&
-      /const rep = _withSeq\(BUILDERS\[_f\.kind\]\(\{logs, capped, b, takes\}\)\);/.test(ivr2));
+      (ivr2.match(/BUILDERS\[_f\.kind\]\(\{logs, capped, b, takes\}\)/g) || []).length === 1 &&
+      /let _built = BUILDERS\[_f\.kind\]\(\{logs, capped, b, takes\}\);/.test(ivr2) &&
+      /const rep = _withSeq\(_built\);/.test(ivr2));
     T("★★★ ln: و**بعد** فراغِ البانِي من الفرز — فالرقمُ يتبع الترتيبَ المعروض",
       /rep\.rows\.forEach\(function\(r,i\)\{ if\(r\) r\._n = i\+1; \}\);/.test(ivr2));
     T("★ ln: وهو idempotent (توليدٌ ثانٍ لا يُضاعف العمود)",
@@ -2061,6 +2070,93 @@ function inventoryReportsTests() {
     /const byId=\{\}, byCode=\{\}, byName=\{\}/.test(src) && /byId\[c\.id\]=c/.test(src));
   T("★ `_catLinkOf` مكشوفةٌ للفحص وتقرأ رابطتَها من وحدة التسعير أوّلاً",
     typeof IR._catLinkOf === "function" && /window\.inventoryPricing/.test(src));
+
+  /* ════════════════════════════════════════════════════════════════
+     ★ الوضع غير المسعَّر — «كمّيّاتٌ بلا أسعار»
+     ورقةٌ تُعلَّق في المستودع أو تُسلَّم لمقاولِ باطنٍ لا يجوز أن تحمل أسعارَ
+     الشراء. والخطرُ هنا **تسريبٌ صامت**: عمودٌ يُحذف من الشاشة ويبقى في الصفّ
+     فيخرج في ورقة Excel — تبدو الشاشةُ نظيفةً والملفُّ ليس كذلك.
+     ════════════════════════════════════════════════════════════════ */
+  if (typeof IR._stripPrices === "function") {
+    const repP = {
+      cols: [{k:"name",l:"المادة"},{k:"closing",l:"ختامي"},{k:"price",l:"سعر الوحدة"},
+             {k:"psrc",l:"مصدر السعر"},{k:"value",l:"القيمة"}],
+      rows: [{ name:"أ", closing:5, price:12, psrc:"الكتالوج", value:60 }],
+      stats: [{v:"3",l:"أصناف"},{v:"60",l:"قيمة",money:true}],
+      caveats: ["تحفّظٌ عام", {t:"تحفّظٌ سعريّ", money:true}],
+      subtitle: "الفترة"
+    };
+    const off = IR._stripPrices(repP);
+    T("★ بلا أسعار: أعمدةُ السعر والمصدر والقيمة تُحذف والباقي كما هو",
+      off.cols.map(c=>c.k).join(",") === "name,closing", off.cols.map(c=>c.k).join(","));
+    T("★★ والصفُّ نفسُه يُنقّى لا الأعمدةُ وحدَها — وإلا خرج السعرُ في ورقة Excel والشاشةُ نظيفة",
+      Object.keys(off.rows[0]).join(",") === "name,closing", Object.keys(off.rows[0]).join(","));
+    T("★ البطاقاتُ والتحفّظاتُ الموسومةُ بـmoney تُحذف، وغيرُ الموسوم يبقى",
+      off.stats.length === 1 && off.stats[0].l === "أصناف" &&
+      off.caveats.length === 1 && IR._cavText(off.caveats[0]) === "تحفّظٌ عام");
+    T("★ والوضعُ يُعلَن في وجه التقرير لا يُخمَّن",
+      /بلا أسعار/.test(off.subtitle) && off.unpriced === true, off.subtitle);
+    T("★★ والنزعُ لا يُفسد التقريرَ الأصليّ (نسخةٌ لا تعديلٌ في مكانه)",
+      repP.cols.length === 5 && repP.rows[0].price === 12 && repP.stats.length === 2);
+    T("★ ونزعٌ على مخرَجٍ فارغٍ أو مشوَّهٍ لا يُسقط التوليد",
+      IR._stripPrices(null) === null && !!IR._stripPrices({}));
+
+    /* ★★★ الحارسُ البنيويّ: **كلُّ عمودٍ ماليٍّ مُعلَنٌ في `PRICE_COLS`**.
+       بلا هذا، عمودُ قيمةٍ يُضاف غداً يبقى ظاهراً في الوضع غير المسعَّر — وهو
+       بالضبط التسريبُ الذي وُجد الوضعُ لمنعه. يُقرأ من المصدر لا من قائمةٍ محفورة. */
+    const moneyKeys = [...src.matchAll(/\{k:"([a-zA-Z]+)"[^}]*f:"money"/g)].map(m => m[1]);
+    const missing = [...new Set(moneyKeys)].filter(k => !IR.PRICE_COLS.includes(k));
+    T("★★★ كلُّ عمودٍ بصيغة money مُعلَنٌ في PRICE_COLS (فلا يتسرّب عمودٌ جديد)",
+      moneyKeys.length > 0 && missing.length === 0,
+      missing.length ? "غائبة: " + missing.join("، ") : moneyKeys.length + " عموداً ماليّاً، كلُّها معلَنة");
+    T("★ ومعها أعمدةُ المصدر والعدّ المرافقة (مصدرُ السعر · بلا سعر · بلا ربط)",
+      ["psrc","noPrice","unlinked"].every(k => IR.PRICE_COLS.includes(k)));
+
+    /* ★★ وكلُّ بطاقةٍ تعرض مبلغاً بالريال أو عدَّ «بلا سعر/بلا ربط» تحمل
+       `money:true` — وإلا ظهر مبلغٌ في وضعٍ حُذفت أعمدتُه. */
+    const statLines = [...src.matchAll(/\{v:[^}]*l:"([^"]*)"[^}]*\}/g)];
+    const leaky = statLines
+      .filter(m => /\(ر\.س\)|بلا سعر|بلا ربط/.test(m[1]) && !/money:\s*true/.test(m[0]))
+      .map(m => m[1]);
+    T("★★ كلُّ بطاقةٍ ماليّةٍ تحمل money:true (وإلا بقي مبلغٌ في وضعٍ بلا أسعار)",
+      leaky.length === 0, leaky.length ? "بلا وسم: " + leaky.join("، ") : "كلُّها موسومة");
+
+    /* ★★ فخُّ النصّ الصادق: قيمةُ `<option>` تصل نصّاً، و`"0"` صادقةٌ في JS —
+       فبلا التحويل الصريح كان «بلا أسعار» يبقى مسعَّراً بصمت. */
+    IR._set("priced", "0");
+    const offState = IR._state().f.priced;
+    IR._set("priced", "1");
+    const onState = IR._state().f.priced;
+    T("★★ اختيارُ «بلا أسعار» يُقرأ false لا نصّاً صادقاً",
+      offState === false && onState === true, `"0"→${offState}  "1"→${onState}`);
+    T("★ الوضعُ الافتراضيُّ مسعَّر، و«مسح المعايير» يعود إليه",
+      /priced:true\s*(?:\/\/|$)/m.test(src) && /groupBy:"project", priced:true\}/.test(src));
+    T("★ والوضعُ يُثبَت في معايير الورقة المطبوعة (فلا يُقرأ ناقصاً بلا بيان)",
+      src.includes('p.push(["الأسعار",_f.priced?"مسعَّر (سعر الوحدة والقيمة)":"بلا أسعار (كمّيّات فقط)"]);'));
+    T("★★ والنزعُ قبل _withSeq (وإلا رقّم عمودُ «م» أعمدةً تُحذف بعده)",
+      /if\(!_f\.priced\) _built = _stripPrices\(_built\);\s*\n\s*const rep = _withSeq\(_built\);/.test(src));
+    T("★ ومنتقي الوضع حاضرٌ في شريط المعايير", /_set\('priced',this\.value\)/.test(src));
+  } else {
+    T("★ _stripPrices مكشوفةٌ على الواجهة للفحص", false, "غير مكشوفة");
+  }
+
+  /* ════ الرقمُ الطويل لا يفيض من بطاقة الإحصاء ════
+     `.ast-stat .sv` مونوسبيس 23px، والبطاقةُ في شبكةٍ مرنة: مبلغٌ كـ«143,745.51»
+     كان يخرج من صندوقه فيقصُّه حاويه — يُقرأ «43,745.51». علّةٌ **صامتة**: لا خطأ
+     ولا تحذير، رقمٌ ناقصٌ يبدو رقماً كاملاً. */
+  T("★★ مقاسُ الرقم يتدرّج بطوله (لا فيضَ ولا قصّ)",
+    typeof IR._svSize === "function" &&
+    IR._svSize("2,470.00") === "" && IR._svSize("143,745.51") === "sv-l" &&
+    IR._svSize("1,234,567.89") === "sv-xl",
+    typeof IR._svSize === "function" ? [IR._svSize("2,470.00"), IR._svSize("143,745.51"), IR._svSize("1,234,567.89")].join("|") : "غير مكشوفة");
+  T("★ والراسمُ يضع الصنفَ فعلاً على .sv", /class="sv \$\{_svSize\(s\.v\)\}"/.test(src));
+  T("★★ والمقاساتُ معرَّفةٌ في app.css مع min-width:0 (بلا الأخيرة لا ينكمش الابن أصلاً)",
+    /\.ast-stat>div\{min-width:0\}/.test(HTML) &&
+    /\.ast-stat \.sv\.sv-l\{font-size:\d+px\}/.test(HTML) &&
+    /\.ast-stat \.sv\.sv-xl\{font-size:\d+px\}/.test(HTML) &&
+    /\.ast-stat \.sv\{[^}]*text-overflow:ellipsis/.test(HTML));
+  T("★ وشبكةُ البطاقات تُعطي الرقمَ عرضاً كافياً في الوجهين (200px لا 160px)",
+    /minmax\(min\(100%,200px\),1fr\)/.test(src) && /minmax\(min\(100%,200px\),1fr\)/.test(HTML));
 
   /* ════ الأعمدةُ الجديدة: القيمةُ صنفاً صنفاً داخل المستودع ════
      «ملخّص المستودعات» يعطي إجماليَّ المستودع، ولا يقول **أيُّ صنفٍ** يحمل
