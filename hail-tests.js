@@ -579,7 +579,12 @@ function predelivery() {
        لقطةُ المشتريات). تعديلٌ على منطقٍ قائمٍ في موضعه؛ ونسخُ البطاقة إلى وحدةٍ
        يشقّها مصدرَين — وهو ما تتجنّبه البطاقةُ أصلاً (مصدرُها `getAvailableStatuses`
        نفسُها التي تبني الأزرار). */
-    const IDX_CEILING = 38328;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 38329 إلى 38338 — ‏٩ أسطرٍ صافية لصلاحية تعديل خطة PPM وحذفها
+       للمشرف (طلب المالك 01/09): دالتا `ppmRoleCanManage`/`ppmCanManage`
+       وتعليقُ حدودهما. **تعديلُ صلاحياتِ شاشةٍ قائمة في مكانها** — حرّاسُ
+       التعديل والحذف الأربعة كلُّهم في وحدة PPM داخل النواة بجوار
+       `ppmRoleCanCreate`، ونقلُ الدالة وحدَها يفصلها عمّن يقرؤها (CLAUDE.md). */
+    const IDX_CEILING = 38338;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -14286,14 +14291,16 @@ function vendorPOIssuance() {
    دائماً، والتقريبُ عند المصدر فلا يتسرّب العائم. (٢) الحالةُ `pending_pm` حصراً
    مهما أرسل النظامُ الخارجي — الباب يُدخل الدورةَ من أولها ولا يتجاوزها أبداً. */
 /* ════════════════════════════════════════════════════════════════════
-   خطط PPM: المشرف يُنشئ خطة صيانة — والتعديل والحذف للمسؤول وحده
-   (طلب المالك) — الدالة النقية ppmRoleCanCreate تُفحص هنا مباشرةً،
-   ومواضع الاستدعاء الأربعة تُحرس نصّياً حتى لا يرتدّ أحدها إلى admin فقط.
+   خطط PPM: المشرف يُنشئ خطة صيانة ويعدّلها ويحذفها (طلب المالك) —
+   الدالتان النقيتان ppmRoleCanCreate/ppmRoleCanManage تُفحصان هنا مباشرةً،
+   ومواضعُ الاستدعاء السبعة تُحرس نصّياً حتى لا يرتدّ أحدها إلى admin فقط.
+   والحارسُ يُبقي الدالتين **مستقلّتين**: تطابقُ مجموعتيهما اليوم قرارٌ لا
+   مرادفة، فدمجُهما يجعل توسيعَ إحداهما توسيعاً للأخرى بلا قصد.
    ════════════════════════════════════════════════════════════════════ */
 function ppmSupervisorCreateGuards() {
-  H("خطط PPM — صلاحية الإنشاء للمشرف (والتعديل/الحذف للمسؤول)");
+  H("خطط PPM — الإنشاء والتعديل والحذف للمشرف");
 
-  // ── (١) الدالة النقية: تُستخرج من index.html وتُنفَّذ فعلاً ──
+  // ── (١) الدالتان النقيتان: تُستخرجان من index.html وتُنفَّذان فعلاً ──
   const m = HTML.match(/function ppmRoleCanCreate\(role\)\{[^\n]*\}/);
   T("ppmRoleCanCreate موجودة (دالة نقية على الدور)", !!m);
   if (m) {
@@ -14304,6 +14311,18 @@ function ppmSupervisorCreateGuards() {
       !can("فني") && !can("technician") && !can("viewer") && !can("") && !can(undefined));
   }
 
+  const mm = HTML.match(/function ppmRoleCanManage\(role\)\{[^\n]*\}/);
+  T("ppmRoleCanManage موجودة (دالة نقية مستقلّة عن ppmRoleCanCreate)", !!mm);
+  if (mm) {
+    const can = new Function(mm[0] + "; return ppmRoleCanManage;")();
+    T("★ المسؤول والمشرف (عربي «مشرف» وإنجليزي supervisor) يعدّلون ويحذفون",
+      can("admin") === true && can("مشرف") === true && can("supervisor") === true);
+    T("★ الفني والزائر ومَن بلا دور لا يعدّلون ولا يحذفون",
+      !can("فني") && !can("technician") && !can("viewer") && !can("") && !can(undefined));
+  }
+  T("★ ppmCanManage تقرأ ppmRoleCanManage لا ppmRoleCanCreate (الحدّان لا يُدمجان)",
+    /function ppmCanManage\(\)\{ return !!\(currentUser && ppmRoleCanManage\(currentUser\.role\)\); \}/.test(HTML));
+
   // ── (٢) مواضع الإنشاء الأربعة تمرّ كلها بـ ppmCanCreate ──
   T("★ زر «خطة جديدة» يظهر بـ ppmCanCreate لا بشرط admin",
     /addBtn\.style\.display=ppmCanCreate\(\)\?"":"none";/.test(HTML));
@@ -14311,19 +14330,22 @@ function ppmSupervisorCreateGuards() {
     /function openAddPPMModal\(\)\{\s*\n\s*if\(!ppmCanCreate\(\)\)/.test(HTML));
   T("★ الإضافة الجماعية لأصول الدور محروسة بـ ppmCanCreate",
     /async function ppmAddAllFloorAssets\(\)\{\s*\n\s*if\(!ppmCanCreate\(\)\)/.test(HTML));
-  T("★ savePPMPlan: فرع الإضافة بـ ppmCanCreate وفرع التعديل admin وحده",
+  T("★ savePPMPlan: فرع الإضافة بـ ppmCanCreate وفرع التعديل بـ ppmCanManage",
     /const _editingPPM = !!document\.getElementById\("ppm-edit-id"\)\.value;/.test(HTML) &&
-    /if\(_editingPPM\)\{\s*\n\s*if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML) &&
+    /if\(_editingPPM\)\{\s*\n\s*if\(!ppmCanManage\(\)\)/.test(HTML) &&
     /\} else if\(!ppmCanCreate\(\)\)/.test(HTML));
 
-  // ── (٣) التعديل والحذف لم يتوسّعا ──
-  T("★ openEditPPMModal ما زال للمسؤول وحده",
-    /function openEditPPMModal\(id\)\{\s*\n\s*if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML));
-  T("★ deletePPMPlan ما زال للمسؤول وحده",
-    /function deletePPMPlan\(id\)\{\s*\n\s*if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML));
-  T("★ أزرار التعديل/الحذف على البطاقة ما زالت بشرط isAdmin",
-    /\$\{isAdmin\?`<button class="btn btn-ghost btn-sm" onclick="event\.stopPropagation\(\);openEditPPMModal/.test(HTML) &&
-    /\$\{isAdmin\?`<button class="btn btn-delete btn-sm" onclick="event\.stopPropagation\(\);deletePPMPlan/.test(HTML));
+  // ── (٣) مواضع التعديل والحذف الثلاثة تمرّ كلها بـ ppmCanManage ──
+  T("★ openEditPPMModal محروس بـ ppmCanManage",
+    /function openEditPPMModal\(id\)\{\s*\n\s*if\(!ppmCanManage\(\)\)/.test(HTML));
+  T("★ deletePPMPlan محروس بـ ppmCanManage",
+    /function deletePPMPlan\(id\)\{\s*\n\s*if\(!ppmCanManage\(\)\)/.test(HTML));
+  T("★ زرّا التعديل/الحذف على البطاقة بـ ppmCanManage لا بشرط admin",
+    /const canManage = ppmCanManage\(\);/.test(HTML) &&
+    /\$\{canManage\?`<button class="btn btn-ghost btn-sm" onclick="event\.stopPropagation\(\);openEditPPMModal/.test(HTML) &&
+    /\$\{canManage\?`<button class="btn btn-delete btn-sm" onclick="event\.stopPropagation\(\);deletePPMPlan/.test(HTML));
+  T("★ لا حارسَ admin نصّياً باقٍ في مواضع PPM الثلاثة (ارتدادٌ صامت)",
+    !/function (?:openEditPPMModal\(id\)|deletePPMPlan\(id\))\{\s*\n\s*if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML));
 }
 
 /* ════════════════════════════════════════════════════════════════════
