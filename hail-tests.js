@@ -14592,6 +14592,41 @@ function vendorPOIssuance() {
   T("★ اللقطةُ مستقلة: p.vendor وبنودُ الطلب لم يتغيّرا",
     po.vendor === "المورد المقترح" && po.items.length === 0);
 
+  /* ── بنودٌ إضافيةٌ في الأمر زيادةً على بنود الطلب (طلب المالك) ──
+     الأمرُ لقطةٌ مستقلة، فبندٌ يُضاف فيه لا يُكتب على `p.items` — لكنه **تجاوزٌ
+     للمعتمَد**، فيُوسَم `extra` ويُعَدّ ويُقيَّد. الحرّاس: السمةُ تبقى في اللقطة،
+     والعدُّ والإجماليُّ صحيحان، وقيدُ الـtimeline يذكرهما، والبندُ الإضافيُّ
+     لا يمسّ بنودَ الطلب. */
+  T("تعرّض _extras", typeof V._extras === "function");
+  if (typeof V._extras === "function") {
+    const ex = V._extras([{ unitCost: 100, qty: 3 }, { unitCost: 100, qty: 1, extra: true }]);
+    T("★ _extras: يعدّ الموسومَ وحدَه ويجمع إجماليَّه شامل الضريبة",
+      ex.count === 1 && ex.total === 115, JSON.stringify(ex));
+    T("_extras: بلا بندٍ موسومٍ ⇒ صفر", V._extras([{ unitCost: 100, qty: 3 }]).count === 0);
+  }
+  const pox = { id: "PO-202608-0009", status: "proc_executing", vendor: "المورد المقترح",
+                items: [{ itemName: "أ", qty: 3, unit: "قطعة", unitCost: 100 }], timeline: [] };
+  const vx = V._applyIssue(pox, {
+    vendorName: "مؤسسة البناء",
+    items: [{ itemName: "أ", qty: 3, unitCost: 100 },
+            { itemName: "بند خارج الطلب", qty: 2, unit: "كيس", unitCost: 50, extra: true }],
+  }, { now: "2026-09-02T10:00:00.000Z", by: "خالد", byUser: "khaled" });
+  T("★ البندُ الإضافيُّ يبقى موسوماً في اللقطة، ويدخل الإجماليَّ",
+    vx.items.length === 2 && vx.items[0].extra === false && vx.items[1].extra === true &&
+    vx.total === 460, JSON.stringify({ total: vx.total, extra: vx.items.map(i => i.extra) }));
+  T("★★ اللقطةُ تحمل عدَّ الإضافيّ وإجماليَّه، والقيدُ يذكرهما صراحةً",
+    vx.extrasCount === 1 && vx.extrasTotal === 115 &&
+    /1 بند إضافي خارج بنود الطلب/.test(pox.timeline[0].notes || ""),
+    JSON.stringify({ c: vx.extrasCount, t: vx.extrasTotal, n: pox.timeline[0].notes }));
+  T("★ الإضافةُ لا تمسّ بنودَ طلب الشراء", pox.items.length === 1 && pox.items[0].itemName === "أ");
+  T("زرُّ «إضافة بند» ومسارُ حذفه معروضان على الوحدة",
+    typeof V.addItem === "function" && typeof V.removeItem === "function" &&
+    src.includes("vendorPO.addItem()") && src.includes("vendorPO.removeItem(this)"));
+  T("★ البندُ الإضافيُّ بلا اسمٍ لا يُصدَر (لا سطرَ فارغٍ في وثيقةٍ تخرج للمورد)",
+    /it\.extra && !it\.itemName/.test(src) && src.includes("اكتب اسم البند الإضافي"));
+  T("★ صفُّ الجدول مصدرٌ واحد — الرسمُ الأوّليّ والإضافةُ يبنيانه بـ_rowHTML",
+    (src.match(/_rowHTML\(/g) || []).length >= 3);
+
   // لا قائمةَ حالاتٍ خامٍ محلية — التصنيف عبر poStageOf المركزية (قاعدة §3)
   T("★ البوّابة تقرأ poStageOf المركزية لا قائمةَ حالاتٍ خام",
     src.includes("poStageOf") && !/VPO_STAGES\s*=\s*\[[^\]]*"ordered"/.test(src));
