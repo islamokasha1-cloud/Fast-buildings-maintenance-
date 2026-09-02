@@ -616,7 +616,11 @@ function predelivery() {
        `checkPPMDue` و`autoCreatePPMTicket` و`confirmPPMTicket` وبطاقةُ الخطة
        كلُّها هنا، والدوالُّ تُقرأ مع `ppmNextDue`/`ppmConsumeSecondDue` في
        السطور نفسِها. ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة إصلاحه ممنوعٌ (CLAUDE.md). */
-    const IDX_CEILING = 38598;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ورُفع من 38598 إلى 38606 — ‏٨ أسطرٍ لوصل وحدة `ppm-schedule-repair.js`
+       وحدَها (مضيفُ البطاقة · نداؤها · وسمُ التحميل وتعليقاه). والأداةُ نفسُها
+       **في ملفِّ وحدة** كما تقضي CLAUDE.md: كتلةٌ جديدةٌ قائمةٌ بنفسها (شاشةٌ
+       ومحرّكُ استنتاج) — ولا يدخل النواةَ منها إلا سطرُ النداء. */
+    const IDX_CEILING = 38606;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -14957,6 +14961,164 @@ function ppmAdvanceOnDueGuards() {
   })(), "بقي كاتبٌ لـlastExecuted ⇒ عودةُ «آخر تنفيذ» الكاذب");
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   أداةُ إصلاح مواعيد خطط PPM (`ppm-schedule-repair.js`) — تصحيحُ ما وقع فعلاً.
+   إصلاحُ المنطق يمنع التكرار ولا يعيد كتابة الماضي: خططٌ استُهلك موعدُها قبل
+   أوانه بقيت قافزة. والمبدأُ الذي تُحرسه هذه الفحوص أنّ **البلاغَ هو الشاهد**:
+   `scheduledFor` يُلتقط قبل أيّ تقديم، فالموعدُ الضائع مكتوبٌ فيه لا يُخمَّن.
+   ولذلك: بلا بلاغٍ **مفتوحٍ** أقدمَ من الاستحقاق الحالي ⇒ لا إصلاح؛ ولا يُخترع
+   موعدٌ ثانٍ لخطةٍ لم يكن لها واحد (يُميَّز بعكس حساب الدورة لا بالتخمين).
+   والحارسُ الأهمّ: حسابُ الأداة **يطابق `ppmNextDue` في النواة** — لو اختلفا
+   لصنّفت الأداةُ تقديماً عادياً «موعداً ثانياً» فاخترعت بياناتٍ لا أصلَ لها.
+   ════════════════════════════════════════════════════════════════════ */
+function ppmScheduleRepairGuards() {
+  H("أداةُ إصلاح مواعيد خطط PPM");
+
+  const RP_PATH = path.resolve(path.dirname(IDX), "ppm-schedule-repair.js");
+  const RP = fs.existsSync(RP_PATH) ? fs.readFileSync(RP_PATH, "utf8") : "";
+  T("الوحدة موجودة", !!RP);
+  if (!RP) return;
+
+  // ── تحميلُ الوحدة في عالمٍ وهميّ (بلا متصفّح) ──
+  let M = null;
+  try {
+    const win = { document: undefined };
+    new Function("window", RP + "\n;return window.ppmScheduleRepair;")(win);
+    M = win.ppmScheduleRepair;
+  } catch (e) { /* يظهر في الفحص التالي */ }
+  T("★ تُحمَّل بنمط IIFE وتعرّض كائناً واحداً على window", !!M && typeof M.audit === "function");
+  if (!M) return;
+
+  const DAY = 86400000;
+  const day = n => { const d = new Date(); d.setDate(d.getDate() + n); d.setHours(12, 0, 0, 0); return d.toISOString(); };
+  const T0 = M._todayMs();
+  const FREQ = { "ربع سنوي": 90, "شهري": 30 };
+  const P = o => Object.assign({ id: "P1", name: "خطة", freq: "ربع سنوي", disabled: false, secondDueDate: null }, o);
+
+  // ── (١) الحالةُ التي بلّغ عنها المالك: موعدُ ٥ سبتمبر استُهلك يوم ٢ ──
+  {
+    const plan = P({ nextDueDate: day(92), secondDueDate: null });      // قفزت للموعد الثاني
+    const tk = [{ id: "PPM-2026-0031", ppmId: "P1", status: "قيد التنفيذ", scheduledFor: day(3) }];
+    const r = M.audit([plan], tk, T0, FREQ);
+    T("★★ الخطةُ القافزةُ فوق التزامٍ مفتوحٍ تُرصَد", r.repairs.length === 1);
+    if (r.repairs.length) {
+      const x = r.repairs[0];
+      T("★★ والموعدُ يعود إلى ما يشهد به البلاغ لا إلى تخمين",
+        M._dayMs(x.to) === M._dayMs(day(3)), "to=" + String(x.to).slice(0, 10));
+      T("★★ والموعدُ الثاني الممحوُّ يُستردّ (القيمةُ الحاليةُ هي هو)",
+        x.restoredSecond === true && M._dayMs(x.secondTo) === M._dayMs(day(92)));
+      T("★ والبلاغُ الشاهدُ مذكورٌ في الاقتراح (قابلٌ للمراجعة)", x.ticketId === "PPM-2026-0031");
+    }
+  }
+
+  // ── (٢) تقديمٌ عاديٌّ بلا موعدٍ ثانٍ: لا يُخترع له واحد ──
+  {
+    const witness = day(3);
+    const ordinary = M._expectedNext(witness, 90, T0);
+    const plan = P({ nextDueDate: new Date(ordinary + 12 * 3600000).toISOString(), secondDueDate: null });
+    const r = M.audit([plan], [{ id: "T", ppmId: "P1", status: "مفتوح", scheduledFor: witness }], T0, FREQ);
+    T("★★ التقديمُ العاديُّ يُصلَح ولا يُخترع له موعدٌ ثانٍ",
+      r.repairs.length === 1 && r.repairs[0].restoredSecond === false && r.repairs[0].secondTo === null);
+  }
+
+  // ── (٣) حدودُ «لا تمسّ» ──
+  {
+    const witness = day(3);
+    const jumped = { nextDueDate: day(92) };
+    const tkOpen = [{ id: "T", ppmId: "P1", status: "مفتوح", scheduledFor: witness }];
+    T("★★ بلا شاهدٍ لا إصلاح — خطةٌ لا بلاغَ لها تُترك",
+      M.audit([P(jumped)], [], T0, FREQ).repairs.length === 0);
+    T("★★ والبلاغُ المغلقُ ليس شاهداً — التزامُه أُنجز فالقفزةُ صحيحة",
+      M.audit([P(jumped)], [{ id: "T", ppmId: "P1", status: "مغلق", scheduledFor: witness }], T0, FREQ).repairs.length === 0);
+    T("★ وبلاغُ خطةٍ أخرى ليس شاهداً",
+      M.audit([P(jumped)], [{ id: "T", ppmId: "P9", status: "مفتوح", scheduledFor: witness }], T0, FREQ).repairs.length === 0);
+    T("★★ وخطةٌ لم تقفز (استحقاقُها = شاهدُها) سليمةٌ لا تُمَسّ", (() => {
+      const r = M.audit([P({ nextDueDate: witness })], tkOpen, T0, FREQ);
+      return r.repairs.length === 0 && r.intact === 1;
+    })());
+    T("★ والخطةُ الموقوفةُ خارج الفحص كلِّه",
+      M.audit([P({ ...jumped, disabled: true })], tkOpen, T0, FREQ).repairs.length === 0);
+  }
+
+  // ── (٤) ما لا يُفسَّر يُعلَن ولا يُمَسّ ──
+  {
+    const r = M.audit(
+      [P({ nextDueDate: day(50), secondDueDate: day(200) })],
+      [{ id: "T", ppmId: "P1", status: "مفتوح", scheduledFor: day(3) }], T0, FREQ);
+    T("★★ استحقاقٌ لا دورةٌ عاديةٌ ولا موعدٌ ثانٍ مستهلَك ⇒ يُعلَن ولا يُصلَح",
+      r.repairs.length === 0 && r.unexplained.length === 1);
+  }
+
+  // ── (٥) مدخلاتٌ فاسدةٌ لا تكسر الأداة ──
+  {
+    const bad = M.audit([null, P({ nextDueDate: "غير صالح" }), P({ id: "" })],
+      [null, { ppmId: "P1", scheduledFor: "" }], T0, FREQ);
+    T("★ خططٌ وبلاغاتٌ ناقصةٌ أو فاسدةٌ لا ترمي ولا تُنتج إصلاحاً",
+      bad.repairs.length === 0 && bad.unexplained.length === 0);
+    T("★ ومدخلاتٌ غيرُ مصفوفةٍ إطلاقاً", M.audit(null, null, T0, null).repairs.length === 0);
+  }
+
+  // ── (٦) ★★ الحارسُ الأهمّ: حسابُ الأداة = حسابُ النواة ──
+  {
+    const mCore = HTML.match(/function ppmNextDue\(plan, fromISO\)\{[\s\S]*?\n\}/);
+    T("ppmNextDue مستخرَجة من النواة للمطابقة", !!mCore);
+    if (mCore) {
+      // خريطةُ الدورات تُقرأ من النواة نفسِها لا تُكتب هنا — وإلا طابقنا نسختَنا
+      const mMap = HTML.match(/const PPM_FREQ_DAYS = \{[\s\S]*?\n\};/);
+      const MAP = mMap ? new Function(mMap[0].replace("const", "var") + "; return PPM_FREQ_DAYS;")() : null;
+      T("خريطةُ الدورات مقروءةٌ من النواة", !!MAP && Object.keys(MAP).length >= 4, MAP ? Object.keys(MAP).join(" · ") : "");
+      const core = new Function("var PPM_FREQ_DAYS = " + JSON.stringify(MAP || {}) + ";" + mCore[0] + "; return ppmNextDue;")();
+      const cases = [];
+      Object.keys(MAP || {}).forEach(f => [3, 0, -5, -400, 10].forEach(off => cases.push([off, f])));
+      const mismatch = cases.filter(([off, freq]) => {
+        const from = day(off);
+        const a = M._dayMs(core({ nextDueDate: from, freq }, from));
+        const b = M._expectedNext(from, MAP[freq], T0);
+        return a !== b;
+      });
+      T("★★ _expectedNext يطابق ppmNextDue في كل الحالات — وإلا اخترعت الأداةُ «موعداً ثانياً» كاذباً",
+        mismatch.length === 0, mismatch.length ? ("اختلفت: " + JSON.stringify(mismatch)) : cases.length + " حالة");
+    }
+  }
+
+  // ── (٧) الكتابةُ محروسةٌ بالمسؤول، وموصولةٌ بالشاشة ──
+  T("★★ open و apply كلاهما محروسٌ بـ_isAdmin",
+    (RP.match(/if\(!_isAdmin\(\)\)\{ _toast\("⚠ إصلاح المواعيد من صلاحية المسؤول","warn"\); return; \}/g) || []).length === 2);
+  /* دالّةُ الفحص نقيّةٌ فعلاً: جسمُها وحدَه يُفحَص — لا الملفُّ كلُّه، وإلا التقط
+     الحارسُ كتابةَ `apply` المشروعةَ وسقط بلا سبب. */
+  T("★★ الكتابةُ في apply وحدَها — و audit نقيّةٌ لا تكتب ولا تقرأ عالماً", (() => {
+    const mA = RP.match(/function audit\(planList, ticketList, todayMs, freqMap\)\{[\s\S]*?\n\}/);
+    if (!mA) return false;
+    const pure = !/savePPMDoc|_g\(|window\.|document\./.test(mA[0]);
+    const writesOnce = (RP.match(/save\(r\.id\);/g) || []).length === 1 &&
+                       /function apply\(\)\{[\s\S]*?save\(r\.id\);/.test(RP);
+    return pure && writesOnce;
+  })());
+  T("★ والإصلاحُ يُقيَّد في سجل المراجعة", /logAudit/.test(RP) && /إصلاح مواعيد خطط PPM/.test(RP));
+  T("★ الوحدةُ موصولةٌ: وسمُ التحميل ومضيفُ البطاقة ونداؤها بعد رسم اللوحة",
+    /<script src="ppm-schedule-repair\.js\?v=/.test(HTML) &&
+    /<div id="ppm-repair-card"><\/div>/.test(HTML) &&
+    /if\(window\.ppmScheduleRepair\) ppmScheduleRepair\.mountAdminCard\(\);/.test(HTML));
+  T("★ ورقمُ البناء يُختم آلياً (لا يُحرَّر بيد)", /const MODULE_BUILD = "v18\.9\.\d+";/.test(RP));
+
+  /* ★★ عطلٌ صامتٌ كشفه الفحصُ الحيُّ لا المراجعة: حالةُ النواة معلَنةٌ بـ`let`/`const`
+     في أعلى `index.html`، والإعلانُ المُعجميُّ في النطاق العام **لا يُنشئ خاصيةً
+     على `window`**. فأداةٌ تقرأ `window.ppmPlans` ترى `undefined` فتظنّ أن لا
+     خطط: لا بطاقةَ ولا إصلاح، وبلا خطأٍ واحدٍ في وحدة التحكّم. الحارسُ يثبّت
+     الأمرين: أنّ الأسماء ما زالت مُعجميّةً في النواة، وأنّ الوحدة لا تقرؤها
+     من `window` وحدَه. */
+  {
+    const lex = ["ppmPlans", "tickets", "currentUser", "PPM_FREQ_DAYS"];
+    const stillLexical = lex.filter(n => new RegExp("^(?:let|const) " + n + "\\b", "m").test(HTML));
+    T("★ حالةُ النواة ما زالت معلَنةً بـlet/const (سببُ وجود هذا الحارس)",
+      stillLexical.length === lex.length, "المُعجميّ: " + stillLexical.join(" · "));
+    T("★★ الوحدةُ تقرأ الأسماء المُعجميّة بجسرٍ يرى النطاق العام — لا window وحدَه",
+      /new Function\("try\{return typeof "\+n\+"==='undefined'\?null:"\+n\+"\}catch\(e\)\{return null\}"\)/.test(RP) &&
+      /const _g = n => \{[\s\S]*?return _lex\(n\);/.test(RP),
+      "قراءةٌ من window وحدَه ⇒ الأداةُ لا ترى خطةً واحدةً وتصمت");
+  }
+}
+
 function assetPPMCoverageGuards() {
   H("سجل الأصول — تغطية خطط الصيانة وسجل الصيانة");
 
@@ -15534,6 +15696,7 @@ function externalPurchaseApiGuards() {
   ppmSupervisorCreateGuards();
   ppmAutoGenerateAuthorityGuards();
   ppmAdvanceOnDueGuards();
+  ppmScheduleRepairGuards();
   assetPPMCoverageGuards();
   ppmAutoNameGuards();
   ppmNextDueFieldGuards();
