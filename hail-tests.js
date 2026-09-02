@@ -603,7 +603,13 @@ function predelivery() {
        على منطقٍ قائم**: الرسمُ ودالّتا التصدير كلُّها هنا، ونقلُ أيٍّ منها إلى
        ملفٍّ بحجّة تعديلها ممنوع (CLAUDE.md). والمحكَمُ نفسُه لا يصلح لوحدة: هو
        قراءةُ عنصرٍ في DOM هذه الشاشة لا حسابٌ نقيّ. */
-    const IDX_CEILING = 38518;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ورُفع من 38518 إلى 38542 — ‏٢٤ سطراً لحارس صلاحية التوليد التلقائي لبلاغات
+       PPM (`ppmRoleCanAutoGenerate` · `ppmCanAutoGenerate` · `ppmPlanOwner`)
+       وتعاليقِها. **مكانُها النواةُ لا وحدة**: هذا **إصلاحٌ في موضعه** على منطقٍ
+       قائم — `checkPPMDue` و`autoCreatePPMTicket` تعيشان هنا، والحارسُ يُقرأ مع
+       أخوَيه `ppmRoleCanCreate`/`ppmRoleCanManage` في السطور نفسِها. ونقلُ منطقٍ
+       قائمٍ إلى ملفٍّ بحجّة إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
+    const IDX_CEILING = 38542;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -14770,6 +14776,71 @@ function ppmSupervisorCreateGuards() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   التوليدُ التلقائيُّ لبلاغات PPM — مَن يكتبه ومَن يُنسب إليه.
+   الجذر كما بلّغ المالك: `checkPPMDue` لم تسأل عن الدور، فكانت تُولّد البلاغات
+   لدى أيّ حسابٍ مفتوحٍ لديه التطبيق ساعةَ الاستحقاق — فظهر مراقبٌ (observer)
+   لا يملك إنشاءَ خطةٍ أصلاً مؤلِّفاً لعشرات البلاغات: اسمُه في حقل «المشرف»
+   وفي سجل الأحداث وفي سجل المراجعة. الحارسان هنا يمنعان الارتداد:
+   (١) `ppmRoleCanAutoGenerate` تُنفَّذ فعلاً — المراقبُ والفنيُّ والزائر خارجَها.
+   (٢) موضعُ الاستدعاء الوحيد (فرعُ الإنشاء في `checkPPMDue`) محروسٌ نصّياً،
+       والرسمُ يبقى للجميع — الحارسُ لا يُخفي الخطط عن المراقب، يمنع كتابتَه فقط.
+   (٣) البلاغُ المولَّد يُنسب لصاحب الخطة (`ppmPlanOwner`) لا لمن صادف اتصالُه.
+   ════════════════════════════════════════════════════════════════════ */
+function ppmAutoGenerateAuthorityGuards() {
+  H("PPM — التوليد التلقائي: الصلاحية والنسبة");
+
+  // ── (١) الدالة النقية على الدور ──
+  const m = HTML.match(/function ppmRoleCanAutoGenerate\(role\)\{[^\n]*\}/);
+  T("ppmRoleCanAutoGenerate موجودة (دالة نقية على الدور)", !!m);
+  if (m) {
+    const can = new Function(m[0] + "; return ppmRoleCanAutoGenerate;")();
+    T("★ المسؤول والمشرف (عربي «مشرف» وإنجليزي supervisor) يُولّدون",
+      can("admin") === true && can("مشرف") === true && can("supervisor") === true);
+    T("★★ المراقبُ لا يُولّد بلاغات PPM (جذرُ البلاغ: بلاغاتٌ باسم مراقب)",
+      can("observer") === false);
+    T("★ الفنيُّ والزائرُ وأدوارُ المشتريات ومَن بلا دور لا يُولّدون",
+      !can("فني") && !can("technician") && !can("viewer") &&
+      !can("finance") && !can("hr_officer") && !can("hr_manager") &&
+      !can("") && !can(undefined) && !can(null));
+  }
+
+  T("★ ppmCanAutoGenerate تقرأ ppmRoleCanAutoGenerate (حارسٌ مستقلٌّ لا مرادف)",
+    /function ppmCanAutoGenerate\(\)\{ return !!\(currentUser && ppmRoleCanAutoGenerate\(currentUser\.role\)\); \}/.test(HTML));
+
+  // ── (٢) موضعُ الاستدعاء: فرعُ الإنشاء وحدَه محروس، والرسمُ للجميع ──
+  T("★★ فرعُ الإنشاء في checkPPMDue محروسٌ بـ ppmCanAutoGenerate",
+    /const toCreate=\[\];\s*\n\s*if\(ppmCanAutoGenerate\(\)\) ppmPlans\.forEach\(p=>\{/.test(HTML));
+  T("★ الحارسُ لا يُخرج من checkPPMDue كلِّها — رسمُ صفحة PPM يبقى لكل الأدوار",
+    /function checkPPMDue\(\)\{[\s\S]*?\n\}/.test(HTML) &&
+    !/if\(!ppmCanAutoGenerate\(\)\) return;/.test(HTML));
+
+  // ── (٣) نسبةُ البلاغ المولَّد: صاحبُ الخطة لا المستخدمُ الحالي ──
+  const mo = HTML.match(/function ppmPlanOwner\(plan\)\{[\s\S]*?\n\}/);
+  T("ppmPlanOwner موجودة (دالة نقية)", !!mo);
+  if (mo) {
+    const owner = new Function("var currentUser=null;" + mo[0] + "; return ppmPlanOwner;")();
+    T("★ مُنشئُ الخطة هو المنسوبُ إليه",
+      owner({ createdBy: "أحمد" }) === "أحمد");
+    T("★ خطةٌ قديمةٌ بلا createdBy ولا مستخدمٍ حالي ⇐ «النظام» (لا undefined)",
+      owner({}) === "النظام" && owner(null) === "النظام");
+  }
+
+  // النطاقُ جسمُ `autoCreatePPMTicket` وحدَه: `confirmPPMTicket` نقرةٌ يدويةٌ صريحةٌ
+  // من صاحبها، فـ`currentUser` هناك هو الصواب — والمنعُ العام كان سيُسقطها.
+  const ma = HTML.match(/async function autoCreatePPMTicket\(plan\)\{[\s\S]*?\n\}/);
+  T("autoCreatePPMTicket موجودة (نطاقُ الحارس)", !!ma);
+  if (ma) {
+    T("★★ حقلُ «المشرف» في البلاغ التلقائي من ppmPlanOwner لا من currentUser",
+      /supervisor: ppmPlanOwner\(plan\),/.test(ma[0]) &&
+      !/supervisor: \(currentUser&&currentUser\.name\)/.test(ma[0]));
+    T("★ ولا يبقى أثرٌ لـcurrentUser في بناء البلاغ التلقائي (نسبةٌ عارضة)",
+      !/(?:by|supervisor):\s*\(currentUser/.test(ma[0]));
+  }
+  T("★ سطرُ سجل الأحداث في البلاغ التلقائي منسوبٌ لصاحب الخطة كذلك",
+    /timeline:\[\{event:"تم إنشاء البلاغ تلقائياً عند استحقاق خطة PPM",by:ppmPlanOwner\(plan\),/.test(HTML));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    سجل الأصول: فلتر تغطية خطط الصيانة + خطط الأصل وسجل صيانته في التفاصيل
    (طلب المالك) — الدالة النقية assetsPPMCoverage تُنفَّذ هنا فعلاً،
    ومواضع الواجهة (الفلتر · البلاطتان · قسما التفاصيل) تُحرس نصّياً.
@@ -15347,6 +15418,7 @@ function externalPurchaseApiGuards() {
   vendorPOIssuance();
   externalPurchaseApiGuards();
   ppmSupervisorCreateGuards();
+  ppmAutoGenerateAuthorityGuards();
   assetPPMCoverageGuards();
   ppmAutoNameGuards();
   ppmNextDueFieldGuards();
