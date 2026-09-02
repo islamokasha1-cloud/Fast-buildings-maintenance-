@@ -620,7 +620,13 @@ function predelivery() {
        وحدَها (مضيفُ البطاقة · نداؤها · وسمُ التحميل وتعليقاه). والأداةُ نفسُها
        **في ملفِّ وحدة** كما تقضي CLAUDE.md: كتلةٌ جديدةٌ قائمةٌ بنفسها (شاشةٌ
        ومحرّكُ استنتاج) — ولا يدخل النواةَ منها إلا سطرُ النداء. */
-    const IDX_CEILING = 38606;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ورُفع من 38606 إلى 38666 — ‏٦٠ سطراً للبحث في طلبات الشراء برقم فاتورة
+       المورد (`poInvoiceNumbers` · `_invSearchNorm` · `poInvoiceMatch` ·
+       `poInvoiceHitChip`) وتعاليقِها. **مكانُها النواةُ لا وحدة**: **تعديلٌ في
+       موضعه** على منطقٍ قائم — الدوالُّ تُقرأ لصقَ `_poInvoiceList` الذي تُصحّح
+       قصورَه في البحث، ومستدعوها مرشّحُ `renderPurchases` وبطاقتُها، وكلُّها
+       هنا. ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة تعديله ممنوعٌ نصّاً (CLAUDE.md). */
+    const IDX_CEILING = 38666;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -3518,6 +3524,55 @@ function invoiceFileSource() {
   T("★ صفّ الرفع المستقل (pu-invoice-photo) مُخفى دائماً — التدقيق هو المصدر الوحيد",
     HTML.includes('if(_invPhotoRow)  _invPhotoRow.style.display  = "none";') &&
     !HTML.includes('_invPhotoRow.style.display  = atAuditClose ? "" : "none"'));
+
+  /* ── البحث في طلبات الشراء برقم فاتورة المورد (طلب المالك) ──
+     الرقمُ يُكتب في ثلاثة مواضع (`p.invoice` · `p.grnDocs[].invoiceNo` ·
+     إسقاطُها `p.invoices[]`)، فالبحثُ يقرأ **اتحادَها** لا أحدَها. والحرّاسُ
+     يثبّتون: الاتحادَ بلا تكرار، وأن رقمَ المشتريات لا يسقط بوجود سندِ مستودعٍ
+     برقمٍ آخر (وهو ما يفعله `_poInvoiceList` العارض)، والمطابقةَ على النصّ
+     الخام وعلى المطبَّع، ورفضَ الحرف الواحد، ووصلَ الدالة بمرشّح القائمة. */
+  {
+    const a = HTML.indexOf("function poInvoiceNumbers(");
+    const b = HTML.indexOf("/* شارةُ المطابقة على بطاقة الطلب", a);
+    let M = null;
+    if (a > 0 && b > a) {
+      try { M = new Function(HTML.slice(a, b) + "\nreturn {poInvoiceNumbers,_invSearchNorm,poInvoiceMatch};")(); }
+      catch (e) { T("تُستخرَج دوالّ بحث الفاتورة", false, String(e.message).slice(0, 90)); }
+    }
+    T("دوالّ بحث رقم الفاتورة موجودة ومستخرَجة", !!M);
+    if (M) {
+      const po = {
+        invoice: "A-100",
+        invoices: [{ invoiceNo: "B 200" }, { invoiceNo: "b-200" }],
+        grnDocs: [{ invoiceNo: "B 200" }, { invoiceNo: "C/300" }],
+      };
+      T("★★ الاتحاد: رقمُ المشتريات + أرقامُ السندات معاً (لا أحدُهما بدل الآخر)",
+        JSON.stringify(M.poInvoiceNumbers(po)) === JSON.stringify(["A-100", "B 200", "b-200", "C/300"]),
+        JSON.stringify(M.poInvoiceNumbers(po)));
+      T("★ التكرارُ يسقط بلا حساسيةِ حالةٍ ولا مسافاتٍ طرفية",
+        M.poInvoiceNumbers({ invoice: " x-1 ", grnDocs: [{ invoiceNo: "X-1" }] }).length === 1);
+      T("طلبٌ بلا فاتورة ⇒ قائمةٌ فارغة ولا مطابقة",
+        M.poInvoiceNumbers({}).length === 0 && M.poInvoiceMatch({}, "12") === false && M.poInvoiceNumbers(null).length === 0);
+      T("★ المطابقة على النصّ كما كُتب (احتواءً كبقية حقول البحث)",
+        M.poInvoiceMatch(po, "a-100") && M.poInvoiceMatch(po, "300"));
+      T("★★ والفواصلُ لا تحجب: «INV-1234» يجد «INV 1234» والعكس",
+        M.poInvoiceMatch({ invoice: "INV 1234" }, "inv-1234") &&
+        M.poInvoiceMatch({ invoice: "INV-1234" }, "INV 1234") &&
+        M.poInvoiceMatch({ invoice: "C/300" }, "c300"));
+      T("★ حرفٌ واحدٌ لا يُطابِق (وإلا أغرق كلَّ فاتورةٍ في النتيجة)",
+        M.poInvoiceMatch(po, "a") === false && M.poInvoiceMatch(po, "-") === false && M.poInvoiceMatch(po, "") === false);
+      T("رقمٌ غيرُ موجودٍ لا يُطابِق", M.poInvoiceMatch(po, "999") === false);
+      T("★ التطبيع يُسقط الفواصل وحدَها ولا يحذف الحروف",
+        M._invSearchNorm(" INV-12_34/5.6#(7) ") === "inv1234567");
+    }
+    T("★★ مرشّحُ قائمة الطلبات يقرأ رقمَ الفاتورة (وإلا فالدالةُ بلا مستدعٍ)",
+      HTML.includes("!poInvoiceMatch(p, q)) return false;"));
+    T("★ حقلُ البحث يقول إنه يبحث برقم الفاتورة — ما لا يُذكر لا يُجرَّب",
+      HTML.includes("ابحث برقم الطلب أو رقم فاتورة المورد"));
+    T("★ بطاقةُ الطلب تعرض الرقمَ المطابق (شارةُ المطابقة موصولة)",
+      HTML.includes("${poInvoiceHitChip(p, search)}") && HTML.includes("function poInvoiceHitChip(") &&
+      /\.po-inv-chip\{/.test(HTML));
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════

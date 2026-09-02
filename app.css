@@ -533,6 +533,11 @@ input,select,textarea,button{font-family:'Cairo','Tajawal',sans-serif}
 .po-wf-tag.rej{color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,var(--surface));border-color:color-mix(in srgb,var(--danger) 35%,var(--border))}
 .po-wf-tag.fin{color:#0e7490;background:color-mix(in srgb,#06b6d4 10%,var(--surface));border-color:color-mix(in srgb,#06b6d4 35%,var(--border))}
 .po-sub-chip{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;color:var(--subst);background:var(--subst-bg);border:1px solid var(--subst-bd)}
+/* شارةُ «طابق رقمُ الفاتورة» على بطاقة الطلب — تظهر عند البحث برقم فاتورة
+   المورد وحدَه، فتقول لماذا ظهرت هذه البطاقة. ألوانُ «سلا-أوك» المعرَّفةُ
+   للنمطين الفاتح والداكن — لا لونَ خامٌّ يعمى في الداكن. */
+.po-inv-chip{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;color:var(--sla-ok);background:var(--sla-ok-bg);border:1px solid var(--sla-ok-bd)}
+.po-inv-chip b{font-family:'JetBrains Mono',monospace;direction:ltr;display:inline-block}
 .po-wf-track{display:flex;align-items:center;overflow-x:auto;padding-bottom:3px}
 .po-step{text-align:center;background:var(--surface);border:1.5px solid var(--border);border-radius:9px;padding:6px 9px;min-width:64px;flex-shrink:0}
 .po-step .ps-ico{display:flex;align-items:center;justify-content:center;height:16px;color:var(--muted)}
