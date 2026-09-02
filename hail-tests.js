@@ -609,7 +609,18 @@ function predelivery() {
        قائم — `checkPPMDue` و`autoCreatePPMTicket` تعيشان هنا، والحارسُ يُقرأ مع
        أخوَيه `ppmRoleCanCreate`/`ppmRoleCanManage` في السطور نفسِها. ونقلُ منطقٍ
        قائمٍ إلى ملفٍّ بحجّة إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
-    const IDX_CEILING = 38542;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ورُفع من 38542 إلى 38598 — ‏٥٦ سطراً لفصل «وُلِّد» عن «نُفِّذ» ولنقل تقديم
+       الجدول إلى كنسةٍ مستقلّة (`ppmLastDone` · `ppmLastGen` · `ppmSameDay` ·
+       `ppmShouldAdvance` · `ppmTodayMs` · `ppmAdvancePlan`) وتعاليقِها.
+       **مكانُها النواةُ لا وحدة**: **إصلاحٌ في موضعه** على منطقٍ قائم —
+       `checkPPMDue` و`autoCreatePPMTicket` و`confirmPPMTicket` وبطاقةُ الخطة
+       كلُّها هنا، والدوالُّ تُقرأ مع `ppmNextDue`/`ppmConsumeSecondDue` في
+       السطور نفسِها. ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة إصلاحه ممنوعٌ (CLAUDE.md). */
+    /* ورُفع من 38598 إلى 38606 — ‏٨ أسطرٍ لوصل وحدة `ppm-schedule-repair.js`
+       وحدَها (مضيفُ البطاقة · نداؤها · وسمُ التحميل وتعليقاه). والأداةُ نفسُها
+       **في ملفِّ وحدة** كما تقضي CLAUDE.md: كتلةٌ جديدةٌ قائمةٌ بنفسها (شاشةٌ
+       ومحرّكُ استنتاج) — ولا يدخل النواةَ منها إلا سطرُ النداء. */
+    const IDX_CEILING = 38606;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -6756,13 +6767,21 @@ function perfContractPhase2() {
   // ── scheduledFor: يُلتقط قبل التقديم ──
   T("★ af: البلاغ الوقائي يحمل استحقاقه المخطَّط (المساران معاً)",
     (HTML.match(/scheduledFor: (plan|p)\.nextDueDate \|\| now/g) || []).length === 2);
-  T("★ af: scheduledFor يسبق تقديمَ الخطة في المسارين", (() => {
-    const iA = HTML.indexOf("scheduledFor: plan.nextDueDate");
-    const jA = HTML.indexOf("ppmPlans[planIdx].nextDueDate=nextISO;");
-    const iB = HTML.indexOf("scheduledFor: p.nextDueDate");
-    const jB = HTML.indexOf("p.nextDueDate  = _adv.nextISO;");
-    return iA > 0 && jA > iA && iB > 0 && jB > iB;
-  })(), "لو قُدّمت الخطة أولاً لحُفظ استحقاقُ الدورة **التالية** بدل الحالية");
+  /* العهدُ باقٍ («لا يُحفظ استحقاقُ الدورة التالية مكانَ الحالية») وضابطُه صار
+     أقوى: التقديمُ خرج من مسارَي التوليد إلى `ppmAdvancePlan` وحدَها، فاستحال
+     على أيٍّ منهما أن يسبق التقاطَ `scheduledFor` — لا بترتيبٍ صحيحٍ يُحرَس، بل
+     بغياب الكاتب. (والسببُ الأصلُ للنقل: التوليدُ مبكّرٌ بثلاثة أيام.) */
+  T("★★ af: كاتبُ nextDueDate بعد الإنشاء واحدٌ — ppmAdvancePlan", (() => {
+    const writes = [...HTML.matchAll(/\.nextDueDate\s*=\s*(?!=)/g)].length;
+    const inAdv  = /function ppmAdvancePlan\(planId\)\{[\s\S]*?ppmPlans\[i\]\.nextDueDate = _adv\.nextISO;[\s\S]*?\n\}/.test(HTML);
+    return inAdv && writes === 1;
+  })(), "موضعُ تقديمٍ ثانٍ ⇒ جدولٌ ينزاح أو يتقدّم مرتين");
+  T("★★ af: مسارا التوليد لا يلمسان الجدول إطلاقاً", (() => {
+    const A = HTML.match(/async function autoCreatePPMTicket\(plan\)\{[\s\S]*?\n\}/);
+    const B = HTML.match(/async function confirmPPMTicket\(\)\{[\s\S]*?\n\}/);
+    const clean = m => !!m && !/\.nextDueDate\s*=\s*(?!=)/.test(m[0]) && !/secondDueDate\s*=\s*null/.test(m[0]);
+    return clean(A) && clean(B);
+  })(), "التوليدُ يقع قبل الموعد بثلاثة أيام — فتقديمُه يمحو موعداً لم يُنفَّذ");
 
   // ── الطوابع: حقيقيةٌ لا مشتقّةٌ ولا مُصطنَعة ──
   T("★ af: زمنُ الاستجابة يُكتب في تطبيق الفنيين عند بدء التنفيذ",
@@ -14845,6 +14864,261 @@ function ppmAutoGenerateAuthorityGuards() {
    (طلب المالك) — الدالة النقية assetsPPMCoverage تُنفَّذ هنا فعلاً،
    ومواضع الواجهة (الفلتر · البلاطتان · قسما التفاصيل) تُحرس نصّياً.
    ════════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════════
+   PPM — «وُلِّد» غيرُ «نُفِّذ»، والجدولُ يتقدّم ببلوغ الموعد لا بتوليد بلاغه.
+   الجذر كما بلّغ المالك (02/09): التوليدُ يقع **قبل الاستحقاق بثلاثة أيام**
+   (`soon = today + 3`)، وكان يفعل في اللحظة نفسِها ثلاثةَ أشياء: يكتب
+   `lastExecuted = now` (فتقول البطاقةُ «آخر تنفيذ: ٢ سبتمبر» ولا عملَ وقع)،
+   ويقفز بـ`nextDueDate` من ٥ سبتمبر إلى الدورة التالية (فيختفي التزامٌ لم
+   يُنفَّذ بعد)، ويمحو الموعد الثاني. الحرّاسُ هنا يمنعون ارتدادَ الثلاثة:
+   (١) `ppmShouldAdvance` دالةٌ نقيّةٌ تُنفَّذ فعلاً — لا تقديمَ قبل الموعد،
+       ولا تقديمَ يوم الموعد إن لم يُولَّد بلاغُه، وبلاغُ **موعدٍ آخر** لا يكفي.
+   (٢) الكنسةُ في `checkPPMDue` **بعد** حلقة التوليد، وداخلَ حارس الصلاحية.
+   (٣) «آخر تنفيذ» = `lastCompletedAt` وحدَه في المواضع الثلاثة (بطاقةُ الخطة ·
+       سجلُّ الأصل · تصديرُ Excel)، ولا يُكتب `lastExecuted` بعد اليوم أبداً.
+   ════════════════════════════════════════════════════════════════════ */
+function ppmAdvanceOnDueGuards() {
+  H("PPM — التقديم ببلوغ الموعد، وفصلُ «وُلِّد» عن «نُفِّذ»");
+
+  // ── (١) الدالةُ النقيّة: تُستخرج وتُنفَّذ ──
+  const mSame = HTML.match(/function ppmSameDay\(a, b\)\{[\s\S]*?\n\}/);
+  const mAdv  = HTML.match(/function ppmShouldAdvance\(plan, ticketList, todayMs\)\{[\s\S]*?\n\}/);
+  T("ppmSameDay و ppmShouldAdvance موجودتان (دالّتان نقيّتان)", !!mSame && !!mAdv);
+  if (mSame && mAdv) {
+    const should = new Function(mSame[0] + mAdv[0] + "; return ppmShouldAdvance;")();
+    const D = n => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString(); };
+    const T0 = (() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime(); })();
+    const plan = due => ({ id: "P1", disabled: false, nextDueDate: due });
+    const tk   = sf  => [{ ppmId: "P1", scheduledFor: sf }];
+
+    T("★★ سيناريو البلاغ: موعدٌ بعد يومين وبلاغُه مولَّدٌ ⇒ **لا تقديم**",
+      should(plan(D(2)), tk(D(2)), T0) === false);
+    T("★★ حلَّ الموعدُ اليوم وبلاغُه مولَّدٌ ⇒ يتقدّم",
+      should(plan(D(0)), tk(D(0)), T0) === true);
+    T("★★ متأخرةٌ وبلاغُها مولَّدٌ ⇒ تتقدّم (لا تعلق في الماضي)",
+      should(plan(D(-5)), tk(D(-5)), T0) === true);
+    T("★★ حلَّ الموعدُ ولا بلاغَ له ⇒ لا تقديم (موعدٌ يمرّ بلا عملٍ ولا أثر)",
+      should(plan(D(0)), [], T0) === false);
+    T("★★ بلاغُ **موعدٍ آخر** لا يُقدّم الخطة (دورةٌ سابقةٌ لا تُسقط الحالية)",
+      should(plan(D(0)), tk(D(-95)), T0) === false);
+    T("★ بلاغُ خطةٍ أخرى في اليوم نفسِه لا يُقدّمها",
+      should(plan(D(0)), [{ ppmId: "P2", scheduledFor: D(0) }], T0) === false);
+    T("★ الخطةُ الموقوفة لا تتقدّم، والبياناتُ الناقصةُ لا تكسر الدالة",
+      should({ ...plan(D(0)), disabled: true }, tk(D(0)), T0) === false &&
+      should(null, null, T0) === false &&
+      should(plan(""), tk(D(0)), T0) === false &&
+      should(plan("غير صالح"), tk(D(0)), T0) === false);
+    T("★ مغلقاً كان البلاغُ أو مفتوحاً — التقديمُ ببلوغ الموعد لا بحالة البلاغ",
+      should(plan(D(0)), [{ ppmId: "P1", scheduledFor: D(0), status: "مغلق" }], T0) === true);
+  }
+
+  // ── (٢) الكنسةُ في موضعها: بعد التوليد، وداخلَ حارس الصلاحية ──
+  const mChk = HTML.match(/function checkPPMDue\(\)\{[\s\S]*?\n\}/);
+  T("checkPPMDue مستخرَجة (نطاقُ الحارس)", !!mChk);
+  if (mChk) {
+    const body = mChk[0];
+    T("★★ الكنسةُ تلي حلقةَ التوليد — فالمستحقُّ اليوم يُولَّد ثم يتقدّم في الجولة نفسِها",
+      body.indexOf("await autoCreatePPMTicket(p);") > 0 &&
+      body.indexOf("ppmShouldAdvance(p, tickets, t0)") > body.indexOf("await autoCreatePPMTicket(p);"));
+    T("★★ والكنسةُ خلفَ حارس الصلاحية — المراقبُ لا يُقدّم جدولاً كما لا يُولّد بلاغاً",
+      /if\(!ppmCanAutoGenerate\(\)\)\{ _redraw\(\); return; \}/.test(body) &&
+      body.indexOf("if(!ppmCanAutoGenerate()){ _redraw(); return; }") < body.indexOf("ppmShouldAdvance"));
+    T("★ والرسمُ يبقى لكل الأدوار (منعُ كتابةٍ لا حجبُ اطّلاع)",
+      /const _redraw = \(\) => \{/.test(body));
+  }
+
+  // ── (٣) «آخر تنفيذ» = الإنجازُ وحدَه، في المواضع الثلاثة ──
+  const mDone = HTML.match(/function ppmLastDone\(plan\)\{[^\n]*\}/);
+  const mGen  = HTML.match(/function ppmLastGen\(plan\)\{[^\n]*\}/);
+  T("ppmLastDone و ppmLastGen موجودتان (قارئان نقيّان)", !!mDone && !!mGen);
+  if (mDone && mGen) {
+    const done = new Function(mDone[0] + "; return ppmLastDone;")();
+    const gen  = new Function(mGen[0]  + "; return ppmLastGen;")();
+    const P = { lastCompletedAt: "2026-09-05", lastGeneratedAt: "2026-09-02", lastExecuted: "2026-09-02" };
+    T("★★ «آخر تنفيذ» = الإغلاق، و«التوليد» لا يتسرّب إليه",
+      done(P) === "2026-09-05" && done({ lastGeneratedAt: "2026-09-02" }) === "" &&
+      done({ lastExecuted: "2026-09-02" }) === "");
+    T("★★ الحقلُ القديم lastExecuted يُقرأ توليداً — لا تنفيذاً (بياناتُ الإنتاج القائمة)",
+      gen({ lastExecuted: "2026-09-02" }) === "2026-09-02" &&
+      gen({ lastGeneratedAt: "2026-09-03", lastExecuted: "2026-09-02" }) === "2026-09-03");
+    T("★ خطةٌ لم يُولَّد لها ولم تُنفَّذ ⇒ فراغٌ لا undefined", done({}) === "" && gen({}) === "" && done(null) === "");
+  }
+  T("★★ بطاقةُ الخطة تقرأ ppmLastDone، و«وُلِّد بلاغُه» يقوم مقامَه عند غيابه",
+    /آخر تنفيذ: \$\{fmtDateOnly\(ppmLastDone\(p\)\)\}/.test(HTML) &&
+    /وُلِّد بلاغُه: \$\{fmtDateOnly\(ppmLastGen\(p\)\)\}/.test(HTML));
+  T("★★ سجلُّ الأصل: الإنجازُ وحدَه — لا `lastExecuted || lastCompletedAt`",
+    /const lastRun = ppmLastDone\(p\);/.test(HTML) &&
+    !/lastExecuted \|\| p\.lastCompletedAt/.test(HTML));
+  T("★ تصديرُ Excel يفصل العمودين", /"آخر تنفيذ": ppmLastDone\(p\)\?/.test(HTML) &&
+    /"آخر توليد بلاغ": ppmLastGen\(p\)\?/.test(HTML));
+  /* الحقلُ القديم يُقرأ ولا يُكتب: أيُّ إسنادٍ أو مفتاحِ كائنٍ باسمه يُعيد «آخر
+     تنفيذ» الكاذب. والقراءةُ الوحيدةُ المسموحة داخل `ppmLastGen` نفسِها. */
+  T("★★ لا يُكتب lastExecuted في أيّ موضعٍ بعد اليوم (قراءةٌ للقديم فقط)", (() => {
+    const CODE = HTML.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'])\/\/[^\n]*/g, "$1");
+    const writes = [...CODE.matchAll(/\blastExecuted\s*[:=](?!=)/g)].length;
+    const reads  = [...CODE.matchAll(/\blastExecuted\b/g)].length;
+    return writes === 0 && reads === 1 && /plan\.lastGeneratedAt \|\| plan\.lastExecuted/.test(CODE);
+  })(), "بقي كاتبٌ لـlastExecuted ⇒ عودةُ «آخر تنفيذ» الكاذب");
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   أداةُ إصلاح مواعيد خطط PPM (`ppm-schedule-repair.js`) — تصحيحُ ما وقع فعلاً.
+   إصلاحُ المنطق يمنع التكرار ولا يعيد كتابة الماضي: خططٌ استُهلك موعدُها قبل
+   أوانه بقيت قافزة. والمبدأُ الذي تُحرسه هذه الفحوص أنّ **البلاغَ هو الشاهد**:
+   `scheduledFor` يُلتقط قبل أيّ تقديم، فالموعدُ الضائع مكتوبٌ فيه لا يُخمَّن.
+   ولذلك: بلا بلاغٍ **مفتوحٍ** أقدمَ من الاستحقاق الحالي ⇒ لا إصلاح؛ ولا يُخترع
+   موعدٌ ثانٍ لخطةٍ لم يكن لها واحد (يُميَّز بعكس حساب الدورة لا بالتخمين).
+   والحارسُ الأهمّ: حسابُ الأداة **يطابق `ppmNextDue` في النواة** — لو اختلفا
+   لصنّفت الأداةُ تقديماً عادياً «موعداً ثانياً» فاخترعت بياناتٍ لا أصلَ لها.
+   ════════════════════════════════════════════════════════════════════ */
+function ppmScheduleRepairGuards() {
+  H("أداةُ إصلاح مواعيد خطط PPM");
+
+  const RP_PATH = path.resolve(path.dirname(IDX), "ppm-schedule-repair.js");
+  const RP = fs.existsSync(RP_PATH) ? fs.readFileSync(RP_PATH, "utf8") : "";
+  T("الوحدة موجودة", !!RP);
+  if (!RP) return;
+
+  // ── تحميلُ الوحدة في عالمٍ وهميّ (بلا متصفّح) ──
+  let M = null;
+  try {
+    const win = { document: undefined };
+    new Function("window", RP + "\n;return window.ppmScheduleRepair;")(win);
+    M = win.ppmScheduleRepair;
+  } catch (e) { /* يظهر في الفحص التالي */ }
+  T("★ تُحمَّل بنمط IIFE وتعرّض كائناً واحداً على window", !!M && typeof M.audit === "function");
+  if (!M) return;
+
+  const DAY = 86400000;
+  const day = n => { const d = new Date(); d.setDate(d.getDate() + n); d.setHours(12, 0, 0, 0); return d.toISOString(); };
+  const T0 = M._todayMs();
+  const FREQ = { "ربع سنوي": 90, "شهري": 30 };
+  const P = o => Object.assign({ id: "P1", name: "خطة", freq: "ربع سنوي", disabled: false, secondDueDate: null }, o);
+
+  // ── (١) الحالةُ التي بلّغ عنها المالك: موعدُ ٥ سبتمبر استُهلك يوم ٢ ──
+  {
+    const plan = P({ nextDueDate: day(92), secondDueDate: null });      // قفزت للموعد الثاني
+    const tk = [{ id: "PPM-2026-0031", ppmId: "P1", status: "قيد التنفيذ", scheduledFor: day(3) }];
+    const r = M.audit([plan], tk, T0, FREQ);
+    T("★★ الخطةُ القافزةُ فوق التزامٍ مفتوحٍ تُرصَد", r.repairs.length === 1);
+    if (r.repairs.length) {
+      const x = r.repairs[0];
+      T("★★ والموعدُ يعود إلى ما يشهد به البلاغ لا إلى تخمين",
+        M._dayMs(x.to) === M._dayMs(day(3)), "to=" + String(x.to).slice(0, 10));
+      T("★★ والموعدُ الثاني الممحوُّ يُستردّ (القيمةُ الحاليةُ هي هو)",
+        x.restoredSecond === true && M._dayMs(x.secondTo) === M._dayMs(day(92)));
+      T("★ والبلاغُ الشاهدُ مذكورٌ في الاقتراح (قابلٌ للمراجعة)", x.ticketId === "PPM-2026-0031");
+    }
+  }
+
+  // ── (٢) تقديمٌ عاديٌّ بلا موعدٍ ثانٍ: لا يُخترع له واحد ──
+  {
+    const witness = day(3);
+    const ordinary = M._expectedNext(witness, 90, T0);
+    const plan = P({ nextDueDate: new Date(ordinary + 12 * 3600000).toISOString(), secondDueDate: null });
+    const r = M.audit([plan], [{ id: "T", ppmId: "P1", status: "مفتوح", scheduledFor: witness }], T0, FREQ);
+    T("★★ التقديمُ العاديُّ يُصلَح ولا يُخترع له موعدٌ ثانٍ",
+      r.repairs.length === 1 && r.repairs[0].restoredSecond === false && r.repairs[0].secondTo === null);
+  }
+
+  // ── (٣) حدودُ «لا تمسّ» ──
+  {
+    const witness = day(3);
+    const jumped = { nextDueDate: day(92) };
+    const tkOpen = [{ id: "T", ppmId: "P1", status: "مفتوح", scheduledFor: witness }];
+    T("★★ بلا شاهدٍ لا إصلاح — خطةٌ لا بلاغَ لها تُترك",
+      M.audit([P(jumped)], [], T0, FREQ).repairs.length === 0);
+    T("★★ والبلاغُ المغلقُ ليس شاهداً — التزامُه أُنجز فالقفزةُ صحيحة",
+      M.audit([P(jumped)], [{ id: "T", ppmId: "P1", status: "مغلق", scheduledFor: witness }], T0, FREQ).repairs.length === 0);
+    T("★ وبلاغُ خطةٍ أخرى ليس شاهداً",
+      M.audit([P(jumped)], [{ id: "T", ppmId: "P9", status: "مفتوح", scheduledFor: witness }], T0, FREQ).repairs.length === 0);
+    T("★★ وخطةٌ لم تقفز (استحقاقُها = شاهدُها) سليمةٌ لا تُمَسّ", (() => {
+      const r = M.audit([P({ nextDueDate: witness })], tkOpen, T0, FREQ);
+      return r.repairs.length === 0 && r.intact === 1;
+    })());
+    T("★ والخطةُ الموقوفةُ خارج الفحص كلِّه",
+      M.audit([P({ ...jumped, disabled: true })], tkOpen, T0, FREQ).repairs.length === 0);
+  }
+
+  // ── (٤) ما لا يُفسَّر يُعلَن ولا يُمَسّ ──
+  {
+    const r = M.audit(
+      [P({ nextDueDate: day(50), secondDueDate: day(200) })],
+      [{ id: "T", ppmId: "P1", status: "مفتوح", scheduledFor: day(3) }], T0, FREQ);
+    T("★★ استحقاقٌ لا دورةٌ عاديةٌ ولا موعدٌ ثانٍ مستهلَك ⇒ يُعلَن ولا يُصلَح",
+      r.repairs.length === 0 && r.unexplained.length === 1);
+  }
+
+  // ── (٥) مدخلاتٌ فاسدةٌ لا تكسر الأداة ──
+  {
+    const bad = M.audit([null, P({ nextDueDate: "غير صالح" }), P({ id: "" })],
+      [null, { ppmId: "P1", scheduledFor: "" }], T0, FREQ);
+    T("★ خططٌ وبلاغاتٌ ناقصةٌ أو فاسدةٌ لا ترمي ولا تُنتج إصلاحاً",
+      bad.repairs.length === 0 && bad.unexplained.length === 0);
+    T("★ ومدخلاتٌ غيرُ مصفوفةٍ إطلاقاً", M.audit(null, null, T0, null).repairs.length === 0);
+  }
+
+  // ── (٦) ★★ الحارسُ الأهمّ: حسابُ الأداة = حسابُ النواة ──
+  {
+    const mCore = HTML.match(/function ppmNextDue\(plan, fromISO\)\{[\s\S]*?\n\}/);
+    T("ppmNextDue مستخرَجة من النواة للمطابقة", !!mCore);
+    if (mCore) {
+      // خريطةُ الدورات تُقرأ من النواة نفسِها لا تُكتب هنا — وإلا طابقنا نسختَنا
+      const mMap = HTML.match(/const PPM_FREQ_DAYS = \{[\s\S]*?\n\};/);
+      const MAP = mMap ? new Function(mMap[0].replace("const", "var") + "; return PPM_FREQ_DAYS;")() : null;
+      T("خريطةُ الدورات مقروءةٌ من النواة", !!MAP && Object.keys(MAP).length >= 4, MAP ? Object.keys(MAP).join(" · ") : "");
+      const core = new Function("var PPM_FREQ_DAYS = " + JSON.stringify(MAP || {}) + ";" + mCore[0] + "; return ppmNextDue;")();
+      const cases = [];
+      Object.keys(MAP || {}).forEach(f => [3, 0, -5, -400, 10].forEach(off => cases.push([off, f])));
+      const mismatch = cases.filter(([off, freq]) => {
+        const from = day(off);
+        const a = M._dayMs(core({ nextDueDate: from, freq }, from));
+        const b = M._expectedNext(from, MAP[freq], T0);
+        return a !== b;
+      });
+      T("★★ _expectedNext يطابق ppmNextDue في كل الحالات — وإلا اخترعت الأداةُ «موعداً ثانياً» كاذباً",
+        mismatch.length === 0, mismatch.length ? ("اختلفت: " + JSON.stringify(mismatch)) : cases.length + " حالة");
+    }
+  }
+
+  // ── (٧) الكتابةُ محروسةٌ بالمسؤول، وموصولةٌ بالشاشة ──
+  T("★★ open و apply كلاهما محروسٌ بـ_isAdmin",
+    (RP.match(/if\(!_isAdmin\(\)\)\{ _toast\("⚠ إصلاح المواعيد من صلاحية المسؤول","warn"\); return; \}/g) || []).length === 2);
+  /* دالّةُ الفحص نقيّةٌ فعلاً: جسمُها وحدَه يُفحَص — لا الملفُّ كلُّه، وإلا التقط
+     الحارسُ كتابةَ `apply` المشروعةَ وسقط بلا سبب. */
+  T("★★ الكتابةُ في apply وحدَها — و audit نقيّةٌ لا تكتب ولا تقرأ عالماً", (() => {
+    const mA = RP.match(/function audit\(planList, ticketList, todayMs, freqMap\)\{[\s\S]*?\n\}/);
+    if (!mA) return false;
+    const pure = !/savePPMDoc|_g\(|window\.|document\./.test(mA[0]);
+    const writesOnce = (RP.match(/save\(r\.id\);/g) || []).length === 1 &&
+                       /function apply\(\)\{[\s\S]*?save\(r\.id\);/.test(RP);
+    return pure && writesOnce;
+  })());
+  T("★ والإصلاحُ يُقيَّد في سجل المراجعة", /logAudit/.test(RP) && /إصلاح مواعيد خطط PPM/.test(RP));
+  T("★ الوحدةُ موصولةٌ: وسمُ التحميل ومضيفُ البطاقة ونداؤها بعد رسم اللوحة",
+    /<script src="ppm-schedule-repair\.js\?v=/.test(HTML) &&
+    /<div id="ppm-repair-card"><\/div>/.test(HTML) &&
+    /if\(window\.ppmScheduleRepair\) ppmScheduleRepair\.mountAdminCard\(\);/.test(HTML));
+  T("★ ورقمُ البناء يُختم آلياً (لا يُحرَّر بيد)", /const MODULE_BUILD = "v18\.9\.\d+";/.test(RP));
+
+  /* ★★ عطلٌ صامتٌ كشفه الفحصُ الحيُّ لا المراجعة: حالةُ النواة معلَنةٌ بـ`let`/`const`
+     في أعلى `index.html`، والإعلانُ المُعجميُّ في النطاق العام **لا يُنشئ خاصيةً
+     على `window`**. فأداةٌ تقرأ `window.ppmPlans` ترى `undefined` فتظنّ أن لا
+     خطط: لا بطاقةَ ولا إصلاح، وبلا خطأٍ واحدٍ في وحدة التحكّم. الحارسُ يثبّت
+     الأمرين: أنّ الأسماء ما زالت مُعجميّةً في النواة، وأنّ الوحدة لا تقرؤها
+     من `window` وحدَه. */
+  {
+    const lex = ["ppmPlans", "tickets", "currentUser", "PPM_FREQ_DAYS"];
+    const stillLexical = lex.filter(n => new RegExp("^(?:let|const) " + n + "\\b", "m").test(HTML));
+    T("★ حالةُ النواة ما زالت معلَنةً بـlet/const (سببُ وجود هذا الحارس)",
+      stillLexical.length === lex.length, "المُعجميّ: " + stillLexical.join(" · "));
+    T("★★ الوحدةُ تقرأ الأسماء المُعجميّة بجسرٍ يرى النطاق العام — لا window وحدَه",
+      /new Function\("try\{return typeof "\+n\+"==='undefined'\?null:"\+n\+"\}catch\(e\)\{return null\}"\)/.test(RP) &&
+      /const _g = n => \{[\s\S]*?return _lex\(n\);/.test(RP),
+      "قراءةٌ من window وحدَه ⇒ الأداةُ لا ترى خطةً واحدةً وتصمت");
+  }
+}
+
 function assetPPMCoverageGuards() {
   H("سجل الأصول — تغطية خطط الصيانة وسجل الصيانة");
 
@@ -15029,9 +15303,11 @@ function ppmSecondDueGuards() {
     /_esd\.value=p\.secondDueDate\?new Date\(p\.secondDueDate\)\.toISOString\(\)\.slice\(0,10\):"";/.test(HTML));
 
   // ── (٤) الاستهلاك مرة واحدة في موضعَي التقديم — ثم يُمحى ──
-  T("★★ التوليد التلقائي والاعتماد اليدوي كلاهما يستهلك الموعد الثاني ويمحوه",
-    /if\(_adv\.usedSecond\) ppmPlans\[planIdx\]\.secondDueDate=null;/.test(HTML) &&
-    /if\(_adv\.usedSecond\) p\.secondDueDate = null;/.test(HTML));
+  /* الاستهلاكُ تبع التقديمَ إلى موضعه الواحد: كان في مسارَي التوليد، فصار حيث
+     يتقدّم الجدولُ فعلاً — وهو ما يمنع محوَ الموعد الثاني قبل بلوغ الأول. */
+  T("★★ الموعد الثاني يُستهلك مرةً واحدةً ويُمحى — حيث يتقدّم الجدول لا حيث يُولَّد البلاغ",
+    /function ppmAdvancePlan\(planId\)\{[\s\S]*?if\(_adv\.usedSecond\) ppmPlans\[i\]\.secondDueDate = null;[\s\S]*?\n\}/.test(HTML) &&
+    ([...HTML.matchAll(/usedSecond\)\s*(?:ppmPlans\[\w+\]|p)\.secondDueDate/g)] || []).length === 1);
   T("★ رسالة نجاح الاعتماد تقرأ استحقاق الخطة المحدَّث لا متغيّراً غير معرَّف (إصلاح ReferenceError)",
     /fmtDateOnly\(p\.nextDueDate\)\}`, "success"\)/.test(HTML) &&
     !/nextDate\.toISOString/.test(HTML));
@@ -15419,6 +15695,8 @@ function externalPurchaseApiGuards() {
   externalPurchaseApiGuards();
   ppmSupervisorCreateGuards();
   ppmAutoGenerateAuthorityGuards();
+  ppmAdvanceOnDueGuards();
+  ppmScheduleRepairGuards();
   assetPPMCoverageGuards();
   ppmAutoNameGuards();
   ppmNextDueFieldGuards();
