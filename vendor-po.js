@@ -46,7 +46,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2994";
+const MODULE_BUILD = "v18.9.2996";
 
 /* ════════ الثوابت ════════ */
 // الأدوار التي تُصدر — المشتريات والأدمن (قرار المالك)
@@ -114,6 +114,17 @@ function totalsOf(items){
   });
   return { net:Math.round(net*100)/100, vat:Math.round(vat*100)/100, total:Math.round(total*100)/100 };
 }
+/* البنود الإضافية — ما أُضيف في الأمر زيادةً على بنود طلب الشراء (`extra:true`).
+   عددُها وإجماليُّها يُعرَضان في النافذة ويُقيَّدان في الـtimeline وسجل التدقيق:
+   الأمرُ يتجاوز حينئذٍ المعتمَدَ في الطلب، وتجاوزٌ لا أثرَ له تجاوزٌ خفيّ. */
+function extrasOf(items){
+  var n=0, t=0;
+  (items||[]).forEach(function(it){
+    if(!it || !it.extra) return;
+    n++; t += lineCalc(it.unitCost, it.qty).total;
+  });
+  return { count:n, total:Math.round(t*100)/100 };
+}
 /* الكمية التي تُشترى فعلاً — المغطّى من المخزون بالكامل لا يدخل أمر المورد */
 function buyQty(it){
   if(!it) return 0;
@@ -164,6 +175,7 @@ function applyIssue(p, payload, ctx){
     p.vendorPOHistory.push(prev);
   }
   var t = totalsOf(payload.items);
+  var ex = extrasOf(payload.items);
   var vpo = {
     docNo: p.id, rev: rev,
     issuedAt: ctx.now, issuedBy: ctx.by||"—", issuedByUser: ctx.byUser||"",
@@ -176,9 +188,11 @@ function applyIssue(p, payload, ctx){
       var l = lineCalc(it.unitCost, it.qty);
       return { itemId:it.itemId||"", itemCode:it.itemCode||"", itemName:it.itemName||"",
                qty:Number(it.qty)||0, unit:it.unit||"", unitCost:Number(it.unitCost)||0,
+               extra: !!it.extra,
                net:l.net, vat:l.vat, total:l.total };
     }),
     net:t.net, vat:t.vat, total:t.total,
+    extrasCount:ex.count, extrasTotal:ex.total,
   };
   p.vendorPO = vpo;
   p.updatedAt = ctx.now;
@@ -187,7 +201,8 @@ function applyIssue(p, payload, ctx){
     event: "إصدار أمر شراء للمورد — "+(vpo.vendorName||"—")+(rev>1?(" (مراجعة "+rev+")"):""),
     code: "vendor_po_issued",          // خارج STAGE_ORDER — لا يقطع قياس أزمنة المراحل
     by: ctx.by||"—", at: ctx.now, icon: "📤",
-    notes: "الإجمالي شامل ض.ق.م: "+_fmtN(vpo.total)+" ر.س — "+vpo.items.length+" بنداً",
+    notes: "الإجمالي شامل ض.ق.م: "+_fmtN(vpo.total)+" ر.س — "+vpo.items.length+" بنداً"+
+           (ex.count ? (" — منها "+ex.count+" بند إضافي خارج بنود الطلب بإجمالي "+_fmtN(ex.total)+" ر.س") : ""),
   });
   return vpo;
 }
@@ -367,12 +382,47 @@ function _defaultDate(p){
   return "";
 }
 
+/* صفُّ بندٍ في جدول النافذة — مصدرٌ واحدٌ للرسم الأوّليّ ولزرّ «إضافة بند».
+   الفرقُ الوحيدُ بين بندِ الطلب والبندِ الإضافيّ: الأوّلُ اسمُه ووحدتُه نصٌّ ثابت
+   (لا يُحرَّر ما اعتُمد)، والثاني حقولٌ مفتوحةٌ وزرُّ حذف. وكلاهما يقرؤه
+   `_readItems` بنفس الأصناف — فلا مسارَ قراءةٍ ثانٍ ينحرف. */
+function _rowHTML(it, i){
+  it = it || {};
+  var ex = !!it.extra;
+  var nameCell = ex
+    ? '<div style="display:flex;gap:6px;align-items:center">'+
+        '<input class="form-input vpo-nm" value="'+_e(it.itemName||"")+'" placeholder="اسم البند الإضافي" style="min-width:150px">'+
+        '<button class="btn btn-ghost btn-sm vpo-del" onclick="vendorPO.removeItem(this)" title="حذف البند الإضافي" style="padding:2px 8px;line-height:1.6">✕</button>'+
+        '<input type="hidden" class="vpo-cd" value=""><input type="hidden" class="vpo-id" value="">'+
+      '</div>'+
+      '<div style="font-size:10.5px;color:var(--muted);margin-top:3px">بند إضافي — خارج بنود طلب الشراء</div>'
+    : (it.itemCode?'<span class="po-code">'+_e(it.itemCode)+'</span> ':'')+_e(it.itemName||"—")+
+      '<input type="hidden" class="vpo-nm" value="'+_e(it.itemName||"")+'">'+
+      '<input type="hidden" class="vpo-cd" value="'+_e(it.itemCode||"")+'">'+
+      '<input type="hidden" class="vpo-id" value="'+_e(it.itemId||"")+'">';
+  var unitCell = ex
+    ? '<input class="form-input vpo-un" value="'+_e(it.unit||"")+'" placeholder="الوحدة" style="width:84px;text-align:center">'
+    : _e(it.unit||"—")+'<input type="hidden" class="vpo-un" value="'+_e(it.unit||"")+'">';
+  return '<tr data-i="'+i+'"'+(ex?' data-extra="1"':'')+'>'+
+    '<td style="text-align:center"><input type="checkbox" class="vpo-inc" checked onchange="vendorPO.recalc()"></td>'+
+    '<td>'+nameCell+'</td>'+
+    '<td style="text-align:center"><input type="number" class="form-input vpo-qty" value="'+(Number(it.qty)||0)+'" min="0" step="any" style="width:84px;text-align:center" oninput="vendorPO.recalc()"></td>'+
+    '<td style="text-align:center">'+unitCell+'</td>'+
+    '<td style="text-align:center"><input type="number" class="form-input vpo-price" value="'+(Number(it.unitCost)||0)+'" min="0" step="any" style="width:104px;text-align:center" oninput="vendorPO.recalc()"></td>'+
+    /* «mono» في app.css تحمل display:inline-block — على <td> تُخرج الخليةَ من
+       تخطيط الجدول فتطفو الأرقام خارج أعمدتها (بلاغ المالك v18.9.2841).
+       فالخطُّ هنا سطريٌّ على الخلية، والصنفُ لا يُوضَع على خلايا جدولٍ أبداً. */
+    '<td style="text-align:center;font-family:\'JetBrains Mono\',monospace" class="vpo-vat">—</td>'+
+    '<td style="text-align:center;font-weight:800;font-family:\'JetBrains Mono\',monospace" class="vpo-line">—</td>'+
+  '</tr>';
+}
+
 function _render(p, gate){
   var body=document.getElementById("vpo-body"), foot=document.getElementById("vpo-footer");
   if(!body||!foot) return;
   var existing = p.vendorPO||null;
   var src = existing || {};
-  var items = existing ? (existing.items||[]).map(function(it){ return {itemId:it.itemId,itemCode:it.itemCode,itemName:it.itemName,qty:it.qty,unit:it.unit,unitCost:it.unitCost}; })
+  var items = existing ? (existing.items||[]).map(function(it){ return {itemId:it.itemId,itemCode:it.itemCode,itemName:it.itemName,qty:it.qty,unit:it.unit,unitCost:it.unitCost,extra:!!it.extra}; })
                        : defaultItems(p);
   var vop = _vendorOptions(existing?existing.vendorName:(p.vendor||""));
   var covered = ((p.items)||[]).filter(function(it){ return it&&it._fullyCoveredByStock; }).length;
@@ -385,24 +435,7 @@ function _render(p, gate){
       (gate.reprintOnly?'':' — الإصدار من جديد يحفظ هذه النسخة في السجل ويرفع رقم المراجعة.')+
     '</div>' : '';
 
-  var rows = items.map(function(it,i){
-    return '<tr data-i="'+i+'">'+
-      '<td style="text-align:center"><input type="checkbox" class="vpo-inc" checked onchange="vendorPO.recalc()"></td>'+
-      '<td>'+(it.itemCode?'<span class="po-code">'+_e(it.itemCode)+'</span> ':'')+_e(it.itemName||"—")+
-        '<input type="hidden" class="vpo-nm" value="'+_e(it.itemName||"")+'">'+
-        '<input type="hidden" class="vpo-cd" value="'+_e(it.itemCode||"")+'">'+
-        '<input type="hidden" class="vpo-id" value="'+_e(it.itemId||"")+'">'+
-        '<input type="hidden" class="vpo-un" value="'+_e(it.unit||"")+'"></td>'+
-      '<td style="text-align:center"><input type="number" class="form-input vpo-qty" value="'+(Number(it.qty)||0)+'" min="0" step="any" style="width:84px;text-align:center" oninput="vendorPO.recalc()"></td>'+
-      '<td style="text-align:center">'+_e(it.unit||"—")+'</td>'+
-      '<td style="text-align:center"><input type="number" class="form-input vpo-price" value="'+(Number(it.unitCost)||0)+'" min="0" step="any" style="width:104px;text-align:center" oninput="vendorPO.recalc()"></td>'+
-      /* «mono» في app.css تحمل display:inline-block — على <td> تُخرج الخليةَ من
-         تخطيط الجدول فتطفو الأرقام خارج أعمدتها (بلاغ المالك v18.9.2841).
-         فالخطُّ هنا سطريٌّ على الخلية، والصنفُ لا يُوضَع على خلايا جدولٍ أبداً. */
-      '<td style="text-align:center;font-family:\'JetBrains Mono\',monospace" class="vpo-vat">—</td>'+
-      '<td style="text-align:center;font-weight:800;font-family:\'JetBrains Mono\',monospace" class="vpo-line">—</td>'+
-    '</tr>';
-  }).join("");
+  var rows = items.map(function(it,i){ return _rowHTML(it,i); }).join("");
 
   body.innerHTML =
     existBanner+
@@ -431,7 +464,11 @@ function _render(p, gate){
           '<td style="text-align:center;font-family:\'JetBrains Mono\',monospace" id="vpo-net">—</td>'+
           '<td style="text-align:center;font-family:\'JetBrains Mono\',monospace" id="vpo-vatsum">—</td>'+
           '<td style="text-align:center;font-family:\'JetBrains Mono\',monospace" id="vpo-total">—</td></tr></tfoot>'+
-      '</table></div></div>'+
+      '</table></div>'+
+      (gate.reprintOnly?'':
+        '<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="vendorPO.addItem()" title="بندٌ يُضاف إلى أمر المورد وحدَه — لا يُكتب على بنود طلب الشراء">'+_icx("plus","ic-sm")+' إضافة بند خارج بنود الطلب</button></div>')+
+      '<div id="vpo-extra-note" style="margin-top:8px"></div>'+
+    '</div>'+
     '<div class="d-sec" style="margin-top:12px"><div class="d-sec-label">الشروط</div>'+
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">'+
         '<select class="form-input" id="vpo-tpl" style="max-width:280px">'+
@@ -502,6 +539,7 @@ function _readItems(){
       unit:(tr.querySelector(".vpo-un")||{}).value||"",
       qty:Number((tr.querySelector(".vpo-qty")||{}).value)||0,
       unitCost:Number((tr.querySelector(".vpo-price")||{}).value)||0,
+      extra: tr.getAttribute("data-extra")==="1",
       _included: !!(inc&&inc.checked),
       _tr: tr,
     };
@@ -524,6 +562,40 @@ function recalc(){
   if(en) en.textContent=_fmtN(t.net);
   if(ev) ev.textContent=_fmtN(t.vat);
   if(et) et.textContent=_fmtN(t.total);
+  /* تنبيهُ التجاوز: البنودُ الإضافيةُ خارجُ ما اعتُمد في الطلب — يُعرَض عددُها
+     وإجماليُّها صراحةً قبل الإصدار، فلا يمرّ التجاوزُ في رقمٍ مجموعٍ صامت. */
+  var note=document.getElementById("vpo-extra-note");
+  if(note){
+    var ex=extrasOf(inc);
+    note.innerHTML = ex.count ?
+      '<div style="background:color-mix(in srgb,var(--warn,#b45309) 10%,var(--surface));border:1.5px solid color-mix(in srgb,var(--warn,#b45309) 35%,var(--border));border-radius:10px;padding:8px 12px;font-size:12px">'+
+        _icx("alertCircle","ic-sm")+' <b>'+ex.count+' بند إضافي</b> خارج بنود طلب الشراء بإجمالي <b class="mono">'+_fmtN(ex.total)+'</b> ر.س — '+
+        'أمرُ المورد يتجاوز بذلك المعتمَدَ في الطلب، ويُقيَّد ذلك في سجلّ الطلب وسجلّ التدقيق.'+
+      '</div>' : "";
+  }
+}
+
+/* إضافةُ بندٍ خارج بنود الطلب — يُلحَق بالجدول مباشرةً (لا إعادةَ رسمٍ للنافذة)
+   كي لا تضيع تعديلاتُ الأسعار والكميات التي كتبها المستخدمُ قبل الإضافة. */
+function addItem(){
+  var tb=document.querySelector("#vpo-items tbody");
+  if(!tb) return;
+  var blank=tb.querySelector("tr:not([data-i])");
+  if(blank) blank.remove();
+  var i=tb.querySelectorAll("tr[data-i]").length;
+  var wrap=document.createElement("tbody");
+  wrap.innerHTML=_rowHTML({ itemName:"", unit:"", qty:1, unitCost:0, extra:true }, i);
+  var tr=wrap.firstElementChild;
+  if(!tr) return;
+  tb.appendChild(tr);
+  try{ var nm=tr.querySelector(".vpo-nm"); if(nm){ nm.oninput=recalc; nm.focus(); } }catch(e){}
+  recalc();
+}
+function removeItem(btn){
+  var tr=btn&&btn.closest?btn.closest("tr[data-i]"):null;
+  if(!tr || tr.getAttribute("data-extra")!=="1") return;
+  tr.remove();
+  recalc();
 }
 
 function _selectedVendor(){
@@ -555,12 +627,18 @@ function issue(){
   var vend=_selectedVendor();
   if(!vend.vendorName){ _toast("⚠ اختر المورد أو اكتب اسمه","warn"); return false; }
   var items=_readItems().filter(function(it){ return it._included && it.qty>0; })
-    .map(function(it){ return { itemId:it.itemId, itemCode:it.itemCode, itemName:it.itemName,
-                                unit:it.unit, qty:it.qty, unitCost:it.unitCost }; });
+    .map(function(it){ return { itemId:it.itemId, itemCode:it.itemCode, itemName:String(it.itemName||"").trim(),
+                                unit:String(it.unit||"").trim(), qty:it.qty, unitCost:it.unitCost, extra:!!it.extra }; });
   if(!items.length){ _toast("⚠ لا بند واحداً مشمولاً في الأمر","warn"); return false; }
+  /* بندٌ إضافيٌّ بلا اسمٍ يُطبَع سطراً فارغاً في وثيقةٍ تخرج للمورد — يُوقَف هنا */
+  if(items.some(function(it){ return it.extra && !it.itemName; })){
+    _toast("⚠ اكتب اسم البند الإضافي أو احذف سطره","warn"); return false;
+  }
   if(items.some(function(it){ return !(it.unitCost>0); })){
     if(!confirm("يوجد بند بسعر صفر — إصدار الأمر مع ذلك؟")) return false;
   }
+  var _ex=extrasOf(items);
+  if(_ex.count && !confirm("الأمرُ يتضمّن "+_ex.count+" بنداً إضافياً خارج بنود طلب الشراء بإجمالي "+_fmtN(_ex.total)+" ر.س — إصداره على هذا النحو؟")) return false;
   if(p.vendorPO && !confirm("صدر أمرٌ سابق لهذا الطلب (مراجعة "+(Number(p.vendorPO.rev)||1)+") — إصدار مراجعة جديدة؟ النسخة السابقة تُحفظ في السجل.")) return false;
 
   var u=_me();
@@ -577,7 +655,8 @@ function issue(){
   if(!vpo) return false;
   if(typeof savePurchase==="function" && !savePurchase(p.id)) return false;
   try{ if(typeof logAudit==="function") logAudit("إصدار أمر شراء للمورد",
-    "رقم الطلب: "+p.id+" — المورد: "+vpo.vendorName+" — مراجعة "+vpo.rev+" — الإجمالي: "+_fmtN(vpo.total)+" ر.س"); }catch(e){}
+    "رقم الطلب: "+p.id+" — المورد: "+vpo.vendorName+" — مراجعة "+vpo.rev+" — الإجمالي: "+_fmtN(vpo.total)+" ر.س"+
+    (_ex.count ? (" — بنود إضافية خارج الطلب: "+_ex.count+" بإجمالي "+_fmtN(_ex.total)+" ر.س") : "")); }catch(e){}
   _toast("✅ صدر أمر الشراء — "+p.id+(vpo.rev>1?" (مراجعة "+vpo.rev+")":""),"success");
   close();
   try{ if(typeof updatePurchaseBadge==="function") updatePurchaseBadge(); }catch(e){}
@@ -610,7 +689,8 @@ function print(poId){
   var rows=(v.items||[]).map(function(it,i){
     return '<tr>'+
       '<td style="text-align:center">'+(i+1)+'</td>'+
-      '<td>'+(it.itemCode?'<span style="font-family:monospace;font-size:10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:1px 5px">'+_e(it.itemCode)+'</span> ':'')+_e(it.itemName||"—")+'</td>'+
+      '<td>'+(it.itemCode?'<span style="font-family:monospace;font-size:10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:1px 5px">'+_e(it.itemCode)+'</span> ':'')+_e(it.itemName||"—")+
+        (it.extra?' <span style="font-size:9px;font-weight:700;color:#b45309;background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:1px 5px">إضافي</span>':'')+'</td>'+
       '<td style="text-align:center;font-weight:700">'+_fmtN(it.qty)+'</td>'+
       '<td style="text-align:center">'+_e(it.unit||"—")+'</td>'+
       '<td style="text-align:center;direction:ltr;font-family:monospace">'+_fmtN(it.unitCost)+'</td>'+
@@ -654,6 +734,11 @@ function print(poId){
     }
   }
 
+  /* أوامرُ صدرت قبل هذه الميزة لا تحمل `extrasCount` — تُحسَب من البنود، والنتيجةُ
+     صفرٌ لأن لا بند فيها يحمل `extra` (لا تُقرأ اللقطةُ الغائبةُ صفراً بالخطأ). */
+  var _pex = { count:Number(v.extrasCount)||0, total:Number(v.extrasTotal)||0 };
+  if(!_pex.count) _pex = extrasOf(v.items);
+
   var inner =
     headHtml+
     '<div class="ig" style="margin-top:12px">'+
@@ -678,7 +763,8 @@ function print(poId){
         '</tr>'+
       '</tbody>'+
     '</table>'+
-    '<div style="margin-top:6px;font-size:11px;color:#475569">الإجمالي شامل ضريبة القيمة المضافة 15٪: <b style="direction:ltr;display:inline-block;font-family:monospace">'+_fmtN(v.total)+'</b> ر.س</div>'+
+    '<div style="margin-top:6px;font-size:11px;color:#475569">الإجمالي شامل ضريبة القيمة المضافة 15٪: <b style="direction:ltr;display:inline-block;font-family:monospace">'+_fmtN(v.total)+'</b> ر.س'+
+      (_pex.count?' — منها <b>'+_pex.count+'</b> بند إضافي بإجمالي <b style="direction:ltr;display:inline-block;font-family:monospace">'+_fmtN(_pex.total)+'</b> ر.س':'')+'</div>'+
     termsHtml+notesHtml+
     /* الترقيمُ ديناميكيّ (بلاغا المالك): وحدتان صغيرتان لا كتلةٌ واحدة — الاعتماداتُ
        وحدةٌ (.appr) والتوقيعاتُ مع التذييل وحدةٌ (.sigblk). فما اتّسعت له صفحةُ
@@ -756,12 +842,13 @@ window.vendorPO = {
   MODULE_BUILD: MODULE_BUILD,
   open: open, close: close, issue: issue, print: print,
   recalc: recalc, vendorChanged: vendorChanged,
+  addItem: addItem, removeItem: removeItem,
   insertTemplate: insertTemplate, saveTemplate: saveTemplate, deleteTemplate: deleteTemplate,
   canIssueBtn: canIssueBtn,
   templates: templates, loadTemplates: loadTemplates,
   // نقيّة — يفحصها hail-tests.js بلا متصفح
   _lineCalc: lineCalc, _totals: totalsOf, _buyQty: buyQty,
-  _defaultItems: defaultItems, _canIssue: canIssue, _applyIssue: applyIssue,
+  _defaultItems: defaultItems, _canIssue: canIssue, _applyIssue: applyIssue, _extras: extrasOf,
   _signoffs: poSignoffs,
   _matchVendor: matchVendor, _normVendorName: normVendorName,
   _ISSUE_STAGES: VPO_STAGES.slice(), _ROLES: VPO_ROLES.slice(),
