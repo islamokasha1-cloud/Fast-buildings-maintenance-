@@ -626,7 +626,13 @@ function predelivery() {
        موضعه** على منطقٍ قائم — الدوالُّ تُقرأ لصقَ `_poInvoiceList` الذي تُصحّح
        قصورَه في البحث، ومستدعوها مرشّحُ `renderPurchases` وبطاقتُها، وكلُّها
        هنا. ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة تعديله ممنوعٌ نصّاً (CLAUDE.md). */
-    const IDX_CEILING = 38669;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ورُفع من 38669 إلى 38750 — ‏٨١ سطراً لعلاج سقف مزامنة البلاغات: ترشيحُ
+       المستمع بـ`archived`، ووسمُ الحقل داخل مسحِ `loadData`، والسقوطُ الآمن عند
+       غياب الفهرس، وتوسيعُ الإصلاح الذاتي إلى كاش الأرشيف. **مكانُها النواةُ لا
+       وحدة**: **إصلاحٌ في موضعه** على منطقٍ قائم — `startRealtimeSync` و`loadData`
+       و`autoArchiveByMonth` و`_archiveFetchNeeded` كلُّها هنا وتُقرأ معاً، ونقلُ
+       منطقٍ قائمٍ إلى ملفٍّ بحجّة إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
+    const IDX_CEILING = 38750;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -13622,6 +13628,20 @@ function archiveScanSkipGuards() {
   C("★ ونوعٌ غيرُ رقميّ يُعامَل معاملةَ المجهول", undefined, 600, true);
   C("★ مجموعةٌ فارغةٌ (لقطةٌ وصلت بصفر) ⇒ لا مسح", 0, 600, false);
 
+  /* الحالةُ الرابعة: مستمعٌ مُرشَّحٌ بـ`archived==false` لا يحمل مؤرشفاً بحال، فطولُ
+     لقطته لا يقول شيئاً عن الأرشيف — والمسحُ مصدرُه الوحيد. لولا هذا لأفرغَت شاشةُ
+     الأرشيف نفسَها بصمت: لقطةٌ غيرُ مقصوصةٍ ⇒ «لا مسح» ⇒ لا مؤرشفَ في الذاكرة أصلاً. */
+  const CF = (name, cnt, lim, want) => {
+    let got;
+    try { got = need(cnt, lim, true); } catch (e) { T(name, false, "خطأ: " + e.message); return; }
+    T(name, got === want, "القرار: " + got + (got === want ? "" : " ← المتوقع " + want));
+  };
+  CF("★★ مستمعٌ مُرشَّحٌ ولقطةٌ غيرُ مقصوصة ⇒ نمسح (وإلا شاشةُ أرشيفٍ فارغةٌ بصمت)", 30, 600, true);
+  CF("★ ومُرشَّحٌ عند السقف ⇒ نمسح كذلك", 600, 600, true);
+  CF("★ ومُرشَّحٌ بمجموعةٍ فارغة ⇒ نمسح", 0, 600, true);
+  T("★★ ووضعُ الترشيح يُمرَّر فعلاً من موضع النداء (لا يبقى الوسيطُ معطَّلاً)",
+    /_archiveFetchNeeded\(_ticketsSyncedCount,\s*_TICKETS_SYNC_LIMIT,\s*_ticketsListenerFiltered\)/.test(HTML));
+
   /* ── حرّاسُ المصدر ── */
   T("★★ الخروجُ المبكّر يسبق ضبطَ `_archiveFetching` (وإلا عَلِق الحارسُ مرفوعاً)",
     /_archiveFetchNeeded\([\s\S]{0,400}?\}\s*\n\s*_archiveFetching = true;/.test(HTML));
@@ -13637,6 +13657,67 @@ function archiveScanSkipGuards() {
   T("★★ كلُّ تصفيرٍ لحالة الأرشيف يُصفّر عدّادَ اللقطة (لا عدّادَ مشروعٍ سابقٍ يخدع الشرط)",
     resets >= 1 && counts >= resets,
     `تصفيرُ الأرشيف ${resets} · تصفيرُ العدّاد ${counts}`);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   نافذةُ المزامنة تعدّ النشطَ وحدَه (v18.9.3002)
+   الأرشفةُ **وسمٌ لا نقل**: نافذةٌ بلا شرطِ `archived` لا تنقص بأرشفةِ ألفِ بلاغ،
+   فيثبت العدّادُ عند `600/600` وتصير نصيحةُ التحذير كذباً — والأخطرُ صامت: المفتوحُ
+   القديم (أو المغلقُ قبل أرشفته) يسقط من `tickets[]` ولا يعيده أيُّ مسار. وترشيحُ
+   النافذة له فخّان يُخفيان البلاغات كلَّها بلا خطأٍ واحد: مستندٌ **بلا الحقل** لا
+   يطابقه `==false`، ومجموعةٌ **بلا فهرسٍ مركّب** تُفشِل الاستعلامَ من أصله.
+   ═══════════════════════════════════════════════════════════════════════ */
+function syncWindowFilterGuards() {
+  H("v18.9.3002) نافذةُ المزامنة: ترشيحٌ بشرطَي الوسم والفهرس");
+
+  T("★★ المستمعُ يستثني المؤرشف (وإلا لم تُنقص الأرشفةُ العدّادَ بواحد)",
+    /_q\s*=\s*_q\.where\("archived","==",false\)/.test(HTML));
+  T("★★ ولا يُرشَّح إلا بشهادة اكتمال الحقل (مستندٌ بلا `archived` يختفي بصمت)",
+    /const\s+_filtered\s*=\s*_archFieldComplete\s*;[\s\S]{0,400}?if\(_filtered\)\s*_q\s*=\s*_q\.where\("archived","==",false\)/.test(HTML));
+  T("★★ وفهرسٌ غائبٌ يُسقِط سقوطاً آمناً للنافذة القديمة لا لشاشةٍ فارغة",
+    /failed-precondition[\s\S]{0,300}?_archFieldComplete\s*=\s*false;[\s\S]{0,80}?startRealtimeSync\(\)/.test(HTML));
+
+  /* الشهادةُ تُشتقّ من مسحِ هذا المشروع لا من سابقه، ولا تُمنح للقطةٍ مقصوصة. */
+  T("★★ الشاهدُ يُصفَّر مع كلّ `loadData` (لا شهادةُ مشروعٍ سابقٍ تُرشِّح مشروعاً لم يُوسَم)",
+    /function loadData\(onDone\)\{[\s\S]{0,300}?_archFieldComplete\s*=\s*false;/.test(HTML));
+  T("★★ ولا تُمنح إلا بخلوّ المسح من ناقصٍ **وأنه لم يُقصّ عند سقفه**",
+    /_archFieldComplete\s*=\s*\(_needStamp\.length===0\)\s*&&\s*snap\.size\s*<\s*_TICKETS_LOAD_LIMIT;/.test(HTML));
+  T("★ وسقفُ المسح رقمٌ واحدٌ يقرؤه الاستعلامُ والشاهد (لا نسختان تنزلقان)",
+    /\.limit\(_TICKETS_LOAD_LIMIT\)/.test(HTML) &&
+    (HTML.match(/_TICKETS_LOAD_LIMIT/g) || []).length >= 3);
+  T("★ والوسمُ يقع داخل المسح المدفوع سلفاً بدفعاتٍ دون حدّ Firestore",
+    /_needStamp\.slice\(_i,_i\+_STCH\)[\s\S]{0,200}?\{archived:false\},\{merge:true\}/.test(HTML) &&
+    /_STCH\s*=\s*499/.test(HTML));
+
+  /* كلُّ مولِّدِ بلاغٍ يكتب الحقل صريحاً — وإلا وُلِد البلاغُ خارجَ الشاشة. */
+  /* لا يكفي عدُّ `archived:false` في الملفّ — الوسمُ والإصلاحُ يكتبانها أيضاً، فيبقى
+     العدّادُ مرتفعاً وقد سقط الحقلُ من مولِّدٍ بأكمله. فكلُّ مولِّدٍ يُفحَص بموضعه. */
+  const births = [
+    ["البلاغ اليدويّ (`submitTicket`)", /reopenCount:0,\s*\n\s*archived:false,/],
+    ["بلاغُ PPM التلقائيّ والمعتمَد (موضعان)", null],
+    ["العيّنات المحلية (`mk`)", /reopenCount:0,archived:false,/],
+  ];
+  T("★★ " + births[0][0] + " يكتب `archived:false` صريحاً", births[0][1].test(HTML));
+  T("★★ " + births[1][0] + " كذلك",
+    (HTML.match(/updatedAt: now,\s*\n\s*archived: false,/g) || []).length === 2,
+    `وُجد ${(HTML.match(/updatedAt: now,\s*\n\s*archived: false,/g) || []).length} من ٢`);
+  T("★ " + births[2][0] + " كذلك", births[2][1].test(HTML));
+  T("★★ والمُرحَّلُ من localStorage كذلك (وإلا سقط المرحَّلُ كلُّه من النافذة)",
+    /tickets=p\.map\(t=>\(\{\.\.\.t,archived:t\.archived===true/.test(HTML));
+
+  /* الإصلاحُ الذاتي كان يمسح `tickets` وحدَها — وهي بعد الترشيح بلا مؤرشفٍ أصلاً. */
+  T("★★ مسحُ «مؤرشفٍ نشط» صار على `allTickets()` لا `tickets` وحدَها",
+    /_healScope=\(typeof allTickets==="function"\)\s*\?\s*allTickets\(\)\s*:\s*tickets/.test(HTML));
+  T("★ وما ليس في `tickets` يُكتب مباشرةً (`saveData` يصمت إن لم يجده)",
+    /!_inMain\.has\(t\.id\)[\s\S]{0,220}?\{archived:false,archivedAt:null,archiveMonth:null\},\{merge:true\}/.test(HTML));
+
+  /* التحذيرُ لا ينصح بالأرشفة إلا والنافذةُ مُرشَّحة — وإلا أرسل المالكَ لعملٍ عقيم. */
+  T("★★ نصُّ التحذير يتبع وضعَ المستمع لا يَعِد بما لا يقع",
+    /_filtered\s*\?\s*"يُنصح بأرشفة البلاغات المغلقة"/.test(HTML) &&
+    /الأرشفةُ لا تُنقص هذا العدّاد/.test(HTML));
+  T("★ ويظهر مرّةً في الجلسة لا مع كلّ لقطة",
+    /!_syncLimitWarned\s*&&\s*snap\.docs\.length\s*>=/.test(HTML) &&
+    /_syncLimitWarned\s*=\s*true;/.test(HTML));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -15810,6 +15891,7 @@ function externalPurchaseApiGuards() {
   catalogMustNotBeCapped();
   firestoreIndexContract();
   archiveScanSkipGuards();
+  syncWindowFilterGuards();
   localCacheStaysDisabled();
   poAlignRepair();
   errLogGrouping();
