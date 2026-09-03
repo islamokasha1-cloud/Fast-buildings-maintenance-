@@ -646,7 +646,10 @@ function predelivery() {
        السايدبار وأيقونتُه · حاويةُ `page-staff-tasks` · مَعبرُ `showPage` · وسمُ
        `<script>` · سطرا `refreshNav` · قيدُ كاشف الوحدات القديمة) وسِعها السقفُ
        القائم. **ولا سطرَ منطقٍ واحدٍ في النواة** — الميزةُ كلُّها في الوحدة. */
-    const IDX_CEILING = 39513;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ورُفع ثانيةً لقيد v1.16: حصرُ الجدول في مسؤولي المشتريات (قائمةُ سماحٍ + بيانُ
+       مَن خارجها مجمَّعاً بالدور)، ونقلُ الخلاصة إلى سطرٍ ممتدٍّ تحت الصفّ. **مكانُها
+       الوحدةُ نفسُها** — التعليلُ أعلاه لا يتغيّر بتغيّر الرقم. */
+    const IDX_CEILING = 39561;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4467,9 +4470,17 @@ function procurementStaffKPI() {
 
   T("★★ «الواقفُ الآن» يقرأ المراحلَ المملوكةَ نفسَها (لا قائمةً ثانيةً تنحرف)",
     /if\(!PROC_OWNED\.includes\(st\) && !EXEC_OWNED\.includes\(st\)\) return;/.test(ksrc));
-  T("★★★ طلباتُ المسؤول خارجَ جدول القياس لكنّها **معلَنة** لا محذوفةٌ صامتاً",
-    /const isAdminRow = r => r\.role==="admin";/.test(ksrc) &&
-    /adminN:/.test(ksrc) && /adminSpend:/.test(ksrc) && ksrc.includes("pkpi-staff-admin"));
+  /* v1.16: **قائمةُ سماحٍ لا قائمةُ منع** — استبعادُ `admin` وحدَه أدخل الجدولَ
+     مشرفاً ميدانياً ومديراً تنفيذياً (بلاغ المالك). قائمةُ المنع تفترض معرفةَ كلِّ
+     مَن لا ينبغي أن يدخل، وهذا مستحيل. */
+  T("★★★ الجدولُ قائمةُ سماحٍ لمسؤولي المشتريات — لا قائمةَ منعٍ تُنسي دوراً",
+    /const isProcRow = r => r\.role==="procurement_officer"/.test(ksrc) &&
+    !/isAdminRow/.test(ksrc));
+  T("★★★ ومَن ليس منهم يُعلَن مجمَّعاً بالدور (لا حذفَ صامت)",
+    /outsideGroups:/.test(ksrc) && /outsideN:/.test(ksrc) && /outsideSpend:/.test(ksrc) &&
+    ksrc.includes("pkpi-outside-list"));
+  T("★★★ والاستبعادُ على دليلٍ موجب: مجهولُ الدور يبقى موسوماً لا يُحذف",
+    /\|\| !r\.role;/.test(ksrc) && /roleUnknown/.test(ksrc));
   T("★★ ودورُ الفاعل يُستكمَل من USERS للسجلات القديمة (وإلّا لم يُعرف المسؤولُ فيها)",
     /function _actorRole\(key, evRole\)/.test(ksrc) && /typeof USERS!=="undefined"/.test(ksrc));
   T("★★ الهدفُ يوما عمل — عتبةُ PO_STALE_WORK_MIN نفسُها (لا عتبتان متناقضتان)",
@@ -4667,9 +4678,36 @@ function procurementStaffKPI() {
     T("★★★ صفُّ المسؤول لا يظهر في جدول القياس (لا يُقارَن بمسؤول المشتريات)",
       S.rows.length === 1 && S.rows[0].key === "u:saad", S.rows.map(r => r.key).join(","));
     T("★★★ لكنّ طلباتِه **معلَنةٌ** عدداً وقيمةً — الحذفُ الصامتُ ثقبٌ في التغطية",
-      S.adminN === 2 && S.adminSpend === 750, `n=${S.adminN} spend=${S.adminSpend}`);
+      S.outsideN === 2 && S.outsideSpend === 750, `n=${S.outsideN} spend=${S.outsideSpend}`);
     T("★★ واسمُه يُذكر في البيان (يُعرف أيُّ حسابٍ نفّذ خارج المسار)",
-      Array.isArray(S.adminNames) && S.adminNames.includes("مدير النظام"));
+      S.outsideGroups.some(g => g.role === "admin" && g.names.includes("مدير النظام")));
+
+    /* بلاغُ المالك حرفياً: «لماذا تضيف مشرف والمدير التنفيذي في أداء مسؤول
+       المشتريات؟» — الحارسُ يعيد إنتاج الحالة بالأدوار التي رآها في اللقطة. */
+    const S2 = E.computeStaffKPIs([
+      mk("b1", "wael", "وائل عبد المجيد", "procurement_officer", 1000),
+      mk("b2", "sup",  "محمد داوود",      "supervisor",          300),
+      mk("b3", "ceo",  "Ceo Abdallah",    "ceo",                 200),
+      mk("b4", "root", "مدير النظام",      "admin",               100),
+    ]);
+    T("★★★ لا مشرفَ ولا تنفيذيَّ ولا مسؤولَ نظامٍ في جدول أداء المشتريات (بلاغ المالك)",
+      S2.rows.length === 1 && S2.rows[0].name === "وائل عبد المجيد",
+      S2.rows.map(r => r.name + ":" + r.role).join(" | "));
+    T("★★★ وثلاثتُهم معلَنون مجمَّعين بأدوارهم فوق الجدول",
+      S2.outsideN === 3 && S2.outsideGroups.length === 3 &&
+      ["supervisor","ceo","admin"].every(x => S2.outsideGroups.some(g => g.role === x)),
+      S2.outsideGroups.map(g => g.role + ":" + g.n).join(" | "));
+
+    /* وضعُ الفشل الذي يمنعه «الاستبعادُ على دليلٍ موجب»: USERS لم يصل بعدُ فالأدوارُ
+       كلُّها فارغة — بالحصر الصارم يفرغ الجدولُ ويظهر كلُّ العمل «خارج القياس». */
+    const S3 = E.computeStaffKPIs([
+      { id: "c1", status: "closed", actualCost: 100, createdAt: "2026-07-01T06:00:00Z",
+        updatedAt: "2026-07-03T06:00:00Z", timeline: [
+          { code: "wh_reviewed",     at: "2026-07-01T08:00:00Z", by: "المستودع", byUser: "wh" },
+          { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad" } ] },
+    ]);
+    T("★★★ ولو غاب سجلُّ المستخدمين لم يفرغ الجدولُ — الصفُّ يبقى موسوماً «دورٌ غير محدّد»",
+      S3.rows.length === 1 && S3.rows[0].roleUnknown === true && S3.outsideN === 0);
   }
 
   // ── ٧) «الواقفُ الآن» عدّادٌ حيٌّ منسوبٌ بالحالة (لا فاعلَ خروجٍ بعد) ──
