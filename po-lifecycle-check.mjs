@@ -379,14 +379,17 @@ L('\n=== ١٢) أداءُ مسؤولي المشتريات — الرقمُ ال�
 // الشاشة يعني موظّفاً يُحاسَب على رقمٍ لم يحسبه أحد. فيُبذَر طلبان بمسارٍ كاملٍ يحمل
 // هويّةَ الفاعل، ثم تُفتح الصفحةُ فعلاً ويُقرأ الجدولُ المرسومُ خليّةً خليّة.
 const staff = await page.evaluate(async () => {
-  const mk = (id, ownerU, ownerN, cost, endCode) => ({
+  /* المسارُ كما يجري فعلاً: المستودعُ يُحيل بـwh_reviewed («بانتظار تنفيذ المشتريات»)
+     ثم يُخرجه مسؤولُ المشتريات. النسخةُ الأولى قاست pending_proc — مسارَ الارتداد
+     النادر — فخرج العمودُ فارغاً على بياناتٍ حقيقية. */
+  const mk = (id, ownerU, ownerN, cost, endCode, role) => ({
     id, projectId: 'hail', projectName: 'هايل', status: 'closed',
     createdAt: '2026-07-01T06:00:00Z', updatedAt: '2026-07-03T06:00:00Z',
     actualCost: cost, estCost: cost,
-    items: [{ itemName: 'بند', qty: 1, unitCost: cost, itemCost: cost, receivedQty: 1 }],
+    items: [{ itemName: 'بند ' + id, qty: 1, unitCost: cost, itemCost: cost, receivedQty: 1 }],
     timeline: [
-      { code: 'pending_proc', at: '2026-07-01T08:00:00Z', by: 'مدير المشاريع', byUser: 'pm', byRole: 'project_manager' },
-      { code: endCode,        at: '2026-07-01T12:00:00Z', by: ownerN, byUser: ownerU, byRole: 'procurement_officer' },
+      { code: 'wh_reviewed', at: '2026-07-01T08:00:00Z', by: 'مسؤول المستودع', byUser: 'wh', byRole: 'warehouse_manager' },
+      { code: endCode,       at: '2026-07-01T12:00:00Z', by: ownerN, byUser: ownerU, byRole: role || 'procurement_officer' },
     ]
   });
   /* `purchases` معرَّفةٌ بـ`let` في النواة، فلا تصبح خاصّيةً على `window`؛ والوحدةُ
@@ -396,6 +399,7 @@ const staff = await page.evaluate(async () => {
     mk('PO-STAFF-1', 'saad', 'سعد', 1000, 'pending_finance'),
     mk('PO-STAFF-2', 'saad', 'سعد', 2000, 'pending_finance'),
     mk('PO-STAFF-3', 'noor', 'نور',  700, 'pending_ceo'),
+    mk('PO-STAFF-4', 'root', 'مدير النظام', 400, 'pending_finance', 'admin'),   // خارجَ الجدول
   ];
   showPage('purchase-kpi');
   await new Promise(r => setTimeout(r, 900));
@@ -413,10 +417,18 @@ const staff = await page.evaluate(async () => {
              spend: (td[2].querySelector('b') || {}).textContent,
              prep: (td[3].querySelector('b') || {}).textContent };
   });
-  const hdr = [...tbl.querySelectorAll('thead th')].length;
+  const hdr = [...tbl.querySelectorAll('thead tr')].pop().children.length;
+  const root = document.getElementById('page-purchase-kpi');
   return { ok: true, rows: S.rows.map(r => ({ key: r.key, name: r.name, poN: r.poN, poClosed: r.poClosed,
              spendClosed: r.spendClosed, prepAvg: r.prepAvg })), drawn, hdr,
-           visible: !!document.getElementById('page-purchase-kpi').classList.contains('active') };
+           adminN: S.adminN, adminSpend: S.adminSpend,
+           adminBanner: !!root.querySelector('.pkpi-staff-admin'),
+           adminInTable: drawn.some(d => d.name === 'مدير النظام'),
+           guide: !!root.querySelector('.pkpi-guide'),
+           groupHdrs: [...root.querySelectorAll('.pkpi-grp th')].map(th => th.textContent.trim().slice(0, 14)),
+           canvases: ['pkpi-c-staff-time','pkpi-c-staff-rate','pkpi-c-staff-load']
+             .map(id => { const c = document.getElementById(id); return c ? (c.clientWidth > 100 && c.clientHeight > 60) : false; }),
+           visible: !!root.classList.contains('active') };
 });
 check('١٢·٠) صفحةُ المؤشرات فُتحت وقسمُ المسؤولين مرسومٌ فيها',
   staff.ok === true && staff.visible === true, staff.ok ? '' : staff.err);
@@ -438,7 +450,19 @@ if (staff.ok) {
   check('١٢هـ) ★★ زمنُ تجهيز المقارنة المرسومُ = المحسوب بأيام العمل',
     !!bySaad && bySaad.prepAvg != null && !!drawnSaad && near(drawnSaad.prep, bySaad.prepAvg.toFixed(1)),
     'مرسوم ' + (drawnSaad && drawnSaad.prep) + ' · محسوب ' + (bySaad && bySaad.prepAvg));
-  check('١٢و) ★ رأسُ الجدول بعشرة أعمدةٍ يطابق صفوفَه', staff.hdr === 10, 'رؤوس=' + staff.hdr);
+  check('١٢و) ★ رأسُ الجدول (الصفُّ الثاني) يطابق أعمدةَ الصفوف', staff.hdr === 11, 'رؤوس=' + staff.hdr);
+  check('١٢ز) ★★★ طلباتُ المسؤول ليست صفّاً في الجدول',
+    staff.adminInTable === false && staff.rows.every(r => r.name !== 'مدير النظام'));
+  check('١٢ح) ★★★ لكنّها معلَنةٌ في بيانٍ فوقه (لا حذفَ صامت)',
+    staff.adminBanner === true && staff.adminN === 1 && staff.adminSpend === 400,
+    'n=' + staff.adminN + ' spend=' + staff.adminSpend);
+  check('١٢ط) ★★ دليلُ قراءة الجدول مرسومٌ (الجدولُ يشرح نفسَه)', staff.guide === true);
+  check('١٢ي) ★★ ورؤوسُ المجموعات تسمّي المحاور (سرعة · جودة · قيمة · التزام)',
+    staff.groupHdrs.length === 6 && staff.groupHdrs.some(h => h.includes('السرعة')) &&
+    staff.groupHdrs.some(h => h.includes('جودة')) && staff.groupHdrs.some(h => h.includes('القيمة')) &&
+    staff.groupHdrs.some(h => h.includes('الالتزام')), staff.groupHdrs.join(' | '));
+  check('١٢ك) ★★★ المخطّطاتُ الثلاثة مرسومةٌ بأبعادٍ حقيقية (لا لوحةٌ منكمشة)',
+    staff.canvases.every(Boolean), JSON.stringify(staff.canvases));
 }
 // ── الصلاحية: مسؤولُ المشتريات يرى صفَّه وحدَه — والحجبُ في الحساب لا في الـDOM ──
 const own = await page.evaluate(async () => {
@@ -454,9 +478,9 @@ const own = await page.evaluate(async () => {
   currentUser = bak;
   return { names, leaksNoor: html.includes('نور') };
 });
-check('١٢ز) ★★★ مسؤولُ المشتريات يرى صفَّه وحدَه',
+check('١٢ل) ★★★ مسؤولُ المشتريات يرى صفَّه وحدَه',
   own.names.length === 1 && own.names[0] === 'سعد', own.names.join(','));
-check('١٢ح) ★★★ ولا يتسرّب اسمُ زميله في الـDOM (الحجبُ في الحساب لا في العرض)',
+check('١٢م) ★★★ ولا يتسرّب اسمُ زميله في الـDOM (الحجبُ في الحساب لا في العرض)',
   own.leaksNoor === false);
 await page.screenshot({ path: SHOTS + '/po-staff-kpi.png', fullPage: false });
 
