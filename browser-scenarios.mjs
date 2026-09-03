@@ -1342,6 +1342,60 @@ const s17 = await page17.evaluate(async ()=>{
   const pv = supervisorReceipt.paperHTML(poV,'SVR-01');
   out.paperTwoVendors = pv.indexOf('المورد في الطلب')>=0 && pv.indexOf('المورد الفعلي')>=0
                         && pv.indexOf('يخالف مورد الطلب')>=0;
+
+  /* (ز) الطلبُ العائدُ إلى المرحلة بعد اكتمالها — مصيدةٌ بلا مخرج (بلاغ المالك 03/09).
+     PO-202609-0229: اكتمل المحضرُ فأُحيل للمستودع، ثم أرجعه المسؤولُ للمشتريات
+     لتصحيح الفاتورة، ثمّ أُشعِر بالشراء ثانيةً فعاد إلى `sv_receiving` بلا متبقٍّ:
+     الخاناتُ معطَّلةٌ و«التحويلُ رغم النقص» مخفيٌّ و`save()` يردّ أبداً. */
+  currentUser={ name:'أسامة السادات', user:'osama', role:'مشرف', permissions:{ purchases:true } };
+  const back={ id:'PO-BACK-1', building:'مبنى الأمانة', projectId:'hail', status:'sv_receiving',
+    vendor:'انوار المنازل', supervisor:'محمد داوود', receivingSupervisor:'أسامة السادات',
+    items:[{ itemName:'جرس بطارية', qty:5, unit:'قطعة', unitCost:20, itemCost:100 }],
+    svReceipts:[{ ref:'SVR-01', by:'أسامة السادات', at:'2026-09-02T16:01:00Z',
+      vendor:'انوار المنازل', photos:[{url:'x'}], items:[{idx:0,name:'جرس بطارية',unit:'قطعة',qty:5}] }],
+    timeline:[], createdAt:'2026-09-02T09:15:00' };
+  purchases=[back]; window.__store[PC+'/PO-BACK-1']=JSON.parse(JSON.stringify(back));
+  reset();
+  supervisorReceipt.open('PO-BACK-1');
+  const qtyIn=[].slice.call(document.querySelectorAll('#modal-sv-receipt .sv-qty'));
+  out.trapNoOpenQty  = qtyIn.length>0 && qtyIn.every(i=>i.disabled);          // لا كميةَ تُدخَل
+  out.trapForceHidden= (document.getElementById('sv-force-row')||{}).style.display==='none';
+  out.exitBtnShown   = !!document.getElementById('sv-fwd-btn');               // المخرجُ ظاهر
+  out.saveBtnHidden  = !document.getElementById('sv-save-btn');
+  out.entryFieldsHidden = (document.getElementById('sv-entry-fields')||{}).style.display==='none';
+  out.exitBanner     = (document.getElementById('modal-sv-receipt').innerHTML||'').indexOf('لا متبقٍّ يُسجَّل')>=0;
+  await supervisorReceipt.forwardToWarehouse();
+  await new Promise(r=>setTimeout(r,300));
+  const backSaved=window.__store[PC+'/PO-BACK-1']||{};
+  out.exitMoved   = backSaved.status==='wh_receiving';
+  out.exitLogged  = (backSaved.timeline||[]).some(t=>t&&t.code==='wh_receiving'
+                      && String(t.event).indexOf('أُحيل للمستودع للتدقيق')>=0);
+  out.exitNoNewRec= (backSaved.svReceipts||[]).length===1;                    // لا محضرَ ثانياً بصفر
+
+  /* والمنعُ عند المصدر: «تم الشراء» لا يُعيد إلى مرحلة المشرف طلباً اكتمل استلامُه */
+  currentUser={ name:'وائل عبد المجيد', user:'wael', role:'procurement_officer' };
+  const back2=JSON.parse(JSON.stringify(back));
+  back2.id='PO-BACK-2'; back2.status='proc_executing';
+  purchases=[back2]; window.__store[PC+'/PO-BACK-2']=JSON.parse(JSON.stringify(back2));
+  reset();
+  openNotifyWarehouseModal('PO-BACK-2');
+  await new Promise(r=>setTimeout(r,200));
+  await doNotifyWarehouse('PO-BACK-2');
+  await new Promise(r=>setTimeout(r,300));
+  const b2=window.__store[PC+'/PO-BACK-2']||{};
+  out.notifySkipsSv = b2.status==='wh_receiving';
+  out.notifySaysWhy = (b2.timeline||[]).some(t=>t&&String(t.notes||'').indexOf('استلامُ المشرف مكتملٌ سلفاً')>=0);
+  /* ولا تُمَسّ الحالةُ السويّة: طلبٌ بلا محاضرَ يمرّ بمرحلة المشرف كما كان */
+  const fresh={ id:'PO-BACK-3', building:'م', projectId:'hail', status:'proc_executing',
+    items:[{ itemName:'جرس بطارية', qty:5, unit:'قطعة', unitCost:20, itemCost:100 }],
+    timeline:[], createdAt:'2026-09-02T09:15:00' };
+  purchases=[fresh]; window.__store[PC+'/PO-BACK-3']=JSON.parse(JSON.stringify(fresh));
+  reset();
+  openNotifyWarehouseModal('PO-BACK-3');
+  await new Promise(r=>setTimeout(r,200));
+  await doNotifyWarehouse('PO-BACK-3');
+  await new Promise(r=>setTimeout(r,300));
+  out.notifyKeepsSv = (window.__store[PC+'/PO-BACK-3']||{}).status==='sv_receiving';
   return out;
 });
 await page17.close();
@@ -1367,6 +1421,19 @@ check('17و) ★★ حقلُ «المورد الفعلي» حاضرٌ في نا�
 check('17و) ★ وزرُّ «هو نفسه ✓» يملؤه بفعلٍ صريح', s17.sameVendorFills===true);
 check('17و) ★★ واختلافُه عن مورد الطلب يُبرَز على البطاقة', s17.vendorChipDiff===true);
 check('17و) ★★ والورقةُ تفصل الموردَين وتُعلن المخالفة', s17.paperTwoVendors===true);
+check('17ز) شرطُ البلاغ متحقّق: عاد الطلبُ للمرحلة وكلُّ كمياته مستلَمة (لا خانةَ إدخالٍ ولا «تحويل رغم النقص»)',
+  s17.trapNoOpenQty===true && s17.trapForceHidden===true, 'خاناتٌ معطَّلة='+s17.trapNoOpenQty+' التحويلُ مخفيّ='+s17.trapForceHidden);
+check('17ز) ★★ ومع ذلك للنافذة مخرجٌ ظاهر: «إحالة للمستودع للتدقيق» بدل زرِّ الحفظ',
+  s17.exitBtnShown===true && s17.saveBtnHidden===true && s17.exitBanner===true,
+  'زرّ='+s17.exitBtnShown+' حفظٌ مخفيّ='+s17.saveBtnHidden+' بيان='+s17.exitBanner);
+check('17ز) ★ ولا حقولَ محضرٍ تُملأ ثم تُهمَل', s17.entryFieldsHidden===true);
+check('17ز) ★★ والضغطُ عليه ينقل الطلبَ فعلاً إلى «بانتظار استلام المستودع» ويقيّده في السجل',
+  s17.exitMoved===true && s17.exitLogged===true, 'الحالة='+s17.exitMoved+' القيد='+s17.exitLogged);
+check('17ز) ★ ولا يُنشئ محضراً ثانياً بصفرٍ لبضاعةٍ وصلت مرةً واحدة', s17.exitNoNewRec===true);
+check('17ز) ★★ والمنعُ عند المصدر: «تم الشراء» لا يُعيد طلباً اكتمل استلامُه إلى مرحلة المشرف',
+  s17.notifySkipsSv===true, 'الحالةُ بعد الإشعار='+s17.notifySkipsSv);
+check('17ز) ★ ولماذا تخطّاها مكتوبٌ في القيد لا مستنتَجٌ من غيابه', s17.notifySaysWhy===true);
+check('17ز) ★★ ولا تُمَسّ الحالةُ السويّة: طلبٌ بلا محاضرَ يمرّ بمرحلة المشرف كما كان', s17.notifyKeepsSv===true);
 
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
