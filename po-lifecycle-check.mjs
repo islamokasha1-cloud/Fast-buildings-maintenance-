@@ -374,6 +374,92 @@ await page.screenshot({ path: SHOTS + '/po-detail-mobile.png', fullPage: false }
 await page.evaluate(() => { try { closeModal('modal-purchase-detail'); } catch (e) {} });
 await page.setViewportSize({ width: 1440, height: 900 });
 
+L('\n=== ١٢) أداءُ مسؤولي المشتريات — الرقمُ المرسوم = الرقمُ المحسوب ═══');
+// لماذا هنا: هذا القسمُ يُقاس عليه **أشخاص**. حسابٌ صحيحٌ في الذاكرة ورقمٌ آخرُ على
+// الشاشة يعني موظّفاً يُحاسَب على رقمٍ لم يحسبه أحد. فيُبذَر طلبان بمسارٍ كاملٍ يحمل
+// هويّةَ الفاعل، ثم تُفتح الصفحةُ فعلاً ويُقرأ الجدولُ المرسومُ خليّةً خليّة.
+const staff = await page.evaluate(async () => {
+  const mk = (id, ownerU, ownerN, cost, endCode) => ({
+    id, projectId: 'hail', projectName: 'هايل', status: 'closed',
+    createdAt: '2026-07-01T06:00:00Z', updatedAt: '2026-07-03T06:00:00Z',
+    actualCost: cost, estCost: cost,
+    items: [{ itemName: 'بند', qty: 1, unitCost: cost, itemCost: cost, receivedQty: 1 }],
+    timeline: [
+      { code: 'pending_proc', at: '2026-07-01T08:00:00Z', by: 'مدير المشاريع', byUser: 'pm', byRole: 'project_manager' },
+      { code: endCode,        at: '2026-07-01T12:00:00Z', by: ownerN, byUser: ownerU, byRole: 'procurement_officer' },
+    ]
+  });
+  /* `purchases` معرَّفةٌ بـ`let` في النواة، فلا تصبح خاصّيةً على `window`؛ والوحدةُ
+     تقرؤها **بالاسم المجرّد** (getPurchases). فالبذرُ على `window.purchases` يُبذَر
+     في مصفوفةٍ أخرى لا يقرؤها أحد — وهي العلّةُ نفسُها التي تشرحها ترويسةُ الوحدة. */
+  purchases = [
+    mk('PO-STAFF-1', 'saad', 'سعد', 1000, 'pending_finance'),
+    mk('PO-STAFF-2', 'saad', 'سعد', 2000, 'pending_finance'),
+    mk('PO-STAFF-3', 'noor', 'نور',  700, 'pending_ceo'),
+  ];
+  showPage('purchase-kpi');
+  await new Promise(r => setTimeout(r, 900));
+
+  // الرقمُ المحسوب — من الدالّة النقيّة نفسِها التي يقرؤها الوجه
+  const S = window.purchaseKPI.computeStaffKPIs(purchases);
+  // الرقمُ المرسوم — من خلايا الجدول في الـDOM
+  const tbl = document.querySelector('#page-purchase-kpi .pkpi-staff-tbl');
+  if (!tbl) return { ok: false, err: 'الجدولُ لم يُرسم' };
+  const drawn = [...tbl.querySelectorAll('tbody tr')].map(tr => {
+    const td = [...tr.children];
+    return { name: (td[0].childNodes[0].textContent || '').trim(),
+             po: (td[1].querySelector('b') || {}).textContent,
+             sub: (td[1].querySelector('.pkpi-sub') || {}).textContent,
+             spend: (td[2].querySelector('b') || {}).textContent,
+             prep: (td[3].querySelector('b') || {}).textContent };
+  });
+  const hdr = [...tbl.querySelectorAll('thead th')].length;
+  return { ok: true, rows: S.rows.map(r => ({ key: r.key, name: r.name, poN: r.poN, poClosed: r.poClosed,
+             spendClosed: r.spendClosed, prepAvg: r.prepAvg })), drawn, hdr,
+           visible: !!document.getElementById('page-purchase-kpi').classList.contains('active') };
+});
+check('١٢·٠) صفحةُ المؤشرات فُتحت وقسمُ المسؤولين مرسومٌ فيها',
+  staff.ok === true && staff.visible === true, staff.ok ? '' : staff.err);
+if (staff.ok) {
+  const bySaad = staff.rows.find(r => r.key === 'u:saad');
+  const drawnSaad = staff.drawn.find(d => d.name === 'سعد');
+  check('١٢أ) ★★ لكلّ مسؤولٍ صفٌّ واحد (لا تكرارَ ولا اندماج)',
+    staff.rows.length === 2 && staff.drawn.length === 2,
+    'محسوب ' + staff.rows.length + ' · مرسوم ' + staff.drawn.length);
+  check('١٢ب) ★★★ عددُ الطلبات المرسومُ = المحسوب',
+    !!bySaad && !!drawnSaad && Number(drawnSaad.po.replace(/[^\d.]/g, '')) === bySaad.poN,
+    'مرسوم ' + (drawnSaad && drawnSaad.po) + ' · محسوب ' + (bySaad && bySaad.poN));
+  check('١٢ج) ★★★ «مغلق · مفتوح» المرسومُ = المحسوب (طلبُ الشراء لا البلاغ)',
+    !!drawnSaad && /مغلق\s*2/.test(drawnSaad.sub) && /مفتوح\s*0/.test(drawnSaad.sub),
+    drawnSaad && drawnSaad.sub);
+  check('١٢د) ★★★ قيمةُ مشترياته المرسومةُ = التكلفةُ الفعليةُ للمغلق (3,000.00)',
+    !!bySaad && bySaad.spendClosed === 3000 && !!drawnSaad && near(drawnSaad.spend.replace(/,/g, ''), 3000),
+    'مرسوم ' + (drawnSaad && drawnSaad.spend) + ' · محسوب ' + (bySaad && bySaad.spendClosed));
+  check('١٢هـ) ★★ زمنُ تجهيز المقارنة المرسومُ = المحسوب بأيام العمل',
+    !!bySaad && bySaad.prepAvg != null && !!drawnSaad && near(drawnSaad.prep, bySaad.prepAvg.toFixed(1)),
+    'مرسوم ' + (drawnSaad && drawnSaad.prep) + ' · محسوب ' + (bySaad && bySaad.prepAvg));
+  check('١٢و) ★ رأسُ الجدول بعشرة أعمدةٍ يطابق صفوفَه', staff.hdr === 10, 'رؤوس=' + staff.hdr);
+}
+// ── الصلاحية: مسؤولُ المشتريات يرى صفَّه وحدَه — والحجبُ في الحساب لا في الـDOM ──
+const own = await page.evaluate(async () => {
+  /* `currentUser` أيضاً `let` في النواة: `isAdmin()` تقرأ المعجميّة لا خاصّيةَ
+     `window`. فالتبديلُ يجب أن يكون بالاسم المجرّد وإلّا بقي الفحصُ يدخل أدمن. */
+  const bak = currentUser;
+  currentUser = { user: 'saad', name: 'سعد', role: 'procurement_officer' };
+  window.purchaseKPI.render();
+  await new Promise(r => setTimeout(r, 500));
+  const tbl = document.querySelector('#page-purchase-kpi .pkpi-staff-tbl');
+  const names = tbl ? [...tbl.querySelectorAll('tbody tr')].map(tr => (tr.children[0].childNodes[0].textContent || '').trim()) : [];
+  const html = document.getElementById('page-purchase-kpi').innerHTML;
+  currentUser = bak;
+  return { names, leaksNoor: html.includes('نور') };
+});
+check('١٢ز) ★★★ مسؤولُ المشتريات يرى صفَّه وحدَه',
+  own.names.length === 1 && own.names[0] === 'سعد', own.names.join(','));
+check('١٢ح) ★★★ ولا يتسرّب اسمُ زميله في الـDOM (الحجبُ في الحساب لا في العرض)',
+  own.leaksNoor === false);
+await page.screenshot({ path: SHOTS + '/po-staff-kpi.png', fullPage: false });
+
 L('\n=== أخطاء الجافاسكربت ═══');
 check('✨ لا أخطاء جافاسكربت في الرحلة كلّها', errors.length === 0, errors.slice(0, 3).join(' | '));
 
