@@ -127,7 +127,7 @@ check('★ والترقيمُ والشرطةُ منزوعان من العنوا�
 
 await page.evaluate(() => staffTasks.draftDueAll('2026-09-10'));
 await page.waitForTimeout(300);
-await page.click('#page-staff-tasks .btn-primary');
+await page.click('#page-staff-tasks .st-quick .btn-primary');
 await page.waitForTimeout(1200);
 
 const saved = await page.evaluate(() => Object.keys(window.__store).filter(k => k.startsWith('staff_tasks/')).map(k => window.__store[k]));
@@ -195,7 +195,7 @@ await page.click('#page-staff-tasks .st-card');
 await page.waitForTimeout(700);
 check('★★ فتحُ البطاقة يعرض التفصيل والمشاركين وحقلَ الملاحظة',
   await page.evaluate(() => { const h = document.getElementById('page-staff-tasks').innerHTML;
-    return /st-detail/.test(h) && /st-who/.test(h) && /st-cmt-/.test(h); }));
+    return /st-acts/.test(h) && /st-who/.test(h) && /st-cmt-/.test(h); }));
 const doneOk = await page.evaluate(async () => {
   const id = (staffTasks.byId ? null : null);
   const card = document.querySelector('#page-staff-tasks .btn-primary');
@@ -206,6 +206,44 @@ const doneOk = await page.evaluate(async () => {
   return st.filter(t => t.status === 'done').length;
 });
 check('★★ زرُّ «تمّ الإنجاز» يكتب الحالةَ فعلاً في المستند', doneOk === 1, String(doneOk));
+
+/* ═════════ ٦) لغةُ المنصّة: أيقوناتٌ لا إيموجي، ومكوّناتٌ مشتركة ═════════
+   شاشةٌ تُخالف أسلوبَ ما حولها تبدو دخيلةً وإن عملت. وأخطرُ ما يقع هنا صامتٌ:
+   متغيّرُ لونٍ **لا وجودَ له** يسقط على قيمةٍ احتياطيةٍ فتخرج الحقولُ سوداءَ وسط
+   شاشةٍ فاتحة، ولا خطأَ في وحدة التحكّم يُنذر. فيُقاس اللونُ المحسوبُ فعلاً. */
+L('\n=== ٦) لغةُ المنصّة ===');
+const skin = await page.evaluate(() => {
+  const host = document.getElementById('page-staff-tasks');
+  const RE = /[\u{1F300}-\u{1FAFF}\u{2700}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/u;
+  // شاشةُ التفصيل مفتوحةٌ الآن — تُقاس أوّلاً، ثمّ نرجع للقائمة لقياس بقيّتها
+  const emojiDetail = RE.test(host.textContent || '');
+  staffTasks.back();
+  const txt = host.textContent || '';
+  // نطاقاتُ الرموز التصويرية — لا يُقاس على النصّ العربيّ ولا على علامات الترقيم
+  const emoji = emojiDetail || RE.test(txt);
+  const svgs = host.querySelectorAll('.ic svg').length;
+  const heroIcon = !!host.querySelector('.page-hero .ph-ico svg');
+  const inp = host.querySelector('.form-input');
+  const bg = inp ? getComputedStyle(inp).backgroundColor : '';
+  // القراءةُ من الجذر: القيمةُ التي يراها المتصفّح فعلاً لا التي ظنناها
+  const rootBg = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim();
+  const tabOn = host.querySelector('.st-tab.on');
+  const tabBg = tabOn ? getComputedStyle(tabOn).backgroundColor : '';
+  const primary = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
+  const inherited = host.querySelectorAll('.form-input,.form-select,.btn').length;
+  return { emoji, svgs, heroIcon, bg, rootBg, tabBg, primary, inherited };
+});
+check('★★★ لا رمزَ تصويريّاً واحداً في الشاشة — الأيقوناتُ كلُّها svg', !skin.emoji);
+check('★★ وأيقوناتُ المنصّة تُرسَم فعلاً (لا span فارغ)', skin.svgs > 0, skin.svgs + ' أيقونة');
+check('★★ وأيقونةُ الترويسة داخل ph-ico كبقيّة الشاشات', skin.heroIcon);
+check('★★ ومكوّناتُ المنصّة مستعملةٌ لا منسوخة (form-input · form-select · btn)',
+  skin.inherited >= 3, skin.inherited + ' عنصراً');
+/* الحقلُ الأبيض على شاشةٍ فاتحة: rgb(255,255,255). لو سقط على متغيّرٍ غيرِ موجودٍ
+   لخرج داكناً — وهذا بالضبط ما وقع في النسخة الأولى. */
+check('★★★ خلفيةُ الحقل من نظام المنصّة لا من قيمةٍ احتياطيةٍ داكنة',
+  /^rgba?\(2[45]\d,\s*2[45]\d,\s*2[45]\d/.test(skin.bg), skin.bg);
+check('★★ والخانةُ المفتوحة بلون الهوية --primary لا بلونٍ من خارجه',
+  !!skin.tabBg && skin.tabBg !== 'rgba(0, 0, 0, 0)', skin.tabBg + '  (--primary: ' + skin.primary + ')');
 
 check('★★★ لا خطأَ جافاسكربت في الرحلة كلّها', errors.length === 0, errors[0] || '');
 

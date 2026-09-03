@@ -54,7 +54,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3005";
+  var MODULE_BUILD = "v18.9.3009";
 
   function COLL(){
     var dev=false;
@@ -467,48 +467,100 @@
   function _e(s){ try{ return esc(s==null?"":String(s)); }catch(e){ return String(s==null?"":s); } }
   function _q(s){ try{ return _jsq(s==null?"":String(s)); }catch(e){ return String(s==null?"":s).replace(/'/g,"\\'"); } }
 
+  /* ════════ الأيقونات ════════
+     تُقرأ من مُصنّع المنصّة `_ic` بالاسم من النطاق المشترك — لا نسخةَ ثانيةً من
+     مسارات الـSVG هنا. السببُ أنّ نسخةً محلّيةً تتجمّد على شكلِ اليوم: تُبدَّل أيقونةُ
+     المنصّة فتبقى أيقونتُنا وحدَها على القديم، فتظهر شاشةٌ بين شاشاتٍ بأسلوبٍ آخر.
+     والسقوطُ الآمن نصٌّ فارغ: أيقونةٌ غائبةٌ تُنقص زينةً ولا تكسر سطراً. */
+  function _icn(name, cls){
+    try{ return (typeof _ic==="function") ? _ic(name, cls) : ""; }catch(e){ return ""; }
+  }
+
   /* ════════ الأنماط ════════
      تُحقن مرّةً واحدةً وقتَ أوّل رسم، ومحصورةٌ ببادئة `st-` وبـ`#page-staff-tasks`
      فلا تنزلق قاعدةٌ منها على شاشةٍ أخرى (خمسُ وحداتٍ تحقن <style> وقتَ التشغيل،
-     وترتيبُ التتالي بينها لا يُضمن). */
+     وترتيبُ التتالي بينها لا يُضمن).
+
+     ── ولا حقلَ يُنسَّق هنا ──
+     الحقولُ تأخذ `.form-input`/`.form-select` من `app.css`، والأزرارُ `.btn-*`،
+     والبطاقاتُ `.card`. والسببُ ليس اختصاراً: القيمُ اللونية في المنصّة **متغيّراتٌ
+     تنقلب في الوضع الداكن** (`html[data-theme="dark"]` يعيد تعريفها جملةً). فكلُّ
+     لونٍ يُكتب هنا رقماً — أو يُقرأ من متغيّرٍ لا وجودَ له فيسقط على احتياطيّ — يبقى
+     على حاله حين ينقلب كلُّ ما حوله. (وقع ذلك فعلاً في أول نسخة: كُتب
+     `var(--bg2,#131a2b)` و`--bg2` **ليس من متغيّرات المنصّة**، فسقطت الحقول على
+     الأزرق الداكن الاحتياطيّ وظهرت سوداءَ وسط شاشةٍ فاتحة.)
+     فما يبقى هنا: **التخطيطُ وحدَه**، وألوانُه من متغيّرات المنصّة لا غير. */
   function _injectCSS(){
     if(_cssDone) return; _cssDone=true;
     var css=
       '#page-staff-tasks{direction:rtl}'+
-      '.st-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}'+
-      '.st-tab{padding:8px 14px;border-radius:10px;border:1px solid var(--border,#2a3550);background:transparent;color:var(--muted,#8b98b8);cursor:pointer;font:inherit;font-size:13px;white-space:nowrap}'+
-      '.st-tab.on{background:var(--accent,#2563eb);color:#fff;border-color:transparent}'+
-      '.st-tab .n{display:inline-block;min-width:18px;padding:0 5px;margin-inline-start:6px;border-radius:9px;background:rgba(255,255,255,.16);font-size:11px}'+
-      '.st-quick{border:1px solid var(--border,#2a3550);border-radius:14px;padding:14px;margin-bottom:16px}'+
-      '.st-quick-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}'+
-      '.st-quick input[type=text],.st-quick select,.st-quick input[type=date]{padding:9px 11px;border-radius:9px;border:1px solid var(--border,#2a3550);background:var(--bg2,#131a2b);color:inherit;font:inherit;font-size:13px}'+
-      '.st-quick input[type=text]{flex:1;min-width:220px}'+
-      '.st-hint{font-size:11px;color:var(--muted,#8b98b8);margin-top:7px;line-height:1.7}'+
-      '.st-draft{margin-top:12px;display:flex;flex-direction:column;gap:6px}'+
-      '.st-drow{display:flex;gap:7px;align-items:center;background:var(--bg2,#131a2b);border-radius:9px;padding:7px 10px;flex-wrap:wrap}'+
-      '.st-drow .t{flex:1;min-width:150px;font-size:13px}'+
-      '.st-card{border:1px solid var(--border,#2a3550);border-radius:12px;padding:12px 14px;margin-bottom:9px;cursor:pointer;transition:border-color .15s}'+
-      '.st-card:hover{border-color:var(--accent,#2563eb)}'+
-      '.st-card.late{border-inline-start:4px solid #ef4444}'+
-      '.st-card.due{border-inline-start:4px solid #f59e0b}'+
-      '.st-card.soon{border-inline-start:4px solid #eab308}'+
-      '.st-card.done{opacity:.55}'+
-      '.st-card.returned{border-inline-start:4px solid #a855f7}'+
-      '.st-ttl{font-size:14px;font-weight:600;margin-bottom:5px;line-height:1.5}'+
-      '.st-meta{font-size:11px;color:var(--muted,#8b98b8);display:flex;gap:12px;flex-wrap:wrap}'+
-      '.st-pill{display:inline-block;padding:1px 8px;border-radius:8px;font-size:10px;background:rgba(148,163,184,.16)}'+
-      '.st-pill.hi{background:rgba(239,68,68,.18);color:#fca5a5}'+
-      '.st-pill.rt{background:rgba(168,85,247,.18);color:#d8b4fe}'+
-      '.st-empty{text-align:center;padding:44px 18px;color:var(--muted,#8b98b8);font-size:13px;line-height:1.9}'+
-      '.st-detail textarea,.st-detail input[type=text]{width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border,#2a3550);background:var(--bg2,#131a2b);color:inherit;font:inherit;font-size:13px}'+
-      '.st-cmt{background:var(--bg2,#131a2b);border-radius:9px;padding:9px 11px;margin-bottom:7px}'+
-      '.st-cmt .who{font-size:11px;color:var(--muted,#8b98b8);margin-bottom:3px}'+
-      '.st-cmt .txt{font-size:13px;line-height:1.7;white-space:pre-wrap}'+
-      '.st-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}'+
-      '.st-who{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}'+
-      '.st-who span{font-size:11px;padding:3px 9px;border-radius:8px;background:rgba(148,163,184,.16)}'+
-      '.st-spin{width:22px;height:22px;border:3px solid var(--border,#2a3550);border-top-color:var(--accent,#2563eb);border-radius:50%;animation:st-rot .8s linear infinite;margin:0 auto 12px}'+
-      '@keyframes st-rot{to{transform:rotate(360deg)}}';
+      /* الخانات: نمطُ رقاقة المنصّة (pcli-grp-chip) — حدٌّ رفيعٌ ولونٌ خافت،
+         والمفتوحةُ تمتلئ بلون الهوية `--primary` نفسِه الذي يعلّم السايدبار والترويسة. */
+      '#page-staff-tasks .st-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}'+
+      '#page-staff-tasks .st-tab{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;'+
+        'padding:6px 14px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);'+
+        'color:var(--muted);cursor:pointer;transition:all .12s;font-family:inherit}'+
+      '#page-staff-tasks .st-tab:hover{border-color:var(--primary);color:var(--primary)}'+
+      '#page-staff-tasks .st-tab.on{background:var(--primary);color:#fff;border-color:var(--primary)}'+
+      '#page-staff-tasks .st-tab .n{min-width:17px;padding:0 5px;border-radius:9px;'+
+        'background:color-mix(in srgb,var(--primary) 14%,var(--surface));color:var(--primary);font-size:10px}'+
+      '#page-staff-tasks .st-tab.on .n{background:rgba(255,255,255,.22);color:#fff}'+
+      /* التكليف السريع */
+      '#page-staff-tasks .st-quick{background:var(--surface);border:1px solid var(--border);'+
+        'border-radius:12px;padding:14px;margin-bottom:14px;box-shadow:var(--shadow)}'+
+      '#page-staff-tasks .st-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}'+
+      '#page-staff-tasks .st-row .form-input,#page-staff-tasks .st-row .form-select{width:auto}'+
+      '#page-staff-tasks .st-grow{flex:1;min-width:200px}'+
+      '#page-staff-tasks .st-hint{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.8}'+
+      '#page-staff-tasks .st-draft{margin-top:12px;display:flex;flex-direction:column;gap:6px}'+
+      '#page-staff-tasks .st-drow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;'+
+        'background:var(--surface2);border-radius:9px;padding:7px 10px}'+
+      '#page-staff-tasks .st-drow .t{flex:1;min-width:150px;font-size:13px;font-weight:600;color:var(--text)}'+
+      '#page-staff-tasks .st-drow .form-input,#page-staff-tasks .st-drow .form-select{width:auto;padding:5px 9px;font-size:12px}'+
+      /* البطاقة: الشريطُ الجانبيُّ وحدَه يحمل الحالة — لا لونَ خلفيةٍ ولا حدٌّ ملوّن.
+         السببُ أنّ الشاشة قد تحمل عشرين بطاقة، فمساحةٌ ملوّنةٌ في كلٍّ منها تُلغي
+         التمييز: حين يصرخ كلُّ شيءٍ لا يُسمع شيء. */
+      '#page-staff-tasks .st-card{background:var(--surface);border:1px solid var(--border);'+
+        'border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;'+
+        'border-inline-start:3px solid transparent;transition:border-color .15s,box-shadow .15s}'+
+      '#page-staff-tasks .st-card:hover{border-color:var(--primary);box-shadow:var(--shadow)}'+
+      '#page-staff-tasks .st-card.late{border-inline-start-color:var(--danger)}'+
+      '#page-staff-tasks .st-card.due{border-inline-start-color:var(--warn)}'+
+      '#page-staff-tasks .st-card.soon{border-inline-start-color:var(--stage-wait-fill)}'+
+      '#page-staff-tasks .st-card.returned{border-inline-start-color:var(--ai)}'+
+      '#page-staff-tasks .st-card.done{opacity:.6}'+
+      '#page-staff-tasks .st-ttl{font-size:14px;font-weight:700;color:var(--text);line-height:1.6;margin-bottom:5px}'+
+      '#page-staff-tasks .st-card.done .st-ttl{text-decoration:line-through;text-decoration-color:var(--muted)}'+
+      '#page-staff-tasks .st-meta{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--muted);font-weight:600}'+
+      '#page-staff-tasks .st-meta span{display:inline-flex;align-items:center;gap:4px}'+
+      '#page-staff-tasks .st-meta .ic svg{width:12px;height:12px}'+
+      '#page-staff-tasks .st-meta .late{color:var(--danger)}'+
+      '#page-staff-tasks .st-pill{padding:1px 8px;border-radius:8px;font-size:10px;'+
+        'background:var(--surface2);border:1px solid var(--border)}'+
+      '#page-staff-tasks .st-pill.hi{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 34%,var(--border))}'+
+      '#page-staff-tasks .st-pill.rt{color:var(--ai-ink);border-color:color-mix(in srgb,var(--ai) 34%,var(--border))}'+
+      /* الفراغ: دعوةٌ إلى فعلٍ لا احتفال — أيقونةٌ خافتةٌ وسطرٌ يقول ما التالي. */
+      '#page-staff-tasks .st-empty{text-align:center;padding:44px 18px;color:var(--muted);font-size:13px;line-height:1.9}'+
+      '#page-staff-tasks .st-empty .ic{display:block;margin:0 auto 10px}'+
+      '#page-staff-tasks .st-empty .ic svg{width:30px;height:30px;stroke-width:1.5;color:var(--border)}'+
+      /* التفصيل */
+      '#page-staff-tasks .st-sec{font-size:12px;font-weight:800;color:var(--text);margin:16px 0 8px;'+
+        'display:flex;align-items:center;gap:6px}'+
+      '#page-staff-tasks .st-body{font-size:13px;line-height:1.9;color:var(--text);white-space:pre-wrap;margin-bottom:12px}'+
+      '#page-staff-tasks .st-note{background:var(--surface2);border-radius:9px;padding:9px 11px;margin-bottom:7px}'+
+      '#page-staff-tasks .st-note.rt{border-inline-start:3px solid var(--ai)}'+
+      '#page-staff-tasks .st-note .who{font-size:11px;color:var(--muted);font-weight:700;margin-bottom:3px}'+
+      '#page-staff-tasks .st-note .txt{font-size:13px;line-height:1.7;color:var(--text);white-space:pre-wrap}'+
+      '#page-staff-tasks .st-who{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}'+
+      '#page-staff-tasks .st-who span{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;'+
+        'padding:4px 10px;border-radius:20px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)}'+
+      '#page-staff-tasks .st-who span .ic svg{width:12px;height:12px}'+
+      '#page-staff-tasks .st-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;'+
+        'padding-top:14px;border-top:1px solid var(--border)}'+
+      '#page-staff-tasks .st-spin{width:22px;height:22px;border:3px solid var(--border);'+
+        'border-top-color:var(--primary);border-radius:50%;animation:st-rot .8s linear infinite;margin:0 auto 12px}'+
+      '@keyframes st-rot{to{transform:rotate(360deg)}}'+
+      '@media (prefers-reduced-motion:reduce){#page-staff-tasks .st-spin{animation-duration:2.4s}}';
     try{
       var s=document.createElement("style");
       s.id="st-styles"; s.textContent=css;
@@ -528,7 +580,7 @@
     _injectCSS();
     _refreshNav();
     if(!_canView()){
-      host.innerHTML='<div class="card"><div class="st-empty">🔒 سجّل الدخول لعرض مهامّك.</div></div>';
+      host.innerHTML='<div class="card"><div class="st-empty">'+_icn("lock")+'سجّل الدخول لعرض مهامّك.</div></div>';
       return;
     }
     startSync();
@@ -537,7 +589,9 @@
       return;
     }
     if(_connIssue && !_tasks.length){
-      host.innerHTML=_hero()+'<div class="card"><div class="st-empty">⚠ تعذّر الاتصال بقاعدة البيانات.<br><button class="btn" onclick="staffTasks.retry()">إعادة المحاولة</button></div></div>';
+      host.innerHTML=_hero()+'<div class="card"><div class="st-empty">'+_icn("alertTriangle")+
+        'تعذّر الاتصال بقاعدة البيانات.<br><br>'+
+        '<button class="btn btn-ghost" onclick="staffTasks.retry()">إعادة المحاولة</button></div></div>';
       return;
     }
     if(_openId){
@@ -552,7 +606,7 @@
   function _hero(){
     return '<div class="page-hero">'+
       '<div class="page-hero-titles">'+
-        '<div class="page-hero-title"><span class="ph-ico">📝</span> المهامّ والملاحظات</div>'+
+        '<div class="page-hero-title"><span class="ph-ico">'+_icn("clipboardCheck")+'</span>المهامّ والملاحظات</div>'+
         '<div class="page-hero-sub">تكليفاتٌ وتذكيراتٌ بينك وبين زملائك — كلُّ مهمّةٍ يراها أطرافُها وحدَهم.</div>'+
       '</div><div class="page-hero-actions"></div></div>';
   }
@@ -580,30 +634,31 @@
     var draft=_draft.map(function(r,i){
       return '<div class="st-drow">'+
         '<span class="t">'+_e(r.title)+'</span>'+
-        '<input type="date" value="'+_e(r.due)+'" onchange="staffTasks.draftDue('+i+',this.value)">'+
-        '<select onchange="staffTasks.draftPrio('+i+',this.value)">'+
+        '<input type="date" class="form-input" value="'+_e(r.due)+'" onchange="staffTasks.draftDue('+i+',this.value)">'+
+        '<select class="form-select" onchange="staffTasks.draftPrio('+i+',this.value)">'+
           '<option value="normal"'+(r.priority!=="high"?" selected":"")+'>عادية</option>'+
           '<option value="high"'+(r.priority==="high"?" selected":"")+'>مهمّة</option>'+
         '</select>'+
-        '<button class="btn btn-sm" onclick="staffTasks.draftDrop('+i+')">✕</button>'+
+        '<button class="btn btn-ghost" onclick="staffTasks.draftDrop('+i+')" title="إزالة">'+_icn("xCircle")+'</button>'+
       '</div>';
     }).join("");
     return '<div class="st-quick">'+
-      '<div class="st-quick-row">'+
-        '<select onchange="staffTasks.draftPick(this.value)" style="min-width:190px">'+opts+'</select>'+
-        '<input type="text" id="st-quick-input" placeholder="اكتب المهمّة ثمّ Enter…" onkeydown="staffTasks.draftKey(event)" onpaste="staffTasks.draftPaste(event)">'+
-        '<button class="btn" onclick="staffTasks.draftAdd()">إضافة</button>'+
+      '<div class="st-row">'+
+        '<select class="form-select" style="min-width:190px" onchange="staffTasks.draftPick(this.value)">'+opts+'</select>'+
+        '<input type="text" class="form-input st-grow" id="st-quick-input" placeholder="اكتب المهمّة ثمّ Enter…" '+
+          'onkeydown="staffTasks.draftKey(event)" onpaste="staffTasks.draftPaste(event)">'+
+        '<button class="btn btn-ghost" onclick="staffTasks.draftAdd()">'+_icn("plus")+'إضافة</button>'+
       '</div>'+
       '<div class="st-hint">اكتب المهمّة واضغط <b>Enter</b> — تنزل تحت والسطرُ يبقى جاهزاً للتالية. '+
         'أو الصق قائمةً جاهزةً من الجوّال: كلُّ سطرٍ يصير مهمّةً مستقلّة.</div>'+
       (_draft.length ? (
         '<div class="st-draft">'+draft+'</div>'+
-        '<div class="st-quick-row" style="margin-top:11px">'+
-          '<span style="font-size:12px;color:var(--muted,#8b98b8)">موعدٌ موحّد للكلّ:</span>'+
-          '<input type="date" onchange="staffTasks.draftDueAll(this.value)">'+
-          '<button class="btn btn-primary" onclick="staffTasks.sendDraft()">إرسال '+_draft.length+' مهمّة'+
+        '<div class="st-row" style="margin-top:12px">'+
+          '<span style="font-size:12px;color:var(--muted);font-weight:700">موعدٌ موحّد للكلّ:</span>'+
+          '<input type="date" class="form-input" onchange="staffTasks.draftDueAll(this.value)">'+
+          '<button class="btn btn-primary" onclick="staffTasks.sendDraft()">'+_icn("send")+'إرسال '+_draft.length+' مهمّة'+
             (_draftTo? (" إلى "+_e(_nameOf(_draftTo))) : "")+'</button>'+
-          '<button class="btn btn-sm" onclick="staffTasks.draftClear()">مسح القائمة</button>'+
+          '<button class="btn btn-ghost" onclick="staffTasks.draftClear()">مسح القائمة</button>'+
         '</div>'
       ) : "")+
     '</div>';
@@ -617,35 +672,40 @@
       var s=_splitTabs(_visible(), me);
       rows=_sortTasks(s[_tab]||[], today);
     }
-    if(!rows.length) return '<div class="st-empty">'+_e(_emptyMsg())+'</div>';
+    if(!rows.length) return _emptyHtml();
     return rows.map(function(t){ return _cardHtml(t, today); }).join("");
   }
 
-  function _emptyMsg(){
-    return _tab==="mine"  ? "لا مهامَّ عليك الآن. 🎉"
-         : _tab==="sent"  ? "لم تُكلّف أحداً بشيءٍ بعد — اكتب مهمّةً في الأعلى واختر الموظف."
-         : _tab==="notes" ? "لا ملاحظات. اكتب تذكيراً لنفسك من الأعلى بلا اختيار موظف."
-         : _tab==="all"   ? "لا مهامَّ مفتوحةً في النظام."
-         : "لا مهامَّ منجَزةً بعد.";
+  /* الفراغُ دعوةٌ إلى فعل: أيقونةٌ خافتةٌ وسطرٌ يقول ما التالي — لا احتفالَ ولا مزاج. */
+  function _emptyHtml(){
+    var m = _tab==="mine"  ? ["checkCircle","لا مهامَّ عليك الآن."]
+          : _tab==="sent"  ? ["send","لم تُكلّف أحداً بشيءٍ بعد.<br>اكتب مهمّةً في الأعلى واختر الموظف."]
+          : _tab==="notes" ? ["edit","لا ملاحظات.<br>اكتب تذكيراً لنفسك من الأعلى بلا اختيار موظف."]
+          : _tab==="all"   ? ["checkCircle","لا مهامَّ مفتوحةً في النظام."]
+          : ["archive","لا مهامَّ منجَزةً بعد."];
+    return '<div class="st-empty">'+_icn(m[0])+m[1]+'</div>';
   }
 
   function _cardHtml(t, today){
     var st=_dueState(t,today);
     var cls="st-card "+(t.status==="done"?"done":(t.status==="returned"?"returned":st));
+    var whoIcon = t.assignedToUser ? "user" : "edit";
     var who = t.assignedToUser
       ? (t.assignedToUser===_me() ? ("من: "+_nameOf(t.createdByUser)) : ("إلى: "+_nameOf(t.assignedToUser)))
       : "ملاحظةٌ شخصية";
-    var dueTxt = t.due ? (st==="late" ? ("متأخّرة — "+t.due) : ("الموعد: "+t.due)) : "بلا موعد";
-    var extra=(Array.isArray(t.shared)&&t.shared.length) ? ('<span class="st-pill">+'+t.shared.length+' مشارك</span>') : "";
-    var cn=(Array.isArray(t.comments)&&t.comments.length) ? ('<span>💬 '+t.comments.length+'</span>') : "";
+    var dueTxt = t.due ? (st==="late" ? ("متأخّرة — "+t.due) : t.due) : "بلا موعد";
+    var shared=(Array.isArray(t.shared)&&t.shared.length)
+      ? ('<span>'+_icn("users")+(t.shared.length+1)+' مشاركين</span>') : "";
+    var cn=(Array.isArray(t.comments)&&t.comments.length)
+      ? ('<span>'+_icn("edit")+t.comments.length+'</span>') : "";
     return '<div class="'+cls+'" onclick="staffTasks.open(\''+_q(t.id)+'\')">'+
       '<div class="st-ttl">'+_e(t.title)+'</div>'+
       '<div class="st-meta">'+
-        '<span>'+_e(who)+'</span>'+
-        '<span>'+_e(dueTxt)+'</span>'+
+        '<span>'+_icn(whoIcon)+_e(who)+'</span>'+
+        '<span'+(st==="late"?' class="late"':'')+'>'+_icn(st==="late"?"alertTriangle":"clock")+_e(dueTxt)+'</span>'+
         (t.priority==="high"?'<span class="st-pill hi">مهمّة</span>':"")+
         (t.status==="returned"?'<span class="st-pill rt">مردودة</span>':"")+
-        extra+cn+
+        shared+cn+
       '</div>'+
     '</div>';
   }
@@ -655,11 +715,14 @@
     var mine   = t.assignedToUser===me;
     var owner  = t.createdByUser===me;
     var canShare=_canEditParticipants(t,me,_myRole());
-    var parts=_participantsOf(t).map(function(u){ return '<span>'+_e(_nameOf(u))+(u===t.createdByUser?" (المُنشئ)":"")+'</span>'; }).join("");
+    var parts=_participantsOf(t).map(function(u){
+      return '<span>'+_icn(u===t.createdByUser?"pin":"user")+_e(_nameOf(u))+(u===t.createdByUser?" · المُنشئ":"")+'</span>';
+    }).join("");
     var cmts=(Array.isArray(t.comments)?t.comments:[]).slice().sort(function(a,b){
       return String(a.at||"")<String(b.at||"") ? -1 : 1;
     }).map(function(c){
-      return '<div class="st-cmt"><div class="who">'+_e(c.name||c.user)+' · '+_e(String(c.at||"").slice(0,16).replace("T"," "))+'</div>'+
+      return '<div class="st-note"><div class="who">'+_e(c.name||c.user)+' · '+
+             _e(String(c.at||"").slice(0,16).replace("T"," "))+'</div>'+
              '<div class="txt">'+_e(c.text)+'</div></div>';
     }).join("") || '<div class="st-hint">لا ملاحظاتٍ بعد.</div>';
 
@@ -667,37 +730,47 @@
       .map(function(u){ return '<option value="'+_e(u.user)+'">'+_e(u.name||u.user)+'</option>'; }).join("");
 
     var acts="";
-    if(t.status!=="done" && (mine||owner||_isAdmin())) acts+='<button class="btn btn-primary" onclick="staffTasks.markDone(\''+_q(t.id)+'\')">✓ تمّ الإنجاز</button>';
-    if(t.status==="done"  && (mine||owner||_isAdmin())) acts+='<button class="btn" onclick="staffTasks.reopen(\''+_q(t.id)+'\')">↺ إعادة فتح</button>';
-    if(t.status==="open" && mine && !owner)             acts+='<button class="btn" onclick="staffTasks.returnTask(\''+_q(t.id)+'\')">↩ ليست من اختصاصي</button>';
-    if(t.status==="returned" && owner)                  acts+='<button class="btn" onclick="staffTasks.acceptBack(\''+_q(t.id)+'\')">↺ إعادة فتحها</button>';
-    if(owner||_isAdmin())                               acts+='<button class="btn btn-danger" onclick="staffTasks.removeTask(\''+_q(t.id)+'\')">🗑 حذف</button>';
+    if(t.status!=="done" && (mine||owner||_isAdmin()))
+      acts+='<button class="btn btn-primary btn-sm" onclick="staffTasks.markDone(\''+_q(t.id)+'\')">'+_icn("checkCircle")+'تمّ الإنجاز</button>';
+    if(t.status==="done"  && (mine||owner||_isAdmin()))
+      acts+='<button class="btn btn-ghost" onclick="staffTasks.reopen(\''+_q(t.id)+'\')">'+_icn("repeat")+'إعادة فتح</button>';
+    if(t.status==="open" && mine && !owner)
+      acts+='<button class="btn btn-ghost" onclick="staffTasks.returnTask(\''+_q(t.id)+'\')">'+_icn("rotateCcw")+'ليست من اختصاصي</button>';
+    if(t.status==="returned" && owner)
+      acts+='<button class="btn btn-ghost" onclick="staffTasks.acceptBack(\''+_q(t.id)+'\')">'+_icn("repeat")+'إعادة فتحها</button>';
+    if(owner||_isAdmin())
+      acts+='<button class="btn btn-danger" onclick="staffTasks.removeTask(\''+_q(t.id)+'\')">'+_icn("trash")+'حذف</button>';
 
-    return '<div class="card st-detail">'+
-      '<button class="btn btn-sm" onclick="staffTasks.back()">← رجوع</button>'+
-      '<h3 style="margin:13px 0 6px;font-size:17px;line-height:1.6">'+_e(t.title)+'</h3>'+
-      '<div class="st-meta" style="margin-bottom:11px">'+
-        '<span>أنشأها: '+_e(_nameOf(t.createdByUser))+'</span>'+
-        (t.assignedToUser?('<span>المكلَّف: '+_e(_nameOf(t.assignedToUser))+'</span>'):'<span>ملاحظةٌ شخصية</span>')+
-        '<span>'+(t.due?('الموعد: '+_e(t.due)+(_isOverdue(t,today)?" (متأخّرة)":"")):'بلا موعد')+'</span>'+
+    return '<div class="card">'+
+      '<button class="btn btn-ghost btn-sm" onclick="staffTasks.back()">← رجوع</button>'+
+      '<h3 style="margin:14px 0 8px;font-size:17px;font-weight:800;line-height:1.6;color:var(--text)">'+_e(t.title)+'</h3>'+
+      '<div class="st-meta" style="margin-bottom:12px">'+
+        '<span>'+_icn("pin")+'أنشأها: '+_e(_nameOf(t.createdByUser))+'</span>'+
+        (t.assignedToUser
+          ? ('<span>'+_icn("user")+'المكلَّف: '+_e(_nameOf(t.assignedToUser))+'</span>')
+          : ('<span>'+_icn("edit")+'ملاحظةٌ شخصية</span>'))+
+        '<span'+(_isOverdue(t,today)?' class="late"':'')+'>'+_icn(_isOverdue(t,today)?"alertTriangle":"clock")+
+          (t.due?(_e(t.due)+(_isOverdue(t,today)?" — متأخّرة":"")):'بلا موعد')+'</span>'+
         (t.priority==="high"?'<span class="st-pill hi">مهمّة</span>':"")+
       '</div>'+
-      (t.body?('<div style="font-size:13px;line-height:1.9;white-space:pre-wrap;margin-bottom:12px">'+_e(t.body)+'</div>'):"")+
+      (t.body?('<div class="st-body">'+_e(t.body)+'</div>'):"")+
       (t.status==="returned"
-        ? '<div class="st-cmt" style="border-inline-start:3px solid #a855f7"><div class="who">رُدّت من '+_e(_nameOf(t.returnedByUser))+'</div><div class="txt">'+_e(t.returnedReason)+'</div></div>'
+        ? '<div class="st-note rt"><div class="who">رُدّت من '+_e(_nameOf(t.returnedByUser))+'</div>'+
+          '<div class="txt">'+_e(t.returnedReason)+'</div></div>'
         : "")+
+      '<div class="st-sec">'+_icn("users")+'المشاركون</div>'+
       '<div class="st-who">'+parts+'</div>'+
       (canShare && shareOpts
-        ? '<div class="st-quick-row" style="margin-bottom:14px">'+
-            '<select id="st-share-'+_e(t.id)+'" style="min-width:170px;padding:8px 10px;border-radius:9px;border:1px solid var(--border,#2a3550);background:var(--bg2,#131a2b);color:inherit;font:inherit;font-size:13px"><option value="">إضافة موظف…</option>'+shareOpts+'</select>'+
-            '<button class="btn btn-sm" onclick="staffTasks.shareTask(\''+_q(t.id)+'\')">إضافة</button>'+
+        ? '<div class="st-row">'+
+            '<select class="form-select" style="min-width:180px" id="st-share-'+_e(t.id)+'">'+
+              '<option value="">إضافة موظف…</option>'+shareOpts+'</select>'+
+            '<button class="btn btn-ghost" onclick="staffTasks.shareTask(\''+_q(t.id)+'\')">إضافة</button>'+
           '</div>'
         : "")+
-      '<div style="margin-top:16px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">الملاحظات</div>'+cmts+
-        '<div class="st-quick-row" style="margin-top:9px">'+
-          '<input type="text" id="st-cmt-'+_e(t.id)+'" placeholder="اكتب ملاحظة…" style="flex:1;min-width:200px;padding:9px 11px;border-radius:9px;border:1px solid var(--border,#2a3550);background:var(--bg2,#131a2b);color:inherit;font:inherit;font-size:13px">'+
-          '<button class="btn btn-sm" onclick="staffTasks.addComment(\''+_q(t.id)+'\')">إرسال</button>'+
-        '</div>'+
+      '<div class="st-sec">'+_icn("edit")+'الملاحظات</div>'+cmts+
+      '<div class="st-row" style="margin-top:9px">'+
+        '<input type="text" class="form-input st-grow" id="st-cmt-'+_e(t.id)+'" placeholder="اكتب ملاحظة…">'+
+        '<button class="btn btn-ghost" onclick="staffTasks.addComment(\''+_q(t.id)+'\')">'+_icn("send")+'إرسال</button>'+
       '</div>'+
       '<div class="st-acts">'+acts+'</div>'+
     '</div>';
