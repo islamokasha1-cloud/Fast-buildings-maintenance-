@@ -16335,7 +16335,26 @@ function staffTasksGuards() {
     ["★★★ اللصقةُ المتعدّدةُ الأسطر تُقرأ من الحافظة لا من قيمة حقلِ السطر الواحد",
       /function draftPaste\(ev\)\{[\s\S]{0,600}clipboardData/.test(src), true],
     ["★★ ومعالجُ اللصق مربوطٌ بالحقل فعلاً",
-      /onpaste="staffTasks\.draftPaste\(event\)"/.test(src), true]
+      /onpaste="staffTasks\.draftPaste\(event\)"/.test(src), true],
+    /* ارتدادٌ بلّغ عنه المالك (03/09): «تعذّر الاتصال بقاعدة البيانات» والمنصّةُ
+       تعمل. الجذرُ أنّ مهلةَ الأمان كانت داخل `startSync` — أي تُسلَّح **عند الدخول
+       والشاشةُ مغلقة** — فتُثبّت حالةَ خطأٍ لا يراها أحد، ثم تُعرَض بعد دقائق بلا
+       سبيلٍ إلى التعافي. الحارسُ يمنع عودةَ المؤقّت إلى `startSync`. */
+    ["★★★ مهلةُ الانتظار لا تُسلَّح داخل startSync (تُثبّت خطأً لا يراه أحد)",
+      /function startSync\(\)\{[\s\S]*?\n  \}/.test(src) &&
+      !/function startSync\(\)\{[\s\S]{0,1400}setTimeout/.test(src), true],
+    ["★★★ و`_loaded` لا يضعه مؤقّتٌ — لقطةٌ حقيقيّةٌ وحدَها",
+      !/_slowTimer=setTimeout\([\s\S]{0,240}_loaded=true/.test(src), true],
+    /* وخفضُ كلفة الدخول: كان الأدمن يشترك في المجموعة **كاملةً** حيّاً من لحظة
+       الدخول وهي تكبر بلا حدّ. صار الاشتراكُ واحداً مقصوراً على أطرافي، و«كل
+       المهامّ» جلبةً عند فتح خانتها. (درسُ finance-audit المكتوبُ في ترويستها.) */
+    ["★★★ والاشتراكُ الحيُّ عند الدخول مقصورٌ على أطرافي — بلا فرعٍ للأدمن",
+      /function startSync\(\)\{[\s\S]*?array-contains[\s\S]*?\n  \}/.test(src) &&
+      !/function startSync\(\)\{[\s\S]{0,900}_isAdmin\(\)\s*\?/.test(src), true],
+    ["★★ و«كل المهامّ» جلبةٌ عند الطلب لا تيّارٌ حيّ",
+      /function _loadAll\(\)/.test(src) && !/_allTasks[\s\S]{0,120}onSnapshot/.test(src), true],
+    ["★★ وفتحُ الشاشة بلا بياناتٍ يُعيد المحاولةَ من نفسه (المستمعُ قد يموت صامتاً)",
+      /if\(!_loaded && \(Date\.now\(\)-_lastTry\)/.test(src), true]
   ];
   G.forEach(([n, got, want]) => T(n, got === want));
 

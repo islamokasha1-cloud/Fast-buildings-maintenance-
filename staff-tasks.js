@@ -54,7 +54,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3016";
+  var MODULE_BUILD = "v18.9.3017";
 
   function COLL(){
     var dev=false;
@@ -65,8 +65,13 @@
   /* ════════ الحالة المحلّية ════════ */
   var _tasks   = [];      // ما وصل من Firestore (مقصورٌ على ما أنا طرفٌ فيه)
   var _unsub   = null;
-  var _loaded  = false;
-  var _connIssue = false;
+  var _loaded  = false;   // وصلت لقطةٌ حقيقيّة — لا تضعها مهلةٌ ولا مؤقّت
+  var _connIssue = false; // المستمعُ أبلغ خطأً فعلياً
+  var _slow    = false;   // طال الانتظارُ **والشاشةُ مفتوحة** — إبطاءٌ لا عطل
+  var _slowTimer = null;
+  var _allTasks = [];     // «كل المهامّ (إدارة)» — تُجلب عند فتح الخانة لا عند الدخول
+  var _allState = "";     // "" | "loading" | "ok" | "err"
+  var _lastTry = 0;       // آخرُ محاولةِ اشتراكٍ — تمنع حلقةَ إعادةٍ عند كل رسم
   var _tab     = "mine";  // mine | sent | notes | done | all
   var _openId  = null;    // المهمّة المفتوحة تفصيلاً
   var _draft   = [];      // مسوّدةُ التكليف السريع
@@ -279,32 +284,32 @@
   }
 
   /* ════════ المزامنة ════════ */
+  /* ── الاشتراكُ عند الدخول: **مقصورٌ على ما أنا طرفٌ فيه** ──
+     كان الأدمن يشترك في المجموعة **كاملةً** حيّاً من لحظة الدخول، وهي تكبر بلا حدّ
+     ولا يحتاجها إلا حين يفتح خانةَ الإدارة. والشارةُ لا تعدّ إلا ما عليّ أنا، فلا
+     شيءَ في الشاشة الأولى يحتاج مهامَّ الآخرين. فصار الاشتراكُ واحداً للجميع
+     (`array-contains` باسمي)، و«كل المهامّ» جلبةٌ واحدةٌ عند فتح خانتها.
+     (درسُ `finance-audit`: دورٌ لا يرى الشاشة لا يُنزِّل مجموعتَها كلَّ جلسة.) */
   function startSync(){
     if(typeof db==="undefined" || !db) return;
     if(!_canView()) return;
     if(_unsub) return;                     // idempotent
-    var me=_me();
-    // الأدمن يستعلم المجموعةَ كاملة؛ وغيرُه **لا يستعلم إلا ما هو طرفٌ فيه**.
-    var q;
+    var me=_me(), q;
+    try{ q = db.collection(COLL()).where("participants","array-contains", me); }
+    catch(e){ return; }
     try{
-      q = _isAdmin() ? db.collection(COLL())
-                     : db.collection(COLL()).where("participants","array-contains", me);
-    }catch(e){ return; }
-    try{
-      q.get().then(function(s){ if(!_loaded) _applySnap(s); }).catch(function(){});
+      q.get().then(function(s){ if(!_loaded) _applySnap(s); })
+       .catch(function(e){ console.warn("staff-tasks first fetch failed:", e); });
     }catch(e){}
     _unsub = q.onSnapshot(_applySnap, function(e){
       console.warn("staff-tasks sync error:", e);
-      _loaded=true; _connIssue=true; _rerender(); _refreshNav();
+      _connIssue=true; _clearSlow(); _rerender(); _refreshNav();
     });
-    setTimeout(function(){
-      if(_loaded) return;
-      _loaded=true; _connIssue=true; _rerender(); _refreshNav();
-    }, 8000);
   }
   function stopSync(){
     try{ if(_unsub) _unsub(); }catch(e){}
     _unsub=null; _loaded=false; _connIssue=false; _tasks=[];
+    _clearSlow();
   }
   function _applySnap(snap){
     var out=[];
@@ -312,7 +317,41 @@
       var v=d.data()||{}; v.id=d.id; out.push(v);
     });
     _tasks=out; _loaded=true; _connIssue=false;
-    _rerender(); _refreshNav();
+    _clearSlow(); _rerender(); _refreshNav();
+  }
+
+  /* ── مهلةُ «يطول أكثر من المعتاد» — تُسلَّح عند العرض وحدَه ──
+     كانت تُسلَّح داخل `startSync` أي **عند الدخول والشاشةُ مغلقة**، فتُثبّت حالةَ
+     خطأٍ لا يراها أحد، ثم يفتحها المستخدم بعد دقائق فيجد «تعذّر الاتصال» بينما
+     الشبكةُ سليمة — و`startSync` ترجع فوراً (`_unsub` موضوع) فلا تُعاد المحاولة.
+     (بلاغُ المالك 03/09، أُعيد إنتاجُه في `staff-tasks-check.mjs`.)
+     والآن: تُسلَّح وقتَ الرسم فقط، **ولا تلمس `_loaded`** — فهي تقول «أبطأُ من
+     المعتاد» لا «تعذّر»، وأيُّ لقطةٍ لاحقةٍ تمسحها. */
+  function _armSlow(){
+    if(_slowTimer || _loaded || _connIssue) return;
+    _slowTimer=setTimeout(function(){
+      _slowTimer=null;
+      if(_loaded || _connIssue) return;
+      _slow=true; _rerender();
+    }, 8000);
+  }
+  function _clearSlow(){
+    if(_slowTimer){ try{ clearTimeout(_slowTimer); }catch(e){} _slowTimer=null; }
+    _slow=false;
+  }
+
+  /* «كل المهامّ (إدارة)» — جلبةٌ واحدةٌ عند الطلب، لا تيّارٌ حيٌّ من لحظة الدخول */
+  function _loadAll(){
+    if(typeof db==="undefined" || !db || !_isAdmin()) return;
+    if(_allState==="loading") return;
+    _allState="loading"; _rerender();
+    db.collection(COLL()).get().then(function(snap){
+      var out=[]; snap.forEach(function(d){ var v=d.data()||{}; v.id=d.id; out.push(v); });
+      _allTasks=out; _allState="ok"; _rerender();
+    }).catch(function(e){
+      console.warn("staff-tasks load-all failed:", e);
+      _allState="err"; _rerender();
+    });
   }
   function _visible(){
     var me=_me(), role=_myRole();
@@ -508,7 +547,11 @@
     }).catch(function(){ _t("تعذّر الحذف","warn"); });
   }
 
-  function byId(id){ return _tasks.filter(function(t){ return t.id===id; })[0] || null; }
+  function byId(id){
+    return _tasks.filter(function(t){ return t.id===id; })[0]
+        || _allTasks.filter(function(t){ return t.id===id; })[0]
+        || null;
+  }
 
   /* ════════ المسوّدة (التكليف السريع) ════════ */
   function draftPick(v){ _draftTo=String(v||""); _rerender(); }
@@ -559,7 +602,14 @@
 
   /* ════════ التنقّل ════════ */
   function list(){ try{ showPage("staff-tasks"); }catch(e){} }
-  function tab(t){ _tab=t; _openId=null; if(t==="all" && _isAdmin()){ try{ logAudit("staff_tasks_view_all","اطّلاعُ الإدارة على كل المهامّ"); }catch(e){} } _rerender(); }
+  function tab(t){
+    _tab=t; _openId=null; _editing=false;
+    if(t==="all" && _isAdmin()){
+      try{ logAudit("staff_tasks_view_all","اطّلاعُ الإدارة على كل المهامّ"); }catch(e){}
+      if(_allState!=="ok") _loadAll();
+    }
+    _rerender();
+  }
   function open(id){ _openId=id; _editing=false; _rerender(); }
   function back(){ _openId=null; _editing=false; _rerender(); }
 
@@ -686,11 +736,25 @@
       return;
     }
     startSync();
-    if(!_loaded){
-      host.innerHTML=_hero()+'<div class="card"><div class="st-empty"><div class="st-spin"></div>جارٍ تحميل المهامّ…</div></div>';
+    /* ── فتحُ الشاشة بلا بياناتٍ يُعيد المحاولةَ من نفسه ──
+       ليس عند الخطأ المُبلَّغ وحدَه: **المستمعُ قد يموت صامتاً** — لا يُبلغ خطأً ولا
+       يُسلّم لقطة (اشتراكٌ بُني عند الدخول ثم انقطعت الشبكة تحته). فالشرطُ هو
+       «لا بيانات» لا «خطأٌ مُبلَّغ»، وإلا بقيت الشاشةُ على دوّارٍ أبديٍّ في أسوأ
+       الحالات وأكثرِها شبهاً بما بلّغ عنه المالك.
+       ومقيَّدةٌ بعشر ثوانٍ فلا تصير حلقةَ إعادةِ اشتراكٍ عند كل رسم. */
+    if(!_loaded && (Date.now()-_lastTry) > 10000){
+      _lastTry=Date.now();
+      stopSync(); startSync();          // بلا _rerender: الرسمُ جارٍ الآن
+    }
+    if(!_loaded && !_connIssue){
+      _armSlow();
+      host.innerHTML=_hero()+'<div class="card"><div class="st-empty"><div class="st-spin"></div>'+
+        (_slow ? 'التحميل يطول أكثر من المعتاد…<br><br><button class="btn btn-ghost" onclick="staffTasks.retry()">إعادة المحاولة</button>'
+               : 'جارٍ تحميل المهامّ…')+
+      '</div></div>';
       return;
     }
-    if(_connIssue && !_tasks.length){
+    if(_connIssue && !_loaded){
       host.innerHTML=_hero()+'<div class="card"><div class="st-empty">'+_icn("alertTriangle")+
         'تعذّر الاتصال بقاعدة البيانات.<br><br>'+
         '<button class="btn btn-ghost" onclick="staffTasks.retry()">إعادة المحاولة</button></div></div>';
@@ -770,7 +834,10 @@
   function _listHtml(){
     var me=_me(), today=_todayISO(), rows;
     if(_tab==="all" && _isAdmin()){
-      rows=_sortTasks(_tasks.filter(function(t){ return t.status!=="done"; }), today);
+      if(_allState==="loading") return '<div class="st-empty"><div class="st-spin"></div>جارٍ تحميل كل المهامّ…</div>';
+      if(_allState==="err")     return '<div class="st-empty">'+_icn("alertTriangle")+
+        'تعذّر جلبُ كل المهامّ.<br><br><button class="btn btn-ghost" onclick="staffTasks.loadAll()">إعادة المحاولة</button></div>';
+      rows=_sortTasks(_allTasks.filter(function(t){ return t.status!=="done"; }), today);
     } else {
       var s=_splitTabs(_visible(), me);
       rows=_sortTasks(s[_tab]||[], today);
@@ -923,11 +990,16 @@
     '</div>';
   }
 
-  function retry(){ _loaded=false; _connIssue=false; stopSync(); startSync(); _rerender(); }
+  function retry(){
+    stopSync();            // تُصفّر الحالةَ وتمسح المهلة
+    startSync();
+    _rerender();
+  }
 
   /* ════════ التصدير ════════ */
   window.staffTasks = {
     startSync:startSync, stopSync:stopSync, render:render, list:list, retry:retry,
+    loadAll:_loadAll,
     refreshNav:refreshNav, canView:_canView,
     tab:tab, open:open, back:back, byId:byId,
     markDone:markDone, reopen:reopen, returnTask:returnTask, acceptBack:acceptBack,
