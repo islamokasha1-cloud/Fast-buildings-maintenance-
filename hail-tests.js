@@ -632,12 +632,21 @@ function predelivery() {
        وحدة**: **إصلاحٌ في موضعه** على منطقٍ قائم — `startRealtimeSync` و`loadData`
        و`autoArchiveByMonth` و`_archiveFetchNeeded` كلُّها هنا وتُقرأ معاً، ونقلُ
        منطقٍ قائمٍ إلى ملفٍّ بحجّة إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
-    /* ورُفع من 38750 إلى 38761 — ‏١٠ أسطرٍ لوصل وحدة `staff-tasks.js` وحدَها:
-       زرُّ السايدبار وأيقونتُه، وحاويةُ `page-staff-tasks`، ومَعبرُ `showPage`،
-       ووسمُ `<script>`، وسطرا `refreshNav`، وقيدُ كاشف الوحدات القديمة. **ولا سطرَ
-       منطقٍ واحدٍ في النواة**: الميزةُ كلُّها في الوحدة كما تنصّ CLAUDE.md، وهذا
-       أدنى ما يلزم لتُرى وحدةٌ جديدةٌ من التطبيق أصلاً. */
-    const IDX_CEILING = 38761;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ورُفع من 38750 إلى 39255 — ‏٥٠٥ أسطر لقياس أداء مسؤولي المشتريات (محرّكُ
+       `computeStaffKPIs` وتوابعُه النقيّة + قسمُه في الوجه + أنماطُه). **مكانُها
+       وحدةُ `purchase-kpi` لا ملفٌّ جديد**: CLAUDE.md ينصّ أن العمل الكبير في
+       **مجالِ وحدةٍ قائمة** (مشتريات) مكانُه تلك الوحدة، والوحدةُ مدموجةٌ هنا منذ
+       v18.9ti (تصل المتصفّح مع المستند الطازج فلا تُخدَم قديمةً من كاش الحافة).
+       وملفٌّ خارجيٌّ **يتعذّر تقنياً**: `_kpiClosed` و`_kpiActual` و`_kpiSpendOf`
+       و`parseTS` و`STAGE_ORDER` خاصّةٌ داخل IIFE الوحدة لا تُقرأ من خارجها، فإخراجُها
+       يعني تصديرَ نصفِ الوحدةِ على `window` أو تكرارَ قراءةِ المسار — وتكرارُ
+       القراءة هو بعينه العطلُ الذي تكرّر في §6 (رقمان لطلبٍ واحدٍ يفترقان بلا سطرٍ
+       يفسّر). ولا سطرَ من المنطق القائم نُقل: إضافةٌ خالصةٌ بجواره. */
+    /* ولم يُرفَع لوصل وحدة `staff-tasks.js`: أحدَ عشرَ سطرَ وصلٍ لا غير (زرُّ
+       السايدبار وأيقونتُه · حاويةُ `page-staff-tasks` · مَعبرُ `showPage` · وسمُ
+       `<script>` · سطرا `refreshNav` · قيدُ كاشف الوحدات القديمة) وسِعها السقفُ
+       القائم. **ولا سطرَ منطقٍ واحدٍ في النواة** — الميزةُ كلُّها في الوحدة. */
+    const IDX_CEILING = 39255;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4396,6 +4405,200 @@ function kpiSpendClosedOnly() {
       T("مورّد السند بقيمته الفعلية", spend("مصقول") === 2500);
       T("المفتوح (40,000 تقديري) مُستبعَد من المخطّط", !K.vendors.some(v => v[0] === "مفتوح"));
     }
+  }
+}
+
+
+/* ════════════════════════════════════════════════════════════════════
+   26-ب) أداءُ مسؤولي المشتريات — الحرّاسُ السلوكيّة (v18.9.3004)
+
+   لماذا حرّاسٌ **سلوكيّة** لا مصدريّة: هذا المؤشّرُ يُقاس عليه **أشخاص**. حارسٌ
+   يقرأ نصَّ الكود يمرّ وإن قلبت الدالةُ نتيجتَها، فيتحوّل المؤشّرُ إلى ظلمٍ صامت.
+   فتُشغَّل الدوالُّ النقيّةُ على بياناتٍ مصنوعةٍ ويُطابَق **الرقمُ الخارج**.
+   ════════════════════════════════════════════════════════════════════ */
+function procurementStaffKPI() {
+  H("26-ب) أداء مسؤولي المشتريات");
+  if (!KPI_SRC) { console.log("  ⏭  كود purchase-kpi غير موجود — تُخطّى"); return; }
+  const ksrc = KPI_SRC;
+
+  // ── حرّاسٌ مصدريّة على المبادئ التي لا تُلتقط بالتشغيل ──
+  T("★★★ الوفر يُقاس مقابل السعر التاريخي لا مقابل العروض (لا يُضخَّم بعرضٍ وهميّ)",
+    ksrc.includes("function _orderSavings(p, hist)") && /آخرِ سعرٍ دُفع للصنف نفسه/.test(ksrc));
+  T("★★ رابطةُ الصنف من المصدر الواحد (inventoryPricing) — لا تطبيعَ عربيَّ رابعاً",
+    /inventoryPricing\.catalogOf/.test(ksrc) && /inventoryPricing\.nameKey/.test(ksrc));
+  T("★★ نوافذُ المشتريات وحدَها تُقاس (لا زمنُ المدير/التنفيذي/المالية/المستودع)",
+    /const PROC_HANDOFF = \["pending_pm_cmp","pending_ceo","pending_finance"\]/.test(ksrc) &&
+    /const EXEC_HANDOFF = \["sv_receiving","wh_receiving"\]/.test(ksrc));
+  T("★★ الهدفُ يوما عمل — عتبةُ PO_STALE_WORK_MIN نفسُها (لا عتبتان متناقضتان)",
+    /const STAFF_TARGET_DAYS = 2;/.test(ksrc) && /const PO_STALE_WORK_MIN\s*=\s*2 \* PO_WORK_MIN_PER_DAY;/.test(HTML));
+  T("★★ الأزمنةُ بأيام العمل عبر محرّك SLA المشترك لا بالزمن الجداريّ",
+    /function _wmDays\(a,b\)/.test(ksrc) && ksrc.includes('typeof workingMinutesBetween==="function"'));
+  T("★★ الصلاحيةُ في الحساب لا في العرض (مسؤول المشتريات يرى صفَّه وحدَه)",
+    /function _staffVisibleRows\(rows\)/.test(ksrc) && /function _staffCanSeeAll\(\)/.test(ksrc) &&
+    /return rows\.filter\(r=>mine\.includes\(r\.key\)/.test(ksrc));
+  T("★★ الدوالُّ الحسابية معروضةٌ على الواجهة ليفحصها هذا الملفّ (قالبُ الوحدة)",
+    /computeStaffKPIs, _staffWindows, _orderSavings, _comparisonStats, _actorKey/.test(ksrc));
+
+  // ── بناءُ المحرّك وتشغيلُه ──
+  let E = null;
+  try {
+    const block = ksrc.slice(ksrc.indexOf("const STAFF_TARGET_DAYS = 2;"),
+                             ksrc.indexOf("/* ══════════════════ الواجهة"));
+    const DAYMS = 86400000;
+    E = new Function(
+      "STAGE_ORDER", "REJECT_CODES", "TERMINAL_CODES", "parseTS", "normStatus", "DAY",
+      "PO_WORK_MIN_PER_DAY", "workingMinutesBetween",
+      "_kpiClosed", "_kpiActual", "_kpiSpendOf", "poDueDate",
+      block + "\nreturn {computeStaffKPIs,_staffWindows,_orderSavings,_comparisonStats,_actorKey,_wmDays};")(
+        ["pending_pm", "pm_approved", "wh_review", "wh_reviewed", "pending_proc", "pending_pm_cmp",
+         "pending_ceo", "pending_finance", "proc_executing", "sv_receiving", "wh_receiving", "wh_auditing", "pending_extra", "closed"],
+        ["pm_rejected", "wh_rejected", "ceo_rejected", "rejected"],
+        ["closed", "rejected", "cancelled", "deleted", "pm_rejected", "wh_rejected", "ceo_rejected"],
+        v => v ? (new Date(v).getTime() || null) : null, s => s, DAYMS,
+        480, (a, b) => Math.max(0, (b - a) / 60000),          // «يومُ عمل» = ٤٨٠ دقيقةً متصلة
+        p => p.status === "closed" || p.status === "closed_after_receipt",
+        p => Number(p.actualCost) || 0,
+        p => Number(p.actualCost) || Number(p.estCost) || 0,
+        p => p.expectedDeliveryDate || "");
+  } catch (e) { T("يُبنى محرّك أداء المسؤولين", false, String(e.message).slice(0, 140)); return; }
+  T("يُبنى محرّك أداء المسؤولين", typeof E.computeStaffKPIs === "function");
+
+  // ── ١) هويةُ الفاعل: byUser أولاً، والاسمُ احتياطاً، و«النظام» ليس شخصاً ──
+  T("★★★ _actorKey: byUser هو الهوية (تغييرُ اسمِ العرض لا يشقّ الشخص)",
+    E._actorKey({ byUser: "saad", by: "سعد" }) === "u:saad" &&
+    E._actorKey({ byUser: "saad", by: "سعد المطيري" }) === "u:saad");
+  T("★★ _actorKey: الاسمُ احتياطاً للسجلات القديمة (بوسمٍ مختلف)",
+    E._actorKey({ by: "سعد" }) === "n:سعد");
+  T("★★★ «النظام» و«—» ليسا شخصاً (لا يُنسب إليهما عمل)",
+    E._actorKey({ by: "النظام" }) === null && E._actorKey({ by: "—" }) === null && E._actorKey({}) === null);
+
+  // ── ٢) النافذة تُنسب إلى مَن أنهاها لا إلى مَن أدخلها ──
+  {
+    const p = { id: "w1", status: "closed", timeline: [
+      { code: "pending_proc", at: "2026-07-01T08:00:00Z", by: "مدير المشاريع", byUser: "pm" },
+      { code: "pending_ceo",  at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad" },
+    ]};
+    const w = E._staffWindows(p);
+    T("★★★ النافذةُ تُنسب إلى مَن أخرج الطلبَ منها لا مَن أدخله",
+      w.length === 1 && w[0].kind === "prep" && E._actorKey(w[0].ev) === "u:saad",
+      JSON.stringify(w.map(x => x.kind + ":" + E._actorKey(x.ev))));
+    T("★★ وزمنُها = ٤ ساعاتِ عمل = نصفُ يوم", Math.abs(E._wmDays(w[0].at, w[0].endAt) - 0.5) < 1e-9);
+  }
+  T("★★ قيدٌ بلا رمزٍ صريح (ما قبل v18.9od) لا يُقاس — لا نسبةَ بالتخمين",
+    E._staffWindows({ timeline: [{ event: "pending_proc", at: "2026-07-01T08:00:00Z", by: "سعد" },
+                                 { event: "pending_ceo", at: "2026-07-01T12:00:00Z", by: "سعد" }] }).length === 0);
+  T("★★★ الخروجُ برفضٍ لا يُنسب إنجازاً (رفضُ المدير ليس إحالةَ المشتريات)",
+    E._staffWindows({ timeline: [{ code: "pending_proc", at: "2026-07-01T08:00:00Z", by: "أ", byUser: "a" },
+                                 { code: "pm_rejected",  at: "2026-07-01T10:00:00Z", by: "ب", byUser: "b" }] }).length === 0);
+  T("★★ نافذةٌ ما زالت مفتوحةً لا تدخل المتوسّط (تُعدّ في «الواقفُ الآن»)",
+    E._staffWindows({ timeline: [{ code: "proc_executing", at: "2026-07-01T08:00:00Z", by: "أ", byUser: "a" }] }).length === 0);
+
+  // ── ٣) الوفر: مقابل التاريخ، وبلا مرجعٍ ليس صفراً ──
+  {
+    const sv = E._orderSavings({ items: [
+      { itemCode: "X1", qty: 10, unitCost: 8 },      // التاريخُ ١٠ ⇒ وفرٌ ٢٠
+      { itemCode: "Z9", qty: 5,  unitCost: 30 },     // بلا مرجع
+    ]}, { "k:x1": 10 });
+    T("★★★ الوفر = (السعر التاريخي − المدفوع) × الكمية", sv.saved === 20, "saved=" + sv.saved);
+    T("★★★ المقامُ قيمةُ ما وُجد له مرجعٌ وحدَه (١٠×١٠)", sv.basis === 100, "basis=" + sv.basis);
+    T("★★★ وما لا مرجعَ له يُعدّ ويُعلَن ولا يُحتسب صفراً يُجمَع فيكذب",
+      sv.uncovered === 150 && sv.nUncov === 1 && sv.nCov === 1);
+    const up = E._orderSavings({ items: [{ itemCode: "X1", qty: 10, unitCost: 12 }] }, { "k:x1": 10 });
+    T("★★ والشراءُ أغلى من تاريخه وفرٌ سالبٌ لا صفر", up.saved === -20);
+  }
+
+  // ── ٤) المقارنة: خانةٌ فارغةٌ ليست عرضاً، والأوفرُ يُقاس بسعرَين فأكثر ──
+  {
+    const po = { items: [{}, {}], priceComparisons2: [{ id: "g1", itemIndices: [0, 1], suppliers: [
+      { name: "أ", items: [{ idx: 0, unitPrice: "100" }, { idx: 1, unitPrice: "50" }] },
+      { name: "ب", items: [{ idx: 0, unitPrice: "90"  }, { idx: 1, unitPrice: "70" }] },
+      { name: "ج", items: [{ idx: 0, unitPrice: "" }, { idx: 1, unitPrice: "" }] },   // خانةٌ فارغة
+    ], decisions: [{ itemIndex: 0, selectedSupplierIdx: 1 },    // اختار ٩٠ = الأوفر ✓
+                   { itemIndex: 1, selectedSupplierIdx: 1 }] }] };  // اختار ٧٠ والأوفرُ ٥٠ ✗
+    const cs = E._comparisonStats(po);
+    T("★★★ المورّدُ الذي لم يسعّر شيئاً ليس عرضاً (خانتان فارغتان ليستا «ثلاثةَ عروض»)",
+      cs.quoteN === 2 && cs.groupN === 1, `quoteN=${cs.quoteN} groupN=${cs.groupN}`);
+    T("★★★ نسبةُ اختيار الأوفر تُحسب لكل بندٍ على حدة", cs.decided === 2 && cs.cheapest === 1);
+  }
+  T("★★ بسعرٍ واحدٍ لا معنى لـ«الأوفر» فلا يدخل المقام",
+    (() => { const cs = E._comparisonStats({ items: [{}], priceComparisons2: [{ id: "g", itemIndices: [0],
+      suppliers: [{ name: "أ", items: [{ idx: 0, unitPrice: "100" }] }],
+      decisions: [{ itemIndex: 0, selectedSupplierIdx: 0 }] }] }); return cs.decided === 0; })());
+
+  // ── ٥) التجميعُ الكامل: نسبةٌ صحيحةٌ وعدٌّ صحيحٌ وغيرُ المنسوب مُعلَن ──
+  {
+    const mk = (id, status, ownerU, ownerN, extra) => Object.assign({
+      id, status, createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-03T06:00:00Z",
+      timeline: [
+        { code: "pending_proc",   at: "2026-07-01T08:00:00Z", by: "مدير", byUser: "pm" },
+        { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: ownerN, byUser: ownerU },
+      ]}, extra || {});
+    const S = E.computeStaffKPIs([
+      mk("p1", "closed", "saad", "سعد", { actualCost: 1000 }),
+      mk("p2", "closed", "saad", "سعد", { actualCost: 2000 }),
+      mk("p3", "pending_finance", "noor", "نور", { estCost: 500 }),
+      // قديمٌ بلا byUser — يُنسب بالاسم
+      { id: "p4", status: "closed", actualCost: 300, createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-02T06:00:00Z",
+        timeline: [{ code: "pending_proc", at: "2026-07-01T08:00:00Z", by: "مدير" },
+                   { code: "pending_ceo",  at: "2026-07-01T10:00:00Z", by: "سعد" }] },
+      // نافذةٌ أنهاها «النظام» — قابلةٌ للقياس وغيرُ منسوبة
+      { id: "p5", status: "closed", actualCost: 400, createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-02T06:00:00Z",
+        timeline: [{ code: "pending_proc", at: "2026-07-01T08:00:00Z", by: "مدير" },
+                   { code: "pending_ceo",  at: "2026-07-01T10:00:00Z", by: "النظام" }] },
+    ]);
+    const row = k => S.rows.find(r => r.key === k);
+    T("★★★ كلُّ مسؤولٍ صفٌّ واحدٌ بمفتاح هويته", S.rows.length === 3, S.rows.map(r => r.key).join(","));
+    T("★★★ عددُ طلباته وقيمةُ مشترياته (الفعليّ للمغلق)",
+      row("u:saad").poN === 2 && row("u:saad").poClosed === 2 && row("u:saad").spendClosed === 3000,
+      JSON.stringify({ n: row("u:saad").poN, c: row("u:saad").spendClosed }));
+    T("★★★ المفتوحُ يُعدّ ويُقيَّم بقيمته منفصلاً عن المغلق",
+      row("u:noor").poOpen === 1 && row("u:noor").poClosed === 0 && row("u:noor").spendOpen === 500);
+    T("★★ السجلُّ القديم يُنسب بالاسم ويُوسَم", row("n:سعد") && row("n:سعد").byName === true);
+    T("★★★ وسعدُ الهويةِ لا يندمج مع سعدِ الاسم (نسبتان مختلفتان لا تُخلطان)",
+      row("u:saad").poN === 2 && row("n:سعد").poN === 1);
+    T("★★★ ما أنهاه «النظام» يُعدّ في «غير منسوب» ولا يُنسب بالتخمين",
+      S.unattributedN === 1 && S.measurableN === 5, `unattr=${S.unattributedN} meas=${S.measurableN}`);
+    T("★★ متوسّطُ تجهيز المقارنة = ٤ ساعاتِ عمل = ٠٫٥ يوم، وفي الهدف",
+      Math.abs(row("u:saad").prepAvg - 0.5) < 1e-9 && row("u:saad").prepTargetRate === 100);
+    T("★★ وسمُ «عيّنة غير كافية» يمنع ترتيبَ رجلٍ على طلبَين كأنه على ثلاثين",
+      row("u:saad").lowSample === true && S.minSample === 5);
+  }
+
+  // ── ٦) الارتداد: ما رجع بعد إحالته وحدَه يُحسب عليه ──
+  {
+    const base = ts => ({ id: "r" + ts, status: "closed", actualCost: 100,
+      createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-05T06:00:00Z" });
+    const S = E.computeStaffKPIs([
+      Object.assign(base(1), { timeline: [
+        { code: "pending_proc",    at: "2026-07-01T08:00:00Z", by: "م", byUser: "pm" },
+        { code: "pending_finance", at: "2026-07-01T10:00:00Z", by: "سعد", byUser: "saad" },
+        { code: "finance_returned", at: "2026-07-02T08:00:00Z", by: "المالية", byUser: "fin" },
+      ]}),
+      Object.assign(base(2), { timeline: [
+        { code: "pending_proc",    at: "2026-07-01T08:00:00Z", by: "م", byUser: "pm" },
+        { code: "pending_finance", at: "2026-07-01T10:00:00Z", by: "سعد", byUser: "saad" },
+        { code: "proc_executing",  at: "2026-07-02T08:00:00Z", by: "المالية", byUser: "fin" },
+        { code: "wh_receiving",    at: "2026-07-02T12:00:00Z", by: "سعد", byUser: "saad" },
+      ]}),
+    ]);
+    const r = S.rows.find(x => x.key === "u:saad");
+    T("★★★ إعادةُ المالية ارتدادٌ على مَن أحال (ملفُّه كان ناقصاً)",
+      r.bounced === 1 && r.financeReturned === 1, JSON.stringify({ b: r.bounced, f: r.financeReturned }));
+    T("★★★ والاعتمادُ من أول مرّة = ١ من ٢ = ٥٠٪ (على إحالاته هو لا على كل الطلبات)",
+      r.handoffs === 2 && r.firstPassRate === 50);
+    T("★★ ونافذةُ التنفيذ بعد السداد تُقاس مستقلّةً عن نافذة التجهيز",
+      r.execN === 1 && Math.abs(r.execAvg - 0.5) < 1e-9);
+  }
+
+  // ── ٧) «الواقفُ الآن» عدّادٌ حيٌّ منسوبٌ بالحالة (لا فاعلَ خروجٍ بعد) ──
+  {
+    const S = E.computeStaffKPIs([
+      { id: "o1", status: "pending_proc", estCost: 900, createdAt: "2026-01-01T06:00:00Z",
+        updatedAt: "2026-01-01T06:00:00Z", timeline: [{ code: "pending_proc", at: "2026-01-01T08:00:00Z", by: "م", byUser: "pm" }] },
+    ]);
+    T("★★★ الطلبُ الواقفُ عند المشتريات يُعدّ حيّاً وإن لم يُنسب لشخص",
+      S.openNowN === 1 && S.openNowOldest && S.openNowOldest.id === "o1" && S.openNowOldest.days > 0);
+    T("★★ ولا يُنسب إنجازاً لأحد (لا صفَّ له)", S.rows.length === 0);
   }
 }
 
@@ -13464,8 +13667,14 @@ function supplyPromiseDates() {
       /if\(fromDate && toDate <= fromDate\)/.test(ext));
     T("★★ وموعدُ الحاجة الأصليّ يُلتقط مرّةً واحدةً ولا يُدهَس",
       /if\(!p\.originalExpectedDate && poNeedDate\(p\)\) p\.originalExpectedDate = poNeedDate\(p\);/.test(ext));
+    /* v18.9.3004: صار القيدُ يحمل بصمةَ الفاعل كاملةً (`by` للقارئ + `byUser`/`byRole`
+       للقياس) بدل اسمِ عرضٍ نصّيٍّ وحدَه — فالحارسُ يطالب بالأقوى لا بالشكل القديم:
+       اسمُ عرضٍ وحدَه يعيد كتابةَ التاريخ بأثرٍ رجعيٍّ عند تغيير اسمِ موظّف. */
     T("★★ وكلُّ تمديدٍ يُقيَّد بسببه وتاريخيه ومَن أجراه",
-      /p\.deliveryExtensions\.push\(\{ at:now, by, reason, note, fromDate: fromDate\|\|"", toDate \}\)/.test(ext));
+      /p\.deliveryExtensions\.push\(\{ at:now, \.\.\._act, reason, note, fromDate: fromDate\|\|"", toDate \}\)/.test(ext) &&
+      /const _act = _poActorStamp\(\);/.test(ext));
+    T("★★ وبصمةُ الفاعل هويةٌ ثابتة (byUser/byRole) لا اسمُ عرضٍ وحدَه",
+      /function _poActorStamp\(\)\{[\s\S]{0,400}?byUser:[\s\S]{0,200}?byRole:/.test(HTML));
     T("★★ وقيدٌ في سجل الأحداث — التمديدُ يُرى في الشاشة وفي PDF",
       /p\.timeline\.push\(\{[\s\S]*تمديد موعد التوريد/.test(ext));
     T("★★ والتمديدُ لا يحرّك حالةَ الطلب (ليس انتقالاً في المسار)",
@@ -16012,6 +16221,7 @@ function staffTasksGuards() {
   issueOrderWarehouseCol();
   issueOrderManualProject();
   kpiSpendClosedOnly();
+  procurementStaffKPI();
   auditRound2();
   dateBucketing();
   auditRound2Medium();
