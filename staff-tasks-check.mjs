@@ -181,12 +181,21 @@ check('★★★ موظفٌ خارجَ الغرفة لا يرى المهمّةَ
   leaked.mine === 0 && leaked.sent === 0 && leaked.done === 0, JSON.stringify(leaked));
 check('★★ ولا تُعدّ له في الشارة', leaked.badgeHidden);
 
-const adminSees = await page.evaluate(() => {
+const adminSees = await page.evaluate(async () => {
   currentUser = { user: 'admin', name: 'المسؤول', role: 'admin' };
   staffTasks.stopSync(); staffTasks.startSync(); staffTasks.tab('all');
+  // «كل المهامّ» جلبةٌ عند الطلب لا تيّارٌ من لحظة الدخول — تُنتظر
+  await new Promise(r => setTimeout(r, 800));
   return document.querySelectorAll('#page-staff-tasks .st-card').length;
 });
-check('★ والمالكُ يرى الكلَّ من خانة الإدارة', adminSees === 4, adminSees + ' بطاقة');
+check('★ والمالكُ يرى الكلَّ من خانة الإدارة (جلبةٌ عند فتح الخانة)', adminSees === 4, adminSees + ' بطاقة');
+/* الاشتراكُ الحيُّ عند الدخول لا يشمل مهامَّ الآخرين — حتى للأدمن.
+   وهو أصلُ خفض الكلفة: مجموعةٌ تكبر بلا حدّ لا تُبَثّ لكل جلسةٍ من أوّلها. */
+check('★★★ والاشتراكُ الحيُّ مقصورٌ على ما أنا طرفٌ فيه — حتى للأدمن (خفضُ كلفة الدخول)',
+  await page.evaluate(() => {
+    const src = String(window.staffTasks.startSync);
+    return /array-contains/.test(src) && !/_isAdmin\(\)\s*\?/.test(src);
+  }));
 
 /* ═════════ ٥) فتحُ المهمّة وإنجازُها ═════════ */
 L('\n=== ٥) تفصيلُ المهمّة ===');
@@ -285,6 +294,34 @@ const gone = await page.evaluate(async (id) => {
   return !window.__store['staff_tasks/' + id];
 }, idEdit);
 check('★★★ والمُنشئُ يحذف فعلاً — يختفي المستند', gone === true, String(gone));
+
+/* ═════════ ٥-ج) الشاشةُ لا تعلَق على «تعذّر الاتصال» ═════════
+   بلاغُ المالك 03/09: فُتحت الشاشةُ على «تعذّر الاتصال بقاعدة البيانات» والمنصّةُ
+   تعمل. والجذرُ أنّ مهلةَ الأمان كانت تُسلَّح داخل `startSync` — أي **عند الدخول
+   والشاشةُ مغلقة**؛ فتأخُّرُ لقطةٍ عن ثمانِ ثوانٍ (شبكةٌ بطيئة · عشرون مجموعةً معاً)
+   يُثبّت حالةَ خطأٍ لا يراها أحد، ثم تُفتح الشاشةُ بعد دقائق فتُعرَض — و`startSync`
+   ترجع فوراً لأن المشترك موضوع، فلا تُعاد المحاولةُ أبداً.
+   هذا الفحصُ **يعيد إنتاج الحالة نفسَها** ويتحقّق أن الشاشة تتعافى. */
+L('\n=== ٥-ج) التعافي من تأخّرٍ وقع والشاشةُ مغلقة ===');
+const recovered = await page.evaluate(async () => {
+  staffTasks.stopSync();
+  const realColl = db.collection.bind(db);
+  db.collection = function (c) {
+    if (!/^staff_tasks/.test(c)) return realColl(c);
+    const dead = { where(){ return dead; }, orderBy(){ return dead; }, limit(){ return dead; },
+                   get(){ return new Promise(() => {}); }, onSnapshot(){ return function(){}; } };
+    return dead;
+  };
+  staffTasks.startSync();                      // كما يقع عند الدخول
+  await new Promise(r => setTimeout(r, 8600)); // تمرّ المهلةُ القديمة والشاشةُ مغلقة
+  db.collection = realColl;                    // عادت الشبكة
+  staffTasks.list();                           // الآن يفتحها المستخدم
+  await new Promise(r => setTimeout(r, 1500));
+  const h = document.getElementById('page-staff-tasks');
+  return { err: /تعذّر الاتصال/.test(h.textContent || ''), tabs: h.querySelectorAll('.st-tab').length };
+});
+check('★★★ تأخّرٌ وقع والشاشةُ مغلقة لا يتركها عالقةً على «تعذّر الاتصال»', !recovered.err);
+check('★★ وتُعرَض الشاشةُ كاملةً بعد عودة الشبكة', recovered.tabs >= 4, recovered.tabs + ' خانة');
 
 /* ═════════ ٦) لغةُ المنصّة: أيقوناتٌ لا إيموجي، ومكوّناتٌ مشتركة ═════════
    شاشةٌ تُخالف أسلوبَ ما حولها تبدو دخيلةً وإن عملت. وأخطرُ ما يقع هنا صامتٌ:
