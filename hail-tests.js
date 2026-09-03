@@ -626,7 +626,7 @@ function predelivery() {
        موضعه** على منطقٍ قائم — الدوالُّ تُقرأ لصقَ `_poInvoiceList` الذي تُصحّح
        قصورَه في البحث، ومستدعوها مرشّحُ `renderPurchases` وبطاقتُها، وكلُّها
        هنا. ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة تعديله ممنوعٌ نصّاً (CLAUDE.md). */
-    const IDX_CEILING = 38666;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    const IDX_CEILING = 38669;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -9117,7 +9117,7 @@ function supervisorReceiptGuards() {
   // ── ربط النواة ──
   T("★ الحالة معرّفة ومسمّاة", /sv_receiving:\s*"بانتظار استلام المشرف"/.test(HTML));
   T("★★ «تم الشراء» يوجّه للمشرف حين مفعّل وللمستودع حين معطّل — من مفتاح الإعدادات",
-    /const _toSv = window\.SUPERVISOR_RECEIPT_ENABLED !== false;/.test(HTML) &&
+    /const _toSv = \(window\.SUPERVISOR_RECEIPT_ENABLED !== false\) && !_svDone;/.test(HTML) &&
     /const _target = _toSv \? "sv_receiving" : "wh_receiving";/.test(HTML) &&
     /supervisorReceiptEnabled !== false/.test(HTML));
   T("★ المرحلة في مساري العرض والقياس (PO_STAGES + STAGE_ORDER قبل استلام المستودع)",
@@ -9223,6 +9223,42 @@ function supervisorReceiptGuards() {
     /v!=="__WAREHOUSE_AUDIT__"&&v!=="__SUPERVISOR_RECEIPT__"&&/.test(HTML));
   T("★ بطاقةُ «بانتظار إجراءك» تسمّي دورَ المشرف بصيغتيه",
     /supervisor:"المشرف الميداني", "مشرف":"المشرف الميداني"/.test(HTML));
+
+  /* ══ العودةُ إلى مرحلة المشرف بعد اكتمال استلامها — مصيدةٌ بلا مخرج (بلاغ المالك 03/09) ══
+     PO-202609-0229: اكتمل محضرُ المشرف (5 من 5) فأُحيل للمستودع، ثم أرجعه المسؤولُ
+     للمشتريات («الفاتورة المرفقة خطأ»)، وأُشعِر بالشراء ثانيةً فعاد إلى `sv_receiving`.
+     المتبقّي صفرٌ ⇒ الخاناتُ معطَّلةٌ، ولا نقصَ ⇒ خانةُ «التحويل رغم النقص» مخفيةٌ،
+     و`save()` يردّ دائماً بـ«أدخل كميةً». حارسان: ألّا يُعاد الطلبُ لمرحلةٍ استُوفيت،
+     وأن يبقى في النافذة مخرجٌ ظاهرٌ لو عاد بأيّ سبيلٍ آخر (تغييرُ حالةٍ من الأدمن). */
+  {
+    const pBack = { items: [{ itemName: "جرس بطارية", unit: "قطعة", qty: 5 }],
+                    svReceipts: [{ ref: "SVR-01", items: [{ idx: 0, qty: 5 }] }] };
+    const rBack = S._rows(pBack);
+    T("★★ لقطةُ البلاغ: استلامٌ مكتملٌ ⇒ لا متبقٍّ ولا نقص — فلا خانةَ إدخالٍ ولا «تحويل رغم النقص»",
+      S._complete(pBack) === true && !rBack.some(r => r.rem > 0), JSON.stringify(rBack));
+  }
+  T("★★ «تم الشراء» لا يُعيد إلى مرحلة المشرف طلباً اكتمل استلامُه الميدانيُّ سلفاً",
+    /supervisorReceipt\._complete\(p\)/.test(HTML) &&
+    /const _toSv = \(window\.SUPERVISOR_RECEIPT_ENABLED !== false\) && !_svDone;/.test(HTML));
+  T("★ ولماذا تخطّى مرحلتَه يُقرأ من القيد لا يُستنتَج من غيابه",
+    /_svDone \? \("استلامُ المشرف مكتملٌ سلفاً \(/.test(HTML));
+  T("★★ ومخرجٌ في النافذة نفسِها حين لا متبقٍّ — إحالةٌ للمستودع بلا محضرٍ جديد",
+    typeof S.forwardToWarehouse === "function" &&
+    /const noRem = rows\.length>0 && rows\.every\(r=>r\.rem<=0\.001\);/.test(src) &&
+    /id="sv-fwd-btn" onclick="supervisorReceipt\.forwardToWarehouse\(\)"/.test(src));
+  T("★★ والإحالةُ مشروطةٌ بالمرحلة الطازجة وباكتمال الاستلام على النسخة الحيّة",
+    /if\(st!=="sv_receiving"\)\{[\s\S]{0,200}لا إحالةَ إلا من مرحلة استلام المشرف/.test(src) &&
+    /const live=_po\(id\)\|\|p;\s*\n\s*if\(!svComplete\(live\)\)\{/.test(src));
+  T("★ ولا حقولَ محضرٍ تُملأ ثم تُهمَل (تُخفى حين لا متبقٍّ) ورسالةُ الحفظ تدلّ على المخرج",
+    /id="sv-entry-fields" style="\$\{noRem\?"display:none":""\}"/.test(src) &&
+    /لا متبقٍّ للاستلام — استخدم «إحالة للمستودع للتدقيق»/.test(src));
+  /* الحالةُ الملتقَطة لا حالةٌ مفترضة: `live.status="sv_receiving"` عند الفشل كانت
+     الموضعَ الوحيدَ في المشروع كلِّه الذي يكتب هذه الحالةَ **بلا قيدٍ في السجل** —
+     ولو حفظ ذلك المتصفّحُ شيئاً بعدها كتبها `merge:true` على الخادم بلا مفسِّر. */
+  T("★★ تراجعُ الفشل يعيد الحالةَ الملتقَطة قبل الكتابة لا «sv_receiving» مفترضة",
+    !/live\.status\s*=\s*"sv_receiving"/.test(src) &&
+    (src.match(/const prevStatus=live\.status;/g) || []).length === 3 &&
+    (src.match(/live\.status=prevStatus;/g) || []).length === 3);
 
   /* ══ وثيقةُ المحضر — الورقةُ التي تُوقَّع (طلب المالك 31/08) ══
      المحضرُ كان يُطبع فقرةً داخل ورقة الطلب وحدَها، والاستلامُ الميدانيّ حدثٌ

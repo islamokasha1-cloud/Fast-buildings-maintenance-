@@ -30,7 +30,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.2998";
+const MODULE_BUILD = "v18.9.3001";
 const MAX_PHOTOS   = 6;
 const MAX_PHOTO_MB = 10;
 
@@ -121,6 +121,10 @@ function open(poId){
   _openPoId=poId; _files=[];
   const rows=svRows(p);
   const prevCnt=(p.svReceipts||[]).length;
+  /* لا متبقٍّ: الطلبُ عاد إلى المرحلة وكلُّ بنوده مستلَمةٌ في محاضرَ سابقة. لا
+     محضرَ يُسجَّل هنا (البضاعةُ وصلت مرةً واحدة) ولا نقصَ يُعلَّم — فالنافذةُ
+     تُبدّل زرَّها بمخرجٍ صريح بدل أن تقف على رسالةِ «أدخل كميةً» لا سبيلَ لها. */
+  const noRem = rows.length>0 && rows.every(r=>r.rem<=0.001);
   const rowsHtml = rows.length ? rows.map(r=>`
     <tr>
       <td style="padding:6px 8px;font-size:12px">${_esc(r.name)}</td>
@@ -142,6 +146,10 @@ function open(poId){
         طالب المواد: <b>${_esc(p.supervisor||"—")}</b>${p.receivingSupervisor?` · المشرف المستلم: <b>${_esc(p.receivingSupervisor)}</b>`:""}${prevCnt?` · محاضر سابقة: ${prevCnt}`:""}
         — التوثيق ميدانيٌّ فقط؛ الرصيد يدخله المستودع عند التدقيق.
       </div>
+      ${noRem?`<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:11.5px;color:#065f46">
+        ✅ <b>كلُّ بنود التوريد مستلَمةٌ في ${prevCnt} محضرٍ سابق</b> — لا متبقٍّ يُسجَّل، ولا محضرَ جديدَ لبضاعةٍ وصلت مرةً واحدة.
+        أحِل الطلبَ للمستودع للتدقيق من الزرّ أدناه.
+      </div>`:""}
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:8px;overflow:hidden">
         <thead><tr style="background:var(--surface2)">
           <th style="padding:6px 8px;text-align:right;font-size:11px">البند</th>
@@ -150,6 +158,8 @@ function open(poId){
           <th style="padding:6px 8px;text-align:center;font-size:11px">المستلَم الآن</th>
         </tr></thead><tbody>${rowsHtml}</tbody></table></div>
 
+      <!-- حقولُ المحضر تُخفى حين لا متبقٍّ: مدخلاتٌ تُملأ ثم تُهمَل أسوأُ من غيابها -->
+      <div id="sv-entry-fields" style="${noRem?"display:none":""}">
       <div style="margin-top:12px">
         <div style="font-size:12px;font-weight:700;margin-bottom:4px">📷 صور الاستلام <span style="font-weight:400;color:var(--muted)">(حتى ${MAX_PHOTOS} — يُستحسن توثيق ما وصل)</span></div>
         <input type="file" id="sv-photos" accept="image/*" multiple style="font-size:12px">
@@ -170,6 +180,7 @@ function open(poId){
       <div style="margin-top:10px">
         <input class="form-input" id="sv-notes" placeholder="ملاحظات الاستلام (حالة البضاعة، نواقص، أضرار...)" style="font-size:12px;width:100%">
       </div>
+      </div>
 
       <label id="sv-force-row" style="display:${rows.some(r=>r.rem>0)?"flex":"none"};align-items:flex-start;gap:8px;margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px;cursor:pointer">
         <input type="checkbox" id="sv-force" style="margin-top:2px">
@@ -180,7 +191,9 @@ function open(poId){
 
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
         <button class="btn btn-ghost" onclick="supervisorReceipt.close()">إلغاء</button>
-        <button class="btn btn-primary" id="sv-save-btn" onclick="supervisorReceipt.save()">💾 حفظ محضر الاستلام</button>
+        ${noRem
+          ? `<button class="btn btn-primary" id="sv-fwd-btn" onclick="supervisorReceipt.forwardToWarehouse()">🚚 إحالة للمستودع للتدقيق</button>`
+          : `<button class="btn btn-primary" id="sv-save-btn" onclick="supervisorReceipt.save()">💾 حفظ محضر الاستلام</button>`}
       </div>
     </div>`;
   m.style.display="flex";
@@ -245,7 +258,14 @@ async function save(){
   const notes=(document.getElementById("sv-notes")?.value||"").trim();
   const vendor=(document.getElementById("sv-vendor")?.value||"").trim();
 
-  if(!typed.length && !force){ _toast("⚠ أدخل كميةً مستلمةً واحدةً على الأقل — أو علّم «تحويل رغم النقص»","warn"); return; }
+  if(!typed.length && !force){
+    // الرسالةُ تدلُّ على المخرج الموجود: «أدخل كمية» في طلبٍ بلا متبقٍّ طريقٌ مسدود
+    const _rs=svRows(_po(poId)||p);
+    _toast(_rs.length && _rs.every(r=>r.rem<=0.001)
+      ? "⚠ لا متبقٍّ للاستلام — استخدم «إحالة للمستودع للتدقيق»"
+      : "⚠ أدخل كميةً مستلمةً واحدةً على الأقل — أو علّم «تحويل رغم النقص»","warn");
+    return;
+  }
 
   /* الصورُ واسمُ المورد اختياريان — بتنبيهٍ صريحٍ لا منع (قرار المالك في الصور،
      ويطّرد في المورد: قد يسلّم سائقٌ بلا ورقةٍ فلا يُعرف الاسمُ لحظتَها، ومنعُ
@@ -306,6 +326,10 @@ async function save(){
 
   const complete=svComplete(live);
   const moved=complete||force;
+  /* الحالةُ الملتقَطة قبل الكتابة هي وحدَها ما يُعاد عند الفشل. كتابةُ
+     "sv_receiving" افتراضاً تُقحم حالةً لم تُقيَّد في السجل — ولو حفظ هذا
+     المتصفّحُ شيئاً بعدها كتبها `merge:true` على الخادم بلا قيدٍ يفسّرها. */
+  const prevStatus=live.status;
   if(moved){
     live.status="wh_receiving";
     live.timeline.push({ event: complete ? "اكتمل استلام المشرف — أُحيل للمستودع للتدقيق"
@@ -318,7 +342,7 @@ async function save(){
   const ok=await savePurchaseAwait(poId);
   if(!ok){
     // تراجعٌ محلي — لا محضرَ في الذاكرة لم يصل القاعدة
-    live.svReceipts.pop(); live.timeline.pop(); if(moved){ live.timeline.pop(); live.status="sv_receiving"; }
+    live.svReceipts.pop(); live.timeline.pop(); if(moved){ live.timeline.pop(); live.status=prevStatus; }
     _fail("⚠ تعذّر حفظ المحضر — تحقق من الاتصال وأعد المحاولة"); return;
   }
 
@@ -350,17 +374,73 @@ async function directTransfer(poId){
   }catch(e){ return; }
   const now=new Date().toISOString();
   const live=_po(poId)||p;   // النسخة الحيّة بعد awaits — كالحفظ تماماً
+  const prevStatus=live.status;
   live.status="wh_receiving";
   if(!Array.isArray(live.timeline)) live.timeline=[];
   live.timeline.push({ event:"تحويل مباشر للمستودع — بلا استلامٍ ميداني", code:"wh_receiving",
     by:_me(), at:now, icon:"🏭", notes:"طلبٌ لا استلامَ ميدانياً له (خدمة/إداري) — تجاوزُ مرحلة المشرف موثَّق" });
   live.updatedAt=now;
   const ok=await savePurchaseAwait(poId);
-  if(!ok){ live.timeline.pop(); live.status="sv_receiving"; _toast("⚠ تعذّر الحفظ — حاول مجدداً","warn"); return; }
+  if(!ok){ live.timeline.pop(); live.status=prevStatus; _toast("⚠ تعذّر الحفظ — حاول مجدداً","warn"); return; }
   try{ logAudit("تحويل مباشر للمستودع", "الطلب: "+poId+" — تجاوز استلام المشرف (بلا توريد ميداني)"); }catch(e){}
   try{ _sendPurchaseWorkflowNotif(live, "sv_receiving", "wh_receiving"); }catch(e){}
   try{ renderPurchases(); updatePurchaseBadge(); closeModal("modal-purchase-detail"); }catch(e){}
   _toast("✅ حُوِّل الطلب لاستلام المستودع","success");
+}
+
+/* ════════ إحالةٌ للمستودع بلا محضرٍ جديد — استلامٌ مكتملٌ سلفاً (بلاغ المالك 03/09) ════════
+   ── المشكلة ──
+   طلبٌ أرجعه المسؤولُ من «بانتظار استلام المستودع» لتصحيح فاتورةٍ ثم أُشعِر
+   بالشراء ثانيةً، فعاد إلى `sv_receiving` وكلُّ بنوده مستلَمةٌ في محاضرَ سابقة.
+   فلا خانةَ كميةٍ تُدخَل (المتبقّي صفرٌ فتُعطَّل)، ولا خانةَ «تحويلٍ رغم النقص»
+   (لانتفاء النقص) — ووقف الطلبُ في مرحلةٍ لا مخرجَ منها بيد صاحبها.
+
+   ── المبدأ ──
+   هذه ليست تجاوزاً كـ«التحويل المباشر» (ذاك لطلبٍ **لا استلامَ ميدانيَّ له**).
+   الدليلُ الميدانيُّ هنا **قائمٌ كاملاً** في محاضره، والإحالةُ إقرارٌ بأنه يكفي —
+   فلا تحتاج سبباً ولا تقتصر على المشتريات، بل هي إجراءُ صاحب المرحلة نفسِه.
+   ولا محضرَ ثانياً يُنشَأ: البضاعةُ وصلت الموقعَ مرةً واحدة، ومحضرٌ ثانٍ بصفرٍ
+   ورقةٌ تشهد بما لم يقع. */
+async function forwardToWarehouse(poId){
+  const id=poId||_openPoId;
+  const p=_po(id);
+  if(!p){ _toast("⚠ لم يُعثر على الطلب","warn"); return; }
+  if(!canReceive()){ _toast("⚠ الإحالة من صلاحية المشرف أو المسؤول فقط","warn"); return; }
+
+  let fresh=null;
+  try{ if(typeof _poFreshStatus==="function") fresh=await _poFreshStatus(id); }catch(e){}
+  const st=fresh||normalizePOStatus(p.status);
+  if(st!=="sv_receiving"){
+    _toast("⚠ حالة الطلب الآن «"+poStatusLabel(st)+"» — لا إحالةَ إلا من مرحلة استلام المشرف","warn");
+    close(); try{ renderPurchases(); }catch(e){} return;
+  }
+
+  // النسخةُ الحيّة بعد الانتظار — واكتمالُ الاستلام يُعاد فحصُه عليها لا على لقطةِ الفتح
+  const live=_po(id)||p;
+  if(!svComplete(live)){ _toast("⚠ ما زال في الطلب متبقٍّ لم يُستلم — سجّل محضراً بكمياته","warn"); return; }
+
+  const btn=document.getElementById("sv-fwd-btn");
+  if(btn){ btn.disabled=true; btn.textContent="⏳ جارٍ الإحالة..."; }
+  const now=new Date().toISOString();
+  const prevStatus=live.status;
+  live.status="wh_receiving";
+  if(!Array.isArray(live.timeline)) live.timeline=[];
+  live.timeline.push({ event:"اكتمل استلام المشرف — أُحيل للمستودع للتدقيق", code:"wh_receiving",
+    by:_me(), at:now, icon:"🚚",
+    notes:"بلا محضرٍ جديد — كمياتُ الطلب مستلَمةٌ في "+((live.svReceipts||[]).length)+" محضرٍ سابق" });
+  live.updatedAt=now;
+
+  const ok=await savePurchaseAwait(id);
+  if(!ok){
+    live.timeline.pop(); live.status=prevStatus;
+    if(btn){ btn.disabled=false; btn.textContent="🚚 إحالة للمستودع للتدقيق"; }
+    _toast("⚠ تعذّرت الإحالة — تحقق من الاتصال وأعد المحاولة","warn"); return;
+  }
+  try{ logAudit("إحالة للمستودع — استلام المشرف مكتمل", "الطلب: "+id+" — بلا محضرٍ جديد"); }catch(e){}
+  try{ _sendPurchaseWorkflowNotif(live, "sv_receiving", "wh_receiving"); }catch(e){}
+  close();
+  try{ renderPurchases(); updatePurchaseBadge(); }catch(e){}
+  _toast("✅ أُحيل الطلب للمستودع للتدقيق","success");
 }
 
 /* ════════ العرض: تفاصيل الطلب · نافذة التدقيق · الطباعة ════════ */
@@ -614,7 +694,7 @@ function printReceipt(poId, ref){
 
 /* ════════ الواجهة المعروضة ════════ */
 window.supervisorReceipt = {
-  open, close, save, directTransfer, canReceive,
+  open, close, save, directTransfer, forwardToWarehouse, canReceive,
   enabled:_enabled,
   sectionHtml, auditHtml, printHtml,
   printReceipt, paperHTML,
