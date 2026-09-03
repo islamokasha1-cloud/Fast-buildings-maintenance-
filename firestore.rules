@@ -179,6 +179,72 @@ service cloud.firestore {
       return coll in ['audit_log', 'audit_log_dev'];
     }
 
+    /* ═══════════ مهامُّ الموظفين — غرفةٌ مغلقةٌ لكلّ مهمّة ═══════════
+       `staff_tasks` تحمل تكليفاتِ المدير لموظفيه وملاحظاتِهم بينهم. أطرافُ كلّ
+       مهمّةٍ في `participants` (أسماءُ دخولٍ لا أسماءً معروضة — المعروضُ يتكرّر
+       ويتغيّر، وهذه بوّابةُ صلاحيةٍ لا سطرُ عرض)، والاستعلامُ في الوحدة مقصورٌ على
+       `array-contains` باسم دخولي.
+
+       ── الكتابةُ مقفولةٌ هنا فعلاً ──
+       تُستثنى المجموعةُ من القاعدة العامة (وإلا لم يقيّد هذا البلوكُ شيئاً: القواعدُ
+       تُقيَّم بـ«أو»، ودرسُ M11 أنّ بلوكاً متساهلاً باقياً يُبطل التشديدَ في أعلاه)،
+       فلا يعدّل المهمّةَ إلا مشاركٌ فيها، ولا يضيف مشاركاً إلا مُنشئُها، ولا تُنتحَل
+       المِلكيّةُ (`createdByUser` و`createdAt` في `unchanged`).
+
+       ── ⚠ والقراءةُ لم تُقفَل بعد — تصريحٌ لا سهو ──
+       سطرُ القراءة العامة `allow read: if hasRole();` يمنح القراءةَ على كلّ مجموعة،
+       وإخراجُ مجموعةٍ منه يمرّ بشرطٍ على `document[…]` — وذاك **أسقط استعلامَ كلّ
+       مجموعةٍ في النظام** في انقطاع إنتاجٍ حقيقيّ (v18.9.2635)، وعليه اليومَ حارسٌ
+       صريحٌ في `hail-tests`. فبلوكُ القراءة أدناه **مكتوبٌ صحيحاً ومُختبَرٌ ولا أثرَ
+       له اليوم**: العامةُ تسبقه بـ«أو». ويومَ تُضيَّق القراءةُ العامة (المرحلة ٣ —
+       `docs/deep-review-2026-08.md`) يعمل هذا البلوكُ بلا سطرٍ يُكتب.
+       ويحرس الحالَ فحصٌ في `rules-check.mjs` يُثبت الثغرةَ صراحةً ويسقط يومَ تُسدّ،
+       فلا يظنّ أحدٌ القراءةَ محروسةً وهي ليست كذلك، ولا تمرّ لحظةُ السدّ بلا انتباه. */
+    function stColl(coll) {
+      return coll in ['staff_tasks', 'staff_tasks_dev'];
+    }
+    function stUser() {
+      return request.auth != null ? request.auth.token.get('u', '') : '';
+    }
+    function stPart(d) {
+      return stUser() != '' && d.get('participants', []).hasAny([stUser()]);
+    }
+    /* الإنشاءُ باسمي أنا، وأكونُ طرفاً فيما أنشأت: بدون الشرطين يُنشئ الموظفُ
+       مهمّةً موقّعةً باسم مديره، أو مهمّةً لا يملك أحدٌ تعديلَها بعد كتابتها. */
+    function stCreateOk() {
+      return hasRole() && !isViewer()
+        && stUser() != ''
+        && request.resource.data.get('createdByUser', '') == stUser()
+        && request.resource.data.get('participants', []).hasAny([stUser()]);
+    }
+    function stUpdateOk() {
+      return isAdmin()
+        || ( hasRole() && !isViewer()
+             && stPart(resource.data)
+             && unchanged(['createdByUser', 'createdAt'])
+             // قائمةُ الأطراف بيد المُنشئ وحدَه — وإلا أدخل المُضافُ الغرفةَ مَن شاء
+             && ( unchanged(['participants', 'shared'])
+                  || resource.data.get('createdByUser', '') == stUser() ) );
+    }
+    function stDeleteOk() {
+      return isAdmin()
+        || ( hasRole() && !isViewer()
+             && stUser() != ''
+             && resource.data.get('createdByUser', '') == stUser() );
+    }
+    match /staff_tasks/{id} {
+      allow read:   if isAdmin() || stPart(resource.data);
+      allow create: if stCreateOk();
+      allow update: if stUpdateOk();
+      allow delete: if stDeleteOk();
+    }
+    match /staff_tasks_dev/{id} {
+      allow read:   if isAdmin() || stPart(resource.data);
+      allow create: if stCreateOk();
+      allow update: if stUpdateOk();
+      allow delete: if stDeleteOk();
+    }
+
     // ═══════════ القاعدة العامة (النظام الرئيسي) ═══════════
     // القراءةُ كما كانت لكلّ ذي دور. **والقصدُ من إبقائها مفتوحةً هنا مقصود**:
     // تقييدُ القراءة يجعل جدولَ الموازنة يعرض أصفاراً صامتةً لمن لا يملكها بدل رفضٍ
@@ -199,6 +265,7 @@ service cloud.firestore {
                       && !isSubstDoc(document[0], document[1])
                       && !sbxColl(document[0])
                       && !srvOnly(document[0])
+                      && !stColl(document[0])
                       && !isAuditColl(document[0]);
     }
 

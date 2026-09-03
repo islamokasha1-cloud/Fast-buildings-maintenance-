@@ -746,6 +746,89 @@ await check("★★ وحسابُ الأدمن ما زال مقفولاً على 
 await check("★★ وسجلُّ التدقيق ما زال لا يُمحى",
   assertFails(deleteDoc(doc(ADMIN, "audit_log/A1"))));
 
+
+/* ═════════ ١١) مهامُّ الموظفين — غرفةٌ مغلقةٌ لكلّ مهمّة ═════════
+   الوعدُ المعلَن للموظفين: لا يرى المهمّةَ إلا أطرافُها. وهذا القسمُ يفصل ما هو
+   **مقفولٌ فعلاً في قاعدة البيانات** عمّا هو محروسٌ في الواجهة وحدَها — فلا يُظنّ
+   الوعدُ منفَّذاً حيث لم يُنفَّذ بعد. */
+head("١١) مهامُّ الموظفين — الكتابةُ مقفولة، والقراءةُ ثغرةٌ مُعلَنة");
+const ST = "staff_tasks";
+const OWNER = supAs("رغده"), ASSIGNEE = supAs("خالد"), OUTSIDER = supAs("سعيد");
+await seed(`${ST}/T1`, {
+  title: "راجع عقد المورّد", status: "open",
+  createdByUser: "رغده", assignedToUser: "خالد",
+  shared: [], participants: ["رغده", "خالد"], comments: []
+});
+
+/* الإنشاء: باسمي أنا، وأكونُ طرفاً فيما أنشأت */
+await check("يُنشئ الموظفُ مهمّةً باسمه وهو طرفٌ فيها",
+  assertSucceeds(setDoc(doc(OWNER, `${ST}/T2`), {
+    title: "ت", status: "open", createdByUser: "رغده",
+    assignedToUser: "خالد", participants: ["رغده", "خالد"] })));
+await check("★ ولا يوقّع مهمّةً باسم زميله (انتحالُ مِلكيّة)",
+  assertFails(setDoc(doc(OWNER, `${ST}/T3`), {
+    title: "ت", status: "open", createdByUser: "خالد",
+    assignedToUser: "سعيد", participants: ["خالد", "سعيد"] })));
+await check("★ ولا يُنشئ مهمّةً بين طرفين ليس هو أحدَهما",
+  assertFails(setDoc(doc(OWNER, `${ST}/T4`), {
+    title: "ت", status: "open", createdByUser: "رغده",
+    assignedToUser: "خالد", participants: ["خالد", "سعيد"] })));
+await check("والزائرُ لا يُنشئ مهامَّ أصلاً",
+  assertFails(setDoc(doc(VIEWER, `${ST}/T5`), {
+    title: "ت", createdByUser: "v", participants: ["v"] })));
+await check("★ وتوكِنٌ بلا الادّعاء `u` لا يُنشئ (توكِنٌ قديمٌ لا يفتح باباً)",
+  assertFails(setDoc(doc(SUP_AR, `${ST}/T6`), {
+    title: "ت", createdByUser: "", participants: [""] })));
+
+/* التعديل: للأطراف وحدَهم */
+await check("المكلَّفُ يُغلق مهمّتَه",
+  assertSucceeds(updateDoc(doc(ASSIGNEE, `${ST}/T1`), { status: "done" })));
+await check("والمُنشئُ يعدّل مهمّتَه",
+  assertSucceeds(updateDoc(doc(OWNER, `${ST}/T1`), { title: "راجع العقد — معدَّل" })));
+await check("★★ وموظفٌ خارجَ الغرفة لا يعدّلها",
+  assertFails(updateDoc(doc(OUTSIDER, `${ST}/T1`), { status: "done" })));
+await check("★★ ولا يمسّها دورٌ آخرُ في النظام (القاعدةُ العامة لم تعد تغطّيها)",
+  assertFails(updateDoc(doc(WH, `${ST}/T1`), { status: "done" })));
+await check("★★ ولا الماليةُ ولا المشترياتُ",
+  assertFails(updateDoc(doc(FIN, `${ST}/T1`), { title: "x" })));
+await check("★ ولا تُنتحَل المِلكيّةُ بتعديلٍ لاحق",
+  assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T1`), { createdByUser: "خالد" })));
+
+/* قائمةُ الأطراف بيد المُنشئ وحدَه */
+await check("★★ المكلَّفُ لا يُدخل الغرفةَ مَن شاء",
+  assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T1`), {
+    shared: ["سعيد"], participants: ["رغده", "خالد", "سعيد"] })));
+await check("★ والمُنشئُ يُشارك زميلاً ثالثاً",
+  assertSucceeds(updateDoc(doc(OWNER, `${ST}/T1`), {
+    shared: ["سعيد"], participants: ["رغده", "خالد", "سعيد"] })));
+await check("ومَن أُضيف صار طرفاً يعدّل",
+  assertSucceeds(updateDoc(doc(OUTSIDER, `${ST}/T1`), { status: "open" })));
+
+/* الحذف */
+await check("★ المكلَّفُ لا يحذف مهمّةً كُلِّف بها (لا يمحو الدليلَ عليه)",
+  assertFails(deleteDoc(doc(ASSIGNEE, `${ST}/T1`))));
+await check("والمُنشئُ يحذف ما أنشأ", assertSucceeds(deleteDoc(doc(OWNER, `${ST}/T2`))));
+await check("والأدمن يحذف", assertSucceeds(deleteDoc(doc(ADMIN, `${ST}/T1`))));
+
+/* ── القراءة: الثغرةُ مُعلَنةٌ ومُختبَرة ──
+   القاعدةُ العامة `allow read: if hasRole();` تسبق بلوكَ المجموعة بـ«أو»، فتمنح
+   القراءةَ لكلّ ذي دور. والفحصُ التالي **يُثبت الثغرةَ لا يُخفيها**: يومَ تُضيَّق
+   القراءةُ العامة (المرحلة ٣) يسقط هذا السطرُ فيُنبّه من يومها أنّ البلوكَ الصارم
+   صار نافذاً — ويُقلب حينها إلى `assertFails`. */
+await seed(`${ST}/T7`, {
+  title: "سرّية", status: "open", createdByUser: "رغده",
+  assignedToUser: "خالد", shared: [], participants: ["رغده", "خالد"] });
+await check("الطرفُ يقرأ مهمّتَه", assertSucceeds(getDoc(doc(ASSIGNEE, `${ST}/T7`))));
+await check("⚠ ثغرةٌ معلومةٌ ومقصودةُ التوثيق: غيرُ الطرف يقرأ أيضاً — القراءةُ العامة تسبق البلوكَ الصارم (المرحلة ٣ تسدّها، وحينها يُقلب هذا الفحصُ إلى assertFails)",
+  assertSucceeds(getDoc(doc(OUTSIDER, `${ST}/T7`))));
+await check("★★ واستعلامُ المجموعةِ ما زال يعمل (لا شرطَ مسارٍ أُقحم في القراءة العامة)",
+  assertSucceeds(getDocs(collection(OWNER, ST))));
+await check("★★ وبقيةُ النظام تُستعلَم كما كانت بعد إضافة المجموعة",
+  assertSucceeds((async () => {
+    for (const c of ["global_purchases", "global_inventory", "meta", "global_contracts"])
+      await getDocs(collection(WH, c));
+  })()));
+
 await env.cleanup();
 console.log(results.join("\n"));
 console.log("\n" + "═".repeat(58));
