@@ -646,7 +646,7 @@ function predelivery() {
        السايدبار وأيقونتُه · حاويةُ `page-staff-tasks` · مَعبرُ `showPage` · وسمُ
        `<script>` · سطرا `refreshNav` · قيدُ كاشف الوحدات القديمة) وسِعها السقفُ
        القائم. **ولا سطرَ منطقٍ واحدٍ في النواة** — الميزةُ كلُّها في الوحدة. */
-    const IDX_CEILING = 39255;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    const IDX_CEILING = 39513;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4427,8 +4427,51 @@ function procurementStaffKPI() {
   T("★★ رابطةُ الصنف من المصدر الواحد (inventoryPricing) — لا تطبيعَ عربيَّ رابعاً",
     /inventoryPricing\.catalogOf/.test(ksrc) && /inventoryPricing\.nameKey/.test(ksrc));
   T("★★ نوافذُ المشتريات وحدَها تُقاس (لا زمنُ المدير/التنفيذي/المالية/المستودع)",
-    /const PROC_HANDOFF = \["pending_pm_cmp","pending_ceo","pending_finance"\]/.test(ksrc) &&
-    /const EXEC_HANDOFF = \["sv_receiving","wh_receiving"\]/.test(ksrc));
+    /const PROC_OWNED = \["wh_reviewed","pending_proc","finance_returned"\]/.test(ksrc) &&
+    /const EXEC_OWNED = \["proc_executing"\]/.test(ksrc));
+
+  /* ══ v1.15 — الحارسُ الذي كان غيابُه يكلّف عموداً فارغاً ══
+     العطلُ الأصليّ: قِيس `pending_proc` وحدَه، وهو في هذا النظام مسارُ **ارتدادٍ نادر**؛
+     أمّا المسارُ الأصليُّ فالمستودعُ يُحيل بـ`wh_reviewed` («تمت مراجعة المستودع —
+     بانتظار تنفيذ المشتريات»). فخرج عمودا «تجهيز المقارنة» و«الاعتماد من أول مرة»
+     فارغَين على ١١٢ طلباً حقيقيّاً — **بلا خطأٍ واحدٍ يُنذر**.
+     ولا يمسك هذا الصنفَ إلا ربطُ القائمة بمصدر الحقيقة: نقرأ فرعَ `procurement_officer`
+     من `getAvailableStatuses` — الدالّةَ التي تبني أزرارَ الإجراء وبطاقةَ «بانتظار
+     إجراءك» — ونستخرج كلَّ حالةٍ **لها إجراءٌ فعليّ**، ثم نطالب أن تغطّيها القائمتان.
+     فتغييرُ سير العمل غداً يُسقط هذا الفحصَ بدل أن يُفرِّغ عموداً بصمت. */
+  {
+    const _a = HTML.indexOf('if(role === "procurement_officer"){');
+    const _b = HTML.indexOf('if(role === "ceo"', _a);
+    const branch = (_a >= 0 && _b > _a) ? HTML.slice(_a, _b) : "";
+    // كلُّ كتلةِ `if(currentStatus === …)` لا تُرجع [] فارغةً ⇒ حالةٌ للمشتريات فيها إجراء
+    const acting = new Set();
+    const re = /if\(currentStatus === ([\s\S]*?)\)\{([\s\S]*?)\n    \}/g;
+    let m;
+    while ((m = re.exec(branch))) {
+      if (/^\s*return \[\];\s*$/.test(m[2])) continue;               // بوّابةٌ بلا إجراء
+      (m[1].match(/"([a-z_]+)"/g) || []).forEach(q => acting.add(q.replace(/"/g, "")));
+    }
+    // حالاتٌ قديمةٌ للتوافق لا تدخل القياس (لا تقع في مسارٍ حيّ)
+    const LEGACY = new Set(["wh_approved"]);
+    const owned = new Set([...(ksrc.match(/const PROC_OWNED = \[([^\]]*)\]/) || ["", ""])[1].match(/"([a-z_]+)"/g) || [],
+                           ...(ksrc.match(/const EXEC_OWNED = \[([^\]]*)\]/) || ["", ""])[1].match(/"([a-z_]+)"/g) || []]
+                          .map(q => q.replace(/"/g, "")));
+    const missing = [...acting].filter(x => !owned.has(x) && !LEGACY.has(x));
+    T("★★★ استُخرجت حالاتُ عمل المشتريات من getAvailableStatuses (لا قائمةٌ مكتوبةٌ بيد)",
+      acting.size >= 4, "المستخرَجة: " + [...acting].join(","));
+    T("★★★ وكلُّ حالةٍ للمشتريات فيها إجراءٌ حقيقيٌّ مشمولةٌ بالقياس (وإلّا فرغ عمودٌ بصمت)",
+      missing.length === 0, missing.length ? "غيرُ مشمولة: " + missing.join(",") : "");
+    T("★★★ وwh_reviewed منها تحديداً — وهي المسارُ الأصليُّ لا pending_proc النادر",
+      acting.has("wh_reviewed") && owned.has("wh_reviewed"));
+  }
+
+  T("★★ «الواقفُ الآن» يقرأ المراحلَ المملوكةَ نفسَها (لا قائمةً ثانيةً تنحرف)",
+    /if\(!PROC_OWNED\.includes\(st\) && !EXEC_OWNED\.includes\(st\)\) return;/.test(ksrc));
+  T("★★★ طلباتُ المسؤول خارجَ جدول القياس لكنّها **معلَنة** لا محذوفةٌ صامتاً",
+    /const isAdminRow = r => r\.role==="admin";/.test(ksrc) &&
+    /adminN:/.test(ksrc) && /adminSpend:/.test(ksrc) && ksrc.includes("pkpi-staff-admin"));
+  T("★★ ودورُ الفاعل يُستكمَل من USERS للسجلات القديمة (وإلّا لم يُعرف المسؤولُ فيها)",
+    /function _actorRole\(key, evRole\)/.test(ksrc) && /typeof USERS!=="undefined"/.test(ksrc));
   T("★★ الهدفُ يوما عمل — عتبةُ PO_STALE_WORK_MIN نفسُها (لا عتبتان متناقضتان)",
     /const STAFF_TARGET_DAYS = 2;/.test(ksrc) && /const PO_STALE_WORK_MIN\s*=\s*2 \* PO_WORK_MIN_PER_DAY;/.test(HTML));
   T("★★ الأزمنةُ بأيام العمل عبر محرّك SLA المشترك لا بالزمن الجداريّ",
@@ -4474,6 +4517,26 @@ function procurementStaffKPI() {
 
   // ── ٢) النافذة تُنسب إلى مَن أنهاها لا إلى مَن أدخلها ──
   {
+    /* v1.15: المسارُ **الأصليّ** — المستودعُ يُحيل بـwh_reviewed، والمشترياتُ تُخرجه.
+       هذا هو ما كان يسقط كلَّه في v1.14 فيفرغ العمود. */
+    const real = E._staffWindows({ id: "w0", status: "closed", timeline: [
+      { code: "wh_reviewed",     at: "2026-07-01T08:00:00Z", by: "المستودع", byUser: "wh" },
+      { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad" },
+    ]});
+    T("★★★ المسارُ الأصليّ (wh_reviewed ⇐ إحالة) يُقاس — وهو ما كان يسقط فيُفرِغ العمود",
+      real.length === 1 && real[0].kind === "prep" && E._actorKey(real[0].ev) === "u:saad",
+      JSON.stringify(real.map(x => x.kind)));
+    T("★★★ والمخرجُ المباشر إلى التنفيذ (بلا مالية) يُقاس أيضاً — لا قائمةَ وجهاتٍ ناقصة",
+      (() => { const w = E._staffWindows({ timeline: [
+        { code: "wh_reviewed",    at: "2026-07-01T08:00:00Z", by: "و", byUser: "wh" },
+        { code: "proc_executing", at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad" }] });
+        return w.length === 1 && w[0].kind === "prep"; })());
+    T("★★ والرجوعُ من بوّابة المقارنة إلى pending_proc لا يُعدّ تسليماً (ما زال في يده)",
+      (() => { const w = E._staffWindows({ timeline: [
+        { code: "wh_reviewed",  at: "2026-07-01T08:00:00Z", by: "و", byUser: "wh" },
+        { code: "pending_proc", at: "2026-07-01T10:00:00Z", by: "المدير", byUser: "pm" }] });
+        return w.length === 0; })());
+
     const p = { id: "w1", status: "closed", timeline: [
       { code: "pending_proc", at: "2026-07-01T08:00:00Z", by: "مدير المشاريع", byUser: "pm" },
       { code: "pending_ceo",  at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad" },
@@ -4590,6 +4653,25 @@ function procurementStaffKPI() {
       r.execN === 1 && Math.abs(r.execAvg - 0.5) < 1e-9);
   }
 
+  // ── ٦-ب) طلباتُ المسؤول: خارجَ الجدول، معلَنةً في سطرها (قرار المالك 03/09) ──
+  {
+    const mk = (id, u, n, role, cost) => ({ id, status: "closed", actualCost: cost,
+      createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-03T06:00:00Z", timeline: [
+        { code: "wh_reviewed",     at: "2026-07-01T08:00:00Z", by: "المستودع", byUser: "wh", byRole: "warehouse_manager" },
+        { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: n, byUser: u, byRole: role } ]});
+    const S = E.computeStaffKPIs([
+      mk("a1", "saad", "سعد", "procurement_officer", 1000),
+      mk("a2", "root", "مدير النظام", "admin", 500),
+      mk("a3", "root", "مدير النظام", "admin", 250),
+    ]);
+    T("★★★ صفُّ المسؤول لا يظهر في جدول القياس (لا يُقارَن بمسؤول المشتريات)",
+      S.rows.length === 1 && S.rows[0].key === "u:saad", S.rows.map(r => r.key).join(","));
+    T("★★★ لكنّ طلباتِه **معلَنةٌ** عدداً وقيمةً — الحذفُ الصامتُ ثقبٌ في التغطية",
+      S.adminN === 2 && S.adminSpend === 750, `n=${S.adminN} spend=${S.adminSpend}`);
+    T("★★ واسمُه يُذكر في البيان (يُعرف أيُّ حسابٍ نفّذ خارج المسار)",
+      Array.isArray(S.adminNames) && S.adminNames.includes("مدير النظام"));
+  }
+
   // ── ٧) «الواقفُ الآن» عدّادٌ حيٌّ منسوبٌ بالحالة (لا فاعلَ خروجٍ بعد) ──
   {
     const S = E.computeStaffKPIs([
@@ -4598,6 +4680,10 @@ function procurementStaffKPI() {
     ]);
     T("★★★ الطلبُ الواقفُ عند المشتريات يُعدّ حيّاً وإن لم يُنسب لشخص",
       S.openNowN === 1 && S.openNowOldest && S.openNowOldest.id === "o1" && S.openNowOldest.days > 0);
+    T("★★★ و«الواقفُ الآن» يشمل wh_reviewed — أكثرُ المراحل وقوفاً في يد المشتريات",
+      E.computeStaffKPIs([{ id: "o2", status: "wh_reviewed", estCost: 100,
+        createdAt: "2026-01-01T06:00:00Z", updatedAt: "2026-01-01T06:00:00Z",
+        timeline: [{ code: "wh_reviewed", at: "2026-01-01T08:00:00Z", by: "و", byUser: "wh" }] }]).openNowN === 1);
     T("★★ ولا يُنسب إنجازاً لأحد (لا صفَّ له)", S.rows.length === 0);
   }
 }
