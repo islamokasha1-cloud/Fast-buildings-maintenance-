@@ -24,6 +24,7 @@ on:
       - 'photo-queue.js'
       - 'operations-wall.js'
       - 'ppm-schedule-repair.js'
+      - 'staff-tasks.js'
       - 'hail-tests.js'
       - 'global-surface-check.mjs'
       - 'css-surface-check.mjs'

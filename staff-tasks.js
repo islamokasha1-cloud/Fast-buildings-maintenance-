@@ -1,0 +1,724 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   نظام هيل — مهامُّ الموظفين وملاحظاتُهم  (staff-tasks.js)
+
+   ── المشكلة التي تعالجها ──
+   التكليفُ بين المدير وموظفيه، وبين الموظفين بعضِهم، كان يجري على الواتساب: يضيع
+   في مجرى الرسائل، ولا أحدَ يعرف ما بقي مفتوحاً، ولا مرجعَ عند الخلاف على «كلّفتُك
+   ولم تُنجز». وهذه الوحدةُ تنقل ذلك إلى النظام الذي يفتحه الموظفون أصلاً طوال
+   اليوم — فالتذكيرُ الذي يُرى بلا قصدٍ هو وحدَه الذي يُقرأ.
+
+   ── المبدأُ الحاكم: كلُّ مهمّةٍ غرفةٌ مغلقة ──
+   لا «قائمةٌ عامة» ولا لوحةُ فريق. المهمّةُ يراها **مُنشئها والمكلَّفُ بها ومَن
+   أضافه المُنشئ** فقط، ويحملهم المستندُ في مصفوفة `participants` (بأسماء الدخول
+   لا بالأسماء المعروضة: المعروضُ يتكرّر ويتغيّر، واسمُ الدخول مفتاحٌ ثابت).
+   والاستعلامُ نفسُه مقصورٌ على المشاركة:
+       .where("participants", "array-contains", <اسم دخولي>)
+   فلا يُنزَّل إلى المتصفّح مستندٌ لست طرفاً فيه أصلاً.
+
+   ── ⚠ حدُّ الخصوصية اليوم — مُعلَنٌ لا مطويّ ──
+   قواعدُ Firestore في هذا المستودع تمنح **القراءةَ لكلّ ذي دور** على كلّ مجموعة
+   (`match /{document=**} { allow read: if hasRole(); }`)، وإخراجُ مجموعةٍ من تلك
+   القاعدة يمرّ بشرطِ مسارٍ في سطر القراءة العامة — وذاك **أسقط استعلامَ كلّ مجموعةٍ
+   في النظام** في انقطاع إنتاجٍ حقيقيّ (v18.9.2635)، وعليه اليومَ حارسٌ صريح في
+   `hail-tests`. وقواعدُ Firestore تُقيَّم بـ«أو»: بلوكٌ صارمٌ للمجموعة **لا يطرح**
+   ما منحته العامة. فالنتيجةُ الصادقة:
+     • **الكتابةُ مقفولةٌ فعلاً على مستوى قاعدة البيانات** (البلوكُ أدناه في
+       `firestore.rules` — يُثبته `npm run rules:check` على محاكٍ حقيقيّ): لا يعدّل
+       المهمّةَ إلا مشاركٌ فيها، ولا يضيف مشاركاً إلا مُنشئُها.
+     • **والقراءةُ محروسةٌ في الواجهة والاستعلام لا في القاعدة**: موظفٌ يفتح وحدةَ
+       تحكّم المتصفّح ويكتب استعلاماً يدوياً يستطيع قراءةَ مهامّ غيره اليوم.
+   وسدُّ ذلك = تضييقُ القراءة العامة، وهو بندٌ مؤجَّلٌ على مستوى المنصّة كلِّها
+   (المرحلة ٣ في `docs/deep-review-2026-08.md`) يمسّ كلَّ المجموعات لا هذه وحدَها.
+   والبلوكُ الصارمُ للقراءة مكتوبٌ في `firestore.rules` جاهزاً ليعمل يومَ تُضيَّق
+   العامة، ويحرسه فحصٌ يرصد اللحظةَ التي ينقلب فيها الحالُ.
+
+   ── الإشعاراتُ مؤجَّلةٌ بقرار المالك ──
+   لا إرسالَ في هذه النسخة. والحقولُ التي تحتاجها قائمةٌ من الآن (`createdAt` ·
+   `due` · `createdByUser` · `batchId` · `notifiedAt`) حتى لا تُعاد هيكلةُ البيانات
+   حين تُفعَّل: تجميعةُ إرسالٍ واحدة (`batchId`) تُنتج إشعاراً واحداً «كلّفك فلانٌ
+   بـ٥ مهامّ» بدل خمسةِ تنبيهاتٍ متتالية تدفع الموظف لإغلاق الإشعارات.
+
+   ── قيدٌ مقصود: لا دردشةَ عامة ──
+   الكلامُ كلُّه **داخل المهمّة**. لا رسائلَ مباشرة ولا قناةَ عامة. بلا هذا القيد
+   تتحوّل الأداةُ واتساب ثانياً فتمتلئ كلاماً وتُهجَر.
+
+   ── صمّامُ «ليست من اختصاصي» ──
+   ولأنّ **أيَّ موظفٍ يكلّف أيَّ زميل** (قرارُ المالك)، فالمكلَّفُ يملك ردَّ المهمّة
+   بسببٍ مكتوب. بدونه يبقى تكليفٌ لا يخصّه في قائمته أحمرَ متأخّراً وهو غيرُ مسؤولٍ
+   عنه — فتصير القائمةُ كذبةً يتوقّف الناسُ عن قراءتها.
+
+   ── خدمات النواة المقروءة بالاسم ──
+   `db` · `firebase` · `esc` · `_jsq` · `toast` · `currentUser` · `USERS` ·
+   `logAudit` · `showPage` · `IS_DEV`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function(){
+  "use strict";
+
+  var MODULE_BUILD = "v18.9.3005";
+
+  function COLL(){
+    var dev=false;
+    try{ dev=(typeof IS_DEV!=="undefined" && IS_DEV); }catch(e){}
+    return dev ? "staff_tasks_dev" : "staff_tasks";
+  }
+
+  /* ════════ الحالة المحلّية ════════ */
+  var _tasks   = [];      // ما وصل من Firestore (مقصورٌ على ما أنا طرفٌ فيه)
+  var _unsub   = null;
+  var _loaded  = false;
+  var _connIssue = false;
+  var _tab     = "mine";  // mine | sent | notes | done | all
+  var _openId  = null;    // المهمّة المفتوحة تفصيلاً
+  var _draft   = [];      // مسوّدةُ التكليف السريع
+  var _draftTo = "";      // اسمُ دخول المكلَّف في المسوّدة
+  var _cssDone = false;
+
+  /* ════════ هوية المستخدم ════════
+     اسمُ الدخول هو المفتاح في كل مكان. الاسمُ المعروض للعرض فقط. */
+  function _me(){
+    try{ return (typeof currentUser!=="undefined" && currentUser && currentUser.user) ? currentUser.user : ""; }
+    catch(e){ return ""; }
+  }
+  function _myName(){
+    try{ return (typeof currentUser!=="undefined" && currentUser && (currentUser.name||currentUser.user)) || ""; }
+    catch(e){ return ""; }
+  }
+  function _myRole(){
+    try{ return (typeof currentUser!=="undefined" && currentUser && currentUser.role) ? currentUser.role : ""; }
+    catch(e){ return ""; }
+  }
+  function _isAdmin(){ return _myRole()==="admin"; }
+  function _users(){
+    try{ return (typeof USERS!=="undefined" && Array.isArray(USERS)) ? USERS : []; }
+    catch(e){ return []; }
+  }
+  function _nameOf(login){
+    var u=_users().filter(function(x){ return x.user===login; })[0];
+    return (u && u.name) ? u.name : (login||"—");
+  }
+  function _canView(){ return !!_me(); }
+
+  /* ════════ دوالٌّ نقيّة — تُفحص في hail-tests بلا متصفّح ════════ */
+
+  /* تفكيكُ لصقةٍ متعدّدةِ الأسطر إلى مهامّ مستقلّة.
+     المديرُ ينسخ قائمةً جاهزةً من الواتساب أو من الملاحظات، فتنفكّ سطراً سطراً.
+     ويُنظَّف كلُّ سطرٍ من ترقيمٍ أو شرطةٍ في أوّله — «١. راجع العقد» و«- راجع العقد»
+     و«راجع العقد» مهمّةٌ واحدةٌ نصُّها واحد، وإلا حُفظ الترقيمُ داخل العنوان فصار
+     الفرزُ والبحثُ عليه عبثاً. */
+  function _parseBulk(text){
+    if(typeof text!=="string" || !text) return [];
+    return text.split(/\r?\n/)
+      .map(function(l){
+        return String(l)
+          .replace(/^[\s‏‎]*(?:[-–—*•]|\(?\d+\)?[.)：:]|[٠-٩]+[.)：:])\s*/, "")
+          .trim();
+      })
+      .filter(function(l){ return l.length>0; });
+  }
+
+  /* المشاركون: المُنشئ + المكلَّف + المضافون — بلا تكرارٍ وبلا فراغ.
+     دالةٌ واحدةٌ تبنيها في كلّ المسارات (إنشاءٌ · إضافةُ مشارك · ردٌّ) فلا يفترق
+     مسارٌ عن آخر فيُنتج مستنداً بمشاركين ناقصين لا يراه صاحبُه. */
+  function _participantsOf(t){
+    var out=[], seen={};
+    [ (t&&t.createdByUser)||"", (t&&t.assignedToUser)||"" ]
+      .concat(Array.isArray(t&&t.shared) ? t.shared : [])
+      .forEach(function(u){
+        u=String(u||"").trim();
+        if(!u || seen[u]) return;
+        seen[u]=true; out.push(u);
+      });
+    return out;
+  }
+
+  /* هل يرى فلانٌ هذه المهمّة؟ الأدمن يرى الكلّ، وغيرُه إن كان مشاركاً. */
+  function _canSee(t, login, role){
+    if(role==="admin") return true;
+    if(!login) return false;
+    return _participantsOf(t).indexOf(login) !== -1;
+  }
+
+  /* مَن يضيف مشاركاً: مُنشئُ المهمّة أو الأدمن — لا كلُّ مشارك.
+     لو ملكها كلُّ مشارك لأمكن لمن أُضيف أن يُدخل الغرفةَ من شاء، فتُفتح غرفةٌ
+     أنشأها المديرُ مغلقةً على مَن لم يخترْه هو. */
+  function _canEditParticipants(t, login, role){
+    if(role==="admin") return true;
+    return !!login && (t&&t.createdByUser)===login;
+  }
+
+  /* حالةُ الموعد — أساسُ اللون في البطاقة.
+     المقارنةُ بنصّ ISO (YYYY-MM-DD) لا بكائن Date: الأخيرُ يفسّر التاريخ بتوقيت
+     الجهاز فينزلق يوماً كاملاً على جهازٍ بمنطقةٍ زمنيةٍ أخرى — والمتأخّرُ يوماً
+     ليس متأخّراً. */
+  function _dueState(t, todayISO){
+    if(!t || t.status==="done") return "none";
+    var d=String((t&&t.due)||"");
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return "none";
+    var today=String(todayISO||"");
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(today)) return "none";
+    if(d < today)  return "late";
+    if(d === today) return "due";
+    return _daysBetween(today, d) <= 1 ? "soon" : "none";
+  }
+  function _daysBetween(aISO, bISO){
+    var a=Date.UTC(+aISO.slice(0,4), +aISO.slice(5,7)-1, +aISO.slice(8,10));
+    var b=Date.UTC(+bISO.slice(0,4), +bISO.slice(5,7)-1, +bISO.slice(8,10));
+    return Math.round((b-a)/86400000);
+  }
+  function _isOverdue(t, todayISO){ return _dueState(t, todayISO)==="late"; }
+
+  /* توزيعُ القائمة على الخانات — مصدرُ الحقيقة الوحيد للتبويب والعدّاد معاً،
+     فلا يقول الشريطُ «٣» وتعرض الشاشةُ اثنتين. */
+  function _splitTabs(list, login){
+    var r={ mine:[], sent:[], notes:[], done:[] };
+    (Array.isArray(list)?list:[]).forEach(function(t){
+      if(!t) return;
+      if(t.status==="done"){ r.done.push(t); return; }
+      if(t.kind==="note" && t.createdByUser===login && !t.assignedToUser){ r.notes.push(t); return; }
+      if(t.assignedToUser===login) r.mine.push(t);
+      if(t.createdByUser===login && t.assignedToUser!==login) r.sent.push(t);
+    });
+    return r;
+  }
+
+  /* عدّادُ الشريط الجانبي: المفتوحُ المكلَّفُ به أنا — لا ما كلّفتُ به غيري.
+     الرقمُ الأحمر التزامٌ عليّ؛ لو عدَّ ما أرسلتُه لصار الرقمُ لا يهبط بعملي أنا. */
+  function _countOpen(list, login){
+    return (Array.isArray(list)?list:[]).filter(function(t){
+      return t && t.status!=="done" && t.assignedToUser===login;
+    }).length;
+  }
+
+  /* الترتيب: المتأخّرُ أوّلاً، ثمّ الأقربُ موعداً، ثمّ بلا موعد، ثمّ الأحدثُ إنشاءً. */
+  function _sortTasks(list, todayISO){
+    var rank={ late:0, due:1, soon:2, none:3 };
+    return (Array.isArray(list)?list.slice():[]).sort(function(a,b){
+      var ra=rank[_dueState(a,todayISO)], rb=rank[_dueState(b,todayISO)];
+      if(ra!==rb) return ra-rb;
+      var da=String((a&&a.due)||"9999-99-99"), dbv=String((b&&b.due)||"9999-99-99");
+      if(da!==dbv) return da<dbv ? -1 : 1;
+      return _ms(b)-_ms(a);
+    });
+  }
+  function _ms(t){
+    try{
+      var c=t&&t.createdAt;
+      if(!c) return 0;
+      if(typeof c.toMillis==="function") return c.toMillis();
+      if(c.seconds) return c.seconds*1000;
+      return 0;
+    }catch(e){ return 0; }
+  }
+
+  function _todayISO(){
+    var d=new Date();
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  }
+
+  /* ════════ المزامنة ════════ */
+  function startSync(){
+    if(typeof db==="undefined" || !db) return;
+    if(!_canView()) return;
+    if(_unsub) return;                     // idempotent
+    var me=_me();
+    // الأدمن يستعلم المجموعةَ كاملة؛ وغيرُه **لا يستعلم إلا ما هو طرفٌ فيه**.
+    var q;
+    try{
+      q = _isAdmin() ? db.collection(COLL())
+                     : db.collection(COLL()).where("participants","array-contains", me);
+    }catch(e){ return; }
+    try{
+      q.get().then(function(s){ if(!_loaded) _applySnap(s); }).catch(function(){});
+    }catch(e){}
+    _unsub = q.onSnapshot(_applySnap, function(e){
+      console.warn("staff-tasks sync error:", e);
+      _loaded=true; _connIssue=true; _rerender(); _refreshNav();
+    });
+    setTimeout(function(){
+      if(_loaded) return;
+      _loaded=true; _connIssue=true; _rerender(); _refreshNav();
+    }, 8000);
+  }
+  function stopSync(){
+    try{ if(_unsub) _unsub(); }catch(e){}
+    _unsub=null; _loaded=false; _connIssue=false; _tasks=[];
+  }
+  function _applySnap(snap){
+    var out=[];
+    snap.forEach(function(d){
+      var v=d.data()||{}; v.id=d.id; out.push(v);
+    });
+    _tasks=out; _loaded=true; _connIssue=false;
+    _rerender(); _refreshNav();
+  }
+  function _visible(){
+    var me=_me(), role=_myRole();
+    return _tasks.filter(function(t){ return _canSee(t, me, role); });
+  }
+
+  /* ════════ شارةُ الشريط الجانبي ════════ */
+  function refreshNav(){ _refreshNav(); }
+  function _refreshNav(){
+    try{
+      var btn=document.getElementById("nav-staff-tasks-btn");
+      if(btn) btn.style.display = _canView() ? "" : "none";
+      var b=document.getElementById("nav-staff-tasks-badge");
+      if(!b) return;
+      var n=_countOpen(_visible(), _me());
+      if(n>0){ b.textContent=String(n); b.style.display=""; }
+      else { b.style.display="none"; }
+    }catch(e){}
+  }
+
+  /* ════════ الكتابة ════════ */
+  function _stamp(){
+    try{ return firebase.firestore.FieldValue.serverTimestamp(); }catch(e){ return new Date(); }
+  }
+  function _newDoc(o){
+    var base={
+      title: String(o.title||"").trim(),
+      body:  String(o.body||"").trim(),
+      kind:  o.assignedToUser ? "task" : "note",
+      status:"open",
+      due:   String(o.due||""),
+      priority: o.priority==="high" ? "high" : "normal",
+      createdBy: _myName(),
+      createdByUser: _me(),
+      assignedToUser: String(o.assignedToUser||""),
+      assignedToName: o.assignedToUser ? _nameOf(o.assignedToUser) : "",
+      shared: [],
+      comments: [],
+      batchId: String(o.batchId||""),
+      notifiedAt: null,                 // محجوزٌ للإشعارات المؤجَّلة
+      createdAt: _stamp(),
+      updatedAt: _stamp()
+    };
+    base.participants=_participantsOf(base);
+    return base;
+  }
+
+  /* إرسالُ المسوّدة كاملةً — دفعةٌ واحدةٌ بمعرّفٍ واحد.
+     كتابةُ الدفعة عبر `writeBatch` لا حلقةَ `add`: خمسُ كتاباتٍ متتاليةٍ قد تنجح
+     ثلاثٌ منها ثمّ تنقطع الشبكة، فيستلم الموظفُ ثلاثاً من خمسٍ ولا يعرف أحدٌ أنّ
+     اثنتين ضاعتا. الدفعةُ تنجح كاملةً أو تفشل كاملةً. */
+  function sendDraft(){
+    if(!_draft.length){ _t("لا توجد مهامٌّ في القائمة","warn"); return; }
+    if(typeof db==="undefined" || !db){ _t("لا اتصال بقاعدة البيانات","warn"); return; }
+    var bid = "B"+Date.now()+"-"+Math.random().toString(36).slice(2,7);
+    var to  = _draftTo;
+    var rows=_draft.slice();
+    var batch;
+    try{ batch=db.batch(); }catch(e){ _t("تعذّر التحضير","warn"); return; }
+    rows.forEach(function(r){
+      var ref=db.collection(COLL()).doc();
+      batch.set(ref, _newDoc({ title:r.title, due:r.due, priority:r.priority, assignedToUser:to, batchId:bid }));
+    });
+    batch.commit().then(function(){
+      try{ logAudit("staff_tasks_create", rows.length+" مهمّة → "+(to?_nameOf(to):"ملاحظات شخصية")); }catch(e){}
+      _t("أُرسلت "+rows.length+" مهمّة"+(to?(" إلى "+_nameOf(to)):""), "ok");
+      _draft=[]; _draftTo=""; _rerender();
+    }).catch(function(e){
+      console.warn("staff-tasks send failed:", e);
+      _t("تعذّر الإرسال — لم تُحفظ أيُّ مهمّة","warn");
+    });
+  }
+
+  function _update(id, patch, okMsg){
+    if(typeof db==="undefined" || !db) return Promise.reject();
+    patch.updatedAt=_stamp();
+    return db.collection(COLL()).doc(id).update(patch).then(function(){
+      if(okMsg) _t(okMsg,"ok");
+    }).catch(function(e){
+      console.warn("staff-tasks update failed:", e);
+      _t("تعذّر الحفظ","warn");
+      throw e;
+    });
+  }
+
+  function markDone(id){
+    var t=byId(id); if(!t) return;
+    _update(id, { status:"done", doneAt:_stamp(), doneByUser:_me(), doneByName:_myName() }, "تمّ الإنجاز");
+    try{ logAudit("staff_task_done", t.title||id); }catch(e){}
+  }
+  function reopen(id){
+    _update(id, { status:"open", doneAt:null, doneByUser:"", doneByName:"" }, "أُعيدت المهمّة");
+  }
+
+  /* الردّ: «ليست من اختصاصي» — لا تُحذف بل تعود للمرسِل بسببٍ ظاهر. */
+  function returnTask(id){
+    var t=byId(id); if(!t) return;
+    var reason=window.prompt("سببُ الردّ (يظهر للمرسِل):","");
+    if(reason===null) return;
+    reason=String(reason).trim();
+    if(!reason){ _t("السببُ مطلوب","warn"); return; }
+    _update(id, {
+      status:"returned",
+      returnedReason:reason,
+      returnedByUser:_me(),
+      returnedByName:_myName(),
+      returnedAt:_stamp()
+    }, "رُدّت المهمّة إلى المرسِل");
+    try{ logAudit("staff_task_returned", (t.title||id)+" — "+reason); }catch(e){}
+  }
+  function acceptBack(id){
+    _update(id, { status:"open", returnedReason:"", returnedByUser:"", returnedByName:"" }, "أُعيد فتح المهمّة");
+  }
+
+  function addComment(id){
+    var el=document.getElementById("st-cmt-"+id);
+    if(!el) return;
+    var txt=String(el.value||"").trim();
+    if(!txt){ _t("اكتب شيئاً أوّلاً","warn"); return; }
+    if(typeof db==="undefined" || !db) return;
+    var entry={ user:_me(), name:_myName(), text:txt, at:new Date().toISOString() };
+    // arrayUnion لا كتابةُ المصفوفة كاملة: مشاركٌ آخر قد يكون علّق في الأثناء،
+    // وكتابةُ نسختي القديمة تمحو تعليقَه.
+    var u;
+    try{ u=firebase.firestore.FieldValue.arrayUnion(entry); }catch(e){ return; }
+    el.value="";
+    _update(id, { comments:u }).catch(function(){});
+  }
+
+  /* إضافةُ مشارك — يملكها المُنشئ وحدَه، وتُصاحبها مصارحةٌ صريحة.
+     المُضافُ سيقرأ المحادثةَ من أوّلها، فيُنبَّه المُنشئ قبل الفعل لا بعدَه. */
+  function shareTask(id){
+    var t=byId(id); if(!t) return;
+    if(!_canEditParticipants(t,_me(),_myRole())){ _t("إضافةُ مشاركٍ لمُنشئ المهمّة","warn"); return; }
+    var sel=document.getElementById("st-share-"+id);
+    if(!sel) return;
+    var who=String(sel.value||"");
+    if(!who){ _t("اختر موظفاً","warn"); return; }
+    if(_participantsOf(t).indexOf(who)!==-1){ _t("مشاركٌ أصلاً","warn"); return; }
+    if(!window.confirm("سيطّلع "+_nameOf(who)+" على كامل تفاصيل المهمّة والمحادثة السابقة.\n\nمتابعة؟")) return;
+    var shared=(Array.isArray(t.shared)?t.shared.slice():[]);
+    shared.push(who);
+    var next=Object.assign({}, t, { shared:shared });
+    _update(id, { shared:shared, participants:_participantsOf(next) }, "أُضيف "+_nameOf(who));
+    try{ logAudit("staff_task_shared", (t.title||id)+" → "+_nameOf(who)); }catch(e){}
+  }
+
+  function removeTask(id){
+    var t=byId(id); if(!t) return;
+    if(!(_isAdmin() || t.createdByUser===_me())){ _t("الحذفُ لمُنشئ المهمّة","warn"); return; }
+    if(!window.confirm("حذفُ «"+(t.title||"")+"» نهائياً؟")) return;
+    if(typeof db==="undefined" || !db) return;
+    db.collection(COLL()).doc(id).delete().then(function(){
+      _openId=null; _t("حُذفت","ok");
+      try{ logAudit("staff_task_delete", t.title||id); }catch(e){}
+    }).catch(function(){ _t("تعذّر الحذف","warn"); });
+  }
+
+  function byId(id){ return _tasks.filter(function(t){ return t.id===id; })[0] || null; }
+
+  /* ════════ المسوّدة (التكليف السريع) ════════ */
+  function draftPick(v){ _draftTo=String(v||""); _rerender(); }
+  function draftAdd(){
+    var el=document.getElementById("st-quick-input");
+    if(!el) return;
+    var raw=String(el.value||"");
+    var rows=_parseBulk(raw);
+    if(!rows.length){ el.value=""; return; }
+    rows.forEach(function(title){ _draft.push({ title:title, due:"", priority:"normal" }); });
+    el.value="";
+    _rerender();
+    // السطرُ يبقى مركَّزاً: يكتب التاليةَ بلا رفعِ يدٍ عن لوحة المفاتيح
+    setTimeout(function(){ var e2=document.getElementById("st-quick-input"); if(e2) e2.focus(); }, 0);
+  }
+  function draftKey(ev){
+    if(ev && (ev.key==="Enter" || ev.keyCode===13)){ ev.preventDefault(); draftAdd(); }
+  }
+  /* لصقُ قائمةٍ جاهزةٍ من الجوّال — يُقرأ من الحافظة لا من قيمة الحقل.
+     السببُ أنّ `<input type="text">` **حقلُ سطرٍ واحد**: المتصفّحُ يطوي أسطرَ اللصقة
+     إلى سطرٍ واحدٍ قبل أن يراها أيُّ كود، فقائمةُ خمسِ مهامٍّ تصير مهمّةً واحدةً
+     عنوانُها الخمسةُ ملتصقة. فلا سبيلَ إلى الأسطر إلا اعتراضُ حدث `paste` نفسِه.
+     (رصده فحصُ المتصفّح؛ ولم يكن ليظهر في فحصٍ يستدعي `_parseBulk` مباشرةً — تلك
+     تُثبت أنّ التفكيكَ صحيحٌ لا أنّ النصَّ يصل إليه أصلاً.)
+     ولصقةُ السطر الواحد تمرّ كما هي: لا نصادر سلوكاً طبيعياً بلا سبب. */
+  function draftPaste(ev){
+    var txt="";
+    try{ txt=((ev && ev.clipboardData) || window.clipboardData).getData("text") || ""; }catch(e){ return; }
+    if(!/[\r\n]/.test(txt)) return;
+    try{ ev.preventDefault(); }catch(e){}
+    var rows=_parseBulk(txt);
+    if(!rows.length) return;
+    rows.forEach(function(title){ _draft.push({ title:title, due:"", priority:"normal" }); });
+    var el=document.getElementById("st-quick-input");
+    if(el) el.value="";
+    _rerender();
+    setTimeout(function(){ var e2=document.getElementById("st-quick-input"); if(e2) e2.focus(); }, 0);
+  }
+  function draftDrop(i){ _draft.splice(i,1); _rerender(); }
+  function draftDue(i,v){ if(_draft[i]) _draft[i].due=String(v||""); }
+  function draftPrio(i,v){ if(_draft[i]) _draft[i].priority = v==="high"?"high":"normal"; _rerender(); }
+  function draftDueAll(v){
+    v=String(v||"");
+    _draft.forEach(function(r){ r.due=v; });
+    _rerender();
+  }
+  function draftClear(){ _draft=[]; _rerender(); }
+
+  /* ════════ التنقّل ════════ */
+  function list(){ try{ showPage("staff-tasks"); }catch(e){} }
+  function tab(t){ _tab=t; _openId=null; if(t==="all" && _isAdmin()){ try{ logAudit("staff_tasks_view_all","اطّلاعُ الإدارة على كل المهامّ"); }catch(e){} } _rerender(); }
+  function open(id){ _openId=id; _rerender(); }
+  function back(){ _openId=null; _rerender(); }
+
+  function _t(m,k){ try{ toast(m,k); }catch(e){} }
+  function _e(s){ try{ return esc(s==null?"":String(s)); }catch(e){ return String(s==null?"":s); } }
+  function _q(s){ try{ return _jsq(s==null?"":String(s)); }catch(e){ return String(s==null?"":s).replace(/'/g,"\\'"); } }
+
+  /* ════════ الأنماط ════════
+     تُحقن مرّةً واحدةً وقتَ أوّل رسم، ومحصورةٌ ببادئة `st-` وبـ`#page-staff-tasks`
+     فلا تنزلق قاعدةٌ منها على شاشةٍ أخرى (خمسُ وحداتٍ تحقن <style> وقتَ التشغيل،
+     وترتيبُ التتالي بينها لا يُضمن). */
+  function _injectCSS(){
+    if(_cssDone) return; _cssDone=true;
+    var css=
+      '#page-staff-tasks{direction:rtl}'+
+      '.st-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}'+
+      '.st-tab{padding:8px 14px;border-radius:10px;border:1px solid var(--border,#2a3550);background:transparent;color:var(--muted,#8b98b8);cursor:pointer;font:inherit;font-size:13px;white-space:nowrap}'+
+      '.st-tab.on{background:var(--accent,#2563eb);color:#fff;border-color:transparent}'+
+      '.st-tab .n{display:inline-block;min-width:18px;padding:0 5px;margin-inline-start:6px;border-radius:9px;background:rgba(255,255,255,.16);font-size:11px}'+
+      '.st-quick{border:1px solid var(--border,#2a3550);border-radius:14px;padding:14px;margin-bottom:16px}'+
+      '.st-quick-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}'+
+      '.st-quick input[type=text],.st-quick select,.st-quick input[type=date]{padding:9px 11px;border-radius:9px;border:1px solid var(--border,#2a3550);background:var(--bg2,#131a2b);color:inherit;font:inherit;font-size:13px}'+
+      '.st-quick input[type=text]{flex:1;min-width:220px}'+
+      '.st-hint{font-size:11px;color:var(--muted,#8b98b8);margin-top:7px;line-height:1.7}'+
+      '.st-draft{margin-top:12px;display:flex;flex-direction:column;gap:6px}'+
+      '.st-drow{display:flex;gap:7px;align-items:center;background:var(--bg2,#131a2b);border-radius:9px;padding:7px 10px;flex-wrap:wrap}'+
+      '.st-drow .t{flex:1;min-width:150px;font-size:13px}'+
+      '.st-card{border:1px solid var(--border,#2a3550);border-radius:12px;padding:12px 14px;margin-bottom:9px;cursor:pointer;transition:border-color .15s}'+
+      '.st-card:hover{border-color:var(--accent,#2563eb)}'+
+      '.st-card.late{border-inline-start:4px solid #ef4444}'+
+      '.st-card.due{border-inline-start:4px solid #f59e0b}'+
+      '.st-card.soon{border-inline-start:4px solid #eab308}'+
+      '.st-card.done{opacity:.55}'+
+      '.st-card.returned{border-inline-start:4px solid #a855f7}'+
+      '.st-ttl{font-size:14px;font-weight:600;margin-bottom:5px;line-height:1.5}'+
+      '.st-meta{font-size:11px;color:var(--muted,#8b98b8);display:flex;gap:12px;flex-wrap:wrap}'+
+      '.st-pill{display:inline-block;padding:1px 8px;border-radius:8px;font-size:10px;background:rgba(148,163,184,.16)}'+
+      '.st-pill.hi{background:rgba(239,68,68,.18);color:#fca5a5}'+
+      '.st-pill.rt{background:rgba(168,85,247,.18);color:#d8b4fe}'+
+      '.st-empty{text-align:center;padding:44px 18px;color:var(--muted,#8b98b8);font-size:13px;line-height:1.9}'+
+      '.st-detail textarea,.st-detail input[type=text]{width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border,#2a3550);background:var(--bg2,#131a2b);color:inherit;font:inherit;font-size:13px}'+
+      '.st-cmt{background:var(--bg2,#131a2b);border-radius:9px;padding:9px 11px;margin-bottom:7px}'+
+      '.st-cmt .who{font-size:11px;color:var(--muted,#8b98b8);margin-bottom:3px}'+
+      '.st-cmt .txt{font-size:13px;line-height:1.7;white-space:pre-wrap}'+
+      '.st-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}'+
+      '.st-who{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}'+
+      '.st-who span{font-size:11px;padding:3px 9px;border-radius:8px;background:rgba(148,163,184,.16)}'+
+      '.st-spin{width:22px;height:22px;border:3px solid var(--border,#2a3550);border-top-color:var(--accent,#2563eb);border-radius:50%;animation:st-rot .8s linear infinite;margin:0 auto 12px}'+
+      '@keyframes st-rot{to{transform:rotate(360deg)}}';
+    try{
+      var s=document.createElement("style");
+      s.id="st-styles"; s.textContent=css;
+      document.head.appendChild(s);
+    }catch(e){}
+  }
+
+  /* ════════ الرسم ════════ */
+  function _rerender(){
+    var pg=document.getElementById("page-staff-tasks");
+    if(pg && pg.classList.contains("active")) render();
+  }
+
+  function render(){
+    var host=document.getElementById("page-staff-tasks");
+    if(!host) return;
+    _injectCSS();
+    _refreshNav();
+    if(!_canView()){
+      host.innerHTML='<div class="card"><div class="st-empty">🔒 سجّل الدخول لعرض مهامّك.</div></div>';
+      return;
+    }
+    startSync();
+    if(!_loaded){
+      host.innerHTML=_hero()+'<div class="card"><div class="st-empty"><div class="st-spin"></div>جارٍ تحميل المهامّ…</div></div>';
+      return;
+    }
+    if(_connIssue && !_tasks.length){
+      host.innerHTML=_hero()+'<div class="card"><div class="st-empty">⚠ تعذّر الاتصال بقاعدة البيانات.<br><button class="btn" onclick="staffTasks.retry()">إعادة المحاولة</button></div></div>';
+      return;
+    }
+    if(_openId){
+      var t=byId(_openId);
+      if(!t){ _openId=null; return render(); }
+      host.innerHTML=_hero()+_detailHtml(t);
+      return;
+    }
+    host.innerHTML=_hero()+_quickHtml()+_tabsHtml()+'<div class="card">'+_listHtml()+'</div>';
+  }
+
+  function _hero(){
+    return '<div class="page-hero">'+
+      '<div class="page-hero-titles">'+
+        '<div class="page-hero-title"><span class="ph-ico">📝</span> المهامّ والملاحظات</div>'+
+        '<div class="page-hero-sub">تكليفاتٌ وتذكيراتٌ بينك وبين زملائك — كلُّ مهمّةٍ يراها أطرافُها وحدَهم.</div>'+
+      '</div><div class="page-hero-actions"></div></div>';
+  }
+
+  function _tabsHtml(){
+    var me=_me(), s=_splitTabs(_visible(), me);
+    function tb(k,label,n){
+      return '<button class="st-tab'+(_tab===k?" on":"")+'" onclick="staffTasks.tab(\''+k+'\')">'+
+        _e(label)+(n>0?'<span class="n">'+n+'</span>':'')+'</button>';
+    }
+    return '<div class="st-tabs">'+
+      tb("mine","مهامّي",s.mine.length)+
+      tb("sent","كلّفتُ بها",s.sent.length)+
+      tb("notes","ملاحظاتي",s.notes.length)+
+      tb("done","المنجَزة",0)+
+      (_isAdmin()? tb("all","كل المهامّ (إدارة)",0) : "")+
+    '</div>';
+  }
+
+  function _quickHtml(){
+    var opts='<option value="">— ملاحظةٌ لنفسي (بلا تكليف) —</option>'+
+      _users().map(function(u){
+        return '<option value="'+_e(u.user)+'"'+(_draftTo===u.user?" selected":"")+'>'+_e(u.name||u.user)+'</option>';
+      }).join("");
+    var draft=_draft.map(function(r,i){
+      return '<div class="st-drow">'+
+        '<span class="t">'+_e(r.title)+'</span>'+
+        '<input type="date" value="'+_e(r.due)+'" onchange="staffTasks.draftDue('+i+',this.value)">'+
+        '<select onchange="staffTasks.draftPrio('+i+',this.value)">'+
+          '<option value="normal"'+(r.priority!=="high"?" selected":"")+'>عادية</option>'+
+          '<option value="high"'+(r.priority==="high"?" selected":"")+'>مهمّة</option>'+
+        '</select>'+
+        '<button class="btn btn-sm" onclick="staffTasks.draftDrop('+i+')">✕</button>'+
+      '</div>';
+    }).join("");
+    return '<div class="st-quick">'+
+      '<div class="st-quick-row">'+
+        '<select onchange="staffTasks.draftPick(this.value)" style="min-width:190px">'+opts+'</select>'+
+        '<input type="text" id="st-quick-input" placeholder="اكتب المهمّة ثمّ Enter…" onkeydown="staffTasks.draftKey(event)" onpaste="staffTasks.draftPaste(event)">'+
+        '<button class="btn" onclick="staffTasks.draftAdd()">إضافة</button>'+
+      '</div>'+
+      '<div class="st-hint">اكتب المهمّة واضغط <b>Enter</b> — تنزل تحت والسطرُ يبقى جاهزاً للتالية. '+
+        'أو الصق قائمةً جاهزةً من الجوّال: كلُّ سطرٍ يصير مهمّةً مستقلّة.</div>'+
+      (_draft.length ? (
+        '<div class="st-draft">'+draft+'</div>'+
+        '<div class="st-quick-row" style="margin-top:11px">'+
+          '<span style="font-size:12px;color:var(--muted,#8b98b8)">موعدٌ موحّد للكلّ:</span>'+
+          '<input type="date" onchange="staffTasks.draftDueAll(this.value)">'+
+          '<button class="btn btn-primary" onclick="staffTasks.sendDraft()">إرسال '+_draft.length+' مهمّة'+
+            (_draftTo? (" إلى "+_e(_nameOf(_draftTo))) : "")+'</button>'+
+          '<button class="btn btn-sm" onclick="staffTasks.draftClear()">مسح القائمة</button>'+
+        '</div>'
+      ) : "")+
+    '</div>';
+  }
+
+  function _listHtml(){
+    var me=_me(), today=_todayISO(), rows;
+    if(_tab==="all" && _isAdmin()){
+      rows=_sortTasks(_tasks.filter(function(t){ return t.status!=="done"; }), today);
+    } else {
+      var s=_splitTabs(_visible(), me);
+      rows=_sortTasks(s[_tab]||[], today);
+    }
+    if(!rows.length) return '<div class="st-empty">'+_e(_emptyMsg())+'</div>';
+    return rows.map(function(t){ return _cardHtml(t, today); }).join("");
+  }
+
+  function _emptyMsg(){
+    return _tab==="mine"  ? "لا مهامَّ عليك الآن. 🎉"
+         : _tab==="sent"  ? "لم تُكلّف أحداً بشيءٍ بعد — اكتب مهمّةً في الأعلى واختر الموظف."
+         : _tab==="notes" ? "لا ملاحظات. اكتب تذكيراً لنفسك من الأعلى بلا اختيار موظف."
+         : _tab==="all"   ? "لا مهامَّ مفتوحةً في النظام."
+         : "لا مهامَّ منجَزةً بعد.";
+  }
+
+  function _cardHtml(t, today){
+    var st=_dueState(t,today);
+    var cls="st-card "+(t.status==="done"?"done":(t.status==="returned"?"returned":st));
+    var who = t.assignedToUser
+      ? (t.assignedToUser===_me() ? ("من: "+_nameOf(t.createdByUser)) : ("إلى: "+_nameOf(t.assignedToUser)))
+      : "ملاحظةٌ شخصية";
+    var dueTxt = t.due ? (st==="late" ? ("متأخّرة — "+t.due) : ("الموعد: "+t.due)) : "بلا موعد";
+    var extra=(Array.isArray(t.shared)&&t.shared.length) ? ('<span class="st-pill">+'+t.shared.length+' مشارك</span>') : "";
+    var cn=(Array.isArray(t.comments)&&t.comments.length) ? ('<span>💬 '+t.comments.length+'</span>') : "";
+    return '<div class="'+cls+'" onclick="staffTasks.open(\''+_q(t.id)+'\')">'+
+      '<div class="st-ttl">'+_e(t.title)+'</div>'+
+      '<div class="st-meta">'+
+        '<span>'+_e(who)+'</span>'+
+        '<span>'+_e(dueTxt)+'</span>'+
+        (t.priority==="high"?'<span class="st-pill hi">مهمّة</span>':"")+
+        (t.status==="returned"?'<span class="st-pill rt">مردودة</span>':"")+
+        extra+cn+
+      '</div>'+
+    '</div>';
+  }
+
+  function _detailHtml(t){
+    var me=_me(), today=_todayISO();
+    var mine   = t.assignedToUser===me;
+    var owner  = t.createdByUser===me;
+    var canShare=_canEditParticipants(t,me,_myRole());
+    var parts=_participantsOf(t).map(function(u){ return '<span>'+_e(_nameOf(u))+(u===t.createdByUser?" (المُنشئ)":"")+'</span>'; }).join("");
+    var cmts=(Array.isArray(t.comments)?t.comments:[]).slice().sort(function(a,b){
+      return String(a.at||"")<String(b.at||"") ? -1 : 1;
+    }).map(function(c){
+      return '<div class="st-cmt"><div class="who">'+_e(c.name||c.user)+' · '+_e(String(c.at||"").slice(0,16).replace("T"," "))+'</div>'+
+             '<div class="txt">'+_e(c.text)+'</div></div>';
+    }).join("") || '<div class="st-hint">لا ملاحظاتٍ بعد.</div>';
+
+    var shareOpts=_users().filter(function(u){ return _participantsOf(t).indexOf(u.user)===-1; })
+      .map(function(u){ return '<option value="'+_e(u.user)+'">'+_e(u.name||u.user)+'</option>'; }).join("");
+
+    var acts="";
+    if(t.status!=="done" && (mine||owner||_isAdmin())) acts+='<button class="btn btn-primary" onclick="staffTasks.markDone(\''+_q(t.id)+'\')">✓ تمّ الإنجاز</button>';
+    if(t.status==="done"  && (mine||owner||_isAdmin())) acts+='<button class="btn" onclick="staffTasks.reopen(\''+_q(t.id)+'\')">↺ إعادة فتح</button>';
+    if(t.status==="open" && mine && !owner)             acts+='<button class="btn" onclick="staffTasks.returnTask(\''+_q(t.id)+'\')">↩ ليست من اختصاصي</button>';
+    if(t.status==="returned" && owner)                  acts+='<button class="btn" onclick="staffTasks.acceptBack(\''+_q(t.id)+'\')">↺ إعادة فتحها</button>';
+    if(owner||_isAdmin())                               acts+='<button class="btn btn-danger" onclick="staffTasks.removeTask(\''+_q(t.id)+'\')">🗑 حذف</button>';
+
+    return '<div class="card st-detail">'+
+      '<button class="btn btn-sm" onclick="staffTasks.back()">← رجوع</button>'+
+      '<h3 style="margin:13px 0 6px;font-size:17px;line-height:1.6">'+_e(t.title)+'</h3>'+
+      '<div class="st-meta" style="margin-bottom:11px">'+
+        '<span>أنشأها: '+_e(_nameOf(t.createdByUser))+'</span>'+
+        (t.assignedToUser?('<span>المكلَّف: '+_e(_nameOf(t.assignedToUser))+'</span>'):'<span>ملاحظةٌ شخصية</span>')+
+        '<span>'+(t.due?('الموعد: '+_e(t.due)+(_isOverdue(t,today)?" (متأخّرة)":"")):'بلا موعد')+'</span>'+
+        (t.priority==="high"?'<span class="st-pill hi">مهمّة</span>':"")+
+      '</div>'+
+      (t.body?('<div style="font-size:13px;line-height:1.9;white-space:pre-wrap;margin-bottom:12px">'+_e(t.body)+'</div>'):"")+
+      (t.status==="returned"
+        ? '<div class="st-cmt" style="border-inline-start:3px solid #a855f7"><div class="who">رُدّت من '+_e(_nameOf(t.returnedByUser))+'</div><div class="txt">'+_e(t.returnedReason)+'</div></div>'
+        : "")+
+      '<div class="st-who">'+parts+'</div>'+
+      (canShare && shareOpts
+        ? '<div class="st-quick-row" style="margin-bottom:14px">'+
+            '<select id="st-share-'+_e(t.id)+'" style="min-width:170px;padding:8px 10px;border-radius:9px;border:1px solid var(--border,#2a3550);background:var(--bg2,#131a2b);color:inherit;font:inherit;font-size:13px"><option value="">إضافة موظف…</option>'+shareOpts+'</select>'+
+            '<button class="btn btn-sm" onclick="staffTasks.shareTask(\''+_q(t.id)+'\')">إضافة</button>'+
+          '</div>'
+        : "")+
+      '<div style="margin-top:16px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">الملاحظات</div>'+cmts+
+        '<div class="st-quick-row" style="margin-top:9px">'+
+          '<input type="text" id="st-cmt-'+_e(t.id)+'" placeholder="اكتب ملاحظة…" style="flex:1;min-width:200px;padding:9px 11px;border-radius:9px;border:1px solid var(--border,#2a3550);background:var(--bg2,#131a2b);color:inherit;font:inherit;font-size:13px">'+
+          '<button class="btn btn-sm" onclick="staffTasks.addComment(\''+_q(t.id)+'\')">إرسال</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="st-acts">'+acts+'</div>'+
+    '</div>';
+  }
+
+  function retry(){ _loaded=false; _connIssue=false; stopSync(); startSync(); _rerender(); }
+
+  /* ════════ التصدير ════════ */
+  window.staffTasks = {
+    startSync:startSync, stopSync:stopSync, render:render, list:list, retry:retry,
+    refreshNav:refreshNav, canView:_canView,
+    tab:tab, open:open, back:back, byId:byId,
+    markDone:markDone, reopen:reopen, returnTask:returnTask, acceptBack:acceptBack,
+    addComment:addComment, shareTask:shareTask, removeTask:removeTask,
+    draftPick:draftPick, draftAdd:draftAdd, draftKey:draftKey, draftPaste:draftPaste, draftDrop:draftDrop,
+    draftDue:draftDue, draftPrio:draftPrio, draftDueAll:draftDueAll,
+    draftClear:draftClear, sendDraft:sendDraft,
+    // دوالٌّ نقيّة مكشوفةٌ لفحوص hail-tests (بلا متصفّح)
+    _parseBulk:_parseBulk, _participantsOf:_participantsOf, _canSee:_canSee,
+    _canEditParticipants:_canEditParticipants, _dueState:_dueState, _isOverdue:_isOverdue,
+    _splitTabs:_splitTabs, _countOpen:_countOpen, _sortTasks:_sortTasks,
+    build:MODULE_BUILD
+  };
+})();

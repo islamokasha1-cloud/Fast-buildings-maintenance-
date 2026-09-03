@@ -642,6 +642,10 @@ function predelivery() {
        يعني تصديرَ نصفِ الوحدةِ على `window` أو تكرارَ قراءةِ المسار — وتكرارُ
        القراءة هو بعينه العطلُ الذي تكرّر في §6 (رقمان لطلبٍ واحدٍ يفترقان بلا سطرٍ
        يفسّر). ولا سطرَ من المنطق القائم نُقل: إضافةٌ خالصةٌ بجواره. */
+    /* ولم يُرفَع لوصل وحدة `staff-tasks.js`: أحدَ عشرَ سطرَ وصلٍ لا غير (زرُّ
+       السايدبار وأيقونتُه · حاويةُ `page-staff-tasks` · مَعبرُ `showPage` · وسمُ
+       `<script>` · سطرا `refreshNav` · قيدُ كاشف الوحدات القديمة) وسِعها السقفُ
+       القائم. **ولا سطرَ منطقٍ واحدٍ في النواة** — الميزةُ كلُّها في الوحدة. */
     const IDX_CEILING = 39255;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
@@ -16025,6 +16029,161 @@ function externalPurchaseApiGuards() {
 }
 
 /* ══ التشغيل ══ */
+/* ═══════════════════════════════════════════════════════════════════════════
+   مهامُّ الموظفين (staff-tasks.js) — حرّاسُ الارتداد
+
+   الوعدُ المعلَن للموظفين أنّ المهمّةَ غرفةٌ مغلقة. وحارسُ ذلك على مستوى قاعدة
+   البيانات في `rules-check.mjs` (محاكٍ حقيقيّ). وهذه الفحوصُ تحرس ما يسبقه:
+   الدوالَّ التي تقرّر **مَن يرى ومَن يعدّل ومتى تأخّرت المهمّة** — فخللٌ في واحدةٍ
+   منها يُسرّب مهمّةً إلى قائمةِ من لا يخصّه قبل أن تصل القاعدةُ أصلاً.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function staffTasksGuards() {
+  H("مهامُّ الموظفين — الغرفةُ المغلقة والتكليفُ الجماعيّ");
+
+  const ST_PATH2 = path.resolve(path.dirname(IDX), "staff-tasks.js");
+  if (!fs.existsSync(ST_PATH2)) { T("staff-tasks.js موجود", false); return; }
+  const src = fs.readFileSync(ST_PATH2, "utf8");
+
+  const vm2 = require("vm");
+  const sandbox = {
+    window: {}, console,
+    document: { getElementById: () => null, querySelector: () => null,
+                querySelectorAll: () => [], head: { appendChild() {} },
+                createElement: () => ({ style: {}, classList: { add() {}, remove() {} }, appendChild() {}, setAttribute() {} }) },
+    setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {}
+  };
+  vm2.createContext(sandbox);
+  let ST = null;
+  try { vm2.runInContext(src, sandbox); ST = sandbox.window.staffTasks; }
+  catch (e) { T("تُحمَّل staffTasks", false, String(e.message).slice(0, 140)); return; }
+  T("staffTasks تُحمَّل وتعرّض كائناً واحداً", !!ST);
+  if (!ST) return;
+
+  const NEED = ["_parseBulk", "_participantsOf", "_canSee", "_canEditParticipants",
+                "_dueState", "_isOverdue", "_splitTabs", "_countOpen", "_sortTasks"];
+  const miss = NEED.filter(k => typeof ST[k] !== "function");
+  T("★ الدوالُّ النقيّة كلُّها مكشوفةٌ للفحص بلا متصفّح", miss.length === 0, miss.join(" · "));
+  if (miss.length) return;
+
+  /* ── (١) تفكيكُ اللصقة: المديرُ ينسخ قائمةً جاهزةً من الجوّال ── */
+  const bulk = ST._parseBulk("راجع العقد\n- نظّف الدور الثاني\n\n٢. سلّم التقرير\n3) اطلب قطع الغيار\n   \n");
+  T("★★ اللصقةُ المتعدّدةُ الأسطر تنفكّ مهامَّ مستقلّة",
+    bulk.length === 4, JSON.stringify(bulk));
+  T("★ والترقيمُ والشرطةُ يُنزَعان — «٢. سلّم» و«سلّم» مهمّةٌ واحدةٌ نصُّها واحد",
+    bulk[1] === "نظّف الدور الثاني" && bulk[2] === "سلّم التقرير" && bulk[3] === "اطلب قطع الغيار",
+    JSON.stringify(bulk));
+  T("والأسطرُ الفارغةُ تسقط ولا تصير مهامَّ بلا عنوان",
+    ST._parseBulk("\n\n   \n").length === 0);
+  T("ومُدخلٌ غيرُ نصّيٍّ لا يُسقط الشاشة",
+    ST._parseBulk(null).length === 0 && ST._parseBulk(undefined).length === 0);
+
+  /* ── (٢) الأطرافُ: مَن في الغرفة ── */
+  const t1 = { createdByUser: "رغده", assignedToUser: "خالد", shared: ["سعيد", "خالد", ""] };
+  const p1 = ST._participantsOf(t1);
+  T("★★ الأطرافُ = المُنشئ + المكلَّف + المضافون، بلا تكرارٍ وبلا فراغ",
+    p1.length === 3 && p1.indexOf("رغده") === 0 && p1.includes("خالد") && p1.includes("سعيد"),
+    JSON.stringify(p1));
+  T("★ وملاحظةٌ شخصيةٌ طرفُها واحد",
+    JSON.stringify(ST._participantsOf({ createdByUser: "رغده", assignedToUser: "" })) === '["رغده"]');
+
+  /* ── (٣) مَن يرى: الغرفةُ مغلقة ── */
+  T("★★★ غيرُ الطرف لا يرى المهمّة", ST._canSee(t1, "منى", "مشرف") === false);
+  T("★★ والطرفُ يراها", ST._canSee(t1, "خالد", "مشرف") === true && ST._canSee(t1, "سعيد", "مشرف") === true);
+  T("★★ والأدمن يرى الكلّ (اطّلاعُ الإدارة — يُسجَّل في audit_log)",
+    ST._canSee(t1, "أيّ_أحد", "admin") === true);
+  T("★ ومستخدمٌ بلا اسمِ دخولٍ لا يرى شيئاً (الوضعُ الآمن عند غياب الهوية)",
+    ST._canSee(t1, "", "مشرف") === false);
+
+  /* ── (٤) مَن يُدخل الغرفةَ أحداً: المُنشئ وحدَه ── */
+  T("★★★ المكلَّفُ لا يضيف مشاركاً — وإلا فُتحت غرفةُ المدير على مَن لم يخترْه",
+    ST._canEditParticipants(t1, "خالد", "مشرف") === false);
+  T("★ والمُنشئُ يضيف", ST._canEditParticipants(t1, "رغده", "مشرف") === true);
+  T("والأدمن يضيف", ST._canEditParticipants(t1, "منى", "admin") === true);
+
+  /* ── (٥) حالةُ الموعد: مقارنةُ نصٍّ لا كائنَ Date ── */
+  const TODAY = "2026-09-03";
+  T("★★ المتأخّرُ متأخّر", ST._dueState({ due: "2026-09-01", status: "open" }, TODAY) === "late");
+  T("★ واليومُ موعده", ST._dueState({ due: TODAY, status: "open" }, TODAY) === "due");
+  T("★ والغدُ قريب", ST._dueState({ due: "2026-09-04", status: "open" }, TODAY) === "soon");
+  T("والبعيدُ عاديّ", ST._dueState({ due: "2026-09-20", status: "open" }, TODAY) === "none");
+  T("وبلا موعدٍ لا لون", ST._dueState({ due: "", status: "open" }, TODAY) === "none");
+  T("★★ والمنجَزُ لا يكون متأخّراً أبداً (لا يبقى أحمرَ بعد إنجازه)",
+    ST._dueState({ due: "2026-01-01", status: "done" }, TODAY) === "none" &&
+    ST._isOverdue({ due: "2026-01-01", status: "done" }, TODAY) === false);
+  T("★ وتاريخٌ مشوَّهٌ لا يُصنَّف متأخّراً بالخطأ",
+    ST._dueState({ due: "غداً", status: "open" }, TODAY) === "none" &&
+    ST._dueState({ due: "2026-09-01", status: "open" }, "") === "none");
+  T("★★ والمقارنةُ نصّيّةٌ عبر نهاية الشهر (لا انزلاقَ يومٍ بمنطقةٍ زمنية)",
+    ST._dueState({ due: "2026-10-01", status: "open" }, "2026-09-30") === "soon" &&
+    ST._dueState({ due: "2026-09-30", status: "open" }, "2026-10-01") === "late");
+
+  /* ── (٦) التبويبُ والعدّاد من مصدرٍ واحد ── */
+  const LIST = [
+    { id: "a", status: "open", kind: "task", createdByUser: "رغده", assignedToUser: "خالد" },
+    { id: "b", status: "open", kind: "task", createdByUser: "منى",  assignedToUser: "رغده" },
+    { id: "c", status: "done", kind: "task", createdByUser: "رغده", assignedToUser: "رغده" },
+    { id: "d", status: "open", kind: "note", createdByUser: "رغده", assignedToUser: "" },
+    { id: "e", status: "open", kind: "task", createdByUser: "رغده", assignedToUser: "رغده" }
+  ];
+  const tabs = ST._splitTabs(LIST, "رغده");
+  T("★★ «مهامّي» = ما كُلِّفتُ به فقط",
+    tabs.mine.map(x => x.id).sort().join("") === "be", JSON.stringify(tabs.mine.map(x => x.id)));
+  T("★★ و«كلّفتُ بها» لا تحسب ما كلّفتُ به نفسي (وإلا ظهرت المهمّةُ مرّتين)",
+    tabs.sent.map(x => x.id).join("") === "a", JSON.stringify(tabs.sent.map(x => x.id)));
+  T("★ والملاحظاتُ الشخصيةُ في خانتها", tabs.notes.map(x => x.id).join("") === "d");
+  T("★ والمنجَزُ يخرج من كل الخانات المفتوحة",
+    tabs.done.map(x => x.id).join("") === "c" &&
+    !tabs.mine.some(x => x.id === "c") && !tabs.sent.some(x => x.id === "c"));
+  T("★★★ وعدّادُ الشريط = ما عليّ أنا لا ما أرسلتُ (رقمٌ يهبط بعملي)",
+    ST._countOpen(LIST, "رغده") === 2, "=" + ST._countOpen(LIST, "رغده"));
+
+  /* ── (٧) الترتيب: المتأخّرُ أوّلاً ── */
+  const sorted = ST._sortTasks([
+    { id: "n", status: "open", due: "" },
+    { id: "L", status: "open", due: "2026-08-01" },
+    { id: "s", status: "open", due: "2026-09-04" },
+    { id: "D", status: "open", due: TODAY }
+  ], TODAY).map(x => x.id).join("");
+  T("★★ المتأخّرُ أوّلاً ثمّ اليومُ ثمّ الغدُ ثمّ بلا موعد", sorted === "LDsn", sorted);
+
+  /* ── (٨) حرّاسُ النمط المصدريّ ── */
+  const G = [
+    ["★★★ الاستعلامُ مقصورٌ على المشاركة (لا يُنزَّل مستندٌ لستُ طرفاً فيه)",
+      /where\("participants"\s*,\s*"array-contains"/.test(src), true],
+    ["★★ والإرسالُ الجماعيُّ دفعةٌ ذرّية — لا حلقةَ add تنجح نصفَها",
+      /db\.batch\(\)/.test(src) && /batch\.commit\(\)/.test(src), true],
+    ["★ والتعليقُ يُلحَق بـarrayUnion لا بكتابة المصفوفة كاملة (لا يمحو تعليقَ غيره)",
+      /arrayUnion/.test(src), true],
+    ["★★ ولا دردشةَ عامة: لا مجموعةَ رسائلَ خارج المهمّة",
+      /collection\((?:"|')(?:messages|chat)/.test(src), false],
+    ["★ ورقمُ البناء مصدرُه سطرٌ واحد يختمه stamp",
+      /var MODULE_BUILD = "v18\.9\.\d+";/.test(src), true],
+    ["★ وحدُّ الخصوصية مُصرَّحٌ به في ترويسة الوحدة لا مطويّ",
+      /القراءةُ محروسةٌ في الواجهة والاستعلام لا في القاعدة/.test(src), true],
+    /* ارتدادٌ رُصد في المتصفّح: `<input type="text">` حقلُ سطرٍ واحد، يطوي أسطرَ
+       اللصقة قبل أن يراها الكود — فقائمةُ خمسِ مهامٍّ تصير مهمّةً واحدة. ولا سبيلَ
+       إلى الأسطر إلا اعتراضُ حدث `paste`. حارسٌ على الاثنين: المعالجُ موجود، وهو
+       مربوطٌ بالحقل فعلاً (وجودُه بلا ربطٍ لا يفعل شيئاً). */
+    ["★★★ اللصقةُ المتعدّدةُ الأسطر تُقرأ من الحافظة لا من قيمة حقلِ السطر الواحد",
+      /function draftPaste\(ev\)\{[\s\S]{0,600}clipboardData/.test(src), true],
+    ["★★ ومعالجُ اللصق مربوطٌ بالحقل فعلاً",
+      /onpaste="staffTasks\.draftPaste\(event\)"/.test(src), true]
+  ];
+  G.forEach(([n, got, want]) => T(n, got === want));
+
+  /* ── (٩) الوصلُ بالنواة: وسمٌ وصفحةٌ وزرٌّ ومَعبر showPage ── */
+  const W = [
+    ["★★ وسمُ <script> مختومٌ بالإصدار", /<script src="staff-tasks\.js\?v=18\.9\.\d+"><\/script>/],
+    ["★★ وحاويةُ الصفحة موجودة", /<div class="page" id="page-staff-tasks"><\/div>/],
+    ["★★ وزرُّ الشريط الجانبي بشارةِ العدّ", /id="nav-staff-tasks-badge"/],
+    ["★★★ ومَعبرُ showPage يرسم الشاشة (بدونه زرٌّ ميتٌ بصمت)",
+      /if\(id==="staff-tasks"\)\s*\{\s*if\(window\.staffTasks&&window\.staffTasks\.render\)/],
+    ["★ والمزامنةُ تبدأ مع بقية الوحدات عند الدخول",
+      /window\.staffTasks&&window\.staffTasks\.startSync/]
+  ];
+  W.forEach(([n, re]) => T(n, re.test(IDX_RAW)));
+}
+
 (async () => {
   await step4;
   guards();
@@ -16124,6 +16283,7 @@ function externalPurchaseApiGuards() {
   assetSupervisorEditGuards();
   contractsTenantScopeGuards();
   ticketMultiPhotoGuards();
+  staffTasksGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
