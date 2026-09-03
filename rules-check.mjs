@@ -810,6 +810,31 @@ await check("★ المكلَّفُ لا يحذف مهمّةً كُلِّف به
 await check("والمُنشئُ يحذف ما أنشأ", assertSucceeds(deleteDoc(doc(OWNER, `${ST}/T2`))));
 await check("والأدمن يحذف", assertSucceeds(deleteDoc(doc(ADMIN, `${ST}/T1`))));
 
+/* التعديل: للأطراف، والتحويلُ والنسبةُ محروسان */
+await seed(`${ST}/T8`, {
+  title: "راجع العقد", body: "", status: "open", due: "2026-09-10", priority: "normal",
+  createdByUser: "رغده", assignedToUser: "خالد", assignedToName: "خالد",
+  kind: "task", shared: [], participants: ["رغده", "خالد"], comments: []
+});
+await check("★★ المكلَّفُ يعدّل نصَّ المهمّة وموعدَها (قرارُ المالك: التعديل للجميع)",
+  assertSucceeds(updateDoc(doc(ASSIGNEE, `${ST}/T8`), {
+    title: "راجع عقد المورّد", due: "2026-09-12", lastEditBy: "خالد" })));
+await check("★★★ ولا يرمي ما كُلِّف به على زميلٍ فيخرج من العهدة",
+  assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T8`), {
+    assignedToUser: "سعيد", assignedToName: "سعيد", participants: ["رغده", "سعيد"] })));
+await check("★★★ ولا يُلغي التكليفَ عن نفسه بتحويلها ملاحظةً شخصية",
+  assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T8`), { assignedToUser: "", kind: "note" })));
+await check("★★★ ولا يوقّع تعديلَه باسم زميله (النسبةُ لا تُزوَّر)",
+  assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T8`), { title: "x", lastEditBy: "رغده" })));
+await check("★ والمُنشئُ يحوّلها إلى موظّفٍ آخر",
+  assertSucceeds(updateDoc(doc(OWNER, `${ST}/T8`), {
+    assignedToUser: "سعيد", assignedToName: "سعيد", kind: "task",
+    participants: ["رغده", "سعيد"], lastEditBy: "رغده" })));
+await check("★★ ومَن خرج بالتحويل لم يعد يعدّلها",
+  assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T8`), { title: "y" })));
+await check("★★ والحذفُ ما زال للمُنشئ وحدَه بعد كل هذا (لا يمحو المكلَّفُ الدليلَ)",
+  assertFails(deleteDoc(doc(OUTSIDER, `${ST}/T8`))));
+
 /* ── القراءة: الثغرةُ مُعلَنةٌ ومُختبَرة ──
    القاعدةُ العامة `allow read: if hasRole();` تسبق بلوكَ المجموعة بـ«أو»، فتمنح
    القراءةَ لكلّ ذي دور. والفحصُ التالي **يُثبت الثغرةَ لا يُخفيها**: يومَ تُضيَّق

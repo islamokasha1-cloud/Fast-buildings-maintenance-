@@ -44,6 +44,7 @@ const IGNORE = /ServiceWorkerRegistration|net::ERR_FAILED|Failed to load resourc
 page.on('pageerror', e => { const m = String(e.message).slice(0, 200); if (!IGNORE.test(m)) errors.push(m); });
 page.on('console', m => { if (m.type() !== 'error') return; const t = String(m.text()).slice(0, 200); if (!IGNORE.test(t)) errors.push(t); });
 
+page.on('dialog', d => d.accept().catch(() => {}));
 let AUTH_OK = false;
 await page.route('**/*', route => {
   const u = route.request().url();
@@ -206,6 +207,84 @@ const doneOk = await page.evaluate(async () => {
   return st.filter(t => t.status === 'done').length;
 });
 check('★★ زرُّ «تمّ الإنجاز» يكتب الحالةَ فعلاً في المستند', doneOk === 1, String(doneOk));
+
+/* ═════════ ٥-ب) التعديلُ والحذف ═════════ */
+L('\n=== ٥-ب) التعديلُ والحذف ===');
+await page.evaluate(() => { staffTasks.back(); staffTasks.tab('sent'); });
+await page.waitForTimeout(500);
+const idEdit = await page.evaluate(() => {
+  currentUser = { user: 'admin', name: 'المسؤول', role: 'admin' };
+  const t = Object.entries(window.__store).find(([k]) => k.startsWith('staff_tasks/'));
+  staffTasks.open(t[0].split('/')[1]);
+  return t[0].split('/')[1];
+});
+await page.waitForTimeout(600);
+check('★★ زرُّ «تعديل» ظاهرٌ في تفاصيل المهمّة',
+  await page.evaluate(() => /staffTasks\.startEdit/.test(document.getElementById('page-staff-tasks').innerHTML)));
+await page.evaluate(() => staffTasks.startEdit(staffTasks.byId(Object.keys(window.__store).filter(k => k.startsWith('staff_tasks/'))[0].split('/')[1]).id));
+await page.waitForTimeout(600);
+check('★★ ونموذجُ التحرير يفتح بحقوله الأربعة',
+  await page.evaluate(() => {
+    const h = document.getElementById('page-staff-tasks');
+    return !!h.querySelector('[id^="st-ed-title-"]') && !!h.querySelector('[id^="st-ed-body-"]') &&
+           !!h.querySelector('[id^="st-ed-due-"]') && !!h.querySelector('[id^="st-ed-prio-"]');
+  }));
+check('★★ ومُنتقي المكلَّف ظاهرٌ للمُنشئ',
+  await page.evaluate(() => !!document.querySelector('#page-staff-tasks [id^="st-ed-asg-"]')));
+await page.fill(`#st-ed-title-${idEdit}`, 'راجع عقد المورّد — معدَّل');
+await page.fill(`#st-ed-due-${idEdit}`, '2026-09-25');
+await page.selectOption(`#st-ed-prio-${idEdit}`, 'high');
+await page.click('#page-staff-tasks .btn-primary');
+await page.waitForTimeout(900);
+const edited = await page.evaluate((id) => window.__store['staff_tasks/' + id], idEdit);
+check('★★★ الحفظُ يكتب العنوانَ والموعدَ والأولوية في المستند',
+  !!edited && edited.title === 'راجع عقد المورّد — معدَّل' && edited.due === '2026-09-25' && edited.priority === 'high',
+  JSON.stringify({ t: edited && edited.title, d: edited && edited.due, p: edited && edited.priority }));
+check('★★★ والتعديلُ يُنسَب لمَن أجراه (مصدرُ المساءلة حين يعدّل مشاركٌ نصَّ غيره)',
+  !!edited && edited.lastEditBy === 'admin', edited && edited.lastEditBy);
+check('★★ ويعود إلى شاشة التفصيل بعد الحفظ (لا يبقى في النموذج)',
+  await page.evaluate(() => !document.querySelector('#page-staff-tasks [id^="st-ed-title-"]')));
+
+/* التحويلُ إلى موظّفٍ آخر — يُخرج المكلَّفَ السابق */
+await page.evaluate((id) => staffTasks.startEdit(id), idEdit);
+await page.waitForTimeout(500);
+await page.selectOption(`#st-ed-asg-${idEdit}`, 'saeed');
+await page.click('#page-staff-tasks .btn-primary');
+await page.waitForTimeout(900);
+const moved = await page.evaluate((id) => window.__store['staff_tasks/' + id], idEdit);
+check('★★★ التحويلُ ينقل المهمّة ويُعيد بناءَ الأطراف (يخرج السابقُ ويدخل الجديد)',
+  !!moved && moved.assignedToUser === 'saeed' &&
+  JSON.stringify((moved.participants || []).slice().sort()) === JSON.stringify(['admin', 'saeed']),
+  JSON.stringify(moved && moved.participants));
+
+/* المكلَّفُ يعدّل ولا يحوّل — الطبقةُ الثانية بعد قاعدة البيانات */
+const asAssignee = await page.evaluate((id) => {
+  currentUser = { user: 'saeed', name: 'سعيد', role: 'مشرف' };
+  staffTasks.stopSync(); staffTasks.startSync(); staffTasks.open(id); staffTasks.startEdit(id);
+  const h = document.getElementById('page-staff-tasks');
+  return { form: !!h.querySelector('[id^="st-ed-title-"]'), asg: !!h.querySelector('[id^="st-ed-asg-"]') };
+}, idEdit);
+await page.waitForTimeout(600);
+check('★★ المكلَّفُ يفتح نموذجَ التعديل', asAssignee.form);
+check('★★★ ولا يُعرَض له مُنتقي التحويل (لا يرمي عهدتَه على زميل)', !asAssignee.asg);
+
+/* الحذف: للمُنشئ وحدَه */
+const delAsAssignee = await page.evaluate((id) => {
+  staffTasks.cancelEdit();
+  return /staffTasks\.removeTask/.test(document.getElementById('page-staff-tasks').innerHTML);
+}, idEdit);
+check('★★★ وزرُّ الحذف محجوبٌ عن المكلَّف (لا يمحو الدليلَ عليه)', !delAsAssignee);
+const gone = await page.evaluate(async (id) => {
+  currentUser = { user: 'admin', name: 'المسؤول', role: 'admin' };
+  staffTasks.stopSync(); staffTasks.startSync(); staffTasks.open(id);
+  await new Promise(r => setTimeout(r, 300));
+  const btn = document.querySelector('#page-staff-tasks .btn-danger');
+  if (!btn) return 'لا زرَّ حذف';
+  btn.click();
+  await new Promise(r => setTimeout(r, 700));
+  return !window.__store['staff_tasks/' + id];
+}, idEdit);
+check('★★★ والمُنشئُ يحذف فعلاً — يختفي المستند', gone === true, String(gone));
 
 /* ═════════ ٦) لغةُ المنصّة: أيقوناتٌ لا إيموجي، ومكوّناتٌ مشتركة ═════════
    شاشةٌ تُخالف أسلوبَ ما حولها تبدو دخيلةً وإن عملت. وأخطرُ ما يقع هنا صامتٌ:

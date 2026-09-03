@@ -217,13 +217,24 @@ service cloud.firestore {
         && request.resource.data.get('createdByUser', '') == stUser()
         && request.resource.data.get('participants', []).hasAny([stUser()]);
     }
+    /* ونسبةُ التعديل لا تُزوَّر: مَن يكتب `lastEditBy` يكتب اسمَه هو.
+       الحقلُ **مصدرُ المساءلة** حين يعدّل مشاركٌ نصَّ مهمّةٍ يراها غيرُه؛ فلو قَبِل
+       اسماً غيرَ صاحبه لدلّ على البريء وصار أسوأَ من غيابه. */
+    function stEditorOk() {
+      return request.resource.data.get('lastEditBy', '') == resource.data.get('lastEditBy', '')
+          || request.resource.data.get('lastEditBy', '') == stUser();
+    }
     function stUpdateOk() {
       return isAdmin()
         || ( hasRole() && !isViewer()
              && stPart(resource.data)
              && unchanged(['createdByUser', 'createdAt'])
-             // قائمةُ الأطراف بيد المُنشئ وحدَه — وإلا أدخل المُضافُ الغرفةَ مَن شاء
-             && ( unchanged(['participants', 'shared'])
+             && stEditorOk()
+             /* قائمةُ الأطراف **وتحويلُ المكلَّف** بيد المُنشئ وحدَه. ولولا
+                `assignedToUser` هنا لأمكن المكلَّفَ أن يرمي ما كُلِّف به على زميلٍ
+                (أو على لا أحد) ويخرج من العهدة، بلا أن يعلم مَن أصدر التكليف.
+                و`kind` معها: بها تصير المهمّةُ «ملاحظةً شخصية» فتغادر قائمةَ أحدهم. */
+             && ( unchanged(['participants', 'shared', 'assignedToUser', 'assignedToName', 'kind'])
                   || resource.data.get('createdByUser', '') == stUser() ) );
     }
     function stDeleteOk() {
