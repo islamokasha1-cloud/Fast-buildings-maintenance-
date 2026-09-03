@@ -399,7 +399,9 @@ const staff = await page.evaluate(async () => {
     mk('PO-STAFF-1', 'saad', 'سعد', 1000, 'pending_finance'),
     mk('PO-STAFF-2', 'saad', 'سعد', 2000, 'pending_finance'),
     mk('PO-STAFF-3', 'noor', 'نور',  700, 'pending_ceo'),
-    mk('PO-STAFF-4', 'root', 'مدير النظام', 400, 'pending_finance', 'admin'),   // خارجَ الجدول
+    mk('PO-STAFF-4', 'root', 'مدير النظام',  400, 'pending_finance', 'admin'),        // خارجَ الجدول
+    mk('PO-STAFF-5', 'sup',  'محمد داوود',   300, 'pending_finance', 'supervisor'),   // وكذلك المشرف
+    mk('PO-STAFF-6', 'boss', 'عبدالله',      200, 'pending_finance', 'ceo'),          // والتنفيذيّ
   ];
   showPage('purchase-kpi');
   await new Promise(r => setTimeout(r, 900));
@@ -409,7 +411,8 @@ const staff = await page.evaluate(async () => {
   // الرقمُ المرسوم — من خلايا الجدول في الـDOM
   const tbl = document.querySelector('#page-purchase-kpi .pkpi-staff-tbl');
   if (!tbl) return { ok: false, err: 'الجدولُ لم يُرسم' };
-  const drawn = [...tbl.querySelectorAll('tbody tr')].map(tr => {
+  // صفوفُ الخلاصة (pkpi-vd-row) ليست صفوفَ بيانات — استُبعدت وإلّا قرأنا خليّةً غيرَ موجودة
+  const drawn = [...tbl.querySelectorAll('tbody tr:not(.pkpi-vd-row)')].map(tr => {
     const td = [...tr.children];
     return { name: (td[0].childNodes[0].textContent || '').trim(),
              po: (td[1].querySelector('b') || {}).textContent,
@@ -421,9 +424,14 @@ const staff = await page.evaluate(async () => {
   const root = document.getElementById('page-purchase-kpi');
   return { ok: true, rows: S.rows.map(r => ({ key: r.key, name: r.name, poN: r.poN, poClosed: r.poClosed,
              spendClosed: r.spendClosed, prepAvg: r.prepAvg })), drawn, hdr,
-           adminN: S.adminN, adminSpend: S.adminSpend,
-           adminBanner: !!root.querySelector('.pkpi-staff-admin'),
-           adminInTable: drawn.some(d => d.name === 'مدير النظام'),
+           outsideN: S.outsideN, outsideSpend: S.outsideSpend,
+           outsideRoles: S.outsideGroups.map(g => g.role).sort(),
+           outsideBanner: !!root.querySelector('.pkpi-staff-admin'),
+           strangersInTable: drawn.filter(d => ['مدير النظام','محمد داوود','عبدالله'].includes(d.name)).map(d => d.name),
+           tableRoles: S.rows.map(r => r.role),
+           vdRows: root.querySelectorAll('.pkpi-vd-row').length,
+           clipped: [...tbl.querySelectorAll('td,th')].filter(c => c.scrollWidth > c.clientWidth + 2).length,
+           pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
            guide: !!root.querySelector('.pkpi-guide'),
            groupHdrs: [...root.querySelectorAll('.pkpi-grp th')].map(th => th.textContent.trim().slice(0, 14)),
            canvases: ['pkpi-c-staff-time','pkpi-c-staff-rate','pkpi-c-staff-load']
@@ -450,15 +458,24 @@ if (staff.ok) {
   check('١٢هـ) ★★ زمنُ تجهيز المقارنة المرسومُ = المحسوب بأيام العمل',
     !!bySaad && bySaad.prepAvg != null && !!drawnSaad && near(drawnSaad.prep, bySaad.prepAvg.toFixed(1)),
     'مرسوم ' + (drawnSaad && drawnSaad.prep) + ' · محسوب ' + (bySaad && bySaad.prepAvg));
-  check('١٢و) ★ رأسُ الجدول (الصفُّ الثاني) يطابق أعمدةَ الصفوف', staff.hdr === 11, 'رؤوس=' + staff.hdr);
-  check('١٢ز) ★★★ طلباتُ المسؤول ليست صفّاً في الجدول',
-    staff.adminInTable === false && staff.rows.every(r => r.name !== 'مدير النظام'));
-  check('١٢ح) ★★★ لكنّها معلَنةٌ في بيانٍ فوقه (لا حذفَ صامت)',
-    staff.adminBanner === true && staff.adminN === 1 && staff.adminSpend === 400,
-    'n=' + staff.adminN + ' spend=' + staff.adminSpend);
+  check('١٢و) ★ رأسُ الجدول (الصفُّ الثاني) يطابق أعمدةَ الصفوف', staff.hdr === 10, 'رؤوس=' + staff.hdr);
+  // بلاغُ المالك حرفياً: «لماذا تضيف مشرف والمدير التنفيذي في أداء مسؤول المشتريات؟»
+  check('١٢ز) ★★★ لا مشرفَ ولا تنفيذيَّ ولا مسؤولَ نظامٍ في جدول أداء المشتريات',
+    staff.strangersInTable.length === 0 &&
+    staff.tableRoles.every(r => r === 'procurement_officer'),
+    'دخلاء: ' + (staff.strangersInTable.join(',') || 'لا شيء') + ' · أدوارُ الجدول: ' + staff.tableRoles.join(','));
+  check('١٢ح) ★★★ وثلاثتُهم معلَنون مجمَّعين بأدوارهم فوق الجدول (لا حذفَ صامت)',
+    staff.outsideBanner === true && staff.outsideN === 3 && staff.outsideSpend === 900 &&
+    ['admin','ceo','supervisor'].every(r => staff.outsideRoles.includes(r)),
+    'n=' + staff.outsideN + ' spend=' + staff.outsideSpend + ' أدوار=' + staff.outsideRoles.join(','));
+  check('١٢ح٢) ★★ الخلاصةُ سطرٌ ممتدٌّ تحت كلِّ صفّ (لا عمودٌ ضيّقٌ يُقصّ)',
+    staff.vdRows === staff.rows.length && staff.vdRows > 0, 'أسطر=' + staff.vdRows);
+  check('١٢ح٣) ★★★ ولا خليّةَ مقصوصةٍ ولا إفاضةَ صفحةٍ أفقية (تنسيقُ الجدول — بلاغ المالك)',
+    staff.clipped === 0 && staff.pageOverflow <= 1,
+    'مقصوصة=' + staff.clipped + ' · فيضُ الصفحة=' + staff.pageOverflow + 'px');
   check('١٢ط) ★★ دليلُ قراءة الجدول مرسومٌ (الجدولُ يشرح نفسَه)', staff.guide === true);
   check('١٢ي) ★★ ورؤوسُ المجموعات تسمّي المحاور (سرعة · جودة · قيمة · التزام)',
-    staff.groupHdrs.length === 6 && staff.groupHdrs.some(h => h.includes('السرعة')) &&
+    staff.groupHdrs.length === 5 && staff.groupHdrs.some(h => h.includes('السرعة')) &&
     staff.groupHdrs.some(h => h.includes('جودة')) && staff.groupHdrs.some(h => h.includes('القيمة')) &&
     staff.groupHdrs.some(h => h.includes('الالتزام')), staff.groupHdrs.join(' | '));
   check('١٢ك) ★★★ المخطّطاتُ الثلاثة مرسومةٌ بأبعادٍ حقيقية (لا لوحةٌ منكمشة)',
@@ -473,7 +490,7 @@ const own = await page.evaluate(async () => {
   window.purchaseKPI.render();
   await new Promise(r => setTimeout(r, 500));
   const tbl = document.querySelector('#page-purchase-kpi .pkpi-staff-tbl');
-  const names = tbl ? [...tbl.querySelectorAll('tbody tr')].map(tr => (tr.children[0].childNodes[0].textContent || '').trim()) : [];
+  const names = tbl ? [...tbl.querySelectorAll('tbody tr:not(.pkpi-vd-row)')].map(tr => (tr.children[0].childNodes[0].textContent || '').trim()) : [];
   const html = document.getElementById('page-purchase-kpi').innerHTML;
   currentUser = bak;
   return { names, leaksNoor: html.includes('نور') };
