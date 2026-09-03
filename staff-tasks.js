@@ -54,7 +54,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3011";
+  var MODULE_BUILD = "v18.9.3012";
 
   function COLL(){
     var dev=false;
@@ -71,6 +71,7 @@
   var _openId  = null;    // المهمّة المفتوحة تفصيلاً
   var _draft   = [];      // مسوّدةُ التكليف السريع
   var _draftTo = "";      // اسمُ دخول المكلَّف في المسوّدة
+  var _editing = false;  // شاشةُ التفصيل في وضع التحرير
   var _cssDone = false;
 
   /* ════════ هوية المستخدم ════════
@@ -144,6 +145,68 @@
   function _canEditParticipants(t, login, role){
     if(role==="admin") return true;
     return !!login && (t&&t.createdByUser)===login;
+  }
+
+  /* مَن يعدّل نصَّ المهمّة: كلُّ مشاركٍ فيها.
+     قرارُ المالك (03/09): المكلَّفُ يصحّح موعداً أو يُتمّ بياناً ناقصاً بلا أن يعود
+     إلى مديره في كل حرف. والمسؤوليةُ محفوظةٌ بأنّ **التعديلَ يُنسَب**: يُكتب
+     `lastEditBy`/`lastEditAt` ويظهران في التفصيل، ويُقيَّد في `audit_log`. */
+  function _canEdit(t, login, role){
+    if(role==="admin") return true;
+    if(!login) return false;
+    return _participantsOf(t).indexOf(login) !== -1;
+  }
+
+  /* ومَن يحوّل المهمّة إلى موظّفٍ آخر: المُنشئُ وحدَه — قاعدةُ الأطراف نفسُها.
+     ولو ملكها المكلَّفُ لأمكنه أن يرمي ما كُلِّف به على زميلٍ ويخرج من الغرفة،
+     فيضيع التكليفُ بلا أن يعلم مَن أصدره. */
+  function _canReassign(t, login, role){
+    return _canEditParticipants(t, login, role);
+  }
+
+  /* بناءُ حزمة التعديل — **دالّةٌ واحدةٌ تقرّر وتبني**، فلا تفترق شاشةٌ عن قاعدة.
+     تُرجع `null` عند المنع أو عند عنوانٍ فارغ: مهمّةٌ بلا عنوانٍ سطرٌ أبيضُ في
+     القائمة لا يعرف صاحبُه ما هو.
+     وتحويلُ المكلَّف يُعيد بناءَ `participants` من `_participantsOf` نفسِها — فيخرج
+     المكلَّفُ السابق تلقائياً (ما لم يكن مُضافاً صراحةً في `shared`) ويدخل الجديد.
+     ولا يُنسَخ منطقُ الأطراف هنا: نسخةٌ ثانيةٌ تفترق بعد أوّل تعديل فتُنتج مستنداً
+     لا يراه صاحبُه. */
+  function _editPatch(t, form, login, role){
+    if(!t || !_canEdit(t, login, role)) return null;
+    var title=String((form&&form.title)||"").trim();
+    if(!title) return null;
+    var due=String((form&&form.due)||"");
+    var p={
+      title: title,
+      body:  String((form&&form.body)||"").trim(),
+      due:   /^\d{4}-\d{2}-\d{2}$/.test(due) ? due : "",
+      priority: (form&&form.priority)==="high" ? "high" : "normal"
+    };
+    if(_canReassign(t, login, role) && form && ("assignedToUser" in form)){
+      var to=String(form.assignedToUser||"");
+      p.assignedToUser = to;
+      p.assignedToName = to ? _nameOf(to) : "";
+      // بلا مكلَّفٍ تصير ملاحظةً شخصية — وإلا بقيت في «مهامّي» عند لا أحد
+      p.kind = to ? "task" : "note";
+      p.participants = _participantsOf({
+        createdByUser: (t&&t.createdByUser)||"",
+        assignedToUser: to,
+        shared: (t&&t.shared)||[]
+      });
+    }
+    return p;
+  }
+
+  /* مَن خرج من الغرفة بهذا التحويل — يُعرَض للمُنشئ **قبل** الحفظ لا بعده.
+     إخراجُ زميلٍ من مهمّةٍ عَلّق فيها فعلٌ لا يُلغى بزرّ رجوع. */
+  function _droppedBy(t, toUser){
+    var before=_participantsOf(t);
+    var after=_participantsOf({
+      createdByUser:(t&&t.createdByUser)||"",
+      assignedToUser:String(toUser||""),
+      shared:(t&&t.shared)||[]
+    });
+    return before.filter(function(u){ return after.indexOf(u)===-1; });
   }
 
   /* حالةُ الموعد — أساسُ اللون في البطاقة.
@@ -397,6 +460,43 @@
     try{ logAudit("staff_task_shared", (t.title||id)+" → "+_nameOf(who)); }catch(e){}
   }
 
+  /* ════════ التحرير ════════ */
+  function startEdit(id){ _openId=id; _editing=true; _rerender(); }
+  function cancelEdit(){ _editing=false; _rerender(); }
+
+  function saveEdit(id){
+    var t=byId(id); if(!t) return;
+    var g=function(sfx){ return document.getElementById("st-ed-"+sfx+"-"+id); };
+    var form={
+      title:    (g("title")||{}).value,
+      body:     (g("body")||{}).value,
+      due:      (g("due")||{}).value,
+      priority: (g("prio")||{}).value
+    };
+    var asg=g("asg");
+    if(asg) form.assignedToUser=asg.value;
+
+    var patch=_editPatch(t, form, _me(), _myRole());
+    if(!patch){
+      _t(String(form.title||"").trim() ? "لا تملك تعديلَ هذه المهمّة" : "العنوان مطلوب","warn");
+      return;
+    }
+    // تحويلٌ يُخرج أحداً من الغرفة: يُصارَح به قبل الحفظ لا بعده
+    if(asg && String(asg.value||"")!==String(t.assignedToUser||"")){
+      var out=_droppedBy(t, asg.value).map(_nameOf);
+      var msg = asg.value
+        ? ("تحويلُ المهمّة إلى "+_nameOf(asg.value)+"."+(out.length?("\n\nوسيخرج منها: "+out.join(" · ")+" — فلن يراها بعد الآن."):""))
+        : ("إلغاءُ التكليف — تصير ملاحظةً شخصيةً لك."+(out.length?("\n\nوسيخرج منها: "+out.join(" · ")+"."):""));
+      if(!window.confirm(msg+"\n\nمتابعة؟")) return;
+    }
+    // التعديلُ يُنسَب: مَن غيّر ومتى — يظهران في التفصيل ويُقيَّدان في السجلّ
+    patch.lastEditBy=_me(); patch.lastEditName=_myName(); patch.lastEditAt=_stamp();
+    _update(id, patch, "حُفظ التعديل").then(function(){
+      _editing=false; _rerender();
+      try{ logAudit("staff_task_edit", (t.title||id)+" ⇐ "+patch.title); }catch(e){}
+    }).catch(function(){});
+  }
+
   function removeTask(id){
     var t=byId(id); if(!t) return;
     if(!(_isAdmin() || t.createdByUser===_me())){ _t("الحذفُ لمُنشئ المهمّة","warn"); return; }
@@ -460,8 +560,8 @@
   /* ════════ التنقّل ════════ */
   function list(){ try{ showPage("staff-tasks"); }catch(e){} }
   function tab(t){ _tab=t; _openId=null; if(t==="all" && _isAdmin()){ try{ logAudit("staff_tasks_view_all","اطّلاعُ الإدارة على كل المهامّ"); }catch(e){} } _rerender(); }
-  function open(id){ _openId=id; _rerender(); }
-  function back(){ _openId=null; _rerender(); }
+  function open(id){ _openId=id; _editing=false; _rerender(); }
+  function back(){ _openId=null; _editing=false; _rerender(); }
 
   function _t(m,k){ try{ toast(m,k); }catch(e){} }
   function _e(s){ try{ return esc(s==null?"":String(s)); }catch(e){ return String(s==null?"":s); } }
@@ -509,6 +609,8 @@
       '#page-staff-tasks .st-quick{background:var(--surface);border:1px solid var(--border);'+
         'border-radius:12px;padding:14px;margin-bottom:14px;box-shadow:var(--shadow)}'+
       '#page-staff-tasks .st-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}'+
+      '#page-staff-tasks .st-form{max-width:640px}'+
+      '#page-staff-tasks .st-form .st-row>div{flex:1 1 180px}'+
       '#page-staff-tasks .st-row .form-input,#page-staff-tasks .st-row .form-select{width:auto}'+
       '#page-staff-tasks .st-grow{flex:1;min-width:200px}'+
       '#page-staff-tasks .st-hint{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.8}'+
@@ -596,8 +698,9 @@
     }
     if(_openId){
       var t=byId(_openId);
-      if(!t){ _openId=null; return render(); }
-      host.innerHTML=_hero()+_detailHtml(t);
+      if(!t){ _openId=null; _editing=false; return render(); }
+      if(_editing && !_canEdit(t,_me(),_myRole())) _editing=false;
+      host.innerHTML=_hero()+(_editing ? _editHtml(t) : _detailHtml(t));
       return;
     }
     host.innerHTML=_hero()+_quickHtml()+_tabsHtml()+'<div class="card">'+_listHtml()+'</div>';
@@ -710,6 +813,47 @@
     '</div>';
   }
 
+  /* شاشةُ التحرير — نموذجٌ واحدٌ صريح، لا تحريرٌ في مكانه على البطاقة.
+     التحريرُ في مكانه يُغري بالحفظ الضمنيّ عند فقد التركيز، فيتغيّر نصُّ مهمّةٍ
+     يراها غيرُك بلا أن تقصد. هنا: حفظٌ بزرّ، وإلغاءٌ يعيد كلَّ شيء. */
+  function _editHtml(t){
+    var canAsg=_canReassign(t,_me(),_myRole());
+    var asgOpts='<option value="">— بلا تكليف (ملاحظةٌ شخصية) —</option>'+
+      _users().map(function(u){
+        return '<option value="'+_e(u.user)+'"'+(t.assignedToUser===u.user?" selected":"")+'>'+_e(u.name||u.user)+'</option>';
+      }).join("");
+    function row(label, field){
+      return '<div style="margin-bottom:12px">'+
+        '<label style="display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:5px">'+_e(label)+'</label>'+
+        field+'</div>';
+    }
+    return '<div class="card"><div class="st-form">'+
+      '<div class="st-sec" style="margin-top:0">'+_icn("edit")+'تعديل المهمّة</div>'+
+      row("العنوان",
+        '<input type="text" class="form-input" id="st-ed-title-'+_e(t.id)+'" value="'+_e(t.title)+'" maxlength="200">')+
+      row("التفاصيل (اختياري)",
+        '<textarea class="form-textarea" id="st-ed-body-'+_e(t.id)+'" rows="3">'+_e(t.body||"")+'</textarea>')+
+      '<div class="st-row">'+
+        '<div style="flex:1;min-width:150px">'+row("الموعد",
+          '<input type="date" class="form-input" id="st-ed-due-'+_e(t.id)+'" value="'+_e(t.due||"")+'">')+'</div>'+
+        '<div style="flex:1;min-width:150px">'+row("الأولوية",
+          '<select class="form-select" id="st-ed-prio-'+_e(t.id)+'">'+
+            '<option value="normal"'+(t.priority!=="high"?" selected":"")+'>عادية</option>'+
+            '<option value="high"'+(t.priority==="high"?" selected":"")+'>مهمّة</option>'+
+          '</select>')+'</div>'+
+      '</div>'+
+      (canAsg
+        ? row("المكلَّف",
+            '<select class="form-select" id="st-ed-asg-'+_e(t.id)+'" style="width:100%">'+asgOpts+'</select>'+
+            '<div class="st-hint">تحويلُ المهمّة يُخرج المكلَّفَ السابق منها ما لم يكن مُضافاً مشاركاً.</div>')
+        : '<div class="st-hint">تحويلُ المهمّة إلى موظّفٍ آخر لمُنشئها وحدَه.</div>')+
+      '<div class="st-acts">'+
+        '<button class="btn btn-primary btn-sm" onclick="staffTasks.saveEdit(\''+_q(t.id)+'\')">'+_icn("save")+'حفظ</button>'+
+        '<button class="btn btn-ghost" onclick="staffTasks.cancelEdit()">إلغاء</button>'+
+      '</div>'+
+    '</div></div>';
+  }
+
   function _detailHtml(t){
     var me=_me(), today=_todayISO();
     var mine   = t.assignedToUser===me;
@@ -732,6 +876,8 @@
     var acts="";
     if(t.status!=="done" && (mine||owner||_isAdmin()))
       acts+='<button class="btn btn-primary btn-sm" onclick="staffTasks.markDone(\''+_q(t.id)+'\')">'+_icn("checkCircle")+'تمّ الإنجاز</button>';
+    if(_canEdit(t,me,_myRole()))
+      acts+='<button class="btn btn-ghost" onclick="staffTasks.startEdit(\''+_q(t.id)+'\')">'+_icn("edit")+'تعديل</button>';
     if(t.status==="done"  && (mine||owner||_isAdmin()))
       acts+='<button class="btn btn-ghost" onclick="staffTasks.reopen(\''+_q(t.id)+'\')">'+_icn("repeat")+'إعادة فتح</button>';
     if(t.status==="open" && mine && !owner)
@@ -752,6 +898,7 @@
         '<span'+(_isOverdue(t,today)?' class="late"':'')+'>'+_icn(_isOverdue(t,today)?"alertTriangle":"clock")+
           (t.due?(_e(t.due)+(_isOverdue(t,today)?" — متأخّرة":"")):'بلا موعد')+'</span>'+
         (t.priority==="high"?'<span class="st-pill hi">مهمّة</span>':"")+
+        (t.lastEditBy?('<span>'+_icn("edit")+'آخر تعديل: '+_e(t.lastEditName||_nameOf(t.lastEditBy))+'</span>'):"")+
       '</div>'+
       (t.body?('<div class="st-body">'+_e(t.body)+'</div>'):"")+
       (t.status==="returned"
@@ -784,6 +931,7 @@
     refreshNav:refreshNav, canView:_canView,
     tab:tab, open:open, back:back, byId:byId,
     markDone:markDone, reopen:reopen, returnTask:returnTask, acceptBack:acceptBack,
+    startEdit:startEdit, cancelEdit:cancelEdit, saveEdit:saveEdit,
     addComment:addComment, shareTask:shareTask, removeTask:removeTask,
     draftPick:draftPick, draftAdd:draftAdd, draftKey:draftKey, draftPaste:draftPaste, draftDrop:draftDrop,
     draftDue:draftDue, draftPrio:draftPrio, draftDueAll:draftDueAll,
@@ -791,6 +939,7 @@
     // دوالٌّ نقيّة مكشوفةٌ لفحوص hail-tests (بلا متصفّح)
     _parseBulk:_parseBulk, _participantsOf:_participantsOf, _canSee:_canSee,
     _canEditParticipants:_canEditParticipants, _dueState:_dueState, _isOverdue:_isOverdue,
+    _canEdit:_canEdit, _canReassign:_canReassign, _editPatch:_editPatch, _droppedBy:_droppedBy,
     _splitTabs:_splitTabs, _countOpen:_countOpen, _sortTasks:_sortTasks,
     build:MODULE_BUILD
   };

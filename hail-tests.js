@@ -16186,6 +16186,50 @@ function staffTasksGuards() {
   T("★ والمُنشئُ يضيف", ST._canEditParticipants(t1, "رغده", "مشرف") === true);
   T("والأدمن يضيف", ST._canEditParticipants(t1, "منى", "admin") === true);
 
+  /* ── (٤-ب) التعديل: للأطراف · والتحويلُ للمُنشئ · ونسبةٌ لا تُزوَّر ── */
+  const NEED2 = ["_canEdit", "_canReassign", "_editPatch", "_droppedBy"];
+  const miss2 = NEED2.filter(k => typeof ST[k] !== "function");
+  T("★ دوالُّ التعديل مكشوفةٌ للفحص", miss2.length === 0, miss2.join(" · "));
+  if (!miss2.length) {
+    const TK = { id: "t", title: "قديم", body: "", due: "2026-09-10", priority: "normal",
+                 kind: "task", createdByUser: "رغده", assignedToUser: "خالد", shared: ["سعيد"] };
+    T("★★ كلُّ مشاركٍ يعدّل (قرارُ المالك: التعديل للجميع)",
+      ST._canEdit(TK, "خالد", "مشرف") === true && ST._canEdit(TK, "سعيد", "مشرف") === true &&
+      ST._canEdit(TK, "رغده", "مشرف") === true);
+    T("★★★ ومَن ليس طرفاً لا يعدّل", ST._canEdit(TK, "منى", "مشرف") === false);
+    T("★★★ والتحويلُ للمُنشئ وحدَه (لا يرمي المكلَّفُ عهدتَه على زميل)",
+      ST._canReassign(TK, "رغده", "مشرف") === true &&
+      ST._canReassign(TK, "خالد", "مشرف") === false &&
+      ST._canReassign(TK, "سعيد", "مشرف") === false);
+
+    const asAssignee = ST._editPatch(TK, { title: "جديد", due: "2026-09-20", priority: "high",
+                                           assignedToUser: "منى" }, "خالد", "مشرف");
+    T("★★ المكلَّفُ يعدّل النصَّ والموعدَ والأولوية",
+      !!asAssignee && asAssignee.title === "جديد" && asAssignee.due === "2026-09-20" &&
+      asAssignee.priority === "high", JSON.stringify(asAssignee));
+    T("★★★ ومحاولتُه تحويلَ المهمّة تُسقَط بصمتٍ من الحزمة (لا تصل القاعدةَ أصلاً)",
+      !!asAssignee && !("assignedToUser" in asAssignee) && !("participants" in asAssignee));
+
+    const asOwner = ST._editPatch(TK, { title: "جديد", assignedToUser: "منى" }, "رغده", "مشرف");
+    T("★★ والمُنشئُ يحوّلها، وتُعاد الأطرافُ من _participantsOf نفسِها",
+      !!asOwner && asOwner.assignedToUser === "منى" &&
+      JSON.stringify(asOwner.participants) === JSON.stringify(["رغده", "منى", "سعيد"]),
+      JSON.stringify(asOwner && asOwner.participants));
+    T("★★ ومَن أُضيف صراحةً (shared) يبقى بعد التحويل، والمكلَّفُ السابقُ يخرج",
+      JSON.stringify(ST._droppedBy(TK, "منى")) === '["خالد"]',
+      JSON.stringify(ST._droppedBy(TK, "منى")));
+    T("★ وإلغاءُ التكليف يجعلها ملاحظةً شخصية",
+      (ST._editPatch(TK, { title: "ج", assignedToUser: "" }, "رغده", "مشرف") || {}).kind === "note");
+    T("★★★ وعنوانٌ فارغٌ يُردّ (لا سطرَ أبيضَ في القائمة لا يعرف صاحبُه ما هو)",
+      ST._editPatch(TK, { title: "   " }, "رغده", "مشرف") === null);
+    T("★★★ وغيرُ الطرف لا تُبنى له حزمةُ تعديلٍ أصلاً",
+      ST._editPatch(TK, { title: "ج" }, "منى", "مشرف") === null);
+    T("★ وتاريخٌ مشوَّهٌ يُنظَّف إلى «بلا موعد» لا يُكتب كما هو",
+      (ST._editPatch(TK, { title: "ج", due: "غداً" }, "رغده", "مشرف") || {}).due === "");
+    T("★★ والتعديلُ لا يحوّر المهمّةَ الأصلية (الحزمةُ تُبنى ولا تُطبَّق هنا)",
+      TK.title === "قديم" && TK.assignedToUser === "خالد");
+  }
+
   /* ── (٥) حالةُ الموعد: مقارنةُ نصٍّ لا كائنَ Date ── */
   const TODAY = "2026-09-03";
   T("★★ المتأخّرُ متأخّر", ST._dueState({ due: "2026-09-01", status: "open" }, TODAY) === "late");
