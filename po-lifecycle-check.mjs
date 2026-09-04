@@ -449,12 +449,14 @@ const staff = await page.evaluate(async () => {
              po: (td[1].querySelector('b') || {}).textContent,
              sub: (td[1].querySelector('.pkpi-sub') || {}).textContent,
              spend: (td[2].querySelector('b') || {}).textContent,
-             prep: (td[3].querySelector('b') || {}).textContent };
+             firstPass: (td[3].querySelector('b') || {}).textContent };
   });
   const hdr = [...tbl.querySelectorAll('thead tr')].pop().children.length;
   const root = document.getElementById('page-purchase-kpi');
   return { ok: true, rows: S.rows.map(r => ({ key: r.key, name: r.name, poN: r.poN, poClosed: r.poClosed,
-             spendClosed: r.spendClosed, prepAvg: r.prepAvg })), drawn, hdr,
+             spendClosed: r.spendClosed, firstPassRate: r.firstPassRate })), drawn, hdr,
+           scopeSpend: S.scopeSpend, inTableSpend: S.inTableSpend, outSpend: S.outSpend,
+           moneyLine: !!root.querySelector('.pkpi-recon-money'),
            outsideN: S.outsideN, outsideSpend: S.outsideSpend,
            outsideRoles: S.outsideGroups.map(g => g.role).sort(),
            outsideBanner: !!root.querySelector('.pkpi-staff-admin'),
@@ -465,7 +467,7 @@ const staff = await page.evaluate(async () => {
            pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
            guide: !!root.querySelector('.pkpi-guide'),
            groupHdrs: [...root.querySelectorAll('.pkpi-grp th')].map(th => th.textContent.trim().slice(0, 14)),
-           canvases: ['pkpi-c-staff-time','pkpi-c-staff-rate','pkpi-c-staff-load']
+           canvases: ['pkpi-c-staff-rate','pkpi-c-staff-load']
              .map(id => { const c = document.getElementById(id); return c ? (c.clientWidth > 100 && c.clientHeight > 60) : false; }),
            visible: !!root.classList.contains('active') };
 });
@@ -487,10 +489,16 @@ if (staff.ok) {
   check('١٢د) ★★★ قيمةُ مشترياته المرسومةُ = التكلفةُ الفعليةُ للمغلق (3,000.00)',
     !!bySaad && bySaad.spendClosed === 3000 && !!drawnSaad && near(drawnSaad.spend.replace(/,/g, ''), 3000),
     'مرسوم ' + (drawnSaad && drawnSaad.spend) + ' · محسوب ' + (bySaad && bySaad.spendClosed));
-  check('١٢هـ) ★★ زمنُ تجهيز المقارنة المرسومُ = المحسوب بأيام العمل',
-    !!bySaad && bySaad.prepAvg != null && !!drawnSaad && near(drawnSaad.prep, bySaad.prepAvg.toFixed(1)),
-    'مرسوم ' + (drawnSaad && drawnSaad.prep) + ' · محسوب ' + (bySaad && bySaad.prepAvg));
-  check('١٢و) ★ رأسُ الجدول (الصفُّ الثاني) يطابق أعمدةَ الصفوف', staff.hdr === 10, 'رؤوس=' + staff.hdr);
+  check('١٢هـ) ★★★ «اعتماد من أول مرة» المرسومُ = المحسوب',
+    !!bySaad && bySaad.firstPassRate != null && !!drawnSaad &&
+    near(parseFloat(drawnSaad.firstPass), bySaad.firstPassRate.toFixed(1)),
+    'مرسوم ' + (drawnSaad && drawnSaad.firstPass) + ' · محسوب ' + (bySaad && bySaad.firstPassRate));
+  // ══ سؤالُ المالك: «كيف قيمةُ مشترياته مختلفةٌ عن المبالغ المغلقة في اللوحة؟» ══
+  check('١٢هـ٢) ★★★ والمالُ يُطابق: قيمةُ الجدول + ما أغلقه غيرُهم = إجماليُّ المغلق',
+    Math.abs((staff.inTableSpend + staff.outSpend) - staff.scopeSpend) < 0.01 && staff.moneyLine === true,
+    staff.inTableSpend + ' + ' + staff.outSpend + ' = ' + staff.scopeSpend);
+  check('١٢و) ★★★ الجدولُ خمسةُ أعمدةٍ بعد حذف السرعة والمقارنة والوفر (طلب المالك)',
+    staff.hdr === 5, 'رؤوس=' + staff.hdr);
   // بلاغُ المالك حرفياً: «لماذا تضيف مشرف والمدير التنفيذي في أداء مسؤول المشتريات؟»
   check('١٢ز) ★★★ لا مشرفَ ولا تنفيذيَّ ولا مسؤولَ نظامٍ في جدول أداء المشتريات',
     staff.strangersInTable.length === 0 &&
@@ -514,11 +522,10 @@ if (staff.ok) {
     staff.clipped === 0 && staff.pageOverflow <= 1,
     'مقصوصة=' + staff.clipped + ' · فيضُ الصفحة=' + staff.pageOverflow + 'px');
   check('١٢ط) ★★ دليلُ قراءة الجدول مرسومٌ (الجدولُ يشرح نفسَه)', staff.guide === true);
-  check('١٢ي) ★★ ورؤوسُ المجموعات تسمّي المحاور (سرعة · جودة · قيمة · التزام)',
-    staff.groupHdrs.length === 5 && staff.groupHdrs.some(h => h.includes('السرعة')) &&
-    staff.groupHdrs.some(h => h.includes('جودة')) && staff.groupHdrs.some(h => h.includes('القيمة')) &&
+  check('١٢ي) ★★ ورؤوسُ المجموعات تسمّي المحاور الباقية (جودة · التزام)',
+    staff.groupHdrs.length === 3 && staff.groupHdrs.some(h => h.includes('جودة')) &&
     staff.groupHdrs.some(h => h.includes('الالتزام')), staff.groupHdrs.join(' | '));
-  check('١٢ك) ★★★ المخطّطاتُ الثلاثة مرسومةٌ بأبعادٍ حقيقية (لا لوحةٌ منكمشة)',
+  check('١٢ك) ★★★ المخطّطان الباقيان مرسومان بأبعادٍ حقيقية (سقط مخطّط الأزمنة)',
     staff.canvases.every(Boolean), JSON.stringify(staff.canvases));
 }
 // ── الصلاحية: مسؤولُ المشتريات يرى صفَّه وحدَه — والحجبُ في الحساب لا في الـDOM ──

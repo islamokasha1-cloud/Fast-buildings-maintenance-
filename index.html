@@ -38118,7 +38118,7 @@ function _hnFeedPurchases(snap){
 "use strict";
 
 const PAGE_ID = "purchase-kpi";
-const VERSION = "1.19";
+const VERSION = "1.20";
 
 /* ── مراحل سير العمل بالترتيب — لحساب زمن كل مرحلة من timeline ── */
 const STAGE_ORDER = [
@@ -38633,104 +38633,10 @@ function _staffOpenNow(list){
   return out.sort((a,b)=>b.days-a.days);
 }
 
-/* ── المرجعُ السعريُّ التاريخيّ ──
-   خريطةُ {مفتاحُ الصنف → آخرُ سعرِ وحدةٍ دُفع فعلاً} من الطلبات **المغلقة** وحدَها،
-   مبنيّةً على الطلبات السابقةِ زمنياً لكلّ طلب. الرابطةُ من `inventoryPricing`
-   (`catalogOf`/`nameKey`) — المصدرُ الواحد؛ ولا تطبيعَ عربيَّ رابعاً هنا: تطبيعان
-   مختلفان لبندٍ واحدٍ يقولان سعرَين ولا سطرَ يفسّر (علّةُ inventory-pricing نفسُها). */
-function _itemKey(it){
-  if(!it) return "";
-  try{
-    if(window.inventoryPricing && typeof inventoryPricing.catalogOf==="function"){
-      const r=inventoryPricing.catalogOf({catalogItemId:it.catalogItemId, itemId:it.itemId, itemCode:it.itemCode, itemName:it.itemName});
-      if(r && r.c && r.c.id) return "c:"+r.c.id;
-    }
-  }catch(e){}
-  const code=String(it.itemCode||"").trim().toLowerCase();
-  if(code) return "k:"+code;
-  try{
-    if(window.inventoryPricing && typeof inventoryPricing.nameKey==="function"){
-      const nk=inventoryPricing.nameKey(it.itemName||"");
-      if(nk) return "n:"+nk;
-    }
-  }catch(e){}
-  const nm=String(it.itemName||"").trim().toLowerCase();
-  return nm ? "n:"+nm : "";
-}
-function _itemUnitPaid(it){
-  if(!it) return 0;
-  const q=Number(it.qty)||0;
-  const u=Number(it.actualUnitCost!=null?it.actualUnitCost:(it.unitCost!=null?it.unitCost:it.price));
-  if(isFinite(u) && u>0) return u;
-  const tot=Number(it.itemCost!=null?it.itemCost:it.total);
-  return (isFinite(tot) && tot>0 && q>0) ? tot/q : 0;
-}
-
-/* الوفرُ لطلبٍ واحدٍ مقابل تاريخِه: {saved, basis, covered, uncovered}
-   `basis` = قيمةُ البنود التي **وُجد لها مرجع** — وهو مقامُ نسبة الوفر ومقياسُ
-   التغطية معاً. `uncovered` = قيمةُ ما لا مرجعَ له: تُعلَن ولا تُحسب صفراً. */
-function _orderSavings(p, hist){
-  const items = Array.isArray(p&&p.items)?p.items:[];
-  let saved=0, basis=0, uncovered=0, nCov=0, nUncov=0;
-  items.forEach(it=>{
-    const q=Number(it&&it.qty)||0;
-    const u=_itemUnitPaid(it);
-    if(!(q>0) || !(u>0)) return;
-    const k=_itemKey(it);
-    const ref = k ? hist[k] : null;
-    if(ref!=null && ref>0){ saved += (ref-u)*q; basis += ref*q; nCov++; }
-    else { uncovered += u*q; nUncov++; }
-  });
-  return {saved, basis, uncovered, nCov, nUncov};
-}
-
-/* ── جودةُ المقارنة: عددُ العروض ونسبةُ اختيار الأوفر ──
-   يقرأ `priceComparisons2` عبر المصدر الموحّد `_pcGroupsFromPO` إن توفّر، فلا
-   تنشقّ قراءةُ المقارنة بين المودال والمؤشّر (وهو صنفُ العطل الذي تكرّر في NOTES). */
-function _comparisonStats(p){
-  let groups=[];
-  try{ if(typeof _pcGroupsFromPO==="function") groups=_pcGroupsFromPO(p)||[]; }catch(e){}
-  /* الاحتياطُ يقرأ **الشكلَ الحديثَ أوّلاً** (`priceComparisons2`) ثم القديم:
-     الاقتصارُ على القديم يجعل غيابَ `_pcGroupsFromPO` يقرأ صفراً صامتاً، فيظهر
-     كلُّ مسؤولٍ بلا مقارنةٍ واحدة — رقمٌ خاطئٌ بلا خطأٍ يُنذر، وهو أسوأُ من عطل. */
-  if(!groups.length && p){
-    const _norm = (g, gi)=>({
-      suppliers:((g&&g.suppliers)||[]).map(sp=>({ name:(sp&&sp.name)||"",
-        items:((sp&&sp.items)||[]).map((it,k)=>({ idx:(it&&it.idx!=null)?it.idx:((gi&&gi[k]!=null)?gi[k]:k), unitPrice:it&&it.unitPrice })) })),
-      decisions:(g&&g.decisions)||[], itemIndices:gi });
-    const allIdx=(Array.isArray(p.items)?p.items:[]).map((_,i)=>i);
-    if(Array.isArray(p.priceComparisons2) && p.priceComparisons2.length)
-      groups=p.priceComparisons2.map(g=>_norm(g,(Array.isArray(g.itemIndices)&&g.itemIndices.length)?g.itemIndices.slice():allIdx.slice()));
-    else if(p.priceComparison2 && Array.isArray(p.priceComparison2.suppliers) && p.priceComparison2.suppliers.length)
-      groups=[_norm(p.priceComparison2, allIdx.slice())];
-  }
-  let quoteN=0, groupN=0, decided=0, cheapest=0;
-  groups.forEach(g=>{
-    const sups=(g&&g.suppliers)||[];
-    /* المورّدُ يُعدّ عرضاً إن سعّر بنداً واحداً على الأقل — خانةٌ فارغةٌ ليست عرضاً
-       (نفسُ ضابط `_pcManualUsed`)، وإلا قال المؤشّر «ثلاثةُ عروض» عن خانتَين فارغتَين. */
-    const real=sups.filter(s=>(s&&Array.isArray(s.items)?s.items:[]).some(x=>(parseFloat(x&&x.unitPrice)||0)>0));
-    if(!real.length) return;
-    groupN++; quoteN+=real.length;
-    const decs=(g&&g.decisions)||[];
-    decs.forEach(d=>{
-      if(!d || d.itemIndex==null) return;
-      const si=(d.selectedSupplierIdx!=null?d.selectedSupplierIdx:-1);
-      if(si<0 || !sups[si]) return;
-      const prices=sups.map(s=>{ const e=(s&&Array.isArray(s.items))?s.items.find(x=>x&&x.idx===d.itemIndex):null; return parseFloat(e&&e.unitPrice)||0; });
-      const valid=prices.filter(v=>v>0);
-      if(valid.length<2) return;              // بسعرٍ واحدٍ لا معنى لـ«الأوفر»
-      const chosen=prices[si];
-      if(!(chosen>0)) return;
-      decided++;
-      if(chosen<=Math.min.apply(null,valid)+1e-9) cheapest++;
-    });
-  });
-  return {groupN, quoteN, decided, cheapest,
-          avgQuotes: groupN ? quoteN/groupN : null,
-          required: (function(){ try{ const th=(typeof PO_CEO_THRESHOLD!=="undefined")?Number(PO_CEO_THRESHOLD):Infinity;
-                                       return (typeof getPOTotal==="function"?(getPOTotal(p)||0):_kpiSpendOf(p)) >= th; }catch(e){ return false; } })()};
-}
+/* v1.20: حُذف محرّكا **المرجع السعريّ** (`_itemKey`/`_itemUnitPaid`/`_orderSavings`)
+   و**جودة المقارنة** (`_comparisonStats`) مع أعمدتهما بطلب المالك (٠٤/٠٩). ولم يُتركا
+   كوداً ميتاً: كودٌ لا مستهلكَ له يُقرأ لاحقاً كأنه قيدُ عملٍ قائم فيُبنى عليه. وتاريخُهما
+   في git إن لزما يوماً. */
 
 /* ══ التجميع على الأشخاص ══ */
 function computeStaffKPIs(list){
@@ -38738,26 +38644,9 @@ function computeStaffKPIs(list){
   const R = key => (rows[key] = rows[key] || {
     key, name:"—", role:"",
     poN:0, poClosed:0, poOpen:0, poEnded:0, spendClosed:0, spendOpen:0,
-    prepDurs:[], prepInTarget:0, execDurs:[], execInTarget:0,
     handoffs:0, bounced:0, financeReturned:0,
-    cmpRequired:0, cmpDone:0, quoteN:0, quoteGroups:0, decided:0, cheapest:0,
-    saved:0, savedBasis:0, savedUncovered:0,
     onTimeN:0, onTimeOk:0, extensions:0,
     openNowN:0, openNowOldest:null
-  });
-
-  /* المرجعُ السعريّ يُبنى من كلّ الطلبات المغلقة **قبل** تاريخ كلّ طلب — بناءً
-     زمنياً تصاعدياً، فلا يُقاس طلبٌ على سعرٍ لم يكن معروفاً وقتَ شرائه. */
-  const closedSorted=(list||[]).filter(p=>p&&_kpiClosed(p)).slice()
-    .sort((a,b)=>(parseTS(a.updatedAt)||parseTS(a.createdAt)||0)-(parseTS(b.updatedAt)||parseTS(b.createdAt)||0));
-  const hist={}, histAt={};
-  const savingsOf={};
-  closedSorted.forEach(p=>{
-    savingsOf[p.id]=_orderSavings(p,hist);
-    (Array.isArray(p.items)?p.items:[]).forEach(it=>{
-      const k=_itemKey(it), u=_itemUnitPaid(it);
-      if(k && u>0){ hist[k]=u; histAt[k]=parseTS(p.updatedAt)||0; }
-    });
   });
 
   let unattributedN=0, measurableN=0;
@@ -38794,9 +38683,9 @@ function computeStaffKPIs(list){
     wins.forEach(w=>{
       const k=_actorKey(w.ev); if(!k) return;
       const rr=R(k); rr.name=_actorLabel(k,w.ev); if(!rr.role) rr.role=_actorRole(k, w.ev.byRole);
-      const d=_wmDays(w.at,w.endAt);
-      if(w.kind==="prep"){ rr.prepDurs.push(d); if(d<=STAFF_TARGET_DAYS) rr.prepInTarget++; rr.handoffs++; }
-      else { rr.execDurs.push(d); if(d<=STAFF_TARGET_DAYS) rr.execInTarget++; }
+      /* v1.20: الأزمنةُ لم تعد تُعرض، لكنّ **عدَّ الإحالات** يبقى — عليه يقوم
+         «الاعتماد من أول مرة»: بسطُه إحالاتٌ لم ترتدّ، ومقامُه كلُّ إحالاته. */
+      if(w.kind==="prep") rr.handoffs++;
     });
 
     /* الارتدادُ المنسوبُ إليه: ما رجع **بعد** إحالته — رفضُ التنفيذي، وإعادةُ
@@ -38818,16 +38707,8 @@ function computeStaffKPIs(list){
       }
     });
 
-    /* المقارنة والوفر والالتزام — على مالكِ الطلب (آخرِ من حمله)، فهي صفاتُ الطلب
-       ككلّ لا صفاتُ نافذةٍ بعينها. */
-    const cs=_comparisonStats(p);
-    if(cs.required) r.cmpRequired++;
-    if(cs.groupN>0){ r.cmpDone++; r.quoteGroups+=cs.groupN; r.quoteN+=cs.quoteN; }
-    r.decided+=cs.decided; r.cheapest+=cs.cheapest;
-
+    /* الالتزامُ على مالكِ الطلب (آخرِ من حمله) — صفةُ الطلب ككلّ لا صفةُ نافذة. */
     if(closed){
-      const sv=savingsOf[p.id];
-      if(sv){ r.saved+=sv.saved; r.savedBasis+=sv.basis; r.savedUncovered+=sv.uncovered; }
       const expected=parseTS((typeof poDueDate==="function"?poDueDate(p):"")||p.expectedDeliveryDate);
       const closedEv=(p.timeline||[]).filter(t=>t&&(t.code==="closed"||t.code==="closed_after_receipt")).map(t=>parseTS(t.at)).filter(Boolean);
       const closedAt=closedEv.length?Math.max.apply(null,closedEv):parseTS(p.updatedAt);
@@ -38840,23 +38721,12 @@ function computeStaffKPIs(list){
      الفريق ويُعرض بجواره أقدمُ طلبٍ باسمه: عدّادٌ حيٌّ يغيّر السلوكَ اليوم. */
   const openNow=_staffOpenNow(list);
 
-  const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
   const out=Object.values(rows).map(r=>({
     key:r.key, name:r.name, role:r.role,
     poN:r.poN, poClosed:r.poClosed, poOpen:r.poOpen, poEnded:r.poEnded,
     spendClosed:r.spendClosed, spendOpen:r.spendOpen,
-    prepAvg:avg(r.prepDurs), prepN:r.prepDurs.length,
-    prepTargetRate:r.prepDurs.length?(r.prepInTarget/r.prepDurs.length)*100:null,
-    execAvg:avg(r.execDurs), execN:r.execDurs.length,
-    execTargetRate:r.execDurs.length?(r.execInTarget/r.execDurs.length)*100:null,
     firstPassRate:r.handoffs?((r.handoffs-r.bounced)/r.handoffs)*100:null,
     handoffs:r.handoffs, bounced:r.bounced, financeReturned:r.financeReturned,
-    cmpRequired:r.cmpRequired, cmpDone:r.cmpDone,
-    avgQuotes:r.quoteGroups?r.quoteN/r.quoteGroups:null,
-    cheapestRate:r.decided?(r.cheapest/r.decided)*100:null, decided:r.decided,
-    saved:r.savedBasis>0?r.saved:null, savedBasis:r.savedBasis,
-    savedPct:r.savedBasis>0?(r.saved/r.savedBasis)*100:null,
-    savedCoverage:(r.savedBasis+r.savedUncovered)>0?(r.savedBasis/(r.savedBasis+r.savedUncovered))*100:null,
     onTimeRate:r.onTimeN?(r.onTimeOk/r.onTimeN)*100:null, onTimeN:r.onTimeN,
     extensions:r.extensions,
     lowSample:r.poN<STAFF_MIN_SAMPLE
@@ -38900,10 +38770,19 @@ function computeStaffKPIs(list){
   const scopeN = (list||[]).length;
   const inTableN = staffRows.reduce((s,r)=>s+r.poN,0);
   const outN = otherRows.reduce((s,r)=>s+r.poN,0);
+  /* v1.20: والمطابقةُ **بالمال** لا بالعدد وحدَه (سؤال المالك 04/09: «كيف قيمةُ
+     مشترياته مختلفةٌ عن المبالغ المغلقة في اللوحة وهو مسؤولُ المشتريات الوحيد؟»).
+     والفرقُ لم يكن خطأً: طلباتٌ أغلقها حسابُ المسؤول لا هو. لكنّ الصفحةَ كانت تُطابق
+     الأعدادَ وتصمت عن المال، فيبقى الرقمُ المالي بلا تفسير — ورقمٌ يخالف رقماً في
+     شاشةٍ أخرى بلا سطرٍ يفسّر يُسقط الثقةَ في الاثنين. */
+  const inTableSpend = staffRows.reduce((s,r)=>s+r.spendClosed,0);
+  const outSpend = otherRows.reduce((s,r)=>s+r.spendClosed,0);
+  const scopeSpend = (list||[]).reduce((s,p)=>s+(_kpiClosed(p)?_kpiActual(p):0),0);
 
   return {
     rows:staffRows, measurableN, unattributedN,
     scopeN, inTableN, noWindowN: Math.max(0, scopeN - measurableN),
+    scopeSpend, inTableSpend, outSpend,
     outsideGroups: Object.values(byRole).sort((a,b)=>b.n-a.n),
     outsideN: outN,
     outsideSpend: otherRows.reduce((s,r)=>s+r.spendClosed,0),
@@ -38978,7 +38857,6 @@ function _staffSectionHtml(list){
   }
 
   const cls=(v,good,bad)=> v==null?"":(v>=good?"pkpi-ok":(v<bad?"pkpi-bad":"pkpi-warn"));
-  const dcls=v=> v==null?"":(v<=tgt?"pkpi-ok":(v>tgt*2?"pkpi-bad":"pkpi-warn"));
   const roleLbl=r=>{ try{ if(window._PU_ROLES && _PU_ROLES[r]) return _PU_ROLES[r]; }catch(e){}
                      return r==="procurement_officer"?"🛒 مسؤول المشتريات":(r||""); };
   const dash = `<span class="pkpi-na" title="لا بيانات كافية لهذا المؤشّر في النطاق المحدّد — والفراغُ هنا فراغٌ معلَنٌ لا صفر">—</span>`;
@@ -38990,14 +38868,11 @@ function _staffSectionHtml(list){
     const good=[], bad=[];
     /* ثلاثيّةٌ صريحة: فوق الهدف ⇒ قوّة، وضِعفُ الهدف فأكثر ⇒ ضعف، وما بينهما لا يُذكر.
        والمنطقةُ الوسطى تُترك صامتةً قصداً: خلاصةٌ تذكر كلَّ شيءٍ لا تقول شيئاً. */
-    if(r.prepAvg!=null){ if(r.prepAvg<=tgt) good.push("سريعٌ في التجهيز"); else if(r.prepAvg>tgt*2) bad.push("بطيءٌ في التجهيز"); }
-    if(r.execAvg!=null){ if(r.execAvg<=tgt) good.push("سريعٌ في التنفيذ"); else if(r.execAvg>tgt*2) bad.push("بطيءٌ في التنفيذ"); }
+    /* v1.20: سقطت جملُ السرعة والمقارنة مع أعمدتها. وكان اجتماعُ «سريعٌ في التنفيذ»
+       مع «التوريد متأخّر» يقرأه المالكُ تناقضاً — وهو ليس تناقضاً (الأولى تقيس تحريكَ
+       الورق والثانية وصولَ البضاعة) لكنّ **خلاصةً تحتاج شرحاً ليست خلاصة**. */
     if(r.firstPassRate!=null){ if(r.firstPassRate>=80) good.push("ملفّاتُه مكتملة"); else if(r.firstPassRate<50) bad.push("ارتدادٌ متكرّر"); }
     if(r.onTimeRate!=null){ if(r.onTimeRate>=85) good.push("يوردُ في الموعد"); else if(r.onTimeRate<60) bad.push("التوريد متأخّر"); }
-    if(r.cheapestRate!=null){ if(r.cheapestRate>=80) good.push("يختار الأوفر"); else if(r.cheapestRate<50) bad.push("يترك الأرخص"); }
-    if(r.avgQuotes!=null && r.avgQuotes<2) bad.push("عروضٌ قليلة");
-    if(r.cmpRequired>0 && r.cmpDone<r.cmpRequired) bad.push(`مقارنةٌ ناقصةٌ في ${nf(r.cmpRequired-r.cmpDone)} طلباً إلزامياً`);
-    if(r.savedPct!=null && r.savedPct<0) bad.push("يشتري أغلى من تاريخه");
     if(!good.length && !bad.length) return `<span class="pkpi-na">لا حكمَ بعد — البيانات قليلة</span>`;
     return (good.length?`<span class="pkpi-vd-ok">${good.join(" · ")}</span>`:"")
          + (good.length&&bad.length?" <span class='pkpi-na'>—</span> ":"")
@@ -39014,33 +38889,17 @@ function _staffSectionHtml(list){
       <td data-viewer-hide title="التكلفةُ الفعليةُ للطلبات المغلقة — نفسُ رقم «إجمالي المبالغ المغلقة» في اللوحة"><b>${nf2(r.spendClosed)}</b>
         <div class="pkpi-sub">مفتوحٌ تحته: ${nf2(r.spendOpen)}</div></td>
 
-      <td class="${dcls(r.prepAvg)} pkpi-g1" title="من لحظةِ وصول الطلب إليه (تمت مراجعة المستودع) حتى إحالته — بأيام العمل">
-        <b>${r.prepAvg==null?dash:days1(r.prepAvg)}</b>
-        <div class="pkpi-sub">${r.prepN?`${nf(r.prepN)} نافذة · في الهدف ${pct(r.prepTargetRate)}`:"لا نوافذَ مكتملة"}</div></td>
-      <td class="${dcls(r.execAvg)} pkpi-g1" title="من «قيد تنفيذ المشتريات» حتى «تم الشراء» — بأيام العمل">
-        <b>${r.execAvg==null?dash:days1(r.execAvg)}</b>
-        <div class="pkpi-sub">${r.execN?`${nf(r.execN)} نافذة · في الهدف ${pct(r.execTargetRate)}`:"لا نوافذَ مكتملة"}</div></td>
 
       <td class="${cls(r.firstPassRate,80,50)} pkpi-g2" title="من إحالاته هو: كم منها مرّ بلا رفضٍ ولا إعادةٍ من المالية">
         <b>${r.firstPassRate==null?dash:pct(r.firstPassRate)}</b>
         <div class="pkpi-sub">${r.handoffs?`${nf(r.bounced)} ارتداد من ${nf(r.handoffs)} إحالة${r.financeReturned?` · ${nf(r.financeReturned)} من المالية`:""}`:"لا إحالاتٍ بعد"}</div></td>
-      <td class="${r.avgQuotes==null?"":(r.avgQuotes>=3?"pkpi-ok":(r.avgQuotes<2?"pkpi-bad":"pkpi-warn"))} pkpi-g2" title="متوسّطُ عددِ الموردين الذين سعّروا فعلاً في كل مقارنة — الخانةُ الفارغةُ ليست عرضاً">
-        <b>${r.avgQuotes==null?dash:r.avgQuotes.toLocaleString("en-US",{maximumFractionDigits:1})}</b>
-        <div class="pkpi-sub">${r.cmpRequired?`أُنجزت ${nf(r.cmpDone)} من ${nf(r.cmpRequired)} إلزامية`:`مقارنات: ${nf(r.cmpDone)}`}</div></td>
 
-      <td class="${cls(r.cheapestRate,80,50)} pkpi-g3" title="لكل بندٍ فيه سعران فأكثر: هل وقع اختيارُه على الأرخص؟">
-        <b>${r.cheapestRate==null?dash:pct(r.cheapestRate)}</b>
-        <div class="pkpi-sub">${r.decided?`على ${nf(r.decided)} قرارَ بند`:"لا قراراتٍ قابلةً للمقارنة"}</div></td>
-      <td data-viewer-hide class="${r.savedPct==null?"":(r.savedPct>0?"pkpi-ok":(r.savedPct<-5?"pkpi-bad":"pkpi-warn"))} pkpi-g3"
-          title="فرقُ ما دفعه عن آخرِ سعرٍ دُفع للصنف نفسه سابقاً. «التغطية» = حصّةُ البنود التي وُجد لها سعرٌ سابق — وما لا سعرَ له لا يُحسب صفراً">
-        <b>${r.saved==null?dash:(r.saved>0?"+":"")+nf2(r.saved)}</b>
-        <div class="pkpi-sub">${r.savedPct==null?"بلا مرجعٍ سعريّ":`${pct(r.savedPct)} · تغطية ${pct(r.savedCoverage)}`}</div></td>
 
       <td class="${cls(r.onTimeRate,85,60)} pkpi-g4" title="مقارنةً بالموعد الملزِم (وعدُ المورّد إن وُجد، وإلّا موعدُ الحاجة) بعد كل تمديدٍ موثَّق">
         <b>${r.onTimeRate==null?dash:pct(r.onTimeRate)}</b>
         <div class="pkpi-sub">${r.onTimeN?`عيّنة ${nf(r.onTimeN)}${r.extensions?` · ${nf(r.extensions)} تمديد`:""}`:"لا طلباتٍ لها موعد"}</div></td>
     </tr>
-    <tr class="pkpi-vd-row"><td colspan="10"><span class="pkpi-vd-lbl">الخلاصة</span> ${verdict(r)}</td></tr>`).join("");
+    <tr class="pkpi-vd-row"><td colspan="5"><span class="pkpi-vd-lbl">الخلاصة</span> ${verdict(r)}</td></tr>`).join("");
 
   const oldest=S.openNowOldest;
   return `
@@ -39052,16 +38911,15 @@ function _staffSectionHtml(list){
       <p><b>المبدأ:</b> طلبُ الشراء يمرّ بسبع بوّاباتٍ ليست كلُّها لمسؤول المشتريات. فلا يُقاس
       إلّا على <b>ما يملكه وحدَه</b>: من لحظة وصول الطلب إليه حتى إحالته، ومن السداد حتى الشراء.
       <b>أزمنةُ مدير المشاريع والتنفيذيّ والمالية والمستودع خارج المقام تماماً.</b></p>
-      <p><b>الأزمنة بأيام العمل</b> لا بالتقويم: نافذةٌ تُفتح الخميسَ عصراً وتُغلق الأحدَ صباحاً
-      ليست ثلاثةَ أيامِ تأخّر. والهدف <b>${nf(tgt)} يوما عمل</b> لكلّ نافذة.</p>
+      <p><b>وأزمنةُ النوافذ سقطت من البطاقة</b> بطلب المالك (٠٤/٠٩): كانت تقيس سرعةَ
+      تحريكِ الورق، وتلتبس بـ«التوريد في الموعد» الذي يقيس <b>وصولَ البضاعة</b> — فيظهر
+      المسؤولُ «سريعاً» و«متأخّراً» في سطرٍ واحدٍ بلا تناقضٍ حقيقيّ لكن بلا معنىً مفهوم.
+      وسقط معها ما يعتمد على مقارنة الأسعار (عددُ العروض · اختيارُ الأوفر · الوفرُ مقابل التاريخ).</p>
       <table class="pkpi-guide-tbl">
-        <tr><td>تجهيز المقارنة</td><td>من وصول الطلب إليه («تمت مراجعة المستودع») حتى إحالته. <b>الأخضر ≤ ${nf(tgt)}</b></td></tr>
-        <tr><td>التنفيذ بعد السداد</td><td>من «قيد تنفيذ المشتريات» حتى «تم الشراء». <b>الأخضر ≤ ${nf(tgt)}</b></td></tr>
+        <tr><td>طلباته</td><td>كلُّ طلبٍ أنهى فيه نافذةَ عملٍ واحدةً على الأقلّ. والثلاثةُ تحته (مغلق · مفتوح · مرفوض/ملغى) <b>تجمع إليه</b>.</td></tr>
+        <tr><td>قيمة مشترياته</td><td>التكلفةُ الفعلية لطلباته <b>المغلقة</b>. وقد تخالف «إجمالي المبالغ المغلقة» في لوحة المشتريات — والفرقُ مكتوبٌ في سطر المطابقة أعلاه: طلباتٌ أغلقها غيرُ مسؤولي المشتريات.</td></tr>
         <tr><td>اعتماد من أول مرة</td><td>من إحالاته <b>هو</b>: كم منها مرّ بلا رفضِ التنفيذيّ ولا إعادةٍ من المالية. <b>الأخضر ≥ ٨٠٪</b></td></tr>
-        <tr><td>عروض لكل مقارنة</td><td>عددُ الموردين الذين <b>سعّروا فعلاً</b> — الخانةُ الفارغةُ ليست عرضاً. <b>الأخضر ≥ ٣</b></td></tr>
-        <tr><td>اختيار الأوفر</td><td>لكلّ بندٍ فيه سعران فأكثر: هل اختار الأرخص؟ <b>الأخضر ≥ ٨٠٪</b></td></tr>
-        <tr><td>الوفر مقابل التاريخ</td><td>فرقُ ما دفعه عن <b>آخرِ سعرٍ دُفع للصنف نفسه</b> سابقاً — لا مقابل العروض التي يُدخلها هو (وإلّا رُفع الوفرُ بعرضٍ وهميّ). و«التغطية» تقول على أيّ حصّةٍ من مشترياته حُسب.</td></tr>
-        <tr><td>التوريد في الموعد</td><td>مقابل الموعد الملزِم بعد كلّ تمديدٍ موثَّق. <b>الأخضر ≥ ٨٥٪</b></td></tr>
+        <tr><td>التوريد في الموعد</td><td>هل أُغلق الطلبُ قبل <b>الموعد الملزِم</b> (وعدُ المورّد إن وُجد، وإلّا موعدُ الحاجة) بعد كلّ تمديدٍ موثَّق؟ <b>الأخضر ≥ ٨٥٪</b> — وهذا يقيس <b>وصولَ البضاعة</b>، ويشترك فيه المورّدُ والمستودع.</td></tr>
       </table>
       <p class="pkpi-guide-note"><b>و«—» فراغٌ معلَنٌ لا صفر:</b> تعني «لا بيانات كافية لهذا المؤشّر»
       — ولا تُقرأ أداءً سيّئاً. وصفٌّ موسومٌ بـ«عيّنة غير كافية» لا يُقارَن بغيره.</p>
@@ -39076,6 +38934,12 @@ function _staffSectionHtml(list){
     <span class="pkpi-recon-b">+ <b>${nf(S.outsideN)}</b> أنهاها من ليس مسؤولَ مشتريات</span>
     ${S.unattributedN?`<span class="pkpi-recon-b">+ <b>${nf(S.unattributedN)}</b> لم يُعرف من أنهاها</span>`:""}
     ${S.noWindowN?`<span class="pkpi-recon-b">+ <b>${nf(S.noWindowN)}</b> لم تمرّ بمرحلة مشترياتٍ أصلاً</span>`:""}
+    <div class="pkpi-recon-money" data-viewer-hide>
+      <b>وبالمال كذلك:</b> إجماليُّ المبالغ المغلقة <b>${nf2(S.scopeSpend)}</b> ر.س
+      = <b>${nf2(S.inTableSpend)}</b> في الجدول
+      ${S.outSpend>0?`+ <b>${nf2(S.outSpend)}</b> أغلقها من ليس مسؤولَ مشتريات`:""}.
+      فإن خالف رقمُ الصفِّ رقمَ لوحة المشتريات فالفرقُ هذا — لا خللٌ في الحساب.
+    </div>
     <div class="pkpi-recon-note">فرقمُ كلّ صفٍّ هو <b>ما حمله ذلك المسؤول</b> لا إجماليَّ طلبات الشركة.
     و«لم تمرّ بمرحلة مشتريات» طلباتٌ رُفضت أو أُلغيت قبل أن تصل إليه — فلا تُحسب على أحد.</div>
   </div>`:""}
@@ -39095,37 +38959,27 @@ function _staffSectionHtml(list){
       <thead>
         <tr class="pkpi-grp">
           <th colspan="3" class="pkpi-gh0">المسؤول وحجمُ ما حمل</th>
-          <th colspan="2" class="pkpi-gh1">السرعة — أيام عمل (هدف ≤ ${nf(tgt)})</th>
-          <th colspan="2" class="pkpi-gh2">جودة الملفّ</th>
-          <th colspan="2" class="pkpi-gh3">القيمة</th>
+          <th class="pkpi-gh2">جودة الملفّ</th>
           <th class="pkpi-gh4">الالتزام</th>
         </tr>
         <tr>
           <th>المسؤول</th>
           <th>طلباته<div class="pkpi-sub">مغلق · مفتوح</div></th>
           <th data-viewer-hide>قيمة مشترياته<div class="pkpi-sub">ر.س — الفعلي للمغلق</div></th>
-          <th class="pkpi-g1">تجهيز المقارنة<div class="pkpi-sub">وصولُه ⇐ إحالتُه</div></th>
-          <th class="pkpi-g1">التنفيذ بعد السداد<div class="pkpi-sub">السدادُ ⇐ «تم الشراء»</div></th>
           <th class="pkpi-g2">اعتماد من أول مرة<div class="pkpi-sub">بلا ارتدادٍ بعد إحالته</div></th>
-          <th class="pkpi-g2">عروض لكل مقارنة<div class="pkpi-sub">مُسعِّرون فعلاً — هدف ≥ 3</div></th>
-          <th class="pkpi-g3">اختيار الأوفر<div class="pkpi-sub">لكل بند</div></th>
-          <th data-viewer-hide class="pkpi-g3">الوفر مقابل التاريخ<div class="pkpi-sub">آخرُ سعرٍ دُفع للصنف</div></th>
           <th class="pkpi-g4">التوريد في الموعد<div class="pkpi-sub">الموعد الملزِم</div></th>
         </tr>
       </thead>
-      <tbody>${body||`<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:18px">لا صفوفَ لعرضها</td></tr>`}</tbody>
+      <tbody>${body||`<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:18px">لا صفوفَ لعرضها</td></tr>`}</tbody>
     </table>
   </div>
   <div class="pkpi-scrollhint">${ICN("arrowLeft","ic-sm")} مرّر الجدولَ أفقياً لرؤية بقيّة الأعمدة</div>
 
   ${rows.length?`
   <div class="pkpi-charts pkpi-staff-charts">
-    <div class="pkpi-chart-card"><h4>${ICN("timer")} زمنُ النافذتَين لكلّ مسؤول (يوم عمل) — الهدف ≤ ${nf(tgt)}</h4>
-      <div class="cwrap"><canvas id="pkpi-c-staff-time"></canvas></div>
-      <div class="pkpi-cap">العمودُ الأطول تأخّرٌ أطول. الأزمنةُ بأيام العمل، ولا يدخلها زمنُ المدير ولا المالية ولا المستودع.</div></div>
     <div class="pkpi-chart-card"><h4>${ICN("checkCircle")} مؤشراتُ الجودة والالتزام (٪)</h4>
       <div class="cwrap"><canvas id="pkpi-c-staff-rate"></canvas></div>
-      <div class="pkpi-cap">هنا العمودُ الأطول أفضل — عكسَ المخطّط المجاور. الأهداف: اعتمادٌ ≥ ٨٠٪ · أوفرُ ≥ ٨٠٪ · توريدٌ ≥ ٨٥٪.</div></div>
+      <div class="pkpi-cap">العمودُ الأطول أفضل. الأهداف: اعتمادٌ من أول مرة ≥ ٨٠٪ · توريدٌ في الموعد ≥ ٨٥٪.</div></div>
     <div class="pkpi-chart-card" data-viewer-hide><h4>${ICN("receipt")} حجمُ ما مرّ بكلّ مسؤول (ر.س — المغلق)</h4>
       <div class="cwrap"><canvas id="pkpi-c-staff-load"></canvas></div>
       <div class="pkpi-cap">مقامُ العدل: لا تُقارَن نسبةُ رجلٍ حمل ثلاثين طلباً بنسبةِ رجلٍ حمل ثلاثة.</div></div>
@@ -39249,6 +39103,7 @@ html[data-theme="dark"] .pkpi-gh4{background:rgba(167,139,250,.14);color:#c4b5fd
   font-size:11.5px;color:var(--muted);line-height:2;margin-bottom:10px;box-shadow:var(--shadow)}
 .pkpi-recon b{color:var(--text)}
 .pkpi-recon-b{display:inline-block;background:var(--surface2);border-radius:6px;padding:1px 8px;margin:2px 3px}
+.pkpi-recon-money{font-size:11px;line-height:1.95;margin-top:6px;padding-top:6px;border-top:1px dashed var(--border)}
 .pkpi-recon-note{font-size:10.5px;line-height:1.85;margin-top:5px;padding-top:6px;border-top:1px solid var(--border)}
 /* بيانُ «خارج الجدول» — قائمةٌ بالدور لا سطرٌ واحدٌ مكدَّس */
 .pkpi-outside-list{margin:6px 0 0;padding-inline-start:18px}
@@ -39518,18 +39373,6 @@ function drawCharts(K){
       const v=c.parsed.x;
       return c.dataset.label+": "+(v==null?"لا بيانات كافية":Number(v).toLocaleString("en-US",{maximumFractionDigits:1})+unit); }}});
 
-    ctx = $("pkpi-c-staff-time");
-    if(ctx){
-      const o = hbar(16,2);
-      o.scales.x.title = {display:true, text:"يوم عمل — كلّما قصُر العمودُ كان أفضل",
-                          color:C.muted, font:{family:"Cairo",size:10}};
-      o.plugins.tooltip = _tip(" يوم عمل");
-      _charts.staffTime = new Chart(ctx,{type:"bar",data:{labels:names,datasets:[
-        _mk("تجهيز المقارنة", SC[0], _Sv.map(r=>_r1(r.prepAvg))),
-        _mk("التنفيذ بعد السداد", SC[1], _Sv.map(r=>_r1(r.execAvg)))
-      ]},options:o});
-    }
-
     ctx = $("pkpi-c-staff-rate");
     if(ctx){
       const o = hbar(16,2);
@@ -39539,7 +39382,6 @@ function drawCharts(K){
       o.plugins.tooltip = _tip("٪");
       _charts.staffRate = new Chart(ctx,{type:"bar",data:{labels:names,datasets:[
         _mk("اعتماد من أول مرة", SC[0], _Sv.map(r=>_r1(r.firstPassRate))),
-        _mk("اختيار الأوفر",     SC[1], _Sv.map(r=>_r1(r.cheapestRate))),
         _mk("التوريد في الموعد", SC[2], _Sv.map(r=>_r1(r.onTimeRate)))
       ]},options:o});
     }
@@ -39635,7 +39477,7 @@ window.purchaseKPI = {
   /* v1.14: الدوالُّ الحسابية النقيّة معروضةٌ ليفحصها hail-tests.js بلا متصفّح —
      شرطُ قالبِ الوحدة في CLAUDE.md، ولأن مؤشّراً يقيس أداءَ أشخاصٍ بلا حارسِ
      ارتدادٍ يتحوّل بأوّل تغييرٍ إلى ظلمٍ صامت. */
-  computeStaffKPIs, _staffWindows, _orderSavings, _comparisonStats, _actorKey,
+  computeStaffKPIs, _staffWindows, _actorKey,
   STAFF_TARGET_DAYS, STAFF_MIN_SAMPLE,
   version: VERSION,
   build: MODULE_BUILD
