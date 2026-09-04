@@ -441,7 +441,9 @@
 
   // ════════ التفاعل ════════
 
-  function open(id){ _curId=id; _counts={}; render(); window.scrollTo(0,0); }
+  /* المُمرَّرُ في سطح المكتب حاويةُ `.main-area` لا النافذة، فـ`window.scrollTo` وحدَه
+     كان يُبقي فتحَ الجردِ عند موضع القائمة. `_scrollAppToTop` يصفّر الاثنين. */
+  function open(id){ _curId=id; _counts={}; render(); try{ (window._scrollAppToTop||function(){ window.scrollTo(0,0); })(); }catch(e){} }
   function back(){ _curId=null; _counts={}; render(); }
 
   // تحديث خلية الفرق فور الكتابة (بلا إعادة رسم كامل)
