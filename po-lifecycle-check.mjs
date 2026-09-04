@@ -448,6 +448,15 @@ const staff = await page.evaluate(async () => {
                  { code: 'pending_finance', at: '2026-07-02T08:00:00Z', by: 'وائل عبد المجيد' },
                  { code: 'proc_executing', at: '2026-07-03T08:00:00Z', by: 'financial01', byUser: 'fin', byRole: 'finance' },
                  { code: 'closed', at: '2026-07-06T08:00:00Z', by: 'مدير النظام', byUser: 'root', byRole: 'admin' }] },
+    /* الطلبُ الباقي في لقطة المالك: وائل عمل فيه، لكنّ المالية أخرجته من نافذته
+       والمسؤولَ أغلقه — فلم يظهر مالكاً وخرجت قيمةُ شرائه إلى «خارج الجدول». */
+    { id: 'PO-TOUCH', projectId: 'hail', projectName: 'هايل', status: 'closed',
+      createdAt: '2026-07-01T06:00:00Z', updatedAt: '2026-07-09T06:00:00Z', actualCost: 323.55, estCost: 323.55,
+      items: [{ itemName: 'بند ج', qty: 1, unitCost: 323.55, itemCost: 323.55, receivedQty: 1 }],
+      timeline: [{ code: 'wh_reviewed', at: '2026-07-01T08:00:00Z', by: 'محمد', byUser: 'wh', byRole: 'warehouse_manager' },
+                 { event: 'إضافة مرفق: عرض المورد', at: '2026-07-02T08:00:00Z', by: 'وائل عبد المجيد' },
+                 { code: 'pending_finance', at: '2026-07-03T08:00:00Z', by: 'financial01', byUser: 'fin', byRole: 'finance' },
+                 { code: 'closed', at: '2026-07-06T08:00:00Z', by: 'مدير النظام', byUser: 'root', byRole: 'admin' }] },
     leap('PO-LEAP-1', 'boss', 'عبدالله', 'ceo'),      // قفزٌ كان يُنسب للتنفيذيّ
     leap('PO-LEAP-2', 'sup',  'محمد داوود', 'supervisor'),
   ];
@@ -533,8 +542,8 @@ if (staff.ok) {
   // ══ بلاغُ المالك: «أين مسؤولو المشتريات من قياس الأداء؟» — سجلٌّ قديمٌ باسمٍ فقط ══
   // ══ بلاغُ المالك: الإغلاقُ ليس عملَ المشتريات — لا ينزع الطلبَ من صاحبه ══
   const waelRow = staff.rows.find(r => r.name === 'وائل عبد المجيد');
-  check('١٢ح٦) ★★★ إغلاقُ المستودعِ أو المسؤولِ لا ينزع الطلبَ وقيمتَه من مسؤول المشتريات',
-    !!waelRow && waelRow.poN === 3 && Math.abs(waelRow.spendClosed - 2100) < 0.01,
+  check('١٢ح٦) ★★★ إغلاقُ غيرِه لا ينزع الطلبَ وقيمتَه منه — ويكفي أن يكون قد لمسه',
+    !!waelRow && waelRow.poN === 4 && Math.abs(waelRow.spendClosed - 2423.55) < 0.01,
     'وائل: ' + (waelRow && waelRow.poN) + ' طلب · ' + (waelRow && waelRow.spendClosed) + ' ر.س');
   check('١٢ح٥) ★★★ ومسؤولو المشتريات الحقيقيّون **ظاهرون** ولو كان سجلُّهم باسمِ عرضٍ فقط',
     staff.drawn.some(d => d.name === 'وائل عبد المجيد') &&

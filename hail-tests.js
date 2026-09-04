@@ -668,7 +668,7 @@ function predelivery() {
        إصلاحٌ في موضعه على `loadData` نفسِها — والنقلُ بحجّة الإصلاح ممنوعٌ نصّاً. */
     /* ثم لقيد v1.21: قاعدةُ ملكيةِ الطلب (من اشتراه لا من أغلقه) — أسطرٌ في
        `computeStaffKPIs` داخل وحدة `purchase-kpi`. */
-    const IDX_CEILING = 39609;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    const IDX_CEILING = 39623;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4847,6 +4847,40 @@ function procurementStaffKPI() {
     T("★★★ لكنّ طلباً نفّذه المسؤولُ من أوّله يبقى خارجَ الجدول بدوره (لا يُهدى لوائل)",
       S.outsideN === 1 && S.outsideGroups.some(g => g.role === "admin" && g.spend === 500),
       `outsideN=${S.outsideN}`);
+    /* ══ الطلبُ الباقي في لقطة المالك: `323.55` ر.س نُسبت لحساب المسؤول ══
+       مسؤولُ المشتريات عمل في الطلب (أحاله للمالية)، لكنّ **كلَّ نافذةٍ فيه أنهاها
+       غيرُه**: المالية حوّلت، والمسؤولُ أغلق. فلم يظهر مالكاً وخرجت قيمةُ شرائه.
+       والمبدأُ الذي قرّره المالك: المسؤولُ لا يشتري بل يُصلح. */
+    {
+      const WH2  = { by: "محمد", byUser: "wh", byRole: "warehouse_manager" };
+      const PRC2 = { by: "وائل", byUser: "wael", byRole: "procurement_officer" };
+      const ADM2 = { by: "مدير النظام", byUser: "root", byRole: "admin" };
+      const S2 = E.computeStaffKPIs([{
+        id: "t1", status: "closed", actualCost: 323.55,
+        createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-09T06:00:00Z", timeline: [
+          { code: "wh_reviewed",     at: "2026-07-01T08:00:00Z", ...WH2 },
+          // وائل يعمل فيه — لكنّ قيدَه ليس مخرجَ نافذةٍ (المالية تُخرجه)
+          { event: "إضافة مرفق: عرض المورد", at: "2026-07-02T08:00:00Z", ...PRC2 },
+          { code: "pending_finance", at: "2026-07-03T08:00:00Z", by: "financial01", byUser: "fin", byRole: "finance" },
+          { code: "closed",          at: "2026-07-06T08:00:00Z", ...ADM2 },
+        ]}]);
+      const w2 = S2.rows.find(r => r.key === "u:wael");
+      T("★★★ ومسؤولُ المشتريات إن لمس الطلبَ فهو شراؤه ولو أنهى نوافذَه غيرُه",
+        !!w2 && w2.poN === 1 && Math.abs(w2.spendClosed - 323.55) < 0.01 && S2.outsideN === 0,
+        `wael=${w2 && w2.poN} spend=${w2 && w2.spendClosed} outside=${S2.outsideN}`);
+      // وطلبٌ لا يظهر فيه مسؤولُ مشترياتٍ قطُّ يبقى خارج الجدول
+      const S3 = E.computeStaffKPIs([{
+        id: "t2", status: "closed", actualCost: 90,
+        createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-09T06:00:00Z", timeline: [
+          { code: "wh_reviewed",     at: "2026-07-01T08:00:00Z", ...WH2 },
+          { code: "pending_finance", at: "2026-07-02T08:00:00Z", ...ADM2 },
+          { code: "closed",          at: "2026-07-05T08:00:00Z", ...WH2 },
+        ]}]);
+      T("★★★ وطلبٌ لا يظهر فيه مسؤولُ مشترياتٍ قطُّ يبقى خارج الجدول (لا يُهدى لأحد)",
+        S3.rows.length === 0 && S3.outsideN === 1,
+        `rows=${S3.rows.length} outside=${S3.outsideN}`);
+    }
+
     T("★★★ والمالُ يُطابق بعد ذلك كلِّه",
       Math.abs((S.inTableSpend + S.outSpend) - S.scopeSpend) < 0.01,
       `${S.inTableSpend} + ${S.outSpend} = ${S.scopeSpend}`);
