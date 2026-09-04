@@ -668,7 +668,10 @@ function predelivery() {
        إصلاحٌ في موضعه على `loadData` نفسِها — والنقلُ بحجّة الإصلاح ممنوعٌ نصّاً. */
     /* ثم لقيد v1.21: قاعدةُ ملكيةِ الطلب (من اشتراه لا من أغلقه) — أسطرٌ في
        `computeStaffKPIs` داخل وحدة `purchase-kpi`. */
-    const IDX_CEILING = 39648;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم لقيد v1.24: عنوانُ قائمةِ الأرقام وتصفيةُ الصفوف الصفرية — أسطرٌ في
+       `_staffSectionHtml` و`computeStaffKPIs` **داخل وحدة `purchase-kpi`**: إصلاحُ
+       عرضٍ في موضعه على منطقٍ قائم، والنقلُ بحجّة الإصلاح ممنوعٌ نصّاً (CLAUDE.md). */
+    const IDX_CEILING = 39651;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4500,6 +4503,10 @@ function procurementStaffKPI() {
     /noWindowIds/.test(ksrc) && /idList\(S\.noWindowIds, S\.noWindowN\)/.test(ksrc));
   T("★★ ورقمُ الطلب يمرّ بحارس XSS نفسِه (سمةُ onclick تُقيَّم في النطاق العام)",
     /typeof _jsq==="function"\) \? _jsq\(id\)/.test(ksrc));
+  /* v1.24 — وأن يكون الرقمُ مرسوماً لا يكفي: عُرض في v1.23 سطراً عارياً بلا كلمةٍ
+     تعرّفه، فأعاد المالكُ السؤالَ نفسَه والجوابُ أمامه. البيانُ يُقاس بأن **يُقرأ**. */
+  T("★★★ وقائمةُ الأرقام مسبوقةٌ بكلمةٍ تعرّفها (الطلب/الطلبات) لا سطرٌ عارٍ",
+    /pkpi-ids-lbl/.test(ksrc) && /n===1\?"الطلب":"الطلبات"/.test(ksrc));
   T("★★★ ومَن ليس منهم يُعلَن مجمَّعاً بالدور (لا حذفَ صامت)",
     /outsideGroups:/.test(ksrc) && /outsideN:/.test(ksrc) && /outsideSpend:/.test(ksrc) &&
     ksrc.includes("pkpi-outside-list"));

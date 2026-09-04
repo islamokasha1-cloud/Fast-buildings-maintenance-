@@ -495,6 +495,10 @@ const staff = await page.evaluate(async () => {
            outsideBanner: !!root.querySelector('.pkpi-staff-admin'),
            poLinks: [...root.querySelectorAll('.pkpi-staff-admin .pkpi-po-link')].map(a => a.textContent.trim()),
            noWinLinks: [...root.querySelectorAll('.pkpi-recon .pkpi-po-link')].map(a => a.textContent.trim()),
+           idBlocks: [...root.querySelectorAll('.pkpi-ids')].map(d => ({
+             lbl: ((d.querySelector('.pkpi-ids-lbl') || {}).textContent || '').trim(),
+             n: d.querySelectorAll('.pkpi-po-link').length,
+             more: !!d.querySelector('.pkpi-na') })),
            strangersInTable: drawn.filter(d => ['مدير النظام','محمد داوود','عبدالله'].includes(d.name)).map(d => d.name),
            tableRoles: S.rows.map(r => r.role),
            vdRows: root.querySelectorAll('.pkpi-vd-row').length,
@@ -509,6 +513,12 @@ const staff = await page.evaluate(async () => {
 check('١٢·٠) صفحةُ المؤشرات فُتحت وقسمُ المسؤولين مرسومٌ فيها',
   staff.ok === true && staff.visible === true, staff.ok ? '' : staff.err);
 if (staff.ok) {
+/* لقطةٌ للكتلتين اللتين اشتكى منهما المالك — البيانُ يُقرأ بالعين لا بالفحص وحدَه */
+try {
+  await page.locator('#page-purchase-kpi .pkpi-staff-admin').screenshot({ path: SHOTS + '/staff-outside.png' });
+  await page.locator('#page-purchase-kpi .pkpi-recon').screenshot({ path: SHOTS + '/staff-recon.png' });
+} catch (e) { /* الكتلةُ لا تظهر إلّا للمالك — وغيابُها ليس خطأً هنا */ }
+
   const bySaad = staff.rows.find(r => r.key === 'u:saad');
   const drawnSaad = staff.drawn.find(d => d.name === 'سعد');
   check('١٢أ) ★★ لكلّ مسؤولٍ صفٌّ واحد (لا تكرارَ ولا اندماج)',
@@ -567,6 +577,12 @@ if (staff.ok) {
     'روابط: ' + staff.poLinks.join(' · '));
   check('١٢س) ★★★ وكذلك ما لم يمرّ بمرحلة مشتريات',
     staff.noWinLinks.length > 0, 'روابط: ' + staff.noWinLinks.join(' · '));
+  // ══ بلاغُ المالك 04/09 الثاني: «لم أفهم شيئاً، أين الطلب؟» — والرقمُ مرسومٌ أمامه ══
+  // رقمٌ عارٍ بلا كلمةٍ تعرّفه ليس جواباً. فيُفحَص أنّ لكلِّ قائمةٍ **عنواناً** يطابق عددَها.
+  check('١٢ف) ★★★ كلُّ قائمةِ أرقامٍ مسبوقةٌ بكلمةٍ تعرّفها — لا سطرٌ عارٍ',
+    staff.idBlocks.length > 0 && staff.idBlocks.every(b =>
+      b.lbl === (b.n === 1 && !b.more ? 'الطلب:' : 'الطلبات:')),
+    staff.idBlocks.map(b => b.lbl + '(' + b.n + ')').join(' · '));
   check('١٢ط) ★★ دليلُ قراءة الجدول مرسومٌ (الجدولُ يشرح نفسَه)', staff.guide === true);
   check('١٢ي) ★★ ورؤوسُ المجموعات تسمّي المحاور الباقية (جودة · التزام)',
     staff.groupHdrs.length === 3 && staff.groupHdrs.some(h => h.includes('جودة')) &&
