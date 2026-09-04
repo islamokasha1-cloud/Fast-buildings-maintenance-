@@ -654,7 +654,10 @@ function predelivery() {
        **مكانُها النواةُ لا وحدة**: **إصلاحٌ في موضعه** على منطقٍ قائم —
        `loadGlobalPOCount` تُنادى من بوّابة المشاريع وتكتب في وسمٍ فيها، وكلاهما هنا؛
        ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
-    const IDX_CEILING = 39580;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع لقيد v1.17: دلوُ «المرفوض/الملغى» في صفِّ أداء المشتريات، وسطرُ
+       مطابقةِ العدّ فوق الجدول. **مكانُها وحدةُ `purchase-kpi`** — التعليلُ في
+       القيد الأوّل أعلاه قائمٌ لا يتغيّر بتغيّر الرقم. */
+    const IDX_CEILING = 39621;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4714,6 +4717,43 @@ function procurementStaffKPI() {
     T("★★★ ولو غاب سجلُّ المستخدمين لم يفرغ الجدولُ — الصفُّ يبقى موسوماً «دورٌ غير محدّد»",
       S3.rows.length === 1 && S3.rows[0].roleUnknown === true && S3.outsideN === 0);
   }
+
+  /* ── ٦-ج) مطابقةُ العدّ: لا طلبَ يضيع بين الأبواب الأربعة (سؤال المالك 04/09) ──
+     «كيف رقم طلبات الشراء في مؤشرات الأداء ١١٤ فقط؟» — لأنه ما حمله ذلك المسؤول لا
+     إجماليُّ الشركة. والجوابُ يجب أن يكون **في الصفحة**، ولا يصحّ إلّا إن كان المجموعُ
+     مطابقاً حسابياً. فالحارسُ يجمع الأربعةَ ويطالب بالمساواة التامّة. */
+  {
+    const win = (id, u, n, role, st) => ({ id, status: st || "closed", actualCost: 100,
+      createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-03T06:00:00Z", timeline: [
+        { code: "wh_reviewed",     at: "2026-07-01T08:00:00Z", by: "المستودع", byUser: "wh", byRole: "warehouse_manager" },
+        { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: n, byUser: u, byRole: role } ]});
+    const list = [
+      win("r1", "saad", "سعد", "procurement_officer"),
+      win("r2", "saad", "سعد", "procurement_officer", "rejected"),   // منتهٍ بلا إغلاق
+      win("r3", "root", "مدير النظام", "admin"),                      // خارج الجدول
+      win("r4", "", "النظام", "procurement_officer"),                 // لم يُعرف من أنهاها
+      // لم تمرّ بمرحلة مشترياتٍ أصلاً — رُفضت عند مدير المشاريع
+      { id: "r5", status: "rejected", actualCost: 50, createdAt: "2026-07-01T06:00:00Z",
+        updatedAt: "2026-07-02T06:00:00Z", timeline: [
+          { code: "pending_pm",  at: "2026-07-01T08:00:00Z", by: "طالب", byUser: "req" },
+          { code: "pm_rejected", at: "2026-07-01T09:00:00Z", by: "المدير", byUser: "pm" } ] },
+    ];
+    const S = E.computeStaffKPIs(list);
+    T("★★★ الأبوابُ الأربعةُ تجمع إلى النطاق تماماً — لا طلبَ يضيع بينها",
+      S.inTableN + S.outsideN + S.unattributedN + S.noWindowN === S.scopeN && S.scopeN === 5,
+      `${S.inTableN}+${S.outsideN}+${S.unattributedN}+${S.noWindowN} = ${S.scopeN}`);
+    T("★★★ وطلبٌ لم يبلغ مرحلةَ المشتريات لا يُحسب على أحد",
+      S.noWindowN === 1 && S.inTableN === 2 && S.outsideN === 1 && S.unattributedN === 1,
+      JSON.stringify({t:S.inTableN,o:S.outsideN,u:S.unattributedN,n:S.noWindowN}));
+    /* والسطرُ الفرعيُّ في خانة «طلباته» كان يُسقط دلوَ المرفوض/الملغى، فيقول الرأسُ
+       ١١٤ والسطرُ ٨٩+١٩=١٠٨ — ستّةٌ تختفي بلا تفسير (لقطةُ المالك). */
+    const saad = S.rows.find(r => r.key === "u:saad");
+    T("★★★ ودِلاءُ الصفِّ الثلاثةُ تجمع إلى رأسه (مغلق + مفتوح + مرفوض = الإجمالي)",
+      saad.poClosed + saad.poOpen + saad.poEnded === saad.poN && saad.poEnded === 1,
+      `${saad.poClosed}+${saad.poOpen}+${saad.poEnded} = ${saad.poN}`);
+  }
+  T("★★ وسطرُ المطابقة معروضٌ في الوجه (الجوابُ في الصفحة لا في رأس القارئ)",
+    /class="pkpi-recon"/.test(ksrc) && /لم تمرّ بمرحلة مشترياتٍ أصلاً/.test(ksrc));
 
   // ── ٧) «الواقفُ الآن» عدّادٌ حيٌّ منسوبٌ بالحالة (لا فاعلَ خروجٍ بعد) ──
   {
