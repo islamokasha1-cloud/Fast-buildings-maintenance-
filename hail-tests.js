@@ -16214,6 +16214,70 @@ function externalPurchaseApiGuards() {
    وصارت عدَّ خادمٍ بشبكة أمان. وهذه الفحوصُ تحرس الاثنين معاً: أن العدَّ يُستعمل،
    وأن السقوطَ قائمٌ — فعدٌّ بلا سقوطٍ يمحو الرقمَ يومَ يُردّ الطلب.
    ═══════════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════
+   تغطيةُ فحص القواعد لاستعلامات التطبيق الحقيقية
+
+   ── العطلُ الذي يحرسه ──
+   قياسُ 04/09 كشف أن `APP_COLLS` في `rules-check.mjs` — وهي القائمةُ التي يُثبَت بها
+   أن **استعلامَ كلّ مجموعةٍ ما زال يعمل** — تختبر مجموعتين **لا وجودَ لهما في
+   التطبيق**: `global_rfqs` (والتطبيقُ يستعمل `global_rfq`) و`global_assets`
+   (والتطبيقُ يستعمل `hail_assets`). وثمانٍ يستعلمها التطبيقُ ولا تُفحَص أصلاً.
+
+   وهما تمرّان اليوم لأن القراءةَ العامة مفتوحة، فالخللُ **غيرُ مرئيّ**. لكنّ هذه
+   القائمةَ بعينها هي شبكةُ الأمان ليوم تُضيَّق القراءة (المرحلة ٣): يومَها ينكسر
+   `global_rfq` و`hail_assets` **ولا فحصَ يمسكهما**، بينما تمرّ مجموعتان وهميّتان.
+   وهو بعينه درسُ انقطاع v18.9.2635: «اختبارٌ يفحص الاستثناءاتِ ويغفل الأصل».
+
+   ── ولماذا يُشتقّ الاسمُ من الكود لا يُكتب بيد ──
+   قائمةٌ مكتوبةٌ بيدٍ تتخلّف عن الكود بصمت — وقد تخلّفت. فهذا الحارسُ يقرأ **دوالَّ
+   أسماء المجموعات نفسَها** من `index.html` ومن الوحدات، ويشترط أن كلَّ اسمٍ منها
+   مذكورٌ في `APP_COLLS`. مجموعةٌ جديدةٌ بلا سطرٍ هناك = فحصٌ ساقط.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function rulesCoverageGuards() {
+  H("تغطيةُ فحص القواعد لاستعلامات التطبيق");
+
+  const rc = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), "rules-check.mjs"), "utf8"); } catch { return ""; } })();
+  T("rules-check.mjs مقروء", !!rc);
+  if (!rc) return;
+
+  const declared = new Set([...(rc.match(/const APP_COLLS = \[([\s\S]*?)\];/) || ["", ""])[1]
+    .matchAll(/"([a-z0-9_]+)"/g)].map(m => m[1]));
+  T("★ قائمةُ APP_COLLS مقروءةٌ من فحص القواعد", declared.size > 10, declared.size + " مجموعة");
+
+  /* الأسماءُ كما يبنيها التطبيقُ نفسُه. `_pfx` تسبق باسم المشروع الحاليّ،
+     والمشروعُ الأصليّ `hail` — وهو ما يقيسه المسبارُ فعلاً. */
+  const found = new Set();
+  for (const m of HTML.matchAll(/function ([A-Z_]+)_COLLECTION\(\)\{\s*return IS_DEV \? [^:]*: ([^;]+);/g)) {
+    const rhs = m[2].trim();
+    const lit = rhs.match(/^"([a-z0-9_]+)"$/);
+    const pfx = rhs.match(/^_pfx\("([a-z0-9_]+)"\)$/);
+    if (lit) found.add(lit[1]);
+    else if (pfx) found.add("hail_" + pfx[1]);
+  }
+  /* وحداتُ الـIIFE تبني اسمَها بنمطها الخاصّ (COLL داخل الوحدة) */
+  for (const f of fs.readdirSync(path.dirname(IDX)).filter(x => /\.js$/.test(x) && x !== "hail-tests.js")) {
+    let src2 = ""; try { src2 = fs.readFileSync(path.resolve(path.dirname(IDX), f), "utf8"); } catch { continue; }
+    /* نمطان في الوحدات: `dev ? …` داخل IIFE، و`_dev() ? …` في وحدة التعاقدات.
+       والمسافاتُ بينهما حرّة (محاذاةٌ بصرية) — فلا يُشترط عددُها. */
+    for (const m of src2.matchAll(/(?:dev|_dev\(\))\s*\?\s*"[a-z0-9_]+_dev"\s*:\s*"([a-z0-9_]+)"/g)) found.add(m[1]);
+  }
+  T("★ أسماءُ المجموعات مُشتقّةٌ من الكود لا مكتوبةٌ بيد", found.size > 10, found.size + " مجموعة");
+
+  const missing = [...found].filter(c => !declared.has(c)).sort();
+  T("★★★ كلُّ مجموعةٍ يبنيها التطبيقُ مذكورةٌ في APP_COLLS (شبكةُ الأمان ليوم تُضيَّق القراءة)",
+    missing.length === 0, missing.length ? ("غيرُ مفحوصة: " + missing.join(" · ")) : (found.size + " مجموعة"));
+
+  /* والعكسُ أخطر: اسمٌ في القائمة لا يبنيه التطبيقُ **يمرّ دائماً ويختبر لا شيء** —
+     فيبدو الغطاءُ أوسعَ ممّا هو، وهو ما وقع في `global_rfqs` و`global_assets`.
+     ويُستثنى ما يخصّ تطبيقَ الفنيين والمجموعاتِ الخادمية (لا دوالَّ أسماءٍ لها هنا). */
+  const KNOWN_EXTRA = new Set(["meta", "hail_tickets", "audit_log", "technicians",
+    "attendance", "wa_outbox", "wa_log", "global_vendors", "global_labor_catalog",
+    "global_price_analysis", "global_substitute_budget"]);
+  const phantom = [...declared].filter(c => !found.has(c) && !KNOWN_EXTRA.has(c)).sort();
+  T("★★★ ولا اسمَ في APP_COLLS لا يبنيه التطبيق (وهميٌّ يمرّ دائماً ويختبر لا شيء)",
+    phantom.length === 0, phantom.length ? ("وهميّة: " + phantom.join(" · ")) : "لا شيء");
+}
+
 function poCountGuards() {
   H("عدّادُ طلبات الشراء — عدُّ خادمٍ لا جلبةُ مجموعة");
 
@@ -16610,6 +16674,7 @@ function staffTasksGuards() {
   ticketMultiPhotoGuards();
   staffTasksGuards();
   poCountGuards();
+  rulesCoverageGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
