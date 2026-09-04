@@ -663,7 +663,7 @@ function predelivery() {
        إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
     /* ثم رُفع لقيد v1.19: `_ensureUsers` تجلب سجلَّ المستخدمين وتُعيد الرسم بالأدوار
        الصحيحة، و`_actorRole` تقرأ الدورَ منه. **مكانُها وحدةُ `purchase-kpi`**. */
-    const IDX_CEILING = 39706;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    const IDX_CEILING = 39548;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4439,10 +4439,6 @@ function procurementStaffKPI() {
   const ksrc = KPI_SRC;
 
   // ── حرّاسٌ مصدريّة على المبادئ التي لا تُلتقط بالتشغيل ──
-  T("★★★ الوفر يُقاس مقابل السعر التاريخي لا مقابل العروض (لا يُضخَّم بعرضٍ وهميّ)",
-    ksrc.includes("function _orderSavings(p, hist)") && /آخرِ سعرٍ دُفع للصنف نفسه/.test(ksrc));
-  T("★★ رابطةُ الصنف من المصدر الواحد (inventoryPricing) — لا تطبيعَ عربيَّ رابعاً",
-    /inventoryPricing\.catalogOf/.test(ksrc) && /inventoryPricing\.nameKey/.test(ksrc));
   T("★★ نوافذُ المشتريات وحدَها تُقاس (لا زمنُ المدير/التنفيذي/المالية/المستودع)",
     /const PROC_OWNED = \["wh_reviewed","pending_proc","finance_returned"\]/.test(ksrc) &&
     /const EXEC_OWNED = \["proc_executing"\]/.test(ksrc));
@@ -4525,7 +4521,23 @@ function procurementStaffKPI() {
     /function _staffVisibleRows\(rows\)/.test(ksrc) && /function _staffCanSeeAll\(\)/.test(ksrc) &&
     /return rows\.filter\(r=>mine\.includes\(r\.key\)/.test(ksrc));
   T("★★ الدوالُّ الحسابية معروضةٌ على الواجهة ليفحصها هذا الملفّ (قالبُ الوحدة)",
-    /computeStaffKPIs, _staffWindows, _orderSavings, _comparisonStats, _actorKey/.test(ksrc));
+    /computeStaffKPIs, _staffWindows, _actorKey/.test(ksrc));
+  /* v1.20 — حُذفت أعمدةُ السرعة والمقارنة والوفر بطلب المالك (٠٤/٠٩)، ومعها محرّكاتُها
+     فلا يبقى كودٌ ميّتٌ يُقرأ لاحقاً كأنه قيدُ عملٍ قائم. */
+  T("★★★ ولا بقيّةَ لمحرّكات ما حُذف (لا كودَ ميّت)",
+    !/function _orderSavings/.test(ksrc) && !/function _comparisonStats/.test(ksrc) &&
+    !/function _itemKey/.test(ksrc) &&
+    !/prepDurs|execDurs|cheapestRate|savedPct|avgQuotes/.test(ksrc));
+  T("★★★ والجدولُ خمسةُ أعمدةٍ: المسؤول · طلباته · قيمتُها · الاعتماد · التوريد",
+    !/تجهيز المقارنة</.test(ksrc) && !/التنفيذ بعد السداد</.test(ksrc) &&
+    !/عروض لكل مقارنة</.test(ksrc) && !/اختيار الأوفر</.test(ksrc) &&
+    !/الوفر مقابل التاريخ</.test(ksrc) &&
+    /اعتماد من أول مرة</.test(ksrc) && /التوريد في الموعد</.test(ksrc));
+  T("★★★ والخلاصةُ لا تجمع «سريعٌ في التنفيذ» مع «التوريد متأخّر» (سؤال المالك)",
+    // الحارسُ على **الكود** لا على التعليق الذي يشرح لماذا سقطت الجملة
+    !/good\.push\("سريعٌ|good\.push\("يختار الأوفر/.test(ksrc));
+  T("★★★ والمطابقةُ بالمال أيضاً — جوابُ «لماذا رقمُه غير رقم اللوحة؟»",
+    /scopeSpend, inTableSpend, outSpend,/.test(ksrc) && /pkpi-recon-money/.test(ksrc));
 
   // ── بناءُ المحرّك وتشغيلُه ──
   let E = null;
@@ -4537,7 +4549,7 @@ function procurementStaffKPI() {
       "STAGE_ORDER", "REJECT_CODES", "TERMINAL_CODES", "parseTS", "normStatus", "DAY",
       "PO_WORK_MIN_PER_DAY", "workingMinutesBetween",
       "_kpiClosed", "_kpiActual", "_kpiSpendOf", "poDueDate", "USERS",
-      block + "\nreturn {computeStaffKPIs,_staffWindows,_orderSavings,_comparisonStats,_actorKey,_wmDays};")(
+      block + "\nreturn {computeStaffKPIs,_staffWindows,_actorKey,_wmDays};")(
         ["pending_pm", "pm_approved", "wh_review", "wh_reviewed", "pending_proc", "pending_pm_cmp",
          "pending_ceo", "pending_finance", "proc_executing", "sv_receiving", "wh_receiving", "wh_auditing", "pending_extra", "closed"],
         ["pm_rejected", "wh_rejected", "ceo_rejected", "rejected"],
@@ -4610,38 +4622,6 @@ function procurementStaffKPI() {
   T("★★ نافذةٌ ما زالت مفتوحةً لا تدخل المتوسّط (تُعدّ في «الواقفُ الآن»)",
     E._staffWindows({ timeline: [{ code: "proc_executing", at: "2026-07-01T08:00:00Z", by: "أ", byUser: "a" }] }).length === 0);
 
-  // ── ٣) الوفر: مقابل التاريخ، وبلا مرجعٍ ليس صفراً ──
-  {
-    const sv = E._orderSavings({ items: [
-      { itemCode: "X1", qty: 10, unitCost: 8 },      // التاريخُ ١٠ ⇒ وفرٌ ٢٠
-      { itemCode: "Z9", qty: 5,  unitCost: 30 },     // بلا مرجع
-    ]}, { "k:x1": 10 });
-    T("★★★ الوفر = (السعر التاريخي − المدفوع) × الكمية", sv.saved === 20, "saved=" + sv.saved);
-    T("★★★ المقامُ قيمةُ ما وُجد له مرجعٌ وحدَه (١٠×١٠)", sv.basis === 100, "basis=" + sv.basis);
-    T("★★★ وما لا مرجعَ له يُعدّ ويُعلَن ولا يُحتسب صفراً يُجمَع فيكذب",
-      sv.uncovered === 150 && sv.nUncov === 1 && sv.nCov === 1);
-    const up = E._orderSavings({ items: [{ itemCode: "X1", qty: 10, unitCost: 12 }] }, { "k:x1": 10 });
-    T("★★ والشراءُ أغلى من تاريخه وفرٌ سالبٌ لا صفر", up.saved === -20);
-  }
-
-  // ── ٤) المقارنة: خانةٌ فارغةٌ ليست عرضاً، والأوفرُ يُقاس بسعرَين فأكثر ──
-  {
-    const po = { items: [{}, {}], priceComparisons2: [{ id: "g1", itemIndices: [0, 1], suppliers: [
-      { name: "أ", items: [{ idx: 0, unitPrice: "100" }, { idx: 1, unitPrice: "50" }] },
-      { name: "ب", items: [{ idx: 0, unitPrice: "90"  }, { idx: 1, unitPrice: "70" }] },
-      { name: "ج", items: [{ idx: 0, unitPrice: "" }, { idx: 1, unitPrice: "" }] },   // خانةٌ فارغة
-    ], decisions: [{ itemIndex: 0, selectedSupplierIdx: 1 },    // اختار ٩٠ = الأوفر ✓
-                   { itemIndex: 1, selectedSupplierIdx: 1 }] }] };  // اختار ٧٠ والأوفرُ ٥٠ ✗
-    const cs = E._comparisonStats(po);
-    T("★★★ المورّدُ الذي لم يسعّر شيئاً ليس عرضاً (خانتان فارغتان ليستا «ثلاثةَ عروض»)",
-      cs.quoteN === 2 && cs.groupN === 1, `quoteN=${cs.quoteN} groupN=${cs.groupN}`);
-    T("★★★ نسبةُ اختيار الأوفر تُحسب لكل بندٍ على حدة", cs.decided === 2 && cs.cheapest === 1);
-  }
-  T("★★ بسعرٍ واحدٍ لا معنى لـ«الأوفر» فلا يدخل المقام",
-    (() => { const cs = E._comparisonStats({ items: [{}], priceComparisons2: [{ id: "g", itemIndices: [0],
-      suppliers: [{ name: "أ", items: [{ idx: 0, unitPrice: "100" }] }],
-      decisions: [{ itemIndex: 0, selectedSupplierIdx: 0 }] }] }); return cs.decided === 0; })());
-
   // ── ٥) التجميعُ الكامل: نسبةٌ صحيحةٌ وعدٌّ صحيحٌ وغيرُ المنسوب مُعلَن ──
   {
     const mk = (id, status, ownerU, ownerN, extra) => Object.assign({
@@ -4677,8 +4657,6 @@ function procurementStaffKPI() {
       `saad=${row("u:saad") && row("u:saad").poN} unattr=${S.unattributedN}`);
     T("★★★ واسمُ العرض يُطبَّع إلى حسابه فلا ينشقّ الشخصُ صفَّين",
       !S.rows.some(r => r.key === "n:سعد") && S.rows.filter(r => r.name === "سعد").length === 1);
-    T("★★ زمنُ تجهيز المقارنة في الهدف (٤ ساعاتِ عملٍ للطلبات المختومة)",
-      row("u:saad").prepAvg <= 2 && row("u:saad").prepTargetRate === 100);
     T("★★ وسمُ «عيّنة غير كافية» يمنع ترتيبَ رجلٍ على طلبَين كأنه على ثلاثين",
       row("u:saad").lowSample === true && S.minSample === 5);
   }
@@ -4728,8 +4706,10 @@ function procurementStaffKPI() {
       r.bounced === 1 && r.financeReturned === 1, JSON.stringify({ b: r.bounced, f: r.financeReturned }));
     T("★★★ والاعتمادُ من أول مرّة = ١ من ٢ = ٥٠٪ (على إحالاته هو لا على كل الطلبات)",
       r.handoffs === 2 && r.firstPassRate === 50);
-    T("★★ ونافذةُ التنفيذ بعد السداد تُقاس مستقلّةً عن نافذة التجهيز",
-      r.execN === 1 && Math.abs(r.execAvg - 0.5) < 1e-9);
+    /* v1.20: سقطت الأزمنةُ من العرض، فيبقى **عدُّ الإحالات** وحدَه — وهو مقامُ
+       «الاعتماد من أول مرة». حارسٌ يمنع سقوطَه مع سقوط ما بُني عليه. */
+    T("★★★ وعدُّ الإحالات باقٍ بعد حذف الأزمنة (مقامُ الاعتماد من أول مرة)",
+      r.handoffs === 2 && r.prepAvg === undefined && r.execAvg === undefined);
   }
 
   // ── ٦-ب) طلباتُ المسؤول: خارجَ الجدول، معلَنةً في سطرها (قرار المالك 03/09) ──
