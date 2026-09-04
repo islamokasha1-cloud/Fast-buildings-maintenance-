@@ -668,7 +668,7 @@ function predelivery() {
        إصلاحٌ في موضعه على `loadData` نفسِها — والنقلُ بحجّة الإصلاح ممنوعٌ نصّاً. */
     /* ثم لقيد v1.21: قاعدةُ ملكيةِ الطلب (من اشتراه لا من أغلقه) — أسطرٌ في
        `computeStaffKPIs` داخل وحدة `purchase-kpi`. */
-    const IDX_CEILING = 39623;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    const IDX_CEILING = 39648;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4491,6 +4491,15 @@ function procurementStaffKPI() {
   T("★★★ الجدولُ قائمةُ سماحٍ لمسؤولي المشتريات — لا قائمةَ منعٍ تُنسي دوراً",
     /const isProcRow = r => r\.role==="procurement_officer"/.test(ksrc) &&
     !/isAdminRow/.test(ksrc));
+  /* v1.23 — سؤالُ المالك: «ما هي الـ٣٢٣ ريال؟!». البيانُ كان يقول «طلبٌ واحد» ولا
+     يقول أيَّ طلب، فلا يستطيع القارئُ فتحَه ليحكم — فيبقى الرقمُ تهمةً بلا ملفّ. */
+  T("★★★ وكلُّ طلبٍ خارجَ الجدول يُسمّى برقمه رابطاً يفتحه (لا رقمٌ مجرّدٌ بلا ملفّ)",
+    /const poLink = id =>/.test(ksrc) && /openPurchaseDetail\('\$\{_q\}'\)/.test(ksrc) &&
+    /\$\{idList\(g\.ids, g\.n\)\}/.test(ksrc) && /pkpi-po-link/.test(ksrc));
+  T("★★★ وكذلك ما لم يمرّ بمرحلة مشتريات — الدلوُ الآخر الذي يُسأل عنه",
+    /noWindowIds/.test(ksrc) && /idList\(S\.noWindowIds, S\.noWindowN\)/.test(ksrc));
+  T("★★ ورقمُ الطلب يمرّ بحارس XSS نفسِه (سمةُ onclick تُقيَّم في النطاق العام)",
+    /typeof _jsq==="function"\) \? _jsq\(id\)/.test(ksrc));
   T("★★★ ومَن ليس منهم يُعلَن مجمَّعاً بالدور (لا حذفَ صامت)",
     /outsideGroups:/.test(ksrc) && /outsideN:/.test(ksrc) && /outsideSpend:/.test(ksrc) &&
     ksrc.includes("pkpi-outside-list"));
@@ -4734,6 +4743,9 @@ function procurementStaffKPI() {
       S.outsideN === 2 && S.outsideSpend === 750, `n=${S.outsideN} spend=${S.outsideSpend}`);
     T("★★ واسمُه يُذكر في البيان (يُعرف أيُّ حسابٍ نفّذ خارج المسار)",
       S.outsideGroups.some(g => g.role === "admin" && g.names.includes("مدير النظام")));
+    T("★★★ وأرقامُ طلباته معه — فيُفتح الطلبُ ويُرى لماذا خرج (سؤال «ما هي الـ٣٢٣ ريال؟»)",
+      S.outsideGroups.some(g => g.role === "admin" && g.ids.includes("a2") && g.ids.includes("a3")),
+      JSON.stringify(S.outsideGroups.map(g => g.role + ":" + g.ids.join(","))));
 
     /* بلاغُ المالك حرفياً: «لماذا تضيف مشرف والمدير التنفيذي في أداء مسؤول
        المشتريات؟» — الحارسُ يعيد إنتاج الحالة بالأدوار التي رآها في اللقطة. */
