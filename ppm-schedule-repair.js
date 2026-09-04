@@ -33,7 +33,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.3028";
+const MODULE_BUILD = "v18.9.3031";
 const MODAL_ID = "modal-ppm-schedule-repair";
 
 /* ════════ حسابُ اليوم — بلا مُعدِّلات Date (درس v18.9vt) ════════ */
