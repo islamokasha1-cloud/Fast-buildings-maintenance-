@@ -62,7 +62,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3033";
+  var MODULE_BUILD = "v18.9.3037";
 
   function COLL(){
     var dev=false;
@@ -1424,7 +1424,9 @@
   }
 
   /* ════════ التفاصيل ════════ */
-  function open(id){ _curId=id; try{ showPage("hr-payments"); }catch(e){} render(); try{ window.scrollTo(0,0); }catch(e){} }
+  /* المُمرَّرُ في سطح المكتب حاويةُ `.main-area` لا النافذة، فـ`window.scrollTo` وحدَه
+     كان يُبقي التفاصيلَ عند موضع القائمة. `_scrollAppToTop` يصفّر الاثنين. */
+  function open(id){ _curId=id; try{ showPage("hr-payments"); }catch(e){} render(); try{ (window._scrollAppToTop||function(){ window.scrollTo(0,0); })(); }catch(e){} }
   function back(){ _curId=null; render(); }
   /* زرّ السايدبار يقصد «القائمة» دائماً. لولا تصفير _curId هنا لأعاد showPage رسم
      تفاصيل آخر طلبٍ فُتح (أو الذي أنشأه المستخدم للتوّ) — فيبدو الزرّ معطّلاً. */

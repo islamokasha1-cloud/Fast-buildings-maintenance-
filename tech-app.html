@@ -13,7 +13,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js"></script>
 <!-- طابور الرفع المؤجَّل للصور (مشترك مع النظام الرئيسي) -->
-<script src="photo-queue.js?v=18.9.3033"></script>
+<script src="photo-queue.js?v=18.9.3037"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -1403,10 +1403,21 @@ let currentPage = "home";
 let currentAdminTab = "overview";
 
 function showPage(page){
+  /* الصفحاتُ تتبادل الظهورَ داخل `.page-content` المُمرَّرة، فموضعُ التمرير يبقى كما
+     تركه المستخدم في الصفحة السابقة — فيفتح الشاشةَ الجديدةَ من منتصفها. تصفيرٌ عند
+     تغيّر الصفحة وحدَه؛ نداءُ الصفحة نفسِها إعادةُ رسمٍ لا تنقّل. */
+  const changed = currentPage!==page;
   currentPage=page;
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   const pageEl = document.getElementById("page-"+page);
   if(pageEl) pageEl.classList.add("active");
+  if(changed){
+    try{
+      const area=document.querySelector(".page-content");
+      if(area) area.scrollTop=0;
+      window.scrollTo(0,0);
+    }catch(e){}
+  }
 
   // bottom-nav active state
   if(currentTech && currentTech.isAdmin){

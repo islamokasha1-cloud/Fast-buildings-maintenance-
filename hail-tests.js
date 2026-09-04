@@ -657,7 +657,11 @@ function predelivery() {
     /* ثم رُفع لقيد v1.17: دلوُ «المرفوض/الملغى» في صفِّ أداء المشتريات، وسطرُ
        مطابقةِ العدّ فوق الجدول. **مكانُها وحدةُ `purchase-kpi`** — التعليلُ في
        القيد الأوّل أعلاه قائمٌ لا يتغيّر بتغيّر الرقم. */
-    const IDX_CEILING = 39622;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ورُفع من 39622 إلى 39636 — ‏١٣ سطراً لتصفير التمرير عند التنقّل (`_scrollAppToTop`
+       ومَعبرُها في `showPage`). **مكانُها النواةُ لا وحدة**: **إصلاحٌ في موضعه** على
+       منطقٍ قائم — العطبُ في `showPage` نفسِها، ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة
+       إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
+    const IDX_CEILING = 39636;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -16615,6 +16619,51 @@ function staffTasksGuards() {
   W.forEach(([n, re]) => T(n, re.test(IDX_RAW)));
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   التنقّلُ يبدأ من أوّل الصفحة — لا من موضع الصفحة السابقة
+   ────────────────────────────────────────────────────────────────────
+   الجذر: التبديلُ إظهارٌ وإخفاءٌ داخل حاويةٍ واحدةٍ مُمرَّرة، لا تحميلُ مستند — فلا
+   شيءَ يُصفّر التمرير، ومن انتقل من منتصف شاشةٍ طويلةٍ وجد الشاشةَ التاليةَ مفتوحةً
+   من منتصفها بلا رأسٍ ولا فلاتر. وهذا حارسٌ نصّيّ لأنّ العطبَ **غيابُ** سطرٍ لا
+   خطأٌ فيه: لا اختبارَ منطقيٍّ يمسك سطراً محذوفاً، ولا خطأَ جافاسكربت ينذر به.
+   ════════════════════════════════════════════════════════════════════ */
+function pageScrollResetGuards() {
+  H("التنقّل بين الصفحات — يبدأ من أوّلها");
+
+  T("★★★ showPage يصفّر التمرير عند تغيّر الصفحة (بدونه تُفتح الشاشةُ من منتصفها)",
+    /const _pageChanged=!_prevPage \|\| _prevPage\.id!=="page-"\+id;/.test(IDX_RAW) &&
+    /if\(_pageChanged\) _scrollAppToTop\(\);/.test(IDX_RAW));
+
+  /* المُمرَّرُ عنصران بحسب المقاس: `.main-area` في سطح المكتب، والنافذةُ في الجوّال
+     (الحاوية `overflow:visible` هناك). تصفيرُ أحدِهما وحدَه يُصلح مقاساً ويترك الآخر. */
+  T("★★ والتصفيرُ يشمل حاويةَ .main-area والنافذةَ معاً (المُمرَّرُ يختلف بالمقاس)",
+    /function _scrollAppToTop\(\)\{[\s\S]*?querySelector\("\.main-area"\)[\s\S]*?area\.scrollTop=0;[\s\S]*?window\.scrollTo\(0,0\);[\s\S]*?\n\}/.test(IDX_RAW));
+
+  T("★ والدالّةُ معروضةٌ على window لتستدعيَها الوحداتُ الخارجية",
+    /window\._scrollAppToTop=_scrollAppToTop;/.test(IDX_RAW));
+
+  /* نداءُ showPage للصفحة نفسِها إعادةُ رسمٍ من وحدةٍ لا تنقّل — وقطعُ قراءةِ المستخدم
+     فيه ارتدادٌ لا إصلاح. لذا الشرطُ على التغيّر جزءٌ من العقد لا تفصيلَ تنفيذ. */
+  T("★★ ولا تصفيرَ عند إعادة رسم الصفحة نفسِها (وإلا قفزت الشاشةُ تحت يد المستخدم)",
+    !/pg\.classList\.add\("active"\);\s*\n\s*_scrollAppToTop\(\);/.test(IDX_RAW));
+
+  const _tp = path.resolve(path.dirname(IDX), "tech-app.html");
+  const _ta = fs.existsSync(_tp) ? fs.readFileSync(_tp, "utf8") : "";
+  T("★★ وتطبيقُ الفنيّ كذلك: showPage يصفّر .page-content عند تغيّر الصفحة",
+    /const changed = currentPage!==page;/.test(_ta) &&
+    /querySelector\("\.page-content"\)[\s\S]{0,80}area\.scrollTop=0;/.test(_ta));
+
+  /* الوحداتُ التي كانت تصفّر بـ`window.scrollTo` وحدَه: يعمل في الجوّال ولا أثرَ له في
+     سطح المكتب حيث المُمرَّرُ الحاوية — عطبٌ يظهر في مقاسٍ ويختفي في آخر. */
+  [["hr-payments.js", "hrPayments"], ["stocktake.js", "stocktake"]].forEach(([f]) => {
+    const p = path.resolve(path.dirname(IDX), f);
+    if (!fs.existsSync(p)) { T(`${f} موجود`, false); return; }
+    const s = fs.readFileSync(p, "utf8");
+    T(`★ ${f}: فتحُ التفاصيل يستدعي _scrollAppToTop لا window.scrollTo وحدَه`,
+      /function open\([\s\S]{0,240}window\._scrollAppToTop\|\|/.test(s));
+  });
+}
+
 (async () => {
   await step4;
   guards();
@@ -16717,6 +16766,7 @@ function staffTasksGuards() {
   staffTasksGuards();
   poCountGuards();
   rulesCoverageGuards();
+  pageScrollResetGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
