@@ -73,10 +73,32 @@ window.__store = {};                       // path -> data (Firestore في ال�
     sn.docChanges = function(){ return changes; };
     return sn;
   }
-  function collRef(coll){ var st={ ob:null, lim:0, sa:null }; var q={
+  /* ── عدُّ الخادم (count) — مُضافٌ لأن التطبيق صار يستعمله ──
+     المُحاكي يجب أن يُمثّل الواجهةَ التي يستدعيها التطبيق، وإلا سقط المسارُ الجديد
+     إلى شبكة الأمان في كل فحصٍ **فمرّ الفحصُ وهو لا يختبر ما كُتب**.
+     و«where» تُطبَّق هنا **وحدَها**: تركُها عديمةَ الأثر في «get»/«onSnapshot» مقصودٌ
+     (مئتا سيناريو قائمٍ تعتمد أنها تُرجع المجموعةَ كاملة)، أمّا العدُّ فبلا ترشيحٍ
+     حقيقيٍّ لا يقيس شيئاً — الرقمان يخرجان متساويين دائماً.
+     (ولا backtick في هذا الملفّ: المُحاكي كلُّه داخل قالبٍ نصّيّ، وحرفٌ منها يُنهيه.) */
+  function _match(d, wh){
+    return (wh||[]).every(function(c){
+      var f=c[0], op=c[1], v=c[2], x=d?d[f]:undefined;
+      if(op==="=="||op==="===") return x===v;
+      if(op==="!=") return x!==v;
+      if(op==="in") return Array.isArray(v) && v.indexOf(x)!==-1;
+      if(op==="not-in") return Array.isArray(v) && v.indexOf(x)===-1;
+      if(op==="array-contains") return Array.isArray(x) && x.indexOf(v)!==-1;
+      return true;                       // مُشغّلٌ غيرُ ممثَّل: لا يُرشِّح
+    });
+  }
+  function collRef(coll){ var st={ ob:null, lim:0, sa:null, wh:[] }; var q={
     doc:function(id){ return docRef(id? coll+'/'+id : coll+'/auto_'+Math.random().toString(36).slice(2)); },
     add:function(d){ var id='auto_'+Math.random().toString(36).slice(2); window.__store[coll+'/'+id]=d; _emit(coll+'/'+id); return Promise.resolve(docRef(coll+'/'+id)); },
-    where:function(){ return q; },
+    where:function(f,op,v){ st.wh.push([f,op,v]); return q; },
+    count:function(){ return { get:function(){
+      var n=docsUnder(coll).filter(function(p){ return _match(window.__store[p], st.wh); }).length;
+      return Promise.resolve({ data:function(){ return { count:n }; } });
+    } }; },
     orderBy:function(f){ if(f && f.__docId) st.ob='__id__'; return q; },
     limit:function(n){ st.lim=n||0; return q; },
     startAfter:function(v){ st.sa=v; return q; },

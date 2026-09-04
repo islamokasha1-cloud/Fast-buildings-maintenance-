@@ -106,6 +106,19 @@ const seeded = await page.evaluate(() => {
   window.__store[T + '/TK-2'] = { id: 'TK-2', status: 'مغلق', building: 'مبنى الورشة', workType: 'سباكة', desc: 'تسريب ماء', priority: 'عاجل 🔴 (4 ساعات)', createdAt: now, closedAt: '2026-07-20T11:00:00.000Z', supervisor: 'أشرف عشري' };
   return Object.keys(window.__store).length;
 });
+await page.evaluate(() => {
+  /* نعدّ ما يُنزَّل فعلاً من مجموعة الشراء: عدّادُ البوّابة كان يجلبها كاملةً
+     ليكتب رقماً. الفحصُ الصادق هنا **حمولةٌ صفر** لا نصُّ الشارة وحدَه. */
+  window.__poReads = 0;
+  const real = db.collection.bind(db);
+  db.collection = function (c) {
+    const q = real(c);
+    if (!/purchases/i.test(c)) return q;
+    const g = q.get.bind(q);
+    q.get = function () { return g().then(sn => { window.__poReads += (sn.size || 0); return sn; }); };
+    return q;
+  };
+});
 L(`\n=== ٣) دخول صحيح (زُرع ${seeded} مستنداً) ===`);
 AUTH_OK = true;
 await page.fill('#login-user', 'admin'); await page.fill('#login-pass', 'Passw0rd!');
@@ -122,6 +135,29 @@ check('★ شاشة المشاريع ظهرت بعد الدخول', await page.i
 const gridTxt = (await page.textContent('#project-grid').catch(() => '')) || '';
 check('بطاقة المشروع المزروع معروضة', gridTxt.includes('مشروع حائل'), gridTxt.trim().slice(0, 50).replace(/\s+/g, ' '));
 check('زر «المشتريات المركزية» ظاهر للمسؤول', await page.isVisible('#global-purchases-btn-wrap').catch(() => false));
+/* عدّادُ طلبات الشراء يعمل بعد نصف ثانية من رسم البوّابة */
+await page.waitForTimeout(1400);
+const poBadge = (await page.textContent('#global-po-count-badge').catch(() => '') || '').trim();
+const poReads = await page.evaluate(() => window.__poReads);
+check('★★ عدّادُ طلبات الشراء يعرض الرقم الصحيح', /^3 طلب$/.test(poBadge), poBadge);
+check('★★★ ولا يُنزِّل مستنداً واحداً ليكتبه (عدُّ خادمٍ لا جلبةُ مجموعة)',
+  poReads === 0, poReads + ' مستنداً نُزّل من مجموعة الشراء');
+/* وشبكةُ الأمان تُختبَر لا يُوعَد بها: نُغيّب `count` كما لو كانت نسخةُ SDK أقدم
+   أو رُدّت القاعدةُ — فالعدّادُ يسقط إلى الطريقة القديمة **ولا يختفي الرقم**. */
+const poFallback = await page.evaluate(async () => {
+  const real = db.collection.bind(db);
+  db.collection = function (c) {
+    const q = real(c);
+    if (/purchases/i.test(c)) q.count = undefined;   // كأنّ العدّ غيرُ مدعوم
+    return q;
+  };
+  document.getElementById('global-po-count-badge').textContent = '—';
+  loadGlobalPOCount();
+  await new Promise(r => setTimeout(r, 900));
+  return (document.getElementById('global-po-count-badge').textContent || '').trim();
+});
+check('★★★ وبلا دعم count يسقط إلى الطريقة القديمة — الرقمُ لا يختفي',
+  /^3 طلب$/.test(poFallback), poFallback);
 await page.screenshot({ path: `${SHOTS}/02-projects.png` });
 
 // نقرٌ حقيقيّ على «إدارة المشتريات المركزية»
