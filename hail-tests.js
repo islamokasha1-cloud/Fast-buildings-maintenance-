@@ -16395,7 +16395,14 @@ function staffTasksGuards() {
     ["★★★ ومَعبرُ showPage يرسم الشاشة (بدونه زرٌّ ميتٌ بصمت)",
       /if\(id==="staff-tasks"\)\s*\{\s*if\(window\.staffTasks&&window\.staffTasks\.render\)/],
     ["★ والمزامنةُ تبدأ مع بقية الوحدات عند الدخول",
-      /window\.staffTasks&&window\.staffTasks\.startSync/]
+      /window\.staffTasks&&window\.staffTasks\.startSync/],
+    /* موضعُ الزرّ قرارُ المالك (04/09): أسفلَ القائمة بجوار الموارد البشرية لا في
+       أعلاها. ويُقاس بالترتيب النصّيّ في المصدر لا بالعين — نقلةٌ عابرةٌ في تحريرٍ
+       لاحقٍ تُعيده إلى الأعلى بلا أن يلاحظها أحد. */
+    ["★★ وزرُّ المهامّ أسفلَ القائمة بعد مجموعة الموارد البشرية (قرارُ المالك)",
+      new RegExp('id="hdr-grp-hrp"[\\s\\S]*id="nav-staff-tasks-btn"[\\s\\S]*id="hdr-grp-system"')],
+    ["★★ ولم يبقَ له موضعٌ ثانٍ في الشريط (زرّان بالمعرّف نفسِه = واحدٌ ميت)",
+      /^(?:(?!id="nav-staff-tasks-btn")[\s\S])*id="nav-staff-tasks-btn"(?:(?!id="nav-staff-tasks-btn")[\s\S])*$/]
   ];
   W.forEach(([n, re]) => T(n, re.test(IDX_RAW)));
 }
