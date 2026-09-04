@@ -383,6 +383,8 @@ const staff = await page.evaluate(async () => {
      القديمة لا تحمل إلّا اسمَ العرض — فبه وحدَه يُعرف الدور. */
   USERS = [{ user: 'وائل عبد المجيد', name: 'وائل عبد المجيد', role: 'procurement_officer' },
            { user: 'عبدالله الشمري',  name: 'عبدالله الشمري',  role: 'procurement_officer' },
+           // مسؤولُ مشترياتٍ في السجلّ بلا طلبٍ واحدٍ في الفترة — يجب أن يُرى بصفر
+           { user: 'faisal',          name: 'فيصل',            role: 'procurement_officer' },
            { user: 'محمد',            name: 'محمد',            role: 'warehouse_manager' },
            { user: 'Ceo01',           name: 'Ceo Abdallah Al Ardi', role: 'ceo' },
            { user: 'sup',             name: 'محمد داوود',      role: 'supervisor' },
@@ -489,12 +491,11 @@ const staff = await page.evaluate(async () => {
   return { ok: true, rows: S.rows.map(r => ({ key: r.key, name: r.name, poN: r.poN, poClosed: r.poClosed,
              spendClosed: r.spendClosed, firstPassRate: r.firstPassRate })), drawn, hdr,
            scopeSpend: S.scopeSpend, inTableSpend: S.inTableSpend, outSpend: S.outSpend,
-           moneyLine: !!root.querySelector('.pkpi-recon-money'),
+           gone: !root.querySelector('.pkpi-recon') && !root.querySelector('.pkpi-staff-admin') &&
+                 !root.querySelector('.pkpi-outside-list') && !root.querySelector('.pkpi-po-link'),
            outsideN: S.outsideN, outsideSpend: S.outsideSpend,
            outsideRoles: S.outsideGroups.map(g => g.role).sort(),
-           outsideBanner: !!root.querySelector('.pkpi-staff-admin'),
-           poLinks: [...root.querySelectorAll('.pkpi-staff-admin .pkpi-po-link')].map(a => a.textContent.trim()),
-           noWinLinks: [...root.querySelectorAll('.pkpi-recon .pkpi-po-link')].map(a => a.textContent.trim()),
+
            strangersInTable: drawn.filter(d => ['مدير النظام','محمد داوود','عبدالله'].includes(d.name)).map(d => d.name),
            tableRoles: S.rows.map(r => r.role),
            vdRows: root.querySelectorAll('.pkpi-vd-row').length,
@@ -504,6 +505,15 @@ const staff = await page.evaluate(async () => {
            groupHdrs: [...root.querySelectorAll('.pkpi-grp th')].map(th => th.textContent.trim().slice(0, 14)),
            canvases: ['pkpi-c-staff-rate','pkpi-c-staff-load']
              .map(id => { const c = document.getElementById(id); return c ? (c.clientWidth > 100 && c.clientHeight > 60) : false; }),
+           /* المخطّطاتُ تقرأ `window._pkpiStaff.rows` عبر `_staffVisibleRows` — **نفسَ
+              النداء الذي يبني الجدول**. فوحدةُ المصدر تُثبَت من هذا الكائن بعينه، لا
+              من نسخة `Chart` (المكتبةُ من CDN ولا تُحمَّل في بيئةٍ بلا شبكة، فقراءتُها
+              تجعل الحارسَ يسقط لعلّةٍ ليست في المنتَج). */
+           chartNames: (() => { try {
+             const rs = (window._pkpiStaff && window._pkpiStaff.rows) || [];
+             const vis = (typeof _staffVisibleRows === 'function') ? _staffVisibleRows(rs) : rs;
+             return vis.map(r => r.name);
+           } catch (e) { return ['خطأ:' + e.message]; } })(),
            visible: !!root.classList.contains('active') };
 });
 check('١٢·٠) صفحةُ المؤشرات فُتحت وقسمُ المسؤولين مرسومٌ فيها',
@@ -512,8 +522,8 @@ if (staff.ok) {
   const bySaad = staff.rows.find(r => r.key === 'u:saad');
   const drawnSaad = staff.drawn.find(d => d.name === 'سعد');
   check('١٢أ) ★★ لكلّ مسؤولٍ صفٌّ واحد (لا تكرارَ ولا اندماج)',
-    staff.rows.length === 4 && staff.drawn.length === 4 &&
-    new Set(staff.drawn.map(d => d.name)).size === 4,
+    staff.rows.length === 5 && staff.drawn.length === 5 &&
+    new Set(staff.drawn.map(d => d.name)).size === 5,
     'محسوب ' + staff.rows.length + ' · مرسوم ' + staff.drawn.length);
   check('١٢ب) ★★★ عددُ الطلبات المرسومُ = المحسوب',
     !!bySaad && !!drawnSaad && Number(drawnSaad.po.replace(/[^\d.]/g, '')) === bySaad.poN,
@@ -530,7 +540,7 @@ if (staff.ok) {
     'مرسوم ' + (drawnSaad && drawnSaad.firstPass) + ' · محسوب ' + (bySaad && bySaad.firstPassRate));
   // ══ سؤالُ المالك: «كيف قيمةُ مشترياته مختلفةٌ عن المبالغ المغلقة في اللوحة؟» ══
   check('١٢هـ٢) ★★★ والمالُ يُطابق: قيمةُ الجدول + ما أغلقه غيرُهم = إجماليُّ المغلق',
-    Math.abs((staff.inTableSpend + staff.outSpend) - staff.scopeSpend) < 0.01 && staff.moneyLine === true,
+    Math.abs((staff.inTableSpend + staff.outSpend) - staff.scopeSpend) < 0.01,
     staff.inTableSpend + ' + ' + staff.outSpend + ' = ' + staff.scopeSpend);
   check('١٢و) ★★★ الجدولُ خمسةُ أعمدةٍ بعد حذف السرعة والمقارنة والوفر (طلب المالك)',
     staff.hdr === 5, 'رؤوس=' + staff.hdr);
@@ -539,8 +549,10 @@ if (staff.ok) {
     staff.strangersInTable.length === 0 &&
     staff.tableRoles.every(r => r === 'procurement_officer'),
     'دخلاء: ' + (staff.strangersInTable.join(',') || 'لا شيء') + ' · أدوارُ الجدول: ' + staff.tableRoles.join(','));
-  check('١٢ح) ★★★ وثلاثتُهم معلَنون مجمَّعين بأدوارهم فوق الجدول (لا حذفَ صامت)',
-    staff.outsideBanner === true && staff.outsideN === 5 && staff.outsideSpend === 2300 &&
+  // بطلب المالك (04/09) حُذفت الكتلتان من الشاشة بعد أن تحقّق من صحّة التصنيف —
+  // **والحسابُ باقٍ**: حذفُ شرحٍ لا حذفُ معلومة، فردُّ العرض سطرٌ لا إعادةُ بناء.
+  check('١٢ح) ★★★ حسابُ «خارج الجدول» باقٍ كاملاً وإن لم يُعرض',
+    staff.outsideN === 5 && staff.outsideSpend === 2300 &&
     ['admin','ceo','supervisor'].every(r => staff.outsideRoles.includes(r)),
     'n=' + staff.outsideN + ' spend=' + staff.outsideSpend + ' أدوار=' + staff.outsideRoles.join(','));
   check('١٢ح٢) ★★ الخلاصةُ سطرٌ ممتدٌّ تحت كلِّ صفّ (لا عمودٌ ضيّقٌ يُقصّ)',
@@ -561,12 +573,18 @@ if (staff.ok) {
   check('١٢ح٣) ★★★ ولا خليّةَ مقصوصةٍ ولا إفاضةَ صفحةٍ أفقية (تنسيقُ الجدول — بلاغ المالك)',
     staff.clipped === 0 && staff.pageOverflow <= 1,
     'مقصوصة=' + staff.clipped + ' · فيضُ الصفحة=' + staff.pageOverflow + 'px');
-  // ══ سؤالُ المالك: «ما هي الـ٣٢٣ ريال؟!» — الرقمُ بلا ملفٍّ لا يُتحقَّق منه ══
-  check('١٢ن) ★★★ كلُّ طلبٍ خارجَ الجدول مُسمّىً برقمه رابطاً (لا رقمٌ مجرّد)',
-    staff.poLinks.length === staff.outsideN && staff.poLinks.every(t => /^PO-/.test(t)),
-    'روابط: ' + staff.poLinks.join(' · '));
-  check('١٢س) ★★★ وكذلك ما لم يمرّ بمرحلة مشتريات',
-    staff.noWinLinks.length > 0, 'روابط: ' + staff.noWinLinks.join(' · '));
+  // ══ طلبُ المالك 04/09: حذفُ الفقرات الشارحة من الشاشة (أشّر عليها بالأحمر) ══
+  check('١٢ن) ★★★ ولا أثرَ لهما في الوجه — حذفٌ لا إخفاءٌ بـCSS',
+    staff.gone === true);
+  // ══ طلبُ المالك: «أضِف مسؤولَ المشتريات الآخر ولو كان أداؤه صفراً» ══
+  check('١٢س) ★★★ ومسؤولُ مشترياتٍ بلا طلبٍ واحدٍ له صفٌّ مرسومٌ بصفر (لا يختفي)',
+    staff.drawn.some(d => d.name === 'فيصل') &&
+    staff.rows.some(r => r.name === 'فيصل' && r.poN === 0),
+    'المرسومون: ' + staff.drawn.map(d => d.name + '(' + d.po + ')').join(' · '));
+  check('١٢ف) ★★★ ويظهر في المخطّطات كما في الجدول — المصدرُ كائنٌ واحد',
+    staff.chartNames.includes('فيصل') &&
+    staff.chartNames.join(',') === staff.drawn.map(d => d.name).join(','),
+    'المخطّط: ' + staff.chartNames.join(' · ') + ' | الجدول: ' + staff.drawn.map(d => d.name).join(' · '));
   check('١٢ط) ★★ دليلُ قراءة الجدول مرسومٌ (الجدولُ يشرح نفسَه)', staff.guide === true);
   check('١٢ي) ★★ ورؤوسُ المجموعات تسمّي المحاور الباقية (جودة · التزام)',
     staff.groupHdrs.length === 3 && staff.groupHdrs.some(h => h.includes('جودة')) &&

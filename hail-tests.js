@@ -668,7 +668,10 @@ function predelivery() {
        إصلاحٌ في موضعه على `loadData` نفسِها — والنقلُ بحجّة الإصلاح ممنوعٌ نصّاً. */
     /* ثم لقيد v1.21: قاعدةُ ملكيةِ الطلب (من اشتراه لا من أغلقه) — أسطرٌ في
        `computeStaffKPIs` داخل وحدة `purchase-kpi`. */
-    const IDX_CEILING = 39648;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم لقيد v1.24: عنوانُ قائمةِ الأرقام وتصفيةُ الصفوف الصفرية — أسطرٌ في
+       `_staffSectionHtml` و`computeStaffKPIs` **داخل وحدة `purchase-kpi`**: إصلاحُ
+       عرضٍ في موضعه على منطقٍ قائم، والنقلُ بحجّة الإصلاح ممنوعٌ نصّاً (CLAUDE.md). */
+    const IDX_CEILING = 39651;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4491,18 +4494,17 @@ function procurementStaffKPI() {
   T("★★★ الجدولُ قائمةُ سماحٍ لمسؤولي المشتريات — لا قائمةَ منعٍ تُنسي دوراً",
     /const isProcRow = r => r\.role==="procurement_officer"/.test(ksrc) &&
     !/isAdminRow/.test(ksrc));
-  /* v1.23 — سؤالُ المالك: «ما هي الـ٣٢٣ ريال؟!». البيانُ كان يقول «طلبٌ واحد» ولا
-     يقول أيَّ طلب، فلا يستطيع القارئُ فتحَه ليحكم — فيبقى الرقمُ تهمةً بلا ملفّ. */
-  T("★★★ وكلُّ طلبٍ خارجَ الجدول يُسمّى برقمه رابطاً يفتحه (لا رقمٌ مجرّدٌ بلا ملفّ)",
-    /const poLink = id =>/.test(ksrc) && /openPurchaseDetail\('\$\{_q\}'\)/.test(ksrc) &&
-    /\$\{idList\(g\.ids, g\.n\)\}/.test(ksrc) && /pkpi-po-link/.test(ksrc));
-  T("★★★ وكذلك ما لم يمرّ بمرحلة مشتريات — الدلوُ الآخر الذي يُسأل عنه",
-    /noWindowIds/.test(ksrc) && /idList\(S\.noWindowIds, S\.noWindowN\)/.test(ksrc));
-  T("★★ ورقمُ الطلب يمرّ بحارس XSS نفسِه (سمةُ onclick تُقيَّم في النطاق العام)",
-    /typeof _jsq==="function"\) \? _jsq\(id\)/.test(ksrc));
-  T("★★★ ومَن ليس منهم يُعلَن مجمَّعاً بالدور (لا حذفَ صامت)",
+  /* v1.25 — حُذف بيانُ «خارج الجدول» وسطرُ المطابقة من الشاشة بطلب المالك (04/09)
+     بعد أن تحقّق بنفسه من صحّة التصنيف. **والحسابُ لم يُمَسّ**: عددُ الخارجين
+     وقيمتُهم وأرقامُ طلباتهم كلُّها باقيةٌ في الدالّة النقيّة. والتمييزُ هنا هو كلُّ
+     شيء: **حذفُ شرحٍ لا حذفُ معلومة**. فلو سقط الحسابُ مع الشرح لصار ردُّ العرض
+     مستحيلاً بلا إعادة بناء، ولضاع أثرُ ما يجري خارج المسار بلا أن يلاحظه أحد. */
+  T("★★★ حسابُ «خارج الجدول» باقٍ كاملاً وإن لم يُعرض (حُذف الشرحُ لا المعلومة)",
     /outsideGroups:/.test(ksrc) && /outsideN:/.test(ksrc) && /outsideSpend:/.test(ksrc) &&
-    ksrc.includes("pkpi-outside-list"));
+    /noWindowIds/.test(ksrc) && /scopeSpend, inTableSpend, outSpend,/.test(ksrc));
+  T("★★★ ولا أثرَ للكتلتين المحذوفتين في الوجه (حذفٌ لا إخفاءٌ بـCSS)",
+    !ksrc.includes("pkpi-recon") && !ksrc.includes("pkpi-outside-list") &&
+    !ksrc.includes("pkpi-staff-admin") && !/const poLink = id =>/.test(ksrc));
   /* ══ v1.19 — الجذرُ الذي أفرغ الجدولَ وملأه بالخطأ: سجلُّ المستخدمين ══
      الأدوارُ تُقرأ من `USERS` وهو **لا يُحمَّل** في وضع المصادقة الخادمية ويُصفَّى عند
      تبديل المشروع. فمرّةً دخل الجدولَ من ليس مسؤولَ مشتريات، ومرّةً خرج منه
@@ -4550,8 +4552,8 @@ function procurementStaffKPI() {
   T("★★★ والخلاصةُ لا تجمع «سريعٌ في التنفيذ» مع «التوريد متأخّر» (سؤال المالك)",
     // الحارسُ على **الكود** لا على التعليق الذي يشرح لماذا سقطت الجملة
     !/good\.push\("سريعٌ|good\.push\("يختار الأوفر/.test(ksrc));
-  T("★★★ والمطابقةُ بالمال أيضاً — جوابُ «لماذا رقمُه غير رقم اللوحة؟»",
-    /scopeSpend, inTableSpend, outSpend,/.test(ksrc) && /pkpi-recon-money/.test(ksrc));
+  T("★★★ والمطابقةُ بالمال محسوبةٌ ومعروضةٌ على الكائن (وإن لم تُرسم)",
+    /scopeSpend, inTableSpend, outSpend,/.test(ksrc));
 
   // ── بناءُ المحرّك وتشغيلُه ──
   let E = null;
@@ -4583,6 +4585,35 @@ function procurementStaffKPI() {
          { user: "ceo",  name: "Ceo Abdallah", role: "ceo" }]);
   } catch (e) { T("يُبنى محرّك أداء المسؤولين", false, String(e.message).slice(0, 140)); return; }
   T("يُبنى محرّك أداء المسؤولين", typeof E.computeStaffKPIs === "function");
+
+  /* ── ٠-أ) كلُّ مسؤولِ مشترياتٍ في الجدول ولو بصفر (طلب المالك 04/09) ──
+     «أضِف مسؤولَ المشتريات الآخر في الجدول والرسومات ولو كان أداؤه صفراً.» والجذرُ
+     الذي جعله غائباً: الجدولُ كان يُبنى من **الطلبات**، فمن لا طلبَ له لا صفَّ له.
+     والغيابُ يُقرأ «لا بيانات» بينما معناه «صفر» — وهما خبران مختلفان في تقييم
+     موظّف: الأوّلُ يقول «لا أدري» والثاني يقول «لم يُنجز». */
+  {
+    const Z = E.computeStaffKPIs([{ id: "z1", status: "closed", actualCost: 100,
+      createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-03T06:00:00Z", timeline: [
+        { code: "wh_reviewed",     at: "2026-07-01T08:00:00Z", by: "المستودع", byUser: "wh", byRole: "warehouse_manager" },
+        { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad", byRole: "procurement_officer" } ] }]);
+    T("★★★ مسؤولُ مشترياتٍ بلا طلبٍ واحدٍ له صفٌّ بصفر (لا يختفي من الشاشة)",
+      Z.rows.some(r => r.key === "u:noor" && r.poN === 0 && r.spendClosed === 0),
+      Z.rows.map(r => r.key + ":" + r.poN).join(" | "));
+    T("★★ ومؤشّراتُه فارغةٌ لا أصفارٌ كاذبة (— لا 0%: «لا أدري» غيرُ «صفر»)",
+      (() => { const n = Z.rows.find(r => r.key === "u:noor");
+               return !!n && n.firstPassRate === null && n.onTimeRate === null; })());
+    T("★★★ ولا يدخل الجدولَ من ليس مسؤولَ مشتريات ولو كان في السجلّ",
+      Z.rows.every(r => r.role === "procurement_officer") &&
+      !Z.rows.some(r => r.key === "u:root" || r.key === "u:sup" || r.key === "u:ceo"),
+      Z.rows.map(r => r.key).join(","));
+    T("★★★ وصفُّ الصفر لا يُفسد المطابقة (لا يزيد عدّاً ولا مالاً)",
+      Z.rows.reduce((a, r) => a + r.poN, 0) === Z.inTableN &&
+      Math.abs(Z.rows.reduce((a, r) => a + r.spendClosed, 0) - Z.inTableSpend) < 0.01,
+      `عدّ=${Z.inTableN} مال=${Z.inTableSpend}`);
+    T("★★ وصفُّ الصفر يهبط إلى الذيل (الترتيبُ بالحجم لا بالسجلّ)",
+      Z.rows[0].poN >= Z.rows[Z.rows.length - 1].poN && Z.rows[0].key === "u:saad",
+      Z.rows.map(r => r.key + ":" + r.poN).join(" > "));
+  }
 
   // ── ١) هويةُ الفاعل: byUser أولاً، والاسمُ احتياطاً، و«النظام» ليس شخصاً ──
   T("★★★ _actorKey: byUser هو الهوية (تغييرُ اسمِ العرض لا يشقّ الشخص)",
@@ -4694,8 +4725,8 @@ function procurementStaffKPI() {
        صحيحة، والتنفيذيُّ لا يدخل الجدولَ لأن دورَه ليس `procurement_officer` —
        ويُعلَن خارجَه فلا يُحذف صامتاً. */
     T("★★★ فلا صفَّ لتنفيذيٍّ في جدول أداء المشتريات ويُعلَن خارجَه (بلاغ المالك)",
-      S.rows.length === 0 && S.outsideN === 1 && S.outsideGroups.some(g => g.role === "ceo"),
-      `rows=${S.rows.length} outside=${S.outsideN} أدوار=${S.outsideGroups.map(g=>g.role).join(",")}`);
+      S.rows.every(r => r.poN === 0) && S.outsideN === 1 && S.outsideGroups.some(g => g.role === "ceo"),
+      `حاملون=${S.rows.filter(r=>r.poN).length} outside=${S.outsideN} أدوار=${S.outsideGroups.map(g=>g.role).join(",")}`);
   }
 
   // ── ٦) الارتداد: ما رجع بعد إحالته وحدَه يُحسب عليه ──
@@ -4738,7 +4769,7 @@ function procurementStaffKPI() {
       mk("a3", "root", "مدير النظام", "admin", 250),
     ]);
     T("★★★ صفُّ المسؤول لا يظهر في جدول القياس (لا يُقارَن بمسؤول المشتريات)",
-      S.rows.length === 1 && S.rows[0].key === "u:saad", S.rows.map(r => r.key).join(","));
+      S.rows.filter(r => r.poN > 0).map(r => r.key).join(",") === "u:saad", S.rows.map(r => r.key).join(","));
     T("★★★ لكنّ طلباتِه **معلَنةٌ** عدداً وقيمةً — الحذفُ الصامتُ ثقبٌ في التغطية",
       S.outsideN === 2 && S.outsideSpend === 750, `n=${S.outsideN} spend=${S.outsideSpend}`);
     T("★★ واسمُه يُذكر في البيان (يُعرف أيُّ حسابٍ نفّذ خارج المسار)",
@@ -4756,8 +4787,9 @@ function procurementStaffKPI() {
       mk("b4", "root", "مدير النظام",      "admin",               100),
     ]);
     T("★★★ لا مشرفَ ولا تنفيذيَّ ولا مسؤولَ نظامٍ في جدول أداء المشتريات (بلاغ المالك)",
-      S2.rows.length === 1 && S2.rows[0].name === "وائل عبد المجيد",
-      S2.rows.map(r => r.name + ":" + r.role).join(" | "));
+      S2.rows.filter(r => r.poN > 0).map(r => r.name).join(",") === "وائل عبد المجيد" &&
+      S2.rows.every(r => r.role === "procurement_officer"),
+      S2.rows.map(r => r.name + ":" + r.role + ":" + r.poN).join(" | "));
     T("★★★ وثلاثتُهم معلَنون مجمَّعين بأدوارهم فوق الجدول",
       S2.outsideN === 3 && S2.outsideGroups.length === 3 &&
       ["supervisor","ceo","admin"].every(x => S2.outsideGroups.some(g => g.role === x)),
@@ -4773,9 +4805,9 @@ function procurementStaffKPI() {
           { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: "مجهولٌ تماماً" } ] },
     ]);
     T("★★★ ومن لا يعرفه السجلُّ ولا ختمَ لدوره يُعلَن تحت «دورٌ غير معروف» لا يُدسّ",
-      S3.rows.length === 0 && S3.outsideN === 1 &&
+      S3.rows.every(r => r.poN === 0) && S3.outsideN === 1 &&
       S3.outsideGroups.some(g => g.role === "__unknown__"),
-      `rows=${S3.rows.length} outside=${S3.outsideN} أدوار=${S3.outsideGroups.map(g=>g.role).join(",")}`);
+      `حاملون=${S3.rows.filter(r=>r.poN).length} outside=${S3.outsideN} أدوار=${S3.outsideGroups.map(g=>g.role).join(",")}`);
   }
 
   /* ── ٦-ج) مطابقةُ العدّ: لا طلبَ يضيع بين الأبواب الأربعة (سؤال المالك 04/09) ──
@@ -4812,8 +4844,11 @@ function procurementStaffKPI() {
       saad.poClosed + saad.poOpen + saad.poEnded === saad.poN && saad.poEnded === 1,
       `${saad.poClosed}+${saad.poOpen}+${saad.poEnded} = ${saad.poN}`);
   }
-  T("★★ وسطرُ المطابقة معروضٌ في الوجه (الجوابُ في الصفحة لا في رأس القارئ)",
-    /class="pkpi-recon"/.test(ksrc) && /لم تمرّ بمرحلة مشترياتٍ أصلاً/.test(ksrc));
+  /* v1.25 — كلُّ مسؤولِ مشترياتٍ في الجدول ولو بصفر (طلب المالك): الغيابُ يُقرأ
+     «لا بيانات» ومعناه الحقيقيُّ «صفر»، وهما خبران مختلفان تماماً في تقييم موظّف. */
+  T("★★★ وجدولُ الأداء يُبنى من سجلّ المستخدمين لا من الطلبات وحدَها (من لا طلبَ له له صفٌّ بصفر)",
+    /u\.role!=="procurement_officer"/.test(ksrc) && /poN:0, poClosed:0/.test(ksrc) &&
+    /firstPassRate:null/.test(ksrc));
 
   /* ── ٦-د) مَن يملك الطلب: من اشتراه لا من أغلقه (بلاغ المالك 04/09) ──
      سيرُ العمل كما شرحه المالك: **مسؤولُ المشتريات ليس من يُغلق الطلب**. يُغلق
@@ -4854,8 +4889,8 @@ function procurementStaffKPI() {
       !!wael && wael.poN === 2 && wael.spendClosed === 3000,
       `poN=${wael && wael.poN} spend=${wael && wael.spendClosed}`);
     T("★★★ ولا يُنسب للمستودع ولا للمسؤول شراءٌ لم يقوما به",
-      S.rows.length === 1 && !S.outsideGroups.some(g => g.role === "warehouse_manager"),
-      S.rows.map(r => r.key).join(",") + " | خارج: " + S.outsideGroups.map(g => g.role).join(","));
+      S.rows.filter(r => r.poN > 0).length === 1 && !S.outsideGroups.some(g => g.role === "warehouse_manager"),
+      S.rows.filter(r => r.poN > 0).map(r => r.key).join(",") + " | خارج: " + S.outsideGroups.map(g => g.role).join(","));
     T("★★★ لكنّ طلباً نفّذه المسؤولُ من أوّله يبقى خارجَ الجدول بدوره (لا يُهدى لوائل)",
       S.outsideN === 1 && S.outsideGroups.some(g => g.role === "admin" && g.spend === 500),
       `outsideN=${S.outsideN}`);
@@ -4889,8 +4924,8 @@ function procurementStaffKPI() {
           { code: "closed",          at: "2026-07-05T08:00:00Z", ...WH2 },
         ]}]);
       T("★★★ وطلبٌ لا يظهر فيه مسؤولُ مشترياتٍ قطُّ يبقى خارج الجدول (لا يُهدى لأحد)",
-        S3.rows.length === 0 && S3.outsideN === 1,
-        `rows=${S3.rows.length} outside=${S3.outsideN}`);
+        S3.rows.every(r => r.poN === 0) && S3.outsideN === 1,
+        `حاملون=${S3.rows.filter(r=>r.poN).length} outside=${S3.outsideN}`);
     }
 
     T("★★★ والمالُ يُطابق بعد ذلك كلِّه",
@@ -4910,7 +4945,7 @@ function procurementStaffKPI() {
       E.computeStaffKPIs([{ id: "o2", status: "wh_reviewed", estCost: 100,
         createdAt: "2026-01-01T06:00:00Z", updatedAt: "2026-01-01T06:00:00Z",
         timeline: [{ code: "wh_reviewed", at: "2026-01-01T08:00:00Z", by: "و", byUser: "wh" }] }]).openNowN === 1);
-    T("★★ ولا يُنسب إنجازاً لأحد (لا صفَّ له)", S.rows.length === 0);
+    T("★★ ولا يُنسب إنجازاً لأحد (لا طلبَ في صفِّ أحد)", S.rows.every(r => r.poN === 0));
   }
 }
 
