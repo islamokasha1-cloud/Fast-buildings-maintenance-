@@ -431,6 +431,23 @@ const staff = await page.evaluate(async () => {
       items: [{ itemName: 'بند قديم ٢', qty: 1, unitCost: 600, itemCost: 600, receivedQty: 1 }],
       timeline: [{ code: 'wh_reviewed',     at: '2026-07-01T08:00:00Z', by: 'محمد' },
                  { code: 'pending_finance', at: '2026-07-01T12:00:00Z', by: 'عبدالله الشمري' }] },
+    /* سيرُ العمل كما وصفه المالك: مسؤولُ المشتريات لا يُغلق الطلب. مرّةً يُغلقه
+       المستودعُ بعد التدقيق، ومرّةً يُغلقه حسابُ المسؤول لعلّةٍ تشغيلية — وكلاهما
+       كان يسلب الطلبَ وقيمتَه من صاحبه. */
+    { id: 'PO-CLOSE-WH', projectId: 'hail', projectName: 'هايل', status: 'closed',
+      createdAt: '2026-07-01T06:00:00Z', updatedAt: '2026-07-09T06:00:00Z', actualCost: 800, estCost: 800,
+      items: [{ itemName: 'بند أ', qty: 1, unitCost: 800, itemCost: 800, receivedQty: 1 }],
+      timeline: [{ code: 'wh_reviewed', at: '2026-07-01T08:00:00Z', by: 'محمد', byUser: 'wh', byRole: 'warehouse_manager' },
+                 { code: 'pending_finance', at: '2026-07-02T08:00:00Z', by: 'وائل عبد المجيد' },
+                 { code: 'proc_executing', at: '2026-07-03T08:00:00Z', by: 'financial01', byUser: 'fin', byRole: 'finance' },
+                 { code: 'closed', at: '2026-07-05T08:00:00Z', by: 'محمد', byUser: 'wh', byRole: 'warehouse_manager' }] },
+    { id: 'PO-CLOSE-ADM', projectId: 'hail', projectName: 'هايل', status: 'closed',
+      createdAt: '2026-07-01T06:00:00Z', updatedAt: '2026-07-09T06:00:00Z', actualCost: 400, estCost: 400,
+      items: [{ itemName: 'بند ب', qty: 1, unitCost: 400, itemCost: 400, receivedQty: 1 }],
+      timeline: [{ code: 'wh_reviewed', at: '2026-07-01T08:00:00Z', by: 'محمد', byUser: 'wh', byRole: 'warehouse_manager' },
+                 { code: 'pending_finance', at: '2026-07-02T08:00:00Z', by: 'وائل عبد المجيد' },
+                 { code: 'proc_executing', at: '2026-07-03T08:00:00Z', by: 'financial01', byUser: 'fin', byRole: 'finance' },
+                 { code: 'closed', at: '2026-07-06T08:00:00Z', by: 'مدير النظام', byUser: 'root', byRole: 'admin' }] },
     leap('PO-LEAP-1', 'boss', 'عبدالله', 'ceo'),      // قفزٌ كان يُنسب للتنفيذيّ
     leap('PO-LEAP-2', 'sup',  'محمد داوود', 'supervisor'),
   ];
@@ -514,6 +531,11 @@ if (staff.ok) {
     staff.tableRoles.every(r => r === 'procurement_officer') && staff.strangersInTable.length === 0,
     'أدوارُ الجدول: ' + staff.tableRoles.join(','));
   // ══ بلاغُ المالك: «أين مسؤولو المشتريات من قياس الأداء؟» — سجلٌّ قديمٌ باسمٍ فقط ══
+  // ══ بلاغُ المالك: الإغلاقُ ليس عملَ المشتريات — لا ينزع الطلبَ من صاحبه ══
+  const waelRow = staff.rows.find(r => r.name === 'وائل عبد المجيد');
+  check('١٢ح٦) ★★★ إغلاقُ المستودعِ أو المسؤولِ لا ينزع الطلبَ وقيمتَه من مسؤول المشتريات',
+    !!waelRow && waelRow.poN === 3 && Math.abs(waelRow.spendClosed - 2100) < 0.01,
+    'وائل: ' + (waelRow && waelRow.poN) + ' طلب · ' + (waelRow && waelRow.spendClosed) + ' ر.س');
   check('١٢ح٥) ★★★ ومسؤولو المشتريات الحقيقيّون **ظاهرون** ولو كان سجلُّهم باسمِ عرضٍ فقط',
     staff.drawn.some(d => d.name === 'وائل عبد المجيد') &&
     staff.drawn.some(d => d.name === 'عبدالله الشمري'),
