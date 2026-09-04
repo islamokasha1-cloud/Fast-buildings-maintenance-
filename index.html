@@ -5712,6 +5712,20 @@ async function exportPhotoReportToPPTX(){
 }
 
 const _TICKETS_LOAD_LIMIT = 2000;   // سقفُ مسحِ الإقلاع — يقرؤه شاهدُ الاكتمال أيضاً
+
+/* قرارُ المسح — دالّةٌ نقيّةٌ ليفحصها `hail-tests` بلا متصفّح.
+   `total` عددُ مستندات المجموعة، `stamped` عددُ حامليَ `archived` منها.
+   ثلاثةُ أسبابٍ للمسح، وواحدٌ فقط لتخطّيه:
+     • رقمٌ غائبٌ (عدٌّ غيرُ مدعومٍ أو فشِل) ⇒ امسح، لا نُخمّن.
+     • مجموعةٌ فارغةٌ ⇒ امسح: مسارُ ترحيلِ localStorage معلَّقٌ بـ`snap.empty`.
+     • نقصٌ في الوسم ⇒ امسح ووسِم، وإلّا رشّح المستمعُ فأسقط الناقصَ بصمت. */
+function _ticketsScanNeeded(total, stamped){
+  if(typeof total!=="number" || typeof stamped!=="number") return true;
+  if(!(total>0)) return true;
+  return total !== stamped;
+}
+window._ticketsScanNeeded = _ticketsScanNeeded;
+
 function loadData(onDone){
   // الشاهدُ يُشتقّ من مسحِ **هذا** المشروع: موروثاً يجعل مستمعَ مشروعٍ لم يُوسَم يُرشِّح.
   _archFieldComplete = false;
@@ -5723,10 +5737,12 @@ function loadData(onDone){
   loadVendorAliases().catch(e=>console.warn("loadVendorAliases failed:",e));   // v18.9.2514: جدول أسماء المورّدين المعتمدة
 
   let _done=false;
-  function done(){
+  function done(keepCache){
     if(_done) return; _done=true;
     _diagMark("loadData:done tickets="+((typeof tickets!=="undefined"&&tickets)?tickets.length:0));
-    safeLSSet("hail_main",JSON.stringify(tickets));
+    // `keepCache` للمسار السريع وحدَه: لم نُنزّل بلاغاً، فكتابةُ مصفوفةٍ فارغةٍ فوق
+    // الكاش تمحو آخرَ نسخةٍ تصلح للعمل بلا اتصال — والمستمعُ يكتبها بعد لحظة.
+    if(!keepCache) safeLSSet("hail_main",JSON.stringify(tickets));
     if(onDone) onDone();
   }
 
@@ -5758,6 +5774,7 @@ function loadData(onDone){
     return;
   }
   try{
+    const _fullScan = () =>
     db.collection(COLLECTION()).orderBy("createdAt","asc").limit(_TICKETS_LOAD_LIMIT).get()
       .then(snap=>{
         clearTimeout(timeout);
@@ -5848,6 +5865,37 @@ function loadData(onDone){
         toast("⚠ خطأ في Firebase — البيانات المحلية","warn");
         done();
       });
+
+    /* ══ هل يلزم مسحُ الإقلاع أصلاً؟ ══
+       كان كلُّ دخولٍ يُنزّل المجموعةَ ثلاثَ مرّات: مسحُ `loadData` كاملاً، ثمّ نافذةُ
+       المستمع، ثمّ مسحُ الأرشيف. والمسحُ الأوّل لم يبقَ منه إلّا **شهادةُ اكتمال
+       `archived`**: الترحيلُ لا يقع إلّا والمجموعةُ فارغة، والمستمعُ يستبدل `tickets[]`
+       كاملاً بعد لحظة، و`newId()` معاملةٌ على `META_DOC()` لا تسأل `counter` المحلّي.
+       والشهادةُ تُشترى بعدّين على الخادم بدل مسحٍ كامل: إن ساوى عددُ حاملي
+       الحقل عددَ الكلّ فلا ناقصَ فيها — وهي أقوى من المسح، إذ تشمل ما خلف السقف
+       (`_TICKETS_LOAD_LIMIT`) والمسحُ لا يراه. والعدُّ **لا يُنزّل مستنداً**.
+       ولا تُحفظ الشهادةُ في علمٍ باقٍ: علمٌ قديمٌ يُرشّح به المستمعُ فيُسقِط مستنداً
+       بلا حقلٍ **بصمت**. وأيُّ تعذّرٍ — عدٌّ غيرُ مدعوم، رفضٌ، شبكةٌ — يسقط إلى المسح كما هو. */
+    let _freshness;
+    try{
+      _freshness = Promise.all([
+        db.collection(COLLECTION()).count().get(),
+        db.collection(COLLECTION()).where("archived","in",[true,false]).count().get()
+      ]).then(r=>[r[0].data().count, r[1].data().count]);
+    }catch(e){ _freshness = Promise.reject(e); }
+
+    _freshness.then(([_all,_stamped])=>{
+      if(window._ticketsScanNeeded(_all,_stamped)) return _fullScan();
+      clearTimeout(timeout);
+      _diagMark("loadData:skip-scan n="+_all);
+      // من كاشٍ غيرِ موسومٍ بمشروعه (`hail_main` مفتاحٌ واحدٌ للكلّ) تأتي
+      // بلاغاتُ مشروعٍ آخر وميضاً على الشاشة. فالفارغُ أصدقُ: شاشةُ الافتتاح
+      // تبقى حتّى أوّل لقطةٍ من المستمع (`hideSplash()` فيها)، فلا يُرى الفراغ.
+      tickets = [];
+      counter = 0;
+      _archFieldComplete = true;
+      done(true);
+    }).catch(()=>_fullScan());
   } catch(firebaseErr){
     clearTimeout(timeout);
     console.error("Firebase init error:",firebaseErr);

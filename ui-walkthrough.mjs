@@ -158,6 +158,64 @@ const poFallback = await page.evaluate(async () => {
 });
 check('★★★ وبلا دعم count يسقط إلى الطريقة القديمة — الرقمُ لا يختفي',
   /^3 طلب$/.test(poFallback), poFallback);
+
+/* ── مسحُ إقلاع البلاغات: ثلاثُ حالاتٍ في متصفّحٍ حقيقيّ ──
+   البلاغان المزروعان بلا `archived` عمداً، فالمسارُ الأوّل هو **المسحُ والوسم**.
+   ثمّ الثاني — والمجموعةُ موسومةٌ كلُّها — يجب أن يمرّ **بلا تنزيلِ مستند**. ثمّ
+   الثالثُ بلا دعم `count` يعود إلى المسح الكامل: شبكةُ الأمان تُختبَر لا يُوعَد بها.
+   ولا يكفي فحصُ المصدر: الفرقُ كلُّه في **ما نُزّل فعلاً**، وهو ما يُقاس هنا. */
+const boot = await page.evaluate(async () => {
+  const out = {};
+  const wrapped = db.collection.bind(db);
+  window.__tkReads = 0;
+  db.collection = function (c) {
+    const q = wrapped(c);
+    if (!/tickets/i.test(c)) return q;
+    const g = q.get.bind(q);
+    q.get = function () { return g().then(sn => { window.__tkReads += (sn.size || 0); return sn; }); };
+    return q;
+  };
+  CURRENT_PROJECT = { id: 'hail', name: 'مشروع حائل' };
+  const run = () => new Promise(r => { window.__tkReads = 0; loadData(() => setTimeout(r, 250)); });
+
+  await run();
+  out.scanReads = window.__tkReads;
+  out.scanStamped = ['TK-1', 'TK-2'].every(id => window.__store['hail_tickets/' + id].archived === false);
+  try { out.scanCert = _archFieldComplete; } catch (e) { out.scanCert = 'غير مقروء'; }
+
+  await run();
+  out.fastReads = window.__tkReads;
+  try { out.fastCert = _archFieldComplete; } catch (e) { out.fastCert = 'غير مقروء'; }
+  out.fastCache = localStorage.getItem('hail_main');
+
+  const withCount = db.collection.bind(db);
+  db.collection = function (c) {
+    const q = withCount(c);
+    if (/tickets/i.test(c)) q.count = undefined;   // كأنّ العدّ غيرُ مدعوم
+    return q;
+  };
+  await run();
+  out.fbReads = window.__tkReads;
+  out.fbTickets = tickets.length;
+
+  db.collection = wrapped;
+  CURRENT_PROJECT = null;
+  return out;
+});
+check('★★ أوّلُ مسحٍ يُنزّل ويَسِم البلاغَين بلا `archived` (٢ مستند)',
+  boot.scanReads === 2 && boot.scanStamped === true, boot.scanReads + ' مستنداً · وُسِما=' + boot.scanStamped);
+/* والشهادةُ **لا** تُمنح في المسح الذي وسَم: ما وُسِم للتوّ قد لا يكون بلغ الخادمَ
+   بعد، فالترشيحُ عليه مخاطرةٌ صامتة. تُمنح في الجولة التالية — وهذه صارت عدَّين. */
+check('★★ والمسحُ الواسمُ لا يمنح الشهادةَ لنفسه (الترشيحُ ينتظر جولةً)',
+  boot.scanCert === false, String(boot.scanCert));
+check('★★★ ودخولٌ ثانٍ لا يُنزّل مستنداً واحداً — عدَّانِ على الخادم بدل مسحٍ كامل',
+  boot.fastReads === 0, boot.fastReads + ' مستنداً نُزّل من مجموعة البلاغات');
+check('★★ والشهادةُ تُمنح بالعدّ كما تُمنح بالمسح', boot.fastCert === true, String(boot.fastCert));
+check('★★ ولا يدهس المسارُ السريع كاشَ العمل بلا اتصالٍ بمصفوفةٍ فارغة',
+  boot.fastCache !== '[]' && boot.fastCache !== null, String(boot.fastCache).slice(0, 40));
+check('★★★ وبلا دعم count يعود المسحُ الكامل — البلاغاتُ لا تختفي',
+  boot.fbReads === 2 && boot.fbTickets === 2, boot.fbReads + ' مستنداً · ' + boot.fbTickets + ' بلاغاً في الذاكرة');
+
 await page.screenshot({ path: `${SHOTS}/02-projects.png` });
 
 // نقرٌ حقيقيّ على «إدارة المشتريات المركزية»
