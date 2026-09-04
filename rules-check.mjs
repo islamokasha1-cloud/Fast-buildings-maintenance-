@@ -708,13 +708,23 @@ await check("★ ولوحةُ الأدمن ما زالت تقرأ السجلّ",
    `get` لا `list`. فالصنفُ كلُّه كان أعمى. هذا القسمُ يفتح عينَه:
    **كلُّ مجموعةٍ يستعلمها التطبيق فعلاً، بكلّ دورٍ يستعلمها به.** */
 head("١٠) الاستعلامُ (`list`) — لا يكفي `get` (الصنفُ الذي أسقط الإنتاج)");
+/* ⛔ **هذه القائمةُ شبكةُ الأمان ليوم تُضيَّق القراءةُ العامة** (المرحلة ٣). فاسمٌ
+   ناقصٌ منها = مجموعةٌ تنكسر يومَها بلا فحصٍ يمسكها، واسمٌ **وهميٌّ** فيها أخطر:
+   يمرّ دائماً ويختبر لا شيء فيبدو الغطاءُ أوسعَ ممّا هو.
+   وقع الاثنان معاً (قياسُ 04/09): كانت تختبر `global_rfqs` و`global_assets` — ولا
+   وجودَ لهما؛ التطبيقُ يبني `global_rfq` و`hail_assets`. وتسعٌ لم تكن مذكورةً أصلاً.
+   ويحرسها الآن فحصٌ في `hail-tests` **يشتقّ الأسماءَ من دوالِّ التطبيق نفسِها**
+   ويقارنها بهذه القائمة في الاتجاهين — فلا تتخلّف عن الكود بصمت مرّةً أخرى.
+   (والأسماءُ المسبوقةُ بـ`hail_` تبنيها `_pfx` من معرّف المشروع الحاليّ.) */
 const APP_COLLS = [
-  "global_purchases", "global_rfqs", "global_inventory", "global_inventory_log",
+  "global_purchases", "global_rfq", "global_inventory", "global_inventory_log",
   "global_issue_orders", "global_item_catalog", "global_labor_catalog",
   "global_hr_payments", "global_warehouses", "global_stocktakes", "global_custody",
-  "global_assets", "global_price_analysis", "global_substitute_budget",
-  "global_substitute_expenses",
-  "meta", "hail_tickets", "audit_log",
+  "global_custody_signed", "global_catalog_import_batches",
+  "global_finance_audits", "global_price_analysis", "global_substitute_budget",
+  "global_substitute_expenses", "staff_tasks",
+  "meta", "hail_tickets", "audit_log", "errors_log",
+  "hail_assets", "hail_ppm_plans", "hail_rollups",
   "global_vendors", "global_contract_requests", "global_contracts",
   "global_contract_extracts", "global_contract_changes"
 ];
