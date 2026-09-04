@@ -392,6 +392,16 @@ const staff = await page.evaluate(async () => {
       { code: endCode,       at: '2026-07-01T12:00:00Z', by: ownerN, byUser: ownerU, byRole: role || 'procurement_officer' },
     ]
   });
+  /* شكلُ الطلب الذي أنتج بلاغَ المالك: قيدٌ **بلا رمز** بين دخول المشتريات وخروجها،
+     فكان الماسحُ يتخطّاه ويقفز إلى قيدٍ أبعدَ كتبه التنفيذيُّ بعد أيام. */
+  const leap = (id, u, n, role) => ({ id, projectId: 'hail', projectName: 'هايل', status: 'closed',
+    createdAt: '2026-07-01T06:00:00Z', updatedAt: '2026-07-09T06:00:00Z', actualCost: 700, estCost: 700,
+    items: [{ itemName: 'بند ' + id, qty: 1, unitCost: 700, itemCost: 700, receivedQty: 1 }],
+    timeline: [
+      { code: 'wh_reviewed', at: '2026-07-01T08:00:00Z', by: 'مسؤول المستودع', byUser: 'wh', byRole: 'warehouse_manager' },
+      { event: 'تعديل بيانات الطلب بواسطة المسؤول', at: '2026-07-02T08:00:00Z', by: 'مدير النظام', byUser: 'root', byRole: 'admin' },
+      { code: 'pending_finance', at: '2026-07-08T08:00:00Z', by: n, byUser: u, byRole: role },
+    ]});
   /* `purchases` معرَّفةٌ بـ`let` في النواة، فلا تصبح خاصّيةً على `window`؛ والوحدةُ
      تقرؤها **بالاسم المجرّد** (getPurchases). فالبذرُ على `window.purchases` يُبذَر
      في مصفوفةٍ أخرى لا يقرؤها أحد — وهي العلّةُ نفسُها التي تشرحها ترويسةُ الوحدة. */
@@ -402,6 +412,8 @@ const staff = await page.evaluate(async () => {
     mk('PO-STAFF-4', 'root', 'مدير النظام',  400, 'pending_finance', 'admin'),        // خارجَ الجدول
     mk('PO-STAFF-5', 'sup',  'محمد داوود',   300, 'pending_finance', 'supervisor'),   // وكذلك المشرف
     mk('PO-STAFF-6', 'boss', 'عبدالله',      200, 'pending_finance', 'ceo'),          // والتنفيذيّ
+    leap('PO-LEAP-1', 'boss', 'عبدالله', 'ceo'),      // قفزٌ كان يُنسب للتنفيذيّ
+    leap('PO-LEAP-2', 'sup',  'محمد داوود', 'supervisor'),
   ];
   showPage('purchase-kpi');
   await new Promise(r => setTimeout(r, 900));
@@ -470,6 +482,9 @@ if (staff.ok) {
     'n=' + staff.outsideN + ' spend=' + staff.outsideSpend + ' أدوار=' + staff.outsideRoles.join(','));
   check('١٢ح٢) ★★ الخلاصةُ سطرٌ ممتدٌّ تحت كلِّ صفّ (لا عمودٌ ضيّقٌ يُقصّ)',
     staff.vdRows === staff.rows.length && staff.vdRows > 0, 'أسطر=' + staff.vdRows);
+  check('١٢ح٤) ★★★ القفزُ فوق قيدٍ مبهم لا يُنسب لفاعلٍ لاحق (بلاغ المالك: كيف نفّذوا طلبات شراء؟)',
+    staff.tableRoles.every(r => r === 'procurement_officer') && staff.strangersInTable.length === 0,
+    'أدوارُ الجدول: ' + staff.tableRoles.join(','));
   check('١٢ح٣) ★★★ ولا خليّةَ مقصوصةٍ ولا إفاضةَ صفحةٍ أفقية (تنسيقُ الجدول — بلاغ المالك)',
     staff.clipped === 0 && staff.pageOverflow <= 1,
     'مقصوصة=' + staff.clipped + ' · فيضُ الصفحة=' + staff.pageOverflow + 'px');

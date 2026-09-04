@@ -38070,7 +38070,7 @@ function _hnFeedPurchases(snap){
 "use strict";
 
 const PAGE_ID = "purchase-kpi";
-const VERSION = "1.17";
+const VERSION = "1.18";
 
 /* ── مراحل سير العمل بالترتيب — لحساب زمن كل مرحلة من timeline ── */
 const STAGE_ORDER = [
@@ -38424,34 +38424,22 @@ const STAFF_MIN_SAMPLE = 5;
 const PROC_OWNED = ["wh_reviewed","pending_proc","finance_returned"];
 const EXEC_OWNED = ["proc_executing"];
 
-/* ── دورُ الفاعل من سجلّ المستخدمين ──
-   `byRole` لا يوجد على السجلات المكتوبة قبل v18.9.3004، فلا يكفي وحدَه لتمييز طلبات
-   المسؤول. فيُستكمَل من `USERS` بمطابقة اسم الحساب ثم اسم العرض — وهو أيضاً ما يملأ
-   وسمَ الدور في الصفوف القديمة. والقراءةُ أفضلُ-جهدٍ: غيابُ السجلّ يُبقي ما في القيد. */
-function _actorRole(key, evRole){
-  if(evRole) return evRole;
-  try{
-    const U = (typeof USERS!=="undefined" && Array.isArray(USERS)) ? USERS : [];
-    if(!U.length || !key) return "";
-    const v = key.slice(2);
-    const hit = key.slice(0,2)==="u:" ? U.find(u=>u && (u.user===v || u.username===v))
-                                      : U.find(u=>u && String(u.name||"").trim()===v);
-    return (hit && hit.role) || "";
-  }catch(e){ return ""; }
-}
-
-/* ── هويةُ فاعلِ القيد ── مفتاحٌ ثابتٌ إن وُجد، وإلّا الاسمُ مع وسمِ «بلا هوية». */
+/* ── هويةُ فاعلِ القيد: ختمٌ صريحٌ أو لا نسبة ──
+   v1.18: كان الاسمُ النصّيُّ يصلح مفتاحاً احتياطياً. وسقط ذلك لسببَين: الاسمُ **لا
+   يحمل دوراً**، فلا سبيلَ إلى معرفة أصاحبُه مسؤولُ مشتريات أم لا إلّا بسجلّ
+   `USERS` — وهو لا يُحمَّل أصلاً في وضع المصادقة الخادمية ويُصفَّى عند تبديل
+   المشروع، فيخرج الدورُ فارغاً فيمرّ من ليس مسؤولَ مشتريات. والسجلاتُ التي تحمل
+   الاسمَ وحدَه هي بعينها القديمةُ التي فيها قيودٌ بلا رمز — أي الأقلُّ صلاحيةً
+   للقياس. فالنسبةُ الآن **على ختمٍ صريح** (`byUser` من `_poActorStamp`)، وما دونه
+   يُعدّ في «لم يُعرف من أنهاها» ويُعلَن في سطر المطابقة. */
 function _actorKey(ev){
   if(!ev) return null;
   const u = String(ev.byUser||"").trim();
-  if(u) return "u:"+u;
-  const n = String(ev.by||"").trim();
-  if(!n || n==="النظام" || n==="—") return null;
-  return "n:"+n;
+  return u ? "u:"+u : null;
 }
 function _actorLabel(key, ev){
   if(!key) return "—";
-  return key.slice(0,2)==="u:" ? String((ev&&ev.by)||key.slice(2)) : key.slice(2);
+  return String((ev&&ev.by)||key.slice(2));
 }
 
 /* ── أزمنةُ النوافذ بأيام العمل ──
@@ -38484,7 +38472,22 @@ function _staffWindows(p){
   const _open = (i, ownedSet, kind)=>{
     for(let j=i+1;j<tl.length;j++){
       const nx=tl[j];
-      if(!nx.code || nx.code===tl[i].code) continue;
+      /* ══ v1.18 — القفزُ فوق القيد المبهم هو ما نسب عملَ المشتريات لغيرهم ══
+         كان الشرطُ `if(!nx.code) continue` يتخطّى كلَّ قيدٍ بلا رمز، فيمضي الماسحُ
+         إلى **قيدٍ أبعدَ كتبه شخصٌ آخر** — تنفيذيٌّ أو مشرفٌ أو مستودعٌ تحرّك بعده
+         بأيام — فيُنسب إليه «تجهيزُ المقارنة». وفي الطلبات قيودٌ كثيرةٌ بلا رمز:
+         البتُّ في بندٍ إضافيّ · الاستبدالُ عند الاستلام · تعديلُ المسؤول · إضافةُ
+         مرفق (أحدَ عشرَ موضعاً). فظهر في الجدول من لم يفتح شاشةَ مشترياتٍ قطّ.
+         والصوابُ أن القيدَ المبهم **يُنهي النافذةَ بلا نسبة**: لا نعلم أهو انتقالٌ
+         أم لا، ونسبةٌ مظنونةٌ في مقياسٍ يُحاسَب عليه الناسُ أسوأُ من لا نسبة. */
+      /* **الفيصلُ وجودُ حقل `code` صريحاً لا قيمتُه.** `normStatus` تُرجع النصَّ كما هو
+         حين لا تعرفه، فيصير `code` جملةً عربيةً غيرَ فارغة — ففحصُ `!nx.code` لا يقع
+         أبداً والقفزُ يستمرّ. و`hasCode` وحدَه يميّز الانتقالَ المكتوبَ بالرمز من
+         قيدٍ لا نعرف ماذا يعني. (والسعرُ معلوم: قيدٌ خاملٌ كإضافة مرفقٍ يُنهي النافذةَ
+         أيضاً فتسقط من القياس — وهو أهونُ من نسبةٍ خاطئة، ويُعلَن في سطر المطابقة.
+         وعلاجُه الجذريّ إضافةُ `code` إلى الأحدَ عشرَ موضعاً التي تفتقده.) */
+      if(!nx.hasCode) return null;
+      if(nx.code===tl[i].code) continue;
       if(nx.code==="cancelled") return null;
       if(nx.code==="pm_rejected" || nx.code==="wh_rejected" || nx.code==="ceo_rejected") return null;
       if(ownedSet.includes(nx.code)) return null;     // ما زال في يده — لا تسليمَ بعد
@@ -38624,7 +38627,7 @@ function _comparisonStats(p){
 function computeStaffKPIs(list){
   const rows={};   // key → صفّ
   const R = key => (rows[key] = rows[key] || {
-    key, name:"—", role:"", byName:key.slice(0,2)==="n:",
+    key, name:"—", role:"",
     poN:0, poClosed:0, poOpen:0, poEnded:0, spendClosed:0, spendOpen:0,
     prepDurs:[], prepInTarget:0, execDurs:[], execInTarget:0,
     handoffs:0, bounced:0, financeReturned:0,
@@ -38666,7 +38669,7 @@ function computeStaffKPIs(list){
 
     const r=R(owner);
     r.name=_actorLabel(owner, ownerEv);
-    if(!r.role) r.role=_actorRole(owner, ownerEv&&ownerEv.byRole);
+    if(!r.role && ownerEv && ownerEv.byRole) r.role=ownerEv.byRole;
 
     /* ثلاثةُ دِلاءٍ تستوعب كلَّ طلبٍ بلا بقيّة: مغلقٌ · مفتوحٌ · منتهٍ بلا إغلاق
        (مرفوضٌ أو ملغى). v1.17 — الدلوُ الثالث كان مفقوداً، فكان رأسُ الخانة يقول
@@ -38681,7 +38684,7 @@ function computeStaffKPIs(list){
        طلبٌ جهّزه أحدُهما ونفّذه الآخرُ يُقسَّم زمنُه بينهما بالعدل. */
     wins.forEach(w=>{
       const k=_actorKey(w.ev); if(!k) return;
-      const rr=R(k); rr.name=_actorLabel(k,w.ev); if(!rr.role) rr.role=_actorRole(k, w.ev.byRole);
+      const rr=R(k); rr.name=_actorLabel(k,w.ev); if(!rr.role && w.ev.byRole) rr.role=w.ev.byRole;
       const d=_wmDays(w.at,w.endAt);
       if(w.kind==="prep"){ rr.prepDurs.push(d); if(d<=STAFF_TARGET_DAYS) rr.prepInTarget++; rr.handoffs++; }
       else { rr.execDurs.push(d); if(d<=STAFF_TARGET_DAYS) rr.execInTarget++; }
@@ -38730,7 +38733,7 @@ function computeStaffKPIs(list){
 
   const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
   const out=Object.values(rows).map(r=>({
-    key:r.key, name:r.name, role:r.role, byName:r.byName,
+    key:r.key, name:r.name, role:r.role,
     poN:r.poN, poClosed:r.poClosed, poOpen:r.poOpen, poEnded:r.poEnded,
     spendClosed:r.spendClosed, spendOpen:r.spendOpen,
     prepAvg:avg(r.prepDurs), prepN:r.prepDurs.length,
@@ -38760,14 +38763,15 @@ function computeStaffKPIs(list){
      يُخرجه تنفيذيٌّ أو مشرفٌ أو مسؤولٌ بتجاوز. وذلك **واقعٌ يستحقّ الإعلان** لا
      الحذف: كم من عمل المشتريات يجري خارج مساره، ومن يفعله. فيُرفع من الجدول
      ويُعلَن فوقه **مجمَّعاً بالدور** — فيبقى المجموعُ صادقاً والمقارنةُ عادلة.
-     **والاستبعادُ على دليلٍ موجبٍ لا على غيابه:** يخرج من دورُه **معروفٌ وليس**
-     مسؤولَ مشتريات؛ أمّا مجهولُ الدور فيبقى في الجدول موسوماً. والسببُ وضعُ فشلٍ
-     حقيقيّ: `USERS` يُحمَّل من `meta/users` وقد تُرسَم الصفحةُ قبل وصوله، فيخرج
-     الدورُ فارغاً **للجميع** — وبالحصر الصارم يفرغ الجدولُ كلُّه ويظهر كلُّ العمل
-     «خارج القياس». جدولٌ فارغٌ عطلٌ صامتٌ محيّر؛ وصفٌّ موسومٌ بـ«دورٌ غير محدّد»
-     يشرح نفسَه ويُصلَح من «إدارة المستخدمين». فيُقايَض الأسوأُ بالأهون. */
-  const isProcRow = r => r.role==="procurement_officer" || !r.role;
-  const staffRows = out.filter(isProcRow).map(r=>Object.assign({roleUnknown:!r.role}, r));
+     **والدورُ من ختم القيد لا من سجلّ المستخدمين.** v1.16 قرأته من `USERS` وأبقت
+     مجهولَ الدور في الجدول خشيةَ أن يفرغ لو تأخّر تحميلُ السجلّ. والواقعُ أسوأُ من
+     التأخّر: `USERS` **لا يُحمَّل أصلاً** في وضع المصادقة الخادمية (`_loadAllUsersForLogin`
+     تُتخطّى)، ويُصفَّى إلّا الأدمنَ عند تبديل المشروع — فخرج الدورُ فارغاً للجميع،
+     ومرّ من ليس مسؤولَ مشتريات من ثغرة «مجهولُ الدور يبقى». فالدورُ الآن من `byRole`
+     المختوم على القيد نفسِه وقتَ الفعل: لا سباقَ تحميلٍ ولا ثغرة، ومن لا ختمَ له لا
+     يدخل الجدولَ أصلاً (يُعدّ في «لم يُعرف من أنهاها»). */
+  const isProcRow = r => r.role==="procurement_officer";
+  const staffRows = out.filter(isProcRow);
   const otherRows = out.filter(r=>!isProcRow(r));
   const byRole = {};
   otherRows.forEach(r=>{
@@ -38819,7 +38823,6 @@ function _staffSelfKeys(){
   const k=[];
   if(u.user) k.push("u:"+u.user);
   if(u.username) k.push("u:"+u.username);
-  if(u.name) k.push("n:"+u.name);
   return k;
 }
 function _staffVisibleRows(rows){
@@ -38895,8 +38898,6 @@ function _staffSectionHtml(list){
   const body = rows.map(r=>`<tr>
       <td class="pkpi-staff-nm">${_esc(r.name)}
         ${r.role?`<div class="pkpi-staff-role">${_esc(roleLbl(r.role))}</div>`:""}
-        ${r.roleUnknown?`<div class="pkpi-staff-warn" title="لم يُعرف دورُ هذا الحساب من سجلّ المستخدمين — يبقى في الجدول ولا يُحذف صامتاً. اضبط دورَه في «إدارة المستخدمين» ليخرج من هنا إن لم يكن مسؤولَ مشتريات">${ICN("alertTriangle","ic-sm")} دورٌ غير محدّد</div>`:""}
-        ${r.byName?`<div class="pkpi-staff-warn" title="سجلاتٌ مكتوبةٌ قبل تثبيت هوية الفاعل — منسوبةٌ بالاسم لا بالحساب">${ICN("alertTriangle","ic-sm")} منسوبٌ بالاسم</div>`:""}
         ${r.lowSample?`<div class="pkpi-staff-warn" title="عيّنةٌ أصغرُ من أن تُقارَن — ترتيبُ رجلٍ على طلبَين مقابلَ رجلٍ على ثلاثين حسابٌ صحيحٌ ونتيجةٌ كاذبة">عيّنة غير كافية (&lt; ${nf(S.minSample)})</div>`:""}
       </td>
       <td title="كلُّ طلبِ شراءٍ أنهى فيه نافذةَ عملٍ واحدةً على الأقلّ — والثلاثةُ أدناه تجمع إليه"><b>${nf(r.poN)}</b>

@@ -657,11 +657,11 @@ function predelivery() {
     /* ثم رُفع لقيد v1.17: دلوُ «المرفوض/الملغى» في صفِّ أداء المشتريات، وسطرُ
        مطابقةِ العدّ فوق الجدول. **مكانُها وحدةُ `purchase-kpi`** — التعليلُ في
        القيد الأوّل أعلاه قائمٌ لا يتغيّر بتغيّر الرقم. */
-    /* ورُفع من 39621 إلى 39635 — ‏١٣ سطراً لتصفير التمرير عند التنقّل (`_scrollAppToTop`
+    /* ورُفع من 39622 إلى 39636 — ‏١٣ سطراً لتصفير التمرير عند التنقّل (`_scrollAppToTop`
        ومَعبرُها في `showPage`). **مكانُها النواةُ لا وحدة**: **إصلاحٌ في موضعه** على
        منطقٍ قائم — العطبُ في `showPage` نفسِها، ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة
        إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
-    const IDX_CEILING = 39635;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    const IDX_CEILING = 39636;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4491,10 +4491,28 @@ function procurementStaffKPI() {
   T("★★★ ومَن ليس منهم يُعلَن مجمَّعاً بالدور (لا حذفَ صامت)",
     /outsideGroups:/.test(ksrc) && /outsideN:/.test(ksrc) && /outsideSpend:/.test(ksrc) &&
     ksrc.includes("pkpi-outside-list"));
-  T("★★★ والاستبعادُ على دليلٍ موجب: مجهولُ الدور يبقى موسوماً لا يُحذف",
-    /\|\| !r\.role;/.test(ksrc) && /roleUnknown/.test(ksrc));
-  T("★★ ودورُ الفاعل يُستكمَل من USERS للسجلات القديمة (وإلّا لم يُعرف المسؤولُ فيها)",
-    /function _actorRole\(key, evRole\)/.test(ksrc) && /typeof USERS!=="undefined"/.test(ksrc));
+  /* ══ v1.18 — بلاغُ المالك مرّتَين: «رجعت أضفت مشرف ومدير تنفيذي؟! أصلاً هما كيف
+     نفّذوا طلبات شراء؟» — ولم يكونا نفّذا شيئاً. سببان تراكبا:
+       (١) `_open` كان يتخطّى القيدَ بلا رمز فيقفز إلى فاعلٍ **لاحقٍ** أبعد.
+       (٢) الدورُ كان يُقرأ من `USERS` — وهو لا يُحمَّل في وضع المصادقة الخادمية —
+           فيخرج فارغاً، وتمرّ ثغرةُ «مجهولُ الدور يبقى في الجدول».
+     فالحارسان يمنعان عودةَ البابَين. */
+  T("★★★ الدورُ من ختم القيد لا من سجلّ المستخدمين (لا سباقَ تحميلٍ ولا ثغرة)",
+    /const isProcRow = r => r\.role==="procurement_officer";/.test(ksrc) &&
+    !/_actorRole/.test(ksrc) && !/roleUnknown/.test(ksrc) && !/typeof USERS/.test(ksrc));
+  T("★★★ والنسبةُ على ختمٍ صريح: لا مفتاحَ من اسم عرضٍ نصّيّ",
+    /function _actorKey\(ev\)\{[\s\S]{0,220}?return u \? "u:"\+u : null;\s*\}/.test(ksrc) &&
+    !/_staffSelfKeys[\s\S]{0,300}?"n:"/.test(ksrc));
+  T("★★★ والقيدُ المبهم يُنهي النافذةَ بلا نسبة (لا قفزَ إلى فاعلٍ لاحق)",
+    /if\(!nx\.hasCode\) return null;/.test(ksrc) &&
+    !/if\(!nx\.code \|\| nx\.code===tl\[i\]\.code\) continue;/.test(ksrc));
+  /* v1.18: سقط استكمالُ الدور من `USERS` — لأنه لا يُحمَّل أصلاً في وضع المصادقة
+     الخادمية ويُصفَّى عند تبديل المشروع، فكان يخرج فارغاً فتُفتح ثغرةُ «مجهولُ الدور
+     يبقى». الدورُ الآن من ختم القيد وقتَ الفعل. */
+  T("★★★ ولا يُقرأ الدورُ من USERS إطلاقاً (سباقُ تحميلٍ لا يُعتمد عليه في صلاحية)",
+    !/_actorRole/.test(ksrc) &&
+    // التعليقاتُ تذكر USERS شرحاً للعلّة — الحارسُ على **الكود** وحدَه
+    !/(?:typeof\s+USERS|\bUSERS\s*\[|\bUSERS\.(?:find|filter|forEach|length))/.test(ksrc));
   T("★★ الهدفُ يوما عمل — عتبةُ PO_STALE_WORK_MIN نفسُها (لا عتبتان متناقضتان)",
     /const STAFF_TARGET_DAYS = 2;/.test(ksrc) && /const PO_STALE_WORK_MIN\s*=\s*2 \* PO_WORK_MIN_PER_DAY;/.test(HTML));
   T("★★ الأزمنةُ بأيام العمل عبر محرّك SLA المشترك لا بالزمن الجداريّ",
@@ -4533,8 +4551,8 @@ function procurementStaffKPI() {
   T("★★★ _actorKey: byUser هو الهوية (تغييرُ اسمِ العرض لا يشقّ الشخص)",
     E._actorKey({ byUser: "saad", by: "سعد" }) === "u:saad" &&
     E._actorKey({ byUser: "saad", by: "سعد المطيري" }) === "u:saad");
-  T("★★ _actorKey: الاسمُ احتياطاً للسجلات القديمة (بوسمٍ مختلف)",
-    E._actorKey({ by: "سعد" }) === "n:سعد");
+  T("★★★ _actorKey: اسمُ عرضٍ بلا ختمٍ لا يُنسب لأحد (لا يحمل دوراً فلا يُحرَس به)",
+    E._actorKey({ by: "سعد" }) === null);
   T("★★★ «النظام» و«—» ليسا شخصاً (لا يُنسب إليهما عمل)",
     E._actorKey({ by: "النظام" }) === null && E._actorKey({ by: "—" }) === null && E._actorKey({}) === null);
 
@@ -4544,7 +4562,7 @@ function procurementStaffKPI() {
        هذا هو ما كان يسقط كلَّه في v1.14 فيفرغ العمود. */
     const real = E._staffWindows({ id: "w0", status: "closed", timeline: [
       { code: "wh_reviewed",     at: "2026-07-01T08:00:00Z", by: "المستودع", byUser: "wh" },
-      { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad" },
+      { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad", byRole: "procurement_officer" },
     ]});
     T("★★★ المسارُ الأصليّ (wh_reviewed ⇐ إحالة) يُقاس — وهو ما كان يسقط فيُفرِغ العمود",
       real.length === 1 && real[0].kind === "prep" && E._actorKey(real[0].ev) === "u:saad",
@@ -4552,7 +4570,7 @@ function procurementStaffKPI() {
     T("★★★ والمخرجُ المباشر إلى التنفيذ (بلا مالية) يُقاس أيضاً — لا قائمةَ وجهاتٍ ناقصة",
       (() => { const w = E._staffWindows({ timeline: [
         { code: "wh_reviewed",    at: "2026-07-01T08:00:00Z", by: "و", byUser: "wh" },
-        { code: "proc_executing", at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad" }] });
+        { code: "proc_executing", at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad", byRole: "procurement_officer" }] });
         return w.length === 1 && w[0].kind === "prep"; })());
     T("★★ والرجوعُ من بوّابة المقارنة إلى pending_proc لا يُعدّ تسليماً (ما زال في يده)",
       (() => { const w = E._staffWindows({ timeline: [
@@ -4562,7 +4580,7 @@ function procurementStaffKPI() {
 
     const p = { id: "w1", status: "closed", timeline: [
       { code: "pending_proc", at: "2026-07-01T08:00:00Z", by: "مدير المشاريع", byUser: "pm" },
-      { code: "pending_ceo",  at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad" },
+      { code: "pending_ceo",  at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad", byRole: "procurement_officer" },
     ]};
     const w = E._staffWindows(p);
     T("★★★ النافذةُ تُنسب إلى مَن أخرج الطلبَ منها لا مَن أدخله",
@@ -4616,38 +4634,59 @@ function procurementStaffKPI() {
     const mk = (id, status, ownerU, ownerN, extra) => Object.assign({
       id, status, createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-03T06:00:00Z",
       timeline: [
-        { code: "pending_proc",   at: "2026-07-01T08:00:00Z", by: "مدير", byUser: "pm" },
-        { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: ownerN, byUser: ownerU },
+        { code: "pending_proc",    at: "2026-07-01T08:00:00Z", by: "مدير", byUser: "pm", byRole: "project_manager" },
+        { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: ownerN, byUser: ownerU, byRole: "procurement_officer" },
       ]}, extra || {});
     const S = E.computeStaffKPIs([
       mk("p1", "closed", "saad", "سعد", { actualCost: 1000 }),
       mk("p2", "closed", "saad", "سعد", { actualCost: 2000 }),
       mk("p3", "pending_finance", "noor", "نور", { estCost: 500 }),
-      // قديمٌ بلا byUser — يُنسب بالاسم
+      // سجلٌّ قديمٌ بلا ختمٍ (اسمٌ فقط) — لا يُنسب لأحدٍ ولا يدخل الجدول
       { id: "p4", status: "closed", actualCost: 300, createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-02T06:00:00Z",
         timeline: [{ code: "pending_proc", at: "2026-07-01T08:00:00Z", by: "مدير" },
                    { code: "pending_ceo",  at: "2026-07-01T10:00:00Z", by: "سعد" }] },
-      // نافذةٌ أنهاها «النظام» — قابلةٌ للقياس وغيرُ منسوبة
+      // ونافذةٌ أنهاها «النظام» — كذلك
       { id: "p5", status: "closed", actualCost: 400, createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-02T06:00:00Z",
         timeline: [{ code: "pending_proc", at: "2026-07-01T08:00:00Z", by: "مدير" },
                    { code: "pending_ceo",  at: "2026-07-01T10:00:00Z", by: "النظام" }] },
     ]);
     const row = k => S.rows.find(r => r.key === k);
-    T("★★★ كلُّ مسؤولٍ صفٌّ واحدٌ بمفتاح هويته", S.rows.length === 3, S.rows.map(r => r.key).join(","));
+    T("★★★ كلُّ مسؤولٍ صفٌّ واحدٌ بمفتاح هويته", S.rows.length === 2, S.rows.map(r => r.key).join(","));
     T("★★★ عددُ طلباته وقيمةُ مشترياته (الفعليّ للمغلق)",
       row("u:saad").poN === 2 && row("u:saad").poClosed === 2 && row("u:saad").spendClosed === 3000,
       JSON.stringify({ n: row("u:saad").poN, c: row("u:saad").spendClosed }));
     T("★★★ المفتوحُ يُعدّ ويُقيَّم بقيمته منفصلاً عن المغلق",
       row("u:noor").poOpen === 1 && row("u:noor").poClosed === 0 && row("u:noor").spendOpen === 500);
-    T("★★ السجلُّ القديم يُنسب بالاسم ويُوسَم", row("n:سعد") && row("n:سعد").byName === true);
-    T("★★★ وسعدُ الهويةِ لا يندمج مع سعدِ الاسم (نسبتان مختلفتان لا تُخلطان)",
-      row("u:saad").poN === 2 && row("n:سعد").poN === 1);
-    T("★★★ ما أنهاه «النظام» يُعدّ في «غير منسوب» ولا يُنسب بالتخمين",
-      S.unattributedN === 1 && S.measurableN === 5, `unattr=${S.unattributedN} meas=${S.measurableN}`);
+    T("★★★ السجلُّ بلا ختمٍ لا يُنسب لأحدٍ ويُعدّ في «لم يُعرف من أنهاها»",
+      !row("n:سعد") && S.unattributedN === 2 && S.measurableN === 5,
+      `unattr=${S.unattributedN} meas=${S.measurableN}`);
     T("★★ متوسّطُ تجهيز المقارنة = ٤ ساعاتِ عمل = ٠٫٥ يوم، وفي الهدف",
       Math.abs(row("u:saad").prepAvg - 0.5) < 1e-9 && row("u:saad").prepTargetRate === 100);
     T("★★ وسمُ «عيّنة غير كافية» يمنع ترتيبَ رجلٍ على طلبَين كأنه على ثلاثين",
       row("u:saad").lowSample === true && S.minSample === 5);
+  }
+
+  /* ── ٥-ب) بلاغُ المالك حرفياً: «كيف نفّذ المشرفُ والتنفيذيُّ طلبات شراء؟» ──
+     لم يُنفّذا. الطلبُ يمرّ بالمشتريات، ثم يقع في مساره قيدٌ **بلا رمز** (بتٌّ في بندٍ
+     إضافيّ · استبدالٌ عند الاستلام · تعديلُ مسؤول · إضافةُ مرفق — أحدَ عشرَ موضعاً في
+     `index.html`)، فكان الماسحُ يتخطّاه ويمضي إلى قيدٍ أبعدَ كتبه التنفيذيُّ أو
+     المشرفُ بعد أيام — فيُنسب إليه «تجهيزُ المقارنة». هذا الحارسُ يعيد إنتاج الشكل. */
+  {
+    const po = { id: "leap", status: "closed", actualCost: 500,
+      createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-09T06:00:00Z", timeline: [
+        { code: "wh_reviewed", at: "2026-07-01T08:00:00Z", by: "المستودع", byUser: "wh", byRole: "warehouse_manager" },
+        // قيدٌ بلا رمز — «تعديل بيانات الطلب بواسطة المسؤول»
+        { event: "تعديل بيانات الطلب بواسطة المسؤول", at: "2026-07-02T08:00:00Z", by: "مدير النظام", byUser: "root", byRole: "admin" },
+        // ثم التنفيذيُّ يتحرّك بعد أيام — كان يُنسب إليه تجهيزُ المقارنة!
+        { code: "pending_finance", at: "2026-07-08T08:00:00Z", by: "Ceo Abdallah", byUser: "ceo", byRole: "ceo" },
+      ]};
+    const w = E._staffWindows(po);
+    T("★★★ القيدُ المبهم يُنهي النافذةَ — لا تُنسب لفاعلٍ تحرّك بعده بأيام",
+      w.length === 0, JSON.stringify(w.map(x => x.kind + ":" + (x.ev.byUser || x.ev.by))));
+    const S = E.computeStaffKPIs([po]);
+    T("★★★ فلا صفَّ لتنفيذيٍّ ولا لمشرفٍ في جدول أداء المشتريات (بلاغ المالك)",
+      S.rows.length === 0 && S.outsideN === 0 && S.noWindowN === 1,
+      `rows=${S.rows.length} outside=${S.outsideN} noWin=${S.noWindowN}`);
   }
 
   // ── ٦) الارتداد: ما رجع بعد إحالته وحدَه يُحسب عليه ──
@@ -4657,14 +4696,14 @@ function procurementStaffKPI() {
     const S = E.computeStaffKPIs([
       Object.assign(base(1), { timeline: [
         { code: "pending_proc",    at: "2026-07-01T08:00:00Z", by: "م", byUser: "pm" },
-        { code: "pending_finance", at: "2026-07-01T10:00:00Z", by: "سعد", byUser: "saad" },
-        { code: "finance_returned", at: "2026-07-02T08:00:00Z", by: "المالية", byUser: "fin" },
+        { code: "pending_finance", at: "2026-07-01T10:00:00Z", by: "سعد", byUser: "saad", byRole: "procurement_officer" },
+        { code: "finance_returned", at: "2026-07-02T08:00:00Z", by: "المالية", byUser: "fin", byRole: "finance" },
       ]}),
       Object.assign(base(2), { timeline: [
         { code: "pending_proc",    at: "2026-07-01T08:00:00Z", by: "م", byUser: "pm" },
-        { code: "pending_finance", at: "2026-07-01T10:00:00Z", by: "سعد", byUser: "saad" },
-        { code: "proc_executing",  at: "2026-07-02T08:00:00Z", by: "المالية", byUser: "fin" },
-        { code: "wh_receiving",    at: "2026-07-02T12:00:00Z", by: "سعد", byUser: "saad" },
+        { code: "pending_finance", at: "2026-07-01T10:00:00Z", by: "سعد", byUser: "saad", byRole: "procurement_officer" },
+        { code: "proc_executing",  at: "2026-07-02T08:00:00Z", by: "المالية", byUser: "fin", byRole: "finance" },
+        { code: "wh_receiving",    at: "2026-07-02T12:00:00Z", by: "سعد", byUser: "saad", byRole: "procurement_officer" },
       ]}),
     ]);
     const r = S.rows.find(x => x.key === "u:saad");
@@ -4716,10 +4755,13 @@ function procurementStaffKPI() {
       { id: "c1", status: "closed", actualCost: 100, createdAt: "2026-07-01T06:00:00Z",
         updatedAt: "2026-07-03T06:00:00Z", timeline: [
           { code: "wh_reviewed",     at: "2026-07-01T08:00:00Z", by: "المستودع", byUser: "wh" },
+          // ختمُ هويةٍ بلا ختمِ دور — لا يكفي لدخول جدولِ المشتريات
           { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad" } ] },
     ]);
-    T("★★★ ولو غاب سجلُّ المستخدمين لم يفرغ الجدولُ — الصفُّ يبقى موسوماً «دورٌ غير محدّد»",
-      S3.rows.length === 1 && S3.rows[0].roleUnknown === true && S3.outsideN === 0);
+    T("★★★ ولا يدخل الجدولَ من لا ختمَ لدوره — يُعلَن تحت «دورٌ غير معروف» لا يُدسّ",
+      S3.rows.length === 0 && S3.outsideN === 1 &&
+      S3.outsideGroups.some(g => g.role === "__unknown__"),
+      `rows=${S3.rows.length} outside=${S3.outsideN} أدوار=${S3.outsideGroups.map(g=>g.role).join(",")}`);
   }
 
   /* ── ٦-ج) مطابقةُ العدّ: لا طلبَ يضيع بين الأبواب الأربعة (سؤال المالك 04/09) ──
