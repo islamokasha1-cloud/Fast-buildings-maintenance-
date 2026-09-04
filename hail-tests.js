@@ -661,7 +661,9 @@ function predelivery() {
        ومَعبرُها في `showPage`). **مكانُها النواةُ لا وحدة**: **إصلاحٌ في موضعه** على
        منطقٍ قائم — العطبُ في `showPage` نفسِها، ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة
        إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
-    const IDX_CEILING = 39636;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع لقيد v1.19: `_ensureUsers` تجلب سجلَّ المستخدمين وتُعيد الرسم بالأدوار
+       الصحيحة، و`_actorRole` تقرأ الدورَ منه. **مكانُها وحدةُ `purchase-kpi`**. */
+    const IDX_CEILING = 39706;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4491,28 +4493,30 @@ function procurementStaffKPI() {
   T("★★★ ومَن ليس منهم يُعلَن مجمَّعاً بالدور (لا حذفَ صامت)",
     /outsideGroups:/.test(ksrc) && /outsideN:/.test(ksrc) && /outsideSpend:/.test(ksrc) &&
     ksrc.includes("pkpi-outside-list"));
-  /* ══ v1.18 — بلاغُ المالك مرّتَين: «رجعت أضفت مشرف ومدير تنفيذي؟! أصلاً هما كيف
-     نفّذوا طلبات شراء؟» — ولم يكونا نفّذا شيئاً. سببان تراكبا:
-       (١) `_open` كان يتخطّى القيدَ بلا رمز فيقفز إلى فاعلٍ **لاحقٍ** أبعد.
-       (٢) الدورُ كان يُقرأ من `USERS` — وهو لا يُحمَّل في وضع المصادقة الخادمية —
-           فيخرج فارغاً، وتمرّ ثغرةُ «مجهولُ الدور يبقى في الجدول».
-     فالحارسان يمنعان عودةَ البابَين. */
-  T("★★★ الدورُ من ختم القيد لا من سجلّ المستخدمين (لا سباقَ تحميلٍ ولا ثغرة)",
+  /* ══ v1.19 — الجذرُ الذي أفرغ الجدولَ وملأه بالخطأ: سجلُّ المستخدمين ══
+     الأدوارُ تُقرأ من `USERS` وهو **لا يُحمَّل** في وضع المصادقة الخادمية ويُصفَّى عند
+     تبديل المشروع. فمرّةً دخل الجدولَ من ليس مسؤولَ مشتريات، ومرّةً خرج منه
+     **مسؤولوه الحقيقيّون** حين اشتُرط ختمٌ صريح. والعلاجُ جلبُ السجلّ لا التحايلُ
+     على غيابه. */
+  T("★★★ الوحدةُ تجلب سجلَّ المستخدمين بنفسها ثم تُعيد الرسم بالأدوار الصحيحة",
+    /function _ensureUsers\(\)/.test(ksrc) && /db\.doc\(USERS_DOC\(\)\)\.get\(\)/.test(ksrc) &&
+    /_usersFetched = true;/.test(ksrc) && /function render\(\)\{\s*\n\s*_ensureUsers\(\);/.test(ksrc));
+  T("★★★ ولا حلقةَ جلبٍ ولا حلقةَ رسمٍ (العلَمُ يُرفع قبل الطلب، والرسمُ بشرط النشاط)",
+    /_usersFetched\) return;[\s\S]{0,90}?_usersFetched = true;/.test(ksrc) &&
+    /classList\.contains\("active"\)\) render\(\);/.test(ksrc));
+  T("★★★ والدورُ من السجلّ يُقدَّم على المختوم (الدورُ الحاليُّ يقرّر من يدخل الجدول)",
+    /function _actorRole\(key, evRole\)/.test(ksrc) &&
+    /u\.user===v \|\| u\.username===v/.test(ksrc) && /return evRole \|\| "";/.test(ksrc));
+  T("★★★ واسمُ العرض يُطبَّع إلى اسم الحساب فلا ينشقّ الشخصُ صفَّين",
+    /if\(hit && hit\.user\) return "u:"\+hit\.user;/.test(ksrc));
+  T("★★★ والجدولُ يبقى قائمةَ سماحٍ لمسؤولي المشتريات وحدَهم",
     /const isProcRow = r => r\.role==="procurement_officer";/.test(ksrc) &&
-    !/_actorRole/.test(ksrc) && !/roleUnknown/.test(ksrc) && !/typeof USERS/.test(ksrc));
-  T("★★★ والنسبةُ على ختمٍ صريح: لا مفتاحَ من اسم عرضٍ نصّيّ",
-    /function _actorKey\(ev\)\{[\s\S]{0,220}?return u \? "u:"\+u : null;\s*\}/.test(ksrc) &&
-    !/_staffSelfKeys[\s\S]{0,300}?"n:"/.test(ksrc));
-  T("★★★ والقيدُ المبهم يُنهي النافذةَ بلا نسبة (لا قفزَ إلى فاعلٍ لاحق)",
-    /if\(!nx\.hasCode\) return null;/.test(ksrc) &&
-    !/if\(!nx\.code \|\| nx\.code===tl\[i\]\.code\) continue;/.test(ksrc));
+    !/\|\| !r\.role;/.test(ksrc));
   /* v1.18: سقط استكمالُ الدور من `USERS` — لأنه لا يُحمَّل أصلاً في وضع المصادقة
      الخادمية ويُصفَّى عند تبديل المشروع، فكان يخرج فارغاً فتُفتح ثغرةُ «مجهولُ الدور
      يبقى». الدورُ الآن من ختم القيد وقتَ الفعل. */
-  T("★★★ ولا يُقرأ الدورُ من USERS إطلاقاً (سباقُ تحميلٍ لا يُعتمد عليه في صلاحية)",
-    !/_actorRole/.test(ksrc) &&
-    // التعليقاتُ تذكر USERS شرحاً للعلّة — الحارسُ على **الكود** وحدَه
-    !/(?:typeof\s+USERS|\bUSERS\s*\[|\bUSERS\.(?:find|filter|forEach|length))/.test(ksrc));
+  T("★★★ وسجلُّ المستخدمين يُقرأ **بعد** ضمانِ جلبه لا رجاءَ أن يكون قد وصل",
+    /_ensureUsers\(\);/.test(ksrc) && /function _actorRole\(key, evRole\)/.test(ksrc));
   T("★★ الهدفُ يوما عمل — عتبةُ PO_STALE_WORK_MIN نفسُها (لا عتبتان متناقضتان)",
     /const STAFF_TARGET_DAYS = 2;/.test(ksrc) && /const PO_STALE_WORK_MIN\s*=\s*2 \* PO_WORK_MIN_PER_DAY;/.test(HTML));
   T("★★ الأزمنةُ بأيام العمل عبر محرّك SLA المشترك لا بالزمن الجداريّ",
@@ -4532,7 +4536,7 @@ function procurementStaffKPI() {
     E = new Function(
       "STAGE_ORDER", "REJECT_CODES", "TERMINAL_CODES", "parseTS", "normStatus", "DAY",
       "PO_WORK_MIN_PER_DAY", "workingMinutesBetween",
-      "_kpiClosed", "_kpiActual", "_kpiSpendOf", "poDueDate",
+      "_kpiClosed", "_kpiActual", "_kpiSpendOf", "poDueDate", "USERS",
       block + "\nreturn {computeStaffKPIs,_staffWindows,_orderSavings,_comparisonStats,_actorKey,_wmDays};")(
         ["pending_pm", "pm_approved", "wh_review", "wh_reviewed", "pending_proc", "pending_pm_cmp",
          "pending_ceo", "pending_finance", "proc_executing", "sv_receiving", "wh_receiving", "wh_auditing", "pending_extra", "closed"],
@@ -4543,7 +4547,14 @@ function procurementStaffKPI() {
         p => p.status === "closed" || p.status === "closed_after_receipt",
         p => Number(p.actualCost) || 0,
         p => Number(p.actualCost) || Number(p.estCost) || 0,
-        p => p.expectedDeliveryDate || "");
+        p => p.expectedDeliveryDate || "",
+        /* سجلُّ المستخدمين كما هو في الإنتاج: أسماءُ الدخول والعرض متطابقةٌ غالباً،
+           والسجلاتُ القديمة لا تحمل إلّا اسمَ العرض — فبه يُعرف الدور. */
+        [{ user: "saad", name: "سعد", role: "procurement_officer" },
+         { user: "noor", name: "نور", role: "procurement_officer" },
+         { user: "root", name: "مدير النظام", role: "admin" },
+         { user: "sup",  name: "محمد داوود", role: "supervisor" },
+         { user: "ceo",  name: "Ceo Abdallah", role: "ceo" }]);
   } catch (e) { T("يُبنى محرّك أداء المسؤولين", false, String(e.message).slice(0, 140)); return; }
   T("يُبنى محرّك أداء المسؤولين", typeof E.computeStaffKPIs === "function");
 
@@ -4551,8 +4562,10 @@ function procurementStaffKPI() {
   T("★★★ _actorKey: byUser هو الهوية (تغييرُ اسمِ العرض لا يشقّ الشخص)",
     E._actorKey({ byUser: "saad", by: "سعد" }) === "u:saad" &&
     E._actorKey({ byUser: "saad", by: "سعد المطيري" }) === "u:saad");
-  T("★★★ _actorKey: اسمُ عرضٍ بلا ختمٍ لا يُنسب لأحد (لا يحمل دوراً فلا يُحرَس به)",
-    E._actorKey({ by: "سعد" }) === null);
+  T("★★★ _actorKey: اسمُ العرض يُطبَّع إلى حسابه من السجلّ (لا ينشقّ الشخصُ صفَّين)",
+    E._actorKey({ by: "سعد" }) === "u:saad");
+  T("★★ واسمٌ لا يعرفه السجلُّ يبقى مفتاحَ اسمٍ ولا يُهمَل",
+    E._actorKey({ by: "غريب" }) === "n:غريب");
   T("★★★ «النظام» و«—» ليسا شخصاً (لا يُنسب إليهما عمل)",
     E._actorKey({ by: "النظام" }) === null && E._actorKey({ by: "—" }) === null && E._actorKey({}) === null);
 
@@ -4653,15 +4666,19 @@ function procurementStaffKPI() {
     const row = k => S.rows.find(r => r.key === k);
     T("★★★ كلُّ مسؤولٍ صفٌّ واحدٌ بمفتاح هويته", S.rows.length === 2, S.rows.map(r => r.key).join(","));
     T("★★★ عددُ طلباته وقيمةُ مشترياته (الفعليّ للمغلق)",
-      row("u:saad").poN === 2 && row("u:saad").poClosed === 2 && row("u:saad").spendClosed === 3000,
+      row("u:saad").poN === 3 && row("u:saad").poClosed === 3 && row("u:saad").spendClosed === 3300,
       JSON.stringify({ n: row("u:saad").poN, c: row("u:saad").spendClosed }));
     T("★★★ المفتوحُ يُعدّ ويُقيَّم بقيمته منفصلاً عن المغلق",
       row("u:noor").poOpen === 1 && row("u:noor").poClosed === 0 && row("u:noor").spendOpen === 500);
-    T("★★★ السجلُّ بلا ختمٍ لا يُنسب لأحدٍ ويُعدّ في «لم يُعرف من أنهاها»",
-      !row("n:سعد") && S.unattributedN === 2 && S.measurableN === 5,
-      `unattr=${S.unattributedN} meas=${S.measurableN}`);
-    T("★★ متوسّطُ تجهيز المقارنة = ٤ ساعاتِ عمل = ٠٫٥ يوم، وفي الهدف",
-      Math.abs(row("u:saad").prepAvg - 0.5) < 1e-9 && row("u:saad").prepTargetRate === 100);
+    /* ══ حالةُ «وائل» بعينها: سجلٌّ قديمٌ باسمِ عرضٍ فقط، ودورُه في السجلّ مشتريات.
+       v1.18 أخرجته من جدوله فرأى المالكُ «لا صفوف لعرضها» على ١٢٧ طلباً. ══ */
+    T("★★★ السجلُّ القديم (اسمٌ بلا ختم) يُنسب لصاحبه ويدخل جدولَه — لا «لا صفوف لعرضها»",
+      row("u:saad").poN === 3 && S.unattributedN === 1,
+      `saad=${row("u:saad") && row("u:saad").poN} unattr=${S.unattributedN}`);
+    T("★★★ واسمُ العرض يُطبَّع إلى حسابه فلا ينشقّ الشخصُ صفَّين",
+      !S.rows.some(r => r.key === "n:سعد") && S.rows.filter(r => r.name === "سعد").length === 1);
+    T("★★ زمنُ تجهيز المقارنة في الهدف (٤ ساعاتِ عملٍ للطلبات المختومة)",
+      row("u:saad").prepAvg <= 2 && row("u:saad").prepTargetRate === 100);
     T("★★ وسمُ «عيّنة غير كافية» يمنع ترتيبَ رجلٍ على طلبَين كأنه على ثلاثين",
       row("u:saad").lowSample === true && S.minSample === 5);
   }
@@ -4680,13 +4697,13 @@ function procurementStaffKPI() {
         // ثم التنفيذيُّ يتحرّك بعد أيام — كان يُنسب إليه تجهيزُ المقارنة!
         { code: "pending_finance", at: "2026-07-08T08:00:00Z", by: "Ceo Abdallah", byUser: "ceo", byRole: "ceo" },
       ]};
-    const w = E._staffWindows(po);
-    T("★★★ القيدُ المبهم يُنهي النافذةَ — لا تُنسب لفاعلٍ تحرّك بعده بأيام",
-      w.length === 0, JSON.stringify(w.map(x => x.kind + ":" + (x.ev.byUser || x.ev.by))));
     const S = E.computeStaffKPIs([po]);
-    T("★★★ فلا صفَّ لتنفيذيٍّ ولا لمشرفٍ في جدول أداء المشتريات (بلاغ المالك)",
-      S.rows.length === 0 && S.outsideN === 0 && S.noWindowN === 1,
-      `rows=${S.rows.length} outside=${S.outsideN} noWin=${S.noWindowN}`);
+    /* الحراسةُ **بالدور** لا بإتلاف النوافذ: القيدُ الخامل يُتخطّى فلا تضيع نافذةٌ
+       صحيحة، والتنفيذيُّ لا يدخل الجدولَ لأن دورَه ليس `procurement_officer` —
+       ويُعلَن خارجَه فلا يُحذف صامتاً. */
+    T("★★★ فلا صفَّ لتنفيذيٍّ في جدول أداء المشتريات ويُعلَن خارجَه (بلاغ المالك)",
+      S.rows.length === 0 && S.outsideN === 1 && S.outsideGroups.some(g => g.role === "ceo"),
+      `rows=${S.rows.length} outside=${S.outsideN} أدوار=${S.outsideGroups.map(g=>g.role).join(",")}`);
   }
 
   // ── ٦) الارتداد: ما رجع بعد إحالته وحدَه يُحسب عليه ──
@@ -4756,9 +4773,9 @@ function procurementStaffKPI() {
         updatedAt: "2026-07-03T06:00:00Z", timeline: [
           { code: "wh_reviewed",     at: "2026-07-01T08:00:00Z", by: "المستودع", byUser: "wh" },
           // ختمُ هويةٍ بلا ختمِ دور — لا يكفي لدخول جدولِ المشتريات
-          { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: "سعد", byUser: "saad" } ] },
+          { code: "pending_finance", at: "2026-07-01T12:00:00Z", by: "مجهولٌ تماماً" } ] },
     ]);
-    T("★★★ ولا يدخل الجدولَ من لا ختمَ لدوره — يُعلَن تحت «دورٌ غير معروف» لا يُدسّ",
+    T("★★★ ومن لا يعرفه السجلُّ ولا ختمَ لدوره يُعلَن تحت «دورٌ غير معروف» لا يُدسّ",
       S3.rows.length === 0 && S3.outsideN === 1 &&
       S3.outsideGroups.some(g => g.role === "__unknown__"),
       `rows=${S3.rows.length} outside=${S3.outsideN} أدوار=${S3.outsideGroups.map(g=>g.role).join(",")}`);
