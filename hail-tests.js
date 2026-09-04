@@ -666,7 +666,9 @@ function predelivery() {
     /* ثم رُفع من 39548 إلى 39588 لقيد v1.20: تخطّي مسحِ الإقلاع بعدَّينِ على الخادم
        (`_ticketsScanNeeded` ومَعبرُها في `loadData`). **مكانُها النواةُ لا وحدة**:
        إصلاحٌ في موضعه على `loadData` نفسِها — والنقلُ بحجّة الإصلاح ممنوعٌ نصّاً. */
-    const IDX_CEILING = 39588;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم لقيد v1.21: قاعدةُ ملكيةِ الطلب (من اشتراه لا من أغلقه) — أسطرٌ في
+       `computeStaffKPIs` داخل وحدة `purchase-kpi`. */
+    const IDX_CEILING = 39609;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -4800,6 +4802,55 @@ function procurementStaffKPI() {
   }
   T("★★ وسطرُ المطابقة معروضٌ في الوجه (الجوابُ في الصفحة لا في رأس القارئ)",
     /class="pkpi-recon"/.test(ksrc) && /لم تمرّ بمرحلة مشترياتٍ أصلاً/.test(ksrc));
+
+  /* ── ٦-د) مَن يملك الطلب: من اشتراه لا من أغلقه (بلاغ المالك 04/09) ──
+     سيرُ العمل كما شرحه المالك: **مسؤولُ المشتريات ليس من يُغلق الطلب**. يُغلق
+     تلقائياً بعد تدقيق المستودع، أو يُغلقه حسابُ المسؤول حين تقع علّةٌ تشغيلية
+     (تغيُّرُ كمياتٍ بعد التوريد). فنسبةُ الطلب إلى «آخرِ من حرّكه» كانت تنزعه من
+     صاحبه بقيمته. الحارسُ يعيد إنتاج الحالات الثلاث. */
+  {
+    const base = (id, cost, tl) => ({ id, status: "closed", actualCost: cost,
+      createdAt: "2026-07-01T06:00:00Z", updatedAt: "2026-07-09T06:00:00Z", timeline: tl });
+    const WH  = { by: "محمد", byUser: "wh",   byRole: "warehouse_manager" };
+    const PRC = { by: "وائل", byUser: "wael", byRole: "procurement_officer" };
+    const ADM = { by: "مدير النظام", byUser: "root", byRole: "admin" };
+    const at = h => "2026-07-0" + h + "T08:00:00Z";
+
+    const S = E.computeStaffKPIs([
+      // (١) الطبيعيّ: المستودعُ يُحيل ⇐ وائل يشتري ⇐ المستودعُ يستلم ⇐ إغلاقٌ تلقائيّ
+      base("n1", 1000, [{ code: "wh_reviewed", at: at(1), ...WH },
+                        { code: "pending_finance", at: at(2), ...PRC },
+                        { code: "proc_executing", at: at(3), by: "المالية", byUser: "fin", byRole: "finance" },
+                        { code: "wh_receiving", at: at(4), ...PRC },
+                        { code: "closed", at: at(5), ...WH }]),
+      /* (٢) الحالةُ التي وصفها المالك: تغيّرت الكمياتُ بعد التوريد فأغلق **حسابُ
+         المسؤول** الطلبَ من «قيد تنفيذ المشتريات» مباشرةً. فيُنهي إغلاقُه نافذةَ
+         التنفيذ — وكان يسلبه الطلبَ وقيمتَه من وائل. */
+      base("n2", 2000, [{ code: "wh_reviewed", at: at(1), ...WH },
+                        { code: "pending_finance", at: at(2), ...PRC },
+                        { code: "proc_executing", at: at(3), by: "المالية", byUser: "fin", byRole: "finance" },
+                        { code: "closed", at: at(6), ...ADM }]),
+      // (٣) المسؤولُ نفّذ الطلبَ من أوّله — فهو خارجَ الجدول بدوره، لا لوائل
+      base("n3",  500, [{ code: "wh_reviewed", at: at(1), ...WH },
+                        { code: "pending_finance", at: at(2), ...ADM },
+                        { code: "closed", at: at(5), ...WH }]),
+    ]);
+    const wael = S.rows.find(r => r.key === "u:wael");
+    T("★★★ إغلاقُ المستودع التلقائيُّ لا ينزع الطلبَ من مسؤول المشتريات",
+      !!wael && wael.poN >= 1, "وائل=" + (wael && wael.poN));
+    T("★★★ وإغلاقُ حسابِ المسؤول لعلّةٍ تشغيلية لا ينزعه أيضاً — القيمةُ تبقى لصاحبها",
+      !!wael && wael.poN === 2 && wael.spendClosed === 3000,
+      `poN=${wael && wael.poN} spend=${wael && wael.spendClosed}`);
+    T("★★★ ولا يُنسب للمستودع ولا للمسؤول شراءٌ لم يقوما به",
+      S.rows.length === 1 && !S.outsideGroups.some(g => g.role === "warehouse_manager"),
+      S.rows.map(r => r.key).join(",") + " | خارج: " + S.outsideGroups.map(g => g.role).join(","));
+    T("★★★ لكنّ طلباً نفّذه المسؤولُ من أوّله يبقى خارجَ الجدول بدوره (لا يُهدى لوائل)",
+      S.outsideN === 1 && S.outsideGroups.some(g => g.role === "admin" && g.spend === 500),
+      `outsideN=${S.outsideN}`);
+    T("★★★ والمالُ يُطابق بعد ذلك كلِّه",
+      Math.abs((S.inTableSpend + S.outSpend) - S.scopeSpend) < 0.01,
+      `${S.inTableSpend} + ${S.outSpend} = ${S.scopeSpend}`);
+  }
 
   // ── ٧) «الواقفُ الآن» عدّادٌ حيٌّ منسوبٌ بالحالة (لا فاعلَ خروجٍ بعد) ──
   {
