@@ -6068,6 +6068,22 @@ function _moduleMissingPage(hostId, title, file){
 }
 
 //  NAVIGATION
+
+/* ══ تصفيرُ تمرير التطبيق ══
+   تبديلُ الصفحات إظهارٌ وإخفاءٌ داخل حاويةٍ واحدةٍ مُمرَّرة لا تحميلُ مستندٍ جديد، فلا
+   شيءَ يُصفّر التمرير: من انتقل من منتصف شاشةٍ طويلةٍ فُتحت له التاليةُ من منتصفها بلا
+   رأسٍ ولا فلاتر. والمُمرَّرُ عنصران بحسب المقاس — `.main-area` في سطح المكتب والنافذةُ
+   في الجوّال (الحاوية `overflow:visible` هناك) — فيُصفَّران معاً وإلا صحّ مقاسٌ وبقي
+   الآخرُ معطوباً. تُعرَّض على `window` فلا تكرّر كلُّ وحدةٍ معرفةَ أيِّهما المُمرَّر. */
+function _scrollAppToTop(){
+  try{
+    const area=document.querySelector(".main-area");
+    if(area) area.scrollTop=0;
+    window.scrollTo(0,0);
+  }catch(e){}
+}
+window._scrollAppToTop=_scrollAppToTop;
+
 function showPage(id){
   // حارس الصلاحيات — منع الوصول المباشر لصفحة محجوبة (تحويل للوحة التنفيذية)
   try{
@@ -6083,10 +6099,16 @@ function showPage(id){
     if(typeof _tvInterval!=="undefined"&&_tvInterval){clearInterval(_tvInterval);_tvInterval=null;}
     if(typeof _tvClockInterval!=="undefined"&&_tvClockInterval){clearInterval(_tvClockInterval);_tvClockInterval=null;}
   }
+  /* موضعُ التمرير يتبع الصفحةَ الجديدة لا القديمة (التعليلُ عند `_scrollAppToTop`).
+     والتصفيرُ عند **تغيّر** الصفحة وحدَه: نداءُ showPage للصفحة نفسِها إعادةُ رسمٍ من
+     وحدةٍ لا تنقّل، وقطعُ قراءةِ المستخدم فيه ارتدادٌ لا إصلاح. */
+  const _prevPage=document.querySelector(".page.active");
+  const _pageChanged=!_prevPage || _prevPage.id!=="page-"+id;
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   const pg=document.getElementById("page-"+id);
   if(!pg) return;
   pg.classList.add("active");
+  if(_pageChanged) _scrollAppToTop();
   pg.style.animation="none";
   void pg.offsetWidth;
   pg.style.animation="";
