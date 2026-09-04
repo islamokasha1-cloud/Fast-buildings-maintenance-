@@ -30,11 +30,12 @@ import { chromium } from 'playwright-core';
 import fs from 'fs';
 import path from 'path';
 
-/* ══ الميزانية ══ قِيست على v18.9.3023 بعد تحويل عدّاد طلبات الشراء إلى عدِّ خادم.
-   خفِّضها بعد كل تحسين. ورفعُها يحتاج سطراً في §6 يقول ما الذي زاد ولماذا. */
-const BUDGET_DOCS      = 1620;   // مستنداتٌ تُنزَّل عند الدخول
+/* ══ الميزانية ══ قِيست على v18.9.3052 بعد تخطّي مسحِ إقلاع البلاغات بعدَّينِ على الخادم
+   (١٦٢٠ ⇐ ١٣٢٠ مستنداً · ١٠ ⇐ ٩ جلبات). خفِّضها بعد كل تحسين. ورفعُها يحتاج سطراً
+   في §6 يقول ما الذي زاد ولماذا. */
+const BUDGET_DOCS      = 1320;   // مستنداتٌ تُنزَّل عند الدخول
 const BUDGET_LISTENERS = 21;     // مستمعون أحياءُ بعد الاستقرار
-const BUDGET_GETS      = 10;     // جلباتٌ لمرّةٍ واحدة (العدُّ على الخادم لا يُحسب — لا يُنزِّل شيئاً)
+const BUDGET_GETS      = 9;      // جلباتٌ لمرّةٍ واحدة (العدُّ على الخادم لا يُحسب — لا يُنزِّل شيئاً)
 
 const REPORT_ONLY = process.argv.includes('--report');
 const REPO = process.env.REPO_DIR || path.resolve(path.dirname(new URL(import.meta.url).pathname));
