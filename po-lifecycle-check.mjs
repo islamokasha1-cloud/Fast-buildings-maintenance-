@@ -457,6 +457,13 @@ const staff = await page.evaluate(async () => {
                  { event: 'إضافة مرفق: عرض المورد', at: '2026-07-02T08:00:00Z', by: 'وائل عبد المجيد' },
                  { code: 'pending_finance', at: '2026-07-03T08:00:00Z', by: 'financial01', byUser: 'fin', byRole: 'finance' },
                  { code: 'closed', at: '2026-07-06T08:00:00Z', by: 'مدير النظام', byUser: 'root', byRole: 'admin' }] },
+    /* طلبٌ لم يبلغ المشترياتِ أصلاً: رُفض عند مدير المشاريع. فلا نافذةَ له ولا مالكَ،
+       ومكانُه بابُ «لم تمرّ بمرحلة مشترياتٍ أصلاً» — ويجب أن يُسمّى برقمه هو أيضاً. */
+    { id: 'PO-NOWIN-1', projectId: 'hail', projectName: 'هايل', status: 'rejected',
+      createdAt: '2026-07-01T06:00:00Z', updatedAt: '2026-07-01T09:00:00Z', actualCost: 0, estCost: 500,
+      items: [{ itemName: 'بند مرفوض', qty: 1, unitCost: 500, itemCost: 500 }],
+      timeline: [{ code: 'pending_pm', at: '2026-07-01T06:30:00Z', by: 'مدير المشاريع', byUser: 'pm', byRole: 'project_manager' },
+                 { code: 'rejected',   at: '2026-07-01T09:00:00Z', by: 'مدير المشاريع', byUser: 'pm', byRole: 'project_manager' }] },
     leap('PO-LEAP-1', 'boss', 'عبدالله', 'ceo'),      // قفزٌ كان يُنسب للتنفيذيّ
     leap('PO-LEAP-2', 'sup',  'محمد داوود', 'supervisor'),
   ];
@@ -486,6 +493,8 @@ const staff = await page.evaluate(async () => {
            outsideN: S.outsideN, outsideSpend: S.outsideSpend,
            outsideRoles: S.outsideGroups.map(g => g.role).sort(),
            outsideBanner: !!root.querySelector('.pkpi-staff-admin'),
+           poLinks: [...root.querySelectorAll('.pkpi-staff-admin .pkpi-po-link')].map(a => a.textContent.trim()),
+           noWinLinks: [...root.querySelectorAll('.pkpi-recon .pkpi-po-link')].map(a => a.textContent.trim()),
            strangersInTable: drawn.filter(d => ['مدير النظام','محمد داوود','عبدالله'].includes(d.name)).map(d => d.name),
            tableRoles: S.rows.map(r => r.role),
            vdRows: root.querySelectorAll('.pkpi-vd-row').length,
@@ -552,6 +561,12 @@ if (staff.ok) {
   check('١٢ح٣) ★★★ ولا خليّةَ مقصوصةٍ ولا إفاضةَ صفحةٍ أفقية (تنسيقُ الجدول — بلاغ المالك)',
     staff.clipped === 0 && staff.pageOverflow <= 1,
     'مقصوصة=' + staff.clipped + ' · فيضُ الصفحة=' + staff.pageOverflow + 'px');
+  // ══ سؤالُ المالك: «ما هي الـ٣٢٣ ريال؟!» — الرقمُ بلا ملفٍّ لا يُتحقَّق منه ══
+  check('١٢ن) ★★★ كلُّ طلبٍ خارجَ الجدول مُسمّىً برقمه رابطاً (لا رقمٌ مجرّد)',
+    staff.poLinks.length === staff.outsideN && staff.poLinks.every(t => /^PO-/.test(t)),
+    'روابط: ' + staff.poLinks.join(' · '));
+  check('١٢س) ★★★ وكذلك ما لم يمرّ بمرحلة مشتريات',
+    staff.noWinLinks.length > 0, 'روابط: ' + staff.noWinLinks.join(' · '));
   check('١٢ط) ★★ دليلُ قراءة الجدول مرسومٌ (الجدولُ يشرح نفسَه)', staff.guide === true);
   check('١٢ي) ★★ ورؤوسُ المجموعات تسمّي المحاور الباقية (جودة · التزام)',
     staff.groupHdrs.length === 3 && staff.groupHdrs.some(h => h.includes('جودة')) &&
