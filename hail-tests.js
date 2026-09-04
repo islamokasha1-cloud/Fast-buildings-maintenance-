@@ -663,7 +663,10 @@ function predelivery() {
        إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
     /* ثم رُفع لقيد v1.19: `_ensureUsers` تجلب سجلَّ المستخدمين وتُعيد الرسم بالأدوار
        الصحيحة، و`_actorRole` تقرأ الدورَ منه. **مكانُها وحدةُ `purchase-kpi`**. */
-    const IDX_CEILING = 39706;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 39706 إلى 39746 لقيد v1.20: تخطّي مسحِ الإقلاع بعدَّينِ على الخادم
+       (`_ticketsScanNeeded` ومَعبرُها في `loadData`). **مكانُها النواةُ لا وحدة**:
+       إصلاحٌ في موضعه على `loadData` نفسِها — والنقلُ بحجّة الإصلاح ممنوعٌ نصّاً. */
+    const IDX_CEILING = 39746;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -14106,6 +14109,68 @@ function archiveScanSkipGuards() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   مسحُ الإقلاع يُتخطّى بعدَّينِ على الخادم (vNEXT)
+   كان كلُّ دخولٍ يُنزّل مجموعةَ البلاغات **ثلاثَ مرّات**: مسحُ `loadData` كاملاً، ثمّ
+   نافذةُ المستمع، ثمّ مسحُ الأرشيف (قياسُ `perf-probe`: ٩٠٠ مستنداً لبذرةِ ٣٠٠).
+   والمسحُ الأوّل لم يبقَ منه إلّا شهادةُ اكتمال `archived` — والشهادةُ تُشترى بعدَّين
+   على الخادم لا يُنزّلان مستنداً. وهذه الفحوصُ تحرس **حدودَ التخطّي**: فارغةٌ لا
+   تُتخطّى (الترحيلُ معلَّقٌ بـ`snap.empty`)، وناقصةُ الوسم لا تُتخطّى (وإلّا رشّح
+   المستمعُ فأسقط الناقصَ بصمت)، ورقمٌ غائبٌ لا يُخمَّن.
+   ═══════════════════════════════════════════════════════════════════════ */
+function bootScanSkipGuards() {
+  H("vNEXT) مسحُ الإقلاع: يُتخطّى بعدَّينِ على الخادم لا بمسحٍ كامل");
+
+  const A = HTML.indexOf("function _ticketsScanNeeded(");
+  const B = HTML.indexOf("function loadData(onDone)", A);
+  if (A < 0 || B < 0) { T("دالّةُ القرار _ticketsScanNeeded مستخرَجة", false, "لم يُعثر على الكتلة"); return; }
+  let need;
+  try {
+    need = new Function("window", HTML.slice(A, B) + "\n return window._ticketsScanNeeded;")({});
+  } catch (e) { T("دالّةُ القرار تُنفَّذ", false, String(e.message).slice(0, 140)); return; }
+  T("دالّةُ القرار _ticketsScanNeeded مستخرَجةٌ وتُنفَّذ", typeof need === "function");
+
+  const C = (name, total, stamped, want) => {
+    let got;
+    try { got = need(total, stamped); } catch (e) { T(name, false, "خطأ: " + e.message); return; }
+    T(name, got === want, "القرار: " + got + (got === want ? "" : " ← المتوقع " + want));
+  };
+
+  C("★★ كلُّ مستندٍ موسومٌ (٣٠٠ من ٣٠٠) ⇒ لا مسح — الشهادةُ ثبتت بلا تنزيل", 300, 300, false);
+  C("★★ ناقصٌ واحدٌ ⇒ نمسح ونَسِم (وإلّا أسقطه الترشيحُ بصمت)", 300, 299, true);
+  C("★★ مجموعةٌ فارغةٌ ⇒ نمسح — مسارُ ترحيل localStorage معلَّقٌ بـ`snap.empty`", 0, 0, true);
+  C("★★ عدٌّ غائبٌ (فشِل أو غيرُ مدعوم) ⇒ نمسح، لا نُخمّن", null, null, true);
+  C("★ وغيابُ أحد الرقمين وحدَه يكفي للمسح", 300, undefined, true);
+  C("★ ورقمٌ سالبٌ (مستحيلٌ نظرياً) يُعامَل معاملةَ الفارغة", -1, -1, true);
+  C("★★ وما تجاوز سقفَ المسح يُشهَد له كذلك — الشهادةُ أقوى من المسح", 5000, 5000, false);
+
+  /* ── حرّاسُ المصدر ── */
+  T("★★ العدّان يُطلبان معاً على الخادم (`count()` لا يُنزّل مستنداً)",
+    /db\.collection\(COLLECTION\(\)\)\.count\(\)\.get\(\)[\s\S]{0,200}?where\("archived","in",\[true,false\]\)\.count\(\)\.get\(\)/.test(HTML));
+  T("★★ وقرارُ المسح يُقرأ من الدالّة النقيّة لا من شرطٍ مكرّرٍ في موضعه",
+    /if\(window\._ticketsScanNeeded\(_all,_stamped\)\)\s*return _fullScan\(\);/.test(HTML));
+  T("★★ وأيُّ تعذّرٍ يسقط إلى المسح الكامل (رفضٌ · شبكةٌ · عدٌّ غيرُ مدعوم)",
+    /\}\)\.catch\(\(\)=>_fullScan\(\)\);/.test(HTML) &&
+    /catch\(e\)\{\s*_freshness = Promise\.reject\(e\);\s*\}/.test(HTML));
+  T("★★ والمسحُ الكاملُ ما زال المسارَ نفسَه (دالّةٌ واحدةٌ تُستدعى، لا نسخةٌ ثانية)",
+    (HTML.match(/_fullScan\(\)/g) || []).length >= 2 &&
+    /const _fullScan = \(\) =>\s*\n\s*db\.collection\(COLLECTION\(\)\)\.orderBy\("createdAt","asc"\)\.limit\(_TICKETS_LOAD_LIMIT\)\.get\(\)/.test(HTML));
+  T("★★ والمسارُ السريعُ يمنح الشهادةَ ويُنهي التحميل",
+    /_diagMark\("loadData:skip-scan[\s\S]{0,400}?_archFieldComplete = true;[\s\S]{0,40}?done\(true\);/.test(HTML));
+  T("★★ ولا يبني `tickets` من كاشٍ لا يُعرف مشروعُه (`hail_main` مفتاحٌ واحدٌ للكلّ)",
+    /_diagMark\("loadData:skip-scan[\s\S]{0,400}?tickets = \[\];/.test(HTML));
+  T("★★ ولا يدهس الكاشَ بمصفوفةٍ فارغة (نسخةُ العمل بلا اتصالٍ تبقى)",
+    /function done\(keepCache\)\{[\s\S]{0,400}?if\(!keepCache\) safeLSSet\("hail_main"/.test(HTML));
+  T("★★ ولا يُحفَظ القرارُ في علمٍ باقٍ (علمٌ قديمٌ يُرشِّح فيُسقِط الناقصَ بصمت)",
+    !/localStorage\.setItem\([^)]*archFieldComplete/i.test(HTML) &&
+    !/safeLSSet\([^)]*archFieldComplete/i.test(HTML));
+
+  /* `counter` صفرٌ على المسار السريع — وهو آمنٌ **بشرطِ** أن يبقى `newId()` معاملةً
+     على `META_DOC()` تأخذ الأكبرَ من الخادم. سقوطُ هذا الشرط يعيد ترقيماً مكرّراً. */
+  T("★★ و`newId()` معاملةٌ تأخذ الأكبرَ من الخادم (فصفرُ `counter` لا يُكرّر رقماً)",
+    /const next=isNewYear\?1:Math\.max\(metaVal,localMax,counter\)\+1;/.test(HTML));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    نافذةُ المزامنة تعدّ النشطَ وحدَه (v18.9.3002)
    الأرشفةُ **وسمٌ لا نقل**: نافذةٌ بلا شرطِ `archived` لا تنقص بأرشفةِ ألفِ بلاغ،
    فيثبت العدّادُ عند `600/600` وتصير نصيحةُ التحذير كذباً — والأخطرُ صامت: المفتوحُ
@@ -16758,6 +16823,7 @@ function pageScrollResetGuards() {
   catalogMustNotBeCapped();
   firestoreIndexContract();
   archiveScanSkipGuards();
+  bootScanSkipGuards();
   syncWindowFilterGuards();
   localCacheStaysDisabled();
   poAlignRepair();
