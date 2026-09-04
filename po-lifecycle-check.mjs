@@ -379,6 +379,14 @@ L('\n=== ١٢) أداءُ مسؤولي المشتريات — الرقمُ ال�
 // الشاشة يعني موظّفاً يُحاسَب على رقمٍ لم يحسبه أحد. فيُبذَر طلبان بمسارٍ كاملٍ يحمل
 // هويّةَ الفاعل، ثم تُفتح الصفحةُ فعلاً ويُقرأ الجدولُ المرسومُ خليّةً خليّة.
 const staff = await page.evaluate(async () => {
+  /* سجلُّ المستخدمين كما في لقطة المالك: أسماءُ الدخول والعرض متطابقة، والسجلاتُ
+     القديمة لا تحمل إلّا اسمَ العرض — فبه وحدَه يُعرف الدور. */
+  USERS = [{ user: 'وائل عبد المجيد', name: 'وائل عبد المجيد', role: 'procurement_officer' },
+           { user: 'عبدالله الشمري',  name: 'عبدالله الشمري',  role: 'procurement_officer' },
+           { user: 'محمد',            name: 'محمد',            role: 'warehouse_manager' },
+           { user: 'Ceo01',           name: 'Ceo Abdallah Al Ardi', role: 'ceo' },
+           { user: 'sup',             name: 'محمد داوود',      role: 'supervisor' },
+           { user: 'root',            name: 'مدير النظام',     role: 'admin' }];
   /* المسارُ كما يجري فعلاً: المستودعُ يُحيل بـwh_reviewed («بانتظار تنفيذ المشتريات»)
      ثم يُخرجه مسؤولُ المشتريات. النسخةُ الأولى قاست pending_proc — مسارَ الارتداد
      النادر — فخرج العمودُ فارغاً على بياناتٍ حقيقية. */
@@ -412,6 +420,17 @@ const staff = await page.evaluate(async () => {
     mk('PO-STAFF-4', 'root', 'مدير النظام',  400, 'pending_finance', 'admin'),        // خارجَ الجدول
     mk('PO-STAFF-5', 'sup',  'محمد داوود',   300, 'pending_finance', 'supervisor'),   // وكذلك المشرف
     mk('PO-STAFF-6', 'boss', 'عبدالله',      200, 'pending_finance', 'ceo'),          // والتنفيذيّ
+    // حالةُ المالك: سجلٌّ قديمٌ باسمِ عرضٍ فقط لمسؤولَي مشتريات حقيقيَّين
+    { id: 'PO-OLD-1', projectId: 'hail', projectName: 'هايل', status: 'closed',
+      createdAt: '2026-07-01T06:00:00Z', updatedAt: '2026-07-03T06:00:00Z', actualCost: 900, estCost: 900,
+      items: [{ itemName: 'بند قديم', qty: 1, unitCost: 900, itemCost: 900, receivedQty: 1 }],
+      timeline: [{ code: 'wh_reviewed',     at: '2026-07-01T08:00:00Z', by: 'محمد' },
+                 { code: 'pending_finance', at: '2026-07-01T12:00:00Z', by: 'وائل عبد المجيد' }] },
+    { id: 'PO-OLD-2', projectId: 'hail', projectName: 'هايل', status: 'closed',
+      createdAt: '2026-07-01T06:00:00Z', updatedAt: '2026-07-03T06:00:00Z', actualCost: 600, estCost: 600,
+      items: [{ itemName: 'بند قديم ٢', qty: 1, unitCost: 600, itemCost: 600, receivedQty: 1 }],
+      timeline: [{ code: 'wh_reviewed',     at: '2026-07-01T08:00:00Z', by: 'محمد' },
+                 { code: 'pending_finance', at: '2026-07-01T12:00:00Z', by: 'عبدالله الشمري' }] },
     leap('PO-LEAP-1', 'boss', 'عبدالله', 'ceo'),      // قفزٌ كان يُنسب للتنفيذيّ
     leap('PO-LEAP-2', 'sup',  'محمد داوود', 'supervisor'),
   ];
@@ -456,7 +475,8 @@ if (staff.ok) {
   const bySaad = staff.rows.find(r => r.key === 'u:saad');
   const drawnSaad = staff.drawn.find(d => d.name === 'سعد');
   check('١٢أ) ★★ لكلّ مسؤولٍ صفٌّ واحد (لا تكرارَ ولا اندماج)',
-    staff.rows.length === 2 && staff.drawn.length === 2,
+    staff.rows.length === 4 && staff.drawn.length === 4 &&
+    new Set(staff.drawn.map(d => d.name)).size === 4,
     'محسوب ' + staff.rows.length + ' · مرسوم ' + staff.drawn.length);
   check('١٢ب) ★★★ عددُ الطلبات المرسومُ = المحسوب',
     !!bySaad && !!drawnSaad && Number(drawnSaad.po.replace(/[^\d.]/g, '')) === bySaad.poN,
@@ -477,14 +497,19 @@ if (staff.ok) {
     staff.tableRoles.every(r => r === 'procurement_officer'),
     'دخلاء: ' + (staff.strangersInTable.join(',') || 'لا شيء') + ' · أدوارُ الجدول: ' + staff.tableRoles.join(','));
   check('١٢ح) ★★★ وثلاثتُهم معلَنون مجمَّعين بأدوارهم فوق الجدول (لا حذفَ صامت)',
-    staff.outsideBanner === true && staff.outsideN === 3 && staff.outsideSpend === 900 &&
+    staff.outsideBanner === true && staff.outsideN === 5 && staff.outsideSpend === 2300 &&
     ['admin','ceo','supervisor'].every(r => staff.outsideRoles.includes(r)),
     'n=' + staff.outsideN + ' spend=' + staff.outsideSpend + ' أدوار=' + staff.outsideRoles.join(','));
   check('١٢ح٢) ★★ الخلاصةُ سطرٌ ممتدٌّ تحت كلِّ صفّ (لا عمودٌ ضيّقٌ يُقصّ)',
     staff.vdRows === staff.rows.length && staff.vdRows > 0, 'أسطر=' + staff.vdRows);
-  check('١٢ح٤) ★★★ القفزُ فوق قيدٍ مبهم لا يُنسب لفاعلٍ لاحق (بلاغ المالك: كيف نفّذوا طلبات شراء؟)',
+  check('١٢ح٤) ★★★ كلُّ صفٍّ في الجدول مسؤولُ مشتريات — لا مشرفَ ولا تنفيذيَّ ولا مسؤولَ نظام',
     staff.tableRoles.every(r => r === 'procurement_officer') && staff.strangersInTable.length === 0,
     'أدوارُ الجدول: ' + staff.tableRoles.join(','));
+  // ══ بلاغُ المالك: «أين مسؤولو المشتريات من قياس الأداء؟» — سجلٌّ قديمٌ باسمٍ فقط ══
+  check('١٢ح٥) ★★★ ومسؤولو المشتريات الحقيقيّون **ظاهرون** ولو كان سجلُّهم باسمِ عرضٍ فقط',
+    staff.drawn.some(d => d.name === 'وائل عبد المجيد') &&
+    staff.drawn.some(d => d.name === 'عبدالله الشمري'),
+    'الظاهرون: ' + staff.drawn.map(d => d.name).join(' · '));
   check('١٢ح٣) ★★★ ولا خليّةَ مقصوصةٍ ولا إفاضةَ صفحةٍ أفقية (تنسيقُ الجدول — بلاغ المالك)',
     staff.clipped === 0 && staff.pageOverflow <= 1,
     'مقصوصة=' + staff.clipped + ' · فيضُ الصفحة=' + staff.pageOverflow + 'px');
