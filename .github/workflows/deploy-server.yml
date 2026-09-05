@@ -1,0 +1,154 @@
+name: Deploy to server
+
+# ═══════════════════════════════════════════════════════════════════════════
+# نشرٌ آليٌّ إلى خادم الإنتاج — «كلُّ دمجٍ في main يصل الخادمَ بلا تدخّل»
+#
+# ── المشكلة التي يعالجها ──
+# النشرُ كان يدوياً: يُفتح SSH ثم `git pull` في `/var/www/maintenance`. وخطؤه ليس
+# في الخطوة بل في **نسيانها**: يُدمَج PR فيظنّه الجميع منشوراً، ويبقى الخادمُ على
+# إصدارٍ أقدمَ أياماً بلا إشارةٍ تُنذر — لا سجلَّ ولا خطأَ ولا فرقاً ظاهراً في الواجهة.
+#
+# ── المبدأ ──
+# **مصدرُ الحقيقة `main` وحدَه.** ما دُمج فيه هو المنشور، والخادمُ يتبعُه تلقائياً.
+# والدفعُ إلى فرع عملٍ لا يمسّ الإنتاج إطلاقاً — وإلا صار كلُّ فرعٍ تجريبيٍّ نشراً.
+#
+# ── الأسرارُ المطلوبة (Settings ← Secrets and variables ← Actions) ──
+#   DEPLOY_HOST         عنوانُ الخادم (IP أو اسم مضيف)
+#   DEPLOY_USER         اسمُ مستخدم SSH
+#   DEPLOY_SSH_KEY      مفتاحٌ خاصّ — **المسارُ المفضَّل**   ── أو ──
+#   DEPLOY_SSH_PASSWORD كلمةُ المرور (بديلٌ أضعف؛ يُستعمل إن غاب المفتاح)
+#   DEPLOY_KNOWN_HOSTS  اختياريّ — سطرُ `known_hosts` للخادم (يُثبّت هويّتَه)
+#   DEPLOY_PORT         اختياريّ — منفذُ SSH (افتراضيّاً 22)
+#   DEPLOY_PATH         اختياريّ — مسارُ العمل (افتراضيّاً /var/www/maintenance)
+#
+# وبغياب الأسرار **لا يسقط الدفع**: وظيفةُ preflight تُطفئ النشرَ وتكتب سببَ
+# التخطّي في ملخّص التشغيل. الدليل الكامل: `docs/deploy-server-ar.md`.
+# ═══════════════════════════════════════════════════════════════════════════
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# دفعتان متتاليتان إلى main = تشغيلان متوازيان على **نفس** مجلّد الخادم يتضاربان
+# على قفل git. ولا نُلغي الجاريَ (`cancel-in-progress: false`): إلغاءُ نشرٍ في
+# منتصفه يترك الخادمَ في حالةٍ لا يعرفها أحد.
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Secrets check
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_PASSWORD: ${{ secrets.DEPLOY_SSH_PASSWORD }}
+        run: |
+          missing=""
+          [ -n "$DEPLOY_HOST" ] || missing="$missing DEPLOY_HOST"
+          [ -n "$DEPLOY_USER" ] || missing="$missing DEPLOY_USER"
+          if [ -z "$DEPLOY_SSH_KEY" ] && [ -z "$DEPLOY_SSH_PASSWORD" ]; then
+            missing="$missing DEPLOY_SSH_KEY|DEPLOY_SSH_PASSWORD"
+          fi
+          if [ -z "$missing" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### النشر إلى الخادم — تخطٍّ مقصود"
+              echo ""
+              echo "أسرارٌ ناقصة: \`$missing\`"
+              echo ""
+              echo "خطواتُ الضبط في \`docs/deploy-server-ar.md\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  deploy:
+    name: git pull on the server
+    needs: preflight
+    if: needs.preflight.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # نحتاج الاستنساخ لأجل `scripts/server-pull.sh` وحدَه — عمقُ 1 يكفي.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Prepare SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          set -euo pipefail
+          port="${DEPLOY_PORT:-22}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+
+          # بصمةُ المضيف: السرُّ المثبَّت يمنع انتحالَ الخادم. وبغيابه نلجأ إلى
+          # ssh-keyscan — يعمل، لكنّه **يثق بأوّل مضيفٍ يردّ** فلا يمنع انتحالاً.
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$port" -H "$DEPLOY_HOST" > ~/.ssh/known_hosts 2>/dev/null
+            echo "::warning::DEPLOY_KNOWN_HOSTS غير مضبوط — استُعملت ssh-keyscan، وهي لا تُثبت هويّةَ الخادم."
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+          if [ -n "$DEPLOY_SSH_KEY" ]; then
+            printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+            chmod 600 ~/.ssh/deploy_key
+            echo "SSH_AUTH_MODE=key" >> "$GITHUB_ENV"
+          else
+            # كلمةُ المرور مسارٌ احتياطيّ: sshpass يمرّرها بلا طرفيّةٍ تفاعلية.
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq sshpass
+            echo "SSH_AUTH_MODE=password" >> "$GITHUB_ENV"
+          fi
+          echo "SSH_PORT=$port" >> "$GITHUB_ENV"
+
+      - name: Pull on the server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          SSHPASS: ${{ secrets.DEPLOY_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          target="${DEPLOY_PATH:-/var/www/maintenance}"
+          # السكربتُ يُمرَّر على stdin: لا نسخةَ تتقادم على الخادم، ولا مسارَ يظهر
+          # في `ps` هناك. ووسيطُه الوحيدُ مسارُ العمل.
+          if [ "$SSH_AUTH_MODE" = "key" ]; then
+            ssh -o StrictHostKeyChecking=yes -o BatchMode=yes -p "$SSH_PORT" \
+              -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+              "bash -s -- '$target' main" < scripts/server-pull.sh
+          else
+            # BatchMode يمنع مطالبةَ كلمة المرور، وsshpass يحتاجها — فيُرفع هنا وحدَه،
+            # ويُطفَأ مفتاحُ الهوية كي لا تُستهلك محاولاتُ المصادقة قبل كلمة المرور.
+            sshpass -e ssh -o StrictHostKeyChecking=yes -o PubkeyAuthentication=no \
+              -p "$SSH_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "bash -s -- '$target' main" < scripts/server-pull.sh
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### النشر إلى الخادم"
+            echo ""
+            echo "- الحالة: **${{ job.status }}**"
+            echo "- الـcommit: \`${{ github.sha }}\`"
+            echo "- المسار: \`DEPLOY_PATH\` أو \`/var/www/maintenance\` افتراضاً"
+          } >> "$GITHUB_STEP_SUMMARY"
