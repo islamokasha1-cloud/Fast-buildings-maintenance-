@@ -10868,7 +10868,7 @@ function tvWallGuards() {
       /function _tvwallFsLabel\(btn, full\)\{/.test(HTML));
     // (٥) زرّ البوّابة بلا عدّ مشاريع
     T("★ aj: زرُّ بوّابة المشاريع بلا عدّ مشاريع",
-      !/tvwall-count-badge/.test(HTML) && /كل المشاريع في شاشة واحدة<\/div>/.test(HTML));
+      !/tvwall-count-badge/.test(HTML) && /كل المشاريع في شاشة واحدة<\/span>/.test(HTML));   // v18.9an: صفُّ .pk-row (span) لا div
 
     /* ── v18.9ak: علامةُ المركز من مجموعة المنصة · وشبكةُ المباني لا تقصّ بطاقة ── */
     T("★ ak: علامةُ الرادار دخلت مجموعة أيقونات المنصة (_ICON)",
@@ -10912,7 +10912,7 @@ function tvWallGuards() {
   // (٤) التسمية والعلامة الجديدتان — لا بقايا للاسم القديم في الواجهة
   T("★ ai: الاسم الظاهر «مركز العمليات» في الشاشة والزرّين",
     /<h1>مركز العمليات — كل المشاريع<\/h1>/.test(HTML) &&
-    />مركز العمليات — كل المشاريع<\/div>/.test(HTML) &&
+    />مركز العمليات — كل المشاريع<\/span>/.test(HTML) &&   // v18.9an: صفُّ .pk-row
     /<span class="s-icon"><\/span> مركز العمليات</.test(HTML));   // v18.9ak: أيقونةُ _ICON لا إيموجي
   // (سطرُ APP_VERSION يذكر الاسم القديم عمداً — فهو يوثّق إعادةَ التسمية نفسها)
   // الاستثناء كان يشمل سطرَ APP_VERSION لأن سجلّ التغييرات كان يسكنه. بعد نقل
@@ -16749,7 +16749,10 @@ function projectHubGuards() {
   const src = fs.readFileSync(PH_PATH, "utf8");
 
   const vm3 = require("vm");
+  const store = {};
   const sandbox = { window: {}, console,
+    localStorage: { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } },
+    document: { getElementById: () => null },
     esc: v => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
               .replace(/>/g, "&gt;").replace(/"/g, "&quot;"),
     projectIconMarkup: () => "<svg></svg>", _svgIcon: () => "<svg></svg>" };
@@ -16760,7 +16763,7 @@ function projectHubGuards() {
   T("ProjectHub تُحمَّل وتعرّض كائناً واحداً", !!PH);
   if (!PH) return;
 
-  const NEED = ["countLabel", "cardHTML", "barHTML", "shell", "isOpen", "setOpen", "open", "close"];
+  const NEED = ["countLabel", "whenLabel", "remember", "last", "lastId", "render", "isOpen", "setOpen", "open", "close", "toggle"];
   const miss = NEED.filter(k => typeof PH[k] !== "function");
   T("★ الواجهةُ كلُّها مكشوفةٌ للفحص بلا متصفّح", miss.length === 0, miss.join(" · "));
   if (miss.length) return;
@@ -16771,38 +16774,62 @@ function projectHubGuards() {
     PH.countLabel(4) === "4 مشاريع" && PH.countLabel(12) === "12 مشروعاً",
     [PH.countLabel(1), PH.countLabel(2), PH.countLabel(4), PH.countLabel(12)].join(" · "));
 
-  /* ── (٢) قرارُ الطبقة: متى تُطوى البطاقاتُ ومتى لا ── */
+  /* ── (٢) «متى فُتح»: اليوم · أمس · تاريخ — والفاسدُ فراغٌ لا «NaN» ── */
+  const now = new Date(2026, 8, 5, 18, 0);
+  T("★ اليوم بالساعة، وأمسِ بالساعة، والأبعدُ بالتاريخ",
+    PH.whenLabel(new Date(2026, 8, 5, 9, 40).toISOString(), now) === "اليوم 09:40" &&
+    PH.whenLabel(new Date(2026, 8, 4, 17, 5).toISOString(), now) === "أمس 17:05" &&
+    PH.whenLabel(new Date(2026, 7, 28, 8, 0).toISOString(), now) === "28/08 08:00",
+    PH.whenLabel(new Date(2026, 8, 5, 9, 40).toISOString(), now));
+  T("وطابعٌ فاسدٌ لا يُخرج «NaN» على الشاشة", PH.whenLabel("xx", now) === "" && PH.whenLabel(null, now) === "");
+
+  /* ── (٣) قرارُ الطبقة: متى تُطوى البطاقاتُ ومتى لا ── */
+  const L2 = [{ id: "a", name: "أ" }, { id: "b", name: "ب" }];
   PH.setOpen(false);
   T("★★★ مشروعٌ واحدٌ مرئيّ ⇐ لا طبقةَ أصلاً (وإلا نقرةٌ زائدةٌ بلا مقابل)",
-    PH.shell([{ id: "a", name: "أ" }]) === null && PH.shell([]) === null);
-  const collapsed = PH.shell([{ id: "a", name: "أ" }, { id: "b", name: "ب" }]);
-  T("★★★ مشروعان فأكثر ⇐ البوّابة تُطوى على البطاقة الجامعة",
-    !!collapsed && collapsed.collapsed === true && /proj-hub-card/.test(collapsed.html));
+    PH.render([{ id: "a", name: "أ" }], "<cards>") === null && PH.render([], "") === null);
+  const collapsed = PH.render(L2, "<i>cards</i>");
+  T("★★★ مشروعان فأكثر ⇐ الإطارُ مطويٌّ، والبطاقاتُ **داخله** جاهزةٌ للفتح بلا إعادة رسم",
+    !!collapsed && collapsed.collapsed === true && /class="proj-hub"/.test(collapsed.html) && /<i>cards<\/i>/.test(collapsed.html));
   PH.setOpen(true);
-  const opened = PH.shell([{ id: "a", name: "أ" }, { id: "b", name: "ب" }]);
-  T("★★★ وبعد الفتح تُعرض البطاقاتُ مسبوقةً بشريط العودة (وإلا حُبس المستخدمُ في الطبقة)",
-    !!opened && opened.collapsed === false && /proj-hub-back/.test(opened.html) &&
-    /ProjectHub\.close\(\)/.test(opened.html));
+  const opened = PH.render(L2, "");
+  T("★★★ وبعد الفتح يحمل الإطارُ صنفَ open ورأسُه يقول «اختر المشروع» و«للرجوع»",
+    !!opened && opened.collapsed === false && /class="proj-hub open"/.test(opened.html) &&
+    /اختر المشروع/.test(opened.html) && /للرجوع/.test(opened.html));
   PH.setOpen(false);
   T("★ وإغلاقُ الطبقة يعيد الطيَّ (البوّابة تُفتح دائماً على البطاقة الجامعة)",
-    PH.isOpen() === false && PH.shell([{ id: "a" }, { id: "b" }]).collapsed === true);
+    PH.isOpen() === false && PH.render(L2, "").collapsed === true);
+  PH.toggle(); T("و toggle يقلب الحالة", PH.isOpen() === true); PH.setOpen(false);
 
-  /* ── (٣) البطاقةُ تفتح الطبقةَ فعلاً — سمةُ onclick مؤهَّلةٌ بالكائن العام ── */
-  const card = PH.cardHTML([{ id: "a", name: "أ" }, { id: "b", name: "ب" }, { id: "c", name: "ج" }]);
-  T("★★ للبطاقة مَعبرٌ يُقيَّم في النطاق العام (ProjectHub.open) — وإلا فبطاقةٌ ميتةٌ بصمت",
-    /onclick="ProjectHub\.open\(\)"/.test(card));
-  T("★ ولوحةُ المفاتيح تفتحها أيضاً (Enter/Space على عنصرٍ ذي tabindex)",
-    /tabindex="0"/.test(card) && /onkeydown=/.test(card));
+  /* ── (٤) الرأسُ زرٌّ حقيقيٌّ بمَعبرٍ مؤهَّلٍ — وإلا فبطاقةٌ ميتةٌ بصمت ── */
+  const card = PH.render(L2, "").html;
+  T("★★ للرأس مَعبرٌ يُقيَّم في النطاق العام (ProjectHub.toggle) و aria-expanded",
+    /onclick="ProjectHub\.toggle\(\)"/.test(card) && /aria-expanded="false"/.test(card) && /<button type="button" class="proj-hub-top"/.test(card));
 
-  /* ── (٤) لمحةُ الأيقونات: أربعٌ ثم عدّادُ الباقي ── */
+  /* ── (٥) «آخر مشروع فتحته»: يُحفَظ على الجهاز، ويُعرض **فقط** إن كان مرئياً ── */
+  T("قبل أيّ اختيارٍ لا صفَّ استئناف", !/proj-hub-resume/.test(card) && PH.lastId() === "");
+  PH.remember({ id: "b", name: "ب" });
+  T("★★ الاختيارُ يُحفظ في localStorage بمعرّفٍ وطابعِ وقت",
+    PH.lastId() === "b" && !!(PH.last() && PH.last().at) && /"id":"b"/.test(store.hail_last_project || ""));
+  const withLast = PH.render(L2, "").html;
+  T("★★★ ثمّ يظهر صفُّ «آخر مشروع فتحته» بمَعبرِ دخولٍ مباشر إليه",
+    /proj-hub-resume/.test(withLast) && /selectProject\('b'\)/.test(withLast) && /آخر مشروع فتحته/.test(withLast));
+  T("★ والرقاقاتُ لا تكرّره — الباقي فقط (أ) تحت «وأيضاً»",
+    /وأيضاً/.test(withLast) && (withLast.match(/proj-hub-names/g) || []).length === 1 &&
+    !/title="ب"/.test(withLast) && /title="أ"/.test(withLast));
+  T("★★★ ومشروعٌ محفوظٌ خرج من رؤية المستخدم لا يُعرض (الرؤيةُ تُقرَّر في _visibleProjectsFor لا هنا)",
+    !/proj-hub-resume/.test(PH.render([{ id: "a", name: "أ" }, { id: "c", name: "ج" }], "").html));
+
+  /* ── (٦) لمحةُ الأسماء: ثلاثٌ ثم عدّادُ الباقي ── */
   const many = [1, 2, 3, 4, 5, 6].map(i => ({ id: "p" + i, name: "م" + i }));
-  const cardMany = PH.cardHTML(many);
-  T("★ اللمحةُ أربعُ أيقوناتٍ ثم «+2» — لا صفٌّ يطول بطول المشاريع",
-    (cardMany.match(/proj-hub-chip/g) || []).length === 5 && /\+2</.test(cardMany));
+  const cardMany = PH.render(many, "").html;
+  T("★ اللمحةُ ثلاثةُ أسماءٍ ثم «+3» — لا صفٌّ يطول بطول المشاريع",
+    (cardMany.match(/title="م\d"/g) || []).length === 3 && /proj-hub-more">\+3</.test(cardMany));
 
-  /* ── (٥) الأمان: اسمُ المشروع بيانٌ لا HTML ── */
-  const evil = PH.cardHTML([{ id: "x", name: '<img src=x onerror="alert(1)">' }, { id: "y", name: "ب" }]);
-  T("★★★ اسمُ المشروع مُهرَّبٌ في سمة العنوان (البوّابةُ تعرض اسماً كتبه الأدمن)",
+  /* ── (٧) الأمان: اسمُ المشروع بيانٌ لا HTML ── */
+  PH.remember({ id: "x" });
+  const evil = PH.render([{ id: "x", name: '<img src=x onerror="alert(1)">' }, { id: "y", name: "ب" }], "").html;
+  T("★★★ اسمُ المشروع مُهرَّبٌ في صفّ الاستئناف والرقاقات (اسمٌ كتبه الأدمن)",
     !/<img src=x/.test(evil) && /&lt;img/.test(evil));
 }
 
