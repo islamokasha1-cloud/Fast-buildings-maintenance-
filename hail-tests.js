@@ -16734,6 +16734,78 @@ function poCountGuards() {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   البطاقةُ الجامعة لبوّابة المشاريع (project-hub.js) — حرّاسُ الارتداد
+
+   البوّابةُ هي البابُ الوحيد للتطبيق: خللٌ فيها يحبس المستخدمَ خارج كل شيء.
+   ولذلك يحرس هذا القسمُ قرارَ الطبقة نفسَه — متى تُطوى البطاقاتُ ومتى لا —
+   وسلامةَ ما تُخرجه من HTML: اسمُ مشروعٍ فيه `<` يجب أن يُهرَّب، لا أن يُحقَن.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function projectHubGuards() {
+  H("البطاقةُ الجامعة لبوّابة المشاريع");
+
+  const PH_PATH = path.resolve(path.dirname(IDX), "project-hub.js");
+  if (!fs.existsSync(PH_PATH)) { T("project-hub.js موجود", false, PH_PATH); return; }
+  const src = fs.readFileSync(PH_PATH, "utf8");
+
+  const vm3 = require("vm");
+  const sandbox = { window: {}, console,
+    esc: v => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;").replace(/"/g, "&quot;"),
+    projectIconMarkup: () => "<svg></svg>", _svgIcon: () => "<svg></svg>" };
+  vm3.createContext(sandbox);
+  let PH = null;
+  try { vm3.runInContext(src, sandbox); PH = sandbox.window.ProjectHub; }
+  catch (e) { T("تُحمَّل ProjectHub", false, String(e.message).slice(0, 140)); return; }
+  T("ProjectHub تُحمَّل وتعرّض كائناً واحداً", !!PH);
+  if (!PH) return;
+
+  const NEED = ["countLabel", "cardHTML", "barHTML", "shell", "isOpen", "setOpen", "open", "close"];
+  const miss = NEED.filter(k => typeof PH[k] !== "function");
+  T("★ الواجهةُ كلُّها مكشوفةٌ للفحص بلا متصفّح", miss.length === 0, miss.join(" · "));
+  if (miss.length) return;
+
+  /* ── (١) تمييزُ العدد بالعربية — مفردٌ ومثنّى وجمعُ قلّةٍ وتمييزٌ منصوب ── */
+  T("★ العدُّ يُصاغ صرفياً صحيحاً (١ · ٢ · ٣–١٠ · ١١+)",
+    PH.countLabel(1) === "مشروع واحد" && PH.countLabel(2) === "مشروعان" &&
+    PH.countLabel(4) === "4 مشاريع" && PH.countLabel(12) === "12 مشروعاً",
+    [PH.countLabel(1), PH.countLabel(2), PH.countLabel(4), PH.countLabel(12)].join(" · "));
+
+  /* ── (٢) قرارُ الطبقة: متى تُطوى البطاقاتُ ومتى لا ── */
+  PH.setOpen(false);
+  T("★★★ مشروعٌ واحدٌ مرئيّ ⇐ لا طبقةَ أصلاً (وإلا نقرةٌ زائدةٌ بلا مقابل)",
+    PH.shell([{ id: "a", name: "أ" }]) === null && PH.shell([]) === null);
+  const collapsed = PH.shell([{ id: "a", name: "أ" }, { id: "b", name: "ب" }]);
+  T("★★★ مشروعان فأكثر ⇐ البوّابة تُطوى على البطاقة الجامعة",
+    !!collapsed && collapsed.collapsed === true && /proj-hub-card/.test(collapsed.html));
+  PH.setOpen(true);
+  const opened = PH.shell([{ id: "a", name: "أ" }, { id: "b", name: "ب" }]);
+  T("★★★ وبعد الفتح تُعرض البطاقاتُ مسبوقةً بشريط العودة (وإلا حُبس المستخدمُ في الطبقة)",
+    !!opened && opened.collapsed === false && /proj-hub-back/.test(opened.html) &&
+    /ProjectHub\.close\(\)/.test(opened.html));
+  PH.setOpen(false);
+  T("★ وإغلاقُ الطبقة يعيد الطيَّ (البوّابة تُفتح دائماً على البطاقة الجامعة)",
+    PH.isOpen() === false && PH.shell([{ id: "a" }, { id: "b" }]).collapsed === true);
+
+  /* ── (٣) البطاقةُ تفتح الطبقةَ فعلاً — سمةُ onclick مؤهَّلةٌ بالكائن العام ── */
+  const card = PH.cardHTML([{ id: "a", name: "أ" }, { id: "b", name: "ب" }, { id: "c", name: "ج" }]);
+  T("★★ للبطاقة مَعبرٌ يُقيَّم في النطاق العام (ProjectHub.open) — وإلا فبطاقةٌ ميتةٌ بصمت",
+    /onclick="ProjectHub\.open\(\)"/.test(card));
+  T("★ ولوحةُ المفاتيح تفتحها أيضاً (Enter/Space على عنصرٍ ذي tabindex)",
+    /tabindex="0"/.test(card) && /onkeydown=/.test(card));
+
+  /* ── (٤) لمحةُ الأيقونات: أربعٌ ثم عدّادُ الباقي ── */
+  const many = [1, 2, 3, 4, 5, 6].map(i => ({ id: "p" + i, name: "م" + i }));
+  const cardMany = PH.cardHTML(many);
+  T("★ اللمحةُ أربعُ أيقوناتٍ ثم «+2» — لا صفٌّ يطول بطول المشاريع",
+    (cardMany.match(/proj-hub-chip/g) || []).length === 5 && /\+2</.test(cardMany));
+
+  /* ── (٥) الأمان: اسمُ المشروع بيانٌ لا HTML ── */
+  const evil = PH.cardHTML([{ id: "x", name: '<img src=x onerror="alert(1)">' }, { id: "y", name: "ب" }]);
+  T("★★★ اسمُ المشروع مُهرَّبٌ في سمة العنوان (البوّابةُ تعرض اسماً كتبه الأدمن)",
+    !/<img src=x/.test(evil) && /&lt;img/.test(evil));
+}
+
 function staffTasksGuards() {
   H("مهامُّ الموظفين — الغرفةُ المغلقة والتكليفُ الجماعيّ");
 
@@ -17126,6 +17198,7 @@ function pageScrollResetGuards() {
   contractsTenantScopeGuards();
   ticketMultiPhotoGuards();
   staffTasksGuards();
+  projectHubGuards();
   poCountGuards();
   rulesCoverageGuards();
   pageScrollResetGuards();

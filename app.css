@@ -905,6 +905,20 @@ html[data-theme="dark"] .login-error{background:#3a1717;border-color:#6e2a2a}
 .project-card-name{font-size:14.5px;font-weight:800;color:var(--primary);margin-bottom:4px;line-height:1.3}
 .project-card-desc{font-size:10.5px;color:var(--muted);line-height:1.4}
 .project-card-badge{position:absolute;top:10px;left:10px;background:#22c55e;color:#fff;font-size:9px;font-weight:800;padding:2px 7px;border-radius:6px}
+/* ═══ v18.9am: البطاقةُ الجامعة للمشاريع — مستوى أوّلٌ فوق بطاقات المشاريع ═══ */
+.proj-hub-card{grid-column:1/-1;padding:26px 18px 22px;display:block}
+.proj-hub-card:focus-visible{outline:2px solid var(--primary);outline-offset:3px}
+.proj-hub-preview{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;flex-wrap:wrap}
+.proj-hub-chip{width:34px;height:34px;border-radius:10px;background:rgba(27,58,107,0.07);border:1px solid var(--border);color:var(--primary);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.proj-hub-chip svg{width:18px;height:18px;stroke-width:2}
+.proj-hub-chip img{width:24px;height:24px;object-fit:contain;border-radius:6px}
+.proj-hub-more{font-size:11px;font-weight:800;color:var(--muted)}
+.proj-hub-bar{grid-column:1/-1;display:flex;align-items:center;gap:10px;margin-bottom:2px}
+.proj-hub-back{display:inline-flex;align-items:center;gap:5px;background:rgba(27,58,107,0.06);border:1px solid var(--border);border-radius:10px;padding:7px 12px;color:var(--primary);font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;transition:background .15s}
+.proj-hub-back svg{width:14px;height:14px}
+.proj-hub-back:hover{background:rgba(27,58,107,0.12)}
+.proj-hub-bar-title{font-size:12.5px;font-weight:800;color:var(--primary)}
+.proj-hub-bar-title span{color:var(--muted);font-weight:700}
 .project-add-btn{width:100%;background:rgba(27,58,107,0.05);border:2px dashed rgba(27,58,107,0.28);border-radius:16px;padding:18px;color:var(--primary);font-size:13px;font-weight:800;cursor:pointer;transition:background .15s,border-color .15s;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px}
 .project-add-btn:hover{background:rgba(27,58,107,0.1);border-color:rgba(27,58,107,0.45)}
 .project-logout-link{text-align:center;margin-top:18px}
