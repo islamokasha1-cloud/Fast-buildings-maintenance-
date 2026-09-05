@@ -671,7 +671,12 @@ function predelivery() {
     /* ثم لقيد v1.24: عنوانُ قائمةِ الأرقام وتصفيةُ الصفوف الصفرية — أسطرٌ في
        `_staffSectionHtml` و`computeStaffKPIs` **داخل وحدة `purchase-kpi`**: إصلاحُ
        عرضٍ في موضعه على منطقٍ قائم، والنقلُ بحجّة الإصلاح ممنوعٌ نصّاً (CLAUDE.md). */
-    const IDX_CEILING = 39651;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 39651 إلى 39669 — ‏١٨ سطراً لبحث الأصول بالرقم التسلسلي
+       (`_searchHit` · `assetMatchesQuery` · `ppmPlanMatchesQuery` وترويستُها).
+       **مكانُها النواةُ لا وحدة**: **إصلاحٌ في موضعه** على منطقٍ قائم — فلترا
+       `renderAssets` و`renderPPM` هنا، ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة إصلاحه
+       ممنوعٌ نصّاً (CLAUDE.md). */
+    const IDX_CEILING = 39669;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -16116,6 +16121,68 @@ function ppmScheduleRepairGuards() {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   بحثُ الأصول بالرقم التسلسلي — الحقلُ الوحيدُ المكتوبُ على الجهاز
+   شكوى المالك: البلاغ يعرض `AMH-HL-MB-F8-195-AC-0232`، ونسخُه إلى بحث سجل
+   الأصول يردّ «لا توجد نتائج مطابقة». السببُ أن الفلتر كان يقارن `name`
+   و`id` و`building` وحدَها، و`serialNo` ليس أيّاً منها. الدالتان تُستخرجان
+   من index.html وتُنفَّذان فعلاً — لا قراءةَ نصٍّ فحسب.
+   ══════════════════════════════════════════════════════════════════════ */
+function assetSerialSearchGuards() {
+  H("سجل الأصول وخطط PPM — البحث بالرقم التسلسلي");
+
+  const a = HTML.indexOf("function _searchHit(needle, fields){");
+  const b = HTML.indexOf("\nfunction renderAssets(){", a);
+  T("دوالُّ المطابقة النقية موجودة قبل renderAssets", a >= 0 && b > a);
+  if (a < 0 || b < a) return;
+  const M = new Function(HTML.slice(a, b) +
+    "\nreturn { assetMatchesQuery, ppmPlanMatchesQuery };")();
+
+  const AST = { id: "AST-26-0032", name: "مكيف", building: "مبنى الأمانة الرئيسي",
+                serialNo: "AMH-HL-MB-F8-195-AC-0232", model: "Carrier Split",
+                subLocation: "غرفة 12", subType: "Split", type: "تكييف", floor: "الثامن" };
+
+  T("★★ الرقم التسلسلي كما هو في البلاغ يُطابق الأصل",
+    M.assetMatchesQuery(AST, "AMH-HL-MB-F8-195-AC-0232") === true);
+  T("★★ لصقُه بمسافاتٍ زائدة أو بحروفٍ صغيرة يُطابق أيضاً",
+    M.assetMatchesQuery(AST, "  amh-hl-mb-f8-195-ac-0232  ") === true &&
+    M.assetMatchesQuery(AST, "F8-195") === true);
+  T("★ الاسم والمعرّف والمبنى والموديل والموقع الفرعي تبقى مطابِقة",
+    ["مكيف", "AST-26-0032", "الأمانة", "carrier", "غرفة 12", "الثامن"]
+      .every(q => M.assetMatchesQuery(AST, q) === true));
+  T("★ بحثٌ لا يطابق شيئاً يُرجع false — والفارغ يُمرّر الكل",
+    M.assetMatchesQuery(AST, "XYZ-000") === false &&
+    M.assetMatchesQuery(AST, "") === true && M.assetMatchesQuery(AST, "   ") === true);
+  T("★ أصلٌ ناقصُ الحقول لا يرمي استثناءً (بيانات قديمة بلا name)",
+    M.assetMatchesQuery({ id: "AST-26-0001" }, "AST-26") === true &&
+    M.assetMatchesQuery({ id: "AST-26-0001" }, "مكيف") === false &&
+    M.assetMatchesQuery(null, "مكيف") === false);
+
+  const PLAN = { id: "PPM-2026-0031", name: "خطة ربع سنوية", building: "مبنى الأمانة الرئيسي",
+                 assetId: "AST-26-0032" };
+  T("★★ خطة PPM تُطابق الرقمَ التسلسلي عبر الأصل المرتبط بها",
+    M.ppmPlanMatchesQuery(PLAN, "AMH-HL-MB-F8-195-AC-0232", AST) === true &&
+    M.ppmPlanMatchesQuery(PLAN, "AMH-HL-MB-F8-195-AC-0232", undefined) === false);
+  T("★ اسمُ الخطة ومعرّفُها ومبناها تبقى مطابِقة",
+    M.ppmPlanMatchesQuery(PLAN, "ربع", null) === true &&
+    M.ppmPlanMatchesQuery(PLAN, "ppm-2026-0031", null) === true &&
+    M.ppmPlanMatchesQuery(PLAN, "", null) === true);
+
+  // ── الوصل: الفلتران يستدعيان الدالتين فعلاً، لا مقارنةً قديمةً بجانبهما ──
+  T("★★ renderAssets يُفلتر عبر assetMatchesQuery وحدَها",
+    /if\(!assetMatchesQuery\(a, search\)\) return false;/.test(HTML) &&
+    !/!a\.name\.toLowerCase\(\)\.includes\(q\) && !\(a\.id\|\|""\)/.test(HTML));
+  T("★★ renderPPM يبني خريطة الأصول ويُفلتر عبر ppmPlanMatchesQuery",
+    /const _ppmAstById = new Map\(assets\.map\(a=>\[a\.id,a\]\)\);/.test(HTML) &&
+    /if\(!ppmPlanMatchesQuery\(p, search, _ppmAstById\.get\(p\.assetId\)\)\) return false;/.test(HTML));
+  T("★ بحثُ البلاغات (اليومية والأرشيف) يشمل الرقمَ التسلسلي ورقمَ الجهاز",
+    (HTML.match(/\(t\.assetSerial\|\|""\)\.toLowerCase\(\)\.includes\(q\)/g) || []).length >= 2 &&
+    (HTML.match(/\(t\.assetId\|\|""\)\.toLowerCase\(\)\.includes\(q\)/g) || []).length >= 2);
+  T("★ نصُّ صندوقَي البحث يُعلن الرقمَ التسلسلي",
+    /id="asset-search" placeholder="🔍 بحث بالاسم أو الرقم التسلسلي أو الموديل أو المبنى\.\.\."/.test(HTML) &&
+    /id="ppm-search" placeholder="🔍 بحث بالاسم أو الرقم التسلسلي أو المبنى\.\.\."/.test(HTML));
+}
+
 function assetPPMCoverageGuards() {
   H("سجل الأصول — تغطية خطط الصيانة وسجل الصيانة");
 
@@ -17217,6 +17284,7 @@ function pageScrollResetGuards() {
   ppmAdvanceOnDueGuards();
   ppmScheduleRepairGuards();
   assetPPMCoverageGuards();
+  assetSerialSearchGuards();
   ppmAutoNameGuards();
   ppmNextDueFieldGuards();
   ppmSecondDueGuards();
