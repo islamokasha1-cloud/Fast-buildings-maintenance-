@@ -784,18 +784,7 @@ html[data-theme="dark"] #login-screen{background:radial-gradient(135% 100% at 50
 .lf-logo{width:106px;height:106px;object-fit:contain;align-self:flex-start;margin-bottom:22px}
 .lb-co{font-size:25px;font-weight:900;color:#fff;letter-spacing:-.3px;line-height:1.3}
 .lb-desc{font-size:12px;font-weight:600;color:rgba(255,255,255,.6);margin-top:6px;line-height:1.65}
-/* الرادار: مسحٌ ذهبيٌّ بطيءٌ من مركز الحلقات — إشارةُ «مركز العمليات» نفسُها. الحركةُ المستمرّةُ الوحيدة في الشاشة. */
-.lb-sweep{position:absolute;z-index:-1;width:170%;aspect-ratio:1;left:26%;top:116%;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;opacity:.9;
-  background:conic-gradient(from 0deg, rgba(230,189,99,0) 0deg, rgba(230,189,99,0) 300deg, rgba(230,189,99,.16) 352deg, rgba(230,189,99,.32) 360deg);animation:lbSweep 11s linear infinite}
-@keyframes lbSweep{to{transform:translate(-50%,-50%) rotate(360deg)}}
 @keyframes lbBreathe{from{transform:scale(1)}to{transform:scale(1.045)}}
-/* ما يفعله النظام — ثلاثةُ سطورٍ بدل الفراغ */
-.lb-vals{list-style:none;margin:24px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}
-.lb-vals li{display:flex;align-items:center;gap:11px;font-size:12.5px;font-weight:700;color:rgba(255,255,255,.86);animation:fieldIn .6s cubic-bezier(.2,.7,.2,1) both}
-.lb-vals li:nth-child(1){animation-delay:.45s}.lb-vals li:nth-child(2){animation-delay:.55s}.lb-vals li:nth-child(3){animation-delay:.65s}
-.lb-vals .vi{width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
-.lb-vals .vi svg{width:15px;height:15px}
-.lb-vals small{display:block;font-size:10.5px;font-weight:600;color:rgba(255,255,255,.5);margin-top:1px}
 /* الإصدارُ تذييلٌ خافتٌ تحت البطاقة — لا نصَّ تصحيحٍ وسط لوحةٍ تعريفية */
 .lb-ver{font-family:inherit;font-variant-numeric:tabular-nums;font-size:11px;font-weight:600;letter-spacing:.2px;color:var(--muted);opacity:.85;margin-top:14px;position:relative;z-index:1;animation:fieldIn .7s cubic-bezier(.2,.7,.2,1) .7s both}
 
@@ -843,11 +832,11 @@ html[data-theme="dark"] .login-error{background:#3a1717;border-color:#6e2a2a}
   .login-brand::after{inset-inline:24px}
   .lf-logo{width:74px;height:74px;margin-bottom:14px}
   .lb-co{font-size:18px}
-  .lb-desc,.lb-vals{display:none}
+  .lb-desc{display:none}
   .lb-ver{margin-top:10px}
   .login-form{padding:28px 28px 30px}
 }
-@media(prefers-reduced-motion:reduce){.login-shell,.login-form .form-group,.login-btn,.login-brand::before,.login-brand::after,.lb-sweep,.lb-vals li,.lb-ver{animation:none}.login-brand::after{transform:none}}
+@media(prefers-reduced-motion:reduce){.login-shell,.login-form .form-group,.login-btn,.login-brand::before,.login-brand::after,.lb-ver{animation:none}.login-brand::after{transform:none}}
 
 /* PROJECT PICKER SCREEN */
 #project-screen{display:flex;position:fixed;inset:0;z-index:999;align-items:center;justify-content:flex-start;padding:22px 24px;flex-direction:column;overflow:auto;
