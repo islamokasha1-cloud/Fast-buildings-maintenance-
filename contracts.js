@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3085";
+var MODULE_BUILD = "v18.9.3087";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -3514,6 +3514,70 @@ function extDueNet(e, c, exts){
   return r2(extNet(e, c, extCtx(e, c, exts)).net);
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   سجلُّ المستخلصات عبر العقود — دوالُّ نقيّة   [صفحةُ «العقود والمستخلصات»]
+
+   المشكلة (طلبُ المالك): المستخلصُ مدفونٌ في تبويبٍ **داخل** بطاقة عقده. فمن
+   أراد أن يعرف «ما المستخلصاتُ التي تنتظرني الآن؟» فتح كلَّ عقدٍ على حدة ثمّ
+   تبويبَه — والسؤالُ في جوهره سؤالٌ عرضيٌّ عبر العقود لا رأسيٌّ داخل عقد.
+
+   المبدأ: **الصافي يُقرأ من `extDueNet` نفسِها** التي يقرؤها زرُّ السداد وبطاقةُ
+   المالية — لا حسبةٌ ثانيةٌ في الشاشة تنحرف عن الأولى بأوّل خصمٍ يُضاف.
+   ومستخلصٌ لعقدٍ خارجَ النطاق يسقط: لا يُعرض «مستخلصُ عقدٍ لا تراه».
+   ════════════════════════════════════════════════════════════════════ */
+function extractLedger(contracts, extracts, projNameOf){
+  var by = {}, all = Array.isArray(extracts) ? extracts : [];
+  (Array.isArray(contracts)?contracts:[]).forEach(function(c){ if(c && c.id) by[c.id] = c; });
+  var rows = [];
+  all.forEach(function(e){
+    if(!e) return;
+    var c = by[e.contractId];
+    if(!c) return;                       // عقدٌ خارجَ النطاق ⇐ مستخلصُه لا يُعرض
+    var gate = extGateOwner(e.status);
+    rows.push({
+      id: e.id || "", contractId: c.id, ext: e, contract: c,
+      title: c.title || "", vendorName: c.vendorName || "",
+      projectName: (typeof projNameOf === "function" ? (projNameOf(c) || "") : ""),
+      period: e.period || "", status: e.status || "", isFinal: !!e.isFinal,
+      net: extDueNet(e, c, all),
+      gate: gate ? gate.lbl : "",
+      awaiting: !!gate,                   // بوّابةٌ تنتظر توقيعاً أو صرفاً
+      paid: e.status === "ext_paid",
+      at: String(e.updatedAt || e.createdAt || "")
+    });
+  });
+  /* الأحدثُ أوّلاً — والمعرّفُ فاصلٌ حتميٌّ حين يتساوى الطابعُ أو يغيب،
+     فلا يتبدّل ترتيبُ الصفحة بين رسمتين على البيانات نفسِها. */
+  rows.sort(function(a,b){
+    if(a.at !== b.at) return a.at < b.at ? 1 : -1;
+    return a.id < b.id ? 1 : (a.id > b.id ? -1 : 0);
+  });
+  return rows;
+}
+/* أرقامُ شريط المستخلصات — تُشتقّ من الصفوف نفسِها التي تُرسم، فلا يَعِد
+   الشريطُ بما لا تعرضه القائمة. */
+function extLedgerStats(rows){
+  var r = Array.isArray(rows) ? rows : [];
+  var out = { total:r.length, awaiting:0, paid:0, awaitingNet:0, paidNet:0 };
+  r.forEach(function(x){
+    if(x.awaiting){ out.awaiting++; out.awaitingNet += Number(x.net)||0; }
+    if(x.paid){ out.paid++; out.paidNet += Number(x.net)||0; }
+  });
+  out.awaitingNet = r2(out.awaitingNet);
+  out.paidNet     = r2(out.paidNet);
+  return out;
+}
+/* بحثُ سجلّ المستخلصات — رقمُ المستخلص أو عقدِه أو الطرفُ أو المشروعُ أو
+   عنوانُ العمل أو الفترة. بالتطبيع العربيّ نفسِه، فلا يفترق عن بقية الشاشات. */
+function extMatchesQuery(row, raw){
+  var q = normName(raw);
+  if(!q) return true;
+  var r = row || {};
+  var hay = normName(r.id) + " " + normName(r.contractId) + " " + normName(r.vendorName) + " " +
+            normName(r.title) + " " + normName(r.projectName) + " " + normName(r.period);
+  return hay.indexOf(q) !== -1;
+}
+
 function createExtract(contract, draft){
   var database=_db(); if(!database) return Promise.reject(new Error("لا اتصال بقاعدة البيانات"));
   if(["project_manager","admin"].indexOf(_role()) === -1) return Promise.reject(new Error("إعداد المستخلص لمدير المشروع أو الأدمن"));
@@ -6790,6 +6854,10 @@ function doPay(){
 /* ════════════════════════════════════════════════════════════════════
    ٧-ج) العقود — الواجهة  [المرحلة ٣]
    ════════════════════════════════════════════════════════════════════ */
+/* اسمُ الصفحة (طلبُ المالك): صارت تحمل المستخلصاتِ كما تحمل العقود، فاسمُها
+   يقول ما فيها. ثابتٌ واحدٌ يقرؤه العنوانُ وزرُّ القائمة الجانبية معاً — واسمان
+   في موضعين يفترقان بأوّل تعديل. */
+var CTRS_PAGE_TITLE = "العقود والمستخلصات";
 var _cFilter = { q:"", status:"", tab:"running" };
 var _cOpen   = null;
 var _cTab    = "overview";
@@ -6841,15 +6909,22 @@ function paintCtrs(){
    المنتهي (منتهٍ بانتظار الضمان · مقفل · مفسوخ) سجلٌّ يُرجَع إليه لا عملٌ ينتظر،
    وخلطُه بالجاري يدفن ما يحتاج المتابعةَ فعلاً بين ما أُغلق. `ctrTabOf` دالةٌ
    نقيةٌ واحدةٌ يقرؤها العدُّ والقائمةُ والشريطُ معاً — نهجُ `reqTabOf` نفسُه. */
+/* والتبويبُ الثالث «المستخلصات» (طلبُ المالك) عرضيٌّ لا رأسيّ: يجمع مستخلصاتِ
+   العقود كلِّها في مكانٍ واحد، لأنّ السؤالَ الذي يُطرَح صباحاً «ما الذي ينتظرني؟»
+   لا «ما مستخلصاتُ هذا العقد؟» — والثاني له تبويبُه داخلَ بطاقة العقد كما كان. */
 var CTR_TABS = [
   { key:"running",  lbl:"العقود الجارية",  icon:"briefcase" },
-  { key:"finished", lbl:"العقود المنتهية", icon:"lock" }
+  { key:"finished", lbl:"العقود المنتهية", icon:"lock" },
+  { key:"extracts", lbl:"المستخلصات",      icon:"banknote" }
 ];
 var CTR_FINISHED = ["ctr_completed","ctr_closed","ctr_terminated"];
 function ctrTabOf(c){
   return CTR_FINISHED.indexOf((c||{}).status) !== -1 ? "finished" : "running";
 }
-function ctrCurTab(){ return _cFilter.tab==="finished" ? "finished" : "running"; }
+var CTR_TAB_KEYS = CTR_TABS.map(function(t){ return t.key; });
+function ctrCurTab(){ return CTR_TAB_KEYS.indexOf(_cFilter.tab)!==-1 ? _cFilter.tab : "running"; }
+var EXTS_PAGE_SIZE = 25;   // صفوفُ جدولٍ لا بطاقات — أكثفُ من شبكة الأطراف
+var _xPage = 1;            // صفحةُ سجلّ المستخلصات (تُصفَّر مع كل ترشيح)
 
 function ctrListHTML(){
   /* نفسُ نطاق المشروع الحالي المطبَّق على طلبات التعاقد (ctDocInTenant). */
@@ -6865,14 +6940,20 @@ function ctrListHTML(){
     return true;
   });
 
-  var head=headHTML("العقود","الالتزاماتُ النافذة — قيمتُها ومدّتُها ومستخلصاتُها.","", "briefcase");
+  var head=headHTML(CTRS_PAGE_TITLE,"الالتزاماتُ النافذة — قيمتُها ومدّتُها ومستخلصاتُها.","", "briefcase");
 
-  /* شريطُ التبويبين — العدُّ من `ctrTabOf` نفسِها فلا يَعِد تبويبٌ بما لا يعرضه. */
+  /* سجلُّ المستخلصات يُبنى مرّةً هنا: يقرؤه عدَّادُ التبويب **والقائمةُ نفسُها**،
+     فلا يَعِد التبويبُ برقمٍ ثمّ يعرض غيرَه. */
+  var ledger = extractLedger(all, _exts, _projName);
+
+  /* شريطُ التبويبات — العدُّ من الدالّة التي تعرض، لا من عدٍّ ثانٍ يوازيها. */
   var tabsBar='<div class="ct-tabs">'+CTR_TABS.map(function(t){
-    var n=all.filter(function(c){ return ctrTabOf(c)===t.key; }).length;
+    var n = t.key==="extracts" ? ledger.length : all.filter(function(c){ return ctrTabOf(c)===t.key; }).length;
     return '<button type="button" class="ct-tab'+(tab===t.key?" on":"")+'" onclick="contracts.ctrsTab(\''+t.key+'\')">'+
       _icn(t.icon,"ic-sm")+' '+t.lbl+' <span class="num">'+n+'</span></button>';
   }).join("")+'</div>';
+
+  if(tab==="extracts") return head + tabsBar + extListHTML(ledger);
 
   /* لكلِّ تبويبٍ شريطُه: الجاري يسأل «ماذا ينتظرني؟»، والمنتهي «كيف انتهى؟». */
   var strip;
@@ -6946,6 +7027,82 @@ function ctrListHTML(){
   return head+tabsBar+strip+filters+manualLine+body;
 }
 
+/* ── شاشةُ سجلّ المستخلصات (التبويب الثالث) ──
+   جدولٌ لا شبكةُ بطاقات: الصفوفُ تُقارَن رأسياً — «كم صافي هذا؟ ومتى ذاك؟» —
+   والبطاقةُ تُقرأ واحدةً واحدة. وكلُّ صفٍّ بابٌ إلى المستخلص في بطاقة عقده:
+   لا نسخةَ ثانيةً من شاشة المستخلص تُصان مرّتين. */
+function extListHTML(ledger){
+  var q = _cFilter.q;
+  var list = ledger.filter(function(r){
+    if(_cFilter.status && r.status !== _cFilter.status) return false;
+    return extMatchesQuery(r, q);
+  });
+  var st = extLedgerStats(ledger);
+
+  var strip = '<div class="ct-strip">'+
+    '<div class="ct-stat"><span class="l">المستخلصات</span><span class="v">'+st.total+'</span></div>'+
+    '<div class="ct-stat'+(st.awaiting?' warn':'')+'"><span class="l">بانتظار إجراء</span><span class="v">'+st.awaiting+'</span></div>'+
+    '<div class="ct-stat'+(st.awaiting?' warn':'')+'"><span class="l">صافيها المعلَّق (ر.س)</span><span class="v">'+money0(st.awaitingNet)+'</span></div>'+
+    '<div class="ct-stat"><span class="l">مسدَّدة</span><span class="v">'+st.paid+'</span></div>'+
+    '<div class="ct-stat"><span class="l">المسدَّد صافياً (ر.س)</span><span class="v">'+money0(st.paidNet)+'</span></div>'+
+  '</div>';
+
+  /* خياراتُ الحالة من `EXT_STATUS` — حالاتُ المستخلص لا حالاتُ العقد: خيارٌ من
+     الجدول الخطأ وعدٌ بقائمةٍ فارغةٍ دائماً. */
+  var filters='<div class="ct-filters">'+
+    '<input class="form-input ct-search" id="ct-x-q" placeholder="ابحث برقم المستخلص أو العقد أو الطرف أو المشروع أو الفترة" value="'+_esc(q)+'" oninput="contracts.filterCtrs(\'q\',this.value)">'+
+    '<select class="form-input" onchange="contracts.filterCtrs(\'status\',this.value)">'+
+      '<option value="">كل الحالات</option>'+
+      Object.keys(EXT_STATUS).map(function(k){
+        return '<option value="'+k+'"'+(_cFilter.status===k?' selected':'')+'>'+_esc(EXT_STATUS[k])+'</option>';
+      }).join("")+
+    '</select><div></div>'+
+  '</div>';
+
+  if(_cError)
+    return strip+'<div class="card" style="text-align:center;padding:30px 18px"><div style="color:var(--danger);font-size:13px;font-weight:700">'+_icn("alertTriangle")+' '+_esc(_cError)+'</div></div>';
+  if(!_cLoaded || !_eLoaded)
+    return strip+'<div class="card" style="text-align:center;padding:30px 18px;color:var(--muted);font-size:13px">جارٍ التحميل…</div>';
+  if(!ledger.length)
+    return strip+'<div class="card ct-empty">'+
+      '<div class="ct-empty-ic">'+_svg("banknote")+'</div>'+
+      '<div class="ct-empty-t">لا مستخلصات بعد</div>'+
+      '<div class="ct-empty-s">المستخلصُ يُعَدّ من داخل عقدٍ سارٍ — افتَح العقد ثمّ تبويبَ «المستخلصات» واضغط «مستخلص جديد».</div>'+
+    '</div>';
+  if(!list.length)
+    return strip+filters+'<div class="card" style="text-align:center;padding:26px 18px;color:var(--muted);font-size:13px">لا نتائج تطابق البحث.</div>';
+
+  var pg = pageSlice(list, _xPage, EXTS_PAGE_SIZE);
+  _xPage = pg.page;
+
+  var rows = pg.items.map(function(r){
+    /* «عند مَن يقف» بجانب الحالة — الحالةُ تقول أين هو، والاسمُ يقول مَن يُنتظَر.
+       وبانتظار المالية بلا نسخةٍ موقّعةٍ حالةٌ ثالثةٌ تُقال صراحةً: السدادُ ممنوعٌ
+       بدونها (يحرسه `extPayGuard`)، فإخفاؤها يترك الماليةَ تنتظر ما لا يأتي. */
+    var needSig = r.status==="ext_pending_finance" && !extSignature(r.ext);
+    var who = needSig ? "بانتظار نسخةٍ موقّعةٍ من المقاول"
+                      : (r.gate && !extIsFinal(r.status) ? ("عند "+r.gate) : "");
+    return '<tr class="fa-click" style="cursor:pointer" onclick="contracts.openExtFrom(\''+_jq(r.id)+'\',\''+_jq(r.contractId)+'\')">'+
+      '<td><span class="num">'+_esc(r.id)+'</span>'+(r.isFinal?' <span class="ct-doc s-ok">ختاميّ</span>':'')+'</td>'+
+      '<td><div style="font-weight:700">'+_esc(r.title||r.contractId)+'</div>'+
+        '<div style="font-size:10.5px;color:var(--muted)"><span class="num">'+_esc(r.contractId)+'</span>'+
+        (r.projectName?' <span class="ct-dot">·</span> '+_esc(r.projectName):'')+'</div></td>'+
+      '<td>'+_esc(r.vendorName||"—")+'</td>'+
+      '<td>'+_esc(r.period||"—")+'</td>'+
+      '<td class="num"><b>'+money(r.net)+'</b></td>'+
+      '<td>'+extBadge(r.status)+(who?' <span class="ct-x-who'+(needSig?" warn":"")+'">'+_esc(who)+'</span>':'')+'</td>'+
+    '</tr>';
+  }).join("");
+
+  return strip+filters+
+    '<div class="card ct-sec">'+
+      '<div class="ct-table-wrap"><table class="ct-table"><thead><tr>'+
+        '<th>المستخلص</th><th>العقد</th><th>الطرف</th><th>الفترة</th><th>الصافي</th><th>الحالة</th>'+
+      '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      pagerHTML(pg, "contracts.setExtPage")+
+    '</div>';
+}
+
 /* بلاغُ المالك: «العقدُ لا يُظهر أنّ له مستخلصاً ولا عند مَن يقف». وكان المستخلصُ
    مدفوناً في تبويبٍ داخل بطاقة العقد: لا تعرفه إلا بفتح العقد ثمّ التبويب. وهو
    **حالةُ العقد الحيّةُ الوحيدة** التي تتحرّك شهرياً — فمن يفتح صفحةَ العقود يريد
@@ -6992,9 +7149,12 @@ function ctrTileHTML(c){
 
 function ctrCardHTML(id){
   var c=contractById(id);
-  if(!c) return headHTML("العقود","","", "briefcase")+'<div class="card">تعذّر العثور على العقد.</div>';
+  if(!c) return headHTML(CTRS_PAGE_TITLE,"","", "briefcase")+'<div class="card">تعذّر العثور على العقد.</div>';
   var role=_role();
-  var back='<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.backToCtrs()">'+_icn("rotateCcw")+' كل العقود</button>';
+  /* الرجوعُ يقول إلى أين يرجع: من دخل من تبويب المستخلصات يعود إليه، فزرٌّ
+     يقول «كل العقود» ثمّ يفتح جدولَ مستخلصاتٍ يُقرأ خطأً لا اختصاراً. */
+  var back='<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.backToCtrs()">'+_icn("rotateCcw")+
+    ' '+(ctrCurTab()==="extracts" ? "كل المستخلصات" : "كل العقود")+'</button>';
   var acts=ctrActionsFor(c.status, role);
   var tools='<button class="btn btn-ghost btn-sm" onclick="contracts.printCtr()">'+_icn("printer","ic-sm")+' طباعة العقد</button> ';
   if(c.status==="ctr_pending_signature" && ctrCanTransit("sign","ctr_pending_signature",role)){
@@ -8216,16 +8376,35 @@ function doCancelChange(){
 }
 
 function filterCtrs(k,v){
-  _cFilter[k]=v||""; paintCtrs();
-  if(k==="q"){ var i=document.getElementById("ct-c-q"); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length,i.value.length); }catch(e){} } }
+  _cFilter[k]=v||"";
+  _xPage=1;                 // ترشيحٌ جديدٌ ⇐ الصفحةُ الأولى، وإلا فنتائجُ ثلاثٌ في صفحةٍ سابعةٍ فارغة
+  paintCtrs();
+  if(k==="q"){
+    // خانةُ البحث تختلف بين تبويب العقود وتبويب المستخلصات — يُعاد التركيزُ إلى الحيّة منهما
+    var i=document.getElementById("ct-c-q")||document.getElementById("ct-x-q");
+    if(i){ i.focus(); try{ i.setSelectionRange(i.value.length,i.value.length); }catch(e){} }
+  }
+}
+/* الانتقالُ بين صفحات سجلّ المستخلصات — والعودةُ إلى رأس الصفحة معه. */
+function setExtPage(n){
+  _xPage = Math.max(1, Math.floor(Number(n) || 1));
+  paintCtrs();
+  var el = document.getElementById("page-"+PAGE_CTRS);
+  if(el){ try{ el.scrollIntoView({ behavior:"smooth", block:"start" }); }catch(e){ el.scrollIntoView(true); } }
 }
 /* تبديلُ تبويب القائمة يُصفّر فلترَ الحالة وحدَه — حالاتُ التبويبين لا تتقاطع،
    ويبقى البحثُ فهو سؤالُ المستخدم لا سؤالَ التبويب. (الاسمُ `ctrsTab` لأن
    `ctrTab` محجوزٌ لتبويبات بطاقة العقد المفتوح.) */
 function ctrsTab(t){
-  var to = t==="finished" ? "finished" : "running";
+  var to = CTR_TAB_KEYS.indexOf(t)!==-1 ? t : "running";
   if(to===ctrCurTab()) return;
+  /* والانتقالُ من تبويب العقود إلى المستخلصات (أو العكس) يُصفّر البحثَ أيضاً:
+     حالاتُ المستندَين لا تتقاطع، ونصُّ بحثٍ عن رقم عقدٍ لا يجد مستخلصاً بمعرّفه
+     — فيبقى المستخدمُ أمام «لا نتائج» وهو لم يكتب شيئاً في هذا التبويب. */
+  var crossed = (to==="extracts") !== (ctrCurTab()==="extracts");
   _cFilter.tab=to; _cFilter.status="";
+  if(crossed) _cFilter.q="";
+  _xPage=1;
   paintCtrs();
 }
 function openCtr(id){ _cOpen=id; _cTab="overview"; _extDraft=null; _extOpen=null; _clEdit=null; _chgDraft=null; _chgOpen=null; paintCtrs(); }
@@ -9797,6 +9976,9 @@ function injectCSS(){
 ".ct-file-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr}",
 ".ct-auto{font-size:9.5px;font-weight:700;color:var(--sla-ok);display:flex;align-items:center;gap:3px;margin-top:3px}",
 ".ct-save-bar{display:flex;gap:8px;justify-content:flex-end;position:sticky;bottom:0;background:var(--bg);padding:12px 0 4px;border-top:1px solid var(--border)}",
+/* «عند مَن يقف» بجانب حالة المستخلص في سجلّه العرضيّ */
+".ct-x-who{font-size:10px;color:var(--muted);font-weight:700;white-space:nowrap}",
+".ct-x-who.warn{color:var(--sla-warn)}",
 /* شريطُ الصفحات — تحت الشبكة، بخطٍّ فاصلٍ يفصله عن آخر بطاقة */
 ".ct-pager{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border)}",
 ".ct-pager-n{font-size:12px;color:var(--muted);font-weight:700}",
@@ -9856,7 +10038,7 @@ function injectSidebarGroup(){
   grp.style.maxHeight = "0";
 
   [{ id:"nav-contract-reqs-btn", page:PAGE_REQS,    icon:"fileText", lbl:"طلبات التعاقد وأوامر الدفع" },
-   { id:"nav-contracts-btn",     page:PAGE_CTRS,    icon:"briefcase",lbl:"العقود" },
+   { id:"nav-contracts-btn",     page:PAGE_CTRS,    icon:"briefcase",lbl:CTRS_PAGE_TITLE },
    { id:"nav-vendors-btn",       page:PAGE_VENDORS, icon:"hardHat",  lbl:"سجل الأطراف" }].forEach(function(b){
     var btn = document.createElement("button");
     btn.className = "sidebar-nav-btn sidebar-child";
@@ -9942,7 +10124,7 @@ window.contracts = {
   addContact: addContact, delContact: delContact,
   setEntity: setEntity,
   addTrade: addTrade, addTradeText: addTradeText, delTrade: delTrade,
-  clearTradeFilter: clearTradeFilter, setVendorPage: setVendorPage,
+  clearTradeFilter: clearTradeFilter, setVendorPage: setVendorPage, setExtPage: setExtPage,
   vendors: vendors, vendorById: vendorById,
   // منتقي الطرف الباحث — يُستدعى من سماتِ onclick/oninput في نموذج الطلب
   vpickOpen: vpickOpen, vpickInput: vpickInput, vpickBlur: vpickBlur,
@@ -10120,6 +10302,9 @@ window.contracts = {
   _vendorPickLabel: vendorPickLabel,
   _pageSlice: pageSlice, _pageNumbers: pageNumbers,
   _VENDORS_PAGE_SIZE: VENDORS_PAGE_SIZE,
+  // سجلُّ المستخلصات عبر العقود — نقيّةٌ يفحصها `hail-tests.js` بلا متصفّح
+  _extractLedger: extractLedger, _extLedgerStats: extLedgerStats, _extMatchesQuery: extMatchesQuery,
+  _CTR_TABS: CTR_TABS, _CTRS_PAGE_TITLE: CTRS_PAGE_TITLE, _EXTS_PAGE_SIZE: EXTS_PAGE_SIZE,
   _crqProcKey: crqProcKey,
   _crqFinanceKey: crqFinanceKey,
   _crqRevalidate: crqRevalidate,
