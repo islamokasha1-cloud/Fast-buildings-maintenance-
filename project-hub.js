@@ -40,7 +40,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.3085";
+const MODULE_BUILD = "v18.9.3087";
 const LS_KEY = "hail_last_project";
 const PREVIEW_MAX = 3;          // رقاقاتُ الأسماء في الحالة المطويّة
 

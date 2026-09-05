@@ -2805,8 +2805,8 @@ const ctrTabsBar = await page.evaluate((cid) => {
     inRunning: [...document.querySelectorAll('#page-contracts-list .ct-tile')].some(e => e.textContent.includes(cid))
   };
 }, conv.cid);
-check('★★ صفحةُ العقود تبويبان بأعدادٍ من ctrTabOf — والمقفلُ ليس بين «الجارية»',
-  ctrTabsBar.nTabs === 2 && ctrTabsBar.inRunning === false &&
+check('★★ صفحةُ العقود ثلاثةُ تبويباتٍ بأعدادٍ من ctrTabOf — والمقفلُ ليس بين «الجارية»',
+  ctrTabsBar.nTabs === 3 && ctrTabsBar.inRunning === false &&
   ctrTabsBar.txt[0].includes('الجارية') && ctrTabsBar.txt[0].includes(String(ctrTabsBar.calc[0])) &&
   ctrTabsBar.txt[1].includes('المنتهية') && ctrTabsBar.txt[1].includes(String(ctrTabsBar.calc[1])),
   JSON.stringify(ctrTabsBar));
@@ -2834,6 +2834,111 @@ check('★ وشريطُه يفصّل: بانتظار الضمان · مقفلة 
 check('★★ واسمُ العقد لا تعصره شارةُ «مقفل — أُفرِج عن المحتجز» (بلاغُ المالك: الاسم ينزاح)',
   finTab.nameRatio >= 0.5, 'نسبةُ عرض الاسم=' + finTab.nameRatio.toFixed(2));
 await page.screenshot({ path: `${SHOTS}/21b-contracts-finished-tab.png`, fullPage: true });
+
+/* ── التبويبُ الثالث: سجلُّ المستخلصات عبر العقود (طلبُ المالك) ──
+   السببُ الذي يجعله فحصَ متصفّحٍ لا فحصَ نصّ: **الرقمُ المرسوم = الرقمُ المحسوب.**
+   جدولٌ يجمع مستخلصاتِ عقودٍ شتّى هو أوّلُ موضعٍ ينزلق فيه صافٍ من عقدٍ إلى صفِّ
+   عقدٍ آخر — ولا مترجمَ يُنذر بذلك، ولا خطأَ في وحدة التحكّم. */
+console.log('\n=== تبويبُ المستخلصات عبر العقود ===');
+const xTab = await page.evaluate(async () => {
+  window.contracts.ctrsTab('extracts');
+  await new Promise(r => setTimeout(r, 600));
+  const el = document.getElementById('page-contracts-list');
+  const rows = [...el.querySelectorAll('.ct-table tbody tr')];
+  const led = window.contracts._extractLedger(
+    window.contracts.contractsList(), window.contracts.extractsList(), null);
+  const tab = [...el.querySelectorAll('.ct-tab')].find(b => b.textContent.includes('المستخلصات'));
+  return {
+    title: (el.querySelector('.ct-title') || {}).textContent.replace(/\s+/g, ' ').trim(),
+    tabOn: !!(tab && tab.classList.contains('on')),
+    tabTxt: tab ? tab.textContent.replace(/\s+/g, ' ').trim() : '',
+    rows: rows.length, led: led.length,
+    ids: rows.map(r => (r.querySelector('td .num') || {}).textContent || '').filter(Boolean),
+    ledIds: led.map(r => r.id),
+    strip: [...el.querySelectorAll('.ct-stat')].map(e => e.textContent.replace(/\s+/g, ' ').trim()),
+    hasCtrTiles: el.querySelectorAll('.ct-tile').length
+  };
+});
+check('★★ اسمُ الصفحة صار «العقود والمستخلصات»',
+  /العقود والمستخلصات/.test(xTab.title), xTab.title);
+check('★★ والتبويبُ الثالث يعرض مستخلصاتِ العقود كلِّها — لا بطاقاتِ عقودٍ',
+  xTab.tabOn && xTab.rows > 0 && xTab.hasCtrTiles === 0, JSON.stringify({ rows: xTab.rows, tiles: xTab.hasCtrTiles }));
+check('★★★ وعددُ الصفوف المرسومة = طولُ السجل النقيّ، وبالمعرّفات نفسِها بالترتيب نفسِه',
+  xTab.rows === xTab.led && xTab.ids.join(',') === xTab.ledIds.join(','),
+  JSON.stringify({ ids: xTab.ids, led: xTab.ledIds }));
+check('★ وعدّادُ التبويب يقول العددَ نفسَه', xTab.tabTxt.includes(String(xTab.led)), xTab.tabTxt);
+
+const xNums = await page.evaluate(() => {
+  const el = document.getElementById('page-contracts-list');
+  const led = window.contracts._extractLedger(
+    window.contracts.contractsList(), window.contracts.extractsList(), null);
+  const st = window.contracts._extLedgerStats(led);
+  const rows = [...el.querySelectorAll('.ct-table tbody tr')];
+  // الصافي المرسوم في كل صفّ مقابل ما تحسبه الدالّة النقيّة لذلك المستخلص بعينه
+  const drawn = rows.map(r => (r.children[4].textContent || '').replace(/[^\d.]/g, ''));
+  const calc = led.map(r => r.net.toFixed(2));
+  const stripTxt = [...el.querySelectorAll('.ct-stat')].map(e => e.textContent.replace(/\s+/g, ' ').trim()).join('|');
+  return { drawn, calc, st, stripTxt };
+});
+check('★★★ الصافي المرسوم في كل صفٍّ = ما تحسبه `extDueNet` لذلك المستخلص (لا انزلاقَ صفٍّ)',
+  xNums.drawn.join(',') === xNums.calc.join(','),
+  JSON.stringify({ drawn: xNums.drawn, calc: xNums.calc }));
+check('★★ وشريطُ الأرقام = ما يحسبه `extLedgerStats` (الإجمالي · بانتظار إجراء · مسدَّدة)',
+  xNums.stripTxt.includes(String(xNums.st.total)) &&
+  xNums.stripTxt.includes(String(xNums.st.awaiting)) &&
+  xNums.stripTxt.includes(String(xNums.st.paid)) &&
+  /بانتظار إجراء/.test(xNums.stripTxt) && /المسدَّد صافياً/.test(xNums.stripTxt),
+  xNums.stripTxt.slice(0, 160));
+await page.screenshot({ path: `${SHOTS}/21c-extracts-ledger.png`, fullPage: true });
+
+const xSearch = await page.evaluate(async () => {
+  const el = document.getElementById('page-contracts-list');
+  const led = window.contracts._extractLedger(
+    window.contracts.contractsList(), window.contracts.extractsList(), null);
+  const one = led[0];
+  window.contracts.filterCtrs('q', one.vendorName);
+  await new Promise(r => setTimeout(r, 400));
+  const hit = el.querySelectorAll('.ct-table tbody tr').length;
+  const want = led.filter(r => r.vendorName === one.vendorName).length;
+  window.contracts.filterCtrs('q', 'لا طرفَ بهذا الاسم إطلاقاً');
+  await new Promise(r => setTimeout(r, 400));
+  const none = el.textContent.includes('لا نتائج تطابق البحث');
+  window.contracts.filterCtrs('q', '');
+  await new Promise(r => setTimeout(r, 400));
+  return { hit, want, none, box: !!document.getElementById('ct-x-q') };
+});
+check('★★ والبحثُ في السجل يعمل (بالطرف) ويقول «لا نتائج» بلا لبس',
+  xSearch.box && xSearch.hit === xSearch.want && xSearch.hit > 0 && xSearch.none,
+  JSON.stringify(xSearch));
+
+const xOpen = await page.evaluate(async () => {
+  const el = document.getElementById('page-contracts-list');
+  const row = el.querySelector('.ct-table tbody tr');
+  const id = (row.querySelector('td .num') || {}).textContent.trim();
+  row.click();
+  await new Promise(r => setTimeout(r, 800));
+  const txt = el.textContent;
+  const back = (el.querySelector('.ct-back') || {}).textContent || '';
+  return { id, opened: txt.includes(id), back: back.replace(/\s+/g, ' ').trim() };
+});
+check('★★★ ونقرُ الصفِّ يفتح المستخلصَ في بطاقة عقده (سمةُ onclick تجد الدالّةَ في النطاق العام)',
+  xOpen.opened, JSON.stringify(xOpen));
+check('★ وزرُّ الرجوع يقول «كل المستخلصات» — إلى حيث دخل المستخدمُ فعلاً',
+  /كل المستخلصات/.test(xOpen.back), xOpen.back);
+/* والعودةُ إلى تبويب عقودٍ تُرجع الشبكةَ: التبويبُ الثالث لا يترك أثراً في
+   الاثنين قبله (مرشِّحُ حالةِ مستخلصٍ باقٍ يُفرغ قائمةَ العقود بلا سبب). */
+const backCtrs = await page.evaluate(async () => {
+  window.contracts.backToCtrs(); await new Promise(r => setTimeout(r, 400));
+  window.contracts.ctrsTab('finished'); await new Promise(r => setTimeout(r, 500));
+  const el = document.getElementById('page-contracts-list');
+  const on = [...el.querySelectorAll('.ct-tab')].find(b => b.classList.contains('on'));
+  return { tiles: el.querySelectorAll('.ct-tile').length,
+           want: window.contracts.contractsList().filter(c => window.contracts._ctrTabOf(c) === 'finished').length,
+           on: on ? on.textContent.replace(/\s+/g, ' ').trim() : '' };
+});
+check('★★ والعودةُ إلى تبويب عقودٍ تُرجع الشبكةَ كاملةً — التبويبُ الثالثُ لا يترك مرشِّحاً وراءه',
+  backCtrs.tiles === backCtrs.want && backCtrs.tiles > 0 && /المنتهية/.test(backCtrs.on),
+  JSON.stringify(backCtrs));
 await page.evaluate(async () => { window.contracts.ctrsTab('running'); await new Promise(r => setTimeout(r, 400)); });
 
 await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'dark'); });

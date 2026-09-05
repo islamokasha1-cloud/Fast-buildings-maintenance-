@@ -13035,6 +13035,83 @@ function contractsPhase1() {
     T("★★ والقائمةُ والتبويبُ والشريطُ تقرأ الإسنادَ نفسَه ctrTabOf",
       /var scoped=all\.filter\(function\(c\)\{ return ctrTabOf\(c\)===tab; \}\);/.test(src) &&
       /all\.filter\(function\(c\)\{ return ctrTabOf\(c\)===t\.key; \}\)\.length/.test(src));
+    /* ════════════════════════════════════════════════════════════
+       التبويبُ الثالث: سجلُّ المستخلصات عبر العقود   [v18.9.3087]
+
+       المحكُّ الذي يحرسه الاختبار: **رقمٌ واحدٌ لا رقمان.** الصافي في هذا الجدول
+       يجب أن يخرج من `extDueNet` — الدالّةِ التي يقرؤها زرُّ السداد وبطاقةُ
+       المالية — وإلا فقد يقرأ مديرُ المشاريع صافياً ويصرف المحاسبُ غيرَه.
+       والمستخلصُ لعقدٍ خارجَ النطاق يسقط: عرضُه تسريبُ عقدٍ عبر مستخلصه.
+       ════════════════════════════════════════════════════════════ */
+    const xC = [
+      { id:"CTR-A", title:"دهانات خارجية", vendorName:"رضا سمير", vatMode:"excl",
+        lines:[{ id:"L1", desc:"دهان", unit:"م٢", qty:100, unitPrice:10 }] },
+      { id:"CTR-B", title:"تجاليد", vendorName:"امير علي", vatMode:"excl",
+        lines:[{ id:"L1", desc:"تجليد", unit:"م٢", qty:100, unitPrice:20 }] }
+    ];
+    const xE = [
+      { id:"EXT-1", contractId:"CTR-A", status:"ext_paid", period:"يوليو 2026",
+        updatedAt:"2026-07-30T00:00:00.000Z", lines:[{ lineId:"L1", cumQty:50, unitPrice:10 }],
+        settled:{ net:500 } },
+      { id:"EXT-2", contractId:"CTR-B", status:"ext_pending_finance", period:"أغسطس 2026",
+        updatedAt:"2026-08-30T00:00:00.000Z", lines:[{ lineId:"L1", cumQty:40, unitPrice:20 }] },
+      { id:"EXT-3", contractId:"CTR-ZZZ", status:"ext_pending_pm", period:"سبتمبر 2026",
+        updatedAt:"2026-09-01T00:00:00.000Z", lines:[{ lineId:"L1", cumQty:10, unitPrice:5 }] }
+    ];
+    const led = C._extractLedger(xC, xE, (c) => c.id === "CTR-A" ? "مشروع حائل" : "مبادرة الواجهات");
+    T("★★★ سجلُّ المستخلصات يصل كلَّ مستخلصٍ بعقده — ومستخلصُ عقدٍ خارجَ النطاق يسقط",
+      led.length === 2 && led.every(r => r.id !== "EXT-3") &&
+      led.every(r => r.contract && r.contract.id === r.contractId),
+      led.map(r => r.id).join(","));
+    T("★★★ والصافي من `extDueNet` نفسِها التي يقرؤها زرُّ السداد — لا حسبةٌ ثانيةٌ في الشاشة",
+      led.map(r => r.net).join(",") ===
+      led.map(r => C._extDueNet(r.ext, r.contract, xE)).join(","),
+      led.map(r => r.id + "=" + r.net).join(" · "));
+    T("★ ولقطةُ السداد تعلو الحسابَ الحيَّ للمسدَّد (500 لا القيمةَ المعادَ حسابُها)",
+      (led.find(r => r.id === "EXT-1") || {}).net === 500);
+    T("★★ والأحدثُ أوّلاً بترتيبٍ حتميّ (الطابعُ ثمّ المعرّف — لا يتبدّل بين رسمتين)",
+      led[0].id === "EXT-2" && led[1].id === "EXT-1" &&
+      C._extractLedger(xC, xE.slice().reverse(), null).map(r => r.id).join(",") === "EXT-2,EXT-1");
+    T("★ وكلُّ صفٍّ يحمل الطرفَ والمشروعَ وعنوانَ العمل (يُبحَث بها ويُقرأ بلا فتح العقد)",
+      led[0].vendorName === "امير علي" && led[0].projectName === "مبادرة الواجهات" &&
+      led[1].projectName === "مشروع حائل" && led[1].title === "دهانات خارجية");
+    T("★★ و«عند مَن يقف» من `extGateOwner` نفسِها التي تحرس الأزرار",
+      led[0].awaiting === true && led[0].gate === "المالية — السداد" &&
+      led[1].awaiting === false && led[1].paid === true);
+
+    const xSt = C._extLedgerStats(led);
+    T("★★ وأرقامُ الشريط تُشتقّ من الصفوف المرسومة نفسِها — فلا يَعِد الشريطُ بما لا يُعرض",
+      xSt.total === 2 && xSt.awaiting === 1 && xSt.paid === 1 &&
+      xSt.paidNet === 500 && xSt.awaitingNet === led[0].net, JSON.stringify(xSt));
+    T("سجلٌّ فارغٌ ⇐ أصفارٌ لا NaN", (() => {
+      const z = C._extLedgerStats([]);
+      return z.total === 0 && z.awaiting === 0 && z.paidNet === 0 && z.awaitingNet === 0;
+    })());
+
+    T("★★ بحثُ السجل: رقمُ المستخلص أو عقدِه أو الطرفُ أو المشروعُ أو الفترة — بالتطبيع العربيّ",
+      C._extMatchesQuery(led[1], "EXT-1") && C._extMatchesQuery(led[1], "CTR-A") &&
+      C._extMatchesQuery(led[1], "رضا") && C._extMatchesQuery(led[1], "مشروع حائل") &&
+      C._extMatchesQuery(led[1], "يوليو") && C._extMatchesQuery(led[1], "دهانات خارجيه") &&
+      C._extMatchesQuery(led[1], "") === true &&
+      C._extMatchesQuery(led[1], "تجاليد") === false);
+
+    T("★★ التبويبُ الثالثُ معرَّفٌ في `CTR_TABS` نفسِها — فالعدُّ والشريطُ يقرآن مصدراً واحداً",
+      C._CTR_TABS.length === 3 && C._CTR_TABS[2].key === "extracts" &&
+      C._CTR_TABS[2].lbl === "المستخلصات" &&
+      /var n = t\.key==="extracts" \? ledger\.length :/.test(src));
+    T("★★ واسمُ الصفحة ثابتٌ واحدٌ يقرؤه العنوانُ وزرُّ القائمة الجانبية معاً (لا اسمان يفترقان)",
+      C._CTRS_PAGE_TITLE === "العقود والمستخلصات" &&
+      /headHTML\(CTRS_PAGE_TITLE,/.test(src) && /lbl:CTRS_PAGE_TITLE/.test(src) &&
+      !/lbl:"العقود"/.test(src));
+    T("★ وصفوفُ السجل أبوابٌ إلى المستخلص في بطاقة عقده — لا نسخةٌ ثانيةٌ تُصان مرّتين",
+      /onclick="contracts\.openExtFrom\(/.test(src) && /function extListHTML\(ledger\)/.test(src));
+    T("★ وسجلُّه يُقسَّم صفحاتٍ بالدالّة النقيّة نفسِها، والترشيحُ يعيد إلى الأولى",
+      /pageSlice\(list, _xPage, EXTS_PAGE_SIZE\)/.test(src) &&
+      /function filterCtrs\(k,v\)\{[\s\S]{0,220}?_xPage=1;/.test(src) &&
+      typeof C.setExtPage === "function");
+    T("★★ وحالاتُ المرشِّح في تبويب المستخلصات من `EXT_STATUS` لا من حالات العقد",
+      /function extListHTML[\s\S]{0,2600}?Object\.keys\(EXT_STATUS\)\.map/.test(src));
+
     T("★ ولتبويب المنتهي شريطُه: ضمانٌ ومقفلٌ ومفسوخٌ وقيمةٌ وإجمالي",
       /بانتظار انتهاء الضمان/.test(src) && /مقفلة — أُفرِج عن المحتجز<\/span>/.test(src) &&
       /مفسوخة/.test(src));
