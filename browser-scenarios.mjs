@@ -1457,6 +1457,95 @@ check('17ز) ★★ والمنعُ عند المصدر: «تم الشراء» ل
 check('17ز) ★ ولماذا تخطّاها مكتوبٌ في القيد لا مستنتَجٌ من غيابه', s17.notifySaysWhy===true);
 check('17ز) ★★ ولا تُمَسّ الحالةُ السويّة: طلبٌ بلا محاضرَ يمرّ بمرحلة المشرف كما كان', s17.notifyKeepsSv===true);
 
+/* ══ سيناريو 18: أسعارٌ متعدّدةٌ للمصنعية حسب درجة الجودة ══
+   الكتالوجُ كان بلا تغطيةِ متصفّحٍ إطلاقاً، وكلُّ سطحِ سعره تغيّر: ثلاثةُ حقولٍ بدل
+   واحد، وخليّةُ جدولٍ مصنَّفة، وفلترٌ بدرجة، وصفُّ تحليلٍ يحمل درجتَه. والحرّاسُ
+   النقيّةُ في hail-tests تُثبت الحسابَ لا الرسمَ — ورسمٌ لا يُملأ (كما حدث هنا أوّلَ
+   مرّة: `openItemModal` يعود صامتاً بلا دور) يمرّ من الحساب سليماً وهو ميت. */
+log('\n=== السيناريو 18: أسعار المصنعية حسب درجة الجودة ══');
+const s18 = await page.evaluate(async ()=>{
+  currentUser = { user:'tester', name:'مختبِر', role:'admin' };
+  const C = (typeof IS_DEV!=='undefined'&&IS_DEV) ? "global_labor_catalog_dev" : "global_labor_catalog";
+  await db.collection(C).doc('L1').set({ code:'LAB-001', name:'لياسة أسمنتية', category:'لياسة', unit:'م2',
+    rate:15, grades:{low:12,mid:15,high:19}, scopeNotes:'يشمل الطرطشة' });
+  await db.collection(C).doc('L2').set({ code:'LAB-002', name:'بلاط بسعرٍ واحد', category:'بلاط وأرضيات', unit:'م2',
+    rate:25, scopeNotes:'يشمل الفرش' });          // بندٌ قديمٌ بلا grades
+  await db.collection(C).doc('L3').set({ code:'LAB-003', name:'دهان عالٍ فقط', category:'دهانات', unit:'م2',
+    rate:17, grades:{low:null,mid:null,high:17}, scopeNotes:'' });
+  showPage('labor-catalog');
+  await new Promise(r=>setTimeout(r,600));
+  window.laborCatalog.render();
+  const tbl = document.getElementById('lab-tbody').innerText;
+
+  // فلترُ الدرجة: «عالي» بحدٍّ أدنى ١٨ ⇒ العاليُ ١٩ يبقى والعاليُ ١٧ يسقط
+  document.getElementById('lab-filter-grade').value = 'high';
+  document.getElementById('lab-filter-min').value   = '18';
+  window.laborCatalog.render();
+  const filtered = document.getElementById('lab-tbody').innerText;
+  window.laborCatalog.resetFilters();
+
+  // المحرّر: بندٌ مصنَّفٌ يملأ الخانات الثلاث، وقديمٌ يضع سعرَه في «متوسط الجودة»
+  window.laborCatalog.openItemModal('L1');
+  const g1 = ['low','mid','high'].map(k=>document.getElementById('lab-rate-'+k).value).join('|');
+  const b1 = document.getElementById('lab-base-preview').innerText;
+  window.laborCatalog.openItemModal('L2');
+  const g2 = ['low','mid','high'].map(k=>document.getElementById('lab-rate-'+k).value).join('|');
+
+  // حفظُ «منخفضٍ» وحدَه ⇒ الأساسُ = المنخفض (وهو ما يُسحب إلى التحليل)
+  document.getElementById('lab-rate-mid').value = '';
+  document.getElementById('lab-rate-low').value = '7';
+  window.laborCatalog.onRateInput();
+  const b2 = document.getElementById('lab-base-preview').innerText;
+  const _oldConfirm = window.showConfirm; window.showConfirm = ()=>Promise.resolve(true);
+  await window.laborCatalog.save();
+  window.showConfirm = _oldConfirm;
+  await new Promise(r=>setTimeout(r,300));
+  const saved = window.__store[C+'/L2'] || {};
+
+  // تحليلُ الأسعار: انتقاءٌ بدرجةٍ، تبديلُها، ثم تحديثُ الأسعار يتبعها لا الأساسَ
+  showPage('price-analysis');
+  await new Promise(r=>setTimeout(r,400));
+  window.priceAnalysis.openEditor();
+  await new Promise(r=>setTimeout(r,200));
+  window.priceAnalysis.openPicker('labor');
+  const pick = document.getElementById('pa-picker-list').innerHTML;
+  const chips = (pick.match(/pickerSelect\('L1','(?:low|mid|high)'\)/g)||[]).length;
+  window.priceAnalysis.pickerSelect('L1','high');
+  const rowsA = document.getElementById('pa-labor-rows').innerHTML;
+  const rate = h => { const m = h.match(/value="([\d.]+)"[^>]*oninput="window\.priceAnalysis\.rowInput\('labor',0,'rate'/); return m?m[1]:'?'; };
+  const rHigh = rate(rowsA);
+  const selHigh = /<option value="high" selected/.test(rowsA);
+  window.priceAnalysis.rowGrade(0,'low');
+  const rLow = rate(document.getElementById('pa-labor-rows').innerHTML);
+  await db.collection(C).doc('L1').update({ grades:{low:99,mid:15,high:19} });
+  await new Promise(r=>setTimeout(r,400));
+  window.priceAnalysis.refreshPrices();
+  const rAfter = rate(document.getElementById('pa-labor-rows').innerHTML);
+  return { tbl, filtered, g1, b1, g2, b2, saved:JSON.stringify(saved.grades||null)+'|'+saved.rate,
+           chips, rHigh, selHigh, rLow, rAfter };
+});
+check('18أ) ★★ البندُ المصنَّفُ يعرض أسعارَه الثلاثةَ بأسماء درجاتها',
+  /منخفض[\s\S]*12\.00[\s\S]*متوسط[\s\S]*15\.00[\s\S]*عالي[\s\S]*19\.00/.test(s18.tbl));
+check('18أ) ★★ والبندُ القديمُ يبقى سعراً واحداً بلا درجةٍ لم يخترها أحد',
+  /25\.00 ر\.س/.test(s18.tbl) && !/بلاط بسعرٍ واحد[\s\S]{0,40}متوسط/.test(s18.tbl));
+check('18ب) ★★ فلترُ «عالي ≥ ١٨» يُبقي العاليَ ١٩ ويُسقط العاليَ ١٧',
+  s18.filtered.includes('LAB-001') && !s18.filtered.includes('LAB-003') && !s18.filtered.includes('LAB-002'),
+  s18.filtered.split('\n')[0]);
+check('18ج) ★★ المحرّرُ يملأ خاناتِ الدرجات الثلاث', s18.g1==='12|15|19', s18.g1);
+check('18ج) ★ ومعاينةُ «السعر الأساسي» تقول أيَّ درجةٍ اشتُقّ منها',
+  /15\.00/.test(s18.b1) && /متوسط/.test(s18.b1), s18.b1);
+check('18ج) ★★ وبندٌ قديمٌ يُوضَع سعرُه في «متوسط الجودة» ليصنّفه المالكُ بيده',
+  s18.g2==='|25|', s18.g2);
+check('18د) ★ «منخفضٌ» وحدَه ⇒ الأساسُ منخفض', /7\.00/.test(s18.b2) && /منخفض/.test(s18.b2), s18.b2);
+check('18د) ★★ والحفظُ يكتب grades و rate الأساسيَّ معاً (فلا يُصفَّر سعرٌ خارج الوحدة)',
+  s18.saved==='{"low":7,"mid":null,"high":null}|7', s18.saved);
+check('18هـ) ★★ منتقي المصنعيات يعرض شريحةً لكلِّ درجة', s18.chips===3, 'شرائح='+s18.chips);
+check('18هـ) ★★ وانتقاءُ «عالي» يُدرج سعرَه هو لا الأساسيّ', s18.rHigh==='19', 'الأجرة='+s18.rHigh);
+check('18و) ★ وقائمةُ الصفِّ تُظهر الدرجةَ المختارة', s18.selHigh===true);
+check('18و) ★★ وتبديلُها إلى «منخفض» ينقل السعرَ معها', s18.rLow==='12', 'الأجرة='+s18.rLow);
+check('18ز) ★★★ و«تحديثُ الأسعار» يتبع الدرجةَ المختارةَ لا السعرَ الأساسيّ',
+  s18.rAfter==='99', 'الأجرة بعد التحديث='+s18.rAfter+' (الأساسيُّ ١٥ — لو تبعه لكان خطأً)');
+
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
 if(boot.length) log('(أخطاء إقلاع غير حرجة: '+boot.length+' — متوقّعة من غياب CDN)');

@@ -59,6 +59,33 @@
   function catResolve(id){ try{ return (typeof _catResolveId==='function') ? (_catResolveId(id)||id) : id; }catch(e){ return id; } }
   function matSource(){ try{ return (typeof _catalogItems!=='undefined' && _catalogItems) ? _catalogItems.filter(function(c){ return !isMerged(c); }) : []; }catch(e){ return []; } }
   function laborSource(){ try{ return (window.laborCatalog && window.laborCatalog.getItems) ? (window.laborCatalog.getItems()||[]) : []; }catch(e){ return []; } }
+  /* ══ درجاتُ جودة المصنعية ══
+     بندُ الكتالوج صار يحمل حتى ثلاثة أسعارٍ حسب درجة الجودة، فصفُّ العمالة هنا
+     يحمل `grade` يقول **أيَّ سعرٍ اختار المحلّل** — بلا ذلك كان «تحديث الأسعار»
+     يعيد كلَّ صفٍّ إلى السعر الأساسيّ فيمحو اختيارَ الدرجة بصمت. والجسورُ تتحمّل
+     غيابَ الوحدة (كتالوجٌ لم يُحمَّل بعد) فترجع إلى `rate` كما كان. */
+  function laborPriceList(it){
+    try{ if(window.laborCatalog && window.laborCatalog.priceList) return window.laborCatalog.priceList(it)||[]; }catch(e){}
+    return (it && it.rate!=null) ? [{key:"",label:"",short:"",value:Number(it.rate)}] : [];
+  }
+  function laborPriceOf(it, grade){
+    try{ if(window.laborCatalog && window.laborCatalog.priceOf) return window.laborCatalog.priceOf(it, grade||""); }catch(e){}
+    return (it && it.rate!=null) ? Number(it.rate) : null;
+  }
+  function laborGradeShort(grade){
+    if(!grade) return "";
+    var pl = null;
+    try{ pl = window.laborCatalog && window.laborCatalog.gradeLabel ? window.laborCatalog.gradeLabel(grade) : ""; }catch(e){ pl=""; }
+    return pl || grade;
+  }
+  // البندُ المرجعيُّ لصفٍّ مسحوبٍ من كتالوج المصنعيات (بالمعرّف ثم بالكود)
+  function laborRefOf(row, labs){
+    if(!row) return null;
+    labs = labs || laborSource();
+    return labs.find(function(x){ return x.id===row.refId; })
+        || labs.find(function(x){ return x.code && row.refCode && x.code===row.refCode; })
+        || null;
+  }
 
   // تحويل نصّ إلى رقم يقبل الفاصلة العربية العشرية («1,25»=1.25) دون أن يُفسد فاصلة
   // الآلاف: الاستبدال القديم replace(/,/g,".") كان يحوّل «1,250.00» إلى «1.250.00» ثم
@@ -726,11 +753,25 @@ table tfoot td{background:#f1f5f9;font-weight:800}
         : r.source==="ai"
         ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;background:#f3e8ff;color:#7c3aed;border-radius:4px;padding:1px 6px">${ICONsz("zap",11)} استرشادي</span>`
         : `<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;background:#f1f5f9;color:#64748b;border-radius:4px;padding:1px 6px">يدوي</span>`;
+      /* مصنعيةٌ من الكتالوج بأكثر من سعر: قائمةٌ تبدّل درجةَ الجودة على الصف بعد
+         إدراجه — والصفُّ القديمُ (حُفظ قبل الدرجات) يحتفظ بخيار «الأساسي» فلا
+         تُفرَض عليه درجةٌ لم يخترها أحد. */
+      let gradeSel = "";
+      if(!isMat && r.source==="catalog"){
+        const _ci = laborRefOf(r, null);
+        const _pl = _ci ? laborPriceList(_ci).filter(function(g){ return g.key; }) : [];
+        if(_pl.length>1){
+          gradeSel = ` <select class="form-select" onchange="window.priceAnalysis.rowGrade(${i},this.value)" title="درجة جودة التنفيذ" style="font-size:9px;padding:1px 4px;height:auto;width:auto;display:inline-block;vertical-align:middle">`
+            + (r.grade ? "" : `<option value="" selected>الأساسي</option>`)
+            + _pl.map(function(g){ return `<option value="${E(g.key)}"${(r.grade||"")===g.key?" selected":""}>${E(g.short)} · ${fmt(g.value)}</option>`; }).join("")
+            + `</select>`;
+        }
+      }
       return `
       <div style="display:grid;grid-template-columns:2fr 70px 60px 72px 78px 30px;gap:6px;align-items:center;margin-bottom:6px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 8px">
         <div style="min-width:0">
           <input class="form-input" style="font-size:12px;padding:5px 7px" placeholder="${isMat?"اسم الخامة":"اسم المصنعية"}" value="${E(r.name||"")}" oninput="window.priceAnalysis.rowInput('${kind}',${i},'name',this.value)">
-          <div style="margin-top:2px">${badge}${r.source==="ai"?` <button class="btn btn-ghost btn-sm" style="font-size:9px;padding:1px 7px;display:inline-flex;align-items:center;gap:3px" onclick="window.priceAnalysis.linkRowToCatalog('${kind}',${i})" title="ربط هذا الصف بصنف من الكتالوج مع الإبقاء على الكمية">${ICONsz("package",10)} ربط بالكتالوج</button>`:""}${r.refCode?` <span style="font-size:9px;font-family:monospace;color:var(--muted)">${E(r.refCode)}</span>`:""}</div>
+          <div style="margin-top:2px">${badge}${gradeSel}${r.source==="ai"?` <button class="btn btn-ghost btn-sm" style="font-size:9px;padding:1px 7px;display:inline-flex;align-items:center;gap:3px" onclick="window.priceAnalysis.linkRowToCatalog('${kind}',${i})" title="ربط هذا الصف بصنف من الكتالوج مع الإبقاء على الكمية">${ICONsz("package",10)} ربط بالكتالوج</button>`:""}${r.refCode?` <span style="font-size:9px;font-family:monospace;color:var(--muted)">${E(r.refCode)}</span>`:""}</div>
         </div>
         <input class="form-input" style="font-size:12px;padding:5px 6px;text-align:center" placeholder="وحدة" value="${E(r.unit||"")}" oninput="window.priceAnalysis.rowInput('${kind}',${i},'unit',this.value)">
         <input class="form-input" style="font-size:12px;padding:5px 6px;font-family:monospace;direction:ltr;text-align:center" inputmode="decimal" placeholder="كمية" value="${r.qty!=null?E(r.qty):""}" oninput="window.priceAnalysis.rowInput('${kind}',${i},'qty',this.value)" title="الكمية">
@@ -775,6 +816,16 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     arr[i][field] = value;
     refreshLine(kind, i);
     renderSummary();
+  }
+  // تبديلُ درجة الجودة على صفِّ مصنعيةٍ مسحوبٍ من الكتالوج — السعرُ يتبع الدرجة
+  function rowGrade(i, key){
+    const arr = _draft && _draft.labor;
+    if(!arr || !arr[i]) return;
+    const it = laborRefOf(arr[i], null);
+    const v  = it ? laborPriceOf(it, key||"") : null;
+    arr[i].grade = key || "";
+    if(v!=null) arr[i].rate = v;
+    renderRows("labor"); renderSummary();
   }
   function addManualRow(kind){
     if(!_draft) return;
@@ -834,18 +885,26 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     }
     list.innerHTML = arr.map(function(it){
       const p = it[priceField];
+      // مصنعيةٌ بأكثر من سعر: كلُّ درجةٍ شريحةٌ تُنتقى بذاتها، ونقرُ الصفِّ يأخذ الأساسيّ
+      const grades = (_pickerMode==="labor") ? laborPriceList(it).filter(function(g){ return g.key; }) : [];
+      const chips = grades.length>1
+        ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">`+grades.map(function(g){
+            return `<span onmousedown="event.stopPropagation();window.priceAnalysis.pickerSelect('${E(it.id)}','${E(g.key)}')" title="إدراج بسعر ${E(g.label)}" style="cursor:pointer;font-size:10px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:2px 7px"><b style="color:var(--muted)">${E(g.short)}</b> <span style="font-family:monospace;color:var(--accent);font-weight:700">${fmt(g.value)}</span></span>`;
+          }).join("")+`</div>`
+        : "";
       return `
-      <div class="catalog-ac-item" style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px" onmousedown="window.priceAnalysis.pickerSelect('${E(it.id)}')">
+      <div class="catalog-ac-item" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px" onmousedown="window.priceAnalysis.pickerSelect('${E(it.id)}')">
         <div style="min-width:0">
           ${it.code?`<span style="font-family:monospace;font-size:10px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-left:6px">${E(it.code)}</span>`:""}
           <span style="font-weight:600">${E(it.name||"")}</span>
           <span style="color:var(--muted)"> • ${E(it.unit||"")}</span>
+          ${chips}
         </div>
         ${p!=null?`<span style="color:var(--accent);font-weight:700;font-size:11px;white-space:nowrap">${fmt(p)} ر.س</span>`:""}
       </div>`;
     }).join("");
   }
-  function pickerSelect(id){
+  function pickerSelect(id, gradeKey){
     const ov = document.getElementById("modal-pa-picker");
     if(_pickerMode==="rfq"){
       const a = _items.find(x=>x.id===id);
@@ -863,13 +922,16 @@ table tfoot td{background:#f1f5f9;font-weight:800}
       const row = (arr && arr[lt.index]) || null;
       if(row){
         const pf = lt.kind==="mat" ? "price" : "rate";
-        const catPrice = lt.kind==="mat" ? (it.unitPrice!=null?it.unitPrice:0) : (it.rate!=null?it.rate:0);
+        const _lg = (lt.kind==="mat") ? "" : (gradeKey||"");
+        const _lv = (lt.kind==="mat") ? it.unitPrice : laborPriceOf(it, _lg);
+        const catPrice = _lv!=null ? _lv : 0;
         row.source  = "catalog";
         row.refId   = it.id;
         row.refCode = it.code||"";
         row.name    = it.name||"";
         row.unit    = it.unit||"";
         row[pf]     = catPrice;
+        if(lt.kind!=="mat") row.grade = _lg;
         renderRows(lt.kind); renderSummary();
         T("🔗 رُبط الصف بالكتالوج — أُبقيت الكمية","success");
       }
@@ -880,14 +942,16 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     // v18.9ad — M23: صنفٌ بلا سعرٍ في الكتالوج كان يُدرَج بصفرٍ **صامت**، فيغذّي
     // التحليلَ سعرَ وحدةٍ مبخوساً ويخرج التسعير أقلَّ من الحقيقة بلا أن يلاحظ أحد.
     // الصفر يبقى مسموحاً (قد يكون مقصوداً) لكنه يُعلَن لحظةَ الإدراج.
-    const _v = _pickerMode==="mat" ? it.unitPrice : it.rate;
+    const _g = (_pickerMode==="labor") ? (gradeKey||"") : "";
+    const _v = _pickerMode==="mat" ? it.unitPrice : laborPriceOf(it, _g);
     if(!(num(_v)>0)) T("⚠ «"+(it.name||"البند")+"» بلا سعرٍ في الكتالوج — أُدرج بصفر، أدخل السعر يدوياً","warn");
     if(_pickerMode==="mat"){
       _draft.materials.push({source:"catalog",refId:it.id,refCode:it.code||"",name:it.name||"",unit:it.unit||"",qty:1,price:(it.unitPrice!=null?it.unitPrice:0)});
       renderRows("mat");
     } else {
-      _draft.labor.push({source:"catalog",refId:it.id,refCode:it.code||"",name:it.name||"",unit:it.unit||"",qty:1,rate:(it.rate!=null?it.rate:0)});
+      _draft.labor.push({source:"catalog",refId:it.id,refCode:it.code||"",name:it.name||"",unit:it.unit||"",qty:1,grade:_g,rate:(_v!=null?_v:0)});
       renderRows("labor");
+      if(_g) T("🛠️ أُدرجت المصنعية بسعر "+laborGradeShort(_g),"info");
     }
     renderSummary();
     if(ov) ov.style.display="none";
@@ -911,8 +975,13 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     });
     (_draft.labor||[]).forEach(function(r){
       if(r.source!=="catalog") return;
-      const it = labs.find(x=>x.id===r.refId) || labs.find(x=>x.code&&r.refCode&&x.code===r.refCode);
-      if(it && it.rate!=null && r.rate!==it.rate){ r.rate=it.rate; n++; }
+      const it = laborRefOf(r, labs);
+      if(!it) return;
+      /* الدرجةُ المختارةُ هي المرجع. وإن حُذفت من الكتالوج (بندٌ عاد لسعرٍ واحد)
+         نسقط إلى الأساسيّ ونُسقط `grade` — فلا يبقى صفٌّ يدّعي درجةً لا سعرَ لها. */
+      let want = laborPriceOf(it, r.grade||"");
+      if(want==null && r.grade){ want = laborPriceOf(it, ""); if(want!=null) r.grade=""; }
+      if(want!=null && r.rate!==want){ r.rate=want; n++; }
     });
     renderRows("mat"); renderRows("labor"); renderSummary();
     T(n>0?("🔄 حُدِّث "+n+" سعر من الكتالوج"):"الأسعار محدَّثة بالفعل", n>0?"success":"info");
@@ -1003,8 +1072,9 @@ table tfoot td{background:#f1f5f9;font-weight:800}
                name:(m.name||"").trim(), unit:(m.unit||"").trim(), qty:num(m.qty), price:num(m.price) };
     }).filter(function(m){ return m.name && m.qty>=0 && m.price>=0; });
     const labor = (_draft.labor||[]).map(function(l){
+      const _g = (l.source==="catalog" && ["low","mid","high"].indexOf(l.grade)>=0) ? l.grade : "";
       return { source:(l.source==="catalog"?"catalog":l.source==="ai"?"ai":"manual"), refId:l.refId||"", refCode:l.refCode||"",
-               name:(l.name||"").trim(), unit:(l.unit||"").trim(), qty:num(l.qty), rate:num(l.rate) };
+               name:(l.name||"").trim(), unit:(l.unit||"").trim(), qty:num(l.qty), rate:num(l.rate), grade:_g };
     }).filter(function(l){ return l.name && l.qty>=0 && l.rate>=0; });
 
     if(!materials.length && !labor.length){ T("⚠ أضف مكوّناً واحداً على الأقل (خامة أو مصنعية)","warn"); return; }
@@ -1173,7 +1243,14 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     try{
       // سياق مُقتضب من الكتالوج ليطابق الذكاء أسماءك ووحداتك
       const mats = matSource().slice(0,60).map(x=>`[${x.code||"—"}] ${x.name||""} (${x.unit||"—"}) = ${x.unitPrice!=null?x.unitPrice:"?"} ر.س`).join("\n");
-      const labs = laborSource().slice(0,40).map(x=>`[${x.code||"—"}] ${x.name||""} (${x.unit||"—"}) = ${x.rate!=null?x.rate:"?"} ر.س`).join("\n");
+      // سياقُ المصنعيات يحمل درجاتِ الجودة كما هي — والذكاءُ يربط بالكود لا بالسعر
+      const labs = laborSource().slice(0,40).map(function(x){
+        const pl = laborPriceList(x);
+        const px = pl.length
+          ? pl.map(function(g){ return (g.short? g.short+" ":"")+g.value; }).join(" / ")
+          : (x.rate!=null?String(x.rate):"?");
+        return `[${x.code||"—"}] ${x.name||""} (${x.unit||"—"}) = ${px} ر.س`;
+      }).join("\n");
 
       const prompt =
 "أنت خبير تحليل أسعار وتسعير بنود في مقاولات المباني بالسوق السعودي.\n"+
@@ -1288,6 +1365,7 @@ table tfoot td{background:#f1f5f9;font-weight:800}
     openPicker: openPicker,
     pickerSearch: pickerSearch,
     pickerSelect: pickerSelect,
+    rowGrade: rowGrade,
     linkRowToCatalog: linkRowToCatalog,
     refreshPrices: refreshPrices,
     aiSuggest: aiSuggest,
