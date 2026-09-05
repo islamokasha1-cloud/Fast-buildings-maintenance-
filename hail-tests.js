@@ -12496,8 +12496,86 @@ function contractsPhase1() {
   T("★ والبطاقةُ تعرض الرقمَ **رابطَ اتصالٍ وواتساب** لا نصّاً يُنسَخ يدوياً",
     /href="tel:\+/.test(src) && /https:\/\/wa\.me\//.test(src) &&
     /infoCell\("رقم الجوال", phoneHTML\(v\.phone\)\)/.test(src));
-  T("★ ومرشّحُ البحث يقرأ الدالّةَ النقيّة لا شرطاً محلّياً",
-    /!vendorMatchesPhone\(v,\s*_vFilter\.q\)/.test(src));
+  /* البحثُ الحرُّ **قاعدةٌ واحدةٌ** يقرؤها السجلُّ ومنتقي الطرف معاً: لو كُتبت
+     مرّتين لافترقتا بأوّل حقلٍ يُضاف، فيجد الباحثُ في السجلّ ما لا يجده وهو
+     يختار — فيظنّ الطرفَ غيرَ مسجَّلٍ ويسجّله ثانيةً. [v18.9.3085] */
+  T("★★ البحثُ قاعدةٌ نقيّةٌ واحدة (`vendorMatchesQuery`) — والرقمُ مسارٌ فيها لا شرطٌ محلّيّ",
+    /function vendorMatchesQuery\(v, raw\)/.test(src) &&
+    /return vendorMatchesPhone\(v, raw\);/.test(src) &&
+    /if\(!vendorMatchesQuery\(v, _vFilter\.q\)\) return false/.test(src) &&
+    /vendorMatchesQuery\(v, q\)/.test(src) &&
+    !/!vendorMatchesPhone\(v,\s*_vFilter\.q\)/.test(src));
+  /* ════════════════════════════════════════════════════════════
+     منتقي الطرف الباحث · وصفحاتُ سجل الأطراف   [v18.9.3085]
+
+     المحكّان اللذان يجب أن يحرسهما الاختبار:
+     ١) **قائمةٌ يُبحَث فيها لا عجلةٌ تُلَفّ** — `<select>` بمئةِ خيارٍ على الجوّال
+        يعني أن يمرّ المستخدمُ على تسعةٍ وتسعين ليصل إلى واحد.
+     ٢) **الصفحةُ تُقصَر داخل المدى دائماً** — رقمٌ خارجُه (بعد بحثٍ يضيّق النتائج
+        أو حذفِ آخرِ طرفٍ في الصفحة الأخيرة) يعني شبكةً فارغةً تُقرأ عطلاً.
+     ════════════════════════════════════════════════════════════ */
+  const vSearchPool = [
+    { id:"S1", name:"مؤسسة العبية لمواد البناء", entityType:"establishment", kind:"supplier",
+      trades:["tiling"], legal:{ crNumber:"3350160849", vatNumber:"300012345600003" }, phone:"966552108883" },
+    { id:"S2", name:"محمد زبير افضل", entityType:"individual", kind:"subcontractor",
+      trades:["~صب ارضيات"], legal:{ idNumber:"2283899900" }, phone:"966593802210" },
+    { id:"S3", name:"مصنع الفريح للصناعة", entityType:"establishment", kind:"supplier",
+      trades:["electrical"], legal:{ crNumber:"7014898220" }, phone:"966570970700" }
+  ];
+  const hit = (q) => vSearchPool.filter(v => C._vendorMatchesQuery(v, q)).map(v => v.id).join(",");
+  T("★★ البحثُ الحرُّ يجد الطرفَ بالاسم — وبالتطبيع العربيّ (الهمزةُ والتاءُ المربوطة)",
+    hit("العبية") === "S1" && hit("مؤسسه العبيه") === "S1");
+  T("★ وبالتخصّص — من يبحث عن «كهرباء» يقصد نوعَ العمل لا الاسم",
+    hit("كهرباء") === "S3");
+  T("★ وبرقم السجل التجاريّ ورقم الهوية (وهما ما يُكتب حين يُنسى الاسم)",
+    hit("3350160849") === "S1" && hit("2283899900") === "S2");
+  T("★★ وبرقم الجوال بأيّ صيغةٍ كتبها الباحث — لا بالصيغة المخزَّنة وحدَها",
+    hit("0593802210") === "S2" && hit("593802210") === "S2" && hit("055 210 8883") === "S1");
+  T("بحثٌ فارغٌ يُبقي الجميع (القائمةُ تُفتَح كاملةً لا فارغة)",
+    hit("") === "S1,S2,S3" && hit("   ") === "S1,S2,S3");
+  T("وما لا يطابق أحداً يُرجع فراغاً (لا كلَّ السجل)", hit("زجاج سيكوريت") === "");
+  T("★ وسطرُ الطرف في القائمة يحمل الاسمَ والصفةَ والتخصّص معاً (تمييزُ كهربائيٍّ من سبّاك)",
+    /محمد زبير افضل/.test(C._vendorPickLabel(vSearchPool[1])) &&
+    /شخص/.test(C._vendorPickLabel(vSearchPool[1])));
+
+  T("★★ المنتقي خانةُ بحثٍ لا `<select>` — ولا خيارُ `<option>` واحدٌ لطرفٍ بقي في النموذج",
+    /function vendorPickerHTML\(key, selId, placeholder\)/.test(src) &&
+    /fieldNL\("الطرف \*", vendorPickerHTML\("main", d\.vendorId\)\)/.test(src) &&
+    /vendorPickerHTML\("c"\+i, c\.vendorId/.test(src) &&
+    !/function vendorOptions\(/.test(src));
+  T("★ والقائمةُ تُعاد كتابتُها وحدَها مع كل حرف (إعادةُ رسم النموذج تُفقد المؤشّرَ موضعَه)",
+    /function vpickInput\(key, val\)\{[\s\S]{0,400}?vpickPaint\(key\);/.test(src) &&
+    !/function vpickInput\(key, val\)\{[\s\S]{0,400}?paintReqs\(\)/.test(src));
+  T("★ والاختيارُ يمرّ بمسار الطرف نفسِه (اقتراحُ الضريبة وإسقاطُ اعتماد المشتريات)",
+    /if\(key === "main"\)\{ setReqVendor\(id\); return; \}/.test(src));
+  T("★ ومعالِجاتُه معروضةٌ على window.contracts (سماتُ onclick تُقيَّم في النطاق العام)",
+    ["vpickOpen","vpickInput","vpickBlur","vpickKey","vpickChoose","vpickClear","setVendorPage"]
+      .every(k => typeof C[k] === "function"));
+
+  const many = Array.from({ length: 57 }, (_, i) => ({ id: "P" + i }));
+  const p1 = C._pageSlice(many, 1, 24), p3 = C._pageSlice(many, 3, 24);
+  T("★ التقسيمُ: ٥٧ طرفاً على ٢٤ ⇐ ٣ صفحاتٍ، والأخيرةُ ٩",
+    p1.totalPages === 3 && p1.items.length === 24 && p3.items.length === 9 &&
+    p1.from === 1 && p1.to === 24 && p3.from === 49 && p3.to === 57);
+  T("★★ ورقمُ صفحةٍ خارج المدى يُقصَر داخله — لا شبكةَ فارغةٍ تُقرأ عطلاً",
+    C._pageSlice(many, 99, 24).page === 3 && C._pageSlice(many, 0, 24).page === 1 &&
+    C._pageSlice(many, -4, 24).page === 1 && C._pageSlice(many, "x", 24).page === 1);
+  T("قائمةٌ فارغةٌ ⇐ صفحةٌ واحدةٌ بلا عناصرَ و`from` صفر (لا «عرض ١–٠ من ٠»)",
+    C._pageSlice([], 1, 24).totalPages === 1 && C._pageSlice([], 1, 24).items.length === 0 &&
+    C._pageSlice([], 1, 24).from === 0);
+  T("★ أرقامُ الشريط: الأولى والأخيرة وجارتا الحالية وما بينها «…» — بلا تكرار",
+    C._pageNumbers(1, 3).join(",") === "1,2,3" &&
+    C._pageNumbers(9, 20).join(",") === "1,…,7,8,9,10,11,…,20" &&
+    C._pageNumbers(1, 1).join(",") === "1");
+  T("★★ الترشيحُ يسبق التقسيم — الصفحاتُ على النتائج لا على السجل كلِّه",
+    /var pg = pageSlice\(list, _vPage, VENDORS_PAGE_SIZE\)/.test(src) &&
+    !/pageSlice\(all,/.test(src));
+  T("★★ وأيُّ ترشيحٍ يعيد إلى الصفحة الأولى (بحثٌ في الصفحة السابعة نتائجُه ثلاث)",
+    /function filterVendors\(key, val\)\{[\s\S]{0,400}?_vPage = 1;[\s\S]{0,120}?paintVendors\(\);/.test(src) &&
+    /function clearTradeFilter\(\)\{[^}]*_vPage = 1;/.test(src));
+  T("شريطُ الصفحات لا يظهر على صفحةٍ واحدة (زرٌّ مُطفأٌ وحيدٌ زينةٌ تُربك)",
+    /if\(!pg \|\| pg\.totalPages <= 1\) return "";/.test(src));
+
   T("★ ووثيقةُ العقد المطبوعةُ تحمل رقمَ الطرف الثاني (الإنذارُ يحتاج وسيلةَ تواصلٍ مثبَتة)",
     /var ph2 = v \? \(\(vendorPhones\(v\)\[0\]\|\|\{\}\)\.display \|\| ""\) : "";/.test(src) &&
     /جوال: <span dir="ltr">/.test(src));

@@ -3229,6 +3229,158 @@ check('★ وسطرُ المصدرين يفصل الشراءَ عن التعاق
 check('★★ وحسابٌ آخرُ لا يرث مستنداتِ غيره',
   await page.evaluate(() => window.contracts.substituteRollupFor('sb2').docs.length === 0));
 
+/* ═════════ منتقي الطرف الباحث · وصفحاتُ سجل الأطراف ═════════   [v18.9.3085]
+   السببُ الذي يجعل هذا فحصَ متصفّحٍ لا فحصَ نصّ: سماتُ `oninput/onclick`
+   تُقيَّم في **النطاق العام**، فاسمٌ يسقط منه = خانةُ بحثٍ لا تبحث وزرُّ صفحةٍ
+   لا ينقل — بلا مترجمٍ ولا خطأٍ في وحدة التحكّم. ولأنّ الصفحاتِ تُحسب على
+   المرسوم لا على الحسبة وحدَها: الرقمُ في «عرض ٢٥–٤٨» يجب أن يساوي البطاقاتِ. */
+console.log('\n=== منتقي الطرف الباحث · وصفحاتُ سجل الأطراف ===');
+await page.evaluate(() => {
+  // ٦٠ طرفاً — فوق سعة الصفحة (٢٤) بثلاث صفحاتٍ كاملة
+  const ws = [];
+  for (let i = 1; i <= 60; i++) {
+    ws.push(db.collection('global_vendors').doc('VND-P' + String(i).padStart(3, '0')).set({
+      name: 'طرفُ الصفحات ' + i, entityType: 'establishment', kind: 'supplier',
+      status: 'active', trades: i === 7 ? ['insulation'] : ['tiling'],
+      legal: { crNumber: '90000000' + String(i).padStart(2, '0') },
+      phone: i === 7 ? '966501110007' : ''
+    }));
+  }
+  return Promise.all(ws);
+});
+await page.waitForTimeout(1600);
+await page.evaluate(() => {
+  // بطاقةٌ مفتوحةٌ أو مرشّحٌ باقٍ من فحصٍ سابق يُخفيان الشبكةَ — نعود لقائمةٍ نظيفة
+  window.contracts.backToVendors();
+  ['q', 'kind', 'entity', 'status', 'trade'].forEach(k => window.contracts.filterVendors(k, ''));
+  showPage('vendors');
+});
+await page.waitForTimeout(900);
+
+const pg1 = await page.evaluate(() => {
+  const el = document.getElementById('page-vendors');
+  const bar = el.querySelector('.ct-pager');
+  const n = (bar ? bar.querySelector('.ct-pager-n').textContent : '').replace(/\s+/g, ' ').trim();
+  return { tiles: el.querySelectorAll('.ct-tile').length, bar: !!bar, n,
+           total: window.contracts.vendors().length };
+});
+check('★★ السجلُّ الكبيرُ يُقسَّم صفحاتٍ — لا شبكةٌ بلا قاع',
+  pg1.bar && pg1.tiles === 24 && pg1.total > 50, JSON.stringify(pg1));
+check('★★★ والرقمُ المكتوبُ = المرسوم فعلاً («عرض ١–٢٤ من N» مقابل عدّ البطاقات)',
+  pg1.n.includes('عرض 1 – 24 من ' + pg1.total) || pg1.n.replace(/\s/g, '') === ('عرض1–24من' + pg1.total),
+  pg1.n);
+
+const pg2 = await page.evaluate(() => {
+  const btns = Array.from(document.querySelectorAll('#page-vendors .ct-pager-btn'));
+  const two = btns.find(b => b.textContent.trim() === '2');
+  if (!two) return { err: 'لا زرّ للصفحة ٢' };
+  two.click();
+  const el = document.getElementById('page-vendors');
+  return { tiles: el.querySelectorAll('.ct-tile').length,
+           n: el.querySelector('.ct-pager-n').textContent.replace(/\s+/g, ' ').trim(),
+           first: (el.querySelector('.ct-tile-name') || {}).textContent };
+});
+check('★★ وزرُّ الصفحة ٢ ينقل فعلاً (سمةُ onclick تجد الدالّةَ في النطاق العام)',
+  !pg2.err && pg2.tiles === 24 && /25/.test(pg2.n), JSON.stringify(pg2));
+await page.evaluate(() => { const b = document.querySelector('#page-vendors .ct-pager'); if (b) b.scrollIntoView(); });
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${SHOTS}/62-vendors-pager.png` });
+
+const pgAfterSearch = await page.evaluate(() => {
+  window.contracts.filterVendors('q', 'الصفحات 7');
+  const el = document.getElementById('page-vendors');
+  return { tiles: el.querySelectorAll('.ct-tile').length, bar: !!el.querySelector('.ct-pager') };
+});
+check('★★★ وبحثٌ وأنت في الصفحة ٢ يعود للأولى — لا شبكةَ فارغةٍ تُقرأ عطلاً',
+  pgAfterSearch.tiles > 0 && !pgAfterSearch.bar, JSON.stringify(pgAfterSearch));
+await page.evaluate(() => window.contracts.filterVendors('q', ''));
+await page.waitForTimeout(500);
+await page.screenshot({ path: `${SHOTS}/62-vendors-paged.png`, fullPage: true });
+
+/* المنتقي داخل نموذج طلب التعاقد */
+await page.evaluate(() => { showPage('contract-requests'); window.contracts.newRequest(); });
+await page.waitForTimeout(1200);
+const vpBoot = await page.evaluate(() => ({
+  input: !!document.getElementById('ct-vp-q-main'),
+  noSelect: document.querySelectorAll('#page-contract-requests select[onchange*="setReqVendor"]').length,
+  listHidden: (document.getElementById('ct-vp-l-main') || {}).hidden
+}));
+check('★★ خانةُ الطرف صارت بحثاً لا `<select>` بمئةِ خيارٍ تُلَفُّ بالإصبع',
+  vpBoot.input && vpBoot.noSelect === 0 && vpBoot.listHidden === true, JSON.stringify(vpBoot));
+
+await page.focus('#ct-vp-q-main');
+await page.waitForTimeout(300);
+const vpOpen = await page.evaluate(() => {
+  const l = document.getElementById('ct-vp-l-main');
+  return { hidden: l.hidden, rows: l.querySelectorAll('.ct-vp-row').length,
+           more: !!l.querySelector('.ct-vp-more') };
+});
+check('★ التركيزُ يفتح القائمةَ كاملةً — بسقفٍ مرسومٍ يُقال عدداً لا بمئةِ صفٍّ',
+  !vpOpen.hidden && vpOpen.rows === 40 && vpOpen.more, JSON.stringify(vpOpen));
+
+await page.fill('#ct-vp-q-main', 'عزل');
+await page.waitForTimeout(400);
+const vpTrade = await page.evaluate(() => Array.from(
+  document.querySelectorAll('#ct-vp-l-main .ct-vp-row .ct-vp-nm')).map(e => e.textContent.trim()));
+check('★★ والبحثُ بالتخصّص يعمل داخل المنتقي (نفسُ قاعدة السجل)',
+  vpTrade.length === 1 && vpTrade[0].includes('الصفحات 7'), vpTrade.join('|'));
+
+await page.fill('#ct-vp-q-main', '0501110007');
+await page.waitForTimeout(400);
+const vpPhone = await page.evaluate(() => document.querySelectorAll('#ct-vp-l-main .ct-vp-row').length);
+check('★★ وبرقم الجوال بأيّ صيغةٍ كتبها الباحث', vpPhone === 1, vpPhone + ' نتيجة');
+await page.fill('#ct-vp-q-main', 'الصفحات 1');
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${SHOTS}/63-vendor-picker-open.png` });
+await page.fill('#ct-vp-q-main', '0501110007');
+await page.waitForTimeout(400);
+
+await page.evaluate(() => document.querySelector('#ct-vp-l-main .ct-vp-row').click());
+await page.waitForTimeout(900);
+const vpPicked = await page.evaluate(() => ({
+  draft: window.contracts._draft().vendorId,
+  name: window.contracts._draft().vendorName,
+  shown: (document.getElementById('ct-vp-q-main') || {}).value,
+  hidden: (document.getElementById('ct-vp-l-main') || {}).hidden
+}));
+check('★★★ والنقرُ يختار فعلاً — المسوّدةُ تحمل الطرفَ والخانةُ تعرض ما اختِير',
+  vpPicked.draft === 'VND-P007' && /الصفحات 7/.test(vpPicked.name) &&
+  /الصفحات 7/.test(vpPicked.shown) && vpPicked.hidden === true, JSON.stringify(vpPicked));
+
+const vpClear = await page.evaluate(() => {
+  const x = document.querySelector('#ct-vp-main .ct-vp-x');
+  if (!x) return { err: 'لا زرَّ مسح' };
+  x.click();
+  return { draft: window.contracts._draft().vendorId };
+});
+await page.waitForTimeout(700);
+check('★ وزرُّ المسح يُفرغ الاختيار (طرفٌ اختِير خطأً يُتراجَع عنه بنقرة)',
+  !vpClear.err && vpClear.draft === '', JSON.stringify(vpClear));
+
+const vpEnter = await page.evaluate(() => {
+  const inp = document.getElementById('ct-vp-q-main');
+  inp.focus(); window.contracts.vpickInput('main', 'عزل');
+  window.contracts.vpickKey('main', { key: 'Enter', preventDefault() {} });
+  return window.contracts._draft().vendorId;
+});
+await page.waitForTimeout(700);
+check('★ و«اكتب ثم Enter» يأخذ النتيجةَ الأولى (يدٌ واحدةٌ على لوحة المفاتيح)',
+  vpEnter === 'VND-P007', vpEnter);
+
+const vpCand = await page.evaluate(() => {
+  window.contracts.addCandidate();
+  return new Promise(r => setTimeout(() => {
+    const has = !!document.getElementById('ct-vp-q-c0');
+    if (has) window.contracts.vpickChoose('c0', 'VND-P007');
+    setTimeout(() => r({ has, id: ((window.contracts._draft().candidates || [])[0] || {}).vendorId }), 500);
+  }, 500));
+});
+check('★★ والمرشّحون كذلك يُختارون بالبحث — لا عجلةٌ ثانيةٌ في جدولٍ ضيّق',
+  vpCand.has && vpCand.id === 'VND-P007', JSON.stringify(vpCand));
+await page.screenshot({ path: `${SHOTS}/63-vendor-picker.png`, fullPage: true });
+await page.evaluate(() => window.contracts.cancelRequest());
+await page.waitForTimeout(500);
+
 check('لا أخطاء جافاسكربت طوال الرحلة', errors.length === 0, errors.slice(0, 2).join(' | '));
 
 console.log('\n' + '═'.repeat(58));

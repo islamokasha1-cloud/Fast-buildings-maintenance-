@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3082";
+var MODULE_BUILD = "v18.9.3085";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -2207,6 +2207,55 @@ function vendorMatchesPhone(vendor, query){
   }
   return false;
 }
+/* مطابقةُ البحث الحرِّ بطرفٍ واحد — **قاعدةٌ واحدةٌ يقرؤها كلُّ من يبحث**:
+   سجلُّ الأطراف ومنتقي الطرف في نموذج الطلب معاً. لو كُتبت مرّتين لافترقتا
+   بأوّل حقلٍ يُضاف، فيجد الباحثُ في السجلّ ما لا يجده وهو يختار — وهو أسوأُ
+   من ألّا يجد: يظنّ الطرفَ غيرَ مسجَّلٍ فيسجّله ثانيةً.
+   النصُّ يشمل الاسمَ والكنى ورقمَ الهوية والرقمَ الضريبيَّ وأنواعَ الأعمال،
+   و**الرقمُ مسارٌ مستقلٌّ** لأنّ من يبحث بجوّالٍ يكتبه بصيغةٍ غير المخزَّنة. */
+function vendorMatchesQuery(v, raw){
+  if(!v) return false;
+  var q = normName(raw);
+  if(!q) return true;
+  var hay = normName(v.name) + " " + normName((v.aliases||[]).join(" ")) + " " +
+            normName(identityOf(v).number) + " " + normName((v.legal||{}).vatNumber) + " " +
+            normName(vendorTrades(v).map(tradeLabel).join(" "));
+  if(hay.indexOf(q) !== -1) return true;
+  return vendorMatchesPhone(v, raw);
+}
+
+/* ── التقسيمُ إلى صفحات — دالّتان نقيّتان تقرؤهما الشاشةُ والفحصُ معاً ──
+   الصفحةُ المطلوبةُ **تُقصَر داخل المدى** دائماً: من حذف آخرَ طرفٍ في الصفحة
+   الأخيرة، أو ضيّق البحثَ وهو في الصفحة السابعة، يجب أن يرى نتائجَ لا شبكةً
+   فارغةً يظنّها عطلاً. و`from/to` تُحسبان هنا لا في القالب، فرقمُ «عرض ٢٥–٤٨»
+   لا يفترق عمّا رُسم فعلاً. */
+function pageSlice(arr, page, size){
+  var list  = Array.isArray(arr) ? arr : [];
+  var sz    = Math.max(1, Math.floor(Number(size) || 1));
+  var total = list.length;
+  var totalPages = Math.max(1, Math.ceil(total / sz));
+  var cur   = Math.min(Math.max(1, Math.floor(Number(page) || 1)), totalPages);
+  var start = (cur - 1) * sz;
+  return { items:list.slice(start, start + sz), page:cur, totalPages:totalPages,
+           total:total, size:sz, from:(total ? start + 1 : 0), to:Math.min(start + sz, total) };
+}
+/* أرقامُ الصفحات المعروضة: الأولى والأخيرة وجارتا الحالية، وما بينها «…».
+   شريطٌ بأربعين رقماً يصير هو نفسه كومةً يُبحث فيها. */
+function pageNumbers(cur, totalPages){
+  var tp = Math.max(1, Math.floor(Number(totalPages) || 1));
+  var c  = Math.min(Math.max(1, Math.floor(Number(cur) || 1)), tp);
+  var seen = {}, keys = [];
+  function add(p){ if(p >= 1 && p <= tp && !seen[p]){ seen[p] = 1; keys.push(p); } }
+  add(1); add(tp);
+  for(var i = c - 2; i <= c + 2; i++) add(i);
+  keys.sort(function(a,b){ return a - b; });
+  var out = [];
+  keys.forEach(function(p){
+    if(out.length && p - out[out.length-1] > 1) out.push("…");
+    out.push(p);
+  });
+  return out;
+}
 /* مَن يملك هذا الرقمَ غيرَ الطرفِ الذي نحرّره؟ **تنبيهٌ لا منع**: الرقمُ الواحد
    قد يكون لمكتبٍ يمثّل مقاولين، لكنه في الغالب طرفٌ سُجِّل مرّتين — ورؤيةُ من
    يملكه الآن هي الفرقُ بين تنبيهٍ يُفهم وتنبيهٍ يُتجاهَل. */
@@ -4117,6 +4166,8 @@ function _users(){ try{ return Array.isArray(USERS) ? USERS : []; }catch(e){ ret
    ════════════════════════════════════════════════════════════════════ */
 var _page    = "";        // الصفحةُ المعروضة حالياً من هذه الوحدة
 var _vFilter = { q:"", kind:"", entity:"", status:"", trade:"" };
+var VENDORS_PAGE_SIZE = 24;   // ثماني صفوفٍ في الشاشة العريضة — كأرشيف البلاغات وطلبات الشراء
+var _vPage   = 1;         // صفحةُ السجل المعروضة (تُصفَّر مع كل تغيير ترشيح)
 var _vOpen   = null;      // معرّفُ الطرف المفتوح (null = القائمة)
 var _vEdit   = null;      // مسوّدةُ التحرير (null = عرض)
 
@@ -4152,21 +4203,13 @@ function vendorListHTML(){
   var all = _vendors.slice();
   var today = _today();
 
-  var q = normName(_vFilter.q);
   var list = all.filter(function(v){
     if(!kindMatches(v, _vFilter.kind)) return false;
     if(_vFilter.entity && normEntity(v.entityType) !== _vFilter.entity) return false;
     if(_vFilter.status && (v.status||"active") !== _vFilter.status) return false;
     if(!vendorHasTrade(v, _vFilter.trade)) return false;
-    if(q){
-      // نوعُ الأعمال داخلَ البحث: من يكتب «عزل» في المربّع يقصد التخصّصَ لا الاسمَ فقط
-      var hay = normName(v.name) + " " + normName((v.aliases||[]).join(" ")) + " " +
-                normName(identityOf(v).number) + " " + normName((v.legal||{}).vatNumber) + " " +
-                normName(vendorTrades(v).map(tradeLabel).join(" "));
-      // والرقمُ مسارٌ مستقلٌّ لا حرفٌ في كومة النصّ: مَن يبحث برقمٍ يكتبه بالصيغة
-      // التي حفظها في جوّاله (بصفرٍ أو بمفتاحٍ دوليّ)، وهي غيرُ الصيغة المخزَّنة.
-      if(hay.indexOf(q) === -1 && !vendorMatchesPhone(v, _vFilter.q)) return false;
-    }
+    // البحثُ الحرُّ بالقاعدة النقيّة المشتركة — هي نفسُها التي يقرؤها منتقي الطرف
+    if(!vendorMatchesQuery(v, _vFilter.q)) return false;
     return true;
   });
 
@@ -4236,10 +4279,39 @@ function vendorListHTML(){
   } else if(!list.length){
     body = '<div class="card" style="text-align:center;padding:26px 18px;color:var(--muted);font-size:13px">لا نتائج تطابق البحث.</div>';
   } else {
-    body = '<div class="ct-grid">'+list.map(function(v){ return vendorTileHTML(v, today); }).join("")+'</div>';
+    /* ── صفحاتٌ لا شبكةٌ بلا قاع ──
+       السجلُّ يتجاوز المئة، ورسمُ الجميع دفعةً واحدةً يعني تمريراً لا ينتهي على
+       الجوّال وبطاقاتٍ تُبنى بلا أن تُقرأ. الترشيحُ يسبق التقسيم دائماً: الصفحاتُ
+       على **النتائج** لا على السجل كلِّه، وإلا صار «صفحة ٣ من ٩» كذباً بعد بحث. */
+    var pg = pageSlice(list, _vPage, VENDORS_PAGE_SIZE);
+    _vPage = pg.page;
+    body = '<div class="ct-grid">'+pg.items.map(function(v){ return vendorTileHTML(v, today); }).join("")+'</div>'+
+           pagerHTML(pg, "contracts.setVendorPage");
   }
 
   return head + strip + filters + body;
+}
+
+/* شريطُ الصفحات — نصٌّ يقول ما يُرى من الكم، وأزرارٌ حقيقيةٌ تصلها لوحةُ المفاتيح.
+   لا يظهر البتّة على صفحةٍ واحدة: شريطٌ بزرٍّ واحدٍ مُطفأ زينةٌ تُربك. */
+function pagerHTML(pg, fn){
+  if(!pg || pg.totalPages <= 1) return "";
+  function btn(p, lbl, on, dis){
+    return '<button class="btn '+(on?"btn-primary":"btn-ghost")+' btn-sm ct-pager-btn"'+
+      (dis?' disabled':'')+(on?' aria-current="page"':'')+
+      ' onclick="'+fn+'('+p+')">'+lbl+'</button>';
+  }
+  return '<div class="ct-pager">'+
+    '<span class="ct-pager-n">عرض <b class="num">'+pg.from+'</b>–<b class="num">'+pg.to+'</b> من <b class="num">'+pg.total+'</b></span>'+
+    '<div class="ct-pager-b">'+
+      btn(pg.page-1, "‹", false, pg.page===1)+
+      pageNumbers(pg.page, pg.totalPages).map(function(p){
+        return p === "…" ? '<span class="ct-pager-e">…</span>'
+                         : btn(p, '<span class="num">'+p+'</span>', p===pg.page, false);
+      }).join("")+
+      btn(pg.page+1, "›", false, pg.page===pg.totalPages)+
+    '</div>'+
+  '</div>';
 }
 
 /* خياراتُ مرشّح نوع الأعمال — مجموعتان مفصولتان صراحةً: ما جاء من القائمة وما
@@ -4711,19 +4783,36 @@ function vendorEditHTML(v){
 function field(label, inputHtml){
   return '<label class="ct-field"><span class="ct-field-l">'+_esc(label)+'</span>'+inputHtml+'</label>';
 }
+/* حقلٌ بلا `<label>` — لمنتقي الطرف وحدَه: نقرةٌ داخل `<label>` تُحوَّل إلى الحقل
+   المرتبطِ به، فيسرق التركيزُ نقرةَ الاختيار من صفّ القائمة أحياناً. العنوانُ
+   هنا نصٌّ مجاورٌ لا رابطٌ نشِط. */
+function fieldNL(label, inputHtml){
+  return '<div class="ct-field"><span class="ct-field-l">'+_esc(label)+'</span>'+inputHtml+'</div>';
+}
 
 /* ════════════════════════════════════════════════════════════════════
    ٧) أفعالُ الواجهة
    ════════════════════════════════════════════════════════════════════ */
 function filterVendors(key, val){
   _vFilter[key] = val || "";
+  /* أيُّ ترشيحٍ يعيد إلى الصفحة الأولى — من بحث وهو في الصفحة السابعة فنتائجُه
+     ثلاثٌ يجب أن يراها، لا شبكةً فارغةً تقول «لا نتائج» وهي كاذبة. */
+  _vPage = 1;
   paintVendors();
   if(key === "q"){
     var inp = document.getElementById("ct-v-q");
     if(inp){ inp.focus(); try{ inp.setSelectionRange(inp.value.length, inp.value.length); }catch(e){} }
   }
 }
-function clearTradeFilter(){ _vFilter.trade = ""; _vFilter.kind = ""; paintVendors(); }
+function clearTradeFilter(){ _vFilter.trade = ""; _vFilter.kind = ""; _vPage = 1; paintVendors(); }
+/* الانتقالُ بين الصفحات — والعودةُ إلى رأس القائمة معه: من ضغط «٣» وهو في أسفل
+   الشاشة يجد نفسَه في وسط صفحةٍ جديدةٍ لا يعرف أوّلَها لولا هذا السطر. */
+function setVendorPage(n){
+  _vPage = Math.max(1, Math.floor(Number(n) || 1));
+  paintVendors();
+  var el = document.getElementById("page-"+PAGE_VENDORS);
+  if(el){ try{ el.scrollIntoView({ behavior:"smooth", block:"start" }); }catch(e){ el.scrollIntoView(true); } }
+}
 function openVendor(id){ _vOpen = id; _vEdit = null; paintVendors(); }
 function backToVendors(){ _vOpen = null; _vEdit = null; paintVendors(); }
 function retry(){ stopSync(); startSync(); paintVendors(); }
@@ -5585,7 +5674,7 @@ function reqFormHTML(){
   // المرشّحون
   var candRows = d.candidates.map(function(c,i){
     return '<tr>'+
-      '<td><select class="form-input" data-cf="vendorId" data-i="'+i+'">'+vendorOptions(c.vendorId)+'</select></td>'+
+      '<td style="min-width:230px">'+vendorPickerHTML("c"+i, c.vendorId, "— اختر المرشّح — ابحث بالاسم أو التخصّص")+'</td>'+
       '<td><input class="form-input num" data-cf="amount" data-i="'+i+'" type="number" step="any" value="'+_esc(c.amount)+'" style="min-width:100px"></td>'+
       '<td><input class="form-input" data-cf="notes" data-i="'+i+'" value="'+_esc(c.notes||"")+'" placeholder="ملاحظة"></td>'+
       '<td><button class="btn btn-delete" onclick="contracts.delCandidate('+i+')">'+_icn("trash","ic-sm")+'</button></td>'+
@@ -5644,7 +5733,7 @@ function reqFormHTML(){
       '<div></div>'+
     '</div>' : '')+
     '<div class="ct-form-row">'+
-      field("الطرف *", '<select class="form-input" onchange="contracts.setReqVendor(this.value)">'+vendorOptions(d.vendorId)+'</select>')+
+      fieldNL("الطرف *", vendorPickerHTML("main", d.vendorId))+
       field("وضع الضريبة", vatSel)+
     '</div>'+
     budgetLinkHTML(linkState, d.budgetCategoryKey) +
@@ -5677,7 +5766,9 @@ function reqFormHTML(){
   '<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("users","ic-sm")+' المرشّحون وعروضهم'+
       '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.addCandidate()">'+_icn("plus","ic-sm")+' مرشّح</button></div>'+
-    (candRows ? '<div class="ct-table-wrap"><table class="ct-table" id="ct-r-cands"><thead><tr>'+
+    /* `ct-ovis`: قائمةُ المنتقي تطفو خارجَ الجدول، و`overflow:auto` على الغلاف
+       كان يقصّها داخله فتُقرأ نصفَ قائمةٍ في شريطٍ ضيّق. */
+    (candRows ? '<div class="ct-table-wrap ct-ovis"><table class="ct-table" id="ct-r-cands"><thead><tr>'+
       '<th>الطرف</th><th>قيمة العرض</th><th>ملاحظة</th><th></th></tr></thead><tbody>'+candRows+'</tbody></table></div>'
       : '<div style="color:var(--muted);font-size:12px">لا مرشّحين — أضِفهم ليرى معتمِدُ المشتريات التنافس.</div>')+
     '<div style="margin-top:12px">'+field("مبرّر اختيار الطرف (إلزامي إن لم يكن الأرخص)",
@@ -5766,15 +5857,170 @@ function totalsHTML(t, mode){
     '<div class="ct-tl"><span class="l">ض.ق.م</span><span class="v num">'+money(t.vat)+'</span></div>'+
     '<div class="ct-tl big"><span class="l">الإجمالي — '+_esc(m.short)+'</span><span class="v num">'+money(t.total)+'</span></div>';
 }
-/* تخصّصُ الطرف داخلَ خيار الاختيار: من يُسند عملَ كهرباءَ يحتاج أن يميّز
+/* تخصّصُ الطرف داخلَ سطر الاختيار: من يُسند عملَ كهرباءَ يحتاج أن يميّز
    كهربائياً من سبّاكٍ **وهو في لحظة الاختيار**، لا بعد فتح سجلّ الأطراف. */
-function vendorOptions(sel){
-  return '<option value="">— اختر الطرف —</option>'+_vendors.map(function(v){
-    var ent=ENTITY_TYPES[normEntity(v.entityType)];
-    var tr =vendorTrades(v).slice(0,2).map(tradeLabel).join(" · ");
-    return '<option value="'+_esc(v.id)+'"'+(sel===v.id?' selected':'')+'>'+_esc(v.name||v.id)+' — '+_esc(ent.short)+
-      (tr?' · '+_esc(tr):'')+'</option>';
-  }).join("");
+/* سطرُ الطرف كما يُقرأ في أيّ منتقٍ — اسمٌ ثم صفةٌ ثم تخصّص. دالّةٌ واحدةٌ
+   تكتبه في القائمة وفي خانة الاختيار بعد الاختيار، فلا يختلف ما اختاره عمّا رآه. */
+function vendorPickLabel(v){
+  if(!v) return "";
+  var ent = ENTITY_TYPES[normEntity(v.entityType)];
+  var tr  = vendorTrades(v).slice(0,2).map(tradeLabel).join(" · ");
+  return (v.name||v.id) + " — " + (ent?ent.short:"") + (tr ? (" · " + tr) : "");
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   منتقي الطرف — قائمةٌ **يُبحَث فيها**
+
+   المشكلة: `<select>` بمئةِ خيارٍ على iPad عجلةٌ تُلَفُّ بالإصبع بلا كتابة.
+   ومن يعرف اسمَ مقاولِه لا يريد أن يمرّ على تسعةٍ وتسعين غيرِه ليصل إليه —
+   ولا أن يفتح سجلَّ الأطراف في تبويبٍ آخر ليتذكّر تهجئةَ الاسم.
+
+   المبدأ: **البحثُ هو نفسُه بحثُ السجل** (`vendorMatchesQuery`) — اسمٌ أو كنيةٌ
+   أو تخصّصٌ أو رقمُ سجلٍّ أو جوّال. فما يجده الباحثُ في السجلّ يجده وهو يختار.
+
+   والقرار: خانةُ كتابةٍ عاديّةٌ لا `<select>`، وقائمةٌ تُعاد كتابتُها **وحدَها**
+   مع كل حرف — إعادةُ رسم النموذج كلِّه تُفقد المؤشّرَ موضعَه فيُكتب حرفٌ ويضيع
+   ما بعده. والحالةُ المخزَّنةُ نصُّ البحث فقط؛ المختارُ يبقى في المسوّدة وحدَها
+   فلا مصدرا حقيقةٍ لطرفٍ واحد.
+   ════════════════════════════════════════════════════════════════════ */
+var VPICK_CAP = 40;       // سقفُ ما يُرسم من النتائج — الباقي يُقال عدداً ويُضيَّق بالبحث
+var _vPick    = {};       // مفتاحُ المنتقي ⇐ نصُّ بحثه الحاليّ
+var _vPickTmr = {};       // مؤقّتُ الإغلاق بعد فقد التركيز (يُلغى إن وقع اختيار)
+
+function vpickState(key){ if(!_vPick[key] && _vPick[key] !== "") _vPick[key] = ""; return _vPick[key]; }
+
+function vendorPickerHTML(key, selId, placeholder){
+  var v = selId ? vendorById(selId) : null;
+  var k = _jq(key);
+  return '<div class="ct-vp" id="ct-vp-'+_esc(key)+'">'+
+    '<input class="form-input ct-vp-in'+(v?' has':'')+'" id="ct-vp-q-'+_esc(key)+'" autocomplete="off" type="text"'+
+      ' role="combobox" aria-expanded="false" aria-autocomplete="list"'+
+      ' value="'+_esc(v ? vendorPickLabel(v) : "")+'"'+
+      ' placeholder="'+_esc(placeholder || "— اختر الطرف — اكتب اسماً أو تخصّصاً أو رقماً للبحث")+'"'+
+      ' onfocus="contracts.vpickOpen(\''+k+'\')"'+
+      ' oninput="contracts.vpickInput(\''+k+'\',this.value)"'+
+      ' onkeydown="contracts.vpickKey(\''+k+'\',event)"'+
+      ' onblur="contracts.vpickBlur(\''+k+'\')">'+
+    (v ? '<button type="button" class="ct-vp-x" title="مسح الاختيار" aria-label="مسح الاختيار"'+
+         ' onmousedown="event.preventDefault()" onclick="contracts.vpickClear(\''+k+'\')">'+_icn("xCircle","ic-sm")+'</button>' : '')+
+    '<div class="ct-vp-list" id="ct-vp-l-'+_esc(key)+'" role="listbox" hidden></div>'+
+  '</div>';
+}
+
+/* صفوفُ النتائج — تُبنى مرّةً في كل حرف، ولذلك بلا أيّ استعلامٍ للشبكة:
+   `_vendors` مصفوفةٌ في الذاكرة يملؤها المستمعُ نفسُه الذي يملأ السجل. */
+function vendorPickListHTML(key){
+  var q = vpickState(key), today = _today();
+  var hits = _vendors.filter(function(v){ return vendorMatchesQuery(v, q); });
+  if(!_vendors.length)
+    return '<div class="ct-vp-empty">لا أطراف في السجل بعد — سجّل الطرف في «سجل الأطراف» ثم عُد.</div>';
+  if(!hits.length)
+    return '<div class="ct-vp-empty">لا طرفَ يطابق «'+_esc(q)+'» — جرّب اسماً أجزأ أو تخصّصاً أو رقمَ جوّال.</div>';
+  var shown = hits.slice(0, VPICK_CAP);
+  return shown.map(function(v){
+    var ent  = ENTITY_TYPES[normEntity(v.entityType)];
+    var kind = VENDOR_KINDS[v.kind] || VENDOR_KINDS.subcontractor;
+    var comp = vendorComplianceState(v, today);
+    var tr   = vendorTrades(v).slice(0,3).map(tradeLabel).join(" · ");
+    /* الحالةُ والوثائقُ **في سطر الاختيار نفسِه**: من يختار طرفاً موقوفاً أو
+       منتهيَ الوثائق يُوقفه المهربُ بعد الإرسال — ورؤيتُه الآن أرخصُ من رحلةٍ
+       كاملةٍ تنتهي برفض. */
+    var flag = (v.status||"active") !== "active"
+      ? '<span class="ct-vp-flag off">'+_esc((VENDOR_STATUS[v.status]||{}).lbl || v.status)+'</span>'
+      : (comp.expired ? '<span class="ct-vp-flag bad">وثيقة منتهية</span>'
+      : (comp.soon    ? '<span class="ct-vp-flag warn">وثيقة توشك</span>' : ''));
+    return '<button type="button" class="ct-vp-row" role="option"'+
+        ' onmousedown="event.preventDefault()"'+
+        ' onclick="contracts.vpickChoose(\''+_jq(key)+'\',\''+_jq(v.id)+'\')">'+
+      '<span class="ct-vp-nm">'+_esc(v.name||v.id)+flag+'</span>'+
+      '<span class="ct-vp-mt">'+_icn(ent.icon,"ic-sm")+' '+_esc(ent.short)+
+        ' <span class="ct-dot">·</span> '+_icn(kind.icon,"ic-sm")+' '+_esc(kind.lbl)+
+        (tr ? ' <span class="ct-dot">·</span> '+_esc(tr) : '')+'</span>'+
+    '</button>';
+  }).join("") +
+  (hits.length > VPICK_CAP
+    ? '<div class="ct-vp-more">'+_icn("search","ic-sm")+' و<b class="num">'+(hits.length-VPICK_CAP)+
+      '</b> نتيجةً أخرى لا تُرسَم — ضيّق البحث.</div>' : '');
+}
+
+function vpickPaint(key){
+  var box = document.getElementById("ct-vp-l-"+key);
+  if(!box) return;
+  box.innerHTML = vendorPickListHTML(key);
+}
+function vpickOpen(key){
+  vpickState(key);
+  clearTimeout(_vPickTmr[key]);
+  var box = document.getElementById("ct-vp-l-"+key), inp = document.getElementById("ct-vp-q-"+key);
+  if(!box) return;
+  /* عند فتحها: البحثُ يبدأ فارغاً فتُعرض القائمةُ كاملةً، والنصُّ المعروضُ
+     (اسمُ المختار) يُظلَّل ليمحوه أوّلُ حرفٍ يُكتب — لا حذفٌ يدويٌّ قبل البحث. */
+  _vPick[key] = "";
+  vpickPaint(key);
+  box.hidden = false;
+  if(inp){ inp.setAttribute("aria-expanded","true"); try{ inp.select(); }catch(e){} }
+}
+function vpickInput(key, val){
+  _vPick[key] = String(val || "");
+  var box = document.getElementById("ct-vp-l-"+key);
+  if(box && box.hidden) box.hidden = false;
+  vpickPaint(key);          // القائمةُ وحدَها تُعاد — فيبقى المؤشّرُ حيث تركه الكاتب
+}
+/* الإغلاقُ بعد فقد التركيز يتأخّر لحظةً: النقرُ على صفٍّ يُفقد التركيزَ **قبل**
+   أن يصل `click`، فإغلاقٌ فوريٌّ يبتلع الاختيار. */
+function vpickBlur(key){
+  clearTimeout(_vPickTmr[key]);
+  _vPickTmr[key] = setTimeout(function(){ vpickClose(key, true); }, 180);
+}
+function vpickClose(key, restore){
+  var box = document.getElementById("ct-vp-l-"+key), inp = document.getElementById("ct-vp-q-"+key);
+  if(box){ box.hidden = true; }
+  if(inp) inp.setAttribute("aria-expanded","false");
+  _vPick[key] = "";
+  // ما لم يقع اختيارٌ يعود النصُّ إلى المختار الحاليّ — لا يبقى بحثٌ معلَّقٌ يُقرأ اختياراً
+  if(restore && inp) inp.value = vendorPickLabel(vendorById(vpickCurrent(key)));
+}
+function vpickKey(key, ev){
+  var k = ev && (ev.key || ev.keyCode);
+  if(k === "Escape" || k === "Esc" || k === 27){
+    clearTimeout(_vPickTmr[key]); vpickClose(key, true);
+    var inp = document.getElementById("ct-vp-q-"+key); if(inp) inp.blur();
+    return;
+  }
+  if(k === "Enter" || k === 13){
+    if(ev.preventDefault) ev.preventDefault();
+    // «اكتب واضغط Enter» — تُؤخذ النتيجةُ الأولى، وهي الوحيدةُ غالباً بعد بحثٍ دقيق
+    var hits = _vendors.filter(function(v){ return vendorMatchesQuery(v, vpickState(key)); });
+    if(hits.length) vpickChoose(key, hits[0].id);
+  }
+}
+function vpickClear(key){
+  clearTimeout(_vPickTmr[key]);
+  vpickApply(key, "");
+}
+function vpickChoose(key, id){
+  clearTimeout(_vPickTmr[key]);
+  vpickApply(key, id);
+}
+/* الوجهةُ حسب المنتقي: `main` طرفُ الطلب (يجرّ معه اقتراحَ وضع الضريبة وإسقاطَ
+   اعتماد المشتريات)، و`c<i>` مرشَّحٌ في جدول العروض. */
+function vpickCurrent(key){
+  if(!_rDraft) return "";
+  if(key === "main") return _rDraft.vendorId || "";
+  var m = /^c(\d+)$/.exec(key);
+  if(m){ var c = (_rDraft.candidates||[])[Number(m[1])]; return c ? (c.vendorId||"") : ""; }
+  return "";
+}
+function vpickApply(key, id){
+  _vPick[key] = "";
+  if(key === "main"){ setReqVendor(id); return; }
+  var m = /^c(\d+)$/.exec(key);
+  if(!m) return;
+  syncReqDraft(); if(!_rDraft) return;
+  var c = (_rDraft.candidates||[])[Number(m[1])];
+  if(!c) return;
+  c.vendorId = id;
+  paintReqs();
 }
 /* إعادةُ حسابِ الإجماليات وحدَها دون إعادة رسم النموذج — فلا يقفز مؤشّرُ الكتابة. */
 function recalc(full){
@@ -9510,6 +9756,7 @@ function injectCSS(){
    الجوال، ومقاسٌ يناسب النصَّ لا أزرارَ الأوامر. */
 ".ct-vbtn{margin-top:5px;padding:4px 10px;font-size:11px;gap:5px}",
 ".ct-table-wrap{overflow-x:auto}",
+".ct-table-wrap.ct-ovis{overflow:visible}",
 ".ct-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:520px}",
 ".ct-table th{text-align:right;font-size:11px;color:var(--muted);font-weight:800;padding:7px 9px;border-bottom:1px solid var(--border);white-space:nowrap}",
 ".ct-table td{padding:8px 9px;border-bottom:1px solid var(--border);vertical-align:middle}",
@@ -9550,6 +9797,30 @@ function injectCSS(){
 ".ct-file-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr}",
 ".ct-auto{font-size:9.5px;font-weight:700;color:var(--sla-ok);display:flex;align-items:center;gap:3px;margin-top:3px}",
 ".ct-save-bar{display:flex;gap:8px;justify-content:flex-end;position:sticky;bottom:0;background:var(--bg);padding:12px 0 4px;border-top:1px solid var(--border)}",
+/* شريطُ الصفحات — تحت الشبكة، بخطٍّ فاصلٍ يفصله عن آخر بطاقة */
+".ct-pager{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border)}",
+".ct-pager-n{font-size:12px;color:var(--muted);font-weight:700}",
+".ct-pager-b{display:flex;gap:4px;flex-wrap:wrap;align-items:center}",
+".ct-pager-btn{min-width:34px;padding:4px 9px;font-size:12.5px}",
+".ct-pager-btn[disabled]{opacity:.4;cursor:default}",
+".ct-pager-e{padding:4px 4px;color:var(--muted);font-weight:700}",
+/* منتقي الطرف الباحث — خانةٌ وقائمةٌ تطفو فوق ما بعدها */
+".ct-vp{position:relative}",
+".ct-vp-in{width:100%;padding-inline-end:30px}",
+".ct-vp-in.has{font-weight:700}",
+".ct-vp-x{position:absolute;inset-inline-end:6px;top:50%;transform:translateY(-50%);background:none;border:0;padding:2px;cursor:pointer;color:var(--muted);display:flex;line-height:0}",
+".ct-vp-x:hover{color:var(--danger)}",
+".ct-vp-list{position:absolute;z-index:40;inset-inline:0;top:calc(100% + 4px);max-height:330px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 26px rgba(0,0,0,.16);padding:5px}",
+".ct-vp-row{display:flex;flex-direction:column;gap:3px;width:100%;text-align:start;background:none;border:0;border-radius:9px;padding:8px 10px;cursor:pointer;font:inherit;color:var(--text)}",
+".ct-vp-row:hover,.ct-vp-row:focus-visible{background:var(--surface2);outline:none}",
+".ct-vp-nm{font-size:13px;font-weight:800;color:var(--primary);display:flex;align-items:center;gap:6px;flex-wrap:wrap}",
+".ct-vp-mt{font-size:11px;color:var(--muted);font-weight:700;display:flex;align-items:center;gap:5px;flex-wrap:wrap}",
+".ct-vp-flag{font-size:9.5px;font-weight:800;border-radius:99px;padding:1px 7px;border:1px solid var(--border);color:var(--muted)}",
+".ct-vp-flag.bad{color:var(--sla-crit);border-color:var(--sla-crit)}",
+".ct-vp-flag.warn{color:var(--sla-warn);border-color:var(--sla-warn)}",
+".ct-vp-flag.off{color:var(--muted)}",
+".ct-vp-empty,.ct-vp-more{font-size:12px;color:var(--muted);padding:12px 10px;text-align:center;line-height:1.7}",
+".ct-vp-more{border-top:1px solid var(--border);margin-top:4px}",
 /* الفراغ */
 ".ct-empty{text-align:center;padding:38px 20px}",
 ".ct-empty-ic{width:46px;height:46px;margin:0 auto 12px;color:var(--muted);opacity:.55}",
@@ -9671,8 +9942,11 @@ window.contracts = {
   addContact: addContact, delContact: delContact,
   setEntity: setEntity,
   addTrade: addTrade, addTradeText: addTradeText, delTrade: delTrade,
-  clearTradeFilter: clearTradeFilter,
+  clearTradeFilter: clearTradeFilter, setVendorPage: setVendorPage,
   vendors: vendors, vendorById: vendorById,
+  // منتقي الطرف الباحث — يُستدعى من سماتِ onclick/oninput في نموذج الطلب
+  vpickOpen: vpickOpen, vpickInput: vpickInput, vpickBlur: vpickBlur,
+  vpickKey: vpickKey, vpickChoose: vpickChoose, vpickClear: vpickClear,
   // طلبات التعاقد [المرحلة ٢]
   renderReqs: renderReqs, startReqSync: startReqSync, stopReqSync: stopReqSync, retryReqs: retryReqs,
   newRequest: newRequest, cancelRequest: cancelRequestForm, submitRequest: submitRequest,
@@ -9841,6 +10115,11 @@ window.contracts = {
   _vendorTrades: vendorTrades, _vendorHasTrade: vendorHasTrade,
   _kindMatches: kindMatches, _tradeOptions: tradeOptions,
   _vendorsByTrade: vendorsByTrade,
+  // البحثُ الحرُّ والتقسيمُ إلى صفحات — دوالُّ نقيّةٌ يفحصها `hail-tests.js` بلا متصفّح
+  _vendorMatchesQuery: vendorMatchesQuery,
+  _vendorPickLabel: vendorPickLabel,
+  _pageSlice: pageSlice, _pageNumbers: pageNumbers,
+  _VENDORS_PAGE_SIZE: VENDORS_PAGE_SIZE,
   _crqProcKey: crqProcKey,
   _crqFinanceKey: crqFinanceKey,
   _crqRevalidate: crqRevalidate,
