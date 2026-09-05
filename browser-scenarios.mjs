@@ -1546,6 +1546,87 @@ check('18و) ★★ وتبديلُها إلى «منخفض» ينقل السعر
 check('18ز) ★★★ و«تحديثُ الأسعار» يتبع الدرجةَ المختارةَ لا السعرَ الأساسيّ',
   s18.rAfter==='99', 'الأجرة بعد التحديث='+s18.rAfter+' (الأساسيُّ ١٥ — لو تبعه لكان خطأً)');
 
+/* ══ سيناريو 19: التسويةُ النهائيةُ للمالية — الذيلُ الذي لا يُسدَّد ══
+   حالةُ البلاغ حرفياً: إجماليٌّ 22,402 ودفعةٌ 21,592.4 وذيلٌ 809.6. الحرّاسُ النقيّةُ
+   تُثبت الحساب، وهذا يُثبت أنّ الشاشةَ **تُجري** التسويةَ فعلاً: الكتابةُ تصل المخزن،
+   والحالةُ تنتقل، والقيدُ يُكتَب — ولا شيءَ من ذلك يظهر في دالّةٍ نقيّة. */
+log('\n=== السيناريو 19: تسوية المالية النهائية ══');
+const s19 = await page.evaluate(async ()=>{
+  const out={}; window.__store={}; purchases=[];
+  const PC = PURCHASES_COLLECTION();
+  const mk = ()=>({ id:'PO-SET-1', building:'مبنى ١', status:'pending_finance', needsFinance:true,
+    estCost:22402, items:[{ itemName:'توريد', qty:1, unit:'مقطوعية', unitCost:22402, itemCost:22402 }],
+    payment:{ beneficiary:'مورد', note:'تم تعديل عرض السعر',
+              installments:[{ amount:21592.4, by:'financial01', at:'2026-09-02T06:36:00' }] },
+    timeline:[], createdAt:'2026-08-02T08:00:00' });
+  const cur = ()=> purchases.find(x=>x.id==='PO-SET-1') || window.__store[PC+'/PO-SET-1'] || {};
+  const reset = ()=>{ const PO=mk(); purchases=[PO]; window.__store[PC+'/PO-SET-1']=JSON.parse(JSON.stringify(PO)); };
+
+  // (أ) الحالة قبل التسوية — ذيلٌ عالقٌ عند المالية
+  currentUser={name:'المالية', role:'finance'};
+  reset();
+  out.before = { due:_poFinanceTotal(cur()), paid:_poPaidSoFar(cur()), rem:_poRemaining(cur()) };
+
+  // (ب) البوّابة: مسؤولُ المشتريات لا يُسوّي
+  currentUser={name:'مشتريات', role:'procurement_officer'};
+  out.procCanSettle = _poCanSettleFinance(cur());
+
+  // (ج) المالية تفتح النافذة — الحقول حقيقيةٌ في المستند
+  currentUser={name:'المالية', role:'finance'};
+  out.finCanSettle = _poCanSettleFinance(cur());
+  openFinanceSettleModal('PO-SET-1');
+  out.amountDefault = (document.getElementById('fs-amount')||{}).value;
+
+  // (د) السببُ إلزاميّ — بلا سببٍ لا كتابة
+  document.getElementById('fs-reason').value='';
+  out.noReason = await window.financeSettlement.save('PO-SET-1');
+  out.noReasonStatus = cur().status;
+
+  // (هـ) بسببٍ مكتوب: يُقفَل الطلبُ ويُحال للتنفيذ
+  document.getElementById('fs-amount').value='21592.4';
+  document.getElementById('fs-reason').value='عرض سعر أقل من المورد بعد الإحالة للسداد';
+  out.ok = await window.financeSettlement.save('PO-SET-1');
+  await new Promise(r=>setTimeout(r,250));
+  const a = cur();
+  out.after = { due:_poFinanceTotal(a), rem:_poRemaining(a), status:a.status,
+                paid:!!(a.payment&&a.payment.paid), settled:a.payment&&a.payment.settledTotal,
+                actual:a.actualCost, logN:(a.payment&&a.payment.settleLog||[]).length,
+                reason:(a.payment&&a.payment.settledReason)||'' };
+  out.stored = (window.__store[PC+'/PO-SET-1']||{}).status;
+  out.tlHasSettle = (a.timeline||[]).some(e=>/اعتماد المبلغ النهائي/.test(e.event||''));
+  out.tlHasClose  = (a.timeline||[]).some(e=>(e.code==='proc_executing'));
+
+  // (و) وبعد الإقفال لا تسويةَ بأثرٍ رجعيّ
+  out.afterPaidCanSettle = _poCanSettleFinance(cur());
+
+  // (ز) فاتورةُ المورد بعد التدقيق تعلو التسوية — المتبقّي يعود
+  const b = cur(); b.auditedBy='مسؤول المستودع'; b.actualCost=22402;
+  out.audited = { due:_poFinanceTotal(b), rem:_poRemaining(b) };
+  return out;
+});
+check('19أ) ★★ قبل التسوية: ذيلٌ 809.6 عالقٌ لا يُسدَّد',
+  s19.before.due===22402 && s19.before.paid===21592.4 && s19.before.rem===809.6,
+  'المطلوب='+s19.before.due+' المسدَّد='+s19.before.paid+' المتبقّي='+s19.before.rem);
+check('19ب) ★★ البوّابة: غيرُ المالية لا يُسوّي', s19.procCanSettle===false);
+check('19ج) ★ والمالية تفتحها، والمبلغُ المقترحُ هو المسدَّدُ فعلاً',
+  s19.finCanSettle===true && String(s19.amountDefault)==='21592.4', 'المقترح='+s19.amountDefault);
+check('19د) ★★★ بلا سببٍ لا كتابة — النافذةُ تبقى والحالةُ لا تتحرّك',
+  s19.noReason===false && s19.noReasonStatus==='pending_finance', 'الحالة='+s19.noReasonStatus);
+check('19هـ) ★★★ وبسببٍ مكتوب: لا متبقٍّ، والطلبُ يُحال للتنفيذ',
+  s19.ok===true && s19.after.rem===0 && s19.after.due===21592.4 &&
+  s19.after.status==='proc_executing' && s19.after.paid===true,
+  'المطلوب='+s19.after.due+' المتبقّي='+s19.after.rem+' الحالة='+s19.after.status);
+check('19هـ) ★★ والكتابةُ تصل المخزن فعلاً (لا ذاكرةً وحدَها)', s19.stored==='proc_executing', s19.stored);
+check('19هـ) ★★ والتقاريرُ تتبعها: actualCost صار المعتمَد لا الإجماليَّ القديم',
+  s19.after.actual===21592.4, 'actualCost='+s19.after.actual);
+check('19هـ) ★★ والأثرُ كاملٌ: سببٌ محفوظٌ وسجلٌّ وقيدان في المسار',
+  s19.after.settled===21592.4 && s19.after.logN===1 && /عرض سعر أقل/.test(s19.after.reason) &&
+  s19.tlHasSettle===true && s19.tlHasClose===true);
+check('19و) ★★★ وبعد الإقفال لا تسويةَ بأثرٍ رجعيّ', s19.afterPaidCanSettle===false);
+check('19ز) ★★★ وفاتورةُ المورد بعد التدقيق تعلو التسوية — المتبقّي يعود 809.6',
+  s19.audited.due===22402 && s19.audited.rem===809.6,
+  'المطلوب='+s19.audited.due+' المتبقّي='+s19.audited.rem);
+
 log('\n════════════════════════════════════════');
 log((fail===0?'✅ ':'❌ ')+pass+'/'+(pass+fail)+' سيناريو ناجح'+(fail?(' — '+fail+' فشل'):''));
 if(boot.length) log('(أخطاء إقلاع غير حرجة: '+boot.length+' — متوقّعة من غياب CDN)');
