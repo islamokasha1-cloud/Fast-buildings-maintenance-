@@ -1565,15 +1565,13 @@ function injectLandingButton(){
   if(!anchor || !anchor.parentElement) return;
   const wrap = document.createElement("div");
   wrap.id = "pm-landing-btn-wrap";
-  wrap.style.cssText = "margin:8px 0 4px;width:100%";
+  wrap.style.cssText = "margin:9px 0 0;width:100%";
+  /* v18.9an: طرازُ `.pk-row` (app.css) — الأشرطةُ الثانويةُ فاتحةٌ لتُقرأ بعد البطاقة الجامعة */
   wrap.innerHTML =
-    '<button onclick="projectMgmt.openFromLanding()" style="width:100%;background:linear-gradient(135deg,#22497f 0%,#1b3a6b 55%,#142c52 100%);color:#fff;border:none;border-radius:14px;padding:14px 18px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:12px;box-shadow:0 8px 22px rgba(27,58,107,0.28), inset 0 1px 0 rgba(255,255,255,0.12);transition:opacity .15s" onmouseover="this.style.opacity=\'.9\'" onmouseout="this.style.opacity=\'1\'">' +
-      '<span style="width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.13);display:flex;align-items:center;justify-content:center;flex-shrink:0">' + _svg('building2') + '</span>' +
-      '<div style="text-align:right">' +
-        '<div>إدارة المشاريع</div>' +
-        '<div style="font-size:11px;opacity:.8;font-weight:400;margin-top:2px">الموازنة والتكلفة الفعلية لكل مشروع</div>' +
-      '</div>' +
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:auto;opacity:.7"><polyline points="9 18 15 12 9 6"/></svg>' +
+    '<button class="pk-row" onclick="projectMgmt.openFromLanding()">' +
+      '<span class="pk-row-ic">' + _svg('building2') + '</span>' +
+      '<span><span>إدارة المشاريع</span><span class="pk-row-sub">الموازنة والتكلفة الفعلية لكل مشروع</span></span>' +
+      '<span class="pk-row-ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>' +
     '</button>';
   // ضعه مباشرةً بعد زر المشتريات المركزية (أو بعد زر الإضافة إن غاب)
   anchor.parentElement.insertBefore(wrap, anchor.nextSibling);
