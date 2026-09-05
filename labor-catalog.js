@@ -62,6 +62,78 @@
     var n=parseFloat(s);
     return isFinite(n)?n:0;
   }
+  /* ══ أسعارٌ متعدّدةٌ للبند الواحد حسب درجة الجودة ══
+     البندُ الواحد (لياسةٌ · بلاطٌ · دهان) يُنفَّذ بثلاث درجاتٍ ولكلِّ درجةٍ أجرتُها،
+     فالسعرُ الواحد كان يُجبر المالكَ على تكرار البند ثلاثَ مرّاتٍ بأسماءٍ مصطنعة.
+     البنيةُ `grades = {low,mid,high}` تحمل ما أُدخِل منها و`null` لما تُرِك فارغاً.
+     و`rate` **يبقى موجوداً** سعراً أساسياً مشتقّاً: خارجَ هذه الوحدة (تحليلُ الأسعار ·
+     الفلاتر · الإحصاءات) يقرأ `rate` وحدَه، فإسقاطُه كان يُصفّر كلَّ سعرٍ مسحوبٍ إلى
+     تحليل. قاعدةُ الاشتقاق: الأساسُ = متوسطُ الجودة إن وُجد، وإلا فالمنخفضُ ثم العالي
+     — لا متوسطٌ حسابيٌّ مخترَعٌ لا يساوي أجرةَ أحد.
+     وبندٌ قديمٌ بلا `grades` يبقى **سعراً واحداً بلا درجة**: لا نصفُه بدرجةٍ لم يخترها
+     أحدٌ، ويُعرض كما كان حتى يفتحه المالكُ ويصنّفه. */
+  const GRADE_KEYS   = ["low","mid","high"];
+  const GRADE_LABELS = { low:"منخفض الجودة", mid:"متوسط الجودة", high:"عالي الجودة" };
+  const GRADE_SHORT  = { low:"منخفض", mid:"متوسط", high:"عالي" };
+  function gradeLabel(k){ return GRADE_LABELS[k] || ""; }
+
+  // خريطةُ الدرجات المُدخَلة وحدَها — نقيّة (للاختبار بلا متصفّح)
+  function gradeMap(it){
+    const g = (it && it.grades && typeof it.grades==='object') ? it.grades : null;
+    const out = { low:null, mid:null, high:null };
+    if(!g) return out;
+    GRADE_KEYS.forEach(function(k){
+      const v = g[k];
+      if(v==null || v==="") return;
+      const n = Number(v);
+      if(isFinite(n)) out[k] = n;
+    });
+    return out;
+  }
+  function hasGrades(it){ const m=gradeMap(it); return GRADE_KEYS.some(function(k){ return m[k]!=null; }); }
+
+  // السعرُ الأساسيُّ المشتقّ — نقيّة
+  const BASE_PRIORITY = ["mid","low","high"];   // متوسطٌ أوّلاً، فإن غاب فالمنخفضُ ثم العالي
+  function baseFrom(m, legacy){
+    m = m || {};
+    for(var i=0;i<BASE_PRIORITY.length;i++){
+      var v = m[BASE_PRIORITY[i]];
+      if(v!=null && isFinite(Number(v))) return Number(v);
+    }
+    return (legacy!=null && isFinite(Number(legacy))) ? Number(legacy) : null;
+  }
+
+  // سعرُ درجةٍ بعينها؛ ودرجةٌ فارغةٌ ⇒ السعرُ الأساسيّ — نقيّة
+  function priceOf(it, gradeKey){
+    if(!it) return null;
+    if(gradeKey && GRADE_KEYS.indexOf(gradeKey)>=0){
+      const v = gradeMap(it)[gradeKey];
+      return v!=null ? v : null;
+    }
+    return (it.rate!=null && isFinite(Number(it.rate))) ? Number(it.rate) : null;
+  }
+
+  // كلُّ أسعار البند: مصنَّفةً إن وُجدت درجات، وسعراً واحداً بلا درجةٍ إن لم توجد — نقيّة
+  function priceList(it){
+    const m = gradeMap(it);
+    const out = [];
+    GRADE_KEYS.forEach(function(k){
+      if(m[k]!=null) out.push({ key:k, label:GRADE_LABELS[k], short:GRADE_SHORT[k], value:m[k] });
+    });
+    if(out.length) return out;
+    const r = priceOf(it, "");
+    return r!=null ? [{ key:"", label:"", short:"", value:r }] : [];
+  }
+
+  // منخفضٌ ≤ متوسطٌ ≤ عالٍ على المُدخَل منها وحدَه — نقيّة (تحذيرٌ ناعمٌ لا منع)
+  function gradeOrderOk(m){
+    const seq = GRADE_KEYS.map(function(k){ return (m||{})[k]; }).filter(function(v){ return v!=null; });
+    for(var i=1;i<seq.length;i++){ if(Number(seq[i]) < Number(seq[i-1])) return false; }
+    return true;
+  }
+
+  function money(v){ return Number(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
   function canManage(){ try{ return (typeof canManageCatalog==='function') ? canManageCatalog() : false; }catch(e){ return false; } }
   function isViewerMode(){ try{ return (typeof isViewer==='function') ? isViewer() : false; }catch(e){ return false; } }
   function userLabel(){ try{ return (currentUser && (currentUser.name||currentUser.user)) || "—"; }catch(e){ return "—"; } }
@@ -137,6 +209,10 @@
             <option value="">كل الوحدات</option>
             ${LABOR_UNITS.map(u=>`<option>${u}</option>`).join("")}
           </select>
+          <select class="form-select" id="lab-filter-grade" onchange="pgReset('${PG_KEY}');window.laborCatalog.render()" style="min-width:130px" title="يُقصر فلترَ السعر على درجةٍ بعينها">
+            <option value="">كل درجات الجودة</option>
+            ${GRADE_KEYS.map(k=>`<option value="${k}">${GRADE_LABELS[k]}</option>`).join("")}
+          </select>
           <input class="form-input" id="lab-filter-min" type="number" min="0" step="0.01" placeholder="سعر من" oninput="pgReset('${PG_KEY}');window.laborCatalog.render()" style="width:90px;font-family:monospace;direction:ltr">
           <input class="form-input" id="lab-filter-max" type="number" min="0" step="0.01" placeholder="سعر إلى" oninput="pgReset('${PG_KEY}');window.laborCatalog.render()" style="width:90px;font-family:monospace;direction:ltr">
           <button class="btn btn-ghost btn-sm" onclick="window.laborCatalog.resetFilters()" title="مسح الفلاتر" style="font-size:12px">✖ مسح</button>
@@ -150,7 +226,7 @@
                 <th>اسم البند</th>
                 <th>التصنيف</th>
                 <th>الوحدة</th>
-                <th style="text-align:center">سعر المصنعية (ر.س)</th>
+                <th style="text-align:center">أسعار المصنعية (ر.س)</th>
                 <th>نطاق العمل</th>
                 <th style="width:90px;text-align:center">إجراءات</th>
               </tr>
@@ -202,8 +278,22 @@
                 </select>
               </div>
               <div class="form-group">
-                <label class="form-label">سعر المصنعية للوحدة (ر.س) <span>*</span></label>
-                <input class="form-input" id="lab-rate" type="text" inputmode="decimal" placeholder="0.00" style="font-family:monospace;direction:ltr;text-align:left">
+                <label class="form-label">السعر الأساسي <span style="color:var(--muted);font-size:10px;font-weight:600">(الذي يُسحب إلى تحليل الأسعار)</span></label>
+                <div id="lab-base-preview" style="font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--accent);border:1px dashed var(--border);border-radius:8px;padding:9px 11px;font-size:13px">—</div>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:10px">
+              <label class="form-label">أسعار المصنعية للوحدة (ر.س) حسب درجة الجودة <span>*</span>
+                <span style="color:var(--accent);font-size:10px;font-weight:600">— سعرٌ واحدٌ على الأقل، واترك ما لا يلزم فارغاً</span>
+              </label>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
+                ${GRADE_KEYS.map(k=>`
+                <div>
+                  <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px">${GRADE_LABELS[k]}</div>
+                  <input class="form-input" id="lab-rate-${k}" type="text" inputmode="decimal" placeholder="0.00"
+                         oninput="window.laborCatalog.onRateInput()"
+                         style="font-family:monospace;direction:ltr;text-align:left">
+                </div>`).join("")}
               </div>
             </div>
             <div class="form-group" style="margin-bottom:6px">
@@ -317,14 +407,27 @@
     const q = (document.getElementById("lab-search-input")?.value||"").trim().toLowerCase();
     const catF = (document.getElementById("lab-filter-cat")?.value||"").trim().toLowerCase();
     const unitF = document.getElementById("lab-filter-unit")?.value||"";
+    const gradeF = document.getElementById("lab-filter-grade")?.value||"";
     const minF = parseFloat(document.getElementById("lab-filter-min")?.value);
     const maxF = parseFloat(document.getElementById("lab-filter-max")?.value);
 
     let items = _items.filter(function(it){
       if(catF && !((it.category||"").toLowerCase().includes(catF))) return false;
       if(unitF && (it.unit||"") !== unitF) return false;
-      if(!isNaN(minF) && !((it.rate!=null) && it.rate>=minF)) return false;
-      if(!isNaN(maxF) && !((it.rate!=null) && it.rate<=maxF)) return false;
+      /* فلترُ السعر يُطابَق على **سعرٍ واحدٍ بعينه**: بندٌ منخفضُه ٥ وعاليه ١٠٠ لا
+         يُعدّ داخلَ المدى [١٠،٢٠] لأنّ طرفيه يقعان خارجَه — الشرطان معاً على القيمة
+         نفسِها لا كلٌّ على قيمةٍ أخرى. ودرجةٌ مختارةٌ ⇒ سعرُها وحدَه، وبندٌ لا سعرَ
+         له فيها يسقط. */
+      if(gradeF || !isNaN(minF) || !isNaN(maxF)){
+        const cand = gradeF
+          ? (function(){ const v = priceOf(it, gradeF); return v==null ? [] : [v]; })()
+          : priceList(it).map(function(pv){ return pv.value; });
+        if(gradeF && !cand.length) return false;
+        if(!isNaN(minF) || !isNaN(maxF)){
+          const okp = cand.some(function(v){ return (isNaN(minF)||v>=minF) && (isNaN(maxF)||v<=maxF); });
+          if(!okp) return false;
+        }
+      }
       if(!q) return true;
       return (it.name||"").toLowerCase().includes(q) ||
              (it.code||"").toLowerCase().includes(q) ||
@@ -348,8 +451,14 @@
     const hideRate = isViewerMode();
 
     tbody.innerHTML = pgItems.map(function(it,i){
+      const prices = priceList(it);
       const rateCell = hideRate ? '🔒'
-        : (it.rate!=null ? it.rate.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+" ر.س" : "—");
+        : (!prices.length ? "—"
+          : prices.map(function(pv){
+              return pv.key
+                ? `<div style="display:flex;align-items:center;justify-content:center;gap:6px;line-height:1.7"><span style="font-family:inherit;font-size:10px;font-weight:700;color:var(--muted)">${pv.short}</span><span>${money(pv.value)}</span></div>`
+                : money(pv.value)+" ر.س";
+            }).join(""));
       const scope = (it.scopeNotes||"").trim();
       const scopeCell = scope
         ? `<span title="${E(scope)}" style="font-size:11px;color:var(--muted)">${E(scope.length>40?scope.slice(0,40)+"…":scope)}</span>`
@@ -377,7 +486,7 @@
   }
 
   function resetFilters(){
-    ["lab-search-input","lab-filter-cat","lab-filter-unit","lab-filter-min","lab-filter-max"]
+    ["lab-search-input","lab-filter-cat","lab-filter-unit","lab-filter-grade","lab-filter-min","lab-filter-max"]
       .forEach(function(idf){ const el=document.getElementById(idf); if(el) el.value=""; });
     pgReset(PG_KEY); render();
   }
@@ -402,6 +511,34 @@
     });
   }
 
+  // ══ قراءةُ أسعار الدرجات من النموذج ══
+  function readGradesFromForm(){
+    const out = { low:null, mid:null, high:null };
+    let any=false, bad=false;
+    GRADE_KEYS.forEach(function(k){
+      const el = document.getElementById("lab-rate-"+k);
+      const raw = el ? String(el.value||"").trim() : "";
+      if(!raw) return;
+      if(!/\d/.test(raw)){ bad=true; return; }
+      const v = num(raw);
+      if(v<0){ bad=true; return; }
+      out[k]=v; any=true;
+    });
+    return { grades:out, any:any, bad:bad };
+  }
+
+  // قاعدةُ الاشتقاق تُرى وقتَ الإدخال لا بعد الحفظ — فلا يفاجأ المالكُ بأيِّ سعرٍ سُحب
+  function onRateInput(){
+    const box = document.getElementById("lab-base-preview");
+    if(!box) return;
+    const gr = readGradesFromForm();
+    const base = baseFrom(gr.grades, null);
+    if(base==null){ box.textContent = "—"; box.style.color = "var(--muted)"; return; }
+    const src = (gr.grades.mid!=null) ? "mid" : (gr.grades.low!=null ? "low" : "high");
+    box.style.color = "var(--accent)";
+    box.innerHTML = money(base)+' ر.س <span style="font-size:10px;color:var(--muted);font-weight:600">('+E(GRADE_LABELS[src])+')</span>';
+  }
+
   function openItemModal(id){
     if(!canManage()){ T("⚠ صلاحية المسؤول أو مسؤول المشتريات فقط","warn"); return; }
     buildDOM();
@@ -412,7 +549,7 @@
     document.getElementById("lab-name").value="";
     { const _cs=document.getElementById("lab-category-select"); if(_cs) _cs.value=""; const _cc=document.getElementById("lab-category-custom"); if(_cc){ _cc.value=""; _cc.style.display="none"; } }
     document.getElementById("lab-unit").value="";
-    document.getElementById("lab-rate").value="";
+    GRADE_KEYS.forEach(function(k){ const el=document.getElementById("lab-rate-"+k); if(el) el.value=""; });
     document.getElementById("lab-scope").value="";
     const lblEl = document.getElementById("lab-code-lbl");
     if(lblEl) lblEl.textContent="";
@@ -425,7 +562,11 @@
       document.getElementById("lab-name").value = it.name||"";
       { const _cs=document.getElementById("lab-category-select"); if(_cs) _cs.value = it.category||""; }
       document.getElementById("lab-unit").value = it.unit||"";
-      document.getElementById("lab-rate").value = it.rate!=null?it.rate:"";
+      /* بندٌ قديمٌ بسعرٍ واحدٍ بلا درجة: يُوضَع سعرُه في «متوسط الجودة» ليصنّفه المالكُ
+         بيده عند أوّل تعديل — ولا يتغيّر شيءٌ إن حفظه كما هو (الأساسُ = المتوسط). */
+      const _gm = gradeMap(it);
+      if(hasGrades(it)) GRADE_KEYS.forEach(function(k){ const el=document.getElementById("lab-rate-"+k); if(el) el.value = _gm[k]!=null ? _gm[k] : ""; });
+      else { const el=document.getElementById("lab-rate-mid"); if(el) el.value = it.rate!=null ? it.rate : ""; }
       document.getElementById("lab-scope").value = it.scopeNotes||"";
       _openedStamp = it.updatedAt || "";   // v18.9ad — M24: بصمةُ النسخة المفتوحة
     } else {
@@ -435,6 +576,7 @@
       document.getElementById("lab-code").value = code;
       if(lblEl) lblEl.textContent="(مُولَّد تلقائياً — قابل للتعديل)";
     }
+    onRateInput();
     openModal("modal-labor-item");
   }
 
@@ -446,14 +588,25 @@
     const name     = document.getElementById("lab-name").value.trim();
     const category = readCategory();
     const unit     = document.getElementById("lab-unit").value.trim();
-    const rawR     = (document.getElementById("lab-rate").value||"").trim();
-    const rate     = num(rawR);
+    const gr       = readGradesFromForm();
+    const grades   = gr.grades;
+    const rate     = baseFrom(grades, null);
     const scope    = document.getElementById("lab-scope").value.trim();
 
     if(!name){ T("⚠ أدخل اسم البند","warn"); return; }
     if(!category){ T("⚠ اختر أو اكتب التصنيف","warn"); return; }
     if(!unit){ T("⚠ اختر الوحدة","warn"); return; }
-    if(!/\d/.test(rawR)||rate<0){ T("⚠ أدخل سعراً صحيحاً","warn"); return; }
+    if(gr.bad){ T("⚠ أدخل أرقاماً صحيحةً غيرَ سالبةٍ في خانات الأسعار","warn"); return; }
+    if(!gr.any || rate==null){ T("⚠ أدخل سعراً واحداً على الأقل لإحدى درجات الجودة","warn"); return; }
+
+    // ترتيبُ الدرجات مقلوبٌ = خطأُ إدخالٍ غالباً (سعرٌ في الخانة الخطأ) — تحذيرٌ لا منع
+    if(!gradeOrderOk(grades)){
+      let okOrd=false;
+      try{
+        okOrd = await showConfirm({title:"ترتيب الأسعار مقلوب", msg:"سعرُ درجةٍ أعلى جودةً أقلُّ من درجةٍ أدنى منها. تأكّد أنّك لم تضع سعراً في الخانة الخطأ. هل تريد الحفظ كما هو؟", icon:"⚠", okText:"حفظ كما هو", okClass:"btn-danger"});
+      }catch(e){ okOrd=false; }
+      if(!okOrd) return;
+    }
 
     // تكرار الكود
     if(code){
@@ -471,7 +624,8 @@
     }
 
     const data = {
-      code:code, name:name, category:category, unit:unit, rate:rate, scopeNotes:scope,
+      code:code, name:name, category:category, unit:unit,
+      rate:rate, grades:grades, scopeNotes:scope,
       updatedAt: stamp(), updatedBy: userLabel()
     };
 
@@ -524,13 +678,19 @@
     if(isViewerMode()){ T("🔒 وضع العرض فقط — الأسعار محجوبة","warn"); return; }
     if(!_items.length){ T("لا توجد مصنعيات للتصدير","warn"); return; }
     const rows = _items.map(function(it,i){
+      // بندٌ قديمٌ بسعرٍ واحد: يُصدَّر في عمود «متوسط الجودة» — نفسُ عُرف المحرّر،
+      // فالتصديرُ ثم الاستيرادُ يعيدان البندَ كما هو لا مبخوساً ولا مضاعَفاً.
+      const m = gradeMap(it);
+      const midOut = hasGrades(it) ? m.mid : (it.rate==null?null:it.rate);
       return {
         "#": i+1,
         "الكود": it.code||"",
         "اسم البند": it.name||"",
         "التصنيف": it.category||"",
         "الوحدة": it.unit||"",
-        "سعر المصنعية (ر.س)": it.rate==null?0:it.rate,
+        "سعر منخفض الجودة (ر.س)": m.low==null?"":m.low,
+        "سعر متوسط الجودة (ر.س)": midOut==null?"":midOut,
+        "سعر عالي الجودة (ر.س)": m.high==null?"":m.high,
         "نطاق العمل": it.scopeNotes||""
       };
     });
@@ -544,20 +704,45 @@
   async function downloadTemplate(){
     if(!await window._needLib(window._ensureXLSX,"Excel")) return;   // عند أوّل تصدير
     const rows = [
-      ["ℹ أدخل البنود من السطر 3 — الحقول المطلوبة: اسم البند + سعر المصنعية | الكود اختياري (يُولَّد تلقائياً) | لا تعدّل رؤوس الأعمدة","","","","","",""],
-      ["#","الكود","اسم البند *","التصنيف","الوحدة","سعر المصنعية (ر.س) *","نطاق العمل"],
-      [1,"LAB-001","لياسة أسمنتية للجدران","لياسة","م2",15.00,"يشمل الطرطشة والبطانة والضهارة — لا يشمل السقالات ولا الخامات"],
-      [2,"LAB-002","تركيب بلاط أرضيات","بلاط وأرضيات","م2",25.00,"يشمل الفرش والمونة — لا يشمل توريد البلاط"],
-      [3,"LAB-003","دهان بلاستيك ثلاث أوجه","دهانات","م2",12.00,"يشمل المعجون والتأسيس والثلاث أوجه"],
-      [4,"LAB-004","مباني بلوك 20 سم","مباني","م2",30.00,"يشمل المونة والعمالة — لا يشمل توريد البلوك"],
-      [5,"LAB-005","تمديد نقطة كهرباء","كهرباء","عدد",45.00,"يشمل المواسير والعلب — لا يشمل الأسلاك واللوحات"]
+      ["ℹ أدخل البنود من السطر 3 — المطلوب: اسم البند + سعرٌ واحدٌ على الأقل من أعمدة الجودة الثلاثة (اترك ما لا يلزم فارغاً) | الكود اختياري (يُولَّد تلقائياً) | لا تعدّل رؤوس الأعمدة","","","","","","","",""],
+      ["#","الكود","اسم البند *","التصنيف","الوحدة","سعر منخفض الجودة (ر.س)","سعر متوسط الجودة (ر.س)","سعر عالي الجودة (ر.س)","نطاق العمل"],
+      [1,"LAB-001","لياسة أسمنتية للجدران","لياسة","م2",12.00,15.00,19.00,"يشمل الطرطشة والبطانة والضهارة — لا يشمل السقالات ولا الخامات"],
+      [2,"LAB-002","تركيب بلاط أرضيات","بلاط وأرضيات","م2",18.00,25.00,34.00,"يشمل الفرش والمونة — لا يشمل توريد البلاط"],
+      [3,"LAB-003","دهان بلاستيك ثلاث أوجه","دهانات","م2","",12.00,17.00,"يشمل المعجون والتأسيس والثلاث أوجه"],
+      [4,"LAB-004","مباني بلوك 20 سم","مباني","م2","",30.00,"","يشمل المونة والعمالة — لا يشمل توريد البلوك"],
+      [5,"LAB-005","تمديد نقطة كهرباء","كهرباء","عدد",35.00,45.00,60.00,"يشمل المواسير والعلب — لا يشمل الأسلاك واللوحات"]
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [{wch:5},{wch:12},{wch:32},{wch:16},{wch:10},{wch:20},{wch:50}];
-    try{ ws["!merges"] = [{s:{r:0,c:0},e:{r:0,c:6}}]; }catch(e){}
+    ws["!cols"] = [{wch:5},{wch:12},{wch:32},{wch:16},{wch:10},{wch:22},{wch:22},{wch:22},{wch:50}];
+    try{ ws["!merges"] = [{s:{r:0,c:0},e:{r:0,c:8}}]; }catch(e){}
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "كتالوج المصنعيات");
     XLSX.writeFile(wb, "labor_catalog_template.xlsx");
+  }
+
+  /* ══ خريطةُ أعمدة الاستيراد — نقيّةٌ للاختبار ══
+     كان الاستيراد يقرأ بمواضعَ ثابتة (٥ = السعر، ٦ = نطاق العمل). وبإدخال ثلاثة
+     أعمدةِ جودةٍ صار الموضعُ ٦ هو «متوسط الجودة»، فملفٌّ بالقالب القديم كان
+     سيُستورَد ونطاقُ عمله في خانة سعر. فالأعمدةُ تُقرأ **بأسماء رؤوسها** الآن،
+     والمواضعُ الثابتةُ خطّةٌ بديلةٌ لملفٍّ بلا رؤوسٍ مفهومة. */
+  function _mapImportCols(headerRow){
+    const hs = (headerRow||[]).map(function(h){ return String(h==null?"":h).replace(/\s+/g," ").trim(); });
+    function col(test, fb){ for(var i=0;i<hs.length;i++){ if(hs[i] && test(hs[i])) return i; } return fb; }
+    const has = function(sub){ return function(h){ return h.indexOf(sub)>=0; }; };
+    const low  = col(has("منخفض"), -1);
+    const mid  = col(has("متوسط"), -1);
+    const high = col(has("عالي"),  -1);
+    // قالبٌ قديمٌ بعمود سعرٍ واحد ⇒ يُقرأ في «متوسط الجودة»
+    const legacy = (low<0 && mid<0 && high<0) ? col(has("سعر"), 5) : -1;
+    let scope = col(has("نطاق"), -1);
+    if(scope<0) scope = (legacy>=0) ? 6 : 8;
+    return {
+      code:  col(has("كود"),    1),
+      name:  col(has("اسم"),    2),
+      cat:   col(has("تصنيف"),  3),
+      unit:  col(has("وحدة"),   4),
+      low:low, mid:mid, high:high, legacy:legacy, scope:scope
+    };
   }
 
   function triggerImport(){
@@ -579,7 +764,13 @@
       const ws = wb.Sheets[wb.SheetNames[0]];
       const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:""});
       // تخطّي صف التعليمات + صف الرؤوس (أول صفين)
-      const dataRows = aoa.slice(2).filter(function(r){ return r && (String(r[2]||"").trim() || String(r[5]||"").trim()); });
+      const C = _mapImportCols(aoa[1]||[]);
+      const PRICE_COLS = [C.low, C.mid, C.high, C.legacy].filter(function(ci){ return ci>=0; });
+      const dataRows = aoa.slice(2).filter(function(r){
+        if(!r) return false;
+        if(String(r[C.name]||"").trim()) return true;
+        return PRICE_COLS.some(function(ci){ return String(r[ci]==null?"":r[ci]).trim(); });
+      });
       if(!dataRows.length){ T("⚠ لا توجد صفوف صالحة في الملف","warn"); return; }
 
       // أكواد مستخدمة (موجودة + مُولَّدة داخل هذه الدفعة)
@@ -592,29 +783,41 @@
       function nextCode(){ let c; do{ seq++; c=CODE_PREFIX+"-"+String(seq).padStart(3,"0"); }while(usedCodes.has(c.toLowerCase())); usedCodes.add(c.toLowerCase()); return c; }
 
       const valid = [];
-      let skipped = 0;
+      let skipped = 0, oddOrder = 0;
       dataRows.forEach(function(r){
-        const name = String(r[2]||"").trim();
-        const rawRate = String(r[5]==null?"":r[5]).trim();
-        const rate = num(rawRate);
-        if(!name || !/\d/.test(rawRate) || rate<0){ skipped++; return; }
-        let code = String(r[1]||"").trim();
+        const name = String(r[C.name]||"").trim();
+        const grades = { low:null, mid:null, high:null };
+        let anyPrice = false;
+        function take(ci, key){
+          if(ci<0) return;
+          const raw = String(r[ci]==null?"":r[ci]).trim();
+          if(!raw || !/\d/.test(raw)) return;
+          const v = num(raw);
+          if(v<0) return;
+          grades[key]=v; anyPrice=true;
+        }
+        take(C.low,"low"); take(C.mid,"mid"); take(C.high,"high");
+        take(C.legacy,"mid");   // القالبُ القديم: عمودُ السعر الواحد ⇒ متوسطُ الجودة
+        const rate = baseFrom(grades, null);
+        if(!name || !anyPrice || rate==null){ skipped++; return; }
+        if(!gradeOrderOk(grades)) oddOrder++;   // يُستورَد ويُعلَن — لا يُسقَط بصمت
+        let code = String(r[C.code]||"").trim();
         if(!code || usedCodes.has(code.toLowerCase())) code = nextCode();
         else usedCodes.add(code.toLowerCase());
         valid.push({
           code:code, name:name,
-          category:String(r[3]||"متفرقة").trim()||"متفرقة",
-          unit:String(r[4]||"").trim(),
-          rate:rate,
-          scopeNotes:String(r[6]||"").trim()
+          category:String(r[C.cat]||"متفرقة").trim()||"متفرقة",
+          unit:String(r[C.unit]||"").trim(),
+          rate:rate, grades:grades,
+          scopeNotes:String(r[C.scope]||"").trim()
         });
       });
 
-      if(!valid.length){ T("⚠ لا توجد صفوف صالحة (تحقق من الاسم والسعر)","warn"); return; }
+      if(!valid.length){ T("⚠ لا توجد صفوف صالحة (تحقق من الاسم وسعرٍ واحدٍ على الأقل)","warn"); return; }
 
       let ok=false;
       try{
-        ok = await showConfirm({title:"تأكيد الاستيراد", msg:"سيُضاف "+valid.length+" بند مصنعية"+(skipped?(" (تخطّي "+skipped+" صف غير صالح)"):"")+". متابعة؟", icon:"📤", okText:"استيراد", okClass:"btn-primary"});
+        ok = await showConfirm({title:"تأكيد الاستيراد", msg:"سيُضاف "+valid.length+" بند مصنعية"+(skipped?(" (تخطّي "+skipped+" صف غير صالح)"):"")+(oddOrder?(" — تنبيه: "+oddOrder+" بنداً ترتيبُ أسعار جودته مقلوب"):"")+". متابعة؟", icon:"📤", okText:"استيراد", okClass:"btn-primary"});
       }catch(e){ ok=false; }
       if(!ok) return;
 
@@ -646,6 +849,7 @@
     render: render,
     resetFilters: resetFilters,
     onCategoryChange: onCategoryChange,
+    onRateInput: onRateInput,
     openItemModal: openItemModal,
     save: save,
     del: del,
@@ -654,8 +858,18 @@
     triggerImport: triggerImport,
     importExcel: importExcel,
     getItems: function(){ return _items.slice(); },
+    // ── أسعارُ درجات الجودة: عقدٌ عامٌّ يقرؤه محرّك تحليل الأسعار، ونقيٌّ للاختبار ──
+    GRADE_KEYS: GRADE_KEYS.slice(),
+    gradeLabel: gradeLabel,
+    gradeMap: gradeMap,
+    hasGrades: hasGrades,
+    priceOf: priceOf,
+    priceList: priceList,
+    baseFrom: baseFrom,
+    gradeOrderOk: gradeOrderOk,
     _num: num,           // مكشوف للاختبار فقط (hail-tests.js) — دالة نقية
-    _nextCodeNum: _nextCodeNum   // منطق العدّاد الذرّي — للاختبار
+    _nextCodeNum: _nextCodeNum,  // منطق العدّاد الذرّي — للاختبار
+    _mapImportCols: _mapImportCols   // خريطة أعمدة الاستيراد — للاختبار
   };
   // جسر ترقيم: pgBar في النواة يولّد onclick باسم render+<PG_KEY> = renderLaborCatalogTable()
   // الوحدة تعرّض render على كائنها، فنعرّف الاسم العام حتى تعمل أزرار الصفحات

@@ -1745,6 +1745,76 @@ function writeRaceRoot() {
     ["labor-catalog: الحفظ يخصّص كوداً ذرّياً", lcSrc, "data.code = await allocCode();", true],
   ];
   GW.forEach(([n, src, needle, want]) => T(n, src.includes(needle) === want, want ? "" : "يجب ألا يعود"));
+
+  /* ── (د) أسعارُ درجات الجودة في كتالوج المصنعيات ──
+     البندُ الواحدُ صار يحمل حتى ثلاثة أسعار (`grades`)، و`rate` يبقى الأساسَ
+     المشتقَّ لأنّ خارجَ الوحدة يقرؤه وحدَه. الحارسُ يمسك ثلاثةَ ارتدادات:
+     ١) بندٌ قديمٌ بسعرٍ واحدٍ يُوصَف بدرجةٍ لم يخترها أحد،
+     ٢) اشتقاقُ الأساس ينزلق عن قاعدته (متوسط ← منخفض ← عالي) أو يخترع متوسطاً حسابياً،
+     ٣) استيرادُ قالبٍ قديمٍ يقرأ «نطاق العمل» في خانة سعرٍ بعد إزاحةِ الأعمدة. */
+  if (LC) {
+    const legacy = { rate: 15 };
+    const graded = { rate: 15, grades: { low: 12, mid: 15, high: 19 } };
+
+    T("★ درجات: بندٌ قديمٌ بسعرٍ واحدٍ يبقى بلا درجة",
+      LC.hasGrades(legacy) === false &&
+      LC.priceList(legacy).length === 1 && LC.priceList(legacy)[0].key === "",
+      JSON.stringify(LC.priceList(legacy)));
+
+    T("★ درجات: البندُ المصنَّف يعرض أسعارَه الثلاثة مرتَّبةً منخفض←عالي",
+      LC.priceList(graded).map(p => p.key).join(",") === "low,mid,high" &&
+      LC.priceList(graded).map(p => p.value).join(",") === "12,15,19");
+
+    T("★ درجات: سعرُ درجةٍ بعينها، ودرجةٌ فارغةٌ ⇒ الأساسيّ",
+      LC.priceOf(graded, "high") === 19 && LC.priceOf(graded, "low") === 12 &&
+      LC.priceOf(graded, "") === 15);
+
+    T("★ درجات: درجةٌ بلا سعرٍ ترجع null لا صفراً (الصفرُ كان يُبخِس التحليل)",
+      LC.priceOf({ rate: 30, grades: { low: null, mid: 30, high: null } }, "high") === null);
+
+    const BASE = [
+      [{ low: 12, mid: 15, high: 19 }, 15, "متوسطٌ موجودٌ ⇒ هو الأساس"],
+      [{ low: 12, mid: null, high: 19 }, 12, "لا متوسطَ ⇒ المنخفض"],
+      [{ low: null, mid: null, high: 19 }, 19, "العالي وحدَه"],
+      [{ low: null, mid: null, high: null }, null, "لا سعرَ أصلاً"],
+    ];
+    let badBase = null;
+    for (const [m, exp, why] of BASE) { const got = LC.baseFrom(m, null); if (got !== exp) { badBase = { why, exp, got }; break; } }
+    T("★ درجات: الأساسُ = متوسط ← منخفض ← عالي، بلا متوسطٍ حسابيٍّ مخترَع",
+      !badBase, badBase ? JSON.stringify(badBase) : BASE.length + " حالة");
+    T("درجات: بندٌ قديمٌ بلا grades يبقى أساسُه سعرَه القديم",
+      LC.baseFrom({ low: null, mid: null, high: null }, 15) === 15);
+
+    T("★ درجات: ترتيبٌ مقلوبٌ يُكشَف على المُدخَل وحدَه",
+      LC.gradeOrderOk({ low: 12, mid: 15, high: 19 }) === true &&
+      LC.gradeOrderOk({ low: null, mid: 15, high: 19 }) === true &&
+      LC.gradeOrderOk({ low: 20, mid: null, high: 5 }) === false);
+
+    const HNEW = ["#", "الكود", "اسم البند *", "التصنيف", "الوحدة",
+      "سعر منخفض الجودة (ر.س)", "سعر متوسط الجودة (ر.س)", "سعر عالي الجودة (ر.س)", "نطاق العمل"];
+    const HOLD = ["#", "الكود", "اسم البند *", "التصنيف", "الوحدة", "سعر المصنعية (ر.س) *", "نطاق العمل"];
+    const cn = LC._mapImportCols(HNEW), co = LC._mapImportCols(HOLD), cz = LC._mapImportCols([]);
+    T("★ استيراد: القالبُ الجديد يُقرأ برؤوسه (٣ أعمدةِ جودةٍ ونطاقٌ في ٨)",
+      cn.low === 5 && cn.mid === 6 && cn.high === 7 && cn.scope === 8 && cn.legacy === -1,
+      JSON.stringify(cn));
+    T("★ استيراد: القالبُ القديمُ لا ينزلق — سعرُه الواحدُ متوسطُ الجودة ونطاقُه في ٦",
+      co.legacy === 5 && co.scope === 6 && co.low === -1 && co.mid === -1 && co.high === -1,
+      JSON.stringify(co));
+    T("استيراد: ملفٌّ بلا رؤوسٍ مفهومةٍ يعود للمواضع القديمة",
+      cz.name === 2 && cz.legacy === 5 && cz.scope === 6);
+  }
+
+  /* ── (هـ) تحليلُ الأسعار يحترم الدرجةَ المختارة ── */
+  const PG = [
+    ["labor-catalog: rate يبقى مكتوباً سعراً أساسياً", lcSrc, "rate:rate, grades:grades, scopeNotes:scope,", true],
+    ["labor-catalog: زال حقلُ السعر الواحد من المودال", lcSrc, 'id="lab-rate" type="text"', false],
+    ["price-analysis: المنتقي يمرّر درجةَ الجودة", paSrc, "function pickerSelect(id, gradeKey){", true],
+    ["price-analysis: صفُّ العمالة يحفظ الدرجة", paSrc, "rate:num(l.rate), grade:_g };", true],
+    ["price-analysis: تحديثُ الأسعار يقرأ سعرَ الدرجة لا rate مباشرةً", paSrc, "let want = laborPriceOf(it, r.grade||\"\");", true],
+    ["price-analysis: زال تحديثُ الأجرة بـ it.rate الأعمى", paSrc, "if(it && it.rate!=null && r.rate!==it.rate){ r.rate=it.rate; n++; }", false],
+    ["price-analysis: rowGrade مكشوفةٌ لقائمة تبديل الدرجة", paSrc, "rowGrade: rowGrade,", true],
+  ];
+  PG.forEach(([n, src, needle, want]) => T(n, src.includes(needle) === want, want ? "" : "يجب ألا يعود"));
 }
 
 /* ════════════════════════════════════════════════════════════════════
