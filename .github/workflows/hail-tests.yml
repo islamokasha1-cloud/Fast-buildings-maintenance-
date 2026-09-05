@@ -19,6 +19,7 @@ on:
       - 'vendor-po.js'
       - 'supervisor-receipt.js'
       - 'hr-payments.js'
+      - 'finance-settlement.js'
       - 'contracts.js'
       - 'HailNotify.js'
       - 'photo-queue.js'

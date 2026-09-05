@@ -2042,7 +2042,7 @@ function inventoryReportsTests() {
     const reg = (HTML.match(/var REG=\[[\s\S]*?\}\}\];/) || [""])[0];
     const stamped = ["inventory-reports.js", "cleaning-operations.js", "finance-audit.js",
                      "hr-payments.js", "performance-contract.js", "photo-queue.js",
-                     "operations-wall.js"];
+                     "operations-wall.js", "finance-settlement.js"];
     const missing = stamped.filter(f => !reg.includes('"' + f + '"'));
     T("★ كلُّ وحدةٍ موسومةٍ ببصمةٍ مسجّلةٌ في كاشف الوحدات القديمة",
       missing.length === 0, missing.length ? "غائبة: " + missing.join("، ") : "السجلّ مكتمل");
@@ -2050,7 +2050,7 @@ function inventoryReportsTests() {
     const NAME2GLOBAL = { "inventory-reports.js":"inventoryReports", "cleaning-operations.js":"cleaningOps",
       "finance-audit.js":"financeAudit", "hr-payments.js":"hrPayments",
       "performance-contract.js":"performanceContract", "photo-queue.js":"photoQueue",
-      "operations-wall.js":"operationsWall" };
+      "operations-wall.js":"operationsWall", "finance-settlement.js":"financeSettlement" };
     const liars = Object.keys(NAME2GLOBAL).filter(f => {
       if (!reg.includes('"' + f + '"')) return false;
       const body = (() => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), f), "utf8"); } catch (e) { return ""; } })();
@@ -3251,13 +3251,15 @@ function financialInvariants() {
 
   // ── v18.9tr — H6: مصالحة المالية (المطلوب سداده = الفعلي؛ القديم يُقرأ كـ estCost) ──
   {
-    const fs = HTML.indexOf("function _poFinanceTotal(");
+    // v18.9 — الشريحةُ تبدأ من `_poSettledTotal`: هي مصدرُ `_poFinanceTotal` الآن،
+    // وقطعُها كان يُسقط الاختبارَ كلَّه بـReferenceError لا بفشلٍ مفهوم.
+    const fs = HTML.indexOf("function _poSettledTotal(");
     const fe = HTML.indexOf("\nfunction _poFinanceFilterAll", fs);
     let F = null;
     if (fs >= 0 && fe > fs) {
       try {
         F = new Function("poActualCost", "getPOTotal",
-          HTML.slice(fs, fe) + "\nreturn { _poFinanceTotal, _poPaidSoFar, _poRemaining, _poOverpaid };")(
+          HTML.slice(fs, fe) + "\nreturn { _poFinanceTotal, _poPaidSoFar, _poRemaining, _poOverpaid, _poSettledTotal, _poBaseFinanceTotal };")(
           p => p.auditedBy ? (Number(p.actualCost) || 0) : (Number(p.estCost) || 0),
           p => Number(p.estCost) || 0);
       } catch (e) { T("تُبنى دوال المالية", false, String(e.message).slice(0, 120)); }
@@ -3277,6 +3279,101 @@ function financialInvariants() {
       T("★ H6: نقص يُستكمل (المتبقّي = فعلي − مُسدَّد)", F._poRemaining(po3) === 1000 && F._poOverpaid(po3) === 0);
     }
     T("★ H6: مؤشّر «زيادة تُستردّ» في تفاصيل الطلب", HTML.includes("_poOverpaid(p)>0.01") && HTML.includes("زيادة تُستردّ"));
+
+    /* ── التسويةُ النهائيةُ للمالية (بلاغ المالك: PO2026080217) ──
+       عرضُ سعرٍ أرخصُ بعد الإحالة للسداد كان يترك ذيلاً لا يُقفَل. الحرّاسُ يمسكون
+       أربعةَ ارتدادات: تسويةٌ لا تُقاس عليها الأرقام، وتسويةٌ **تعلو فاتورةَ المورد**
+       بعد التدقيق، وسببٌ يصير اختيارياً، وتسويةٌ تمرّ على طلبٍ اكتمل سدادُه. */
+    if (F) {
+      const st = { estCost: 22402, payment: { settledTotal: 21592.4, installments: [{ amount: 21592.4 }] } };
+      T("★★ تسوية: المطلوبُ سدادُه = المبلغُ المعتمدُ من المالية",
+        F._poFinanceTotal(st) === 21592.4, "=" + F._poFinanceTotal(st));
+      T("★★★ تسوية: لا متبقٍّ بعد اعتماد المبلغ — الطلبُ يُقفَل ولا يترك دفعةً وهمية",
+        F._poRemaining(st) === 0 && F._poOverpaid(st) === 0);
+      // فاتورةُ المورد بعد التدقيق تعلو التسوية — وإلا أخفت التسويةُ ديناً حقيقياً
+      const stA = { auditedBy: "ن", actualCost: 22402, estCost: 22402, payment: { settledTotal: 21592.4, installments: [{ amount: 21592.4 }] } };
+      T("★★★ تسوية: الطلبُ المُدقَّقُ يعود لفاتورة المورد — التسويةُ لا تعلوها",
+        F._poFinanceTotal(stA) === 22402 && F._poRemaining(stA) === 809.6,
+        "المطلوب=" + F._poFinanceTotal(stA) + " المتبقّي=" + F._poRemaining(stA));
+      T("تسوية: مبلغٌ غيرُ صالحٍ (نصٌّ أو سالب) يُتجاهَل فيعود الأصل",
+        F._poFinanceTotal({ estCost: 500, payment: { settledTotal: "abc" } }) === 500 &&
+        F._poFinanceTotal({ estCost: 500, payment: { settledTotal: -3 } }) === 500);
+      T("تسوية: صفرٌ معتمَدٌ صفرٌ حقيقيّ لا غياب",
+        F._poFinanceTotal({ estCost: 500, payment: { settledTotal: 0 } }) === 0);
+      T("تسوية: طلبٌ بلا تسويةٍ لا يتغيّر سلوكُه",
+        F._poFinanceTotal({ estCost: 500, payment: {} }) === 500);
+    }
+    /* الوحدةُ الجديدة `finance-settlement.js`: النواةُ **تقرأ** التسوية والوحدةُ
+       **تصنعها**. فحرّاسُ القراءة على `index.html` وحرّاسُ الكتابة على الوحدة —
+       وخلطُهما كان سيُمرّر نصفَ الميزة صامتاً. */
+    // ملحوظة: `fs` مُظلَّلٌ في هذه الكتلة بمؤشّر نصٍّ — نستعمل require مباشرةً
+    const FS_PATH = path.resolve(path.dirname(IDX), "finance-settlement.js");
+    const _nodeFs = require("fs");
+    const fsSrc = _nodeFs.existsSync(FS_PATH) ? _nodeFs.readFileSync(FS_PATH, "utf8") : "";
+    T("★ ملفُّ وحدة التسوية موجود", !!fsSrc);
+    const SG = [
+      // ── النواةُ تقرأ ──
+      ["التسوية: الإجماليُّ يُشتقّ من _poSettledTotal لا من حقلٍ خام", HTML, "function _poSettledTotal(p){", true],
+      ["التسوية: فاتورةُ المورد تعلوها (شرط !p.auditedBy)", HTML, "if(p && !p.auditedBy){ const st=_poSettledTotal(p); if(st!=null) return st; }", true],
+      ["التسوية: زرُّها في بطاقة السداد", HTML, "openFinanceSettleModal('${esc(p.id)}')", true],
+      ["التسوية: الأصلُ يبقى معروضاً بعد التعديل", HTML, "مبلغٌ نهائيٌّ معتمدٌ من المالية — الأصل", true],
+      ["التسوية: نداءُ النواةِ للوحدة محروسٌ بـtypeof (وحدةٌ لم تُحمَّل ⇒ لا زرَّ ميتاً)", HTML, 'typeof _poCanSettleFinance==="function" && _poCanSettleFinance(p)', true],
+      ["التسوية: وسمُ الوحدة في index.html", HTML, '<script src="finance-settlement.js?v=', true],
+      ["نافذةُ السداد: إجماليُّها من مصدر المتبقّي نفسِه", HTML, "const total = _poFinanceTotal(p);", true],
+      ["نافذةُ السداد: زال getPOTotal المنشقُّ عن المتبقّي", HTML, "const total = getPOTotal(p);\n  const paidSoFar = _poPaidSoFar(p);", false],
+      // ── الوحدةُ تكتب ──
+      ["التسوية: بوّابةُ الصلاحية للمالية وقبل اكتمال السداد", fsSrc, "function canSettleState(financeActor, payPaid, status, hasInstallments){", true],
+      ["التسوية: طلبٌ اكتمل سدادُه لا يُسوّى بأثرٍ رجعيّ", fsSrc, "if(payPaid) return false;", true],
+      ["التسوية: السببُ إلزاميّ", fsSrc, '⚠ اكتب سبب تعديل المبلغ', true],
+      ["التسوية: سجلٌّ تراكميٌّ لكلّ تعديل (settleLog)", fsSrc, "pay.settleLog = hist;", true],
+      ["التسوية: التقاريرُ تتبعها للطلب غير المدقَّق (actualCost)", fsSrc, "if(!p.auditedBy){ if(doClear) delete p.actualCost; else p.actualCost = amount; }", true],
+      ["التسوية: اكتمالُ السداد يُحيل الطلبَ للتنفيذ ويُشعِر", fsSrc, '_sendPurchaseWorkflowNotif(p, oldStatus, "proc_executing");', true],
+      ["التسوية: الكتابةُ تمرّ بـsavePurchase لا بـFirestore مباشرةً", fsSrc, "savePurchase(poId)", true],
+      ["التسوية: كلُّ قراءةٍ من النموذج قبل أيِّ await", fsSrc, 'const reason  = ((document.getElementById("fs-reason")||{}).value||"").trim();', true],
+      ["التسوية: جسرُ onclick معروضٌ على النطاق العام", fsSrc, "window.openFinanceSettleModal = function(poId){", true],
+    ];
+    SG.forEach(([n, src, needle, want]) => T(n, src.includes(needle) === want, want ? "" : "يجب ألا يعود"));
+
+    // ── الدوالُّ النقيّةُ للوحدة: تُشغَّل فعلاً بلا متصفّح ──
+    if (fsSrc) {
+      const vmS = require("vm");
+      const sbS = { window:{}, document:{ getElementById:()=>null }, console, setTimeout:()=>0 };
+      vmS.createContext(sbS);
+      let FSM = null;
+      try { vmS.runInContext(fsSrc, sbS); FSM = sbS.window.financeSettlement; }
+      catch (e) { T("تُحمَّل وحدة التسوية", false, String(e.message).slice(0, 120)); }
+      T("تُحمَّل وحدة التسوية وتعرّض window.financeSettlement", !!FSM);
+      if (FSM) {
+        const CS = FSM._canSettleState;
+        T("★★ البوّابة: المالية على طلبٍ عند السداد ⇒ نعم",
+          CS(true, false, "pending_finance", false) === true);
+        T("★★★ البوّابة: طلبٌ اكتمل سدادُه لا يُسوّى مهما كان الدور",
+          CS(true, true, "pending_finance", true) === false);
+        T("★★ البوّابة: غيرُ المالية لا يُسوّي", CS(false, false, "pending_finance", true) === false);
+        T("★★ البوّابة: دفعةٌ جزئيةٌ تُبقي البابَ مفتوحاً ولو تحرّكت الحالة",
+          CS(true, false, "proc_executing", true) === true);
+        T("البوّابة: طلبٌ لم يبلغ السداد ولا دفعةَ له ⇒ لا تسوية",
+          CS(true, false, "pending_proc", false) === false);
+
+        const SO = FSM._settleOutcome;
+        T("★★★ التسوية تُقفِل: مسدَّدٌ 21592.4 ومعتمَدٌ 21592.4 ⇒ لا متبقٍّ ولا فائض",
+          SO(21592.4, 21592.4).fullyPaid === true && SO(21592.4, 21592.4).remaining === 0 &&
+          SO(21592.4, 21592.4).excess === 0);
+        T("★★ ولا تُقفِل قبل أوانها: مسدَّدٌ أقلُّ من المعتمَد يُبقي المتبقّي",
+          SO(10000, 21592.4).fullyPaid === false && SO(10000, 21592.4).remaining === 11592.4);
+        T("★★ ومعتمَدٌ دون المسدَّد يُعلن فائضاً يُستردّ",
+          SO(21592.4, 20000).fullyPaid === true && SO(21592.4, 20000).excess === 1592.4);
+        T("★ كسورُ الهللة لا تترك متبقّياً وهمياً (هامش 0.01)",
+          SO(999.995, 1000).fullyPaid === true);
+        T("★★ صفرُ سدادٍ لا يُقفِل طلباً مهما كان المعتمَد (وإلا أُقفل بلا ريال)",
+          SO(0, 0).fullyPaid === false && SO(0, 500).fullyPaid === false);
+
+        const RA = FSM._readAmount;
+        T("★ قراءةُ المبلغ: النصُّ والسالبُ والفراغُ ⇒ null، والصفرُ صفرٌ حقيقيّ",
+          RA("abc") === null && RA("-3") === null && RA("") === null && RA(null) === null &&
+          RA("0") === 0 && RA("21592.404") === 21592.4);
+      }
+    }
   }
 
   // ── سدادُ المالية فوق المتبقّي: مسموحٌ بتحذيرٍ وتأكيدٍ صريح — لا منعَ صامت ──
