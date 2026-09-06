@@ -676,7 +676,14 @@ function predelivery() {
        **مكانُها النواةُ لا وحدة**: **إصلاحٌ في موضعه** على منطقٍ قائم — فلترا
        `renderAssets` و`renderPPM` هنا، ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة إصلاحه
        ممنوعٌ نصّاً (CLAUDE.md). */
-    const IDX_CEILING = 39669;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 39669 إلى 39702 — ‏٣٣ سطراً لعلاج «شهرٌ كاملٌ يسقط من التقرير»:
+       مصدرُ التقريرين صار `allTickets()`، وانتظارُ كاشِ الأرشيف قبل الرسم
+       (`_ensureArchiveThen`)، وطابورُ منتظري جلبٍ جارٍ (`_archiveFetchFlush`)،
+       وتسويةُ شكلِ المستند المؤرشف كما يسوّيه المستمع. **مكانُها النواةُ لا وحدة**:
+       **إصلاحٌ في موضعه** على منطقٍ قائم — `generateReport` و`generatePhotoReport`
+       و`_fetchExtraArchivedTickets` و`startRealtimeSync` كلُّها هنا وتُقرأ معاً،
+       ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة إصلاحه ممنوعٌ نصّاً (CLAUDE.md). */
+    const IDX_CEILING = 39702;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -14534,7 +14541,8 @@ function archiveScanSkipGuards() {
   T("★★ الخروجُ المبكّر يسبق ضبطَ `_archiveFetching` (وإلا عَلِق الحارسُ مرفوعاً)",
     /_archiveFetchNeeded\([\s\S]{0,400}?\}\s*\n\s*_archiveFetching = true;/.test(HTML));
   T("★★ وعند التخطّي يُعلَن الاكتمالُ ويُفرَّغ الزائد (فلا شاشةُ «جارٍ التحميل» أبديّة)",
-    /_archiveFetchNeeded\([\s\S]{0,300}?_extraArchivedTickets = \[\];[\s\S]{0,120}?_archiveFetchDone = true;[\s\S]{0,80}?onDone/.test(HTML));
+    /_archiveFetchNeeded\([\s\S]{0,300}?_extraArchivedTickets = \[\];[\s\S]{0,120}?_archiveFetchFlush\(onDone\)/.test(HTML)
+    && /function _archiveFetchFlush\([\s\S]{0,400}?_archiveFetchDone\s*=\s*true/.test(HTML));
   T("★ طولُ اللقطة يُسجَّل داخل مستمع البلاغات",
     /_ticketsSyncedCount = snap\.docs\.length;/.test(HTML));
 
@@ -14545,6 +14553,117 @@ function archiveScanSkipGuards() {
   T("★★ كلُّ تصفيرٍ لحالة الأرشيف يُصفّر عدّادَ اللقطة (لا عدّادَ مشروعٍ سابقٍ يخدع الشرط)",
     resets >= 1 && counts >= resets,
     `تصفيرُ الأرشيف ${resets} · تصفيرُ العدّاد ${counts}`);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   التقريرُ يقرأ الأرشيف (vNEXT) — «شهرٌ كاملٌ موجودٌ في الأرشيف وغائبٌ عن التقرير»
+   مستمعُ البلاغات مُرشَّحٌ بـ`where("archived","==",false)`، فالشهرُ **بمجرّد أرشفته**
+   يسقط من `tickets[]`. وكان التقريران وحدَهما يمسحان `tickets` — فخرج تقريرُ أغسطس
+   ٢٠٢٦ للعميل بـ‏٣٣ بلاغاً (بلاغاتُ سبتمبرَ وحدَها ضمن المدى) بينما شاشةُ الأرشيف
+   تعرض ٣٧٦ عن الشهر نفسِه: **رقمان لشهرٍ واحدٍ يفترقان بلا خطأٍ واحدٍ يُنذر**.
+   وحارسان لا واحد: المصدرُ الصحيح، و**انتظارُ وصولِ الكاش** — فمسحُ الأرشيف يصل
+   بعد الإقلاع بثلاثِ ثوانٍ فأكثر، وتقريرٌ يُولَّد قبله يقرأ ناقصاً بالضبط كما كان.
+   ═══════════════════════════════════════════════════════════════════════ */
+function reportReadsArchiveGuards() {
+  H("vNEXT) التقريرُ يمسح الأرشيف لا البلاغاتِ النشطةَ وحدَها");
+
+  /* ── ١) حرّاسُ المصدر: التقريران يقرآن `allTickets()` ── */
+  const body = (sig) => {
+    const a = HTML.indexOf(sig);
+    if (a < 0) return null;
+    const b = HTML.indexOf("\nfunction ", a + sig.length);
+    return b < 0 ? HTML.slice(a) : HTML.slice(a, b);
+  };
+  const PR = body("function generatePhotoReport(){");
+  const RP = body("function generateReport(){");
+  T("جسمُ generatePhotoReport مستخرَج", !!PR);
+  T("جسمُ generateReport مستخرَج", !!RP);
+  if (!PR || !RP) return;
+
+  T("★★★ التقريرُ المصوَّر يمسح `allTickets()` (الأرشيفُ داخلَه)",
+    /photoReportTickets\s*=\s*allTickets\(\)\.filter\(/.test(PR));
+  T("★★★ ولا يبقى فيه مسحٌ لـ`tickets` النشطةِ وحدَها (المصدرُ المقصوص)",
+    !/=\s*tickets\.filter\(/.test(PR));
+  T("★★★ تقريرُ الأداء كذلك يمسح `allTickets()`",
+    /filtered\s*=\s*allTickets\(\)\.filter\(/.test(RP));
+  T("★★★ ولا يبقى فيه مسحٌ لـ`tickets` النشطةِ وحدَها",
+    !/=\s*tickets\.filter\(/.test(RP));
+
+  /* ── ٢) وانتظارُ الكاش: مصدرٌ صحيحٌ يُقرأ قبل وصوله = العطبُ نفسُه ── */
+  T("★★★ التقريرُ المصوَّر ينتظر كاشَ الأرشيف قبل الرسم",
+    /if\(db\s*&&\s*!_archiveFetchDone\)\{\s*_ensureArchiveThen\(generatePhotoReport\);\s*return;\s*\}/.test(PR));
+  T("★★★ وتقريرُ الأداء كذلك",
+    /if\(db\s*&&\s*!_archiveFetchDone\)\{\s*_ensureArchiveThen\(generateReport\);\s*return;\s*\}/.test(RP));
+
+  /* ── ٣) الحرّاسُ السلوكيّة: الكتلةُ تُنفَّذ فعلاً بلا متصفّح ──
+     الوعدُ هنا **مؤجَّلٌ متزامن** (`then` يخزّن ويُنفَّذ عند `fire`)، فتُقاس اللحظةُ
+     الحرجة نفسُها: مَن أُيقظ قبل وصول البيانات، ومَن بعدَها، وعلى أيِّ كاش. */
+  const A = HTML.indexOf("let _extraArchivedTickets = [];");
+  const B = HTML.indexOf("function ROLLUPS_COLLECTION()", A);
+  if (A < 0 || B < 0) { T("كتلةُ الأرشيف مستخرَجة", false, "لم يُعثر على الحدود"); return; }
+  const SRC = HTML.slice(A, B);
+
+  const mk = (docs, live) => {
+    const st = { reads: 0, fire: null, toasts: [] };
+    const thenable = {
+      then(cb) { st.fire = () => cb({ docs: docs.map(d => ({ data: () => JSON.parse(JSON.stringify(d)) })) });
+                 return { catch() { return thenable; } }; }
+    };
+    const fakeDb = { collection: () => ({ where: () => ({ get: () => { st.reads++; return thenable; } }) }) };
+    const api = new Function("window", "db", "tickets", "COLLECTION", "monthKey",
+      "_TICKETS_SYNC_LIMIT", "_ticketsListenerFiltered", "toast", "console",
+      SRC + "\nreturn {allTickets, _fetchExtraArchivedTickets, _ensureArchiveThen, getTicketsForMonth};"
+    )({}, fakeDb, (live || []).slice(), () => "c", d => String(d).slice(0, 7),
+      600, true, m => st.toasts.push(m), { warn() {}, info() {} });
+    return { api, st };
+  };
+
+  const AUG = [
+    { id: "a1", createdAt: "2026-08-31T15:06:00", archived: true, archiveMonth: "2026-08", status: "مغلق" },
+    { id: "a2", createdAt: "2026-08-31T15:05:00", archived: true, archiveMonth: "2026-08", status: "مغلق" }
+  ];
+  const SEP = [{ id: "s1", createdAt: "2026-09-02T08:00:00", archived: false, status: "مغلق", photos: [], maintType: "تصحيحية" }];
+
+  {
+    const { api, st } = mk(AUG, SEP);
+    T("★★★ قبل وصول الكاش: المصدرُ لا يرى أغسطس أصلاً (هذا هو العطبُ بعينه)",
+      api.allTickets().length === 1);
+    let fired = 0, sawAtFire = -1;
+    api._ensureArchiveThen(() => { fired++; sawAtFire = api.allTickets().length; });
+    T("★★★ و`_ensureArchiveThen` لا توقظ التقريرَ قبل وصول البيانات", fired === 0);
+    st.fire();
+    T("★★★ فإذا وصلت أُيقظ مرّةً واحدةً وعلى أرشيفٍ كامل",
+      fired === 1 && sawAtFire === 3, `fired=${fired} sawAtFire=${sawAtFire}`);
+    T("★★★ والمصدرُ الذي يقرؤه التقريرُ يحمل أغسطس وسبتمبر معاً (٣ لا ١)",
+      api.allTickets().length === 3);
+    T("★★ وشهرُ أغسطس يُقرأ بكامله من الأرشيف", api.getTicketsForMonth("2026-08").length === 2);
+  }
+
+  /* طابورُ المنتظرين: نداءان متزامنان ⇒ قراءةٌ واحدةٌ ويقظتان **بعد** وصول البيانات.
+     كان الثاني يُوقَظ فوراً على كاشٍ فارغ (`if(_archiveFetching) onDone()`) — أي
+     تقريرٌ يقرأ ناقصاً بالضبط كما لو لم يُنتظر شيء. */
+  {
+    const { api, st } = mk(AUG, SEP);
+    let f1 = 0, f2 = 0, n1 = -1, n2 = -1;
+    api._fetchExtraArchivedTickets(() => { f1++; n1 = api.allTickets().length; });
+    api._fetchExtraArchivedTickets(() => { f2++; n2 = api.allTickets().length; });
+    T("★★★ نداءان متزامنان ⇒ قراءةٌ واحدةٌ على الخادم لا اثنتان", st.reads === 1);
+    T("★★ ولا أحدَ يُوقَظ قبل وصول البيانات", f1 === 0 && f2 === 0);
+    st.fire();
+    T("★★★ وبوصولها يُوقَظ الاثنان — كلٌّ على أرشيفٍ كامل",
+      f1 === 1 && f2 === 1 && n1 === 3 && n2 === 3, `n1=${n1} n2=${n2}`);
+  }
+
+  /* تسويةُ شكلِ المستند المؤرشف: بلاغٌ قديمٌ بلا `maintType` يسقط من تصفيةِ
+     «تصحيحية»، وبلا `photos` يُفجّر رسمَ بطاقة التقرير. */
+  {
+    const { api, st } = mk([{ id: "b1", createdAt: "2026-08-01T00:00:00", archived: true, archiveMonth: "2026-08" }], []);
+    api._fetchExtraArchivedTickets(() => {});
+    st.fire();
+    const t0 = api.allTickets()[0] || {};
+    T("★★ المستندُ المؤرشفُ العاري يُسوّى كما يُسوّيه المستمع (maintType · photos · timeline)",
+      t0.maintType === "تصحيحية" && Array.isArray(t0.photos) && Array.isArray(t0.timeline));
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -17423,6 +17542,7 @@ function pageScrollResetGuards() {
   catalogMustNotBeCapped();
   firestoreIndexContract();
   archiveScanSkipGuards();
+  reportReadsArchiveGuards();
   bootScanSkipGuards();
   syncWindowFilterGuards();
   localCacheStaysDisabled();

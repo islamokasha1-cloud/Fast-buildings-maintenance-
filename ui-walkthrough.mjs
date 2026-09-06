@@ -404,6 +404,53 @@ await page.evaluate(async () => { try { closeModal('modal-purchase-detail'); } c
 check('ح) «مسح الفلاتر» يمسح فلتر البطاقة أيضاً',
   await page.evaluate(() => !window._poFinanceView));
 
+/* ═════════ ٨) التقرير المصوَّر يقرأ الأرشيف (vNEXT) ═════════
+   العطبُ الذي يحرسه: مستمعُ البلاغات مُرشَّحٌ بـ`archived==false`، فبلاغُ الشهر
+   المؤرشَف **ليس في `tickets` أصلاً**؛ وكان التقريرُ يمسحها وحدَها فيخرج للعميل
+   ناقصاً شهراً كاملاً بلا خطأٍ واحد. لا يُفحَص في jsdom: المسارُ كلُّه دورةُ
+   حياةٍ حقيقية (انتظارُ الجلب ← إعادةُ نداء الدالّة ← رسمُ الوجه). ونُحاكي هنا
+   حالةَ الإنتاج نصّاً — المؤرشفُ خارج `tickets` والمستمعُ مُرشَّح — لأن مُحاكي
+   Firestore لا يُطبّق `where` في `get`/`onSnapshot` عمداً (انظر ترويسته). */
+CURRENT = 'photo-report';
+L('\n=== ٨) التقرير المصوَّر يقرأ الأرشيف ===');
+const rep = await page.evaluate(async () => {
+  const TC = COLLECTION();
+  const mkT = (id, createdAt, archived, extra) => Object.assign({
+    id, status: 'مغلق', building: 'مبنى الإدارة', workType: 'سباكة', desc: 'دورة مياه',
+    priority: 'عادي 🟢 (48 ساعة)', createdAt, closedAt: '2026-09-02T08:21:00.000Z',
+    maintType: 'تصحيحية', photos: [], archived, supervisor: 'أسامة السادات'
+  }, extra || {});
+  await db.collection(TC).doc('BLG-AUG').set(mkT('BLG-AUG', '2026-08-31T15:06:00.000Z', true, { archiveMonth: '2026-08' }));
+  await db.collection(TC).doc('BLG-SEP').set(mkT('BLG-SEP', '2026-09-02T08:00:00.000Z', false));
+  await new Promise(r => setTimeout(r, 600));
+
+  // حالةُ الإنتاج نصّاً: النشطُ في `tickets`، والمؤرشفُ **خارجَها** (المستمعُ مُرشَّح)
+  // وفي المخزن وحدَه، وكاشُ الأرشيف لم يصل بعد.
+  tickets = tickets.filter(t => t.id !== 'BLG-AUG' && t.id !== 'BLG-SEP');
+  tickets.push(mkT('BLG-SEP', '2026-09-02T08:00:00.000Z', false));
+  _ticketsListenerFiltered = true;
+  _extraArchivedTickets = []; _archiveFetchDone = false; _archiveFetching = false; _ticketsSyncedCount = tickets.length;
+
+  showPage('photo-report');
+  await new Promise(r => setTimeout(r, 700));
+  document.getElementById('pr-from').value = '2026-08-05';
+  document.getElementById('pr-to').value   = '2026-09-04';
+  const inTickets = tickets.some(t => t.id === 'BLG-AUG');
+  generatePhotoReport();
+  await new Promise(r => setTimeout(r, 1500));
+  const txt = (document.getElementById('photo-report-output').innerText || '');
+  return { inTickets, aug: txt.includes('BLG-AUG'), sep: txt.includes('BLG-SEP'),
+           n: photoReportTickets.length, done: _archiveFetchDone };
+});
+check('أ) ★★ الأساسُ قائم: بلاغُ أغسطسَ المؤرشفُ ليس في `tickets` (كما في الإنتاج)',
+  rep.inTickets === false, 'موجودٌ في tickets=' + rep.inTickets);
+check('ب) ★★★ ومع ذلك يظهر في التقرير — الأرشيفُ يُنتظَر ثم يُمسح',
+  rep.aug === true, 'أغسطس=' + rep.aug + ' سبتمبر=' + rep.sep + ' عدد=' + rep.n);
+check('ج) ★★ وبلاغُ الشهر الجاري معه لا بدلَه (٢ لا ١)',
+  rep.sep === true && rep.n === 2, rep.n + ' بلاغاً في التقرير');
+check('د) ★ وكاشُ الأرشيف صار مكتملاً بعد النداء (لا انتظارَ أبديّ)', rep.done === true);
+await page.screenshot({ path: `${SHOTS}/08-photo-report-archive.png` });
+
 CURRENT = 'logout';
 const out = await page.evaluate(async () => {
   try { window.showConfirm = async () => true; logout(); } catch (e) { return 'خطأ: ' + e.message; }
