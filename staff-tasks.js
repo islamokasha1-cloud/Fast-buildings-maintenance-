@@ -72,7 +72,7 @@
   var _allTasks = [];     // «كل المهامّ (إدارة)» — تُجلب عند فتح الخانة لا عند الدخول
   var _allState = "";     // "" | "loading" | "ok" | "err"
   var _lastTry = 0;       // آخرُ محاولةِ اشتراكٍ — تمنع حلقةَ إعادةٍ عند كل رسم
-  var _tab     = "mine";  // mine | sent | notes | done | all
+  var _tab     = "mine";  // mine | sent | shared | notes | done | all
   var _openId  = null;    // المهمّة المفتوحة تفصيلاً
   var _draft   = [];      // مسوّدةُ التكليف السريع
   var _draftTo = "";      // اسمُ دخول المكلَّف في المسوّدة
@@ -236,15 +236,30 @@
   function _isOverdue(t, todayISO){ return _dueState(t, todayISO)==="late"; }
 
   /* توزيعُ القائمة على الخانات — مصدرُ الحقيقة الوحيد للتبويب والعدّاد معاً،
-     فلا يقول الشريطُ «٣» وتعرض الشاشةُ اثنتين. */
+     فلا يقول الشريطُ «٣» وتعرض الشاشةُ اثنتين.
+
+     ── وخانةُ «شارَكوني فيها» ليست ترفاً ──
+     بلاغُ المالك (08/09): «لماذا لا يظهر عندي غير مهمّةٍ واحدة؟» والجذرُ أنّ التوزيع
+     كان يعرف ثلاثَ صفاتٍ فقط — مكلَّفٌ · مُنشئٌ · صاحبُ ملاحظة — والصفةُ الرابعةُ
+     (**مُضافٌ مشاركاً** في `shared`) لا تُصادف أيَّ سطر، فتسقط المهمّةُ من كلّ
+     الخانات. وهي تصل من Firestore فعلاً (الاستعلامُ `array-contains` يجلبها)
+     وتُفتح صفحةُ تفصيلها برابطها، لكنها **لا تُرى في أيّ قائمة** — أسوأُ عطلٍ في
+     قائمة: بياناتٌ حاضرةٌ ولا سبيلَ إليها، بلا خطأٍ ولا رسالةِ فراغٍ تدلّ عليها.
+     فالقاعدةُ الآن: **كلُّ ما يجلبه الاستعلامُ له خانةٌ يظهر فيها**، وحارسٌ في
+     `hail-tests` يمنع عودةَ المهمّة اليتيمة.
+     ولم تُضَف إلى «مهامّي»: تلك التزامٌ عليّ أنا، وخلطُ ما أُشرِكتُ في متابعته بما
+     أُلزِمتُ به يجعل الرقمَ الأحمرَ كذبةً لا تهبط بعملي. */
   function _splitTabs(list, login){
-    var r={ mine:[], sent:[], notes:[], done:[] };
+    var r={ mine:[], sent:[], shared:[], notes:[], done:[] };
     (Array.isArray(list)?list:[]).forEach(function(t){
       if(!t) return;
       if(t.status==="done"){ r.done.push(t); return; }
       if(t.kind==="note" && t.createdByUser===login && !t.assignedToUser){ r.notes.push(t); return; }
-      if(t.assignedToUser===login) r.mine.push(t);
-      if(t.createdByUser===login && t.assignedToUser!==login) r.sent.push(t);
+      var hit=false;
+      if(t.assignedToUser===login){ r.mine.push(t); hit=true; }
+      if(t.createdByUser===login && t.assignedToUser!==login){ r.sent.push(t); hit=true; }
+      // لا مكلَّفٌ ولا مُنشئ — فهو طرفٌ أُضيف، أو ملاحظةُ زميلٍ أشركني فيها
+      if(!hit && login && _participantsOf(t).indexOf(login)!==-1) r.shared.push(t);
     });
     return r;
   }
@@ -787,6 +802,7 @@
     return '<div class="st-tabs">'+
       tb("mine","مهامّي",s.mine.length)+
       tb("sent","كلّفتُ بها",s.sent.length)+
+      tb("shared","شارَكوني فيها",s.shared.length)+
       tb("notes","ملاحظاتي",s.notes.length)+
       tb("done","المنجَزة",0)+
       (_isAdmin()? tb("all","كل المهامّ (إدارة)",0) : "")+
@@ -850,6 +866,7 @@
   function _emptyHtml(){
     var m = _tab==="mine"  ? ["checkCircle","لا مهامَّ عليك الآن."]
           : _tab==="sent"  ? ["send","لم تُكلّف أحداً بشيءٍ بعد.<br>اكتب مهمّةً في الأعلى واختر الموظف."]
+          : _tab==="shared"? ["users","لم يُشركك أحدٌ في مهمّةٍ بعد.<br>ما تُكلَّف به يظهر في «مهامّي»."]
           : _tab==="notes" ? ["edit","لا ملاحظات.<br>اكتب تذكيراً لنفسك من الأعلى بلا اختيار موظف."]
           : _tab==="all"   ? ["checkCircle","لا مهامَّ مفتوحةً في النظام."]
           : ["archive","لا مهامَّ منجَزةً بعد."];

@@ -17311,7 +17311,11 @@ function staffTasksGuards() {
     { id: "b", status: "open", kind: "task", createdByUser: "منى",  assignedToUser: "رغده" },
     { id: "c", status: "done", kind: "task", createdByUser: "رغده", assignedToUser: "رغده" },
     { id: "d", status: "open", kind: "note", createdByUser: "رغده", assignedToUser: "" },
-    { id: "e", status: "open", kind: "task", createdByUser: "رغده", assignedToUser: "رغده" }
+    { id: "e", status: "open", kind: "task", createdByUser: "رغده", assignedToUser: "رغده" },
+    /* أُضيفَ «رغده» مشاركاً: لا مُنشئٌ ولا مكلَّف — وهذه هي الحالةُ التي كانت تسقط */
+    { id: "f", status: "open", kind: "task", createdByUser: "منى", assignedToUser: "خالد", shared: ["رغده"] },
+    /* وملاحظةُ زميلٍ أشركني فيها: ليست ملاحظتي ولا مهمّتي */
+    { id: "g", status: "open", kind: "note", createdByUser: "منى", assignedToUser: "", shared: ["رغده"] }
   ];
   const tabs = ST._splitTabs(LIST, "رغده");
   T("★★ «مهامّي» = ما كُلِّفتُ به فقط",
@@ -17324,6 +17328,32 @@ function staffTasksGuards() {
     !tabs.mine.some(x => x.id === "c") && !tabs.sent.some(x => x.id === "c"));
   T("★★★ وعدّادُ الشريط = ما عليّ أنا لا ما أرسلتُ (رقمٌ يهبط بعملي)",
     ST._countOpen(LIST, "رغده") === 2, "=" + ST._countOpen(LIST, "رغده"));
+
+  /* ── (٦-ب) لا مهمّةَ يتيمة: كلُّ ما يجلبه الاستعلامُ له خانةٌ يظهر فيها ──
+     بلاغُ المالك (08/09): «لماذا لا يظهر عندي غير مهمّةٍ واحدة؟» والجذرُ أنّ التوزيع
+     عرف ثلاثَ صفاتٍ (مكلَّفٌ · مُنشئٌ · صاحبُ ملاحظة) ونسي الرابعة: **مُضافٌ مشاركاً**.
+     فمهمّةٌ أُشرِك فيها الموظفُ كانت تصل من Firestore وتُفتح صفحةُ تفصيلها، ولا
+     تظهر في أيّ قائمة — بلا خطأٍ ولا رسالةِ فراغٍ تدلّ عليها. */
+  T("★★★ المهمّةُ التي أُشرِكتُ فيها تظهر في «شارَكوني فيها» (لا تسقط من كل الخانات)",
+    (tabs.shared || []).map(x => x.id).sort().join("") === "fg",
+    JSON.stringify((tabs.shared || []).map(x => x.id)));
+  T("★★ ولا تُخلط بـ«مهامّي» — تلك التزامٌ عليّ، والعدّادُ الأحمرُ يبقى ما يهبط بعملي",
+    !tabs.mine.some(x => x.id === "f") && ST._countOpen(LIST, "رغده") === 2);
+  T("★★ وملاحظةُ زميلٍ أشركني فيها ليست في «ملاحظاتي»",
+    !tabs.notes.some(x => x.id === "g") && tabs.notes.map(x => x.id).join("") === "d");
+  {
+    /* الحارسُ الجذريّ: مهمّةٌ يجلبها الاستعلامُ ولا تُصادف خانةً = بياناتٌ حاضرةٌ
+       ولا سبيلَ إليها. يُفحص على القائمة كلِّها لا على الحالة المُصلَحة وحدَها. */
+    const seen = new Set([].concat(tabs.mine, tabs.sent, tabs.shared || [], tabs.notes, tabs.done).map(x => x.id));
+    const orphans = LIST.filter(t => !seen.has(t.id)).map(t => t.id);
+    T("★★★ ولا مهمّةَ يتيمةً: كلُّ مستندٍ يصل المتصفّحَ له خانةٌ تعرضه",
+      orphans.length === 0, orphans.length ? ("يتيمة: " + orphans.join(" · ")) : "٧/٧");
+  }
+  {
+    /* وخانةُ الشريط موجودةٌ فعلاً: بضاعةٌ في `_splitTabs` بلا زرٍّ يفتحها لا تُرى. */
+    T("★★ وللخانة زرٌّ في الشريط ورسالةُ فراغٍ خاصّةٌ بها",
+      /tb\("shared"/.test(src) && /_tab==="shared"/.test(src));
+  }
 
   /* ── (٧) الترتيب: المتأخّرُ أوّلاً ── */
   const sorted = ST._sortTasks([
