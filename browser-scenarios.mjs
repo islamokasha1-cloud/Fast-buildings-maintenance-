@@ -31,7 +31,20 @@ window.__store = {};                       // path -> data (Firestore في ال�
     path:path, id:path.split('/').pop(),
     get:function(){ return Promise.resolve(snap(path)); },
     set:function(d,opt){ writeDoc(path,d,!!(opt&&opt.merge)); return Promise.resolve(); },
-    update:function(d){ writeDoc(path,d,true); return Promise.resolve(); },
+    /* update(FieldPath, value) — الصيغةُ الجرّاحيّة. كانت غائبةً عن المحاكي، فكلُّ
+       كتابةٍ إلى حقلٍ متداخلٍ باسمٍ غيرِ لاتينيّ (أسماءُ الدخول هنا عربية) لم تكن
+       قابلةً للفحص أصلاً. وهي تكتب المقطعَ المطلوبَ وحدَه ولا تمسّ إخوتَه — وهذا
+       هو ما يُفحَص: أنّ ما يكتبه زميلٌ لا يمحو ما كتبه غيرُه. */
+    update:function(d,v){
+      if(d && d.segs){
+        var cur=window.__store[path]||{}, nd=Object.assign({},cur), o=nd;
+        for(var i=0;i<d.segs.length-1;i++){ o[d.segs[i]]=Object.assign({}, o[d.segs[i]]||{}); o=o[d.segs[i]]; }
+        o[d.segs[d.segs.length-1]]=v;
+        window.__store[path]=nd; _emit(path);
+        return Promise.resolve();
+      }
+      writeDoc(path,d,true); return Promise.resolve();
+    },
     delete:function(){ delDoc(path); return Promise.resolve(); },
     collection:function(c){ return collRef(path+'/'+c); },
     onSnapshot:function(cb){ try{ cb(snap(path)); }catch(e){} return _sub({ path:path, cb:cb }); }
@@ -132,7 +145,9 @@ window.__store = {};                       // path -> data (Firestore في ال�
              commit:function(){ return Promise.resolve(); } }; }};
   var firestoreFn=function(){ return fs; };
   firestoreFn.FieldValue=FieldValue;
-  firestoreFn.FieldPath={ documentId:function(){ return {__docId:1}; } };
+  function FieldPath(){ this.segs=Array.prototype.slice.call(arguments); }
+  FieldPath.documentId=function(){ return {__docId:1}; };
+  firestoreFn.FieldPath=FieldPath;
   firestoreFn.Timestamp={ now:function(){return {toDate:function(){return new Date();}};}, fromDate:function(d){return {toDate:function(){return d;}};} };
   window.firebase={
     initializeApp:function(){ return {}; },

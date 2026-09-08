@@ -224,12 +224,25 @@ service cloud.firestore {
       return request.resource.data.get('lastEditBy', '') == resource.data.get('lastEditBy', '')
           || request.resource.data.get('lastEditBy', '') == stUser();
     }
+    /* ── حالةُ القراءة (`seenBy`): كلٌّ يكتب مفتاحَه وحدَه ──
+       الخريطةُ مشتركةٌ في مستندٍ واحد، ومفتاحُها اسمُ دخولِ صاحبها. ولولا هذا
+       الشرطُ لأمكن مشاركاً أن يكتب مفتاحَ زميله فيُطفئ عنه لونَ «فيها جديد» —
+       أي **يُخفي عنه تعليقاً أو تعديلاً في مهمّةٍ يخصّه** بلا أثرٍ ظاهر. وهو
+       المنعُ نفسُه الذي فُرض على التعليقات بـ`arrayUnion`: لا يمحو أحدٌ أثرَ غيره.
+       والتعديلاتُ التي لا تمسّ `seenBy` تمرّ بلا قيد (الفرقُ خالٍ فلا مفاتيحَ
+       متأثّرة). */
+    function stSeenOk() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['seenBy'])
+          || request.resource.data.get('seenBy', {}).diff(resource.data.get('seenBy', {}))
+               .affectedKeys().hasOnly([stUser()]);
+    }
     function stUpdateOk() {
       return isAdmin()
         || ( hasRole() && !isViewer()
              && stPart(resource.data)
              && unchanged(['createdByUser', 'createdAt'])
              && stEditorOk()
+             && stSeenOk()
              /* قائمةُ الأطراف **وتحويلُ المكلَّف** بيد المُنشئ وحدَه. ولولا
                 `assignedToUser` هنا لأمكن المكلَّفَ أن يرمي ما كُلِّف به على زميلٍ
                 (أو على لا أحد) ويخرج من العهدة، بلا أن يعلم مَن أصدر التكليف.

@@ -15254,7 +15254,7 @@ function poAlignRepair() {
   const BS = fs.existsSync(path.resolve(path.dirname(IDX), "browser-scenarios.mjs"))
     ? fs.readFileSync(path.resolve(path.dirname(IDX), "browser-scenarios.mjs"), "utf8") : "";
   T("★★ xe: محاكي Firestore يُنفّذ الترتيب/الحدّ/المرساة فعلاً على documentId",
-    /startAfter:function\(v\)\{ st\.sa=v;/.test(BS) && /FieldPath=\{ documentId/.test(BS)
+    /startAfter:function\(v\)\{ st\.sa=v;/.test(BS) && /FieldPath\.documentId=function/.test(BS)
       && /if\(st\.lim>0\) paths=paths\.slice\(0, st\.lim\);/.test(BS));
   T("★★ xe: وسيناريو ٤٥٠ طلباً يثبت العبورَ بعد حدّ الـ ٤٠٠",
     /BROKEN = \[5, 210, 448\]/.test(BS) && /s10\.scanned===450/.test(BS)
@@ -17353,6 +17353,86 @@ function staffTasksGuards() {
     /* وخانةُ الشريط موجودةٌ فعلاً: بضاعةٌ في `_splitTabs` بلا زرٍّ يفتحها لا تُرى. */
     T("★★ وللخانة زرٌّ في الشريط ورسالةُ فراغٍ خاصّةٌ بها",
       /tb\("shared"/.test(src) && /_tab==="shared"/.test(src));
+  }
+
+  /* ── (٦-ج) «فيها جديد»: اللونُ الذي يقول أين حدث شيء ──
+     طلبُ المالك (08/09): «أحتاج إذا تم أي تحديث يظهر بلون مختلف للمهمّة».
+     والخطرُ في مثل هذا اللون أنّه يكذب بسهولة: يلتهب من فعلِ صاحبه، أو يبقى
+     مشتعلاً بعد القراءة، أو يخلط صيغَ الأوقات فيلتهب دائماً. فالحارسُ هنا على
+     الكذب الثلاثة لا على وجود اللون. */
+  {
+    const NEED3 = ["_msVal", "_lastActivity", "_seenMs", "_isUnread", "_unreadLabel"];
+    const miss3 = NEED3.filter(k => typeof ST[k] !== "function");
+    T("★ دوالُّ «فيها جديد» مكشوفةٌ للفحص", miss3.length === 0, miss3.join(" · "));
+    if (!miss3.length) {
+      /* المستندُ الواحد يخلط أربعَ صيغِ وقت: ختمُ خادمٍ · seconds · ISO · رقم.
+         ومقارنةُ صيغتين بلا توحيدٍ تُنتج لوناً دائماً أو لا لونَ أبداً. */
+      const MS = 1758000000000;
+      T("★★★ كلُّ صيغِ الوقت في المستند تُقرأ رقماً واحداً (ختمُ خادمٍ · seconds · ISO · رقم)",
+        ST._msVal({ toMillis: () => MS }) === MS && ST._msVal({ seconds: MS / 1000 }) === MS &&
+        ST._msVal(new Date(MS).toISOString()) === MS && ST._msVal(MS) === MS,
+        [ST._msVal({ toMillis: () => MS }), ST._msVal({ seconds: MS / 1000 }), ST._msVal(new Date(MS).toISOString())].join("|"));
+      T("★ وغيابُ الختم أو تشوّهُه صفرٌ لا NaN (وإلا صارت كلُّ مقارنةٍ false بصمت)",
+        ST._msVal(null) === 0 && ST._msVal(undefined) === 0 && ST._msVal("غداً") === 0 &&
+        ST._msVal({}) === 0);
+
+      const BASE = { createdByUser: "منى", assignedToUser: "رغده", kind: "task", status: "open",
+                     participants: ["منى", "رغده"], createdAt: 1000 };
+      T("★★ آخرُ حركةٍ = الأحدثُ من (إنشاءٌ · تعديلٌ · إنجازٌ · ردٌّ · تعليق) ومعها صاحبُها",
+        JSON.stringify(ST._lastActivity(Object.assign({}, BASE, {
+          lastEditAt: 2000, lastEditBy: "منى",
+          comments: [{ at: 5000, user: "خالد", text: "ت" }, { at: 3000, user: "منى", text: "ت" }]
+        }))) === JSON.stringify({ at: 5000, by: "خالد", kind: "comment" }),
+        JSON.stringify(ST._lastActivity(Object.assign({}, BASE, { comments: [{ at: 5000, user: "خالد" }] }))));
+
+      T("★★★ مهمّةٌ كلّفني بها غيري ولم أفتحها بعد = فيها جديد",
+        ST._isUnread(BASE, "رغده") === true);
+      T("★★★ وفعلي أنا لا يُلهب سطري (أُعلّق فتصير مهمّتي «محدَّثةً» عندي — لونٌ كاذب)",
+        ST._isUnread(Object.assign({}, BASE, {
+          comments: [{ at: 9000, user: "رغده", text: "ت" }], seenBy: { "رغده": 1000 } }), "رغده") === false);
+      T("★★★ وبعد فتحها ينطفئ اللون (وإلا بقي مشتعلاً فبطل معناه)",
+        ST._isUnread(Object.assign({}, BASE, { seenBy: { "رغده": 1000 } }), "رغده") === false);
+      T("★★★ ثم يعود بتعليقٍ جديدٍ من زميلٍ بعد قراءتي",
+        ST._isUnread(Object.assign({}, BASE, {
+          seenBy: { "رغده": 1000 }, comments: [{ at: 4000, user: "خالد", text: "ت" }] }), "رغده") === true);
+      T("★★★ ومَن ليس طرفاً لا يلتهب له شيء (لا تصرخ «كل المهامّ» في وجه الأدمن)",
+        ST._isUnread(BASE, "سعيد") === false && ST._isUnread(BASE, "") === false);
+      T("★★ وقراءةُ زميلٍ لا تُطفئ لوني (المفتاحُ اسمُ دخولي وحدَه)",
+        ST._isUnread(Object.assign({}, BASE, { seenBy: { "خالد": 9000 } }), "رغده") === true);
+      T("★★ واختلافُ صيغة الوقت بين الحركة وحالة القراءة لا يكسر المقارنة",
+        ST._isUnread(Object.assign({}, BASE, {
+          createdAt: { toMillis: () => 5000 }, seenBy: { "رغده": 5000 } }), "رغده") === false &&
+        ST._isUnread(Object.assign({}, BASE, {
+          createdAt: { toMillis: () => 6000 }, seenBy: { "رغده": 5000 } }), "رغده") === true);
+      /* «مردودة» حالةٌ قائمة، و«فيها جديد» ما طرأ — ولا تُخفى الأولى خلف الثانية:
+         مهمّةٌ مردودةٌ جدّ فيها تعليقٌ تبقى مردودةً في نظر قارئ القائمة. */
+      T("★★ ورقاقةُ «مردودة» لا تُخفيها رقاقةُ الجديد (حالةٌ قائمةٌ لا حركةٌ طارئة)",
+        /t\.status==="returned"\?'<span class="st-pill '/.test(src) &&
+        !/t\.status==="returned"&&!nw\?/.test(src));
+      T("★★ وإن كان الجديدُ هو الردَّ نفسَه فرقاقةٌ واحدةٌ لا «رُدّت» و«مردودة» متجاورتين",
+        /!\(act\.kind==="returned" && t\.status==="returned"\)/.test(src));
+      T("★ والرقاقةُ تقول ما جدّ لا «جديد» مبهمة",
+        ST._unreadLabel("comment") === "تعليقٌ جديد" && ST._unreadLabel("edit") === "عُدِّلت" &&
+        ST._unreadLabel("done") === "أُنجزت" && ST._unreadLabel("returned") === "رُدّت" &&
+        ST._unreadLabel("new") === "جديدة");
+
+      /* حرّاسُ المصدر: الكتابةُ جرّاحيّةٌ ولا تُختَم قراءةً كأنّها تعديل. */
+      T("★★★ وحالةُ القراءة تُكتب بـFieldPath لا بمفتاحٍ منقوط (أسماءُ الدخول عربية)",
+        /new firebase\.firestore\.FieldPath\("seenBy", *me\)/.test(src) &&
+        !/"seenBy\."\s*\+/.test(src) && !/seenBy\.\$\{/.test(src));
+      /* جسمُ `_markSeen` وحدَه — لا مدىً من الأحرف يبتلع الدالّةَ التالية
+         (`_update` تليها مباشرةً، فحارسٌ بمدىً يسقط على تعريفها لا على جسمها). */
+      const seenBody = (src.match(/function _markSeen\(t\)\{[\s\S]*?\n  \}/) || [""])[0];
+      T("★★★ ولا تمرّ بـ_update فتختم updatedAt (القراءةُ ليست تعديلاً في سجلّ المهمّة)",
+        seenBody.length > 0 && !/_update\(/.test(seenBody), seenBody.length + " حرفاً");
+      T("★★ ولا كتابةَ بلا جديدٍ فعلاً (فتحٌ متكرّرٌ لا يكلّف كتابةً ولا يوقظ الأطراف)",
+        /if\(!_isUnread\(t, *me\)\) return;/.test(seenBody));
+      /* وتُنزَع التعاليقُ قبل هذا الحارس: تعليقُ الوحدة يقتبس العبارةَ نفسَها
+         ليشرح لِمَ لا زرَّ لها — فحارسٌ يقرأ التعاليقَ يسقط على شرحِ ما يحرسه. */
+      T("★★ والفتحُ نفسُه هو القراءة — لا زرَّ «تعليم كمقروء» يُنسى",
+        /_markSeen\(t\);/.test(src) &&
+        !/تعليم كمقروء/.test(src.replace(/\/\*[\s\S]*?\*\//g, " ")));
+    }
   }
 
   /* ── (٧) الترتيب: المتأخّرُ أوّلاً ── */
