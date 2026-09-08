@@ -54,7 +54,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3094";
+  var MODULE_BUILD = "v18.9.3097";
 
   function COLL(){
     var dev=false;
@@ -283,14 +283,72 @@
       return _ms(b)-_ms(a);
     });
   }
-  function _ms(t){
+  /* قراءةُ أيّ ختمٍ زمنيٍّ إلى مِلّي ثانية — **صيغةٌ واحدةٌ تفهم الصيغَ الأربع**.
+     المشكلةُ أنّ المستندَ الواحد يخلطها: `createdAt` ختمُ خادم (`Timestamp`)،
+     و`comments[].at` نصُّ ISO كتبه المتصفّح، و`seenBy` رقمٌ نكتبه نحن. ومقارنةُ
+     صيغتين مختلفتين تُنتج «تحديثاً» وهميّاً دائماً أو تُخفيه دائماً — وكلاهما
+     يُفقد اللونَ معناه. */
+  function _msVal(v){
     try{
-      var c=t&&t.createdAt;
-      if(!c) return 0;
-      if(typeof c.toMillis==="function") return c.toMillis();
-      if(c.seconds) return c.seconds*1000;
+      if(v==null) return 0;
+      if(typeof v==="number") return v;
+      if(typeof v.toMillis==="function") return v.toMillis();
+      if(typeof v.seconds==="number") return v.seconds*1000;
+      if(v instanceof Date) return v.getTime();
+      if(typeof v==="string"){ var n=Date.parse(v); return isNaN(n) ? 0 : n; }
       return 0;
     }catch(e){ return 0; }
+  }
+  function _ms(t){ return _msVal(t && t.createdAt); }
+
+  /* ════════ «ما الجديد فيها؟» — آخرُ حركةٍ في المهمّة ومَن صنعها ════════
+     المهمّةُ ليست سطراً ساكناً: تُعلَّق ويُعدَّل نصُّها وتُنجَز وتُردّ. والمستخدمُ
+     يفتح الشاشةَ فيجد القائمةَ نفسَها فلا يعرف **أين جدّ الجديد** — فيفتحها
+     واحدةً واحدة، أو (وهو الأغلب) لا يفتح شيئاً.
+     والدالّةُ تُرجع **الحركةَ وصاحبَها معاً** لا الوقتَ وحدَه: بلا `by` يلتهب
+     السطرُ من فعلِ صاحبه — أُعلّق أنا فتصير مهمّتي «محدَّثةً» عندي. */
+  function _lastActivity(t){
+    var best={ at:0, by:"", kind:"" };
+    function bid(at, by, kind){
+      var ms=_msVal(at);
+      if(ms>best.at) best={ at:ms, by:String(by||""), kind:kind };
+    }
+    if(!t) return best;
+    bid(t.createdAt,  t.createdByUser,   "new");
+    bid(t.lastEditAt, t.lastEditBy,      "edit");
+    bid(t.doneAt,     t.doneByUser,      "done");
+    bid(t.returnedAt, t.returnedByUser,  "returned");
+    (Array.isArray(t.comments)?t.comments:[]).forEach(function(c){
+      if(c) bid(c.at, c.user, "comment");
+    });
+    return best;
+  }
+
+  /* متى قرأتُ هذه المهمّةَ آخرَ مرّة — رقمٌ في `seenBy` مفتاحُه اسمُ دخولي.
+     ولمَ في المستند لا في `localStorage`: الموظفُ يفتح النظامَ على الجوّال وعلى
+     الحاسوب، وحالةُ القراءة في المتصفّح تعني أنّ ما قرأتَه على أحدهما يبقى
+     ملتهباً على الآخر — فيصير اللونُ ضجيجاً يُتعلَّم تجاهلُه. */
+  function _seenMs(t, login){
+    try{ return _msVal((t && t.seenBy) ? t.seenBy[login] : 0); }catch(e){ return 0; }
+  }
+
+  /* «فيها جديدٌ لم أرَه» — الشرطُ ثلاثيّ، وكلُّ طرفٍ فيه يمنع لوناً كاذباً:
+       • طرفٌ في المهمّة  — فلا يلتهب على الأدمن في «كل المهامّ» ما ليس شأنَه.
+       • آخرُ حركةٍ ليست لي — فلا تلتهب مهمّةٌ من فعلِ صاحبها.
+       • وهي أحدثُ من آخرِ فتحةٍ لي — وإلا بقي اللونُ بعد القراءة فبطل معناه. */
+  function _isUnread(t, login){
+    if(!t || !login) return false;
+    if(_participantsOf(t).indexOf(login)===-1) return false;
+    var a=_lastActivity(t);
+    if(!a.at || a.by===login) return false;
+    return a.at > _seenMs(t, login);
+  }
+  function _unreadLabel(kind){
+    return kind==="comment"  ? "تعليقٌ جديد"
+         : kind==="edit"     ? "عُدِّلت"
+         : kind==="done"     ? "أُنجزت"
+         : kind==="returned" ? "رُدّت"
+         : "جديدة";
   }
 
   function _todayISO(){
@@ -438,6 +496,31 @@
       console.warn("staff-tasks send failed:", e);
       _t("تعذّر الإرسال — لم تُحفظ أيُّ مهمّة","warn");
     });
+  }
+
+  /* ── تعليمُ المهمّة مقروءةً — كتابةٌ جرّاحيّةٌ لا تلمس شيئاً آخر ──
+     ثلاثةُ قيودٍ مقصودة:
+     ١) **لا تُكتب إلا إن كان فيها جديدٌ فعلاً** — ففتحُ المهمّة عشرَ مرّاتٍ بعد
+        قراءتها لا يكلّف كتابةً واحدة. (بلا هذا القيد يصير كلُّ فتحٍ كتابةً تُبثّ
+        إلى كلّ الأطراف فتُعيد رسمَ شاشاتهم بلا سبب.)
+     ٢) **لا تمرّ بـ`_update`** — فتلك تختم `updatedAt`، والقراءةُ ليست تعديلاً:
+        ختمُها يجعل مجرّدَ فتحِ زميلٍ للمهمّة يبدو حركةً في سجلّها.
+     ٣) **`FieldPath` لا مفتاحٌ منقوط** — أسماءُ الدخول في هذا النظام **عربية**
+        (`اسامة` · `اشرف` · `حسن`)، و`update({"seenBy.اسامة":n})` يُفكَّك مساراً
+        فيسقط على محلّل المسارات. والبانيةُ تأخذ المقاطعَ خاماً بلا تفكيك.
+        وهي جرّاحيّةٌ أيضاً: لا تُعيد كتابةَ `seenBy` كلِّها فتمحو ما سجّله زميلٌ
+        في الأثناء — درسُ `arrayUnion` نفسُه في التعليقات. */
+  function _markSeen(t){
+    var me=_me();
+    if(!t || !me || !t.id) return;
+    if(!_isUnread(t, me)) return;
+    var at=_lastActivity(t).at;
+    if(!at) return;
+    if(typeof db==="undefined" || !db) return;
+    try{
+      var fp=new firebase.firestore.FieldPath("seenBy", me);
+      db.collection(COLL()).doc(t.id).update(fp, at).catch(function(){});
+    }catch(e){}
   }
 
   function _update(id, patch, okMsg){
@@ -684,9 +767,16 @@
         'background:var(--surface2);border-radius:9px;padding:7px 10px}'+
       '#page-staff-tasks .st-drow .t{flex:1;min-width:150px;font-size:13px;font-weight:600;color:var(--text)}'+
       '#page-staff-tasks .st-drow .form-input,#page-staff-tasks .st-drow .form-select{width:auto;padding:5px 9px;font-size:12px}'+
-      /* البطاقة: الشريطُ الجانبيُّ وحدَه يحمل الحالة — لا لونَ خلفيةٍ ولا حدٌّ ملوّن.
-         السببُ أنّ الشاشة قد تحمل عشرين بطاقة، فمساحةٌ ملوّنةٌ في كلٍّ منها تُلغي
-         التمييز: حين يصرخ كلُّ شيءٍ لا يُسمع شيء. */
+      /* البطاقة: الشريطُ الجانبيُّ وحدَه يحمل **حالةَ الموعد** — لا لونَ خلفيةٍ ولا
+         حدٌّ ملوّن. السببُ أنّ الشاشة قد تحمل عشرين بطاقة، فمساحةٌ ملوّنةٌ في كلٍّ
+         منها تُلغي التمييز: حين يصرخ كلُّ شيءٍ لا يُسمع شيء.
+
+         ── واستثناءُ «فيها جديد» (`nw`) مشروطٌ بما يحفظ القاعدةَ نفسَها ──
+         هو **قناةٌ أخرى** لا منازعةٌ على الشريط: الشريطُ يبقى للموعد، والجديدُ
+         نقطةٌ قبل العنوان ورقاقةٌ تقول ما جدّ وخلفيةٌ بـ٧٪ من `--info`. ولا يخرق
+         «لا يصرخ كلُّ شيء» لأنّه **زائلٌ بطبعه**: يخصّ الأقلّيةَ التي تحرّكت،
+         ويُطفَأ بمجرّد فتحها. أمّا لونُ الموعد فدائمٌ ما دام الموعدُ قائماً —
+         ولو حمل الشريطُ الاثنين لَما عُرف أيُّهما يتكلّم. */
       '#page-staff-tasks .st-card{background:var(--surface);border:1px solid var(--border);'+
         'border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;'+
         'border-inline-start:3px solid transparent;transition:border-color .15s,box-shadow .15s}'+
@@ -696,6 +786,11 @@
       '#page-staff-tasks .st-card.soon{border-inline-start-color:var(--stage-wait-fill)}'+
       '#page-staff-tasks .st-card.returned{border-inline-start-color:var(--ai)}'+
       '#page-staff-tasks .st-card.done{opacity:.6}'+
+      '#page-staff-tasks .st-card.nw{background:color-mix(in srgb,var(--info) 7%,var(--surface));'+
+        'border-color:color-mix(in srgb,var(--info) 32%,var(--border))}'+
+      '#page-staff-tasks .st-card.nw .st-ttl{color:var(--info)}'+
+      '#page-staff-tasks .st-dot{display:inline-block;width:7px;height:7px;border-radius:50%;'+
+        'background:var(--info);margin-inline-end:7px;vertical-align:middle}'+
       '#page-staff-tasks .st-ttl{font-size:14px;font-weight:700;color:var(--text);line-height:1.6;margin-bottom:5px}'+
       '#page-staff-tasks .st-card.done .st-ttl{text-decoration:line-through;text-decoration-color:var(--muted)}'+
       '#page-staff-tasks .st-meta{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--muted);font-weight:600}'+
@@ -706,6 +801,8 @@
         'background:var(--surface2);border:1px solid var(--border)}'+
       '#page-staff-tasks .st-pill.hi{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 34%,var(--border))}'+
       '#page-staff-tasks .st-pill.rt{color:var(--ai-ink);border-color:color-mix(in srgb,var(--ai) 34%,var(--border))}'+
+      '#page-staff-tasks .st-pill.nw{color:var(--info);background:color-mix(in srgb,var(--info) 13%,var(--surface));'+
+        'border-color:color-mix(in srgb,var(--info) 38%,var(--border))}'+
       /* الفراغ: دعوةٌ إلى فعلٍ لا احتفال — أيقونةٌ خافتةٌ وسطرٌ يقول ما التالي. */
       '#page-staff-tasks .st-empty{text-align:center;padding:44px 18px;color:var(--muted);font-size:13px;line-height:1.9}'+
       '#page-staff-tasks .st-empty .ic{display:block;margin:0 auto 10px}'+
@@ -780,6 +877,10 @@
       if(!t){ _openId=null; _editing=false; return render(); }
       if(_editing && !_canEdit(t,_me(),_myRole())) _editing=false;
       host.innerHTML=_hero()+(_editing ? _editHtml(t) : _detailHtml(t));
+      /* الفتحُ هو القراءة — لا زرَّ «تعليم كمقروء» يُنسى فيبقى اللونُ كذبةً.
+         ولا حلقةَ هنا: الكتابةُ تُبثّ فتُعيد الرسمَ، و`_isUnread` صارت false
+         فتخرج `_markSeen` من أوّل سطرٍ بلا كتابةٍ ثانية. */
+      _markSeen(t);
       return;
     }
     host.innerHTML=_hero()+_quickHtml()+_tabsHtml()+'<div class="card">'+_listHtml()+'</div>';
@@ -875,7 +976,8 @@
 
   function _cardHtml(t, today){
     var st=_dueState(t,today);
-    var cls="st-card "+(t.status==="done"?"done":(t.status==="returned"?"returned":st));
+    var act=_lastActivity(t), nw=_isUnread(t,_me());
+    var cls="st-card "+(t.status==="done"?"done":(t.status==="returned"?"returned":st))+(nw?" nw":"");
     var whoIcon = t.assignedToUser ? "user" : "edit";
     var who = t.assignedToUser
       ? (t.assignedToUser===_me() ? ("من: "+_nameOf(t.createdByUser)) : ("إلى: "+_nameOf(t.assignedToUser)))
@@ -886,12 +988,18 @@
     var cn=(Array.isArray(t.comments)&&t.comments.length)
       ? ('<span>'+_icn("edit")+t.comments.length+'</span>') : "";
     return '<div class="'+cls+'" onclick="staffTasks.open(\''+_q(t.id)+'\')">'+
-      '<div class="st-ttl">'+_e(t.title)+'</div>'+
+      '<div class="st-ttl">'+(nw?'<i class="st-dot"></i>':"")+_e(t.title)+'</div>'+
       '<div class="st-meta">'+
         '<span>'+_icn(whoIcon)+_e(who)+'</span>'+
         '<span'+(st==="late"?' class="late"':'')+'>'+_icn(st==="late"?"alertTriangle":"clock")+_e(dueTxt)+'</span>'+
+        /* «مردودة» حالةٌ قائمة، و«فيها جديد» ما طرأ — رقاقتان لا واحدة.
+           ولا تُخفى الحالةُ خلف الجديد: مهمّةٌ مردودةٌ جدّ فيها تعليقٌ تبقى مردودة.
+           والاستثناءُ الوحيد أنّ الجديدَ **هو** الردُّ نفسُه، فتقولهما رقاقةٌ واحدةٌ
+           بلون الجديد — وإلا قرأ الموظفُ «رُدّت» و«مردودة» متجاورتين. */
+        (nw && !(act.kind==="returned" && t.status==="returned")
+          ? '<span class="st-pill nw">'+_e(_unreadLabel(act.kind))+'</span>' : "")+
         (t.priority==="high"?'<span class="st-pill hi">مهمّة</span>':"")+
-        (t.status==="returned"?'<span class="st-pill rt">مردودة</span>':"")+
+        (t.status==="returned"?'<span class="st-pill '+(nw&&act.kind==="returned"?"nw":"rt")+'">مردودة</span>':"")+
         shared+cn+
       '</div>'+
     '</div>';
@@ -1027,6 +1135,8 @@
     draftClear:draftClear, sendDraft:sendDraft,
     // دوالٌّ نقيّة مكشوفةٌ لفحوص hail-tests (بلا متصفّح)
     _parseBulk:_parseBulk, _participantsOf:_participantsOf, _canSee:_canSee,
+    _msVal:_msVal, _lastActivity:_lastActivity, _seenMs:_seenMs, _isUnread:_isUnread,
+    _unreadLabel:_unreadLabel,
     _canEditParticipants:_canEditParticipants, _dueState:_dueState, _isOverdue:_isOverdue,
     _canEdit:_canEdit, _canReassign:_canReassign, _editPatch:_editPatch, _droppedBy:_droppedBy,
     _splitTabs:_splitTabs, _countOpen:_countOpen, _sortTasks:_sortTasks,

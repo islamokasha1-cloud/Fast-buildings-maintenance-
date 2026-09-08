@@ -360,6 +360,104 @@ const recovered = await page.evaluate(async () => {
 check('★★★ تأخّرٌ وقع والشاشةُ مغلقة لا يتركها عالقةً على «تعذّر الاتصال»', !recovered.err);
 check('★★ وتُعرَض الشاشةُ كاملةً بعد عودة الشبكة', recovered.tabs >= 4, recovered.tabs + ' خانة');
 
+/* ═════════ ٥-د) لونُ «فيها جديد» — ما يُقاس هنا وحدَه ═════════
+   طلبُ المالك (08/09): «أحتاج إذا تم أي تحديث يظهر بلون مختلف للمهمّة».
+   و`hail-tests` تُثبت المنطقَ نقيّاً ولا تُثبت **أنّ اللونَ يصل الشاشة ثم ينطفئ
+   بالفتح**: بين المنطق والشاشة كتابةٌ إلى قاعدة البيانات بـ`FieldPath` (أسماءُ
+   الدخول عربية، والمفتاحُ المنقوط يسقط على محلّل المسارات) — وهذا لا يُختبَر إلا
+   بمتصفّحٍ ومحاكٍ يكتب فعلاً. */
+L('\n=== ٥-د) لونُ «فيها جديد» يصل الشاشةَ وينطفئ بالفتح ===');
+const NWTITLE = 'مهمّةٌ جديدةٌ من المدير';
+const nw1 = await page.evaluate(async (ttl) => {
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const cardBy = (t) => [...document.querySelectorAll('#page-staff-tasks .st-card')]
+    .find(c => (c.querySelector('.st-ttl') || {}).textContent === t);
+  window.__store['staff_tasks/NW1'] = {
+    title: ttl, status: 'open', kind: 'task',
+    createdByUser: 'admin', createdAt: Date.now() - 60000,
+    assignedToUser: 'khaled', assignedToName: 'خالد',
+    /* حالةُ قراءةِ زميلٍ ثالث — تُترك هنا لتُثبت لاحقاً أنّ كتابتنا جرّاحيّة */
+    participants: ['admin', 'khaled', 'saeed'], shared: ['saeed'], comments: [], seenBy: { saeed: 111 }
+  };
+  const out = {};
+  /* (أ) صاحبُ الفعل لا يلتهب له سطرُه */
+  currentUser = { user: 'admin', name: 'المسؤول', role: 'admin' };
+  staffTasks.stopSync(); staffTasks.startSync(); staffTasks.tab('sent');
+  await wait(700);
+  out.ownerGlows = document.querySelectorAll('#page-staff-tasks .st-card.nw').length;
+  /* (ب) والمكلَّفُ يراها ملوّنةً برقاقةٍ تقول ما جدّ */
+  currentUser = { user: 'khaled', name: 'خالد', role: 'مشرف' };
+  staffTasks.stopSync(); staffTasks.startSync(); staffTasks.tab('mine');
+  await wait(700);
+  const c = cardBy(ttl);
+  out.glows = !!c && c.classList.contains('nw');
+  out.pill = c ? (c.querySelector('.st-pill.nw') || {}).textContent : null;
+  out.dot  = !!(c && c.querySelector('.st-ttl .st-dot'));
+  return out;
+}, NWTITLE);
+check('★★★ مهمّةٌ كلّفني بها غيري ولم أفتحها بعد تظهر بلونٍ مختلف', nw1.glows === true, JSON.stringify(nw1));
+check('★★ ورقاقةٌ تقول ما جدّ لا مجرّدَ لون', nw1.pill === 'جديدة', String(nw1.pill));
+check('★★ ونقطةٌ قبل العنوان (اللونُ وحدَه لا يكفي لمن لا يميّزه)', nw1.dot === true);
+check('★★★ ولا يلتهب سطرُ مَن صنع الحركةَ بنفسه (لونٌ كاذبٌ يُتعلَّم تجاهلُه)',
+  nw1.ownerGlows === 0, nw1.ownerGlows + ' بطاقة');
+
+/* الفتحُ يُطفئ اللون — بنقرٍ حقيقيٍّ لا بنداءٍ برمجيّ: بين البطاقة والدالّة سمةُ
+   onclick تُقيَّم في النطاق العام، واسمٌ يسقط منه = زرٌّ ميتٌ بصمت. */
+await page.evaluate((ttl) => [...document.querySelectorAll('#page-staff-tasks .st-card')]
+  .find(c => (c.querySelector('.st-ttl') || {}).textContent === ttl).click(), NWTITLE);
+await page.waitForTimeout(900);
+const nw2 = await page.evaluate(async (ttl) => {
+  const d = window.__store['staff_tasks/NW1'];
+  const out = { seen: d.seenBy, updatedAt: d.updatedAt === undefined };
+  staffTasks.back(); staffTasks.tab('mine');
+  await new Promise(r => setTimeout(r, 500));
+  const c = [...document.querySelectorAll('#page-staff-tasks .st-card')]
+    .find(x => (x.querySelector('.st-ttl') || {}).textContent === ttl);
+  out.stillGlows = !!c && c.classList.contains('nw');
+  return out;
+}, NWTITLE);
+check('★★★ وفتحُها يُطفئ اللون (وإلا بقي مشتعلاً فبطل معناه)', nw2.stillGlows === false);
+check('★★★ والفتحُ سجّل حالةَ القراءة باسمي أنا فعلاً في المستند',
+  !!nw2.seen && typeof nw2.seen.khaled === 'number', JSON.stringify(nw2.seen));
+check('★★★ ولم يمحُ حالةَ قراءةِ زميلي (كتابةٌ جرّاحيّةٌ بـFieldPath لا خريطةٌ كاملة)',
+  !!nw2.seen && nw2.seen.saeed === 111, JSON.stringify(nw2.seen));
+check('★★★ والقراءةُ لم تُختَم تعديلاً في سجلّ المهمّة (updatedAt لم يُمَسّ)', nw2.updatedAt === true);
+
+/* ثم يعود اللونُ بحركةٍ جديدةٍ بعد قراءتي — وهو بيتُ القصيد */
+const nw3 = await page.evaluate(async (ttl) => {
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const d = window.__store['staff_tasks/NW1'];
+  window.__store['staff_tasks/NW1'] = Object.assign({}, d, {
+    comments: [{ user: 'admin', name: 'المسؤول', text: 'عاجل', at: new Date().toISOString() }] });
+  staffTasks.stopSync(); staffTasks.startSync(); staffTasks.tab('mine');
+  await wait(700);
+  const c = [...document.querySelectorAll('#page-staff-tasks .st-card')]
+    .find(x => (x.querySelector('.st-ttl') || {}).textContent === ttl);
+  return { glows: !!c && c.classList.contains('nw'), pill: c ? (c.querySelector('.st-pill.nw') || {}).textContent : null };
+}, NWTITLE);
+check('★★★ وتعليقُ زميلٍ بعد قراءتي يُعيد اللون', nw3.glows === true, JSON.stringify(nw3));
+check('★★ والرقاقةُ تقول «تعليقٌ جديد» لا «جديدة»', nw3.pill === 'تعليقٌ جديد', String(nw3.pill));
+
+/* واللونُ من نظام المنصّة لا من رقمٍ مكتوب: ينقلب مع الوضع الداكن كما ينقلب ما حوله */
+/* والمقارنةُ ببطاقةٍ عاديةٍ لا بقيمةٍ مكتوبة: اللونُ من `color-mix` على متغيّرات
+   المنصّة، وشكلُ ما يُرجعه المتصفّح يتبدّل بين إصدارٍ وآخر (`rgb()` مرّةً
+   و`color(srgb …)` أخرى) — فحارسٌ على النصّ يسقط بلا عطلٍ في الشاشة. المقصودُ
+   أن **يفترق** الملوَّنُ عن غيره لا أن يساوي رقماً بعينه. */
+const nwColor = await page.evaluate(() => {
+  const on = document.querySelector('#page-staff-tasks .st-card.nw');
+  /* بطاقةٌ عاديةٌ تُركَّب للقياس: قائمةُ المكلَّف في هذه اللحظة **كلُّها ملوّنة**
+     (كلُّ ما كلّفه به المديرُ لم يُفتح بعد)، فلا نظيرَ في الشاشة يُقاس عليه. */
+  const ref = document.createElement('div');
+  ref.className = 'st-card';
+  document.getElementById('page-staff-tasks').appendChild(ref);
+  const out = { on: on ? getComputedStyle(on).backgroundColor : '',
+                off: getComputedStyle(ref).backgroundColor };
+  ref.remove();
+  return out;
+});
+check('★★ وخلفيةُ «فيها جديد» تفترق فعلاً عن البطاقة العادية (لا صنفٌ بلا قاعدة)',
+  !!nwColor.on && !!nwColor.off && nwColor.on !== nwColor.off, JSON.stringify(nwColor));
+
 /* ═════════ ٦) لغةُ المنصّة: أيقوناتٌ لا إيموجي، ومكوّناتٌ مشتركة ═════════
    شاشةٌ تُخالف أسلوبَ ما حولها تبدو دخيلةً وإن عملت. وأخطرُ ما يقع هنا صامتٌ:
    متغيّرُ لونٍ **لا وجودَ له** يسقط على قيمةٍ احتياطيةٍ فتخرج الحقولُ سوداءَ وسط
