@@ -2027,12 +2027,20 @@ html[data-theme="dark"] .notif-item.unread{background:#1a2d45}
 html[data-theme="dark"] #notif-bell{background:var(--surface);color:var(--text);border-color:var(--border)}
 
 /* ══ ASSETS PAGE ══ */
-.asset-card{background:#fff;border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--shadow);border:1px solid var(--border);border-right:4px solid var(--primary);cursor:pointer;transition:box-shadow .15s}
-.asset-card:hover{box-shadow:0 4px 14px rgba(0,0,0,0.12)}
-.asset-card.status-good{border-right-color:#0a7c59}
-.asset-card.status-warn{border-right-color:#d97706}
-.asset-card.status-crit{border-right-color:#dc2626}
-.asset-card.status-out{border-right-color:#64748b}
+/* بطاقةُ الأصل = بطاقةُ «سجل الأطراف» نفسُها (طلبُ المالك 08/09): شبكةُ بلاطاتٍ
+   بشريطِ حالةٍ على حافة البداية، لا صفوفٌ بعرض الشاشة تُقرأ سطراً سطراً.
+   ولمَ شبكة: ٦٦٤ أصلاً في صفوفٍ عريضةٍ تمريرٌ لا ينتهي على iPad، والصفُّ العريض
+   يترك ثلثيه فارغَين ثم يُخفي الأصلَ التالي تحت الطيّة. والشريطُ يحمل **الحالةَ
+   وحدَها** — لونٌ واحدٌ يقول ما يجب أن يُرى قبل أيّ شيءٍ في البطاقة.
+   ولونُه من متغيّرات SLA لا من رقمٍ محفور: تلك تنقلب في الوضع الداكن، والرقمُ لا. */
+.ast-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:14px}
+.asset-card{--rail:var(--primary);position:relative;overflow:hidden;background:var(--surface);border-radius:14px;padding:14px 15px;box-shadow:var(--shadow);border:1px solid var(--border);cursor:pointer;transition:transform .16s,box-shadow .16s}
+.asset-card::before{content:"";position:absolute;inset-block:0;inset-inline-start:0;width:4px;background:var(--rail)}
+.asset-card:hover{transform:translateY(-3px);box-shadow:0 14px 32px rgba(20,30,55,.13)}
+.asset-card.status-good{--rail:var(--sla-ok)}
+.asset-card.status-warn{--rail:var(--sla-warn)}
+.asset-card.status-crit{--rail:var(--sla-crit)}
+.asset-card.status-out{--rail:var(--muted)}
 .asset-id{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--primary);background:#eff6ff;padding:2px 8px;border-radius:5px}
 .asset-type-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;background:#f1f5f9;color:#475569}
 .asset-status-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px}
@@ -2042,7 +2050,6 @@ html[data-theme="dark"] #notif-bell{background:var(--surface);color:var(--text);
 .asset-status-badge.s-out{background:#f1f5f9;color:#64748b}
 .asset-meta-row{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:6px}
 .asset-history-entry{padding:9px 12px;border-radius:8px;background:var(--surface2);margin-bottom:6px;border-right:3px solid var(--border);font-size:12px}
-html[data-theme="dark"] .asset-card{background:var(--surface);border-color:var(--border)}
 
 /* ══ PPM PAGE — تصميم موحّد ══ */
 .ppm-card{position:relative;overflow:hidden;background:var(--surface);border-radius:14px;padding:15px 16px;margin-bottom:11px;box-shadow:var(--shadow);border:1px solid var(--border);transition:box-shadow .15s,transform .15s}
@@ -2073,6 +2080,26 @@ html[data-theme="dark"] .asset-card{background:var(--surface);border-color:var(-
 @keyframes ppmPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(1.6)}}
 @media(prefers-reduced-motion:reduce){.ppm-overdue-pulse{animation:none}}
 .ppm-overdue-banner{display:flex;align-items:center;gap:8px;background:#fee2e2;border-radius:9px;padding:7px 12px;margin-bottom:11px;font-size:12px;font-weight:700;color:#991b1b;border:1px solid #fca5a5}
+/* ══ بطاقاتُ خطط PPM = بطاقاتُ سجل الأطراف (طلبُ المالك 08/09) ══
+   ⚠ ومقصورةٌ على `#page-ppm` عمداً: `.ppm-card` **مفردةُ المنصّة للعمل الدوريّ**
+   تستعملها صفحاتُ النظافة واللوحةُ التنفيذية والمتابعةُ اليومية بمقاسها الخاصّ
+   (تحقن وحدةُ النظافة `#page-cleaning .ppm-card{padding:9px 11px}`). فتغييرُ
+   القاعدة العامة يقلب أربعَ شاشاتٍ لم يطلب أحدٌ قلبَها — والحارسُ في hail-tests
+   يرصد ذلك من الجهة الأخرى. */
+#page-ppm .ppm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:14px}
+#page-ppm .ppm-card{--_c:var(--sla-ok);margin-bottom:0;border-radius:14px;padding:14px 15px;transition:transform .16s,box-shadow .16s}
+#page-ppm .ppm-card::before{top:auto;bottom:auto;right:auto;left:auto;inset-block:0;inset-inline-start:0;width:4px}
+#page-ppm .ppm-card:hover{transform:translateY(-3px);box-shadow:0 14px 32px rgba(20,30,55,.13)}
+#page-ppm .ppm-card.due-soon{--_c:var(--sla-warn)}
+#page-ppm .ppm-card.due-today{--_c:var(--sla-crit)}
+#page-ppm .p-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px 8px;margin-bottom:5px;flex-wrap:wrap}
+#page-ppm .p-name{font-size:14.5px;font-weight:800;color:var(--primary);line-height:1.35;flex:1 1 auto;min-width:56%}
+#page-ppm .p-top .ppm-due-badge{flex:0 0 auto;white-space:normal;line-height:1.6}
+#page-ppm .p-kind{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:9px}
+#page-ppm .p-kind .mi{display:inline-flex}
+#page-ppm .p-kind .mi svg{width:13px;height:13px}
+#page-ppm .p-desc{margin-top:9px;padding-top:9px;border-top:1px dashed var(--border);font-size:11px;color:var(--muted);line-height:1.7}
+#page-ppm .ppm-overdue-banner{margin-bottom:9px;padding:5px 10px;font-size:11px;border-radius:8px}
 .ppm-approval-row{background:color-mix(in srgb,var(--info) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--info) 22%,var(--border));border-radius:10px;padding:10px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 html[data-theme="dark"] .ppm-approval-row{background:#1a2d45;border-color:#2e4a6e}
 
@@ -2676,20 +2703,20 @@ html[data-theme="dark"] .ast-stat.ppm .si{background:#241a3a;color:#c4b5fd}
 #assets-stat-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
 @media(max-width:760px){.ast-stats{grid-template-columns:1fr 1fr}}
 
-.asset-card .a-row{display:flex;gap:12px;align-items:flex-start}
-.a-ic{width:40px;height:40px;border-radius:11px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--surface2);color:var(--primary)}
-.a-ic svg{width:20px;height:20px}
-.asset-card.status-good .a-ic{background:var(--sla-ok-bg);color:var(--sla-ok)}
-.asset-card.status-warn .a-ic{background:var(--sla-warn-bg);color:var(--sla-warn)}
-.asset-card.status-crit .a-ic{background:var(--sla-crit-bg);color:var(--sla-crit)}
-.asset-card.status-out .a-ic{background:var(--surface2);color:var(--muted)}
-.a-main{flex:1;min-width:0}
-.a-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px}
+/* ترويسةُ البلاطة كترويسة بطاقة الطرف: الاسمُ لا ينزل تحت ٥٦٪ من العرض، وشارةُ
+   الحالة التي لا تسَعُها البقيّةُ تنزل سطراً وحدَها — لا اسمٌ يتكسّر كلمةً كلمة. */
+.a-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px 8px;margin-bottom:5px;flex-wrap:wrap}
+.a-name{font-size:14.5px;font-weight:800;color:var(--primary);line-height:1.35;flex:1 1 auto;min-width:56%;margin:0}
+.a-top .asset-status-badge{flex:0 0 auto;white-space:normal;line-height:1.6}
+/* سطرُ النوع: نوعٌ وفرعٌ ومعرّفٌ — أوّلُ ما يبحث عنه الناظرُ في شبكةٍ من مئات الأصول */
+.a-kind{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:9px}
+.a-kind .a-mi{display:inline-flex;color:var(--muted)}
+.a-kind .a-mi svg{width:13px;height:13px}
+.a-dot{opacity:.5}
 .asset-type-badge.sub{background:#e0f2fe;color:#0369a1}
 html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
 .a-warn-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;background:var(--sla-crit-bg);color:var(--sla-crit);border-radius:6px;padding:2px 7px;font-weight:700}
 .a-warn-badge svg{width:12px;height:12px}
-.a-name{font-size:15px;font-weight:800;color:var(--primary);margin:2px 0 7px}
 .a-meta-wrap{display:flex;flex-wrap:wrap;gap:6px}
 .a-meta{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:3px 8px}
 .a-meta .a-mi{display:inline-flex;color:var(--muted)}
@@ -2705,9 +2732,11 @@ html[data-theme="dark"] .asset-type-badge.sub{background:#0c2b3a;color:#7dd3fc}
 /* أيقونة عنوان قسم في نافذة تفاصيل الأصل — خطّية بلون النص بدل الإيموجي */
 .sec-ic{display:inline-flex;flex-shrink:0}
 .sec-ic svg{width:13px;height:13px;stroke-width:2.2}
-.a-actions{display:flex;flex-direction:column;gap:6px;align-items:stretch;flex-shrink:0}
-.a-actions .btn{display:inline-flex;align-items:center;gap:5px;justify-content:center}
-.a-actions .btn svg{width:13px;height:13px}
+/* الأزرارُ في ذيلٍ مستقلٍّ لا في عمودٍ جانبيّ: البلاطةُ الضيّقةُ لا تحتمل عموداً
+   يعصر الاسمَ والشارات، والذيلُ المفصولُ بخطٍّ متقطّعٍ يقول «هذه أفعالٌ لا بيانات». */
+.a-foot{display:flex;gap:6px;justify-content:flex-end;align-items:center;flex-wrap:wrap;margin-top:10px;padding-top:9px;border-top:1px dashed var(--border)}
+.a-foot .btn{display:inline-flex;align-items:center;gap:5px;justify-content:center}
+.a-foot .btn svg{width:13px;height:13px}
 /* ══ ISSUE-ORDER UI ICONS (v18.9kl) ══ */
 #page-issue-order .btn svg,#page-issue-orders .btn svg{width:14px;height:14px}
 #page-issue-orders .ast-stat .si svg{width:19px;height:19px}

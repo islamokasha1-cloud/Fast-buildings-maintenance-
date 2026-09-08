@@ -690,7 +690,12 @@ function predelivery() {
        و`saveUsers` و`_upsertUserCentral` و`_adminOnlyUsersGuard` نفسَها. ونسخُ بابٍ
        واحدٍ إلى ملفٍّ يشقّ إدارةَ الحسابات إلى مصدرَين، ونقلُ منطقٍ قائمٍ بحجّة
        تعديله ممنوعٌ نصّاً (CLAUDE.md). */
-    const IDX_CEILING = 39762;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 39762 إلى 39770 — ‏٨ أسطرٍ لتوحيد بطاقات الأصول وخطط PPM على
+       بطاقة «سجل الأطراف» (طلبُ المالك 08/09). **تعديلُ عرضٍ في موضعه على منطقٍ
+       قائم**: `renderAssets` و`renderPPM` هنا منذ البدء، والزيادةُ أكثرُها تعليقٌ
+       يشرح لِمَ الشبكةُ لا الصفوف. ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة تعديله ممنوعٌ
+       نصّاً (CLAUDE.md). */
+    const IDX_CEILING = 39770;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -16069,10 +16074,13 @@ function ppmSupervisorCreateGuards() {
     /function openEditPPMModal\(id\)\{\s*\n\s*if\(!ppmCanManage\(\)\)/.test(HTML));
   T("★ deletePPMPlan محروس بـ ppmCanManage",
     /function deletePPMPlan\(id\)\{\s*\n\s*if\(!ppmCanManage\(\)\)/.test(HTML));
+  /* منذ v18.9.3099 صار الزرّان في ذيلٍ واحدٍ (`a-foot`) محروسٍ بـ`canManage`
+     بدل حارسَين متجاورين — والمحروسُ هو ما يُفحص لا شكلُ الغلاف. */
   T("★ زرّا التعديل/الحذف على البطاقة بـ ppmCanManage لا بشرط admin",
     /const canManage = ppmCanManage\(\);/.test(HTML) &&
-    /\$\{canManage\?`<button class="btn btn-ghost btn-sm" onclick="event\.stopPropagation\(\);openEditPPMModal/.test(HTML) &&
-    /\$\{canManage\?`<button class="btn btn-delete btn-sm" onclick="event\.stopPropagation\(\);deletePPMPlan/.test(HTML));
+    /\$\{canManage\?`<div class="a-foot">[\s\S]{0,420}openEditPPMModal[\s\S]{0,260}deletePPMPlan[\s\S]{0,120}<\/div>`:""\}/.test(HTML) &&
+    /onclick="event\.stopPropagation\(\);openEditPPMModal/.test(HTML) &&
+    /onclick="event\.stopPropagation\(\);deletePPMPlan/.test(HTML));
   T("★ لا حارسَ admin نصّياً باقٍ في مواضع PPM الثلاثة (ارتدادٌ صامت)",
     !/function (?:openEditPPMModal\(id\)|deletePPMPlan\(id\))\{\s*\n\s*if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML));
 }
@@ -16227,8 +16235,9 @@ function ppmAdvanceOnDueGuards() {
     T("★ خطةٌ لم يُولَّد لها ولم تُنفَّذ ⇒ فراغٌ لا undefined", done({}) === "" && gen({}) === "" && done(null) === "");
   }
   T("★★ بطاقةُ الخطة تقرأ ppmLastDone، و«وُلِّد بلاغُه» يقوم مقامَه عند غيابه",
-    /آخر تنفيذ: \$\{fmtDateOnly\(ppmLastDone\(p\)\)\}/.test(HTML) &&
-    /وُلِّد بلاغُه: \$\{fmtDateOnly\(ppmLastGen\(p\)\)\}/.test(HTML));
+    /const lastDone = ppmLastDone\(p\), lastGen = ppmLastGen\(p\);/.test(HTML) &&
+    /lastDone\?_aMeta\("checkCircle", "آخر تنفيذ: "\+fmtDateOnly\(lastDone\)\)/.test(HTML) &&
+    /lastGen\?_aMeta\("ticket", "وُلِّد بلاغُه: "\+fmtDateOnly\(lastGen\)\)/.test(HTML));
   T("★★ سجلُّ الأصل: الإنجازُ وحدَه — لا `lastExecuted || lastCompletedAt`",
     /const lastRun = ppmLastDone\(p\);/.test(HTML) &&
     !/lastExecuted \|\| p\.lastCompletedAt/.test(HTML));
@@ -16526,6 +16535,39 @@ function assetPPMCoverageGuards() {
     /\.ast-stat\.noppm\{border-inline-start-color:var\(--muted\)\}/.test(HTML) &&
     /\.a-tag\.noppm\{background:var\(--surface2\);color:var\(--muted\);border:1px dashed var\(--border\)\}/.test(HTML) &&
     /#assets-stat-grid\{grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,150px\),1fr\)\)\}/.test(HTML));
+
+  /* ── (٦) بطاقاتُ الأصول وخطط PPM = بطاقةُ «سجل الأطراف» (طلبُ المالك 08/09) ──
+     الشكلُ قرارٌ يُنقض بسهولة: سطرٌ واحدٌ يُعيد البطاقاتِ صفوفاً بعرض الشاشة بلا
+     أن يسقط شيء. والحرّاسُ هنا على **ما يجعلها بطاقةَ الأطراف**: شبكةٌ لا صفوف،
+     وشريطُ حالةٍ على حافة البداية بلونٍ من متغيّرات المنصّة، وذيلُ أفعالٍ مفصول. */
+  T("★★ بطاقاتُ الأصول شبكةٌ من بلاطاتٍ لا صفوفٌ بعرض الشاشة",
+    /list\.innerHTML = '<div class="ast-grid">'\+pgItems\.map\(a=>\{/.test(HTML) &&
+    /\.ast-grid\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(265px,1fr\)\);gap:14px\}/.test(HTML));
+  T("★★ وخطط PPM كذلك — بالشبكة نفسِها ومقاسِها",
+    /list\.innerHTML = '<div class="ppm-grid">'\+pgItems\.map\(p=>\{/.test(HTML) &&
+    /#page-ppm \.ppm-grid\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(265px,1fr\)\);gap:14px\}/.test(HTML));
+  T("★★★ وشريطُ الحالة على حافة البداية بلونٍ من متغيّرات SLA لا برقمٍ محفور",
+    /\.asset-card::before\{content:"";position:absolute;inset-block:0;inset-inline-start:0;width:4px;background:var\(--rail\)\}/.test(HTML) &&
+    /\.asset-card\.status-good\{--rail:var\(--sla-ok\)\}/.test(HTML) &&
+    /\.asset-card\.status-crit\{--rail:var\(--sla-crit\)\}/.test(HTML) &&
+    /#page-ppm \.ppm-card\.due-today\{--_c:var\(--sla-crit\)\}/.test(HTML) &&
+    !/\.asset-card\.status-(?:good|warn|crit|out)\{border-right-color:#/.test(HTML));
+  /* ⚠ الحارسُ الأهمّ: `.ppm-card` مفردةُ المنصّة للعمل الدوريّ — تستعملها صفحاتُ
+     النظافة واللوحةُ التنفيذية والمتابعةُ اليومية. فتحويلُها إلى بلاطةِ شبكةٍ في
+     القاعدة العامة يقلب أربعَ شاشاتٍ لم يطلب أحدٌ قلبَها. التحويلُ مقصورٌ على
+     `#page-ppm` وحدَها، وهذا ما يُفحص هنا. */
+  T("★★★ وتحويلُ بطاقة PPM مقصورٌ على صفحتها (لا يمسّ النظافة ولا التنفيذية ولا اليومية)",
+    /#page-ppm \.ppm-card\{--_c:var\(--sla-ok\);margin-bottom:0/.test(HTML) &&
+    !/^\.ppm-card\{[^}]*grid/m.test(HTML) &&
+    /^\.ppm-card\{position:relative;overflow:hidden;background:var\(--surface\);border-radius:14px;padding:15px 16px;margin-bottom:11px/m.test(HTML));
+  T("★★ والبيانُ في البطاقتين رقاقةٌ واحدةٌ مشتركة (_aMeta) لا لغتان لشيءٍ واحد",
+    /<div class="a-meta-wrap">[\s\S]{0,600}_aMeta\("building2", esc\(a\.building\)\)/.test(HTML) &&
+    /<div class="a-meta-wrap">[\s\S]{0,600}_aMeta\("building2", esc\(p\.building\)\)/.test(HTML));
+  T("★★ والأفعالُ في ذيلٍ مفصولٍ لا في عمودٍ يعصر الاسم",
+    /\.a-foot\{display:flex;gap:6px;justify-content:flex-end;[^}]*border-top:1px dashed var\(--border\)\}/.test(HTML) &&
+    !/class="a-actions"/.test(HTML) && !/class="a-row"/.test(HTML));
+  T("★ ولا صنفَ ميتاً بقي في ورقة الأنماط بعد إسقاط الأيقونة الجانبية",
+    !/\.asset-card \.a-row\{/.test(HTML) && !/\.asset-card\.status-good \.a-ic\{/.test(HTML));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -16657,7 +16699,7 @@ function ppmSecondDueGuards() {
     /fmtDateOnly\(p\.nextDueDate\)\}`, "success"\)/.test(HTML) &&
     !/nextDate\.toISOString/.test(HTML));
   T("★ بطاقة الخطة تعرض الموعد الثاني حين يكون محدَّداً",
-    /الثاني: \$\{fmtDateOnly\(p\.secondDueDate\)\}/.test(HTML));
+    /p\.secondDueDate\?_aMeta\("calendarClock", "الثاني: "\+fmtDateOnly\(p\.secondDueDate\)\)/.test(HTML));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -16825,7 +16867,7 @@ function assetSupervisorEditGuards() {
     /if\(_editingAsset\)\{\s*\n\s*if\(!assetCanEdit\(\)\)/.test(HTML) &&
     /\} else if\(!currentUser\|\|currentUser\.role!=="admin"\)/.test(HTML));
   T("★ زر التعديل على البطاقة وفي التفاصيل بـ canEdit — والحذف بـ isAdmin وحده",
-    /\$\{canEdit\?`<div class="a-actions">/.test(HTML) &&
+    /\$\{canEdit\?`<div class="a-foot">/.test(HTML) &&
     /\$\{isAdmin\?`<button class="btn btn-delete btn-sm" onclick="event\.stopPropagation\(\);deleteAsset/.test(HTML) &&
     /\$\{canEdit\?`<button class="btn btn-warn btn-sm" onclick="closeModal\('modal-asset-detail'\);openEditAssetModal/.test(HTML));
 
