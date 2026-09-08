@@ -81,7 +81,8 @@ await page.waitForTimeout(3000);
 await page.evaluate(() => {
   USERS = [{ user: 'admin', name: 'المسؤول', role: 'admin' },
            { user: 'khaled', name: 'خالد', role: 'مشرف' },
-           { user: 'saeed',  name: 'سعيد', role: 'مشرف' }];
+           { user: 'saeed',  name: 'سعيد', role: 'مشرف' },
+           { user: 'ashraf', name: 'أشرف عشري', role: 'مشرف' }];
 });
 
 /* ═════════ ١) الزرّ حيّ والشاشة تُرسَم ═════════ */
@@ -98,8 +99,31 @@ check('وسطرُ التكليف السريع موجود', await page.isVisible(
 
 /* ═════════ ٢) التكليفُ الجماعيّ ═════════ */
 L('\n=== ٢) التكليفُ الجماعيّ (نمط Microsoft To Do) ===');
-await page.selectOption('#page-staff-tasks .st-quick select', 'khaled');
+/* منتقي المكلَّف — قائمةٌ يُبحَث فيها لا عجلةٌ تُلَفُّ بالإصبع (بلاغُ المالك 08/09).
+   ويُقاد هنا كما يقوده الموظف: لمسةٌ ثم كتابةٌ ثم نقرٌ على النتيجة. */
+await page.click('#st-up-q-quick');
 await page.waitForTimeout(300);
+check('★★ لمسُ خانة التكليف يفتح القائمةَ كاملةً قبل أيّ كتابة',
+  await page.evaluate(() => document.querySelectorAll('#st-up-l-quick .st-up-row').length >= 5),
+  await page.evaluate(() => document.querySelectorAll('#st-up-l-quick .st-up-row').length + ' صفّاً'));
+await page.fill('#st-up-q-quick', 'اشرف');
+await page.waitForTimeout(300);
+check('★★★ «اشرف» بلا همزةٍ تجد «أشرف عشري» — البحثُ يطبّع لا يطابق حرفياً',
+  await page.evaluate(() => {
+    const r = [...document.querySelectorAll('#st-up-l-quick .st-up-row')];
+    return r.length === 1 && /أشرف عشري/.test(r[0].textContent);
+  }),
+  await page.evaluate(() => [...document.querySelectorAll('#st-up-l-quick .st-up-row')].map(x => x.textContent.trim()).join(' | ')));
+await page.fill('#st-up-q-quick', 'خال');
+await page.waitForTimeout(300);
+await page.click('#st-up-l-quick .st-up-row');
+await page.waitForTimeout(400);
+check('★★★ والنقرُ على النتيجة يُثبت المكلَّف فعلاً (صفٌّ حيٌّ لا مرسومٌ فقط)',
+  await page.evaluate(() => {
+    const v = document.getElementById('st-quick-asg'), q = document.getElementById('st-up-q-quick');
+    return !!v && v.value === 'khaled' && !!q && q.value === 'خالد';
+  }),
+  await page.evaluate(() => (document.getElementById('st-quick-asg') || {}).value));
 await page.fill('#st-quick-input', 'راجع عقد المورّد');
 await page.press('#st-quick-input', 'Enter');
 await page.waitForTimeout(400);
@@ -254,6 +278,35 @@ const doneOk = await page.evaluate(async () => {
 });
 check('★★ زرُّ «تمّ الإنجاز» يكتب الحالةَ فعلاً في المستند', doneOk === 1, String(doneOk));
 
+/* ── إضافةُ مشارك: المنتقي نفسُه، ومصدرُ الحقيقة حقلٌ يقرؤه `shareTask` بمعرّفه.
+   لو انزلق المعرّفُ يوماً لَقرأ الحفظُ فراغاً وقال «اختر موظفاً» بلا خطأٍ واحد. ── */
+const shKey = await page.evaluate(() => {
+  const el = document.querySelector('#page-staff-tasks [id^="st-up-q-sh-"]');
+  return el ? el.id.replace('st-up-q-sh-', '') : '';
+});
+check('★★ ومنتقي إضافة المشارك مرسومٌ في التفصيل', !!shKey, shKey);
+if (shKey) {
+  await page.fill(`#st-up-q-sh-${shKey}`, 'اشرف');
+  await page.waitForTimeout(300);
+  await page.click(`#st-up-l-sh-${shKey} .st-up-row`);
+  await page.waitForTimeout(300);
+  await page.click('#page-staff-tasks button:has-text("إضافة")');
+  await page.waitForTimeout(900);
+  const shared = await page.evaluate((id) => window.__store['staff_tasks/' + id], shKey);
+  check('★★★ البحثُ ثمّ «إضافة» يُدخل الزميلَ في الغرفة فعلاً (مشاركاً وطرفاً)',
+    !!shared && (shared.shared || []).includes('ashraf') && (shared.participants || []).includes('ashraf'),
+    JSON.stringify(shared && shared.participants));
+  check('★ ومَن صار مشاركاً لا يعود في قائمة الإضافة (لا إضافةٌ مكرّرة)',
+    await page.evaluate(() => {
+      const el = document.querySelector('#page-staff-tasks [id^="st-up-q-sh-"]');
+      if (!el) return true;
+      el.focus();
+      const k = el.id.replace('st-up-q-', '');
+      return ![...document.querySelectorAll('#st-up-l-' + k + ' .st-up-row')]
+        .some(r => /أشرف عشري/.test(r.textContent));
+    }));
+}
+
 /* ═════════ ٥-ب) التعديلُ والحذف ═════════ */
 L('\n=== ٥-ب) التعديلُ والحذف ===');
 await page.evaluate(() => { staffTasks.back(); staffTasks.tab('sent'); });
@@ -294,7 +347,13 @@ check('★★ ويعود إلى شاشة التفصيل بعد الحفظ (لا 
 /* التحويلُ إلى موظّفٍ آخر — يُخرج المكلَّفَ السابق */
 await page.evaluate((id) => staffTasks.startEdit(id), idEdit);
 await page.waitForTimeout(500);
-await page.selectOption(`#st-ed-asg-${idEdit}`, 'saeed');
+await page.fill(`#st-up-q-ed-${idEdit}`, 'سعيد');
+await page.waitForTimeout(300);
+await page.click(`#st-up-l-ed-${idEdit} .st-up-row`);
+await page.waitForTimeout(300);
+check('★★★ ومنتقي التحويل يكتب اسمَ الدخول في الحقل الذي يقرؤه الحفظ (لا الاسمَ المعروض)',
+  await page.evaluate((id) => (document.getElementById('st-ed-asg-' + id) || {}).value === 'saeed', idEdit),
+  await page.evaluate((id) => (document.getElementById('st-ed-asg-' + id) || {}).value, idEdit));
 await page.click('#page-staff-tasks .btn-primary');
 await page.waitForTimeout(900);
 const moved = await page.evaluate((id) => window.__store['staff_tasks/' + id], idEdit);
