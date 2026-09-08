@@ -54,7 +54,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3097";
+  var MODULE_BUILD = "v18.9.3098";
 
   function COLL(){
     var dev=false;
@@ -120,6 +120,34 @@
           .trim();
       })
       .filter(function(l){ return l.length>0; });
+  }
+
+  /* ════════ مطابقةُ اسمِ الموظف في البحث ════════
+     المشكلةُ التي بلّغ عنها المالك: قائمةُ التكليف صارت عشراتِ الأسماء، فاختيارُ
+     زميلٍ على iPad لَفُّ عجلةٍ بالإصبع لا كتابة. والبحثُ لا يُجدي إن كان مطابقةً
+     حرفيّة: الأسماءُ تُكتب بالهمزة وبدونها («أشرف» · «اشرف»)، وبالتاء المربوطة
+     وبالهاء، وبالياء وبالألف المقصورة. فمن يكتب «اشرف» يجب أن يجد «أشرف عشري»،
+     وإلا خرج بأنّ «البحث لا يعمل» وعاد إلى لفّ العجلة.
+
+     ولذلك: تطبيعٌ عربيٌّ قبل المقارنة (الهمزاتُ ألفاً · الألفُ المقصورةُ ياءً ·
+     التاءُ المربوطةُ هاءً · نزعُ التشكيل والتطويل)، ثمّ **كلُّ كلمةٍ في الاستعلام
+     يجب أن تُوجد** — «اشرف عش» تجد «أشرف عشري»، ولا يشترط ترتيبُ الكلمات.
+     والبحثُ يشمل اسمَ الدخول أيضاً: هو ما يميّز متشابهَي الاسم في القائمة. */
+  function _normAr(s){
+    return String(s==null?"":s)
+      .replace(/[\u064B-\u065F\u0670\u0640]/g, "")   // تشكيلٌ وتطويل
+      .replace(/[\u0623\u0625\u0622\u0671]/g, "\u0627")   // أ إ آ ٱ ⇐ ا
+      .replace(/\u0649/g, "\u064A")                       // ى ⇐ ي
+      .replace(/\u0629/g, "\u0647")                       // ة ⇐ ه
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+  function _userMatches(u, q){
+    var needle=_normAr(q);
+    if(!needle) return true;
+    var hay=_normAr(((u&&u.name)||"")+" "+((u&&u.user)||"")+" "+((u&&u.role)||""));
+    return needle.split(" ").every(function(w){ return !w || hay.indexOf(w)!==-1; });
   }
 
   /* المشاركون: المُنشئ + المكلَّف + المضافون — بلا تكرارٍ وبلا فراغ.
@@ -652,7 +680,17 @@
   }
 
   /* ════════ المسوّدة (التكليف السريع) ════════ */
-  function draftPick(v){ _draftTo=String(v||""); _rerender(); }
+  /* اختيارُ المكلَّف يُعيد رسمَ الشاشة (زرُّ الإرسال يحمل اسمَه)، وما كُتب في سطر
+     المهمّة يعيش في الـDOM لا في الحالة — فيُحفَظ ويُعاد، وإلا محا الاختيارُ عنوانَ
+     المهمّة الذي كتبه المدير قبل قليل. */
+  function draftPick(v){
+    _draftTo=String(v||"");
+    var el=document.getElementById("st-quick-input");
+    var txt=el ? String(el.value||"") : "";
+    _rerender();
+    var e2=document.getElementById("st-quick-input");
+    if(e2 && txt) e2.value=txt;
+  }
   function draftAdd(){
     var el=document.getElementById("st-quick-input");
     if(!el) return;
@@ -762,6 +800,26 @@
       '#page-staff-tasks .st-row .form-input,#page-staff-tasks .st-row .form-select{width:auto}'+
       '#page-staff-tasks .st-grow{flex:1;min-width:200px}'+
       '#page-staff-tasks .st-hint{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.8}'+
+      /* منتقي الموظف: خانةُ كتابةٍ وقائمةٌ عائمةٌ تحتها. الحقلُ `.form-input` من
+         المنصّة، وما هنا تخطيطُ الغلاف والقائمة وحدَه. */
+      '#page-staff-tasks .st-up{position:relative}'+
+      '#page-staff-tasks .st-up-in{width:100%;padding-inline-end:30px}'+
+      '#page-staff-tasks .st-up-in.has{font-weight:700}'+
+      '#page-staff-tasks .st-up-x{position:absolute;inset-inline-end:6px;top:50%;transform:translateY(-50%);'+
+        'background:none;border:0;padding:2px;cursor:pointer;color:var(--muted);display:flex;line-height:0}'+
+      '#page-staff-tasks .st-up-x:hover{color:var(--danger)}'+
+      '#page-staff-tasks .st-up-list{position:absolute;z-index:40;inset-inline:0;top:calc(100% + 4px);'+
+        'max-height:300px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);'+
+        'border-radius:12px;box-shadow:0 10px 26px rgba(0,0,0,.16);padding:5px}'+
+      '#page-staff-tasks .st-up-row{display:flex;flex-direction:column;gap:2px;width:100%;text-align:start;'+
+        'background:none;border:0;border-radius:9px;padding:8px 10px;cursor:pointer;font:inherit;color:var(--text)}'+
+      '#page-staff-tasks .st-up-row:hover,#page-staff-tasks .st-up-row:focus-visible{background:var(--surface2);outline:none}'+
+      '#page-staff-tasks .st-up-row.on{background:color-mix(in srgb,var(--primary) 10%,var(--surface))}'+
+      '#page-staff-tasks .st-up-row .nm{font-size:13px;font-weight:800;color:var(--primary);'+
+        'display:flex;align-items:center;gap:6px;flex-wrap:wrap}'+
+      '#page-staff-tasks .st-up-row.none .nm{color:var(--muted)}'+
+      '#page-staff-tasks .st-up-row .mt{font-size:11px;color:var(--muted);font-weight:700;padding-inline-start:18px}'+
+      '#page-staff-tasks .st-up-empty{font-size:12px;color:var(--muted);padding:12px 10px;text-align:center;line-height:1.7}'+
       '#page-staff-tasks .st-draft{margin-top:12px;display:flex;flex-direction:column;gap:6px}'+
       '#page-staff-tasks .st-drow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;'+
         'background:var(--surface2);border-radius:9px;padding:7px 10px}'+
@@ -910,11 +968,179 @@
     '</div>';
   }
 
+  /* ════════════════════════════════════════════════════════════════════
+     منتقي الموظف — قائمةٌ **يُبحَث فيها**
+
+     المشكلة: `<select>` بعشرات الأسماء على iPad عجلةٌ تُلَفُّ بالإصبع بلا كتابة،
+     ومن يعرف اسمَ زميله لا يريد أن يمرّ على عشرين غيرِه ليصل إليه.
+
+     القرار: خانةُ كتابةٍ عاديّةٌ لا `<select>`، تحتها قائمةٌ تُعاد كتابتُها **وحدَها**
+     مع كل حرف — إعادةُ رسم الشاشة كلِّها مع كل حرفٍ تُفقد المؤشّرَ موضعَه (وتمحو ما
+     كُتب في نموذج التحرير أصلاً، فهو في الـDOM لا في الحالة).
+
+     ومصدرُ الحقيقة يبقى حيث كان: حقلٌ خفيٌّ يحمل **اسمَ الدخول** بالمعرّف نفسِه
+     الذي كان للـ`<select>` (`st-ed-asg-<id>` · `st-share-<id>`)، فلم يتغيّر سطرٌ
+     واحدٌ في `saveEdit` ولا في `shareTask`. والمكتوبُ في الخانة اسمُ العرض — يُقرأ
+     ولا يُحفظ. أمّا التكليفُ السريع فحقيقتُه `_draftTo` كما كانت.
+     ════════════════════════════════════════════════════════════════════ */
+  var _upQ   = {};    // مفتاحُ المنتقي ⇐ نصُّ بحثه الحاليّ
+  var _upTmr = {};    // مؤقّتُ الإغلاق بعد فقد التركيز (يُلغى إن وقع اختيار)
+
+  /* المفاتيح: "quick" للتكليف السريع · "ed-<id>" للتحرير · "sh-<id>" لإضافة مشارك */
+  function _upValId(key){
+    if(key==="quick") return "st-quick-asg";
+    var m=/^ed-([\s\S]*)$/.exec(key); if(m) return "st-ed-asg-"+m[1];
+    var h=/^sh-([\s\S]*)$/.exec(key); if(h) return "st-share-"+h[1];
+    return "st-up-v-"+key;
+  }
+  function _upUsers(key){
+    var h=/^sh-([\s\S]*)$/.exec(key);
+    if(h){
+      var t=byId(h[1]); if(!t) return [];
+      var p=_participantsOf(t);
+      return _users().filter(function(u){ return p.indexOf(u.user)===-1; });
+    }
+    return _users();
+  }
+  /* سطرُ «بلا تكليف» ليس موظفاً، فلا يُطابَق بالبحث: يظهر والخانةُ فارغةٌ وحدَها.
+     ولو ظهر مع كل بحثٍ لَزاحم النتيجةَ الوحيدةَ التي يبحث عنها الكاتب. */
+  function _upNone(key){
+    if(key==="quick")        return "— ملاحظةٌ لنفسي (بلا تكليف) —";
+    if(/^ed-/.test(key))     return "— بلا تكليف (ملاحظةٌ شخصية) —";
+    return "";
+  }
+  function _upCurrent(key){
+    if(key==="quick") return _draftTo;
+    var el=document.getElementById(_upValId(key));
+    return el ? String(el.value||"") : "";
+  }
+  function _upLabel(key, login){
+    if(login) return _nameOf(login);
+    return "";
+  }
+
+  function _upickHTML(key, cur, ph){
+    var k=_q(key), e=_e(key);
+    return '<div class="st-up" id="st-up-'+e+'">'+
+      '<input type="hidden" id="'+_e(_upValId(key))+'" value="'+_e(cur||"")+'">'+
+      '<input type="text" class="form-input st-up-in'+(cur?" has":"")+'" id="st-up-q-'+e+'"'+
+        ' autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"'+
+        ' value="'+_e(_upLabel(key,cur))+'" placeholder="'+_e(ph)+'"'+
+        ' onfocus="staffTasks.upickOpen(\''+k+'\')"'+
+        ' oninput="staffTasks.upickInput(\''+k+'\',this.value)"'+
+        ' onkeydown="staffTasks.upickKey(\''+k+'\',event)"'+
+        ' onblur="staffTasks.upickBlur(\''+k+'\')">'+
+      (cur ? '<button type="button" class="st-up-x" title="مسح الاختيار" aria-label="مسح الاختيار"'+
+             ' onmousedown="event.preventDefault()" onclick="staffTasks.upickClear(\''+k+'\')">'+
+             _icn("xCircle","ic-sm")+'</button>' : "")+
+      '<div class="st-up-list" id="st-up-l-'+e+'" role="listbox" hidden></div>'+
+    '</div>';
+  }
+
+  function _upickListHTML(key){
+    var q=String(_upQ[key]||""), cur=_upCurrent(key), none=_upNone(key);
+    var all=_upUsers(key);
+    var hits=all.filter(function(u){ return _userMatches(u, q); });
+    var head = (none && !q.trim())
+      ? '<button type="button" class="st-up-row none'+(cur?"":" on")+'" role="option"'+
+        ' onmousedown="event.preventDefault()"'+
+        ' onclick="staffTasks.upickChoose(\''+_q(key)+'\',\'\')">'+
+        '<span class="nm">'+_icn("edit","ic-sm")+_e(none)+'</span></button>'
+      : "";
+    if(!all.length)
+      return head+'<div class="st-up-empty">لا موظفين في القائمة.</div>';
+    if(!hits.length)
+      return head+'<div class="st-up-empty">لا موظفَ يطابق «'+_e(q)+'» — جرّب جزءاً من الاسم أو اسمَ الدخول.</div>';
+    return head+hits.map(function(u){
+      /* اسمُ الدخول في السطر نفسِه: في القائمة اسمان معروضان متطابقان لموظفين
+         مختلفين («أشرف عشري» و«اشرف عشري»)، ولا يميّزهما إلا هو. */
+      var sub=[u.user||"", u.role||""].filter(function(x){ return !!x; }).join(" · ");
+      return '<button type="button" class="st-up-row'+(u.user===cur?" on":"")+'" role="option"'+
+          ' aria-selected="'+(u.user===cur?"true":"false")+'"'+
+          ' onmousedown="event.preventDefault()"'+
+          ' onclick="staffTasks.upickChoose(\''+_q(key)+'\',\''+_q(u.user)+'\')">'+
+        '<span class="nm">'+_icn("user","ic-sm")+_e(u.name||u.user)+'</span>'+
+        (sub ? '<span class="mt">'+_e(sub)+'</span>' : "")+
+      '</button>';
+    }).join("");
+  }
+
+  function _upickPaint(key){
+    var box=document.getElementById("st-up-l-"+key);
+    if(box) box.innerHTML=_upickListHTML(key);
+  }
+  function upickOpen(key){
+    clearTimeout(_upTmr[key]);
+    var box=document.getElementById("st-up-l-"+key), inp=document.getElementById("st-up-q-"+key);
+    if(!box) return;
+    /* عند الفتح: البحثُ يبدأ فارغاً فتُعرض القائمةُ كاملة، والاسمُ المعروضُ يُظلَّل
+       ليمحوه أوّلُ حرفٍ يُكتب — لا حذفٌ يدويٌّ قبل البحث. */
+    _upQ[key]="";
+    _upickPaint(key);
+    box.hidden=false;
+    if(inp){ inp.setAttribute("aria-expanded","true"); try{ inp.select(); }catch(e){} }
+  }
+  function upickInput(key, val){
+    _upQ[key]=String(val||"");
+    var box=document.getElementById("st-up-l-"+key);
+    if(box && box.hidden) box.hidden=false;
+    _upickPaint(key);        // القائمةُ وحدَها تُعاد — فيبقى المؤشّرُ حيث تركه الكاتب
+  }
+  /* الإغلاقُ بعد فقد التركيز يتأخّر لحظةً: النقرُ على صفٍّ يُفقد التركيزَ **قبل**
+     أن يصل `click`، فإغلاقٌ فوريٌّ يبتلع الاختيار. */
+  function upickBlur(key){
+    clearTimeout(_upTmr[key]);
+    _upTmr[key]=setTimeout(function(){ upickClose(key, true); }, 180);
+  }
+  function upickClose(key, restore){
+    var box=document.getElementById("st-up-l-"+key), inp=document.getElementById("st-up-q-"+key);
+    if(box) box.hidden=true;
+    if(inp) inp.setAttribute("aria-expanded","false");
+    _upQ[key]="";
+    // ما لم يقع اختيارٌ يعود النصُّ إلى المختار الحاليّ — لا يبقى بحثٌ معلَّقٌ يُقرأ اختياراً
+    if(restore && inp) inp.value=_upLabel(key, _upCurrent(key));
+  }
+  function upickKey(key, ev){
+    var k=ev && (ev.key || ev.keyCode);
+    if(k==="Escape" || k==="Esc" || k===27){
+      clearTimeout(_upTmr[key]); upickClose(key, true);
+      var inp=document.getElementById("st-up-q-"+key); if(inp) inp.blur();
+      return;
+    }
+    if(k==="Enter" || k===13){
+      if(ev && ev.preventDefault) ev.preventDefault();
+      // «اكتب واضغط Enter» — تُؤخذ النتيجةُ الأولى، وهي الوحيدةُ غالباً بعد بحثٍ دقيق
+      var hits=_upUsers(key).filter(function(u){ return _userMatches(u, _upQ[key]||""); });
+      if(hits.length) upickChoose(key, hits[0].user);
+    }
+  }
+  function upickClear(key){ clearTimeout(_upTmr[key]); _upickApply(key, ""); }
+  function upickChoose(key, login){ clearTimeout(_upTmr[key]); _upickApply(key, String(login||"")); }
+
+  function _upickApply(key, login){
+    _upQ[key]="";
+    if(key==="quick"){ draftPick(login); return; }   // حقيقتُه في الحالة، والرسمُ يتبعها
+    var v=document.getElementById(_upValId(key));
+    if(v) v.value=login;
+    var inp=document.getElementById("st-up-q-"+key);
+    if(inp){
+      inp.value=_upLabel(key, login);
+      if(login) inp.classList.add("has"); else inp.classList.remove("has");
+    }
+    /* زرُّ المسح يظهر أو يختفي تبعاً للاختيار، وهو خارج القائمة المُعادِ رسمُها —
+       فيُبنى الغلافُ كلُّه من جديدٍ بحالته الصحيحة (والقائمةُ فيه مطويّة). ولا يُعاد
+       التركيزُ إلى الخانة بعد الاختيار: التركيزُ يفتح القائمةَ من جديد، فيبدو للمختار
+       أنّ اختيارَه لم يُسجَّل. */
+    var wrap=document.getElementById("st-up-"+key);
+    if(wrap && wrap.parentNode){
+      var ph=inp ? (inp.getAttribute("placeholder")||"") : "";
+      wrap.outerHTML=_upickHTML(key, login, ph);
+    }else{
+      upickClose(key, false);
+    }
+  }
+
   function _quickHtml(){
-    var opts='<option value="">— ملاحظةٌ لنفسي (بلا تكليف) —</option>'+
-      _users().map(function(u){
-        return '<option value="'+_e(u.user)+'"'+(_draftTo===u.user?" selected":"")+'>'+_e(u.name||u.user)+'</option>';
-      }).join("");
     var draft=_draft.map(function(r,i){
       return '<div class="st-drow">'+
         '<span class="t">'+_e(r.title)+'</span>'+
@@ -928,7 +1154,9 @@
     }).join("");
     return '<div class="st-quick">'+
       '<div class="st-row">'+
-        '<select class="form-select" style="min-width:190px" onchange="staffTasks.draftPick(this.value)">'+opts+'</select>'+
+        '<div style="flex:0 1 230px;min-width:190px">'+
+          _upickHTML("quick", _draftTo, "المكلَّف — اكتب للبحث")+
+        '</div>'+
         '<input type="text" class="form-input st-grow" id="st-quick-input" placeholder="اكتب المهمّة ثمّ Enter…" '+
           'onkeydown="staffTasks.draftKey(event)" onpaste="staffTasks.draftPaste(event)">'+
         '<button class="btn btn-ghost" onclick="staffTasks.draftAdd()">'+_icn("plus")+'إضافة</button>'+
@@ -1010,10 +1238,6 @@
      يراها غيرُك بلا أن تقصد. هنا: حفظٌ بزرّ، وإلغاءٌ يعيد كلَّ شيء. */
   function _editHtml(t){
     var canAsg=_canReassign(t,_me(),_myRole());
-    var asgOpts='<option value="">— بلا تكليف (ملاحظةٌ شخصية) —</option>'+
-      _users().map(function(u){
-        return '<option value="'+_e(u.user)+'"'+(t.assignedToUser===u.user?" selected":"")+'>'+_e(u.name||u.user)+'</option>';
-      }).join("");
     function row(label, field){
       return '<div style="margin-bottom:12px">'+
         '<label style="display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:5px">'+_e(label)+'</label>'+
@@ -1036,7 +1260,7 @@
       '</div>'+
       (canAsg
         ? row("المكلَّف",
-            '<select class="form-select" id="st-ed-asg-'+_e(t.id)+'" style="width:100%">'+asgOpts+'</select>'+
+            _upickHTML("ed-"+t.id, t.assignedToUser||"", "اكتب اسمَ الموظف للبحث — أو اتركه بلا تكليف")+
             '<div class="st-hint">تحويلُ المهمّة يُخرج المكلَّفَ السابق منها ما لم يكن مُضافاً مشاركاً.</div>')
         : '<div class="st-hint">تحويلُ المهمّة إلى موظّفٍ آخر لمُنشئها وحدَه.</div>')+
       '<div class="st-acts">'+
@@ -1062,8 +1286,7 @@
              '<div class="txt">'+_e(c.text)+'</div></div>';
     }).join("") || '<div class="st-hint">لا ملاحظاتٍ بعد.</div>';
 
-    var shareOpts=_users().filter(function(u){ return _participantsOf(t).indexOf(u.user)===-1; })
-      .map(function(u){ return '<option value="'+_e(u.user)+'">'+_e(u.name||u.user)+'</option>'; }).join("");
+    var shareCands=_upUsers("sh-"+t.id);
 
     var acts="";
     if(t.status!=="done" && (mine||owner||_isAdmin()))
@@ -1099,10 +1322,11 @@
         : "")+
       '<div class="st-sec">'+_icn("users")+'المشاركون</div>'+
       '<div class="st-who">'+parts+'</div>'+
-      (canShare && shareOpts
+      (canShare && shareCands.length
         ? '<div class="st-row">'+
-            '<select class="form-select" style="min-width:180px" id="st-share-'+_e(t.id)+'">'+
-              '<option value="">إضافة موظف…</option>'+shareOpts+'</select>'+
+            '<div style="flex:0 1 240px;min-width:190px">'+
+              _upickHTML("sh-"+t.id, "", "إضافة موظف — اكتب للبحث")+
+            '</div>'+
             '<button class="btn btn-ghost" onclick="staffTasks.shareTask(\''+_q(t.id)+'\')">إضافة</button>'+
           '</div>'
         : "")+
@@ -1131,10 +1355,13 @@
     startEdit:startEdit, cancelEdit:cancelEdit, saveEdit:saveEdit,
     addComment:addComment, shareTask:shareTask, removeTask:removeTask,
     draftPick:draftPick, draftAdd:draftAdd, draftKey:draftKey, draftPaste:draftPaste, draftDrop:draftDrop,
+    upickOpen:upickOpen, upickInput:upickInput, upickKey:upickKey, upickBlur:upickBlur,
+    upickChoose:upickChoose, upickClear:upickClear,
     draftDue:draftDue, draftPrio:draftPrio, draftDueAll:draftDueAll,
     draftClear:draftClear, sendDraft:sendDraft,
     // دوالٌّ نقيّة مكشوفةٌ لفحوص hail-tests (بلا متصفّح)
     _parseBulk:_parseBulk, _participantsOf:_participantsOf, _canSee:_canSee,
+    _normAr:_normAr, _userMatches:_userMatches,
     _msVal:_msVal, _lastActivity:_lastActivity, _seenMs:_seenMs, _isUnread:_isUnread,
     _unreadLabel:_unreadLabel,
     _canEditParticipants:_canEditParticipants, _dueState:_dueState, _isOverdue:_isOverdue,
