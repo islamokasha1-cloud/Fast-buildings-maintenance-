@@ -197,6 +197,43 @@ check('★★★ والاشتراكُ الحيُّ مقصورٌ على ما أن
     return /array-contains/.test(src) && !/_isAdmin\(\)\s*\?/.test(src);
   }));
 
+/* ═════════ ٤-ب) مَن أُشرِك في مهمّةٍ يراها ═════════
+   بلاغُ المالك (08/09): «لماذا لا يظهر عندي غير مهمّةٍ واحدة؟» — كان التوزيعُ يعرف
+   ثلاثَ صفاتٍ (مكلَّفٌ · مُنشئٌ · صاحبُ ملاحظة) وينسى الرابعة: **مُضافٌ مشاركاً**.
+   فالمستندُ يصل المتصفّحَ فعلاً وتُفتح صفحةُ تفصيله برابطه، ولا يُصادف خانةً تعرضه.
+   وهذا يُقاس في المتصفّح لا في الوحدة وحدَها: العطلُ كان في الشاشة. */
+L('\n=== ٤-ب) مَن أُشرِك في مهمّةٍ يراها في خانةٍ ===');
+const sharedView = await page.evaluate(async () => {
+  const key = Object.keys(window.__store).filter(k => k.startsWith('staff_tasks/')).pop();
+  const doc = window.__store[key];
+  const before = JSON.stringify({ shared: doc.shared || null, participants: doc.participants });
+  doc.shared = ['saeed'];
+  doc.participants = [doc.createdByUser, doc.assignedToUser, 'saeed'];
+  currentUser = { user: 'saeed', name: 'سعيد', role: 'مشرف' };
+  staffTasks.stopSync(); staffTasks.startSync();
+  await new Promise(r => setTimeout(r, 900));
+  const host = document.getElementById('page-staff-tasks');
+  const count = (t) => { staffTasks.tab(t); return host.querySelectorAll('.st-card').length; };
+  const out = { mine: count('mine'), sent: count('sent'), notes: count('notes'), shared: count('shared') };
+  out.tab = !![...host.querySelectorAll('.st-tab')].find(b => /شارَكوني/.test(b.textContent));
+  out.badge = ((document.getElementById('nav-staff-tasks-badge') || {}).style || {}).display;
+  // إرجاعُ المستند إلى حاله — لا يُلوَّث ما بعده
+  const b = JSON.parse(before);
+  if (b.shared === null) delete doc.shared; else doc.shared = b.shared;
+  doc.participants = b.participants;
+  currentUser = { user: 'admin', name: 'المسؤول', role: 'admin' };
+  staffTasks.stopSync(); staffTasks.startSync();
+  await new Promise(r => setTimeout(r, 600));
+  return out;
+});
+check('★★★ المهمّةُ التي أُشرِك فيها تظهر له في خانة «شارَكوني فيها»',
+  sharedView.shared === 1, JSON.stringify(sharedView));
+check('★★★ ولم تكن تظهر في أيٍّ من الخانات الأخرى (هذا هو العطلُ المُبلَّغ عنه)',
+  sharedView.mine === 0 && sharedView.sent === 0 && sharedView.notes === 0, JSON.stringify(sharedView));
+check('★★ وللخانة زرٌّ في الشريط يفتحها (بضاعةٌ بلا زرٍّ لا تُرى)', sharedView.tab === true);
+check('★★ ولا تُعدّ في الشارة الحمراء — تلك ما عليّ أنا لا ما أتابعه',
+  sharedView.badge === 'none', String(sharedView.badge));
+
 /* ═════════ ٥) فتحُ المهمّة وإنجازُها ═════════ */
 L('\n=== ٥) تفصيلُ المهمّة ===');
 await page.evaluate(() => { staffTasks.tab('sent'); });
