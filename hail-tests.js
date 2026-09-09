@@ -695,7 +695,14 @@ function predelivery() {
        قائم**: `renderAssets` و`renderPPM` هنا منذ البدء، والزيادةُ أكثرُها تعليقٌ
        يشرح لِمَ الشبكةُ لا الصفوف. ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة تعديله ممنوعٌ
        نصّاً (CLAUDE.md). */
-    const IDX_CEILING = 39770;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 39770 إلى 39797 — ‏٢٧ سطراً لإلغاء نافذة التوليد المبكّر
+       (`PPM_GEN_LEAD_DAYS` و`ppmShouldGenerate`، وبها انكمش فرعُ الإنشاء في
+       `checkPPMDue`). **إصلاحٌ في موضعه على منطقٍ قائم**: `checkPPMDue`
+       و`autoCreatePPMTicket` و`ppmShouldAdvance` وحدُّ الصلاحية كلُّها هنا
+       وتُقرأ معاً، وأكثرُ الزيادة تعليقٌ يشرح لِمَ سقطت النافذةُ الآن وقد
+       أُبقيت مرّتين. ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة إصلاحه ممنوعٌ نصّاً
+       (CLAUDE.md). */
+    const IDX_CEILING = 39797;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -16254,6 +16261,71 @@ function ppmAdvanceOnDueGuards() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   PPM — البلاغُ يُولَّد يومَ الموعد لا قبله (بلاغ المالك 09/09).
+   الجذر: نافذةُ التوليد المبكّر `soon = today + 3` — قرارُ «إشعارٍ مبكّر» أُبقي
+   مرّتين صراحةً لأنّ تعديلَه قرارُ المالك. وقد قرّره حين رأى خططاً استحقاقُها
+   ١٢ سبتمبر وبلاغاتُها مفتوحةٌ «قيد التنفيذ» يوم ٩. والبلاغُ المفتوح **أمرُ
+   تنفيذٍ لا تذكير**: يدخل قائمةَ الفنيّ وعدّادَ المفتوح، ويُقاس زمنُ استجابته
+   من إنشائه — فيبدو متأخّراً قبل أن يحلّ موعدُه.
+   الحرّاسُ هنا يمنعون ارتدادَ النافذة:
+   (١) `ppmShouldGenerate` دالةٌ نقيّةٌ تُنفَّذ فعلاً — حالةُ المالك بعينها.
+   (٢) المهلةُ **مِقدارٌ مسمّىً واحدٌ** قيمتُه صفر، لا رقمٌ مبثوثٌ في الشرط.
+   (٣) `checkPPMDue` تقرأ الدالّةَ ولم يبقَ فيها حسابُ نافذةٍ بيدها.
+   (٤) الاعتمادُ اليدويُّ (`confirmPPMTicket`) لم يُحبس بها — نقرةُ إنسانٍ صريحة.
+   ════════════════════════════════════════════════════════════════════ */
+function ppmGenerateOnDueGuards() {
+  H("PPM — التوليد يوم الموعد لا قبله");
+
+  const mLead = HTML.match(/const PPM_GEN_LEAD_DAYS = \d+;/);
+  const mGen  = HTML.match(/function ppmShouldGenerate\(plan, todayMs\)\{[\s\S]*?\n\}/);
+  T("PPM_GEN_LEAD_DAYS و ppmShouldGenerate موجودتان", !!mLead && !!mGen);
+  T("★★ المهلةُ صفرٌ — لا توليدَ قبل الموعد", /const PPM_GEN_LEAD_DAYS = 0;/.test(HTML));
+
+  if (mLead && mGen) {
+    const gen = new Function(mLead[0] + mGen[0] + "; return ppmShouldGenerate;")();
+    const D = n => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString(); };
+    const T0 = (() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime(); })();
+    const plan = due => ({ id: "P1", disabled: false, nextDueDate: due });
+
+    T("★★ حالةُ المالك: استحقاقٌ بعد ثلاثة أيام ⇒ **لا يُولَّد بلاغُه اليوم**",
+      gen(plan(D(3)), T0) === false);
+    T("★★ ولا قبله بيومٍ واحد", gen(plan(D(1)), T0) === false);
+    T("★★ حلَّ الموعدُ اليوم ⇒ يُولَّد (الميزةُ لم تُعطَّل)", gen(plan(D(0)), T0) === true);
+    T("★★ متأخّرةٌ ⇒ تُولَّد (لا تعلق خطةٌ فات موعدُها بلا بلاغ)",
+      gen(plan(D(-1)), T0) === true && gen(plan(D(-400)), T0) === true);
+    T("★ ساعةُ اليوم لا تُغيّر الحكم — المقارنةُ باليوم لا باللحظة", (() => {
+      const n = new Date();
+      const dueLate = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 23, 59, 0).toISOString();
+      return gen(plan(dueLate), T0) === true;
+    })());
+    T("★ الموقوفةُ لا تُولّد، والبياناتُ الناقصةُ لا تكسر الدالة",
+      gen({ ...plan(D(0)), disabled: true }, T0) === false &&
+      gen(null, T0) === false && gen(plan(""), T0) === false &&
+      gen(plan("غير صالح"), T0) === false);
+  }
+
+  const mChk = HTML.match(/function checkPPMDue\(\)\{[\s\S]*?\n\}/);
+  T("checkPPMDue مستخرَجة", !!mChk);
+  if (mChk) {
+    const body = mChk[0];
+    T("★★ فرعُ الإنشاء يقرأ الدالّةَ النقيّة", /if\(ppmShouldGenerate\(p, _todayMs\)\)\{/.test(body));
+    T("★★ ولم يبقَ حسابُ نافذةٍ بيدها داخلها (لا `soon` ولا `+3`)",
+      !/\bsoon\b/.test(body) && !/setDate\([^)]*\+\s*3\s*\)/.test(body),
+      "عادت نافذةُ التوليد المبكّر إلى checkPPMDue");
+  }
+
+  /* الاعتمادُ اليدويّ نقرةُ إنسان — لا تحكمه مهلةُ التوليد الآليّ. */
+  const mCnf = HTML.match(/async function confirmPPMTicket\(\)\{[\s\S]*?\n\}/);
+  T("★ الاعتمادُ اليدويُّ لم يُحبس بمهلة التوليد الآليّ",
+    !!mCnf && !/ppmShouldGenerate/.test(mCnf[0]));
+
+  /* والكنسةُ باقيةٌ: بلاغاتُ النسخ السابقة (وُلِّدت قبل موعدها) والاعتمادُ اليدويُّ
+     المبكّر يحتاجان كنسةَ يومِ الموعد لتقديم خططهما. حذفُها يُجمّد تلك الخطط. */
+  T("★★ كنسةُ التقديم باقيةٌ بعد إلغاء النافذة (بلاغاتُ الإنتاج المبكّرة القائمة)",
+    !!mChk && /ppmShouldAdvance\(p, tickets, t0\)/.test(mChk[0]));
+}
+
+/* ════════════════════════════════════════════════════════════════════
    أداةُ إصلاح مواعيد خطط PPM (`ppm-schedule-repair.js`) — تصحيحُ ما وقع فعلاً.
    إصلاحُ المنطق يمنع التكرار ولا يعيد كتابة الماضي: خططٌ استُهلك موعدُها قبل
    أوانه بقيت قافزة. والمبدأُ الذي تُحرسه هذه الفحوص أنّ **البلاغَ هو الشاهد**:
@@ -17769,6 +17841,7 @@ function pageScrollResetGuards() {
   ppmSupervisorCreateGuards();
   ppmAutoGenerateAuthorityGuards();
   ppmAdvanceOnDueGuards();
+  ppmGenerateOnDueGuards();
   ppmScheduleRepairGuards();
   assetPPMCoverageGuards();
   assetSerialSearchGuards();
