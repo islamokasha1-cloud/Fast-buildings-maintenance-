@@ -13,7 +13,8 @@ import {
 } from "@firebase/rules-unit-testing";
 import fs from "node:fs";
 import {
-  doc, getDoc, setDoc, updateDoc, deleteDoc, writeBatch, collection, getDocs, addDoc
+  doc, getDoc, setDoc, updateDoc, deleteDoc, writeBatch, collection, getDocs, addDoc,
+  arrayUnion, serverTimestamp
 } from "firebase/firestore";
 
 const HOST = "127.0.0.1";
@@ -844,6 +845,32 @@ await check("★★ ومَن خرج بالتحويل لم يعد يعدّلها"
   assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T8`), { title: "y" })));
 await check("★★ والحذفُ ما زال للمُنشئ وحدَه بعد كل هذا (لا يمحو المكلَّفُ الدليلَ)",
   assertFails(deleteDoc(doc(OUTSIDER, `${ST}/T8`))));
+
+/* ── التعليق: إلحاقٌ بـarrayUnion على وثيقةٍ حيّة ──
+   بلاغُ المالك (09/09): «الملاحظات لا تظهر». والمنطقُ في المتصفّح سليم (يُكتب
+   ويُرسم)، فبقي أن تُسأل القاعدةُ نفسُها: هل تقبل إلحاقَ تعليقٍ؟ ولم يكن على هذا
+   المسار فحصٌ واحد — لا هنا ولا في المتصفّح (محاكي Firestore كان يُزيّف
+   `arrayUnion` بكائنٍ فارغ). */
+await seed(`${ST}/TC`, {
+  title: "تعليق", status: "open", createdByUser: "رغده", assignedToUser: "خالد",
+  shared: [], participants: ["رغده", "خالد"], comments: []
+});
+const CMT = (u) => ({ comments: arrayUnion({ user: u, name: u, text: "ملاحظة", at: "2026-09-09T10:00:00.000Z" }),
+                      updatedAt: serverTimestamp() });
+await check("★★★ المكلَّفُ يُلحق ملاحظةً بالمهمّة (المسارُ الذي بلّغ عنه المالك)",
+  assertSucceeds(updateDoc(doc(ASSIGNEE, `${ST}/TC`), CMT("خالد"))));
+await check("★★ والمُنشئُ كذلك", assertSucceeds(updateDoc(doc(OWNER, `${ST}/TC`), CMT("رغده"))));
+await check("★★ والأدمن كذلك", assertSucceeds(updateDoc(doc(ADMIN, `${ST}/TC`), CMT("admin"))));
+await check("★★ ومَن ليس طرفاً لا يُعلّق", assertFails(updateDoc(doc(OUTSIDER, `${ST}/TC`), CMT("سعيد"))));
+/* والوثيقةُ التي لا تحمل حقلَ `comments` أصلاً (مهامُّ أُنشئت قبل الحقل) */
+await seed(`${ST}/TC2`, {
+  title: "بلا حقل", status: "open", createdByUser: "رغده", assignedToUser: "خالد",
+  shared: [], participants: ["رغده", "خالد"] });
+await check("★★★ ووثيقةٌ بلا حقل comments أصلاً يُنشئه الإلحاقُ فيها",
+  assertSucceeds(updateDoc(doc(ASSIGNEE, `${ST}/TC2`), CMT("خالد"))));
+/* وبلا حقل seenBy — الحارسُ الجديد يجب ألّا يعترض ما لا يخصّه */
+await check("★★★ وحارسُ seenBy لا يعترض تعليقاً على وثيقةٍ بلا seenBy",
+  assertSucceeds(updateDoc(doc(ASSIGNEE, `${ST}/TC2`), { comments: arrayUnion({ user: "خالد", text: "ثانية", at: "2026-09-09T11:00:00.000Z" }) })));
 
 /* ── حالةُ القراءة `seenBy`: كلٌّ يكتب مفتاحَه وحدَه ──
    الخريطةُ مشتركةٌ في مستندٍ واحد، ومَن يكتب مفتاحَ زميله يُطفئ عنه لونَ «فيها

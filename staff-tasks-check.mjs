@@ -419,6 +419,104 @@ const recovered = await page.evaluate(async () => {
 check('★★★ تأخّرٌ وقع والشاشةُ مغلقة لا يتركها عالقةً على «تعذّر الاتصال»', !recovered.err);
 check('★★ وتُعرَض الشاشةُ كاملةً بعد عودة الشبكة', recovered.tabs >= 4, recovered.tabs + ' خانة');
 
+/* ═════════ ٥-هـ) الملاحظات: تُكتب وتُرسم — وEnter طريقٌ لا زرٌّ وحدَه ═════════
+   بلاغُ المالك (09/09): «الملاحظات لا تظهر». ولم يكن على هذا المسار فحصٌ واحد،
+   وسببُ العمى مضاعف: محاكي Firestore كان يُزيّف `arrayUnion` **بكائنٍ فارغ**،
+   فكلُّ إلحاقٍ بمصفوفةٍ يُنتج حقلاً ليس مصفوفةً، وقارئوه يكتبون
+   `Array.isArray(x) ? … : []` فتخرج قائمةٌ فارغةٌ صامتة — لا خطأَ ولا فحصٌ يسقط.
+   أُصلح المحاكي، وهذه فحوصُ المسار. */
+L('\n=== ٥-هـ) الملاحظات ===');
+const NOTEID = await page.evaluate(async () => {
+  window.__store['staff_tasks/CM1'] = {
+    title: 'مهمّةٌ للتعليق', status: 'open', kind: 'task',
+    createdByUser: 'admin', createdAt: Date.now() - 5000,
+    assignedToUser: 'khaled', assignedToName: 'خالد',
+    participants: ['admin', 'khaled'], shared: [], comments: []
+  };
+  currentUser = { user: 'admin', name: 'المسؤول', role: 'admin' };
+  staffTasks.stopSync(); staffTasks.startSync();
+  await new Promise(r => setTimeout(r, 800));
+  staffTasks.open('CM1');
+  await new Promise(r => setTimeout(r, 400));
+  return !!document.getElementById('st-cmt-CM1');
+});
+check('حقلُ الملاحظة مرسومٌ في التفصيل', NOTEID === true);
+
+/* (أ) الزرّ — بنقرٍ حقيقيّ */
+await page.fill('#st-cmt-CM1', 'ملاحظةٌ بالزرّ');
+await page.evaluate(() => [...document.querySelectorAll('#page-staff-tasks .btn')]
+  .find(x => /إرسال/.test(x.textContent)).click());
+await page.waitForTimeout(1200);
+const byBtn = await page.evaluate(() => ({
+  doc: (window.__store['staff_tasks/CM1'].comments || []).map(c => c.text),
+  ui: [...document.querySelectorAll('#page-staff-tasks .st-note')].map(n => n.textContent)
+}));
+check('★★★ زرُّ «إرسال» يكتب الملاحظةَ في المستند',
+  Array.isArray(byBtn.doc) && byBtn.doc.join('') === 'ملاحظةٌ بالزرّ', JSON.stringify(byBtn.doc));
+check('★★★ وتُرسَم على الشاشة فوراً (لا تُكتب في الصمت)',
+  byBtn.ui.length === 1 && /ملاحظةٌ بالزرّ/.test(byBtn.ui[0]), JSON.stringify(byBtn.ui));
+
+/* (ب) وEnter — الطريقُ الذي درّبت عليه الشاشةُ نفسُها في أعلاها */
+await page.fill('#st-cmt-CM1', 'ملاحظةٌ بـEnter');
+await page.press('#st-cmt-CM1', 'Enter');
+await page.waitForTimeout(1200);
+const byEnter = await page.evaluate(() => ({
+  doc: (window.__store['staff_tasks/CM1'].comments || []).map(c => c.text),
+  ui: [...document.querySelectorAll('#page-staff-tasks .st-note')].map(n => n.textContent),
+  cleared: (document.getElementById('st-cmt-CM1') || {}).value
+}));
+check('★★★ وEnter يُرسل كذلك — والشاشةُ نفسُها تدرّب عليه في حقل التكليف أعلاها',
+  byEnter.doc.length === 2 && byEnter.doc.indexOf('ملاحظةٌ بـEnter') !== -1, JSON.stringify(byEnter.doc));
+check('★★ والملاحظتان معاً في الشاشة (arrayUnion يُلحق ولا يستبدل)',
+  byEnter.ui.length === 2, byEnter.ui.length + ' ملاحظة');
+check('★ والحقلُ يُفرَّغ بعد الإرسال (لا إرسالٌ مكرَّرٌ بضغطةٍ ثانية)', byEnter.cleared === '');
+
+/* (ج) وملاحظةٌ فارغةٌ لا تُكتب */
+await page.fill('#st-cmt-CM1', '   ');
+await page.press('#st-cmt-CM1', 'Enter');
+await page.waitForTimeout(700);
+check('★★ وفراغٌ أو مسافاتٌ لا تصير ملاحظةً',
+  await page.evaluate(() => (window.__store['staff_tasks/CM1'].comments || []).length === 2));
+
+/* (د) مهمّةٌ خارج المستمع الحيّ — تُفتح من «كل المهامّ (إدارة)» ولستُ طرفاً فيها.
+   الكتابةُ تنجح ولا لقطةَ تصل، فكانت الشاشةُ تبقى بلا الملاحظة — أي «لم تُحفَظ»
+   في نظر صاحبها بينما هي في قاعدة البيانات. */
+const outside = await page.evaluate(async () => {
+  /* المستمعُ يُضيَّق هنا فعلاً (window.__mockWhere) — وبدونه لا يُثبت هذا الفحصُ
+     شيئاً: المحاكي يُرجع المجموعةَ كاملةً افتراضاً، فتصل CM2 في اللقطة الحيّة
+     ويمرّ الفحصُ **حتى مع تعطيل الإصلاح**. (اكتُشف بردّ السطر: مرّ وهو معطَّل.) */
+  window.__mockWhere = true;
+  window.__store['staff_tasks/CM2'] = {
+    title: 'مهمّةٌ لستُ طرفاً فيها', status: 'open', kind: 'task',
+    createdByUser: 'khaled', createdAt: Date.now() - 4000,
+    assignedToUser: 'saeed', assignedToName: 'سعيد',
+    participants: ['khaled', 'saeed'], shared: [], comments: []
+  };
+  staffTasks.back(); staffTasks.stopSync(); staffTasks.startSync();
+  staffTasks.tab('all');
+  staffTasks.loadAll();                  // الخانةُ حُمِّلت في قسمٍ سابق فلا تُعاد من نفسها
+  await new Promise(r => setTimeout(r, 1100));
+  staffTasks.open('CM2');
+  await new Promise(r => setTimeout(r, 400));
+  const el = document.getElementById('st-cmt-CM2');
+  if (!el) return { drawn: false };
+  el.value = 'ملاحظةٌ من الإدارة';
+  staffTasks.addComment('CM2');
+  await new Promise(r => setTimeout(r, 1400));
+  const out = { drawn: true,
+                doc: (window.__store['staff_tasks/CM2'].comments || []).map(c => c.text),
+                ui: [...document.querySelectorAll('#page-staff-tasks .st-note')].map(n => n.textContent) };
+  window.__mockWhere = false;            // لا يُترك مرفوعاً لما بعده
+  return out;
+});
+check('★★★ وملاحظةٌ على مهمّةٍ خارج المستمع الحيّ تُكتب فعلاً',
+  outside.drawn && outside.doc.join('') === 'ملاحظةٌ من الإدارة', JSON.stringify(outside));
+check('★★★ وتظهر على الشاشة بلا إعادة تحميل (جلبةٌ صريحةٌ تعوّض غيابَ اللقطة)',
+  outside.ui && outside.ui.length === 1 && /ملاحظةٌ من الإدارة/.test(outside.ui[0]),
+  JSON.stringify(outside.ui));
+await page.evaluate(() => { staffTasks.back(); staffTasks.tab('mine'); });
+await page.waitForTimeout(400);
+
 /* ═════════ ٥-د) لونُ «فيها جديد» — ما يُقاس هنا وحدَه ═════════
    طلبُ المالك (08/09): «أحتاج إذا تم أي تحديث يظهر بلون مختلف للمهمّة».
    و`hail-tests` تُثبت المنطقَ نقيّاً ولا تُثبت **أنّ اللونَ يصل الشاشة ثم ينطفئ

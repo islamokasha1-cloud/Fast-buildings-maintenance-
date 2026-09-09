@@ -54,7 +54,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3103";
+  var MODULE_BUILD = "v18.9.3106";
 
   function COLL(){
     var dev=false;
@@ -551,11 +551,33 @@
     }catch(e){}
   }
 
+  /* ── مهمّةٌ خارج المستمع الحيّ: تُحدَّث بجلبةٍ صريحةٍ بعد الكتابة ──
+     «كل المهامّ (إدارة)» جلبةٌ واحدةٌ عند فتح الخانة لا تيّارٌ حيّ (وذاك مقصودٌ:
+     المجموعةُ تكبر بلا حدّ فلا تُبَثّ لكل جلسة). ونتيجتُه أنّ الأدمن حين يفتح من
+     تلك الخانة مهمّةً **ليس طرفاً فيها** ثم يعلّق عليها: الكتابةُ تنجح، ولا لقطةَ
+     تصل — فتبقى الشاشةُ على نسخةٍ قديمةٍ بلا الملاحظة، ويبدو الأمرُ **كأنّ
+     الملاحظة لم تُحفَظ** بينما هي في قاعدة البيانات. فتُجلَب الوثيقةُ صراحةً بعد
+     الكتابة، وللوثيقةِ التي يغطّيها المستمعُ لا جلبةَ أصلاً (اللقطةُ أسرعُ وأصدق). */
+  function _refreshLocalCopy(id){
+    if(!id || typeof db==="undefined" || !db) return;
+    if(_tasks.some(function(t){ return t.id===id; })) return;
+    if(!_allTasks.some(function(t){ return t.id===id; })) return;
+    try{
+      db.collection(COLL()).doc(id).get().then(function(d){
+        if(!d || !d.exists) return;
+        var v=d.data()||{}; v.id=d.id;
+        _allTasks=_allTasks.map(function(t){ return t.id===id ? v : t; });
+        _rerender();
+      }).catch(function(){});
+    }catch(e){}
+  }
+
   function _update(id, patch, okMsg){
     if(typeof db==="undefined" || !db) return Promise.reject();
     patch.updatedAt=_stamp();
     return db.collection(COLL()).doc(id).update(patch).then(function(){
       if(okMsg) _t(okMsg,"ok");
+      _refreshLocalCopy(id);
     }).catch(function(e){
       console.warn("staff-tasks update failed:", e);
       _t("تعذّر الحفظ","warn");
@@ -592,17 +614,34 @@
     _update(id, { status:"open", returnedReason:"", returnedByUser:"", returnedByName:"" }, "أُعيد فتح المهمّة");
   }
 
+  /* Enter يُرسل الملاحظة — **والشاشةُ نفسُها هي التي درّبت عليه**: حقلُ التكليف
+     السريع في أعلاها يقول «اكتب المهمّة ثمّ Enter» وسطرُ الإرشاد تحته يُعيدها.
+     فمن تعلّم الإيقاعَ في أعلى الشاشة يكرّره في أسفلها، ويجد **لا شيء**: لا حفظ
+     ولا رسالةَ خطأ ولا حتى وميض — فيستنتج أنّ الملاحظات لا تعمل، لا أنّ زرّاً
+     بجانبه هو الطريق. (بلاغُ المالك 09/09.)
+     ولا Shift+Enter هنا: الحقلُ سطرٌ واحد، والملاحظةُ الطويلةُ مكانُها متن المهمّة. */
+  function cmtKey(ev, id){
+    try{
+      if(!ev || ev.key!=="Enter" || ev.shiftKey) return;
+      ev.preventDefault();
+    }catch(e){ return; }
+    addComment(id);
+  }
+
   function addComment(id){
     var el=document.getElementById("st-cmt-"+id);
     if(!el) return;
     var txt=String(el.value||"").trim();
     if(!txt){ _t("اكتب شيئاً أوّلاً","warn"); return; }
-    if(typeof db==="undefined" || !db) return;
+    if(typeof db==="undefined" || !db){ _t("تعذّر الحفظ","warn"); return; }
     var entry={ user:_me(), name:_myName(), text:txt, at:new Date().toISOString() };
     // arrayUnion لا كتابةُ المصفوفة كاملة: مشاركٌ آخر قد يكون علّق في الأثناء،
     // وكتابةُ نسختي القديمة تمحو تعليقَه.
     var u;
-    try{ u=firebase.firestore.FieldValue.arrayUnion(entry); }catch(e){ return; }
+    /* وغيابُ `arrayUnion` لا يُبتلع صامتاً: كان `return` وحدَه فيصير الزرُّ ميتاً
+       بلا أثر، والمستخدمُ يظنّ الملاحظاتِ معطّلةً لا أنّ شيئاً أخفق. */
+    try{ u=firebase.firestore.FieldValue.arrayUnion(entry); }
+    catch(e){ _t("تعذّر الحفظ","warn"); return; }
     el.value="";
     _update(id, { comments:u }).catch(function(){});
   }
@@ -1332,7 +1371,8 @@
         : "")+
       '<div class="st-sec">'+_icn("edit")+'الملاحظات</div>'+cmts+
       '<div class="st-row" style="margin-top:9px">'+
-        '<input type="text" class="form-input st-grow" id="st-cmt-'+_e(t.id)+'" placeholder="اكتب ملاحظة…">'+
+        '<input type="text" class="form-input st-grow" id="st-cmt-'+_e(t.id)+'" placeholder="اكتب ملاحظة ثمّ Enter…" '+
+          'onkeydown="staffTasks.cmtKey(event,\''+_q(t.id)+'\')">'+
         '<button class="btn btn-ghost" onclick="staffTasks.addComment(\''+_q(t.id)+'\')">'+_icn("send")+'إرسال</button>'+
       '</div>'+
       '<div class="st-acts">'+acts+'</div>'+
@@ -1353,7 +1393,7 @@
     tab:tab, open:open, back:back, byId:byId,
     markDone:markDone, reopen:reopen, returnTask:returnTask, acceptBack:acceptBack,
     startEdit:startEdit, cancelEdit:cancelEdit, saveEdit:saveEdit,
-    addComment:addComment, shareTask:shareTask, removeTask:removeTask,
+    addComment:addComment, cmtKey:cmtKey, shareTask:shareTask, removeTask:removeTask,
     draftPick:draftPick, draftAdd:draftAdd, draftKey:draftKey, draftPaste:draftPaste, draftDrop:draftDrop,
     upickOpen:upickOpen, upickInput:upickInput, upickKey:upickKey, upickBlur:upickBlur,
     upickChoose:upickChoose, upickClear:upickClear,
