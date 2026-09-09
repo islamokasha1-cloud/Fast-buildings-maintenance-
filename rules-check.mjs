@@ -868,6 +868,17 @@ await seed(`${ST}/TC2`, {
   shared: [], participants: ["رغده", "خالد"] });
 await check("★★★ ووثيقةٌ بلا حقل comments أصلاً يُنشئه الإلحاقُ فيها",
   assertSucceeds(updateDoc(doc(ASSIGNEE, `${ST}/TC2`), CMT("خالد"))));
+/* والإنجازُ والملاحظةُ في كتابةٍ واحدة — «تمّ الإنجاز» صار يحمل ما في الحقل معه،
+   فالحقلان يمضيان معاً. ولو رفضت القاعدةُ الجمعَ لَضاعت الخلاصةُ عند كل إغلاق. */
+await check("★★★ الإنجازُ والملاحظةُ يمضيان في كتابةٍ واحدة (لا تُغلق المهمّةُ بلا خلاصتها)",
+  assertSucceeds(updateDoc(doc(ASSIGNEE, `${ST}/TC`), {
+    status: "done", doneByUser: "خالد", doneAt: serverTimestamp(),
+    comments: arrayUnion({ user: "خالد", name: "خالد", text: "خلاصة", at: "2026-09-09T12:00:00.000Z" }),
+    updatedAt: serverTimestamp() })));
+await check("★★ ومَن ليس طرفاً لا يُنجز ولو أرفق ملاحظة",
+  assertFails(updateDoc(doc(OUTSIDER, `${ST}/TC`), {
+    status: "done", comments: arrayUnion({ user: "سعيد", text: "x", at: "2026-09-09T12:00:00.000Z" }) })));
+
 /* وبلا حقل seenBy — الحارسُ الجديد يجب ألّا يعترض ما لا يخصّه */
 await check("★★★ وحارسُ seenBy لا يعترض تعليقاً على وثيقةٍ بلا seenBy",
   assertSucceeds(updateDoc(doc(ASSIGNEE, `${ST}/TC2`), { comments: arrayUnion({ user: "خالد", text: "ثانية", at: "2026-09-09T11:00:00.000Z" }) })));

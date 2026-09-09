@@ -54,7 +54,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3106";
+  var MODULE_BUILD = "v18.9.3108";
 
   function COLL(){
     var dev=false;
@@ -585,9 +585,23 @@
     });
   }
 
+  /* «تمّ الإنجاز» يُرسل ما في حقل الملاحظة معه (طلبُ المالك 09/09).
+     السببُ أنّ آخرَ ما يُكتب قبل الإغلاق هو **خلاصةُ العمل**: «رُكِّب المحرّك،
+     ناقصٌ فلتر». فمن كتبها ثم ضغط «تمّ الإنجاز» — وهو التسلسلُ الطبيعيّ — كان
+     يفقدها بلا إنذار: الشاشةُ تُعاد رسمُها فيذهب ما في الحقل. وأسوأُ ما فيه أنّ
+     **الفقدَ صامت**: لا يُكتشف إلا حين يُسأل عن تفصيلٍ ظنّ أنّه دوّنه.
+     **وكتابةٌ واحدةٌ لا اثنتان:** لو أُرسلت الملاحظةُ ثم الإنجازُ في نداءين
+     لأمكن أن تنجح إحداهما وتفشل الأخرى — فتُغلق المهمّةُ بلا خلاصتها، أو تُسجَّل
+     خلاصةٌ لمهمّةٍ لم تُغلق. فالحقلان يمضيان معاً أو لا يمضيان. */
   function markDone(id){
     var t=byId(id); if(!t) return;
-    _update(id, { status:"done", doneAt:_stamp(), doneByUser:_me(), doneByName:_myName() }, "تمّ الإنجاز");
+    var patch={ status:"done", doneAt:_stamp(), doneByUser:_me(), doneByName:_myName() };
+    var p=_pendingComment(id), u=p ? _cmtUnion(p.entry) : null;
+    if(p && u){ patch.comments=u; p.el.value=""; }
+    /* وإن تعذّر بناءُ القيد: يُنجَز ولا يُفرَّغ الحقل، ويُقال صراحةً — فلا يظنّ
+       صاحبُه أنّ ملاحظتَه حُفظت مع الإنجاز وهي لم تُحفظ. */
+    else if(p) _t("أُنجزت، ولم تُحفَظ الملاحظة","warn");
+    _update(id, patch, (p && u) ? "تمّ الإنجاز، وأُرسلت الملاحظة" : "تمّ الإنجاز");
     try{ logAudit("staff_task_done", t.title||id); }catch(e){}
   }
   function reopen(id){
@@ -628,21 +642,33 @@
     addComment(id);
   }
 
+  /* ما في حقل الملاحظة الآن — **مصدرٌ واحدٌ** يقرؤه «إرسال» و«تمّ الإنجاز» معاً.
+     يُرجع `null` إن غاب الحقلُ أو كان فارغاً؛ ولا يمسّ الحقلَ ولا يكتب شيئاً. */
+  function _pendingComment(id){
+    var el=document.getElementById("st-cmt-"+id);
+    if(!el) return null;
+    var txt=String(el.value||"").trim();
+    if(!txt) return null;
+    return { el:el, entry:{ user:_me(), name:_myName(), text:txt, at:new Date().toISOString() } };
+  }
+  /* arrayUnion لا كتابةُ المصفوفة كاملة: مشاركٌ آخر قد يكون علّق في الأثناء،
+     وكتابةُ نسختي القديمة تمحو تعليقَه. */
+  function _cmtUnion(entry){
+    try{ return firebase.firestore.FieldValue.arrayUnion(entry); }catch(e){ return null; }
+  }
+
   function addComment(id){
     var el=document.getElementById("st-cmt-"+id);
     if(!el) return;
-    var txt=String(el.value||"").trim();
-    if(!txt){ _t("اكتب شيئاً أوّلاً","warn"); return; }
+    if(!String(el.value||"").trim()){ _t("اكتب شيئاً أوّلاً","warn"); return; }
     if(typeof db==="undefined" || !db){ _t("تعذّر الحفظ","warn"); return; }
-    var entry={ user:_me(), name:_myName(), text:txt, at:new Date().toISOString() };
-    // arrayUnion لا كتابةُ المصفوفة كاملة: مشاركٌ آخر قد يكون علّق في الأثناء،
-    // وكتابةُ نسختي القديمة تمحو تعليقَه.
-    var u;
+    var p=_pendingComment(id);
+    if(!p) return;
     /* وغيابُ `arrayUnion` لا يُبتلع صامتاً: كان `return` وحدَه فيصير الزرُّ ميتاً
        بلا أثر، والمستخدمُ يظنّ الملاحظاتِ معطّلةً لا أنّ شيئاً أخفق. */
-    try{ u=firebase.firestore.FieldValue.arrayUnion(entry); }
-    catch(e){ _t("تعذّر الحفظ","warn"); return; }
-    el.value="";
+    var u=_cmtUnion(p.entry);
+    if(!u){ _t("تعذّر الحفظ","warn"); return; }
+    p.el.value="";
     _update(id, { comments:u }).catch(function(){});
   }
 
