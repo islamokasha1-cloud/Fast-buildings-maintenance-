@@ -702,7 +702,12 @@ function predelivery() {
        وتُقرأ معاً، وأكثرُ الزيادة تعليقٌ يشرح لِمَ سقطت النافذةُ الآن وقد
        أُبقيت مرّتين. ونقلُ منطقٍ قائمٍ إلى ملفٍّ بحجّة إصلاحه ممنوعٌ نصّاً
        (CLAUDE.md). */
-    const IDX_CEILING = 39797;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ورُفع ٢٢ سطراً في v18.9.3110: تأجيلُ مزامنة المخزون عن الإقلاع (‏٦٠٠ مستندٍ من
+       ١٣٢٠ في كلّ دخول). المضافُ بوّابةٌ واحدةٌ (`ensureInventorySync`) وخمسةُ نداءاتٍ
+       لها عند خمسةِ قرّاءٍ كانوا يتّكئون على تركيب الإقلاع — **وأكثرُه تعليقٌ يقول
+       أيَّ قارئٍ ينكسر بصمتٍ لو حُذف التركيبُ بلا بديل**. إصلاحٌ في موضعه على منطقٍ
+       قائم (`startInventorySync` و`showPage` وفحصُ الرصيد تُقرأ معاً). */
+    const IDX_CEILING = 39819;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -1948,7 +1953,7 @@ function inventoryReportsTests() {
   T("زر القائمة الجانبية في مجموعة المخزون",
     HTML.includes('data-page="inventory-reports" onclick="showPage(\'inventory-reports\')"'));
   T("خطّاف showPage يستدعي الوحدة",
-    HTML.includes('if(id==="inventory-reports"){ if(window.inventoryReports&&window.inventoryReports.render) window.inventoryReports.render(); else _moduleMissingPage("page-inventory-reports","تقارير المخزون","inventory-reports.js"); }'));
+    HTML.includes('if(id==="inventory-reports"){ ensureInventorySync(); if(window.inventoryReports&&window.inventoryReports.render) window.inventoryReports.render(); else _moduleMissingPage("page-inventory-reports","تقارير المخزون","inventory-reports.js"); }'));
 
   /* ══ ★★ v18.9.2743: رقمُ البند — الشاشةُ تُرقّم كما تُرقّم الورقةُ الموقَّعة ══
      العقدُ والطلبُ المطبوعان يرقّمان بنودَهما بترتيب `lines` منذ اليوم الأول، وشاشاتُ
@@ -14796,8 +14801,28 @@ function syncWindowFilterGuards() {
   /* الإصلاحُ الذاتي كان يمسح `tickets` وحدَها — وهي بعد الترشيح بلا مؤرشفٍ أصلاً. */
   T("★★ مسحُ «مؤرشفٍ نشط» صار على `allTickets()` لا `tickets` وحدَها",
     /_healScope=\(typeof allTickets==="function"\)\s*\?\s*allTickets\(\)\s*:\s*tickets/.test(HTML));
-  T("★ وما ليس في `tickets` يُكتب مباشرةً (`saveData` يصمت إن لم يجده)",
-    /!_inMain\.has\(t\.id\)[\s\S]{0,220}?\{archived:false,archivedAt:null,archiveMonth:null\},\{merge:true\}/.test(HTML));
+  /* ══ كتاباتُ الأرشفة لا تمرّ بـ`saveData` — الجذرُ المقيس في 09/09 ══
+     `saveData(id)` تبحث عن البلاغ في `tickets` **وقتَ النداء** وتصمت إن لم تجده.
+     والمستمعُ مُرشَّحٌ على `archived==false`: فأوّلُ كتابةِ أرشفةٍ تُخرج مستندَها من
+     نطاقه، واللقطةُ التاليةُ تستبدل `tickets` كاملاً — فتصمت `saveData` عن بقيّة
+     الدفعة. يُؤرشف بعضُها ويبقى الباقي فيُعاد المحاولةُ **في كلّ دخول أبداً**: قِيس
+     ‏200 كتابةً في الدخول الواحد و349 في العودة، ولا تهدأ. وكلُّ كتابةٍ تُبَثّ لكلّ
+     مستمعٍ حيٍّ فتصير قراءةً مُحاسَبةً لكلّ مستخدم. الحارسُ يمنع عودةَ الاعتماد على
+     مصفوفةٍ تتبدّل تحت الحلقة. */
+  const _AABM = (HTML.match(/async function autoArchiveByMonth\(\)\{[\s\S]*?\n\}/) || [""])[0];
+  T("★★ جسمُ `autoArchiveByMonth` لا يستدعي `saveData` إطلاقاً (وإلا عادت الكتاباتُ الصامتة)",
+    _AABM.length > 400 && !/saveData\(/.test(_AABM));
+  T("★★ وكلُّ كتابةٍ مُرقِّعٌ صريحٌ بالمعرّف من الكائن الذي بيدنا (لا بحثٌ في `tickets`)",
+    /const _patch=\(id,data\)=>\{[\s\S]{0,200}?db\.collection\(COLLECTION\(\)\)\.doc\(id\)\.set\(data,\{merge:true\}\)/.test(_AABM));
+  T("★ الإصلاحُ الذاتيُّ يُكتب لكلّ مُعالَجٍ لا لمن هو خارج `tickets` وحدَه",
+    /_patch\(t\.id,\{archived:false,archivedAt:null,archiveMonth:null\}\)/.test(_AABM) &&
+    !/_inMain/.test(_AABM));
+  T("★★ وحقولُ الأرشفة وحدَها تُكتب لا المستندُ كلُّه (لا دهسَ لحقلٍ حدّثه غيرُها)",
+    /_archivedNow\.forEach\(t=>_patch\(t\.id,\{archived:true,archivedAt:t\.archivedAt,archiveMonth:t\.archiveMonth\}\)\)/.test(_AABM));
+  /* `writeRollupForMonth` تستعلم عن الشهر **من الخادم**: حسابُه قبل وصول الأرشفة
+     يكتب ملخّصاً ناقصاً — قِيس «كُتب ملخّص 2026-08: 1 بلاغ» بعد أرشفة مئةٍ وخمسين. */
+  T("★★ والملخّصُ الشهريُّ لا يُحسَب إلا بعد ثبوت الكتابات",
+    /if\(_writes\.length\) await Promise\.all\(_writes\);[\s\S]{0,200}?writeRollupForMonth\(ym\)/.test(_AABM));
 
   /* التحذيرُ لا ينصح بالأرشفة إلا والنافذةُ مُرشَّحة — وإلا أرسل المالكَ لعملٍ عقيم. */
   T("★★ نصُّ التحذير يتبع وضعَ المستمع لا يَعِد بما لا يقع",
@@ -14886,6 +14911,26 @@ function catalogMustNotBeCapped() {
   T("★ ولا إنذارَ سقفٍ على الكتالوج (لا سقفَ يُنذَر ببلوغه)",
     !/_warnSyncCap\(\s*"كتالوج/.test(HTML));
 
+  /* ══ المخزونُ يُركَّب عند الحاجة لا عند الدخول (v18.9.3110) ══
+     ‏٦٠٠ مستندٍ من ١٣٢٠ في **كلّ** دخولٍ لشاشاتٍ قد لا تُفتَح. والخطرُ ليس في الحذف
+     بل فيمن كان يتّكئ عليه من **خارج** شاشات المخزون: أخطرُهم
+     `checkInventoryBeforePurchase` — يرجع `null` على مصفوفةٍ فارغة، فيُطلَب شراءُ
+     صنفٍ موجودٍ في المستودع **بلا تحذير**؛ وهذا لا يُكتشَف من الشاشة ولا من خطأٍ. */
+  T("★★ لا مزامنةَ مخزونٍ في طبقة الإقلاع المؤجَّلة (٦٠٠ مستندٍ لشاشةٍ قد لا تُفتَح)",
+    !/_deferBoot\([^\n]*startInventorySync/.test(HTML));
+  T("★★ وبوّابةٌ واحدةٌ تُركّب عند الطلب وتُرجع وعدَ أوّلِ لقطة",
+    /function ensureInventorySync\(\)\{[\s\S]{0,200}?if\(!_invUnsub\) startInventorySync\(\);[\s\S]{0,80}?return _invSyncReady \|\| Promise\.resolve\(\);/.test(HTML));
+  T("★★ والوعدُ يُحلّ عند الخطأ أيضاً (وإلا عُلّق المنتظِرُ أبداً)",
+    /e=>\{ console\.warn\("inventory sync error:",e\); _invReady\(\); \}/.test(HTML));
+  T("★★★ فحصُ الرصيد قبل الشراء **ينتظر** البيانات قبل حكمه بـ`null`",
+    /async function checkInventoryBeforePurchase\(items\)\{\s*\n\s*if\(!db\) return null;\s*\n\s*await ensureInventorySync\(\);[\s\S]{0,120}?if\(!_inventoryItems\.length\) return null;/.test(HTML));
+  /* خمسةُ قرّاءٍ خارج شاشات المخزون: الجرد · التقارير · أوامرُ الصرف · العهدة (شاشتاها). */
+  [["stocktake"],["inventory-reports"],["issue-orders"],["custody"],["custody-new"]].forEach(([pg])=>
+    T(`★★ «${pg}» يُركّب المخزونَ بنفسه (كان يتّكئ على تركيب الإقلاع)`,
+      new RegExp('if\\(id==="'+pg+'"\\)\\s*\\{\\s*ensureInventorySync\\(\\)').test(HTML)));
+  T("★ وأوامرُ الصرف تُعاد رسمَها بعد وصول الرصيد (اسمُ المستودع مشتقٌّ منه)",
+    /ensureInventorySync\(\)\.then\(\(\)=>\{ if\(document\.getElementById\("page-issue-orders"\)\?\.classList\.contains\("active"\)\) renderIssueOrders\(\); \}\)/.test(HTML));
+
   /* والمجموعتان الباقيتان تبقيان محدودتَين — قياسُهما الحقيقيّ دون السقف بفارقٍ
      واسع (المخزون ٣٧١ من ٤٠٠٠)، وهما لا تُبنى عليهما قائمةُ اختيارٍ كالكتالوج. */
   T("★ والمخزونُ يبقى محدوداً بإنذاره (٣٧١ فعلياً من ٤٠٠٠)",
@@ -14914,8 +14959,8 @@ function loadTimeSurgeryGuards() {
 
   /* الشاشةُ المفتوحة لا تنتظر فراغَ المتصفّح */
   const pageStarts = [
-    ['inventory',     /if\(id==="inventory"\)\s*\{\s*if\(!_invUnsub\) startInventorySync\(\);/],
-    ['inventory-log', /if\(id==="inventory-log"\)\s*\{\s*if\(!_invUnsub\) startInventorySync\(\);/],
+    ['inventory',     /if\(id==="inventory"\)\s*\{\s*ensureInventorySync\(\);/],
+    ['inventory-log', /if\(id==="inventory-log"\)\s*\{\s*ensureInventorySync\(\);/],
     ['assets',        /if\(id==="assets"\)\s*\{\s*if\(!_assetsUnsub\) startAssetsSync\(\);/],
     ['ppm',           /if\(id==="ppm"\)\s*\{\s*if\(!_ppmUnsub\) startPPMSync\(\);/],
     ['item-catalog',  /if\(id==="item-catalog"\)\s*\{\s*loadItemCatalog\(\);/],
