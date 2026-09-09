@@ -9,7 +9,16 @@ window.__store = {};                       // path -> data (Firestore في ال�
 (function(){
   function keyDoc(p){ return p; }
   function snap(path){ var d=window.__store[path]; return { exists:d!==undefined, id:path.split('/').pop(), data:function(){return d||{};}, get:function(f){return (d||{})[f];} }; }
-  function applyVal(cur,k,v){ if(v && v.__inc!==undefined) return (cur[k]||0)+v.__inc; if(v && v.__sv) return Date.now(); if(v && v.__del) return undefined; return v; }
+  function applyVal(cur,k,v){
+    if(v && v.__inc!==undefined) return (cur[k]||0)+v.__inc;
+    if(v && v.__sv) return Date.now();
+    if(v && v.__del) return undefined;
+    if(v && v.__au){ var a=Array.isArray(cur[k])?cur[k].slice():[];
+      v.__au.forEach(function(x){ if(!a.some(function(y){ return _same(x,y); })) a.push(x); }); return a; }
+    if(v && v.__ar){ var b=Array.isArray(cur[k])?cur[k].slice():[];
+      return b.filter(function(y){ return !v.__ar.some(function(x){ return _same(x,y); }); }); }
+    return v;
+  }
   /* ── المستمعون أحياء: الكتابةُ تُبثّ فوراً كما يفعل Firestore ──
      المحاكي كان يستدعي onSnapshot مرّةً عند التركيب ولا يعود أبداً، فكان يُخفي
      صنفاً كاملاً من العلل: **تعويضُ الكمون**. في Firestore الحقيقيّ تصل اللقطةُ
@@ -20,7 +29,9 @@ window.__store = {};                       // path -> data (Firestore في ال�
   function _emit(path){
     var coll = path.slice(0, path.lastIndexOf('/'));
     _subs.slice().forEach(function(s){
-      try{ if(s.path === path) s.cb(snap(path)); else if(s.coll === coll) s.cb(collSnap(coll)); }catch(e){}
+      /* يُمرَّر wh وحدَه إلى اللقطة المُعادة — لا ob/lim/sa: تلك تخصّ الترقيمَ
+         بمرساة documentId، وتطبيقُها على إعادة البثّ يبدّل سلوكاً قائماً. */
+      try{ if(s.path === path) s.cb(snap(path)); else if(s.coll === coll) s.cb(collSnap(coll, s.wh ? { wh:s.wh } : undefined)); }catch(e){}
     });
   }
   function _sub(o){ _subs.push(o); return function(){ var i=_subs.indexOf(o); if(i>=0) _subs.splice(i,1); }; }
@@ -57,6 +68,14 @@ window.__store = {};                       // path -> data (Firestore في ال�
      الفحصُ يقيس المحاكيَ لا النظام. فالنطاقُ مقصودٌ: documentId فقط. */
   function collSnap(coll, st){
     var paths=docsUnder(coll);
+    /* ترشيحُ where في اللقطات — **اختياريٌّ بعَلَم window.__mockWhere** ──
+       الافتراضُ (مطفأ) أنّ المجموعةَ تعود كاملةً، وعليه تعتمد مئتا سيناريو قائم،
+       ومنها فحصٌ مقصودٌ يقيس أنّ الواجهة تحجب مهمّةَ غيري **ولو أعاد الاستعلامُ
+       المستندَ إليها**. لكنّ بعضَ العلل لا تظهر إلا حين يكون المستمعُ **ضيّقاً
+       فعلاً**: مستندٌ خارج الاستعلام لا تصله لقطةٌ بعد الكتابة، فتبقى الشاشةُ على
+       نسخةٍ قديمةٍ ويبدو أنّ ما كُتب لم يُحفَظ. فمن أراد قياسَ ذلك رفع العَلَم. */
+    if(window.__mockWhere && st && st.wh && st.wh.length)
+      paths=paths.filter(function(p){ return _match(window.__store[p], st.wh); });
     if(st && st.ob==='__id__'){
       paths.sort();
       if(st.sa!=null) paths=paths.filter(function(p){ return p.slice(coll.length+1) > st.sa; });
@@ -120,10 +139,20 @@ window.__store = {};                       // path -> data (Firestore في ال�
       var state={prev:{}};
       var wrapped=function(sn){ cb(_attachChanges(sn, state, coll)); };
       try{ wrapped(collSnap(coll, st)); }catch(e){}
-      return _sub({ coll:coll, cb:wrapped });
+      return _sub({ coll:coll, cb:wrapped, wh:st.wh });
     }
   }; return q; }
-  var FieldValue={ serverTimestamp:function(){return {__sv:1};}, increment:function(n){return {__inc:n};}, arrayUnion:function(){return {};}, arrayRemove:function(){return {};}, delete:function(){return {__del:1};} };
+  /* arrayUnion/arrayRemove كانتا تُرجعان كائناً فارغاً — أي أنّ كلّ كتابةٍ تُلحق
+     عنصراً بمصفوفة كانت في المحاكي **تستبدل المصفوفة بكائنٍ فارغ**، فيصير الحقلُ
+     ليس مصفوفةً أصلاً. ولأنّ قارئيه يكتبون Array.isArray(x) ? ... : [] فالنتيجةُ
+     قائمةٌ فارغةٌ صامتة: لا خطأَ ولا فحصٌ يسقط، ومسارُ التعليقات والصورِ الملحقة
+     **غيرُ مفحوصٍ أصلاً** وهو يبدو مفحوصاً. (كُشف ببلاغ المالك 09/09: الملاحظات
+     لا تظهر.) والآن تُنفَّذان فعلاً بدلالة الاتّحاد: لا تكرارَ لعنصرٍ موجود. */
+  function _same(a,b){ try{ return JSON.stringify(a)===JSON.stringify(b); }catch(e){ return a===b; } }
+  var FieldValue={ serverTimestamp:function(){return {__sv:1};}, increment:function(n){return {__inc:n};},
+                   arrayUnion:function(){ return {__au:Array.prototype.slice.call(arguments)}; },
+                   arrayRemove:function(){ return {__ar:Array.prototype.slice.call(arguments)}; },
+                   delete:function(){return {__del:1};} };
   // نمذجة عزل Firestore التسلسلي: كل معاملة تُنفَّذ كاملةً قبل التالية (طابور)،
   // فلا تقرأ معاملتان العدّاد نفسه ثم تدهس إحداهما الأخرى — كضمان Firestore الفعلي.
   var __txq = Promise.resolve();
