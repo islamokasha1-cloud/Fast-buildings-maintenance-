@@ -17363,6 +17363,7 @@ function staffTasksGuards() {
   if (!ST) return;
 
   const NEED = ["_parseBulk", "_participantsOf", "_canSee", "_canEditParticipants",
+                "_canShare", "_docParticipants", "_sharePatch", "_unsharePatch",
                 "_dueState", "_isOverdue", "_splitTabs", "_countOpen", "_sortTasks"];
   const miss = NEED.filter(k => typeof ST[k] !== "function");
   T("★ الدوالُّ النقيّة كلُّها مكشوفةٌ للفحص بلا متصفّح", miss.length === 0, miss.join(" · "));
@@ -17397,11 +17398,55 @@ function staffTasksGuards() {
   T("★ ومستخدمٌ بلا اسمِ دخولٍ لا يرى شيئاً (الوضعُ الآمن عند غياب الهوية)",
     ST._canSee(t1, "", "مشرف") === false);
 
-  /* ── (٤) مَن يُدخل الغرفةَ أحداً: المُنشئ وحدَه ── */
-  T("★★★ المكلَّفُ لا يضيف مشاركاً — وإلا فُتحت غرفةُ المدير على مَن لم يخترْه",
-    ST._canEditParticipants(t1, "خالد", "مشرف") === false);
-  T("★ والمُنشئُ يضيف", ST._canEditParticipants(t1, "رغده", "مشرف") === true);
-  T("والأدمن يضيف", ST._canEditParticipants(t1, "منى", "admin") === true);
+  /* ── (٤) سلسلةُ المشاركة: يُدخل كلُّ طرفٍ مَن يحتاجه، ولا يُخرج إلا المُنشئ ── */
+  T("★★ كلُّ طرفٍ يضيف طرفاً (سلسلةُ المشاركة — وإلا خرج المكلَّفُ بالمهمّة إلى الواتساب)",
+    ST._canShare(t1, "خالد", "مشرف") === true && ST._canShare(t1, "سعيد", "مشرف") === true &&
+    ST._canShare(t1, "رغده", "مشرف") === true);
+  T("★★★ ومَن ليس طرفاً لا يضيف (الغرفةُ ما زالت مغلقة)",
+    ST._canShare(t1, "منى", "مشرف") === false && ST._canShare(t1, "", "مشرف") === false);
+  T("★★★ والإخراجُ وتحويلُ التكليف للمُنشئ وحدَه — الإضافةُ ليست تركيبَ الغرفة",
+    ST._canEditParticipants(t1, "خالد", "مشرف") === false &&
+    ST._canEditParticipants(t1, "سعيد", "مشرف") === false);
+  T("★ والمُنشئُ يملكها", ST._canEditParticipants(t1, "رغده", "مشرف") === true);
+  T("والأدمن يملكها", ST._canEditParticipants(t1, "منى", "admin") === true);
+
+  /* حزمةُ الإضافة: إضافةٌ محضةٌ — لا يسقط منها اسمٌ كان في الوثيقة */
+  const SH = ST._sharePatch(t1, "منى", "خالد", "مشرف");
+  T("★★★ المكلَّفُ يُضيف زميلاً، والقائمتان تكبران معاً (`shared` مصدرُ الاشتقاق بعد التحويل)",
+    !!SH && SH.shared.includes("منى") && SH.participants.includes("منى") &&
+    SH.shared.includes("سعيد"), JSON.stringify(SH));
+  T("★★★ والإضافةُ لا تُسقط طرفاً — كلُّ مَن كان في الوثيقة باقٍ (وإلا صارت إخراجاً بصمت)",
+    !!SH && ["رغده", "خالد", "سعيد"].every(u => SH.participants.includes(u)),
+    JSON.stringify(SH && SH.participants));
+  T("★★★ ومَن ليس طرفاً لا تُبنى له حزمةُ إضافةٍ أصلاً",
+    ST._sharePatch(t1, "منى", "منى", "مشرف") === null);
+  T("★ وإضافةُ مشاركٍ أصلاً لا تُنتج كتابةً لا تغيّر شيئاً",
+    ST._sharePatch(t1, "سعيد", "خالد", "مشرف") === null &&
+    ST._sharePatch(t1, "   ", "خالد", "مشرف") === null);
+  T("★★ وطرفٌ محفوظٌ في الوثيقة لا تشتقّه المشتقّةُ يبقى بعد الإضافة (وثيقةٌ من تحويلٍ سابق)",
+    (() => {
+      const legacy = { createdByUser: "رغده", assignedToUser: "خالد", shared: [],
+                       participants: ["رغده", "خالد", "قديم"] };
+      const p = ST._sharePatch(legacy, "منى", "خالد", "مشرف");
+      return !!p && p.participants.includes("قديم") && p.participants.includes("منى");
+    })());
+
+  /* حزمةُ الإخراج: صمّامُ المُنشئ، ولا تطال ركنَي المهمّة */
+  T("★★★ المُنشئُ يُخرج مَن أُضيف — بلا هذا يصير فتحُ الإضافة تنازلاً نهائياً عن غرفته",
+    (() => {
+      const p = ST._unsharePatch(t1, "سعيد", "رغده", "مشرف");
+      return !!p && !p.shared.includes("سعيد") && !p.participants.includes("سعيد") &&
+             p.participants.includes("رغده") && p.participants.includes("خالد");
+    })());
+  T("★★★ والمشاركُ لا يُخرج أحداً (لا ينقض من أُضيف قرارَ من أدخله)",
+    ST._unsharePatch(t1, "سعيد", "خالد", "مشرف") === null);
+  T("★★★ ولا يُخرَج المُنشئُ ولا المكلَّفُ بزرّ × (إخراجُ المكلَّف تحويلٌ يُصارَح به)",
+    ST._unsharePatch(t1, "رغده", "رغده", "مشرف") === null &&
+    ST._unsharePatch(t1, "خالد", "رغده", "مشرف") === null);
+  T("★ ومَن ليس طرفاً لا يُخرَج (كتابةٌ لا تغيّر شيئاً)",
+    ST._unsharePatch(t1, "منى", "رغده", "مشرف") === null);
+  T("★★ والحزمتان لا تحوّران المهمّةَ الأصلية",
+    JSON.stringify(t1.shared) === JSON.stringify(["سعيد", "خالد", ""]));
 
   /* ── (٤-ب) التعديل: للأطراف · والتحويلُ للمُنشئ · ونسبةٌ لا تُزوَّر ── */
   const NEED2 = ["_canEdit", "_canReassign", "_editPatch", "_droppedBy"];

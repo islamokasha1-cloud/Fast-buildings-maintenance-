@@ -188,8 +188,9 @@ service cloud.firestore {
        ── الكتابةُ مقفولةٌ هنا فعلاً ──
        تُستثنى المجموعةُ من القاعدة العامة (وإلا لم يقيّد هذا البلوكُ شيئاً: القواعدُ
        تُقيَّم بـ«أو»، ودرسُ M11 أنّ بلوكاً متساهلاً باقياً يُبطل التشديدَ في أعلاه)،
-       فلا يعدّل المهمّةَ إلا مشاركٌ فيها، ولا يضيف مشاركاً إلا مُنشئُها، ولا تُنتحَل
-       المِلكيّةُ (`createdByUser` و`createdAt` في `unchanged`).
+       فلا يعدّل المهمّةَ إلا مشاركٌ فيها، ولا يُضيف طرفاً إلا مشاركٌ فيها **إضافةً
+       محضة**، ولا يُخرج طرفاً ولا يحوّل التكليفَ إلا مُنشئُها، ولا تُنتحَل المِلكيّةُ
+       (`createdByUser` و`createdAt` في `unchanged`).
 
        ── ⚠ والقراءةُ لم تُقفَل بعد — تصريحٌ لا سهو ──
        سطرُ القراءة العامة `allow read: if hasRole();` يمنح القراءةَ على كلّ مجموعة،
@@ -236,6 +237,27 @@ service cloud.firestore {
           || request.resource.data.get('seenBy', {}).diff(resource.data.get('seenBy', {}))
                .affectedKeys().hasOnly([stUser()]);
     }
+    /* ── الغرفةُ: مَن يُدخل ومَن يُخرج ──
+       **الإضافةُ لكلّ طرف** (سلسلةُ المشاركة — قرارُ المالك 09/09): مَن أُشرك في
+       مهمّةٍ يُشرك فيها ثالثاً يحتاجه ليُتمّ العمل، بلا أن يعود إلى مُنشئها. لكنها
+       **إضافةٌ محضة**: `hasAll` تفرض أن تبقى القائمتان القديمتان كلتاهما داخلَ
+       الجديدتين، فلا يُخرج طرفٌ طرفاً باسم المشاركة، والنقصانُ في أيٍّ منهما
+       (الإخراج) يبقى للمُنشئ وحدَه — صمّامُ مِلكيّةٍ بلا انتزاعِ الأداةِ من مستعملها.
+       ولمَ القائمتان معاً لا `participants` وحدَها: `shared` هي مصدرُ اشتقاقِ
+       الأطراف بعد كلّ تحويل، فإسقاطُ اسمٍ منها **إخراجٌ مؤجَّل** يقع صامتاً عند أوّل
+       تحويلٍ لاحق — وحارسٌ يفحص الظاهرَ وحدَه يمرّره.
+       و**التحويلُ باقٍ للمُنشئ**: `assignedToUser`/`assignedToName`/`kind` خارجَ ما
+       يمسّه الطرفُ ولو كان يضيف، وإلا رمى المكلَّفُ عهدتَه على زميلٍ من باب
+       «المشاركة» — وهو البابُ نفسُه الذي أُغلق قبلَها. */
+    function stAddOnly() {
+      return request.resource.data.get('participants', []).hasAll(resource.data.get('participants', []))
+          && request.resource.data.get('shared', []).hasAll(resource.data.get('shared', []));
+    }
+    function stRoomOk() {
+      return resource.data.get('createdByUser', '') == stUser()
+          || ( unchanged(['assignedToUser', 'assignedToName', 'kind'])
+               && ( unchanged(['participants', 'shared']) || stAddOnly() ) );
+    }
     function stUpdateOk() {
       return isAdmin()
         || ( hasRole() && !isViewer()
@@ -243,12 +265,7 @@ service cloud.firestore {
              && unchanged(['createdByUser', 'createdAt'])
              && stEditorOk()
              && stSeenOk()
-             /* قائمةُ الأطراف **وتحويلُ المكلَّف** بيد المُنشئ وحدَه. ولولا
-                `assignedToUser` هنا لأمكن المكلَّفَ أن يرمي ما كُلِّف به على زميلٍ
-                (أو على لا أحد) ويخرج من العهدة، بلا أن يعلم مَن أصدر التكليف.
-                و`kind` معها: بها تصير المهمّةُ «ملاحظةً شخصية» فتغادر قائمةَ أحدهم. */
-             && ( unchanged(['participants', 'shared', 'assignedToUser', 'assignedToName', 'kind'])
-                  || resource.data.get('createdByUser', '') == stUser() ) );
+             && stRoomOk() );
     }
     function stDeleteOk() {
       return isAdmin()
