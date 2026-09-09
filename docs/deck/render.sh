@@ -20,11 +20,20 @@ CHROME="${CHROME:-/opt/pw-browsers/chromium-1194/chrome-linux/chrome}"
 
 python3 - <<'PY'
 import re,sys
-d=open('hail-platform-deck.pdf','rb').read()
-pages=len(re.findall(rb'/Type\s*/Page[^s]', d))
-box=set(re.findall(rb'/MediaBox\s*\[([^\]]*)\]', d))
-ok = pages==18 and box=={b'0 0 1200 675.12'}
-print('الصفحات: %d | المقاس: %s' % (pages, ', '.join(b.decode() for b in box)))
+# عددُ الصفحات المتوقَّع يُشتقّ من الورقة نفسِها لا يُكتب رقماً: شريحةٌ تُضاف
+# أو تُحذَف فيتبعها الفحصُ بلا تعديل — والرقمُ المكتوبُ بيدٍ يتقادم فيصير
+# الفحصُ إمّا كاذباً أو مزعجاً، وكلاهما يُفقده معناه.
+html = open('platform-deck.html', encoding='utf-8').read()
+want = html.count('<section class="slide')
+d = open('hail-platform-deck.pdf','rb').read()
+pages = len(re.findall(rb'/Type\s*/Page[^s]', d))
+box = set(re.findall(rb'/MediaBox\s*\[([^\]]*)\]', d))
+imgs = len(re.findall(rb'/Subtype\s*/Image', d))
+want_imgs = html.count('<img src="screens/')
+ok = pages == want and box == {b'0 0 1200 675.12'} and imgs >= want_imgs
+print('الصفحات: %d/%d | الصور: %d/%d | المقاس: %s'
+      % (pages, want, imgs, want_imgs, ', '.join(b.decode() for b in box)))
+if not ok: print('⛔ لا يطابق المتوقَّع')
 sys.exit(0 if ok else 1)
 PY
 echo "تمّ: hail-platform-deck.pdf"
