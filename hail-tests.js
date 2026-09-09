@@ -13989,6 +13989,24 @@ function contractsPhase1() {
     T("⛔ ولا شرطَ مسارٍ في قاعدة القراءة العامة (يُسقط استعلامَ كلّ مجموعة)",
       /match \/\{document=\*\*\} \{[\s\S]{0,1200}?allow read:\s+if hasRole\(\);/.test(RUL) &&
       !/allow read:\s+if hasRole\(\)\s*&&/.test(RUL));
+    /* ════ خطأُ التقييم ليس رفضاً — والفرقُ يظهر تحت النفي ════
+       الوصولُ المباشرُ إلى ادّعاءٍ **غائبٍ** عن التوكِن (‏`request.auth.token.role`)
+       **خطأُ تقييمٍ** لا `false` — أُثبت على محاكٍ حقيقيّ: `!(…role != null)` يُردّ،
+       و`!(…token.get('role','') != '')` يمرّ. وتطبيقُ الفنيين يدخل مُصادَقاً مجهولاً
+       بلا `role`، فكلُّ نداءٍ منه كان يُسجّل خطأً في `Rules metrics` (‏11 ⇐ 82 بين
+       ٠٤/٠٩ و٠٩/٠٩). والخطرُ ليس الرقمَ: الخطأُ **يسري تحت النفي**، فقاعدةٌ سليمةُ
+       المنطق تمنع من لا يُقصَد منعُه (وقع في M11: `!hasRole()` منعت الفنّيَّ).
+       والشيءُ نفسُه في `resource.data` على مستندٍ **غير موجود** — `resource` معدومٌ. */
+    T("★★★ لا وصولَ مباشرٍ لادّعاءِ توكِنٍ في القواعد — `get(key, default)` وحدَها",
+      !/request\.auth\.token\.(?!get\()[a-zA-Z_]/.test(RUL.replace(/\/\*[\s\S]*?\*\//g, "")));
+    T("★★ و`hasRole`/`isViewer`/`role` تمرّ كلُّها عبر `tokRole()` الآمنة",
+      /function hasRole\(\) \{\s*\n\s*return tokRole\(\) != null && tokRole\(\) != '';/.test(RUL) &&
+      /function isViewer\(\) \{\s*\n\s*return tokRole\(\) == 'viewer';/.test(RUL) &&
+      /function role\(\)\s*\{ return tokRole\(\); \}/.test(RUL) &&
+      /function tokRole\(\) \{\s*\n\s*return request\.auth != null \? request\.auth\.token\.get\('role', ''\) : '';/.test(RUL));
+    T("★★ وقراءةُ `staff_tasks` تحرس `resource` المعدوم (مستندٌ غير موجود = خطأٌ لا رفض)",
+      (RUL.match(/allow read:   if isAdmin\(\) \|\| \(resource != null && stPart\(resource\.data\)\);/g) || []).length === 2);
+
     /* والفحصُ الذي كان غائباً: **الاستعلامُ نفسُه**. ١٣٣ فحصاً مرّت والصنفُ أعمى،
        لأنّ كلَّها `getDoc`/`setDoc` على مستندٍ واحد. القائمةُ تُشتقّ من الفحص. */
     {
