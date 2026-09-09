@@ -805,15 +805,35 @@ await check("★★ ولا الماليةُ ولا المشترياتُ",
 await check("★ ولا تُنتحَل المِلكيّةُ بتعديلٍ لاحق",
   assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T1`), { createdByUser: "خالد" })));
 
-/* قائمةُ الأطراف بيد المُنشئ وحدَه */
-await check("★★ المكلَّفُ لا يُدخل الغرفةَ مَن شاء",
-  assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T1`), {
+/* ── سلسلةُ المشاركة: يُدخل كلُّ طرفٍ مَن يحتاجه، والإخراجُ للمُنشئ ──
+   وهذا لا يُحكَم عليه بقراءة السطر: الشرطُ مركَّبٌ من `hasAll` و`unchanged`
+   و«أو»، والمحاكي وحدَه يُثبت أين ينتهي «الإضافة» ويبدأ «إعادةُ التركيب». */
+await check("★★★ المكلَّفُ يُدخل زميلاً ثالثاً (سلسلةُ المشاركة — قرارُ المالك 09/09)",
+  assertSucceeds(updateDoc(doc(ASSIGNEE, `${ST}/T1`), {
     shared: ["سعيد"], participants: ["رغده", "خالد", "سعيد"] })));
-await check("★ والمُنشئُ يُشارك زميلاً ثالثاً",
+await check("★★ ومَن أُضيف صار طرفاً يعدّل",
+  assertSucceeds(updateDoc(doc(OUTSIDER, `${ST}/T1`), { status: "open" })));
+await check("★★★ ومَن أُضيف يُضيف بدوره (السلسلةُ تمتدّ — وإلا عاد الطلبُ إلى المُنشئ)",
+  assertSucceeds(updateDoc(doc(OUTSIDER, `${ST}/T1`), {
+    shared: ["سعيد", "منى"], participants: ["رغده", "خالد", "سعيد", "منى"] })));
+await check("★★★ ولا يُخرج طرفٌ طرفاً باسم المشاركة (`participants` تنقص)",
+  assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T1`), {
+    shared: ["سعيد", "منى"], participants: ["رغده", "خالد", "منى"] })));
+await check("★★★ ولا بإسقاط اسمٍ من `shared` وحدَها — إخراجٌ مؤجَّلٌ يقع عند أوّل تحويل",
+  assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T1`), {
+    shared: ["منى"], participants: ["رغده", "خالد", "سعيد", "منى"] })));
+await check("★★★ ولا يُخرج نفسَه من عهدةٍ بإضافةٍ ملحقةٍ بتحويل (البابُ المغلقُ لا يُفتح من هنا)",
+  assertFails(updateDoc(doc(ASSIGNEE, `${ST}/T1`), {
+    shared: ["سعيد", "منى"], participants: ["رغده", "خالد", "سعيد", "منى"],
+    assignedToUser: "منى", assignedToName: "منى" })));
+await check("★★ والمُنشئُ وحدَه يُخرج مَن أُضيف (صمّامُ المِلكيّة)",
   assertSucceeds(updateDoc(doc(OWNER, `${ST}/T1`), {
     shared: ["سعيد"], participants: ["رغده", "خالد", "سعيد"] })));
-await check("ومَن أُضيف صار طرفاً يعدّل",
-  assertSucceeds(updateDoc(doc(OUTSIDER, `${ST}/T1`), { status: "open" })));
+await check("★★★ ومَن أُخرج لم يعد يعدّلها",
+  assertFails(updateDoc(doc(supAs("منى"), `${ST}/T1`), { status: "done" })));
+await check("★★ وموظفٌ خارجَ الغرفة لا يُدخل نفسَه فيها",
+  assertFails(updateDoc(doc(supAs("منى"), `${ST}/T1`), {
+    shared: ["سعيد", "منى"], participants: ["رغده", "خالد", "سعيد", "منى"] })));
 
 /* الحذف */
 await check("★ المكلَّفُ لا يحذف مهمّةً كُلِّف بها (لا يمحو الدليلَ عليه)",

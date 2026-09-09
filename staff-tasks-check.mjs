@@ -307,6 +307,78 @@ if (shKey) {
     }));
 }
 
+/* ═════════ ٥-أ-٢) سلسلةُ المشاركة: يُضيف مَن أُشرك، ويُخرج المُنشئُ وحدَه ═════════
+   قرارُ المالك 09/09. والفحصُ هنا لا في `hail-tests` وحدَها لأنّ نصفَ المسألة
+   **مَن يرى الزرَّ أصلاً**: منطقٌ صحيحٌ خلف منتقٍ لا يُرسم لغير المُنشئ = ميزةٌ
+   غيرُ موجودةٍ عند مَن أُنشئت له، ولا مترجمَ يقول ذلك ولا خطأَ في وحدة التحكّم. */
+L('\n=== ٥-أ-٢) سلسلةُ المشاركة ===');
+const chain0 = await page.evaluate(async () => {
+  window.__store['staff_tasks/SH1'] = {
+    title: 'سلسلةُ المشاركة', status: 'open', kind: 'task',
+    createdByUser: 'saeed', createdBy: 'سعيد', createdAt: Date.now() - 5000,
+    assignedToUser: 'khaled', assignedToName: 'خالد',
+    participants: ['saeed', 'khaled'], shared: [], comments: []
+  };
+  currentUser = { user: 'khaled', name: 'خالد', role: 'مشرف' };
+  /* الوثيقةُ تُبَثُّ عبر المستمع الحيّ كما تصل في التطبيق — لا بإعادةِ اشتراكٍ
+     يدويّة: المستمعُ قائمٌ أصلاً، وإعادةُ تركيبه هنا تقيس المحاكيَ لا النظام. */
+  await db.collection('staff_tasks').doc('SH1').set(window.__store['staff_tasks/SH1']);
+  await new Promise(r => setTimeout(r, 600));
+  staffTasks.open('SH1');
+  await new Promise(r => setTimeout(r, 400));
+  const el = document.querySelector('#page-staff-tasks [id^="st-up-q-sh-"]');
+  return { picker: el ? el.id.replace('st-up-q-sh-', '') : '',
+           xs: document.querySelectorAll('#page-staff-tasks .st-who-x').length };
+});
+check('★★★ المكلَّفُ (لا المُنشئ) يرى منتقيَ الإضافة — الميزةُ حاضرةٌ حيث تُستعمل',
+  chain0.picker === 'SH1', chain0.picker || 'لا منتقي');
+check('★★★ ولا يرى زرَّ الإخراج (الإضافةُ ليست تركيبَ الغرفة)', chain0.xs === 0, String(chain0.xs));
+if (chain0.picker === 'SH1') {
+  await page.fill('#st-up-q-sh-SH1', 'اشرف');
+  await page.waitForTimeout(300);
+  await page.click('#st-up-l-sh-SH1 .st-up-row');
+  await page.waitForTimeout(300);
+  await page.click('#page-staff-tasks button:has-text("إضافة")');
+  await page.waitForTimeout(1100);
+  const after = await page.evaluate(() => window.__store['staff_tasks/SH1']);
+  check('★★★ ومَن أُشرك يُشرك ثالثاً فعلاً — الاسمُ يصل المستندَ مشاركاً وطرفاً',
+    !!after && (after.shared || []).includes('ashraf') && (after.participants || []).includes('ashraf'),
+    JSON.stringify(after && after.shared));
+  check('★★★ ولم يسقط المُنشئُ ولا المكلَّفُ بالإضافة (إضافةٌ محضةٌ لا إعادةُ تركيب)',
+    ['saeed', 'khaled'].every(u => (after.participants || []).includes(u)),
+    JSON.stringify(after && after.participants));
+  check('★★★ ولم يُمَسّ التكليفُ ولا نوعُ المهمّة (بابُ رميِ العهدة ما زال مغلقاً)',
+    after.assignedToUser === 'khaled' && after.kind === 'task',
+    after.assignedToUser + ' · ' + after.kind);
+  check('★★★ وسطرُ الإضافة مكتوبٌ في الملاحظات باسم مَن أضاف (لا اسمٌ يظهر بلا خبر)',
+    (after.comments || []).some(c => c && c.sys && c.user === 'khaled' && /أشرف عشري/.test(c.text)),
+    JSON.stringify((after.comments || []).map(c => c.text)));
+  check('★★ ويُرسَم مميَّزاً عن كلامِ الناس لا سطراً كتبه صاحبُه',
+    await page.evaluate(() => !!document.querySelector('#page-staff-tasks .st-note.sys')));
+
+  const asOwner = await page.evaluate(async () => {
+    currentUser = { user: 'saeed', name: 'سعيد', role: 'مشرف' };
+    staffTasks.open('SH1');
+    await new Promise(r => setTimeout(r, 400));
+    return [...document.querySelectorAll('#page-staff-tasks .st-who-x')]
+      .map(b => b.getAttribute('aria-label') || '');
+  });
+  check('★★★ والمُنشئُ يرى زرَّ الإخراج على مَن أُضيف وحدَه — لا على نفسه ولا على المكلَّف',
+    asOwner.length === 1 && /أشرف عشري/.test(asOwner[0]), JSON.stringify(asOwner));
+  await page.click('#page-staff-tasks .st-who-x');
+  await page.waitForTimeout(1100);
+  const out = await page.evaluate(() => window.__store['staff_tasks/SH1']);
+  check('★★★ ونقرُه يُخرجه فعلاً من القائمتين معاً (وإلا عاد عند أوّل تحويل)',
+    !(out.participants || []).includes('ashraf') && !(out.shared || []).includes('ashraf'),
+    JSON.stringify(out.participants) + ' · ' + JSON.stringify(out.shared));
+  check('★★ ويبقى ركنا المهمّة بعد الإخراج',
+    ['saeed', 'khaled'].every(u => (out.participants || []).includes(u)),
+    JSON.stringify(out.participants));
+  check('★★ وسطرُ الإخراج مكتوبٌ كذلك — فيعرف مَن أضافه أنّه أُخرج ولا يبحث عن اسمٍ اختفى',
+    (out.comments || []).some(c => c && c.sys && c.user === 'saeed' && /أخرج/.test(c.text)),
+    JSON.stringify((out.comments || []).map(c => c.text)));
+}
+
 /* ═════════ ٥-ب) التعديلُ والحذف ═════════ */
 L('\n=== ٥-ب) التعديلُ والحذف ===');
 await page.evaluate(() => { staffTasks.back(); staffTasks.tab('sent'); });

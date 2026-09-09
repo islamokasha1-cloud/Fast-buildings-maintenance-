@@ -9,11 +9,26 @@
 
    ── المبدأُ الحاكم: كلُّ مهمّةٍ غرفةٌ مغلقة ──
    لا «قائمةٌ عامة» ولا لوحةُ فريق. المهمّةُ يراها **مُنشئها والمكلَّفُ بها ومَن
-   أضافه المُنشئ** فقط، ويحملهم المستندُ في مصفوفة `participants` (بأسماء الدخول
+   أُضيف إليها** فقط، ويحملهم المستندُ في مصفوفة `participants` (بأسماء الدخول
    لا بالأسماء المعروضة: المعروضُ يتكرّر ويتغيّر، واسمُ الدخول مفتاحٌ ثابت).
    والاستعلامُ نفسُه مقصورٌ على المشاركة:
        .where("participants", "array-contains", <اسم دخولي>)
    فلا يُنزَّل إلى المتصفّح مستندٌ لست طرفاً فيه أصلاً.
+
+   ── سلسلةُ المشاركة: يضيف كلُّ طرفٍ مَن يحتاجه (قرارُ المالك 09/09) ──
+   كانت الإضافةُ للمُنشئ وحدَه، فالمكلَّفُ الذي يحتاج زميلاً ليُتمّ عملَه يعود إلى
+   مديره ليُضيفه — أو (وهو الأغلب) **يخرج بالمهمّة إلى الواتساب** فتضيع حيث أُريد
+   لها ألّا تضيع، وتعود الوحدةُ إلى المشكلة التي أُنشئت لحلّها. فصارت الإضافةُ لكلّ
+   طرف، وحُفظت الغرفةُ بثلاثةِ قيود:
+     • **الإضافةُ إضافةٌ محضة**: لا يُخرج طرفٌ طرفاً. تفرضه القاعدةُ بـ`hasAll` على
+       `participants` و`shared` معاً — لا الواجهةُ وحدَها.
+     • **التحويلُ والإلغاءُ للمُنشئ كما كانا**: `assignedToUser` و`assignedToName`
+       و`kind` خارجَ ما يمسّه الطرف، وإلا رمى المكلَّفُ عهدتَه على زميلٍ من بابِ
+       «المشاركة» — وهو البابُ نفسُه الذي أُغلق في شاشة التحرير.
+     • **وللمُنشئ إخراجُ مَن أُضيف**: صمّامُ المِلكيّة. بلا زرِّ إخراجٍ يصير فتحُ
+       الإضافة تنازلاً نهائياً عن غرفةٍ فتحها هو، فلا يملك ردَّ اسمٍ لم يخترْه.
+   وكلُّ إضافةٍ وإخراجٍ **يُكتب سطراً في ملاحظات المهمّة** (بـ`arrayUnion` فلا يُمحى)
+   — فلا يجد المُنشئ اسماً جديداً في القائمة لا يعرف مَن أدخله ولا متى.
 
    ── ⚠ حدُّ الخصوصية اليوم — مُعلَنٌ لا مطويّ ──
    قواعدُ Firestore في هذا المستودع تمنح **القراءةَ لكلّ ذي دور** على كلّ مجموعة
@@ -54,7 +69,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3110";
+  var MODULE_BUILD = "v18.9.3112";
 
   function COLL(){
     var dev=false;
@@ -172,9 +187,33 @@
     return _participantsOf(t).indexOf(login) !== -1;
   }
 
-  /* مَن يضيف مشاركاً: مُنشئُ المهمّة أو الأدمن — لا كلُّ مشارك.
-     لو ملكها كلُّ مشارك لأمكن لمن أُضيف أن يُدخل الغرفةَ من شاء، فتُفتح غرفةٌ
-     أنشأها المديرُ مغلقةً على مَن لم يخترْه هو. */
+  /* أطرافُ الوثيقة كما هي: المشتقّةُ ∪ المخزَّنة.
+     الاشتقاقُ المحض (`_participantsOf`) هو مصدرُ الحقيقة عند الإنشاء والتحويل،
+     لكنّ **الكتابةَ الإضافيّة** تحتاج ما في الوثيقة فعلاً: وثيقةٌ قد تحمل طرفاً لا
+     يشتقّه (بقيّةُ تحويلٍ سابق أو مهمّةٌ قديمة)، واشتقاقٌ محضٌ في حزمة الإضافة
+     يُسقطه — فتصير «إضافةُ زميل» **إخراجَ ثالثٍ بصمت**، وترفضها القاعدةُ أصلاً على
+     غير المُنشئ (`hasAll`) فيُقال للمُضيف «تعذّر الحفظ» بلا سبب. */
+  function _docParticipants(t){
+    var out=_participantsOf(t);
+    (Array.isArray(t&&t.participants)?t.participants:[]).forEach(function(u){
+      u=String(u||"").trim();
+      if(u && out.indexOf(u)===-1) out.push(u);
+    });
+    return out;
+  }
+
+  /* مَن يضيف مشاركاً: كلُّ طرفٍ في المهمّة (سلسلةُ المشاركة — انظر الترويسة).
+     والإضافةُ لا تُعيد تركيبَ الغرفة: تبنيها `_sharePatch` وحدَها إضافةً محضة،
+     وتحرسها القاعدةُ بـ`hasAll` — فلا يعتمد الوعدُ على زرٍّ في الواجهة. */
+  function _canShare(t, login, role){
+    if(role==="admin") return true;
+    if(!login) return false;
+    return _docParticipants(t).indexOf(login) !== -1;
+  }
+
+  /* ومَن يملك **تركيبةَ** الغرفة — إخراجَ طرفٍ وتحويلَ التكليف: المُنشئُ وحدَه.
+     والفرقُ بينها وبين `_canShare` هو الفرقُ بين أن تُدخل من تحتاجه لتُتمّ عملاً،
+     وأن تُخرج من أدخله غيرُك أو تنقل عهدةً أصدرها سواك. */
   function _canEditParticipants(t, login, role){
     if(role==="admin") return true;
     return !!login && (t&&t.createdByUser)===login;
@@ -240,6 +279,38 @@
       shared:(t&&t.shared)||[]
     });
     return before.filter(function(u){ return after.indexOf(u)===-1; });
+  }
+
+  /* ── حزمةُ الإضافة: إضافةٌ محضةٌ تُبنى في مكانٍ واحد ──
+     تُرجع `null` عند المنع أو عند اسمٍ فارغ أو عند مشاركٍ أصلاً — فلا تُكتب كتابةٌ
+     لا تغيّر شيئاً، ولا يُسأل المستخدمُ تأكيداً عن فعلٍ لن يقع. */
+  function _sharePatch(t, who, login, role){
+    who=String(who||"").trim();
+    if(!t || !who) return null;
+    if(!_canShare(t, login, role)) return null;
+    var have=_docParticipants(t);
+    if(have.indexOf(who)!==-1) return null;
+    var shared=(Array.isArray(t.shared)?t.shared.slice():[]);
+    shared.push(who);
+    return { shared:shared, participants:have.concat([who]) };
+  }
+
+  /* ── حزمةُ الإخراج: للمُنشئ وحدَه، ولا تطال إلا مَن أُضيف ──
+     المُنشئُ والمكلَّفُ ركنا المهمّة لا «مشاركان»: إخراجُ المكلَّف **تحويلٌ** يمرّ من
+     شاشة التحرير بمصارحةِ `_droppedBy`، لا زرَّ × صامتاً يترك تكليفاً بلا مكلَّف. */
+  function _unsharePatch(t, who, login, role){
+    who=String(who||"").trim();
+    if(!t || !who) return null;
+    if(!_canEditParticipants(t, login, role)) return null;
+    if(who===String((t&&t.createdByUser)||"") || who===String((t&&t.assignedToUser)||"")) return null;
+    var have=_docParticipants(t);
+    if(have.indexOf(who)===-1) return null;
+    return {
+      shared: (Array.isArray(t.shared)?t.shared:[])
+                .map(function(u){ return String(u||"").trim(); })
+                .filter(function(u){ return u && u!==who; }),
+      participants: have.filter(function(u){ return u!==who; })
+    };
   }
 
   /* حالةُ الموعد — أساسُ اللون في البطاقة.
@@ -651,6 +722,13 @@
     if(!txt) return null;
     return { el:el, entry:{ user:_me(), name:_myName(), text:txt, at:new Date().toISOString() } };
   }
+  /* سطرُ نظامٍ في مجرى الملاحظات — دخولُ طرفٍ أو خروجُه.
+     بالصيغة نفسِها التي تفهمها بقيّةُ التعليقات و`_lastActivity` (فيلتهب لونُ «فيها
+     جديد» عند البقيّة كما يلتهب لتعليق — ودخولُ ثالثٍ إلى الغرفة أولى بالانتباه من
+     تعليق)، ويميّزه `sys` في العرض فلا يُقرأ كلاماً كتبه صاحبُه بيده. */
+  function _sysEntry(text){
+    return { user:_me(), name:_myName(), text:String(text||""), at:new Date().toISOString(), sys:true };
+  }
   /* arrayUnion لا كتابةُ المصفوفة كاملة: مشاركٌ آخر قد يكون علّق في الأثناء،
      وكتابةُ نسختي القديمة تمحو تعليقَه. */
   function _cmtUnion(entry){
@@ -672,22 +750,36 @@
     _update(id, { comments:u }).catch(function(){});
   }
 
-  /* إضافةُ مشارك — يملكها المُنشئ وحدَه، وتُصاحبها مصارحةٌ صريحة.
-     المُضافُ سيقرأ المحادثةَ من أوّلها، فيُنبَّه المُنشئ قبل الفعل لا بعدَه. */
+  /* إضافةُ مشارك — يملكها كلُّ طرف، وتُصاحبها مصارحةٌ صريحة.
+     المُضافُ سيقرأ المحادثةَ من أوّلها، فيُنبَّه المُضيفُ قبل الفعل لا بعدَه. */
   function shareTask(id){
     var t=byId(id); if(!t) return;
-    if(!_canEditParticipants(t,_me(),_myRole())){ _t("إضافةُ مشاركٍ لمُنشئ المهمّة","warn"); return; }
     var sel=document.getElementById("st-share-"+id);
     if(!sel) return;
     var who=String(sel.value||"");
     if(!who){ _t("اختر موظفاً","warn"); return; }
-    if(_participantsOf(t).indexOf(who)!==-1){ _t("مشاركٌ أصلاً","warn"); return; }
+    if(!_canShare(t,_me(),_myRole())){ _t("إضافةُ مشاركٍ لأطراف المهمّة","warn"); return; }
+    var patch=_sharePatch(t, who, _me(), _myRole());
+    if(!patch){ _t("مشاركٌ أصلاً","warn"); return; }
     if(!window.confirm("سيطّلع "+_nameOf(who)+" على كامل تفاصيل المهمّة والمحادثة السابقة.\n\nمتابعة؟")) return;
-    var shared=(Array.isArray(t.shared)?t.shared.slice():[]);
-    shared.push(who);
-    var next=Object.assign({}, t, { shared:shared });
-    _update(id, { shared:shared, participants:_participantsOf(next) }, "أُضيف "+_nameOf(who));
+    var u=_cmtUnion(_sysEntry("أضاف "+_nameOf(who)+" إلى المهمّة."));
+    if(u) patch.comments=u;
+    _update(id, patch, "أُضيف "+_nameOf(who));
     try{ logAudit("staff_task_shared", (t.title||id)+" → "+_nameOf(who)); }catch(e){}
+  }
+
+  /* إخراجُ مَن أُضيف — صمّامُ المُنشئ في مقابل فتحِ الإضافة لكلّ طرف.
+     ولا يُخفى: يُكتب سطرُه في الملاحظات كما تُكتب الإضافة، فيعرف مَن أضافه أنّه
+     أُخرج ولا يبحث عن اسمٍ اختفى من القائمة بلا خبر. */
+  function unshareTask(id, who){
+    var t=byId(id); if(!t) return;
+    var patch=_unsharePatch(t, who, _me(), _myRole());
+    if(!patch){ _t("الإخراجُ لمُنشئ المهمّة، ولا يطال مُنشئَها ولا المكلَّفَ بها","warn"); return; }
+    if(!window.confirm("إخراجُ "+_nameOf(who)+" من المهمّة — لن يراها ولا محادثتَها بعد الآن.\n\nمتابعة؟")) return;
+    var u=_cmtUnion(_sysEntry("أخرج "+_nameOf(who)+" من المهمّة."));
+    if(u) patch.comments=u;
+    _update(id, patch, "أُخرج "+_nameOf(who));
+    try{ logAudit("staff_task_unshared", (t.title||id)+" ⇐ "+_nameOf(who)); }catch(e){}
   }
 
   /* ════════ التحرير ════════ */
@@ -942,6 +1034,11 @@
       '#page-staff-tasks .st-who span{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;'+
         'padding:4px 10px;border-radius:20px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)}'+
       '#page-staff-tasks .st-who span .ic svg{width:12px;height:12px}'+
+      '#page-staff-tasks .st-who-x{background:none;border:0;padding:0;margin-inline-start:3px;'+
+        'cursor:pointer;color:var(--muted);display:inline-flex;opacity:.6}'+
+      '#page-staff-tasks .st-who-x:hover{opacity:1;color:var(--danger)}'+
+      '#page-staff-tasks .st-note.sys{background:transparent;border:1px dashed var(--border)}'+
+      '#page-staff-tasks .st-note.sys .txt{font-size:12px;color:var(--muted)}'+
       '#page-staff-tasks .st-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;'+
         'padding-top:14px;border-top:1px solid var(--border)}'+
       '#page-staff-tasks .st-spin{width:22px;height:22px;border:3px solid var(--border);'+
@@ -1062,7 +1159,7 @@
     var h=/^sh-([\s\S]*)$/.exec(key);
     if(h){
       var t=byId(h[1]); if(!t) return [];
-      var p=_participantsOf(t);
+      var p=_docParticipants(t);
       return _users().filter(function(u){ return p.indexOf(u.user)===-1; });
     }
     return _users();
@@ -1339,14 +1436,22 @@
     var me=_me(), today=_todayISO();
     var mine   = t.assignedToUser===me;
     var owner  = t.createdByUser===me;
-    var canShare=_canEditParticipants(t,me,_myRole());
-    var parts=_participantsOf(t).map(function(u){
-      return '<span>'+_icn(u===t.createdByUser?"pin":"user")+_e(_nameOf(u))+(u===t.createdByUser?" · المُنشئ":"")+'</span>';
+    var canShare=_canShare(t,me,_myRole());
+    var canOut  =_canEditParticipants(t,me,_myRole());
+    var parts=_docParticipants(t).map(function(u){
+      var own=(u===t.createdByUser), asg=(u===t.assignedToUser);
+      return '<span>'+_icn(own?"pin":"user")+_e(_nameOf(u))+(own?" · المُنشئ":"")+
+        (canOut && !own && !asg
+          ? '<button type="button" class="st-who-x" title="إخراجٌ من المهمّة"'+
+            ' aria-label="إخراج '+_e(_nameOf(u))+' من المهمّة"'+
+            ' onclick="staffTasks.unshareTask(\''+_q(t.id)+'\',\''+_q(u)+'\')">'+
+            _icn("xCircle","ic-sm")+'</button>'
+          : "")+'</span>';
     }).join("");
     var cmts=(Array.isArray(t.comments)?t.comments:[]).slice().sort(function(a,b){
       return String(a.at||"")<String(b.at||"") ? -1 : 1;
     }).map(function(c){
-      return '<div class="st-note"><div class="who">'+_e(c.name||c.user)+' · '+
+      return '<div class="st-note'+(c&&c.sys?" sys":"")+'"><div class="who">'+_e(c.name||c.user)+' · '+
              _e(String(c.at||"").slice(0,16).replace("T"," "))+'</div>'+
              '<div class="txt">'+_e(c.text)+'</div></div>';
     }).join("") || '<div class="st-hint">لا ملاحظاتٍ بعد.</div>';
@@ -1419,7 +1524,8 @@
     tab:tab, open:open, back:back, byId:byId,
     markDone:markDone, reopen:reopen, returnTask:returnTask, acceptBack:acceptBack,
     startEdit:startEdit, cancelEdit:cancelEdit, saveEdit:saveEdit,
-    addComment:addComment, cmtKey:cmtKey, shareTask:shareTask, removeTask:removeTask,
+    addComment:addComment, cmtKey:cmtKey, shareTask:shareTask, unshareTask:unshareTask,
+    removeTask:removeTask,
     draftPick:draftPick, draftAdd:draftAdd, draftKey:draftKey, draftPaste:draftPaste, draftDrop:draftDrop,
     upickOpen:upickOpen, upickInput:upickInput, upickKey:upickKey, upickBlur:upickBlur,
     upickChoose:upickChoose, upickClear:upickClear,
@@ -1430,7 +1536,9 @@
     _normAr:_normAr, _userMatches:_userMatches,
     _msVal:_msVal, _lastActivity:_lastActivity, _seenMs:_seenMs, _isUnread:_isUnread,
     _unreadLabel:_unreadLabel,
-    _canEditParticipants:_canEditParticipants, _dueState:_dueState, _isOverdue:_isOverdue,
+    _canEditParticipants:_canEditParticipants, _canShare:_canShare,
+    _docParticipants:_docParticipants, _sharePatch:_sharePatch, _unsharePatch:_unsharePatch,
+    _dueState:_dueState, _isOverdue:_isOverdue,
     _canEdit:_canEdit, _canReassign:_canReassign, _editPatch:_editPatch, _droppedBy:_droppedBy,
     _splitTabs:_splitTabs, _countOpen:_countOpen, _sortTasks:_sortTasks,
     build:MODULE_BUILD
