@@ -34291,6 +34291,33 @@ function ppmShouldAdvance(plan, ticketList, todayMs){
 }
 function ppmTodayMs(){ const n=new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime(); }
 
+/* ═══ البلاغُ يُولَّد يومَ الموعد لا قبله بثلاثة (بلاغ المالك 09/09) ═══
+   نافذةُ التوليد المبكّر (`soon = today + 3`) كانت قراراً قائماً منذ البداية:
+   إشعارٌ مبكّرٌ للفنيّ. وقد أُبقيت في v18.9.2991 و v18.9.2993 صراحةً لأنّ
+   تعديلَها **قرارُ المالك**. وقد قرّره: خطةٌ استحقاقُها ١٢ سبتمبر ظهر بلاغُها
+   يوم ٩ — وهذا ليس إشعاراً بل **عملاً في غير وقته**. فالبلاغُ المفتوح أمرُ
+   تنفيذٍ لا تذكير: يدخل قائمةَ الفنيّ ولوحةَ العمليات وعدّادَ المفتوح، ويقيس
+   زمنُ الاستجابة من لحظة إنشائه، فيبدو متأخّراً ثلاثةَ أيامٍ قبل أن يحلّ موعدُه.
+   والاستحقاقُ نفسُه لم يكن يضيع (`scheduledFor` يحمله، والجدولُ يتقدّم ببلوغ
+   الموعد) — العيبُ أنّ **الأمرَ يسبق التزامَه**.
+   القرار: `PPM_GEN_LEAD_DAYS = 0` — التوليدُ حين يحلّ الموعدُ أو يمضي. مِقدارٌ
+   **مسمّىً واحدٌ** لا رقمٌ مبثوثٌ في الشرط، فإن أراد المالكُ إشعاراً مبكّراً
+   يوماً ما فموضعُه سطرٌ واحد. والقرارُ **لا يمسّ الاعتمادَ اليدويّ**
+   (`confirmPPMTicket`): نقرةٌ صريحةٌ من صاحب صلاحيةٍ تُقدّم البلاغَ متى شاء —
+   المنعُ منعُ توليدٍ آليٍّ مبكّر، لا حجرٌ على قرار إنسان.
+   وحدُّه دالّةٌ نقيّةٌ تُنفَّذ في `hail-tests` بلا متصفّح. */
+const PPM_GEN_LEAD_DAYS = 0;
+function ppmShouldGenerate(plan, todayMs){
+  if(!plan || plan.disabled || !plan.nextDueDate) return false;
+  const d = new Date(plan.nextDueDate);
+  if(!isFinite(+d)) return false;
+  const dueMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  // بلا مُعدِّلات Date (درس v18.9vt) — البناءُ بالمُنشئ وحدَه
+  const t = new Date(todayMs);
+  const limitMs = new Date(t.getFullYear(), t.getMonth(), t.getDate() + PPM_GEN_LEAD_DAYS).getTime();
+  return dueMs <= limitMs;
+}
+
 /* تقديمُ خطةٍ واحدة — الموضعُ الوحيد الذي يكتب `nextDueDate` بعد الإنشاء. */
 function ppmAdvancePlan(planId){
   const i = ppmPlans.findIndex(x=>x.id===planId); if(i<0) return null;
@@ -34974,9 +35001,10 @@ async function autoCreatePPMTicket(plan){
     `${newId} — ${plan.name} — ${plan.building}${asset?' — '+asset.name:''}`,
     newId,"ppm"
   );
-  // ★ التوليدُ يسجّل لحظتَه ولا يلمس الجدول: البلاغُ يُنشأ قبل الموعد بثلاثة أيام،
-  //   وتقديمُ `nextDueDate` هنا كان يمحو موعداً لم يُنفَّذ بعد. التقديمُ كنسةٌ
-  //   مستقلّةٌ في `checkPPMDue` تقع يوم الموعد نفسِه (ppmShouldAdvance).
+  // ★ التوليدُ يسجّل لحظتَه ولا يلمس الجدول. التقديمُ كنسةٌ مستقلّةٌ في
+  //   `checkPPMDue` تقع يوم الموعد نفسِه (ppmShouldAdvance) — والفصلُ باقٍ
+  //   بعد إلغاء النافذة المبكّرة: بلاغاتُ النسخ السابقة والاعتمادُ اليدويُّ
+  //   المبكّر يسبقان موعدَهما، وتقديمُ الجدول عندهما يمحو موعداً لم يُنفَّذ.
   const planIdx=ppmPlans.findIndex(x=>x.id===plan.id);
   if(planIdx>=0){
     ppmPlans[planIdx].lastGeneratedAt=now;
@@ -35015,8 +35043,7 @@ function checkPPMDue(){
   const now = Date.now();
   if(_ppmCheckInProgress || (now - _ppmCheckLastRun) < 30000) return;
   _ppmCheckLastRun = now;
-  const today=new Date(); today.setHours(0,0,0,0);
-  const soon=new Date(today); soon.setDate(soon.getDate()+3);
+  const _todayMs = ppmTodayMs();
 
   // ★ التوليدُ لصاحب الصلاحية وحدَه؛ والرسمُ للجميع. المراقبُ والفنيُّ والزائر
   //   يرون الخطط ولا يكتبون بلاغاً باسمهم — ولذا الخروجُ من فرع الإنشاء لا من
@@ -35024,9 +35051,8 @@ function checkPPMDue(){
   const toCreate=[];
   if(ppmCanAutoGenerate()) ppmPlans.forEach(p=>{
     if(p.disabled) return;
-    const due=new Date(p.nextDueDate); due.setHours(0,0,0,0);
-    // إنشاء تلقائي: مستحقة اليوم أو متأخرة أو خلال 3 أيام
-    if(due<=soon){
+    // إنشاء تلقائي: مستحقة اليوم أو متأخرة — لا قبل الموعد (PPM_GEN_LEAD_DAYS)
+    if(ppmShouldGenerate(p, _todayMs)){
       // تحقق 1: هل يوجد بلاغ مفتوح لهذه الخطة بالفعل؟
       const openExisting = tickets.find(t=>t.ppmId===p.id && t.status!=="مغلق");
       if(openExisting) return;
@@ -35058,8 +35084,9 @@ function checkPPMDue(){
       }
       /* ★ كنسةُ التقديم — **بعد** التوليد لا قبله: خطةٌ مستحقّةٌ اليوم يُولَّد
          بلاغُها في الحلقة أعلاه، ثم تتقدّم في الكنسة نفسِها. والقراءةُ من
-         `tickets` الحيّة فيدخل البلاغُ الذي وُلِّد قبل ثلاثة أيام كذلك — وهو
-         الحالةُ التي من أجلها فُصلت الكنسةُ عن التوليد أصلاً. */
+         `tickets` الحيّة **تبقى ضرورية** بعد إلغاء النافذة المبكّرة: بلاغاتٌ
+         وُلِّدت قبل الموعد في النسخ السابقة ما زالت قائمةً في القاعدة، وكنسةُ
+         يومِ موعدها هي ما يُقدّم خططَها. وكذلك بلاغُ الاعتماد اليدويّ المبكّر. */
       const t0 = ppmTodayMs();
       ppmPlans.filter(p => ppmShouldAdvance(p, tickets, t0))
               .forEach(p => ppmAdvancePlan(p.id));
