@@ -517,6 +517,74 @@ check('★★★ وتظهر على الشاشة بلا إعادة تحميل (ج
 await page.evaluate(() => { staffTasks.back(); staffTasks.tab('mine'); });
 await page.waitForTimeout(400);
 
+/* ═════════ ٥-و) «تمّ الإنجاز» يحمل الملاحظةَ معه ═════════
+   طلبُ المالك (09/09): «زر تم الإنجاز يعمل عمل زر الإرسال للملاحظات». وآخرُ ما
+   يُكتب قبل الإغلاق هو خلاصةُ العمل، وكان يضيع صامتاً حين يُعاد رسمُ الشاشة. */
+L('\n=== ٥-و) «تمّ الإنجاز» يحمل الملاحظة ===');
+const doneWith = await page.evaluate(async () => {
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  window.__store['staff_tasks/DN1'] = {
+    title: 'مهمّةٌ تُنجَز بخلاصة', status: 'open', kind: 'task',
+    createdByUser: 'admin', createdAt: Date.now() - 5000,
+    assignedToUser: 'khaled', assignedToName: 'خالد',
+    participants: ['admin', 'khaled'], shared: [], comments: []
+  };
+  currentUser = { user: 'khaled', name: 'خالد', role: 'مشرف' };
+  staffTasks.stopSync(); staffTasks.startSync();
+  await wait(800);
+  staffTasks.open('DN1');
+  await wait(400);
+  const el = document.getElementById('st-cmt-DN1');
+  if (!el) return { drawn: false };
+  el.value = 'رُكِّب المحرّك، ناقصٌ فلتر';
+  /* بنقرٍ حقيقيٍّ على الزرّ لا بنداءٍ برمجيّ */
+  const btn = [...document.querySelectorAll('#page-staff-tasks .btn')].find(b => /تمّ الإنجاز/.test(b.textContent));
+  if (!btn) return { drawn: true, btn: false };
+  btn.click();
+  await wait(1400);
+  const d = window.__store['staff_tasks/DN1'];
+  const fld = document.getElementById('st-cmt-DN1');
+  return { drawn: true, btn: true, status: d.status,
+           comments: (d.comments || []).map(c => c.text),
+           by: (d.comments || []).map(c => c.user),
+           cleared: fld ? fld.value : '(الحقلُ غاب)',
+           ui: [...document.querySelectorAll('#page-staff-tasks .st-note')].map(n => n.textContent) };
+});
+check('زرُّ «تمّ الإنجاز» مرسومٌ في التفصيل', doneWith.drawn === true && doneWith.btn === true, JSON.stringify(doneWith));
+check('★★★ ما في حقل الملاحظة يُحفَظ مع الإنجاز (كان يضيع صامتاً)',
+  doneWith.comments && doneWith.comments.join('') === 'رُكِّب المحرّك، ناقصٌ فلتر', JSON.stringify(doneWith.comments));
+check('★★★ والمهمّةُ أُنجزت في الكتابة نفسِها (لا تُغلق بلا خلاصتها ولا خلاصةَ بلا إغلاق)',
+  doneWith.status === 'done', String(doneWith.status));
+check('★★ والملاحظةُ منسوبةٌ لمن كتبها لا لمن أنشأ المهمّة',
+  doneWith.by && doneWith.by.join('') === 'khaled', JSON.stringify(doneWith.by));
+check('★ وتظهر في قائمة الملاحظات بعد الإنجاز', doneWith.ui && doneWith.ui.length === 1, JSON.stringify(doneWith.ui));
+
+/* وحقلٌ فارغ: إنجازٌ بلا ملاحظةٍ فارغةٍ تُقحَم */
+const doneEmpty = await page.evaluate(async () => {
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  window.__store['staff_tasks/DN2'] = {
+    title: 'مهمّةٌ بلا خلاصة', status: 'open', kind: 'task',
+    createdByUser: 'admin', createdAt: Date.now() - 4000,
+    assignedToUser: 'khaled', assignedToName: 'خالد',
+    participants: ['admin', 'khaled'], shared: [], comments: []
+  };
+  staffTasks.back(); staffTasks.stopSync(); staffTasks.startSync();
+  await wait(800);
+  staffTasks.open('DN2');
+  await wait(400);
+  const el = document.getElementById('st-cmt-DN2');
+  if (el) el.value = '   ';                 // مسافاتٌ وحدَها
+  const btn = [...document.querySelectorAll('#page-staff-tasks .btn')].find(b => /تمّ الإنجاز/.test(b.textContent));
+  btn.click();
+  await wait(1200);
+  const d = window.__store['staff_tasks/DN2'];
+  return { status: d.status, comments: (d.comments || []).length };
+});
+check('★★ وإنجازٌ بحقلٍ فارغٍ (أو مسافاتٍ) لا يُقحم ملاحظةً بلا نصّ',
+  doneEmpty.status === 'done' && doneEmpty.comments === 0, JSON.stringify(doneEmpty));
+await page.evaluate(() => { staffTasks.back(); staffTasks.tab('mine'); });
+await page.waitForTimeout(400);
+
 /* ═════════ ٥-د) لونُ «فيها جديد» — ما يُقاس هنا وحدَه ═════════
    طلبُ المالك (08/09): «أحتاج إذا تم أي تحديث يظهر بلون مختلف للمهمّة».
    و`hail-tests` تُثبت المنطقَ نقيّاً ولا تُثبت **أنّ اللونَ يصل الشاشة ثم ينطفئ
