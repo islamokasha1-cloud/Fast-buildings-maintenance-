@@ -230,6 +230,23 @@ check('★ دخول المشتريات المركزية حمّل الطلبات 
 check('شاشة المشاريع أُغلقت', gp.screenGone === true);
 await page.screenshot({ path: `${SHOTS}/03-central-purchases.png` });
 
+/* ═════════ ٤ب) المخزونُ مؤجَّلٌ — ومَن يحتاجه ينتظره لا يفترضه (v18.9.3110) ═════════
+   ٦٠٠ مستندٍ لم تعد تُنزَّل عند الدخول. والخطرُ كلُّه في قارئٍ **خارج شاشات المخزون**
+   يقرأ مصفوفةً فارغةً ويصمت: `checkInventoryBeforePurchase` يرجع `null` فيُطلَب شراءُ
+   صنفٍ في المستودع **بلا تحذير** — ولا شاشةَ تكذب ولا خطأَ يظهر. فيُقاس هنا **قبل**
+   تصفّحِ الصفحات، إذ يُركّب التصفّحُ المستمعَ فيُخفي العطل. ═══════════════════════ */
+CURRENT = 'inventory-defer';
+const defer = await page.evaluate(async () => {
+  const before = { unsub: !!_invUnsub, items: _inventoryItems.length };
+  const res = await checkInventoryBeforePurchase([{ itemName: 'كابل نحاس 2.5', qty: 3, unit: 'متر' }]);
+  return { before, hit: res && res.length === 1 ? res[0].inStock : null, after: _inventoryItems.length };
+});
+check('٤ب-١) ★★ لا مستمعَ مخزونٍ عند الدخول (٦٠٠ مستندٍ لم تُنزَّل)',
+  defer.before.unsub === false && defer.before.items === 0,
+  `مستمع=${defer.before.unsub} أصناف=${defer.before.items}`);
+check('٤ب-٢) ★★★ ومع ذلك يُحذّر فحصُ الرصيد قبل الشراء (انتظر البيانات ولم يفترضها)',
+  defer.hit === 120, `الرصيدُ المُبلَّغ=${defer.hit} أصنافٌ بعدها=${defer.after}`);
+
 /* ═════════ ٥) تصفّح كلّ صفحة بالنقر الفعلي ═════════ */
 L('\n=== ٥) تصفّح الصفحات (نقرٌ فعليٌّ على القائمة) ===');
 const navItems = await page.evaluate(() => {
