@@ -14796,8 +14796,28 @@ function syncWindowFilterGuards() {
   /* الإصلاحُ الذاتي كان يمسح `tickets` وحدَها — وهي بعد الترشيح بلا مؤرشفٍ أصلاً. */
   T("★★ مسحُ «مؤرشفٍ نشط» صار على `allTickets()` لا `tickets` وحدَها",
     /_healScope=\(typeof allTickets==="function"\)\s*\?\s*allTickets\(\)\s*:\s*tickets/.test(HTML));
-  T("★ وما ليس في `tickets` يُكتب مباشرةً (`saveData` يصمت إن لم يجده)",
-    /!_inMain\.has\(t\.id\)[\s\S]{0,220}?\{archived:false,archivedAt:null,archiveMonth:null\},\{merge:true\}/.test(HTML));
+  /* ══ كتاباتُ الأرشفة لا تمرّ بـ`saveData` — الجذرُ المقيس في 09/09 ══
+     `saveData(id)` تبحث عن البلاغ في `tickets` **وقتَ النداء** وتصمت إن لم تجده.
+     والمستمعُ مُرشَّحٌ على `archived==false`: فأوّلُ كتابةِ أرشفةٍ تُخرج مستندَها من
+     نطاقه، واللقطةُ التاليةُ تستبدل `tickets` كاملاً — فتصمت `saveData` عن بقيّة
+     الدفعة. يُؤرشف بعضُها ويبقى الباقي فيُعاد المحاولةُ **في كلّ دخول أبداً**: قِيس
+     ‏200 كتابةً في الدخول الواحد و349 في العودة، ولا تهدأ. وكلُّ كتابةٍ تُبَثّ لكلّ
+     مستمعٍ حيٍّ فتصير قراءةً مُحاسَبةً لكلّ مستخدم. الحارسُ يمنع عودةَ الاعتماد على
+     مصفوفةٍ تتبدّل تحت الحلقة. */
+  const _AABM = (HTML.match(/async function autoArchiveByMonth\(\)\{[\s\S]*?\n\}/) || [""])[0];
+  T("★★ جسمُ `autoArchiveByMonth` لا يستدعي `saveData` إطلاقاً (وإلا عادت الكتاباتُ الصامتة)",
+    _AABM.length > 400 && !/saveData\(/.test(_AABM));
+  T("★★ وكلُّ كتابةٍ مُرقِّعٌ صريحٌ بالمعرّف من الكائن الذي بيدنا (لا بحثٌ في `tickets`)",
+    /const _patch=\(id,data\)=>\{[\s\S]{0,200}?db\.collection\(COLLECTION\(\)\)\.doc\(id\)\.set\(data,\{merge:true\}\)/.test(_AABM));
+  T("★ الإصلاحُ الذاتيُّ يُكتب لكلّ مُعالَجٍ لا لمن هو خارج `tickets` وحدَه",
+    /_patch\(t\.id,\{archived:false,archivedAt:null,archiveMonth:null\}\)/.test(_AABM) &&
+    !/_inMain/.test(_AABM));
+  T("★★ وحقولُ الأرشفة وحدَها تُكتب لا المستندُ كلُّه (لا دهسَ لحقلٍ حدّثه غيرُها)",
+    /_archivedNow\.forEach\(t=>_patch\(t\.id,\{archived:true,archivedAt:t\.archivedAt,archiveMonth:t\.archiveMonth\}\)\)/.test(_AABM));
+  /* `writeRollupForMonth` تستعلم عن الشهر **من الخادم**: حسابُه قبل وصول الأرشفة
+     يكتب ملخّصاً ناقصاً — قِيس «كُتب ملخّص 2026-08: 1 بلاغ» بعد أرشفة مئةٍ وخمسين. */
+  T("★★ والملخّصُ الشهريُّ لا يُحسَب إلا بعد ثبوت الكتابات",
+    /if\(_writes\.length\) await Promise\.all\(_writes\);[\s\S]{0,200}?writeRollupForMonth\(ym\)/.test(_AABM));
 
   /* التحذيرُ لا ينصح بالأرشفة إلا والنافذةُ مُرشَّحة — وإلا أرسل المالكَ لعملٍ عقيم. */
   T("★★ نصُّ التحذير يتبع وضعَ المستمع لا يَعِد بما لا يقع",
