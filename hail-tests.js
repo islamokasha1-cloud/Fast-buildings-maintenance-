@@ -707,7 +707,14 @@ function predelivery() {
        لها عند خمسةِ قرّاءٍ كانوا يتّكئون على تركيب الإقلاع — **وأكثرُه تعليقٌ يقول
        أيَّ قارئٍ ينكسر بصمتٍ لو حُذف التركيبُ بلا بديل**. إصلاحٌ في موضعه على منطقٍ
        قائم (`startInventorySync` و`showPage` وفحصُ الرصيد تُقرأ معاً). */
-    const IDX_CEILING = 39819;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* ثم رُفع من 39819 إلى 39868 — ‏٤٩ سطراً لمفتاح «طلبات سداد الموارد البشرية»
+       (`permissions.hrPayments`، طلبُ المالك): مدخلٌ في `_PERM_LABELS`، ودالّةُ
+       أهليّةٍ واحدةٌ تقرأ الأدوارَ من الوحدة نفسِها (`_hrpEligible`)، وفرعٌ في
+       `_permKeysForUser`، وخانةٌ وشرحُها في نافذة الصلاحيات. **تعديلٌ في موضعه على
+       منطقٍ قائم**: نظامُ المفاتيح كلُّه هنا (`_permOn`/`_permIsGrant`/نافذةُ
+       التعديل)، وشطرُ مفتاحٍ واحدٍ إلى ملفٍّ يجعل الصلاحياتِ مصدرَين. وأكثرُ
+       الزيادة تعليقٌ يقول لِمَ حاجبٌ لا مانحٌ ولِمَ لا يُعرض لغير المؤهَّل. */
+    const IDX_CEILING = 39868;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -8606,15 +8613,45 @@ function hrPaymentsTests() {
     HR._iban("SA" + "1".repeat(22)).ok && HR._iban("").ok &&
     !HR._iban("SA123").ok && !HR._iban("XX" + "1".repeat(22)).ok);
 
-  // (١٠) الصلاحيات — الأدوار المعنية وحدها
+  /* (١٠) الصلاحيات — الأدوارُ المعنية وحدها، **ومفتاحٌ حاجبٌ فوقها** (طلبُ المالك):
+     الدورُ كان يفتح الوحدةَ وحدَه، فحسابُ موارد بشريةٍ جديدٌ يرى كلَّ طلبات السداد
+     لحظةَ إنشائه بلا قرارٍ من أحد. والحارسُ **يُنفّذ الدوالَّ على مستخدمين حقيقيين**
+     لا يقرأ سطورَها — فحدُّ صلاحيةٍ لا يُحكم عليه بقراءة نصِّه. */
+  const as = (u) => { sandbox.currentUser = u; };
   T("★ العرض مقصور على الأدوار المعنية (لا المستودع ولا المشتريات ولا الزائر)",
-    /canCreate\(\)\s*\|\|\s*canHRM\(\)\s*\|\|\s*canPM\(\)\s*\|\|\s*canCEO\(\)\s*\|\|\s*canFinance\(\)/.test(src) &&
+    ["hr_officer","hr_manager","project_manager","ceo","finance","admin"]
+      .every(r => { as({ role:r }); return HR.canView() === true; }) &&
+    ["warehouse_manager","procurement_officer","viewer","observer","مشرف","supervisor"]
+      .every(r => { as({ role:r }); return HR.canView() === false; }) &&
     !/warehouse_manager|procurement_officer/.test(src));
+  T("★★ hrp: مفتاحُ «طلبات سداد الموارد البشرية» **حاجبٌ** — الافتراضُ مسموحٌ وإلغاؤه يحجب",
+    (() => { as({ role:"hr_officer" });                                  const old   = HR.canView() === true;
+             as({ role:"hr_officer", permissions:{} });                  const blank = HR.canView() === true;
+             as({ role:"hr_officer", permissions:{ hrPayments:true } });  const yes   = HR.canView() === true;
+             as({ role:"hr_officer", permissions:{ hrPayments:false } }); const no    = HR.canView() === false;
+             return old && blank && yes && no; })());
+  T("★★ hrp: وحاجبٌ **لا مانح** — الدورُ شرطٌ سابق، فالتأشيرُ لا يفتح لغير المؤهَّل",
+    ["مشرف","supervisor","warehouse_manager","procurement_officer","viewer","observer"]
+      .every(r => { as({ role:r, permissions:{ hrPayments:true } }); return HR.canView() === false; }));
+  T("★ hrp: والأدمنُ يتجاوزه كما في كل مفاتيح النواة",
+    (() => { as({ role:"admin", permissions:{ hrPayments:false } }); return HR.canView() === true; })());
+  T("★★ hrp: وحجبُ الاطّلاع يُسقط الكتابةَ معه (لا إنشاءَ من خلف شاشةٍ مقفلة)",
+    (() => { as({ role:"hr_officer", permissions:{ hrPayments:false } }); const off = HR.canCreate() === false;
+             as({ role:"hr_officer", permissions:{ hrPayments:true  } }); const on  = HR.canCreate() === true;
+             return off && on; })());
+  T("★★ hrp: قائمةُ الأدوار المؤهَّلة مكشوفةٌ **مصدراً واحداً** تقرؤه نافذةُ صلاحيات النواة",
+    Array.isArray(HR.viewRoles) && typeof HR.roleEligible === "function" &&
+    HR.roleEligible("hr_officer") === true && HR.roleEligible("مشرف") === false &&
+    /function _hrpEligible\(u\)\{[\s\S]*?window\.hrPayments\.roleEligible/.test(HTML),
+    (HR.viewRoles || []).join(","));
   T("الإنشاء لمسؤول الموارد البشرية والمسؤول فقط",
-    /function canCreate\(\)\s*\{\s*return _role\(\)==="hr_officer" \|\| _isAdmin\(\); \}/.test(src));
+    ["hr_officer","admin"].every(r => { as({ role:r }); return HR.canCreate() === true; }) &&
+    ["hr_manager","project_manager","ceo","finance","مشرف"]
+      .every(r => { as({ role:r }); return HR.canCreate() === false; }));
   T("★ اعتماد البوّابة الأولى لمدير الموارد البشرية والمسؤول فقط",
-    /function canHRM\(\)\s*\{\s*return _role\(\)==="hr_manager" \|\| _isAdmin\(\); \}/.test(src) &&
+    /function canHRM\(\)\{\s*return canView\(\) && \(_role\(\)==="hr_manager"\s*\|\| _isAdmin\(\)\); \}/.test(src) &&
     /if\(r\.status==="hrp_pending_hrm" && canHRM\(\)\)/.test(src));
+  as(undefined);   // لا تُسرَّب هويةٌ إلى ما بعدها من فحوص
   T("تسجيل السداد يفرض إيصالاً إلزامياً", /إيصال التحويل إلزامي/.test(src));
   T("كل كتابة تمرّ بمعاملة على الوثيقة الطازجة", /runTransaction/.test(src));
 
@@ -10437,6 +10474,7 @@ function hrPurchaseRequestGuards() {
     dual:   grab(/const _PERM_DUAL_KEYS = \{[^}]*\};/),
     elig:   grab(/function _permRoleEligible\(k, u\)\{[\s\S]*?\n\}/),
     isGr:   grab(/function _permIsGrant\(k, u\)\{[\s\S]*?\n\}/),
+    hrpEl:  grab(/function _hrpEligible\(u\)\{[\s\S]*?\n\}/),
     on:     grab(/function _permOn\(perms, k, u\)\{[\s\S]*?\n\}/),
     pages:  grab(/const _HRO_PO_PAGES   = \[[^\]]*\];/),
     okPgs:  grab(/const _HRO_PO_GRANTED = \[[^\]]*\];/),
@@ -10454,7 +10492,7 @@ function hrPurchaseRequestGuards() {
   if (absent.length) return;
 
   const SRC = [parts.map, parts.labels, "const _PERM_KEYS = Object.keys(_PERM_LABELS);",
-    parts.grant, parts.dual, parts.elig, parts.isGr, parts.on, parts.pages, parts.okPgs,
+    parts.grant, parts.dual, parts.elig, parts.isGr, parts.hrpEl, parts.on, parts.pages, parts.okPgs,
     parts.gRole, parts.keys, parts.blocked, parts.own, parts.mine, parts.names, parts.isHR,
     parts.vis].join("\n");
   /* `window` يُحقن حقناً: المفتاحُ المزدوجُ يقرأ أدوارَه من وحدة التعاقدات، فالحارسُ
@@ -10462,7 +10500,11 @@ function hrPurchaseRequestGuards() {
   const CTR_ROLES = ((CTR_PATH && (fs.readFileSync(CTR_PATH,"utf8")
     .match(/var VIEW_ROLES\s*=\s*\[([^\]]*)\]/) || [])[1]) || "")
     .split(",").map(s=>s.trim().replace(/^"|"$/g,"")).filter(Boolean);
-  const WIN = { contracts:{ viewRoles:CTR_ROLES, roleEligible:r=>CTR_ROLES.indexOf(r)!==-1 } };
+  const HRP_ROLES = ((HRP_PATH && (fs.readFileSync(HRP_PATH,"utf8")
+    .match(/var VIEW_ROLES\s*=\s*\[([^\]]*)\]/) || [])[1]) || "")
+    .split(",").map(s=>s.trim().replace(/^"|"$/g,"")).filter(Boolean);
+  const WIN = { contracts:{ viewRoles:CTR_ROLES, roleEligible:r=>CTR_ROLES.indexOf(r)!==-1 },
+                hrPayments:{ viewRoles:HRP_ROLES, roleEligible:r=>HRP_ROLES.indexOf(r)!==-1 } };
   const mk = (currentUser, purchases, users) =>
     new Function("currentUser", "purchases", "USERS", "window",
       SRC + "\nreturn {blocked:_blockedPagesForUser,keys:_permKeysForUser,on:_permOn,grant:_permIsGrant,vis:_poVisibleList};")
@@ -10476,15 +10518,19 @@ function hrPurchaseRequestGuards() {
   const B = u => [...mk(u).blocked()];
 
   // ── (١) ★ البلاغ نفسُه: الخاناتُ المعروضةُ هي العاملةُ وحدَها ──
-  T("★★ hrpo: نافذةُ الموارد البشرية لا تعرض إلا «طلب شراء» (لا خانةَ بلا أثر)",
-    JSON.stringify(mk(hrNo).keys(hrNo)) === JSON.stringify(["poRequest"]),
+  T("★★ hrpo: نافذةُ الموارد البشرية تعرض «طلب شراء» و«سداد الموارد البشرية» فقط (لا خانةَ بلا أثر)",
+    JSON.stringify(mk(hrNo).keys(hrNo)) === JSON.stringify(["poRequest","hrPayments"]),
     JSON.stringify(mk(hrNo).keys(hrNo)));
-  T("★ hrpo: أدوارُ الوضع المركزيّ الأخرى بلا خاناتٍ (صفحاتُها يحكمها دورُها)",
-    ["finance","warehouse_manager","procurement_officer"].every(r =>
+  T("★ hrpo: والمستودعُ والمشترياتُ بلا خاناتٍ (صفحاتُها يحكمها دورُها، ولا وحدةَ موارد بشرية لهما)",
+    ["warehouse_manager","procurement_officer"].every(r =>
       mk({role:r}).keys({role:r}).length === 0));
-  T("★ hrpo: والدورُ العاديُّ يبقى على مفاتيحه العشرة بلا «طلب شراء»",
+  T("★★ hrpo: والماليةُ خانةٌ واحدةٌ — «سداد الموارد البشرية» وحدَه (لا «طلب شراء»)",
+    JSON.stringify(mk({role:"finance"}).keys({role:"finance"})) === JSON.stringify(["hrPayments"]),
+    JSON.stringify(mk({role:"finance"}).keys({role:"finance"})));
+  T("★ hrpo: والدورُ العاديُّ يبقى على مفاتيحه العشرة بلا «طلب شراء» ولا «سداد الموارد البشرية»",
     (() => { const u={role:"supervisor",permissions:{}}; const k=mk(u).keys(u);
-      return k.length === 10 && k.indexOf("poRequest") === -1 && k[0] === "tickets"; })());
+      return k.length === 10 && k.indexOf("poRequest") === -1 &&
+             k.indexOf("hrPayments") === -1 && k[0] === "tickets"; })());
 
   // ── (٢) ★★ البوّابةُ الحقيقية: showPage لا الزرُّ المخفيّ ──
   const ALL_PO = ["purchases","new-purchase","purchase-reports","substitute-budget","po-audit","finance-audit"];
