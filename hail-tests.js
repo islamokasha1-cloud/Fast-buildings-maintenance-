@@ -17718,6 +17718,137 @@ function staffTasksGuards() {
     P.forEach(([n, got, want]) => T(n, got === want));
   }
 
+  /* ── (٧-ب) المرفقات: دليلُ المهمّة يسكنها ──
+     البابُ الذي فُتح هنا **ثلاثةُ أخطارٍ في واحد**: رابطٌ يُوضع في `href` فيُنقَر،
+     وملفٌّ يُرفع فيكلّف، ودليلٌ يُحذف فيضيع. وهذه الحرّاسُ على الثلاثة. */
+  {
+    const NEEDA = ["_attList", "_attKind", "_attExt", "_attSafeName", "_attPath",
+                   "_attReject", "_attEntry", "_fmtBytes", "_canAttach", "_canDropAtt"];
+    const missA = NEEDA.filter(k => typeof ST[k] !== "function");
+    T("★ دوالُّ المرفقات النقيّةُ كلُّها مكشوفةٌ للفحص بلا متصفّح", missA.length === 0, missA.join(" · "));
+
+    if (!missA.length) {
+      /* الرابطُ يُرسَم في `href` — ومخطّطٌ غيرُ `https` نقرةٌ على قنبلة. والفلترُ
+         في `_attList` لا في موضع الرسم: مصدرٌ واحدٌ يحرس كلَّ قارئ. */
+      const bad = { attachments: [
+        { url: "javascript:alert(1)", name: "ب" },
+        { url: "blob:http://x/1",     name: "ج" },
+        { url: "http://x/1.jpg",      name: "د" },
+        { url: "https://x/1.jpg",     name: "ه" },
+        "https://x/2.jpg", null, {}
+      ] };
+      const kept = ST._attList(bad);
+      T("★★★ لا يُعرض إلا رابطُ https — لا `javascript:` ولا `blob:` ولا نصٌّ حرّ",
+        kept.length === 1 && kept[0].name === "ه", JSON.stringify(kept.map(a => a.url)));
+      T("★ ومهمّةٌ بلا مرفقاتٍ تُرجع مصفوفةً فارغةً لا تُسقط الشاشة",
+        ST._attList({}).length === 0 && ST._attList(null).length === 0);
+
+      /* النوعُ من `type` أو من الامتداد: الجوّالُ قد يرسل `type` فارغاً. */
+      T("★★ نوعُ المرفق يُعرف من `type` ومن الامتداد معاً (الجوّالُ يرسل type فارغاً)",
+        ST._attKind({ type: "image/heic", name: "x" }) === "image" &&
+        ST._attKind({ type: "", name: "لقطة.PNG" }) === "image" &&
+        ST._attKind({ type: "", name: "عرض.pdf" }) === "pdf" &&
+        ST._attKind({ type: "application/pdf", name: "x" }) === "pdf" &&
+        ST._attKind({ type: "", name: "جدول.xlsx" }) === "file");
+
+      /* اسمُ العرض لا يبني المسار، ولا يحمل فاصلَ مسارٍ ولا سطراً جديداً. */
+      T("★★ اسمُ الملفّ يُنظَّف من فواصل المسار والأسطر قبل أن يُحفَظ",
+        ST._attSafeName("../../etc/passwd") === ".. .. etc passwd" &&
+        ST._attSafeName("سطر\nثانٍ") === "سطر ثانٍ" &&
+        ST._attSafeName("") === "مرفق", JSON.stringify(ST._attSafeName("../../etc/passwd")));
+      T("★ والاسمُ الطويلُ يُقصّ فلا يكسر سطرَ الرقاقة",
+        ST._attSafeName("ا".repeat(400)).length === 118);
+      const pth = ST._attPath("T1", "PDF");
+      T("★★★ ومسارُ التخزين يُولَّد من المعرّف والوقت لا من اسم الملفّ (لا حرفَ من المستخدم فيه)",
+        /^staff-tasks\/T1\/\d+_[a-z0-9]+\.pdf$/.test(pth), pth);
+      T("★★ والامتدادُ يُنقّى إلى حروفٍ وأرقامٍ وحدَها، وغيابُه يسقط إلى bin",
+        /^staff-tasks\/T1\/\d+_[a-z0-9]+\.x$/.test(ST._attPath("T1", "../../x")) &&
+        /\.bin$/.test(ST._attPath("T1", "")),
+        ST._attPath("T1", "../../x"));
+
+      /* الردُّ يقول سببَه: ملفٌّ يُرفض بصمتٍ يُقرأ عطلاً في النظام. */
+      T("★★ الحدُّ ستّةُ مرفقاتٍ للمهمّة — والسابعُ يُردّ بسببٍ مكتوب",
+        ST._attReject({ name: "a.pdf", size: 10 }, 6).indexOf("الحدُّ") === 0);
+      T("★★ ونوعٌ غيرُ مدعومٍ يُردّ (لا تنفيذيٌّ يُرفع باسم مرفق)",
+        ST._attReject({ name: "x.exe", size: 10 }, 0) !== "" &&
+        ST._attReject({ name: "x.pdf", size: 10 }, 0) === "" &&
+        ST._attReject({ name: "x.jpg", size: 10 }, 0) === "");
+      T("★★ والحجمُ محدودٌ — والصورةُ أوسعُ حدّاً لأنها تُضغط قبل الرفع",
+        ST._attReject({ name: "x.pdf", size: 20 * 1048576 }, 0) !== "" &&
+        ST._attReject({ name: "x.jpg", size: 20 * 1048576 }, 0) === "" &&
+        ST._attReject({ name: "x.jpg", size: 60 * 1048576 }, 0) !== "");
+      T("★ ولا ملفَّ = سببٌ لا انهيار", ST._attReject(null, 0) !== "");
+
+      /* `undefined` واحدٌ يُسقط كتابةَ Firestore كلَّها فتبدو الشبكةُ هي العطل. */
+      const ent = ST._attEntry({ url: "https://x/1.jpg", by: "خالد" });
+      T("★★★ قيدُ المرفق بلا حقلٍ غيرِ معرَّف (undefined واحدٌ يُسقط الكتابةَ كلَّها)",
+        Object.keys(ent).every(k => ent[k] !== undefined && ent[k] !== null) &&
+        ent.name === "مرفق" && ent.size === 0 && typeof ent.at === "string",
+        JSON.stringify(ent));
+
+      /* الغرفةُ نفسُها تحكم المرفق: يُرفق مَن يعلّق، ويحذف مَن رفع أو المُنشئ. */
+      const ta = { createdByUser: "رغده", assignedToUser: "خالد", shared: ["سعيد"],
+                   participants: ["رغده", "خالد", "سعيد"] };
+      T("★★ يُرفق كلُّ طرفٍ كما يعلّق — المُنشئُ والمكلَّفُ والمُضاف",
+        ST._canAttach(ta, "رغده", "مشرف") && ST._canAttach(ta, "خالد", "مشرف") &&
+        ST._canAttach(ta, "سعيد", "مشرف"));
+      T("★★★ ومَن ليس طرفاً لا يُرفق (الغرفةُ ما زالت مغلقة)",
+        ST._canAttach(ta, "منى", "مشرف") === false && ST._canAttach(ta, "", "مشرف") === false);
+      const att = { url: "https://x/1.jpg", name: "عطل.jpg", by: "خالد" };
+      T("★★★ وحذفُ المرفق لمَن رفعه أو لمُنشئ المهمّة — لا لطرفٍ ثالثٍ يمحو دليلَ غيره",
+        ST._canDropAtt(ta, att, "خالد", "مشرف") === true &&
+        ST._canDropAtt(ta, att, "رغده", "مشرف") === true &&
+        ST._canDropAtt(ta, att, "سعيد", "مشرف") === false &&
+        ST._canDropAtt(ta, att, "منى", "مشرف") === false);
+      T("★ والأدمن يملكها (اطّلاعُ الإدارة وتصحيحُها)",
+        ST._canDropAtt(ta, att, "منى", "admin") === true);
+
+      /* ولو لم يُحسب المرفقُ حركةً لَرُفع الدليلُ فلم يفتحه أحد. */
+      const tf = { createdByUser: "رغده", assignedToUser: "خالد",
+                   participants: ["رغده", "خالد"], createdAt: "2026-09-01T08:00:00.000Z",
+                   attachments: [{ url: "https://x/1.jpg", name: "عطل.jpg", by: "رغده",
+                                   at: "2026-09-02T09:00:00.000Z" }],
+                   seenBy: { "خالد": Date.parse("2026-09-01T09:00:00.000Z") } };
+      const actF = ST._lastActivity(tf);
+      T("★★★ المرفقُ حركةٌ في المهمّة كالتعليق — وإلا رُفع الدليلُ فلم يفتحه أحد",
+        actF.kind === "file" && actF.by === "رغده", JSON.stringify(actF));
+      T("★★ فيلتهب «فيها جديد» عند الطرف الآخر ولا يلتهب عند مَن رفعه",
+        ST._isUnread(tf, "خالد") === true && ST._isUnread(tf, "رغده") === false);
+      T("★ ورقاقتُه تقول ما جدّ بلغة الناس", ST._unreadLabel("file") === "مرفقٌ جديد");
+    }
+
+    /* حرّاسُ المصدر: ما لا تُمسكه الدوالُّ النقيّة. */
+    const A = [
+      ["★★★ لا يُكتب في الوثيقة إلا بعد نجاح الرفع — لا رابطَ محلّيٍّ (`blob:`) في قاعدة البيانات",
+        /getDownloadURL\(\)[\s\S]{0,400}_attEntry\(/.test(src) &&
+        !/attachments[\s\S]{0,80}preview/.test(src), true],
+      ["★★★ والمرفقُ يُلحَق بـarrayUnion لا بكتابة المصفوفة كاملة (لا يمحو مرفقَ زميلٍ رُفع في الأثناء)",
+        /attachments:\s*u\b/.test(src) && /function _union\(v\)\{[\s\S]{0,140}arrayUnion/.test(src), true],
+      ["★★★ والحذفُ بـarrayRemove على القيمة نفسِها — لا بكتابةِ المصفوفة ناقصة",
+        /function _arrRemove\(v\)\{[\s\S]{0,140}arrayRemove/.test(src) &&
+        /attachments:\s*rm\b/.test(src), true],
+      ["★★ وحذفُ المرفق يُكتب سطراً في الملاحظات (دليلٌ يزول بلا أثرٍ يُبطل الثقةَ بالسجلّ)",
+        /function dropAttachment\([\s\S]{0,900}_sysEntry\("حذف المرفق/.test(src), true],
+      ["★★ وجسمُ الملفّ يُحذف من Storage **بعد** نجاح الوثيقة لا قبلَه",
+        /_update\(id, patch, "حُذف المرفق"\)\.then\([\s\S]{0,220}ref\(a\.path\)\.delete\(\)/.test(src), true],
+      ["★★★ ورابطُ المرفق يُفتح بـrel=\"noopener\" (تبويبٌ يُفتح بلا حاجزٍ يملك فاتحَه)",
+        /target="_blank" rel="noopener noreferrer"/.test(src), true],
+      ["★★ وتقدّمُ الرفع يُكتب في عنصره لا بإعادة رسمِ الشاشة لكلّ حزمةِ بايتات",
+        /state_changed[\s\S]{0,340}textContent/.test(src) &&
+        !/state_changed[\s\S]{0,340}_rerender\(\)/.test(src), true],
+      ["★★ وفشلُ الرفع يُبقي جسمَ الملفّ في الذاكرة فزرُّ «إعادة» لا يطلبه من جديد",
+        /function retryAtt\(id, recId\)\{[\s\S]{0,220}_uploadAtt\(id, r\.file\)/.test(src), true],
+      /* الرسمُ يعيد بناءَ الشاشة كلِّها — ومن أسبابه الآن اكتمالُ رفعِ مرفق. فحقلُ
+         الملاحظة يولد فارغاً وتذهب جملةٌ كُتب نصفُها بلا خبر: الفقدُ الصامتُ نفسُه
+         الذي عولج في «تمّ الإنجاز». */
+      ["★★★ وما كُتب في حقل الملاحظة ولم يُرسَل يبقى عبر إعادة الرسم",
+        /var keep=_cmtDraft\(\);[\s\S]{0,160}_cmtRestore\(keep\)/.test(src), true],
+      ["★ ولا خدمةَ تخزينٍ = رسالةٌ صريحةٌ لا زرٌّ ميت",
+        /خدمة التخزين غير متاحة/.test(src), true]
+    ];
+    A.forEach(([n, got, want]) => T(n, got === want));
+  }
+
   /* ── (٨) حرّاسُ النمط المصدريّ ── */
   const G = [
     ["★★★ الاستعلامُ مقصورٌ على المشاركة (لا يُنزَّل مستندٌ لستُ طرفاً فيه)",
