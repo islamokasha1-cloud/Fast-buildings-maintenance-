@@ -727,7 +727,8 @@ const APP_COLLS = [
   "meta", "hail_tickets", "audit_log", "errors_log",
   "hail_assets", "hail_ppm_plans", "hail_rollups",
   "global_vendors", "global_contract_requests", "global_contracts",
-  "global_contract_extracts", "global_contract_changes"
+  "global_contract_extracts", "global_contract_changes",
+  "global_docs", "global_letters"
 ];
 for (const c of APP_COLLS) {
   await check("★ يستعلم الأدمن مجموعةَ " + c,
@@ -940,6 +941,59 @@ await check("★★ وبقيةُ النظام تُستعلَم كما كانت �
     for (const c of ["global_purchases", "global_inventory", "meta", "global_contracts"])
       await getDocs(collection(WH, c));
   })()));
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ١٢) خزانةُ الوثائق — القراءةُ لكلّ ذي دور، والكتابةُ بالدور لا بالمفتاح
+   المفتاحُ `docVault` يعيش في الواجهة وحدَها: الخادمُ لا يقرأ `permissions` — لا
+   يصل إليه من التوكِن إلا الدورُ واسمُ الدخول. فلو اتُّكل على المفتاح لكانت خزانةُ
+   وثائق الشركة مفتوحةً للكتابة لكلّ ذي دورٍ من الـConsole مباشرةً. الفحصُ يُثبت
+   أنّ **الطبقةَ الثانية قائمةٌ بالدور** — وأنّ الاستثناءَ من القاعدة العامة نافذٌ
+   فعلاً (بلا الاستثناء لا تقيّد هذه البلوكاتُ شيئاً، فالقواعدُ تُقيَّم بـ«أو»).
+   ═══════════════════════════════════════════════════════════════════════════ */
+head("١٢) خزانةُ الوثائق — وثائقُ الشركة وخطاباتُها");
+const DOCS_C = "global_docs", LTRS_C = "global_letters";
+await seed(`${DOCS_C}/DOC-2609-0001`, {
+  title: "السجل التجاري", docType: "cr", number: "1010000000",
+  start: "2025-01-01", expiry: "2026-09-15", noExpiry: false, files: [], history: [] });
+await seed(`${LTRS_C}/LTR-2609-0001`, { kind: "issued", title: "خطاب ترشيح", party: "الأمانة" });
+
+await check("★ يُنشئ الأدمنُ وثيقةً في الخزانة",
+  assertSucceeds(setDoc(doc(ADMIN, `${DOCS_C}/DOC-2609-0002`), {
+    title: "شهادة الزكاة", docType: "zakat", expiry: "2026-12-31" })));
+await check("★ ومسؤولُ المشتريات يُنشئ ويجدّد (هو مَن يمسك الشهاداتِ فعلاً)",
+  assertSucceeds(setDoc(doc(PROC, `${DOCS_C}/DOC-2609-0003`), {
+    title: "شهادة التأمينات", docType: "gosi", expiry: "2026-11-30" })));
+await check("★ ومسؤولُ الموارد البشرية كذلك",
+  assertSucceeds(updateDoc(doc(HR, `${DOCS_C}/DOC-2609-0001`), { expiry: "2027-09-15" })));
+await check("★★ والزائرُ لا يكتب وإن مُنح المفتاحَ في الواجهة (الخادمُ لا يقرأ permissions)",
+  assertFails(setDoc(doc(VIEWER, `${DOCS_C}/DOC-2609-0009`), { title: "من الزائر" })));
+await check("★★ والمراقبُ كذلك",
+  assertFails(setDoc(doc(OBS, `${DOCS_C}/DOC-2609-0010`), { title: "من المراقب" })));
+await check("★★ ومسؤولُ المستودعات لا يكتب في خزانة الوثائق (ليست من عمله)",
+  assertFails(setDoc(doc(WH, `${DOCS_C}/DOC-2609-0011`), { title: "من المستودع" })));
+await check("★★ وتطبيقُ الفنيين مردودٌ عن الخزانة كلِّها",
+  assertFails(setDoc(doc(TECH, `${DOCS_C}/DOC-2609-0012`), { title: "من الفني" })));
+await check("★★★ والحذفُ للأدمن وحدَه — مَن يحذف وثيقةً يمحو دليلاً",
+  assertFails(deleteDoc(doc(PROC, `${DOCS_C}/DOC-2609-0001`))));
+await check("★★★ والأدمنُ يحذف", assertSucceeds(deleteDoc(doc(ADMIN, `${DOCS_C}/DOC-2609-0002`))));
+
+await check("★ والخطاباتُ تحكمها القاعدةُ نفسُها — الكتابةُ بالدور",
+  assertSucceeds(setDoc(doc(PROC, `${LTRS_C}/TPL-2609-0001`), { kind: "template", title: "نموذج تفويض" })));
+await check("★★ ولا يكتب فيها الزائرُ ولا المستودع",
+  assertFails(setDoc(doc(VIEWER, `${LTRS_C}/LTR-2609-0099`), { kind: "issued", title: "من الزائر" })));
+await check("★★★ وحذفُ الخطاب للأدمن وحدَه",
+  assertFails(deleteDoc(doc(HR, `${LTRS_C}/LTR-2609-0001`))));
+
+/* القراءةُ واسعةٌ كبقيّة المنصّة — تُضيَّق في المرحلة ٣ مع أخواتها لا وحدَها */
+await check("★ ويقرأ كلُّ ذي دورٍ الخزانةَ (وتُستعلَم مجموعتاها فعلاً لا مستنداً مستنداً)",
+  assertSucceeds((async () => {
+    for (const ctx of [ADMIN, PM, FIN, PROC, WH, VIEWER])
+      for (const c of [DOCS_C, LTRS_C]) await getDocs(collection(ctx, c));
+  })()));
+await check("★★ ونسختا `_dev` تحكمهما القاعدةُ نفسُها (لا بابَ يُفتح باسمٍ ثانٍ)",
+  assertFails(setDoc(doc(VIEWER, "global_docs_dev/DOC-X"), { title: "ت" })));
+await check("★★ والكتابةُ في `_dev` تمرّ للدور المصرَّح",
+  assertSucceeds(setDoc(doc(ADMIN, "global_docs_dev/DOC-X"), { title: "ت" })));
 
 await env.cleanup();
 console.log(results.join("\n"));
