@@ -657,6 +657,186 @@ check('★★ وإنجازٌ بحقلٍ فارغٍ (أو مسافاتٍ) لا ي
 await page.evaluate(() => { staffTasks.back(); staffTasks.tab('mine'); });
 await page.waitForTimeout(400);
 
+/* ═════════ ٥-ز) المرفقات — الرحلةُ كاملةً بملفٍّ حقيقيّ ═════════
+   `hail-tests` تُثبت أنّ المنطقَ صحيح ولا تُثبت **أنّ ملفاً يصل**: بين الزرّ
+   والوثيقة نافذةُ اختيارِ ملفّ، وضغطُ صورةٍ على Canvas، ورفعٌ إلى Storage، ثمّ
+   `arrayUnion` على الوثيقة. وكلُّ حلقةٍ منها تسقط بصمت: زرٌّ لا يفتح النافذة،
+   أو رابطٌ يُكتب ولا يُرسَم، أو مرفقٌ يُحذف من الشاشة ويبقى في الوثيقة.
+   فهنا: نقرٌ حقيقيٌّ، وملفٌّ حقيقيٌّ يُسلَّم لنافذة الاختيار، وقراءةٌ من المخزن. */
+L('\n=== ٥-ز) المرفقات ===');
+const attSetup = await page.evaluate(async () => {
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  window.__store['staff_tasks/AT1'] = {
+    title: 'مهمّةٌ لها مرفق', status: 'open', kind: 'task',
+    createdByUser: 'admin', createdAt: Date.now() - 5000,
+    assignedToUser: 'khaled', assignedToName: 'خالد',
+    participants: ['admin', 'khaled', 'saeed'], shared: ['saeed'], comments: [], attachments: []
+  };
+  currentUser = { user: 'khaled', name: 'خالد', role: 'مشرف' };
+  staffTasks.back(); staffTasks.stopSync(); staffTasks.startSync();
+  await wait(800);
+  staffTasks.open('AT1');
+  await wait(400);
+  const txt = [...document.querySelectorAll('#page-staff-tasks .btn')].map(b => b.textContent.trim());
+  return {
+    attach: txt.some(t => /إرفاق ملف/.test(t)),
+    cam:    txt.some(t => /^صورة$/.test(t) || /صورة$/.test(t)),
+    fn:     typeof (window.staffTasks || {}).pickAttachment === 'function',
+    empty:  /لا مرفقاتٍ بعد/.test(document.getElementById('page-staff-tasks').textContent)
+  };
+});
+check('★★ زرّا الإرفاق مرسومان في تفصيل المهمّة', attSetup.attach === true && attSetup.cam === true, JSON.stringify(attSetup));
+check('★★★ و`staffTasks.pickAttachment` في النطاق العام (سمةُ onclick تُقيَّم فيه — واسمٌ ساقطٌ = زرٌّ ميتٌ بصمت)',
+  attSetup.fn === true);
+check('★ وقبل الرفع يُقال «لا مرفقاتٍ بعد» لا فراغٌ يُقرأ عطلاً', attSetup.empty === true);
+
+/* (أ) مستندٌ — النقرُ يفتح نافذةَ الاختيار فعلاً، والملفُّ يصل الوثيقة */
+const [chooserDoc] = await Promise.all([
+  page.waitForEvent('filechooser'),
+  page.evaluate(() => [...document.querySelectorAll('#page-staff-tasks .btn')]
+    .find(b => /إرفاق ملف/.test(b.textContent)).click())
+]);
+await chooserDoc.setFiles({ name: 'عرضُ السعر.pdf', mimeType: 'application/pdf',
+                            buffer: Buffer.from('%PDF-1.4 hail') });
+await page.waitForTimeout(1600);
+const attDoc = await page.evaluate(() => {
+  const d = window.__store['staff_tasks/AT1'] || {};
+  const a = (d.attachments || [])[0] || {};
+  const lnk = document.querySelector('#page-staff-tasks .st-att .lnk');
+  return { n: (d.attachments || []).length, url: a.url, name: a.name, by: a.by, byName: a.byName,
+           path: a.path, type: a.type, at: a.at,
+           href: lnk ? lnk.getAttribute('href') : null,
+           rel:  lnk ? lnk.getAttribute('rel')  : null,
+           tgt:  lnk ? lnk.getAttribute('target') : null,
+           txt:  lnk ? lnk.textContent : '' };
+});
+check('★★★ النقرُ على «إرفاق ملف» يفتح نافذةَ الاختيار ويصل الملفُّ الوثيقةَ فعلاً',
+  attDoc.n === 1, JSON.stringify({ n: attDoc.n, name: attDoc.name }));
+check('★★★ ورابطُ التنزيل https لا رابطٌ محلّيّ (blob: يموت على كلّ جهازٍ آخر)',
+  typeof attDoc.url === 'string' && /^https:\/\//.test(attDoc.url), String(attDoc.url));
+check('★★ ومسارُ التخزين تحت بادئة المهامّ بمعرّف المهمّة (لا خلطَ مع مرفقات وحدةٍ أخرى)',
+  typeof attDoc.path === 'string' && attDoc.path.indexOf('staff-tasks/AT1/') === 0, String(attDoc.path));
+check('★★ والاسمُ الأصليُّ محفوظٌ للعرض ومنسوبٌ لمن رفعه',
+  attDoc.name === 'عرضُ السعر.pdf' && attDoc.by === 'khaled' && attDoc.byName === 'خالد',
+  JSON.stringify([attDoc.name, attDoc.by, attDoc.byName]));
+check('★★★ ويُرسَم رابطاً على الشاشة بالرابط نفسِه (كتابةٌ بلا رسمٍ = مرفقٌ لا يفتحه أحد)',
+  attDoc.href === attDoc.url && /عرضُ السعر\.pdf/.test(attDoc.txt), String(attDoc.href));
+check('★★★ ويُفتح في تبويبٍ بـrel=noopener (تبويبٌ يملك فاتحَه ثغرةٌ صامتة)',
+  attDoc.tgt === '_blank' && /noopener/.test(String(attDoc.rel)), String(attDoc.rel));
+
+/* (ب) صورةٌ — المسارُ الآخر: ضغطٌ على Canvas ثم رفعٌ بامتداد jpg */
+const PNG1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64');
+const [chooserImg] = await Promise.all([
+  page.waitForEvent('filechooser'),
+  page.evaluate(() => [...document.querySelectorAll('#page-staff-tasks .btn')]
+    .find(b => /صورة/.test(b.textContent) && !/إرفاق/.test(b.textContent)).click())
+]);
+await chooserImg.setFiles({ name: 'عطل.png', mimeType: 'image/png', buffer: PNG1 });
+await page.waitForTimeout(1800);
+const attImg = await page.evaluate(() => {
+  const d = window.__store['staff_tasks/AT1'] || {};
+  const a = (d.attachments || []).filter(x => /عطل/.test(x.name || ''))[0] || {};
+  return { n: (d.attachments || []).length, type: a.type, path: a.path,
+           thumb: !!document.querySelector('#page-staff-tasks .st-att img'),
+           cards: document.querySelectorAll('#page-staff-tasks .st-att').length };
+});
+check('★★★ والصورةُ تُضغط قبل الرفع وتُحفَظ jpeg (المصدرُ من الجوّال عشراتُ الميغابايت)',
+  attImg.type === 'image/jpeg' && /\.jpg$/.test(String(attImg.path)), JSON.stringify([attImg.type, attImg.path]));
+check('★★ والمرفقان معاً في الوثيقة (arrayUnion يُلحق ولا يستبدل — لا يمحو مرفقَ زميل)',
+  attImg.n === 2, attImg.n + ' مرفقاً');
+check('★★ وللصورة مصغَّرةٌ تُميّزها عن المستند بلا فتحها', attImg.thumb === true);
+
+/* (ج) مَن يحذف: مَن رفع أو مُنشئُ المهمّة — لا طرفٌ ثالثٌ يمحو دليلَ غيره */
+const attWho = await page.evaluate(async () => {
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const xs = () => document.querySelectorAll('#page-staff-tasks .st-att-x').length;
+  const as = async (u, n, r) => {
+    currentUser = { user: u, name: n, role: r };
+    staffTasks.back(); staffTasks.stopSync(); staffTasks.startSync();
+    await wait(700); staffTasks.open('AT1'); await wait(350);
+  };
+  const out = { uploader: xs() };
+  await as('saeed', 'سعيد', 'مشرف');   out.third = xs();
+  /* والحجبُ في الواجهة لا يكفي: النداءُ المباشر يجب أن يُردّ كذلك */
+  const url = (window.__store['staff_tasks/AT1'].attachments || [])[0].url;
+  staffTasks.dropAttachment('AT1', url);
+  await wait(800);
+  out.afterThird = (window.__store['staff_tasks/AT1'].attachments || []).length;
+  await as('admin', 'المسؤول', 'مشرف'); out.owner = xs();   // المُنشئُ بلا دورِ أدمن
+  return out;
+});
+check('★★★ مَن رفع المرفقَ يرى زرَّ حذفه', attWho.uploader === 2, attWho.uploader + ' زرّاً');
+check('★★★ وطرفٌ ثالثٌ لا يراه — ولا يحذف بالنداء المباشر (الحجبُ في الواجهة وحدَه ليس حراسة)',
+  attWho.third === 0 && attWho.afterThird === 2, JSON.stringify(attWho));
+check('★★ ومُنشئُ المهمّة يملك حذفَ ما رُفع فيها ولو لم يرفعه (صمّامُ المِلكيّة نفسُه)',
+  attWho.owner === 2, attWho.owner + ' زرّاً');
+
+/* (د) والحذفُ يُنفَّذ ويُكتب سطرُه — دليلٌ يزول بلا أثرٍ يُبطل الثقةَ بالسجلّ */
+const attDel = await page.evaluate(async () => {
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  currentUser = { user: 'khaled', name: 'خالد', role: 'مشرف' };
+  staffTasks.back(); staffTasks.stopSync(); staffTasks.startSync();
+  await wait(700); staffTasks.open('AT1'); await wait(350);
+  const before = (window.__store['staff_tasks/AT1'].attachments || []).length;
+  document.querySelector('#page-staff-tasks .st-att-x').click();
+  await wait(1200);
+  const d = window.__store['staff_tasks/AT1'] || {};
+  return { before, after: (d.attachments || []).length,
+           left: (d.attachments || []).map(a => a.name),
+           sys: (d.comments || []).filter(c => c && c.sys).map(c => c.text),
+           ui: document.querySelectorAll('#page-staff-tasks .st-att').length };
+});
+check('★★★ نقرُ سلّة المرفق يحذفه من الوثيقة فعلاً (لا من الشاشة وحدَها)',
+  attDel.before === 2 && attDel.after === 1, JSON.stringify(attDel));
+check('★★★ ولا يطال غيرَه — arrayRemove على القيمة نفسِها لا كتابةُ المصفوفة ناقصة',
+  attDel.left.length === 1 && /عطل/.test(attDel.left[0]), JSON.stringify(attDel.left));
+check('★★ وسطرُ الحذف مكتوبٌ في الملاحظات باسم مَن حذف',
+  attDel.sys.some(t => /حذف المرفق/.test(t)), JSON.stringify(attDel.sys));
+check('★ والشاشةُ تُحدَّث فوراً بعد الحذف', attDel.ui === 1, attDel.ui + ' رقاقة');
+
+/* (هـ) والمرفقُ حركةٌ: البطاقةُ تُعلن عددَه، ولونُ «فيها جديد» يلتهب به عند البقيّة.
+   ومهمّةٌ مستقلّةٌ لهذا القياس: في AT1 آخرُ الحركات سطرُ الحذف، فالرقاقةُ تقول
+   «تعليقٌ جديد» بحقّ — والمقيسُ هنا أن يصل **المرفقُ نفسُه** إلى الشاشة رقاقةً. */
+const attGlow = await page.evaluate(async () => {
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const t0 = Date.now();
+  const att = (n) => ({ url: 'https://mock.storage/x' + n + '.jpg', path: 'staff-tasks/AT2/' + n + '.jpg',
+                        name: 'صورة' + n + '.jpg', type: 'image/jpeg', size: 1024,
+                        by: 'khaled', byName: 'خالد', at: new Date(t0 - 1000).toISOString() });
+  window.__store['staff_tasks/AT2'] = {
+    title: 'مهمّةٌ رُفع فيها دليل', status: 'open', kind: 'task',
+    createdByUser: 'admin', createdAt: t0 - 90000,
+    assignedToUser: 'khaled', assignedToName: 'خالد',
+    participants: ['admin', 'khaled'], shared: [], comments: [],
+    attachments: [att(1), att(2), att(3)], seenBy: { admin: t0 - 60000 }
+  };
+  currentUser = { user: 'admin', name: 'المسؤول', role: 'مشرف' };
+  staffTasks.back(); staffTasks.stopSync(); staffTasks.startSync(); staffTasks.tab('sent');
+  await wait(800);
+  const c = [...document.querySelectorAll('#page-staff-tasks .st-card')]
+    .find(x => /مهمّةٌ رُفع فيها دليل/.test(x.textContent));
+  const out = { card: !!c, glows: !!c && c.classList.contains('nw'),
+                pill: c ? ((c.querySelector('.st-pill.nw') || {}).textContent || '') : '',
+                metas: c ? [...c.querySelectorAll('.st-meta span')].map(x => x.textContent.trim()) : [] };
+  /* وتنظيفُ ما زرعه هذا القسم: مهمّتان مفتوحتان فيهما حركةٌ من زميلٍ تبقيان
+     ملتهبتين عند المُنشئ — فيقيس القسمُ التالي («لا يلتهب سطرُ مَن صنع الحركة»)
+     التهابَنا نحن لا ما يفحصه. فحصٌ يترك أثراً يُسقط فحصاً بعده. */
+  delete window.__store['staff_tasks/AT1'];
+  delete window.__store['staff_tasks/AT2'];
+  staffTasks.back(); staffTasks.stopSync(); staffTasks.startSync();
+  await wait(600);
+  return out;
+});
+check('★★ عددُ المرفقات معلَنٌ على البطاقة (فلا تُفتح عشرُ مهامَّ بحثاً عن صورة)',
+  attGlow.card === true && attGlow.metas.indexOf('3') !== -1, JSON.stringify(attGlow.metas));
+check('★★★ ورفعُ زميلٍ مرفقاً يُلهب «فيها جديد» عند بقيّة الأطراف (وإلا رُفع الدليلُ فلم يفتحه أحد)',
+  attGlow.glows === true && attGlow.pill === 'مرفقٌ جديد', JSON.stringify(attGlow));
+
+await page.evaluate(() => { staffTasks.back(); staffTasks.tab('mine'); });
+await page.waitForTimeout(400);
+
 /* ═════════ ٥-د) لونُ «فيها جديد» — ما يُقاس هنا وحدَه ═════════
    طلبُ المالك (08/09): «أحتاج إذا تم أي تحديث يظهر بلون مختلف للمهمّة».
    و`hail-tests` تُثبت المنطقَ نقيّاً ولا تُثبت **أنّ اللونَ يصل الشاشة ثم ينطفئ

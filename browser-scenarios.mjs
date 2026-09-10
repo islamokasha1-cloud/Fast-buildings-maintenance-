@@ -190,7 +190,30 @@ window.__store = {};                       // path -> data (Firestore في ال�
         getIdTokenResult:function(){ return Promise.resolve({ claims: (window.__authClaims||{}) }); } };
       return { currentUser:_u, onAuthStateChanged:function(cb){ try{cb(_u);}catch(e){} return function(){}; }, signInAnonymously:function(){return Promise.resolve({});}, signInWithCustomToken:function(){return Promise.resolve({});}, signOut:function(){return Promise.resolve();} }; },
     appCheck:Object.assign(function(){ return { activate:function(){} }; }, { ReCaptchaEnterpriseProvider:function(){} }),
-    storage:function(){ return { ref:function(){ return { put:function(){return Promise.resolve({ ref:{ getDownloadURL:function(){return Promise.resolve('mock://u');} } });}, getDownloadURL:function(){return Promise.resolve('mock://u');} }; }, refFromURL:function(){ return { delete:function(){return Promise.resolve();} }; } }; }
+    /* التخزين: رابطُ التنزيل https كما تُصدره Firebase فعلاً — لا 'mock://'.
+       المخطّطُ ليس تفصيلاً: الواجهاتُ ترفض ما ليس https قبل أن ترسمه في href
+       (حارسُ javascript:)، فمُحاكٍ يُصدر مخطّطاً وهمياً يجعل كلَّ مرفقٍ يختفي في
+       الفحص ويبدو الرفعُ ناجحاً والرسمُ معطوباً. و put تُرجع مهمّةَ رفعٍ لها on
+       كالحقيقيّة — تُبلّغ اكتمالاً واحداً — فيُنفَّذ مسارُ التقدّم لا يُتجاوَز. */
+    storage:function(){
+      function _url(p){ return 'https://mock.storage/'+encodeURIComponent(String(p||'u')); }
+      return {
+        ref:function(p){
+          var _p=String(p||'u');
+          return {
+            fullPath:_p,
+            put:function(){
+              var t=Promise.resolve({ ref:{ fullPath:_p, getDownloadURL:function(){ return Promise.resolve(_url(_p)); } } });
+              t.on=function(ev, cb){ try{ if(typeof cb==='function') cb({ bytesTransferred:1, totalBytes:1 }); }catch(e){} };
+              return t;
+            },
+            getDownloadURL:function(){ return Promise.resolve(_url(_p)); },
+            delete:function(){ return Promise.resolve(); }
+          };
+        },
+        refFromURL:function(){ return { delete:function(){return Promise.resolve();} }; }
+      };
+    }
   };
 })();
 `;

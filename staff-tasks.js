@@ -53,6 +53,23 @@
    حين تُفعَّل: تجميعةُ إرسالٍ واحدة (`batchId`) تُنتج إشعاراً واحداً «كلّفك فلانٌ
    بـ٥ مهامّ» بدل خمسةِ تنبيهاتٍ متتالية تدفع الموظف لإغلاق الإشعارات.
 
+   ── المرفقاتُ داخل المهمّة (طلبُ المالك 10/09) ──
+   المهمّةُ سطرُ كلامٍ بلا دليل: «صيانةُ المكيّف في الدور الثاني» لا تقول أيَّ مكيّفٍ
+   ولا ما عطلُه ولا أين العرضُ الذي بُني عليه التكليف — فيخرج المكلَّفُ إلى الواتساب
+   ليطلب الصورة، وهو البابُ الذي أُنشئت الوحدةُ لإغلاقه. فالمرفقُ (صورةٌ · PDF ·
+   مستند) يسكن المهمّةَ نفسَها: يرفعه **أيُّ طرفٍ فيها** كما يعلّق، ويحمله الحقلُ
+   `attachments` قيداً لكلّ ملفّ (رابطٌ · مسارُ التخزين · اسمٌ · نوعٌ · حجمٌ · مَن
+   رفع ومتى). وثلاثةُ قيودٍ تحرسه:
+     • **لا رابطَ محلّيٍّ في قاعدة البيانات**: القيدةُ تُكتب بعد نجاح الرفع لا قبلَه
+       (درسُ `photo-queue.js`: رابطُ `blob:` يبدو سليماً لحظتَه ويموت إلى الأبد على
+       كلّ جهازٍ آخر). والفشلُ يُقال صراحةً ويبقى جسمُ الملفّ في الذاكرة لزرّ إعادة.
+     • **`https` وحدَها تُعرض** (`_attList`): الوثيقةُ يكتبها بشرٌ ورابطُها يُوضع في
+       `href`، ومخطّطٌ آخر (`javascript:`) يصير نقرةً على قنبلة.
+     • **الحذفُ لمَن رفع أو لمُنشئ المهمّة**، ويُكتب سطرُه في الملاحظات — المرفقُ
+       دليلٌ، ودليلٌ يزول بلا أثرٍ يُبطل الثقةَ بالسجلّ كلِّه.
+   والمرفقُ **حركةٌ كالتعليق** في `_lastActivity`: يلتهب به لونُ «فيها جديد» عند
+   بقيّة الأطراف، وإلا رُفع الدليلُ فلم يفتحه أحد.
+
    ── قيدٌ مقصود: لا دردشةَ عامة ──
    الكلامُ كلُّه **داخل المهمّة**. لا رسائلَ مباشرة ولا قناةَ عامة. بلا هذا القيد
    تتحوّل الأداةُ واتساب ثانياً فتمتلئ كلاماً وتُهجَر.
@@ -63,13 +80,15 @@
    عنه — فتصير القائمةُ كذبةً يتوقّف الناسُ عن قراءتها.
 
    ── خدمات النواة المقروءة بالاسم ──
-   `db` · `firebase` · `esc` · `_jsq` · `toast` · `currentUser` · `USERS` ·
-   `logAudit` · `showPage` · `IS_DEV`.
+   `db` · `firebase` · `storage` · `compressImage` · `esc` · `_jsq` · `toast` ·
+   `currentUser` · `USERS` · `logAudit` · `showPage` · `IS_DEV`.
+   (وغيابُ `storage` أو `compressImage` لا يكسر الوحدة: الأولى تُقال «خدمة التخزين
+   غير متاحة» عند محاولة الإرفاق وحدَها، والثانيةُ تُرفع الصورةُ بلا ضغط.)
    ═══════════════════════════════════════════════════════════════════════════ */
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3112";
+  var MODULE_BUILD = "v18.9.3114";
 
   function COLL(){
     var dev=false;
@@ -93,6 +112,7 @@
   var _draftTo = "";      // اسمُ دخول المكلَّف في المسوّدة
   var _editing = false;  // شاشةُ التفصيل في وضع التحرير
   var _cssDone = false;
+  var _atUp    = {};      // مرفقاتٌ قيدَ الرفع الآن: id المهمّة ⇐ [سجلّ رفع]
 
   /* ════════ هوية المستخدم ════════
      اسمُ الدخول هو المفتاح في كل مكان. الاسمُ المعروض للعرض فقط. */
@@ -420,6 +440,10 @@
     (Array.isArray(t.comments)?t.comments:[]).forEach(function(c){
       if(c) bid(c.at, c.user, "comment");
     });
+    /* والمرفقُ حركةٌ كالتعليق: صورةُ العطل التي رُفعت هي **الجديدُ** في المهمّة،
+       وبلا هذا السطر تُرفَع بلا أن يلتهب لونُ «فيها جديد» عند بقيّة الأطراف —
+       فيبقى الدليلُ في المهمّة لا يفتحه أحد. */
+    _attList(t).forEach(function(a){ bid(a.at, a.by, "file"); });
     return best;
   }
 
@@ -447,7 +471,112 @@
          : kind==="edit"     ? "عُدِّلت"
          : kind==="done"     ? "أُنجزت"
          : kind==="returned" ? "رُدّت"
+         : kind==="file"     ? "مرفقٌ جديد"
          : "جديدة";
+  }
+
+  /* ════════ المرفقات — دوالٌّ نقيّة ════════
+     المهمّةُ كلامٌ بلا دليل: «صيانةُ المكيّف في الدور الثاني» لا تقول أيَّ مكيّفٍ
+     ولا ما عطلُه، فيعود المكلَّفُ إلى الواتساب ليطلب الصورة — وهو البابُ نفسُه الذي
+     أُنشئت الوحدةُ لإغلاقه. فالمرفقُ يسكن المهمّةَ نفسَها.
+
+     ── ثلاثةُ قيودٍ مقصودة ──
+     • **لا رابطَ محلّيٍّ في قاعدة البيانات**: يُكتب المرفقُ بعد نجاح الرفع لا قبلَه.
+       رابطُ `blob:` يبدو سليماً للحظته ثم يموت على كلّ جهازٍ آخر وإلى الأبد (درسُ
+       `photo-queue.js`)، فالفشلُ يُقال صراحةً ويبقى الملفُّ في الذاكرة لإعادة
+       المحاولة — ولا يُسجَّل مرفقٌ لا وجودَ له.
+     • **`https` وحدَها تُعرض**: الوثيقةُ يكتبها بشرٌ وتُقرأ هنا في `href`، ورابطٌ
+       بمخطّطٍ آخر (`javascript:`) يصير نقرةً على قنبلة. الفلترُ في `_attList` لا
+       في موضع الرسم — فمصدرٌ واحدٌ يحرس كلَّ قارئ.
+     • **الحذفُ لمَن رفع أو لمُنشئ المهمّة**: المرفقُ دليلٌ، ومَن يمحو دليلَ غيره
+       يمحو أثراً لا يملكه. وهو صمّامُ المِلكيّة نفسُه في إخراج المشاركين. */
+  var ATT_MAX        = 6;      // مرفقاتٍ للمهمّة الواحدة
+  var ATT_MAX_MB     = 12;     // للملفّ غير الصورة
+  var ATT_IMG_MAX_MB = 40;     // للصورة قبل الضغط (تُضغط إلى ~١٢٨٠px بعده)
+  var ATT_IMG_EXT    = ["jpg","jpeg","png","webp","heic","heif","gif"];
+  var ATT_DOC_EXT    = ["pdf","doc","docx","xls","xlsx","csv","txt"];
+  var ATT_ACCEPT     = "image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt";
+
+  function _attList(t){
+    return (Array.isArray(t&&t.attachments)?t.attachments:[]).filter(function(a){
+      return !!a && typeof a==="object" && /^https:\/\//i.test(String(a.url||""));
+    });
+  }
+  function _attExt(name){
+    var m=String(name==null?"":name).toLowerCase().match(/\.([a-z0-9]{1,5})$/);
+    return m ? m[1] : "";
+  }
+  function _attKind(a){
+    var ty=String((a&&a.type)||"").toLowerCase(), ex=_attExt(a&&a.name);
+    if(ty.indexOf("image/")===0 || ATT_IMG_EXT.indexOf(ex)!==-1) return "image";
+    if(ty==="application/pdf" || ex==="pdf") return "pdf";
+    return "file";
+  }
+  function _attIcon(a){
+    var k=_attKind(a);
+    return k==="image" ? "image" : (k==="pdf" ? "fileText" : "paperclip");
+  }
+  /* الحجمُ بالعربية: رقمٌ واحدٌ بعد الفاصلة يكفي — «2.4 م.ب» تقول ما يقوله
+     «2516582 بايت» وتُقرأ بلمحة. */
+  function _fmtBytes(n){
+    n=Number(n)||0;
+    if(n<=0) return "";
+    if(n<1024) return n+" بايت";
+    if(n<1048576) return (Math.round(n/102.4)/10)+" ك.ب";
+    return (Math.round(n/104857.6)/10)+" م.ب";
+  }
+  /* اسمُ العرض: بلا فواصلِ مسارٍ ولا أسطر، ومقصوصٌ فلا يكسر سطراً طويلٌ بلا حدّ.
+     ولا يُبنى منه مسارُ التخزين: الأسماءُ عربيةٌ وفيها مسافاتٌ ورموز، والمسارُ
+     يُولَّد من الوقت والصدفة — فيبقى الاسمُ للعرض وحدَه حيث لا يضرّ. */
+  function _attSafeName(name){
+    var s=String(name==null?"":name).replace(/[\\/\r\n\t]+/g," ").replace(/\s+/g," ").trim();
+    if(!s) return "مرفق";
+    return s.length>120 ? s.slice(0,117)+"…" : s;
+  }
+  function _attPath(taskId, ext){
+    var e=String(ext||"").toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,5) || "bin";
+    return "staff-tasks/"+String(taskId||"x")+"/"+Date.now()+"_"+
+           Math.random().toString(36).slice(2,7)+"."+e;
+  }
+  /* يُرجع "" إن جاز المرفق، وإلا **سببَ المنع بنصّه المعروض** — فلا يُردّ الملفُّ
+     بصمتٍ ولا برسالةٍ عامّةٍ لا تقول ما العمل. */
+  function _attReject(file, have){
+    if(!file) return "لا ملفَّ مختار";
+    if(Number(have||0) >= ATT_MAX) return "الحدُّ "+ATT_MAX+" مرفقاتٍ للمهمّة";
+    var ex=_attExt(file.name), img=(_attKind(file)==="image");
+    if(!img && ATT_DOC_EXT.indexOf(ex)===-1) return "نوعُ الملفّ غيرُ مدعوم — صورةٌ أو PDF أو مستند";
+    var mb=Number(file.size||0)/1048576, cap=img?ATT_IMG_MAX_MB:ATT_MAX_MB;
+    if(mb > cap) return "حجمُ الملفّ فوق "+cap+" م.ب";
+    return "";
+  }
+  /* قيدُ المرفق كما يُكتب في الوثيقة — **بلا حقلٍ غيرِ معرَّف**: `undefined` واحدٌ
+     يُسقط الكتابةَ كلَّها في Firestore، فتبدو الشبكةُ هي العطل. */
+  function _attEntry(o){
+    o=o||{};
+    return {
+      url:    String(o.url||""),
+      path:   String(o.path||""),
+      name:   _attSafeName(o.name),
+      type:   String(o.type||"").slice(0,80),
+      size:   Number(o.size||0)||0,
+      by:     String(o.by||""),
+      byName: String(o.byName||""),
+      at:     String(o.at||new Date().toISOString())
+    };
+  }
+  /* مَن يُرفق: أطرافُ المهمّة (والأدمن) — كمن يعلّق تماماً.
+     ولا يُشترط أن يكون المكلَّفَ: المُنشئُ يُرفق صورةَ العطل، والمكلَّفُ يُرفق
+     صورةَ الإنجاز، والمُضافُ يُرفق العرضَ الذي أُدخل من أجله. */
+  function _canAttach(t, login, role){
+    if(role==="admin") return true;
+    if(!login || !t) return false;
+    return _docParticipants(t).indexOf(login) !== -1;
+  }
+  function _canDropAtt(t, att, login, role){
+    if(role==="admin") return true;
+    if(!login || !t || !att) return false;
+    if(_docParticipants(t).indexOf(login)===-1) return false;
+    return String(att.by||"")===login || String(t.createdByUser||"")===login;
   }
 
   function _todayISO(){
@@ -730,10 +859,15 @@
     return { user:_me(), name:_myName(), text:String(text||""), at:new Date().toISOString(), sys:true };
   }
   /* arrayUnion لا كتابةُ المصفوفة كاملة: مشاركٌ آخر قد يكون علّق في الأثناء،
-     وكتابةُ نسختي القديمة تمحو تعليقَه. */
-  function _cmtUnion(entry){
-    try{ return firebase.firestore.FieldValue.arrayUnion(entry); }catch(e){ return null; }
+     وكتابةُ نسختي القديمة تمحو تعليقَه. والقاعدةُ نفسُها تحكم المرفقات: زميلٌ
+     يرفع صورةً بينما أرفع أنا أخرى، وكتابةُ المصفوفة كاملةً تمحو إحداهما. */
+  function _union(v){
+    try{ return firebase.firestore.FieldValue.arrayUnion(v); }catch(e){ return null; }
   }
+  function _arrRemove(v){
+    try{ return firebase.firestore.FieldValue.arrayRemove(v); }catch(e){ return null; }
+  }
+  function _cmtUnion(entry){ return _union(entry); }
 
   function addComment(id){
     var el=document.getElementById("st-cmt-"+id);
@@ -748,6 +882,134 @@
     if(!u){ _t("تعذّر الحفظ","warn"); return; }
     p.el.value="";
     _update(id, { comments:u }).catch(function(){});
+  }
+
+  /* ════════ المرفقات — الرفعُ والحذف ════════ */
+  function _st(){
+    try{ return (typeof storage!=="undefined" && storage) ? storage : null; }catch(e){ return null; }
+  }
+  function _attPending(id){ return (_atUp[String(id)]||[]); }
+  function _attDrop(id, recId){
+    var k=String(id);
+    _atUp[k]=_attPending(k).filter(function(r){ return r.id!==recId; });
+    if(!_atUp[k].length) delete _atUp[k];
+  }
+  /* اختيارُ الملفّ: زرّان لا زرٌّ واحد. «صورة» يفتح الكاميرا مباشرةً على الجوّال
+     (الفنيُّ في الموقع يصوّر العطلَ ولا يبحث في معرضٍ)، و«إرفاق ملف» يفتح المتصفّحَ
+     كاملاً — وفرضُ `capture` دائماً كان يمنع الاختيارَ من المعرض ومن الحاسوب. */
+  function pickAttachment(id, fromCamera){
+    var t=byId(id); if(!t) return;
+    if(!_canAttach(t,_me(),_myRole())){ _t("المرفقاتُ لأطراف المهمّة","warn"); return; }
+    var room=ATT_MAX-_attList(t).length-_attPending(id).length;
+    if(room<=0){ _t("الحدُّ "+ATT_MAX+" مرفقاتٍ للمهمّة","warn"); return; }
+    var inp;
+    try{ inp=document.createElement("input"); }catch(e){ return; }
+    inp.type="file"; inp.style.display="none";
+    if(fromCamera){ inp.accept="image/*"; inp.setAttribute("capture","environment"); }
+    else{ inp.accept=ATT_ACCEPT; inp.multiple=true; }
+    inp.onchange=function(){
+      var all=Array.prototype.slice.call(inp.files||[]);
+      var files=all.slice(0,room);
+      if(all.length>files.length) _t("أُخذت "+files.length+" — الحدُّ "+ATT_MAX+" مرفقاتٍ للمهمّة","warn");
+      files.forEach(function(f){ _uploadAtt(id,f); });
+      try{ document.body.removeChild(inp); }catch(e){}
+    };
+    try{ document.body.appendChild(inp); inp.click(); }catch(e){}
+  }
+
+  /* الرفع: Storage أوّلاً ثمّ الوثيقة — **بهذا الترتيب لا عكسِه**.
+     ولا يُكتب في الوثيقة إلا رابطُ التنزيل الدائم بعد نجاح الرفع؛ فالفشلُ يترك
+     المهمّةَ كما كانت ويُقال صراحةً، ويبقى **جسمُ الملفّ في الذاكرة** فزرُّ
+     «إعادة» يُعيد المحاولةَ بلا أن يبحث صاحبُه عن الملفّ من جديد على جوّاله.
+     والتقدّمُ يُكتب في عنصره مباشرةً لا بإعادة رسمٍ لكلّ حزمةِ بايتات: الرسمُ
+     يعيد بناءَ الشاشة كلِّها، وإعادتُه ثلاثين مرّةً في الثانية تُجمّد الصفحة. */
+  function _uploadAtt(id, file){
+    var t=byId(id); if(!t || !file) return;
+    var why=_attReject(file, _attList(t).length+_attPending(id).length);
+    if(why){ _t(why,"warn"); return; }
+    var st=_st();
+    if(!st){ _t("خدمة التخزين غير متاحة","warn"); return; }
+    var rec={ id:"u"+Date.now().toString(36)+Math.random().toString(36).slice(2,7),
+              name:_attSafeName(file.name), pct:0, err:"", file:file };
+    var k=String(id);
+    (_atUp[k]=_atUp[k]||[]).push(rec);
+    _rerender();
+
+    var img=(_attKind(file)==="image");
+    var prep = (img && typeof compressImage==="function")
+      ? Promise.resolve(compressImage(file)).catch(function(){ return null; })
+      : Promise.resolve(null);
+    var saving=false;
+
+    prep.then(function(small){
+      var body = small || file;
+      var type = small ? "image/jpeg" : String(file.type||"");
+      var ext  = small ? "jpg" : (_attExt(file.name) || String(type.split("/")[1]||"bin"));
+      var path = _attPath(id, ext);
+      var task = st.ref(path).put(body, type ? { contentType:type } : undefined);
+      try{
+        task.on("state_changed", function(sn){
+          var p = (sn && sn.totalBytes) ? Math.round((sn.bytesTransferred/sn.totalBytes)*100) : 0;
+          rec.pct=p;
+          var el=document.getElementById("st-atp-"+rec.id);
+          if(el) el.textContent=p+"٪";
+        });
+      }catch(e){}
+      return task.then(function(snap){
+        return snap.ref.getDownloadURL().then(function(url){
+          return _attEntry({ url:url, path:path, name:file.name, type:type||file.type,
+                             size:(body&&body.size)||file.size, by:_me(), byName:_myName() });
+        });
+      });
+    }).then(function(entry){
+      if(!entry || !entry.url) throw new Error("no-url");
+      var u=_union(entry);
+      if(!u) throw new Error("no-arrayUnion");
+      saving=true;
+      return _update(id, { attachments:u }, "أُرفق "+entry.name).then(function(){
+        _attDrop(id, rec.id);
+        _rerender();
+        try{ logAudit("staff_task_attach", (t.title||id)+" — "+entry.name); }catch(e){}
+      });
+    }).catch(function(e){
+      console.warn("staff-tasks attach failed:", e);
+      rec.pct=0;
+      rec.err = saving ? "رُفع الملفُّ ولم يُسجَّل — أعِد المحاولة" : "تعذّر الرفع";
+      if(!saving) _t("تعذّر رفع المرفق","warn");   // و`_update` تقول عطلَها بنفسها
+      _rerender();
+    });
+  }
+
+  /* إعادةُ محاولةٍ لملفٍّ لم يُرفع — من جسمه الباقي في الذاكرة. */
+  function retryAtt(id, recId){
+    var r=_attPending(id).filter(function(x){ return x.id===recId; })[0];
+    if(!r || !r.file) return;
+    _attDrop(id, recId);
+    _uploadAtt(id, r.file);
+  }
+  function dismissAtt(id, recId){ _attDrop(id, recId); _rerender(); }
+
+  /* الحذف: تُنزع القيدةُ بـ`arrayRemove` على القيمة نفسِها — لا بكتابة المصفوفة
+     ناقصةً، فتلك تمحو مرفقاً رفعه زميلٌ في الأثناء. ثمّ يُحذف الجسمُ من Storage
+     **بعد** نجاح الوثيقة وبلا تعليقِ النتيجة عليه: ملفٌّ يتيمٌ يكلّف مساحةً،
+     وقيدةٌ بلا ملفٍّ تكلّف رابطاً مكسوراً أمام الناس. */
+  function dropAttachment(id, url){
+    var t=byId(id); if(!t) return;
+    var a=_attList(t).filter(function(x){ return String(x.url)===String(url); })[0];
+    if(!a){ _t("المرفقُ غيرُ موجود","warn"); return; }
+    if(!_canDropAtt(t, a, _me(), _myRole())){ _t("حذفُ المرفق لمَن رفعه أو لمُنشئ المهمّة","warn"); return; }
+    if(!window.confirm("حذفُ المرفق «"+(a.name||"")+"» نهائياً؟\n\nمتابعة؟")) return;
+    var rm=_arrRemove(a);
+    if(!rm){ _t("تعذّر الحذف","warn"); return; }
+    var patch={ attachments:rm };
+    /* ولا يختفي بصمت: سطرٌ في الملاحظات يقول مَن حذف وماذا — كسطرِ الإضافة
+       والإخراج. مرفقٌ يزول بلا أثرٍ يجعل المهمّةَ سجلّاً لا يُوثق به. */
+    var u=_union(_sysEntry("حذف المرفق «"+(a.name||"")+"»."));
+    if(u) patch.comments=u;
+    _update(id, patch, "حُذف المرفق").then(function(){
+      try{ var st=_st(); if(st && a.path) st.ref(a.path).delete().catch(function(){}); }catch(e){}
+      try{ logAudit("staff_task_attach_drop", (t.title||id)+" — "+(a.name||"")); }catch(e){}
+    }).catch(function(){});
   }
 
   /* إضافةُ مشارك — يملكها كلُّ طرف، وتُصاحبها مصارحةٌ صريحة.
@@ -1039,6 +1301,27 @@
       '#page-staff-tasks .st-who-x:hover{opacity:1;color:var(--danger)}'+
       '#page-staff-tasks .st-note.sys{background:transparent;border:1px dashed var(--border)}'+
       '#page-staff-tasks .st-note.sys .txt{font-size:12px;color:var(--muted)}'+
+      /* المرفقات: رقاقةٌ لكلّ ملفّ — مصغَّرةٌ للصورة وأيقونةٌ لغيرها. ولا شبكةَ
+         معرضٍ كبيرة: المرفقُ هنا **سندٌ للمهمّة** لا معرضُ صور، والصفُّ المتدفّق
+         يبقيه سطراً أو سطرين مهما كثر. */
+      '#page-staff-tasks .st-atts{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}'+
+      '#page-staff-tasks .st-att{display:inline-flex;align-items:center;gap:8px;max-width:100%;'+
+        'background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:6px 10px}'+
+      '#page-staff-tasks .st-att .lnk{display:inline-flex;align-items:center;gap:8px;min-width:0;'+
+        'text-decoration:none;color:var(--text)}'+
+      '#page-staff-tasks .st-att .lnk:hover .nm{color:var(--primary);text-decoration:underline}'+
+      '#page-staff-tasks .st-att .nm{font-size:12px;font-weight:700;max-width:210px;overflow:hidden;'+
+        'text-overflow:ellipsis;white-space:nowrap}'+
+      '#page-staff-tasks .st-att .mt{font-size:11px;color:var(--muted);font-weight:600;white-space:nowrap}'+
+      '#page-staff-tasks .st-att .ic svg{width:15px;height:15px}'+
+      '#page-staff-tasks .st-att img{width:38px;height:38px;object-fit:cover;border-radius:7px;display:block;'+
+        'border:1px solid var(--border)}'+
+      '#page-staff-tasks .st-att.pend{border-style:dashed}'+
+      '#page-staff-tasks .st-att.err{border-color:color-mix(in srgb,var(--danger) 40%,var(--border))}'+
+      '#page-staff-tasks .st-att.err .mt{color:var(--danger)}'+
+      '#page-staff-tasks .st-att-x{background:none;border:0;padding:2px;margin-inline-start:2px;'+
+        'cursor:pointer;color:var(--muted);display:inline-flex;opacity:.6}'+
+      '#page-staff-tasks .st-att-x:hover{opacity:1;color:var(--danger)}'+
       '#page-staff-tasks .st-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;'+
         'padding-top:14px;border-top:1px solid var(--border)}'+
       '#page-staff-tasks .st-spin{width:22px;height:22px;border:3px solid var(--border);'+
@@ -1049,6 +1332,25 @@
       var s=document.createElement("style");
       s.id="st-styles"; s.textContent=css;
       document.head.appendChild(s);
+    }catch(e){}
+  }
+
+  /* ما كُتب في حقل الملاحظة ولم يُرسَل يبقى عبر إعادة الرسم.
+     الرسمُ يعيد بناءَ الشاشة كلَّها، وأسبابُه ليست من فعل صاحب الحقل وحدَه: تعليقُ
+     زميلٍ يصل لقطةً، ومرفقٌ يكتمل رفعُه — فتذهب جملةٌ كُتب نصفُها **بلا خبر**، وهو
+     الفقدُ الصامتُ نفسُه الذي عولج في «تمّ الإنجاز». */
+  function _cmtDraft(){
+    if(!_openId) return null;
+    try{
+      var el=document.getElementById("st-cmt-"+_openId);
+      return el ? String(el.value||"") : null;
+    }catch(e){ return null; }
+  }
+  function _cmtRestore(v){
+    if(v==null || !v || !_openId) return;
+    try{
+      var el=document.getElementById("st-cmt-"+_openId);
+      if(el && !el.value) el.value=v;
     }catch(e){}
   }
 
@@ -1096,7 +1398,9 @@
       var t=byId(_openId);
       if(!t){ _openId=null; _editing=false; return render(); }
       if(_editing && !_canEdit(t,_me(),_myRole())) _editing=false;
+      var keep=_cmtDraft();
       host.innerHTML=_hero()+(_editing ? _editHtml(t) : _detailHtml(t));
+      _cmtRestore(keep);
       /* الفتحُ هو القراءة — لا زرَّ «تعليم كمقروء» يُنسى فيبقى اللونُ كذبةً.
          ولا حلقةَ هنا: الكتابةُ تُبثّ فتُعيد الرسمَ، و`_isUnread` صارت false
          فتخرج `_markSeen` من أوّل سطرٍ بلا كتابةٍ ثانية. */
@@ -1377,6 +1681,9 @@
       ? ('<span>'+_icn("users")+(t.shared.length+1)+' مشاركين</span>') : "";
     var cn=(Array.isArray(t.comments)&&t.comments.length)
       ? ('<span>'+_icn("edit")+t.comments.length+'</span>') : "";
+    /* المرفقُ يُعلَن على البطاقة: مَن يبحث عن الصورة يعرف أين هي بلا فتحِ عشرِ
+       مهامَّ واحدةً واحدة. */
+    var an=_attList(t).length ? ('<span>'+_icn("paperclip")+_attList(t).length+'</span>') : "";
     return '<div class="'+cls+'" onclick="staffTasks.open(\''+_q(t.id)+'\')">'+
       '<div class="st-ttl">'+(nw?'<i class="st-dot"></i>':"")+_e(t.title)+'</div>'+
       '<div class="st-meta">'+
@@ -1390,7 +1697,7 @@
           ? '<span class="st-pill nw">'+_e(_unreadLabel(act.kind))+'</span>' : "")+
         (t.priority==="high"?'<span class="st-pill hi">مهمّة</span>':"")+
         (t.status==="returned"?'<span class="st-pill '+(nw&&act.kind==="returned"?"nw":"rt")+'">مردودة</span>':"")+
-        shared+cn+
+        shared+cn+an+
       '</div>'+
     '</div>';
   }
@@ -1458,6 +1765,42 @@
 
     var shareCands=_upUsers("sh-"+t.id);
 
+    var canAtt=_canAttach(t,me,_myRole());
+    /* المرفوعُ فعلاً ثمّ ما هو قيدَ الرفع الآن — في صفٍّ واحدٍ لا صفّين: ما يرفعه
+       المستخدمُ الآن يظهر مكانَه الذي سيستقرّ فيه، فلا يقفز من قائمةٍ إلى أخرى. */
+    var attRows=_attList(t).map(function(a){
+      var k=_attKind(a), canX=_canDropAtt(t,a,me,_myRole());
+      return '<div class="st-att">'+
+        '<a class="lnk" href="'+_e(a.url)+'" target="_blank" rel="noopener noreferrer">'+
+          (k==="image"
+            ? '<img src="'+_e(a.url)+'" alt="'+_e(a.name)+'" loading="lazy">'
+            : _icn(_attIcon(a)))+
+          '<span class="nm">'+_e(a.name)+'</span>'+
+          '<span class="mt">'+_e(a.byName||_nameOf(a.by))+
+            (a.size?(' · '+_e(_fmtBytes(a.size))):"")+'</span>'+
+        '</a>'+
+        (canX
+          ? '<button type="button" class="st-att-x" title="حذفُ المرفق"'+
+            ' aria-label="حذف المرفق '+_e(a.name)+'"'+
+            ' onclick="staffTasks.dropAttachment(\''+_q(t.id)+'\',\''+_q(a.url)+'\')">'+
+            _icn("trash","ic-sm")+'</button>'
+          : "")+
+      '</div>';
+    }).join("")+
+    _attPending(t.id).map(function(r){
+      return '<div class="st-att pend'+(r.err?" err":"")+'">'+
+        _icn(r.err?"alertTriangle":"paperclip")+
+        '<span class="nm">'+_e(r.name)+'</span>'+
+        (r.err
+          ? '<span class="mt">'+_e(r.err)+'</span>'+
+            '<button type="button" class="st-att-x" title="إعادةُ المحاولة" aria-label="إعادة رفع '+_e(r.name)+'"'+
+              ' onclick="staffTasks.retryAtt(\''+_q(t.id)+'\',\''+_q(r.id)+'\')">'+_icn("repeat","ic-sm")+'</button>'+
+            '<button type="button" class="st-att-x" title="إسقاطُ المرفق" aria-label="إسقاط '+_e(r.name)+'"'+
+              ' onclick="staffTasks.dismissAtt(\''+_q(t.id)+'\',\''+_q(r.id)+'\')">'+_icn("xCircle","ic-sm")+'</button>'
+          : '<span class="mt" id="st-atp-'+_e(r.id)+'">'+_e(r.pct+"٪")+'</span>')+
+      '</div>';
+    }).join("");
+
     var acts="";
     if(t.status!=="done" && (mine||owner||_isAdmin()))
       acts+='<button class="btn btn-primary btn-sm" onclick="staffTasks.markDone(\''+_q(t.id)+'\')">'+_icn("checkCircle")+'تمّ الإنجاز</button>';
@@ -1500,6 +1843,19 @@
             '<button class="btn btn-ghost" onclick="staffTasks.shareTask(\''+_q(t.id)+'\')">إضافة</button>'+
           '</div>'
         : "")+
+      '<div class="st-sec">'+_icn("paperclip")+'المرفقات</div>'+
+      (attRows
+        ? ('<div class="st-atts">'+attRows+'</div>')
+        : '<div class="st-hint">لا مرفقاتٍ بعد.</div>')+
+      (canAtt
+        ? '<div class="st-row" style="margin-top:9px">'+
+            '<button class="btn btn-ghost" onclick="staffTasks.pickAttachment(\''+_q(t.id)+'\')">'+
+              _icn("paperclip")+'إرفاق ملف</button>'+
+            '<button class="btn btn-ghost" onclick="staffTasks.pickAttachment(\''+_q(t.id)+'\',true)">'+
+              _icn("camera")+'صورة</button>'+
+            '<span class="st-hint" style="margin:0">صورٌ · PDF · مستندات — حتى '+ATT_MAX+' مرفقاتٍ للمهمّة.</span>'+
+          '</div>'
+        : "")+
       '<div class="st-sec">'+_icn("edit")+'الملاحظات</div>'+cmts+
       '<div class="st-row" style="margin-top:9px">'+
         '<input type="text" class="form-input st-grow" id="st-cmt-'+_e(t.id)+'" placeholder="اكتب ملاحظة ثمّ Enter…" '+
@@ -1525,6 +1881,8 @@
     markDone:markDone, reopen:reopen, returnTask:returnTask, acceptBack:acceptBack,
     startEdit:startEdit, cancelEdit:cancelEdit, saveEdit:saveEdit,
     addComment:addComment, cmtKey:cmtKey, shareTask:shareTask, unshareTask:unshareTask,
+    pickAttachment:pickAttachment, dropAttachment:dropAttachment,
+    retryAtt:retryAtt, dismissAtt:dismissAtt,
     removeTask:removeTask,
     draftPick:draftPick, draftAdd:draftAdd, draftKey:draftKey, draftPaste:draftPaste, draftDrop:draftDrop,
     upickOpen:upickOpen, upickInput:upickInput, upickKey:upickKey, upickBlur:upickBlur,
@@ -1540,6 +1898,10 @@
     _docParticipants:_docParticipants, _sharePatch:_sharePatch, _unsharePatch:_unsharePatch,
     _dueState:_dueState, _isOverdue:_isOverdue,
     _canEdit:_canEdit, _canReassign:_canReassign, _editPatch:_editPatch, _droppedBy:_droppedBy,
+    _attList:_attList, _attKind:_attKind, _attExt:_attExt, _attIcon:_attIcon,
+    _attSafeName:_attSafeName, _attPath:_attPath, _attReject:_attReject, _attEntry:_attEntry,
+    _fmtBytes:_fmtBytes, _canAttach:_canAttach, _canDropAtt:_canDropAtt,
+    _ATT_MAX:ATT_MAX, _ATT_MAX_MB:ATT_MAX_MB, _ATT_IMG_MAX_MB:ATT_IMG_MAX_MB,
     _splitTabs:_splitTabs, _countOpen:_countOpen, _sortTasks:_sortTasks,
     build:MODULE_BUILD
   };
