@@ -38,8 +38,12 @@
        ما اعتمده (ceoApprovedAmount)، فلا يُسدَّد مبلغٌ لم يره أحد.
 
    الصلاحيات (متفق عليها — بيانات الإقامات والتأشيرات حساسة):
-   • العرض: hr_officer + hr_manager + project_manager + ceo + finance + admin **فقط**.
-     مسؤول المستودعات ومسؤول المشتريات والزائر والمراقب لا يرون المجموعة أصلاً.
+   • العرض: hr_officer + hr_manager + project_manager + ceo + finance + admin **فقط**،
+     **ومقيَّدٌ بمفتاح `permissions.hrPayments`** الحاجب: الافتراضُ مسموحٌ لهذه الأدوار
+     وحدَها، وإلغاءُ علامته في نافذة الصلاحيات يحجب الوحدةَ عن المستخدم بعينه (خانةٌ
+     لا تُعرض أصلاً لدورٍ غيرِ مؤهَّل، فالمفتاحُ حاجبٌ لا مانح — لا يفتح لأحدٍ ما
+     يحجبه دورُه). مسؤول المستودعات ومسؤول المشتريات والزائر والمراقب لا يرون
+     المجموعة أصلاً.
    • الإنشاء/التعديل/إعادة الإرسال/الإلغاء: hr_officer + admin.
    • اعتماد/رفض بوّابة الموارد البشرية الأولى: hr_manager + admin.
    • اعتماد/رفض مرحلة مدير المشاريع: project_manager + admin.
@@ -62,7 +66,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3114";
+  var MODULE_BUILD = "v18.9.3116";
 
   function COLL(){
     var dev=false;
@@ -219,13 +223,46 @@
   /* ════════ الصلاحيات ════════ */
   function _role(){ try{ return (currentUser && currentUser.role) || ""; }catch(e){ return ""; } }
   function _isAdmin(){ return _role()==="admin"; }
-  function canCreate(){ return _role()==="hr_officer" || _isAdmin(); }
-  function canHRM(){    return _role()==="hr_manager" || _isAdmin(); }
-  function canPM(){     return _role()==="project_manager" || _isAdmin(); }
-  function canCEO(){    return _role()==="ceo" || _isAdmin(); }
-  function canFinance(){return _role()==="finance" || _isAdmin(); }
-  // العرض للأدوار المعنية وحدها — بيانات الموارد البشرية لا تخصّ المستودع ولا المشتريات.
-  function canView(){ return canCreate() || canHRM() || canPM() || canCEO() || canFinance(); }
+
+  /* الأدوارُ المؤهَّلةُ بطبعها للاطّلاع — بيانات الإقامات والتأشيرات لا تخصّ المستودع
+     ولا المشتريات. **مصدرٌ واحدٌ مكشوف** (`roleEligible`) تقرؤه نافذةُ الصلاحيات في
+     النواة عبر `_PERM_DUAL_KEYS`-نمطِ التعاقدات نفسِه، فلا تفترق الخانةُ عن البوّابة:
+     خانةٌ تُعرض لدورٍ محجوبٍ أصلاً **تَعِد بما لا تملك**، وهو عيبُ نافذةِ التعاقدات
+     الذي أصلحه v18.9.2737 — ولا يُكرَّر هنا بنسخِ القائمة في موضعين. */
+  var VIEW_ROLES = ["hr_officer","hr_manager","project_manager","ceo","finance"];
+  function roleEligible(r){
+    return VIEW_ROLES.indexOf(r===undefined ? _role() : (r||"")) !== -1;
+  }
+
+  /* ── مفتاحُ «طلبات سداد الموارد البشرية» (`permissions.hrPayments`) ──
+     طلبُ المالك: الدورُ وحدَه كان يفتح الوحدة، فمسؤولُ موارد بشريةٍ جديدٌ يرى كلَّ
+     طلبات السداد لحظةَ إنشاء حسابه بلا قرارٍ من أحد. المفتاحُ **حاجبٌ** لا مانح:
+     الافتراضُ مسموحٌ للدور المؤهَّل (فلا يفقد قائمٌ شيئاً بأثرٍ رجعيّ)، وإلغاءُ
+     العلامة يحجب. و**الدورُ شرطٌ سابقٌ لا يُتجاوَز**: المفتاحُ لا يمنح الاطّلاعَ
+     لدورٍ غيرِ مؤهَّل مهما أُشِّر — فلا يُفتح سجلُّ الإقامات لمشرفٍ بخانةٍ في نافذة.
+     والأدمنُ يتجاوزه كما في كل مفاتيح النواة. */
+  function _permAllows(){
+    try{
+      var u = (typeof currentUser!=="undefined") ? currentUser : null;
+      if(!u) return false;
+      if(u.role==="admin") return true;
+      if(!roleEligible(u.role)) return false;
+      var p = u.permissions;
+      return !p || p.hrPayments !== false;
+    }catch(e){ return false; }
+  }
+  /* بوّابةُ الوحدة كلِّها: تقرؤها الصفحتان وبطاقةُ اللوحة وعدّادُ السايدبار وحقنُ
+     المجموعة والرابطُ العميق ومرشّحُ الإشعارات و`startSync` — مصدرٌ واحد، فلا يبقى
+     بابٌ مفتوحاً حين يُغلق الباقي، ولا تُجلب وثيقةٌ لمن لا يملك فتحَ الوحدة. */
+  function canView(){ return _permAllows(); }
+  /* والأدوارُ الإجرائيةُ تشترط **الاطّلاعَ والدورَ معاً**: من حُجبت عنه الوحدةُ لا
+     يعتمد ولا ينشئ من وحدة التحكّم — ولولا اشتراطه لبقيت أزرارُ الكتابة عاملةً
+     خلف شاشةٍ مقفلة. */
+  function canCreate(){ return canView() && (_role()==="hr_officer"       || _isAdmin()); }
+  function canHRM(){    return canView() && (_role()==="hr_manager"       || _isAdmin()); }
+  function canPM(){     return canView() && (_role()==="project_manager"  || _isAdmin()); }
+  function canCEO(){    return canView() && (_role()==="ceo"              || _isAdmin()); }
+  function canFinance(){return canView() && (_role()==="finance"          || _isAdmin()); }
   // الوحدة ابنةُ المشتريات المركزية وحدَها (قرار المالك 29/08): سدادُ الإقامات
   // والتأشيرات مصروفٌ إداريّ عام لا يخصّ مشروعاً بعينه، فداخلَ مشروعٍ لا بطاقةَ
   // له في لوحة المشتريات ولا مجموعةَ في السايدبار — تظهران في الوضع المركزي فقط.
@@ -1645,6 +1682,8 @@
     payModal:payModal, financeReturn:financeReturn,
     editModal:editModal, attachModal:attachModal, cancel:cancel, remove:remove,
     canView:canView, canCreate:canCreate, pendingForMe:pendingForMe,
+    // قائمةُ الأدوار المؤهَّلة **مكشوفةٌ مصدراً واحداً** تقرؤه نافذةُ صلاحيات النواة
+    viewRoles:VIEW_ROLES.slice(), roleEligible:roleEligible,
     renderMyTasks:renderMyTasks, hookMyTasks:hookMyTasks,
     all:all, byId:byId, refreshNav:_navToggle,
     // دوال نقية مكشوفة لفحوص hail-tests
