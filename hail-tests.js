@@ -17637,6 +17637,94 @@ function docVaultGuards() {
     /_PERM_MANAGED_GROUPS = \[[^\]]*"grp-vault"[^\]]*\]/.test(HTML));
   T("★ dv: وسمُ الوحدة في index.html", /<script src="doc-vault\.js\?v=[\d.]+"><\/script>/.test(HTML));
 
+
+  /* ── (١٤) ★★ «وثيقة أخرى» تُسمّى بيدها، ومسؤولُ التجديد يُختار من المستخدمين ──
+     طلبُ المالك: «إذا اختير نوع الوثيقة اخري يفتح خانة لكتابة أسم الوثيقة يدويا /
+     المسؤول عن التجديد احتاج إمكانية اختياره من المستخدمين ليكون سهل الوصول له عبر
+     رسائل الواتساب».
+     وأخطرُ ما يُحرَس هنا **تفرّقُ التسمية**: لو قرأ الجدولُ `DOC_LBL` وقرأت البطاقةُ
+     الاسمَ اليدويّ، رأى المستخدمُ «وثيقة أخرى» في الصفّ واسمَها الحقيقيَّ في بطاقتها.
+     و**اسمُ الدخول هو المفتاح**: الاسمُ المعروضُ نصٌّ لا يصل إليه شيء، واسمُ الدخول
+     هو ما يجد به `functions/lib/recipients.js` رقمَ الواتساب في `meta/users`. */
+  {
+    const other = { id:"DOC-X1", title:"شهادة الهيئة", docType:"other",
+                    docTypeOther:"شهادة اشتراك في الهيئة السعودية للمهندسين", expiry:"2026-10-01" };
+    T("★★ dv: «أخرى» باسمٍ يدويٍّ تُقرأ باسمها لا بالتسمية العامّة",
+      V.typeLabel(other) === "شهادة اشتراك في الهيئة السعودية للمهندسين", V.typeLabel(other));
+    T("★ dv: و«أخرى» بلا اسمٍ (بياناتٌ قديمة) تسقط إلى التسمية العامّة لا إلى فراغ",
+      V.typeLabel({ docType:"other" }) === "وثيقة أخرى" &&
+      V.typeLabel({ docType:"other", docTypeOther:"   " }) === "وثيقة أخرى");
+    T("★ dv: والاسمُ اليدويُّ لا يُقحَم على نوعٍ مسمّى",
+      V.typeLabel({ docType:"cr", docTypeOther:"مهملة" }) === "السجل التجاري");
+    T("★ dv: ونوعٌ مجهولٌ يُقرأ كما هو لا «undefined»",
+      V.typeLabel({ docType:"zzz" }) === "zzz" && V.typeLabel({}) === "—");
+    /* مصدرٌ واحدٌ للتسمية — الحارسُ يمنع عودةَ القراءة المباشرة إلى أيّ شاشة */
+    T("★★ dv: لا تُقرأ خريطةُ التسميات مباشرةً إلا داخل `typeLabel` (مصدرٌ واحد)",
+      (src.match(/DOC_LBL\[/g) || []).length === 1, String((src.match(/DOC_LBL\[/g) || []).length));
+    T("★★ dv: والبحثُ يشمل الاسمَ اليدويّ (يُبحَث بما يُقرأ في الجدول لا بالمفتاح)",
+      V.filterDocs([other], { q:"مهندسين" }, TODAY).length === 1 &&
+      V.filterDocs([other], { q:"الهيئة السعودية" }, TODAY).length === 1 &&
+      V.filterDocs([other], { q:"لا شيء" }, TODAY).length === 0);
+
+    /* ── مسؤولُ التجديد ── */
+    const prevU = W.USERS;
+    W.USERS = [
+      { user:"mohammed", name:"محمد العتيبي", role:"procurement_officer", phone:"966500000001", waOptIn:true },
+      { user:"noura",    name:"نورة الشمري", role:"hr_officer" },            // بلا رقم
+      { user:"saad",     name:"سعد القحطاني", role:"supervisor", phone:"966500000003", waOptIn:false }
+    ];
+    T("★★ dv: الاسمُ المعروضُ يُشتقّ من اسم الدخول — لا نسخةً جامدة",
+      V.ownerLabel({ ownerUser:"mohammed", owner:"اسمٌ قديمٌ محفوظ" }) === "محمد العتيبي",
+      V.ownerLabel({ ownerUser:"mohammed", owner:"اسمٌ قديمٌ محفوظ" }));
+    T("★★ dv: ومَن حُذف حسابُه لا يُفقَد — تُقرأ النسخةُ المحفوظة",
+      V.ownerLabel({ ownerUser:"ghost", owner:"من غادر" }) === "من غادر");
+    T("★ dv: وبلا مسؤولٍ لا اسم", V.ownerLabel({}) === "" && V.ownerLabel({ owner:"" }) === "");
+    T("★ dv: والبحثُ يجد الوثيقةَ باسم مسؤولها وباسم دخوله معاً",
+      V.filterDocs([{ id:"D", title:"ت", docType:"cr", expiry:"2026-10-01", ownerUser:"noura" }],
+        { q:"نورة" }, TODAY).length === 1 &&
+      V.filterDocs([{ id:"D", title:"ت", docType:"cr", expiry:"2026-10-01", ownerUser:"noura" }],
+        { q:"noura" }, TODAY).length === 1);
+
+    /* ── الرسمُ الحقيقيّ: الخانةُ تظهر مع «أخرى» وحدَها، والمنتقي يحمل المستخدمين ── */
+    const pg2 = W.document.getElementById("page-vault-docs");
+    V.newDoc();
+    T("★★ dv: خانةُ الاسم اليدويّ غائبةٌ ما دام النوعُ مسمّى",
+      !W.document.getElementById("dv-type-other"));
+    T("★★ dv: ومنتقي المسؤول `<select>` يحمل كلَّ المستخدمين وخيارَ «بلا مسؤول»",
+      W.document.querySelectorAll("#dv-owner option").length === 4 &&
+      W.document.querySelector("#dv-owner option").value === "",
+      String(W.document.querySelectorAll("#dv-owner option").length));
+    T("★★ dv: ومَن لا رقمَ واتساب مفعَّلاً له يُقال ذلك في خيارِه — لا يُكتشَف يومَ يصمت التنبيه",
+      /نورة الشمري \(بلا واتساب\)/.test(pg2.innerHTML) &&
+      /سعد القحطاني \(بلا واتساب\)/.test(pg2.innerHTML) &&
+      /محمد العتيبي<\/option>/.test(pg2.innerHTML));
+    V.setType("other");
+    T("★★ dv: واختيارُ «أخرى» يفتح الخانةَ فوراً",
+      !!W.document.getElementById("dv-type-other") &&
+      W.document.getElementById("dv-type").value === "other");
+    /* الحفظُ يُردّ بلا اسمٍ يدويّ — وإلّا عاد «وثيقة أخرى» المبهم من الباب الخلفيّ */
+    W.document.getElementById("dv-title").value = "وثيقةٌ ما";
+    W.document.getElementById("dv-expiry").value = "2027-01-01";
+    const before = NOTIFS.length;
+    V.saveEdit();
+    T("★★ dv: والحفظُ يُردّ ما دامت خانةُ الاسم فارغة (النموذجُ يبقى مفتوحاً)",
+      !!W.document.getElementById("dv-type-other"));
+    /* والانصرافُ عن «أخرى» يمحو الاسمَ اليدويّ فلا يبقى معلَّقاً على نوعٍ مسمّى */
+    W.document.getElementById("dv-type-other").value = "شهادة اشتراك";
+    V.setType("cr");
+    T("★★ dv: والانصرافُ عن «أخرى» يمحو الاسمَ اليدويَّ ولا يُبقيه معلَّقاً",
+      !W.document.getElementById("dv-type-other"));
+    V.setType("other");
+    T("★ dv: ولا يعود بعد المحو (لا قيمةَ شبحيّةٌ في الحالة)",
+      W.document.getElementById("dv-type-other").value === "");
+    /* والحقولُ الأخرى لا تُفقَد عند تبديل النوع — هي في الـDOM لا في الحالة */
+    T("★★ dv: وتبديلُ النوع يحفظ ما كُتب في بقيّة الحقول",
+      W.document.getElementById("dv-title").value === "وثيقةٌ ما" &&
+      W.document.getElementById("dv-expiry").value === "2027-01-01");
+    V.cancelEdit();
+    W.USERS = prevU;
+  }
+
   /* ── (١٣) المرفقُ يحفظ مسارَه، والمسارُ تحت البادئة القائمة `po/` ──
      مسارٌ جذريٌّ جديد قد تردّه قواعدُ Storage صامتاً (درسُ `hr-payments.js`). */
   /* ── ★★ الأرقامُ داخل جملةٍ عربية: `direction` وحدَها لا تكفي لصندوقٍ سطريّ ──
