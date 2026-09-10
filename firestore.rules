@@ -29,6 +29,16 @@ service cloud.firestore {
        قواعدَ Firestore تُقيَّم بـ«أو» — يكفي تطابقُ قاعدةٍ واحدةٍ للسماح — فإضافةُ
        قواعدَ صارمةٍ لهذه المجموعات **لا تقيّد شيئاً** ما لم تُستثنَ من العامة أوّلاً.
        فهذه القائمةُ هي الاستثناء، وكلُّ مجموعةٍ فيها يحكمها بلوكُها وحدَه. */
+    /* ═══════════ خزانةُ الوثائق ═══════════
+       وثائقُ الشركة نفسِها (السجلُّ التجاريّ · الزكاة · التأمينات · التصنيف) وخطاباتُها
+       الرسمية. **مفتاحُ `docVault` مانحٌ في الواجهة، والخادمُ لا يقرأ `permissions`** —
+       لا يصل إليه من التوكِن إلا الدورُ واسمُ الدخول. فالطبقتان تحرسان شيئين مختلفين
+       وهذا مقصود: الواجهةُ تقرّر **مَن يرى القسمَ** بالمفتاح، والخادمُ يقرّر **مَن
+       يكتب فيه** بالدور — والزائرُ والمراقبُ مردودان هنا مهما مُنحا هناك.
+       والحذفُ للأدمن وحدَه: مَن يحذف وثيقةً يمحو دليلاً. */
+    function vaultColl(coll) {
+      return coll in ['global_docs', 'global_docs_dev', 'global_letters', 'global_letters_dev'];
+    }
     function ctrLocked(coll) {
       return coll in [
         'global_vendors',            'global_vendors_dev',
@@ -307,7 +317,8 @@ service cloud.firestore {
                       && !sbxColl(document[0])
                       && !srvOnly(document[0])
                       && !stColl(document[0])
-                      && !isAuditColl(document[0]);
+                      && !isAuditColl(document[0])
+                      && !vaultColl(document[0]);
     }
 
     // ═══════════ إضافات تطبيق الفنيين (مصادقة مجهولة، مرحلة اختبار) ═══════════
@@ -420,6 +431,36 @@ service cloud.firestore {
         && ibanOf(request.resource.data) == ibanOf(resource.data)
         && unchanged(['createdByUser', 'createdBy', 'createdAt', 'status']);
     }
+    /* ── خزانةُ الوثائق: القراءةُ لكلّ ذي دور، والكتابةُ لمن يُنتظر منه عملٌ فيها ──
+       القراءةُ واسعةٌ عمداً كبقيّة المنصّة (المرحلة ٣ تُضيّقها كلَّها معاً، لا مجموعةً
+       مفردةً تفترق عن أخواتها فتنكسر شاشتُها وحدَها). والكتابةُ **مقصورةٌ بالدور**:
+       الأدمنُ ومَن يمسك الشهاداتِ والخطاباتِ فعلاً. والزائرُ والمراقبُ والفنيّ مردودون
+       — وهم مَن قد يُمنح المفتاحَ في الواجهة اطّلاعاً، فلا يفتح له المفتاحُ كتابةً. */
+    function vaultWriteOk() {
+      return anyRole(['admin', 'project_manager', 'ceo', 'finance',
+                      'procurement_officer', 'hr_officer', 'hr_manager']);
+    }
+    match /global_docs/{id} {
+      allow read:         if hasRole();
+      allow create, update: if vaultWriteOk();
+      allow delete:       if isAdmin();
+    }
+    match /global_docs_dev/{id} {
+      allow read:         if hasRole();
+      allow create, update: if vaultWriteOk();
+      allow delete:       if isAdmin();
+    }
+    match /global_letters/{id} {
+      allow read:         if hasRole();
+      allow create, update: if vaultWriteOk();
+      allow delete:       if isAdmin();
+    }
+    match /global_letters_dev/{id} {
+      allow read:         if hasRole();
+      allow create, update: if vaultWriteOk();
+      allow delete:       if isAdmin();
+    }
+
     match /global_vendors/{id} {
       allow read:   if hasRole();
       allow create: if vendorCreateOk();

@@ -714,7 +714,15 @@ function predelivery() {
        منطقٍ قائم**: نظامُ المفاتيح كلُّه هنا (`_permOn`/`_permIsGrant`/نافذةُ
        التعديل)، وشطرُ مفتاحٍ واحدٍ إلى ملفٍّ يجعل الصلاحياتِ مصدرَين. وأكثرُ
        الزيادة تعليقٌ يقول لِمَ حاجبٌ لا مانحٌ ولِمَ لا يُعرض لغير المؤهَّل. */
-    const IDX_CEILING = 39868;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 39868 إلى 39890 — ‏١٨ سطراً لخزانة الوثائق، **ولا سطرَ منها منطقُ
+       الوحدة**: الوحدةُ كلُّها (١٤٤٠ سطراً) في `doc-vault.js` كما تقتضي CLAUDE.md.
+       الأسطرُ هنا ثلاثةٌ لا رابعَ لها، وكلُّها مواضعُ **لا تعيش في وحدة**:
+       • وسمُ <script> وتعليقُه — ولا موضعَ له غيرُ المستند.
+       • مفتاحُ `docVault` في **مصدر المفاتيح الواحد** `_PERM_LABELS` وقائمةِ المانحين
+         وخريطةِ الصفحات ومربّعِ الشبكة الساكنة. ونسخُ مفتاحٍ إلى ملفٍّ ثانٍ يشقّ
+         المصدرَ الواحد — وهو بالضبط ما يحرسه فحصُ «★★ pk» أدناه.
+       • سطرٌ في `_permKeysForUser` يعرض الخانةَ لأدوار الوضع المركزيّ أيضاً. */
+    const IDX_CEILING = 39890;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -764,7 +772,8 @@ function predelivery() {
     // ★ حارسُ التغطية: أيُّ رفعٍ جديدٍ يُضاف بلا مسارٍ يُسقط هذا الفحص — فلا يعود
     //   النمطُ يُنسى مع أوّل شاشةٍ تُضاف. (نعدّ لا نطابق: المواضعُ تتغيّر صياغتُها.)
     [["index.html", HTML], ["tech-app.html", TECH], ["cleaning-operations.js", CLEAN],
-     ["hr-payments.js", HRP], ["contracts.js", CTR]].forEach(([nm, src]) => {
+     ["hr-payments.js", HRP], ["contracts.js", CTR], ["doc-vault.js", rd2("doc-vault.js")]].forEach(([nm, src]) => {
+      if (!src) return;
       const dl = (src.match(/getDownloadURL/g) || []).length;
       const pt = (src.match(/fullPath|storagePath|PhotoPath|photoPath|filePath|Paths=/g) || []).length;
       T(`★ sp: ${nm} — مواضعُ المسار (${pt}) ≥ مواضعُ الرابط (${dl})`, pt >= dl);
@@ -785,7 +794,8 @@ function predelivery() {
     const ROOT3 = path.dirname(IDX);
     const FILES3 = ["index.html", "tech-app.html", "cleaning-operations.js", "contracts.js",
       "project-management.js", "inventory-reports.js", "performance-contract.js", "hr-payments.js",
-      "finance-audit.js", "stocktake.js", "operations-wall.js", "price-analysis.js", "substitute-budget.js"];
+      "finance-audit.js", "stocktake.js", "operations-wall.js", "price-analysis.js", "substitute-budget.js",
+      "doc-vault.js"];
     let scanned = 0;
     FILES3.forEach(f => {
       const fp = path.join(ROOT3, f);
@@ -10517,20 +10527,27 @@ function hrPurchaseRequestGuards() {
   const hrOld = { role:"hr_officer", name:"عبدالله آدم" };            // بلا حقل صلاحياتٍ أصلاً
   const B = u => [...mk(u).blocked()];
 
-  // ── (١) ★ البلاغ نفسُه: الخاناتُ المعروضةُ هي العاملةُ وحدَها ──
-  T("★★ hrpo: نافذةُ الموارد البشرية تعرض «طلب شراء» و«سداد الموارد البشرية» فقط (لا خانةَ بلا أثر)",
-    JSON.stringify(mk(hrNo).keys(hrNo)) === JSON.stringify(["poRequest","hrPayments"]),
+  /* ── (١) ★ البلاغ نفسُه: الخاناتُ المعروضةُ هي العاملةُ وحدَها ──
+     ‏v18.9: `docVault` (خزانة الوثائق) **مفتاحٌ عابرٌ للوضعين** بطلب المالك — يُمنح
+     لأشخاصٍ بعينهم في المشتريات كما في المشاريع، لأنّ وثيقةَ الشركة ليست تابعةً
+     لوضعٍ دون وضع. فهو الاستثناءُ الوحيد في فرع الأدوار المركزية، ويُذكر صراحةً
+     في كلّ توقّعٍ أدناه: لو أُضيف مفتاحٌ آخرُ إلى الفرع سهواً لَسقطت هذه الفحوص. */
+  T("★★ hrpo: نافذةُ الموارد البشرية تعرض «طلب شراء» و«سداد الموارد البشرية» و«الخزانة» فقط (لا خانةَ بلا أثر)",
+    JSON.stringify(mk(hrNo).keys(hrNo)) === JSON.stringify(["poRequest","hrPayments","docVault"]),
     JSON.stringify(mk(hrNo).keys(hrNo)));
-  T("★ hrpo: والمستودعُ والمشترياتُ بلا خاناتٍ (صفحاتُها يحكمها دورُها، ولا وحدةَ موارد بشرية لهما)",
+  T("★ hrpo: والمستودعُ والمشترياتُ خانةُ الخزانة وحدَها (صفحاتُهما يحكمها دورُهما، ولا وحدةَ موارد بشرية لهما)",
     ["warehouse_manager","procurement_officer"].every(r =>
-      mk({role:r}).keys({role:r}).length === 0));
-  T("★★ hrpo: والماليةُ خانةٌ واحدةٌ — «سداد الموارد البشرية» وحدَه (لا «طلب شراء»)",
-    JSON.stringify(mk({role:"finance"}).keys({role:"finance"})) === JSON.stringify(["hrPayments"]),
+      JSON.stringify(mk({role:r}).keys({role:r})) === JSON.stringify(["docVault"])),
+    JSON.stringify(mk({role:"warehouse_manager"}).keys({role:"warehouse_manager"})));
+  T("★★ hrpo: والماليةُ «سداد الموارد البشرية» و«الخزانة» — لا «طلب شراء»",
+    JSON.stringify(mk({role:"finance"}).keys({role:"finance"})) === JSON.stringify(["hrPayments","docVault"]),
     JSON.stringify(mk({role:"finance"}).keys({role:"finance"})));
-  T("★ hrpo: والدورُ العاديُّ يبقى على مفاتيحه العشرة بلا «طلب شراء» ولا «سداد الموارد البشرية»",
+  T("★ hrpo: والدورُ العاديُّ يبقى على مفاتيح المشروع بلا «طلب شراء» ولا «سداد الموارد البشرية»",
     (() => { const u={role:"supervisor",permissions:{}}; const k=mk(u).keys(u);
-      return k.length === 10 && k.indexOf("poRequest") === -1 &&
-             k.indexOf("hrPayments") === -1 && k[0] === "tickets"; })());
+      return k.length === 11 && k.indexOf("poRequest") === -1 &&
+             k.indexOf("hrPayments") === -1 && k.indexOf("docVault") !== -1 &&
+             k[0] === "tickets"; })(),
+    JSON.stringify(mk({role:"supervisor",permissions:{}}).keys({role:"supervisor",permissions:{}})));
 
   // ── (٢) ★★ البوّابةُ الحقيقية: showPage لا الزرُّ المخفيّ ──
   const ALL_PO = ["purchases","new-purchase","purchase-reports","substitute-budget","po-audit","finance-audit"];
@@ -10551,7 +10568,7 @@ function hrPurchaseRequestGuards() {
   T("★★ hrpo: المفتاحُ مانحٌ — المستخدمُ القديمُ بلا حقل صلاحياتٍ لا يُفتح له شيء",
     ALL_PO.every(p => B(hrOld).includes(p)));
   T("★ hrpo: والمفتاحُ مسجَّلٌ في قائمة المانحين (فلا يُقرأ باصطلاح الحاجب)",
-    /_PERM_GRANT_KEYS = \["cleaningEdit","poRequest"\]/.test(HTML) &&
+    /_PERM_GRANT_KEYS = \[[^\]]*"poRequest"[^\]]*\]/.test(HTML) &&
     mk(hrOld).on(undefined, "poRequest") === false &&
     mk(hrNo).on(hrNo.permissions, "poRequest") === false &&
     mk(hrYes).on(hrYes.permissions, "poRequest") === true);
@@ -10562,24 +10579,36 @@ function hrPurchaseRequestGuards() {
      بل لأنّ القسمَ كان محجوباً عنه بدوره منذ البداية، وكانت `_blockedPagesForUser`
      وحدَها تجهله فتترك `showPage` المباشرةَ مفتوحةً. ولا مسارَ شراءٍ أُقحم. */
   {
+    /* ‏v18.9: صفحتا خزانة الوثائق تنضمّان إلى المحجوب لكلّ مَن لم يُمنح `docVault` —
+       وهو **أثرُ المفتاح المانح لا حجبٌ أُقحم**: خزانةُ وثائق الشركة لا تنفتح لأحدٍ
+       بأثرٍ رجعيّ. ولأنّ القوائم أدناه تُطابَق **حرفياً**، تُذكر الصفحتان صراحةً في
+       كلّ توقّع — فلو انقلب المفتاحُ حاجباً يوماً لَسقطت هذه الفحوصُ فوراً. */
+    const VAULT = ["vault-docs","vault-letters"];
     const sup = B({role:"supervisor",permissions:{assets:false}});
-    T("★ hrpo: والمشرفُ يبقى بلا مسارِ شراءٍ أُقحم عليه (المحجوبُ: أصولُه وتعاقداتُه)",
-      JSON.stringify(sup) === JSON.stringify(["assets","vendors","contract-requests","contracts-list"]),
+    T("★ hrpo: والمشرفُ يبقى بلا مسارِ شراءٍ أُقحم عليه (المحجوبُ: أصولُه وتعاقداتُه وخزانتُه)",
+      JSON.stringify(sup) === JSON.stringify(["assets","vendors","contract-requests","contracts-list"].concat(VAULT)),
       sup.join(","));
     T("★★ zg: والمشرفُ الممنوحُ صراحةً لا يُحجب عنه إلا ما ألغاه المسؤول",
-      JSON.stringify(B({role:"supervisor",permissions:{assets:false,contracts:true}})) === JSON.stringify(["assets"]));
-    T("★★ zg: ومديرُ المشاريع القديمُ بلا حقلِ صلاحياتٍ لا يُحجب عنه شيء (الحاجبُ على حاله)",
-      B({role:"project_manager"}).length === 0 &&
+      JSON.stringify(B({role:"supervisor",permissions:{assets:false,contracts:true,docVault:true}})) === JSON.stringify(["assets"]),
+      B({role:"supervisor",permissions:{assets:false,contracts:true,docVault:true}}).join(","));
+    T("★★ dv: والمشرفُ الممنوحُ التعاقداتِ دون الخزانة يُحجب عنها وحدَها",
+      JSON.stringify(B({role:"supervisor",permissions:{contracts:true}})) === JSON.stringify(VAULT),
+      B({role:"supervisor",permissions:{contracts:true}}).join(","));
+    T("★★ zg: ومديرُ المشاريع القديمُ بلا حقلِ صلاحياتٍ لا يُحجب عنه إلا الخزانةُ المانحة",
+      JSON.stringify(B({role:"project_manager"})) === JSON.stringify(VAULT) &&
       JSON.stringify(B({role:"project_manager",permissions:{contracts:false}}))
-        === JSON.stringify(["vendors","contract-requests","contracts-list"]));
+        === JSON.stringify(["vendors","contract-requests","contracts-list"].concat(VAULT)),
+      B({role:"project_manager"}).join(","));
     T("★★ zg: وخانةُ «التعاقدات» تُقرأ باصطلاحين — مانحةً للمشرف حاجبةً لمدير المشاريع",
       mk().grant("contracts",{role:"supervisor"}) === true &&
       mk().grant("contracts",{role:"project_manager"}) === false &&
       mk().on(undefined,"contracts",{role:"supervisor"}) === false &&
       mk().on(undefined,"contracts",{role:"project_manager"}) === true);
   }
-  T("★ hrpo: ومسؤولُ المشتريات لا يمسّه الحجبُ الجديد",
-    B({role:"procurement_officer",permissions:{}}).length === 0);
+  T("★ hrpo: ومسؤولُ المشتريات لا يمسّه الحجبُ الجديد (والخزانةُ وحدَها تنتظر منحاً)",
+    JSON.stringify(B({role:"procurement_officer",permissions:{}})) === JSON.stringify(["vault-docs","vault-letters"]) &&
+    B({role:"procurement_officer",permissions:{docVault:true}}).length === 0,
+    B({role:"procurement_officer",permissions:{}}).join(","));
 
   // ── (٥) ★★ القائمةُ واللوحةُ من مصدرٍ واحد — طلباتُ الموارد البشرية وحدَها ──
   const POS = [
@@ -17294,6 +17323,339 @@ function poCountGuards() {
    ولذلك يحرس هذا القسمُ قرارَ الطبقة نفسَه — متى تُطوى البطاقاتُ ومتى لا —
    وسلامةَ ما تُخرجه من HTML: اسمُ مشروعٍ فيه `<` يجب أن يُهرَّب، لا أن يُحقَن.
    ═══════════════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════════
+   ★★ خزانة الوثائق (`doc-vault.js`) — طلبُ المالك
+   وثائقُ الشركة نفسِها (السجلّ التجاريّ · الزكاة · التأمينات · السعودة · التصنيف)
+   بتواريخ انتهائها وتنبيهِ التجديد، والخطاباتُ نماذجَ وصادراتٍ مرقَّمة.
+   الحرّاسُ هنا **يُنفّذون الوحدةَ** لا يقرأون سطورَها: الدوالُّ النقيّةُ في حاضنةٍ،
+   والرسمُ في DOM حقيقيّ. وأخطرُ ما يحرسونه ثلاثةٌ:
+   (١) **انحرافُ حساب الأيام** عن محرّك `contracts.js` — لم نُنادِه وقتَ التشغيل
+       (سياستُه ثلاثيةٌ وسياستُنا خماسية، والنداءُ يربط شاشتَنا بتحميل وحدةٍ أخرى)،
+       فلولا مطابقةٌ صريحةٌ لَانحرف المحرّكان بعد شهرٍ بلا خطأٍ واحدٍ يُنذر.
+   (٢) **حلقةُ `MutationObserver`**: الوحدةُ تُعيد حقنَ قائمتها عند كلّ تغييرٍ في
+       الشجرة، وشارةٌ تُكتب في كلّ نداءٍ تُنتج التغييرَ الذي يستدعي النداء — حلقةٌ
+       لا تنتهي تُجمّد التبويب. وقعت فعلاً في التطوير وأُمسكت هنا.
+   (٣) **المفتاحُ المانح**: `docVault` لو قُرئ باصطلاح الحاجب لانفتحت خزانةُ وثائق
+       الشركة لكلّ مستخدمٍ قائمٍ بأثرٍ رجعيّ.
+   ════════════════════════════════════════════════════════════════════ */
+function docVaultGuards() {
+  H("خزانة الوثائق");
+
+  const DV_PATH = path.resolve(path.dirname(IDX), "doc-vault.js");
+  if (!fs.existsSync(DV_PATH)) { T("doc-vault.js موجود", false, DV_PATH); return; }
+  const src = fs.readFileSync(DV_PATH, "utf8");
+
+  let JSDOM;
+  try { ({ JSDOM } = require("jsdom")); }
+  catch { T("jsdom متاح لفحص الخزانة", false, "npm install"); return; }
+
+  const dom = new JSDOM(`<!DOCTYPE html><body>
+      <div class="sidebar-nav"></div>
+      <div class="page active" id="page-dashboard"></div>
+      <div id="global-purchases-btn-wrap"></div>
+    </body>`, { runScripts: "dangerously", url: "https://hail.test/" });
+  /* الأصلُ الحقيقيُّ شرطٌ لا زينة: `localStorage` يرمي على أصلٍ مبهم (`about:blank`)،
+     وكتمُ تكرار التنبيه يعيش فيه — فبلا الأصل يمرّ الفحصُ على وحدةٍ لا تكتم شيئاً. */
+  const W = dom.window;
+  W.esc = x => String(x == null ? "" : x).replace(/[&<>"]/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  W._jsq = v => String(v == null ? "" : v).replace(/['"\\]/g, "\\$&");
+  const NOTIFS = [];
+  W.toast = () => {}; W.logAudit = () => {};
+  W.addNotification = (t, b, _i, k) => NOTIFS.push({ t, b, k });
+  W._svgIcon = () => "<svg></svg>"; W._ic = () => "<span></span>";
+  W.showPage = () => {}; W.toggleSidebarGroup = () => {};
+  W.currentUser = { name: "المالك", user: "owner", role: "admin" };
+
+  let V = null;
+  try { W.eval(src); V = W.docVault; }
+  catch (e) { T("تُحمَّل docVault", false, String(e.message).slice(0, 160)); return; }
+  T("★ docVault تُحمَّل وتعرّض كائناً واحداً", !!V);
+  if (!V) return;
+
+  const NEED = ["daysUntil", "alertLevel", "docLevel", "needsAction", "horizonBuckets",
+    "rollup", "nextRef", "renewDoc", "filterDocs", "sortDocs", "cloneTemplate",
+    "filterLetters", "canView", "canEdit", "canDelete", "render", "renderLetters"];
+  const miss = NEED.filter(k => typeof V[k] !== "function");
+  T("★ الواجهةُ الحسابيةُ كلُّها مكشوفةٌ للفحص بلا متصفّح", miss.length === 0, miss.join(" · "));
+  if (miss.length) return;
+
+  const TODAY = new Date("2026-09-10T09:00:00Z");
+
+  /* ── (١) ★★ حسابُ الأيام مربوطٌ بمحرّك `contracts.js` — لا انحرافَ صامت ──
+     المحرّكان منفصلان عمداً وقتَ التشغيل. وهذا الحارسُ هو الرباطُ الوحيد بينهما:
+     لو غيّر أحدُهما حسابَه (منتصفُ الليل المحلّيّ بدل UTC مثلاً) سقط الفحصُ هنا
+     بدل أن يظهر بعد شهرين في تنبيهٍ يصل يوماً متأخّراً. */
+  {
+    const CS = CTR_PATH ? fs.readFileSync(CTR_PATH, "utf8") : "";
+    const blk = (CS.match(/function docExpiryState\(expiry, today\)\{[\s\S]*?\n\}/) || [])[0] || "";
+    const soon = (CS.match(/var DOC_SOON_DAYS = (\d+);/) || [])[1];
+    T("★ محرّكُ انتهاء التعاقدات موجودٌ ليُقاس عليه", !!blk && !!soon, soon);
+    if (blk) {
+      const ctrDays = new Function("expiry", "today",
+        "var DOC_SOON_DAYS=" + soon + ";\n" + blk + "\nreturn docExpiryState(expiry, today).days;");
+      const TABLE = ["2026-09-10", "2026-09-11", "2026-09-09", "2026-08-31", "2026-10-01",
+        "2026-12-31", "2027-01-01", "2027-02-28", "2028-02-29", "2026-03-29", "2026-10-30"];
+      const drift = TABLE.filter(d => V.daysUntil(d, TODAY) !== ctrDays(d, TODAY));
+      T("★★ dv: حسابُ الأيام يطابق `contracts._docExpiryState` على جدول تواريخ",
+        drift.length === 0, drift.join(" · "));
+      /* وعتبةُ الثلاثين المشتركة تقع في المرتبة نفسِها في المحرّكين — فرقُ السياسة
+         في المراتب الأخرى مقصود، وهذه وحدَها يجب ألّا تفترق. */
+      T("★ dv: عتبةُ الثلاثين نفسُها في المحرّكين (الفرقُ في المراتب الأخرى مقصود)",
+        V.alertLevel(Number(soon)) === "urgent" && V.alertLevel(Number(soon) + 1) === "soon");
+    }
+  }
+
+  /* ── (٢) حدودُ السلّم مغلقةٌ من أعلى: لا يومَ يسقط بين مرتبتين ── */
+  T("★ dv: حدودُ سلّم التنبيه مغلقةٌ من أعلى (`<=`) فلا يومَ بلا مرتبة",
+    V.alertLevel(-1) === "expired" && V.alertLevel(0) === "critical" &&
+    V.alertLevel(7) === "critical" && V.alertLevel(8) === "urgent" &&
+    V.alertLevel(30) === "urgent" && V.alertLevel(31) === "soon" &&
+    V.alertLevel(60) === "soon" && V.alertLevel(61) === "plan" &&
+    V.alertLevel(90) === "plan" && V.alertLevel(91) === "ok",
+    [-1, 0, 7, 8, 30, 31, 60, 61, 90, 91].map(V.alertLevel).join(","));
+  T("★ dv: بلا تاريخٍ أو بتاريخٍ فاسدٍ ⇒ لا مرتبة (لا `expired` كاذبة)",
+    V.daysUntil("", TODAY) === null && V.daysUntil("ليس تاريخاً", TODAY) === null &&
+    V.alertLevel(null) === "none" && V.alertLevel(undefined) === "none");
+  T("★ dv: العملُ اليومَ للمراتب الثلاث الأُوَل وحدَها",
+    ["expired", "critical", "urgent"].every(V.needsAction) &&
+    !["soon", "plan", "ok", "none"].some(V.needsAction));
+
+  const DOCS = [
+    { id: "DOC-1", title: "السجل التجاري", docType: "cr",             expiry: "2026-09-05" },
+    { id: "DOC-2", title: "الزكاة",        docType: "zakat",          expiry: "2026-09-15" },
+    { id: "DOC-3", title: "التأمينات",     docType: "gosi",           expiry: "2026-10-05" },
+    { id: "DOC-4", title: "السعودة",       docType: "saudization",    expiry: "2026-11-20" },
+    { id: "DOC-5", title: "التصنيف",       docType: "classification", expiry: "2027-06-01" },
+    { id: "DOC-6", title: "عقد التأسيس",   docType: "agreement",      noExpiry: true },
+    { id: "DOC-7", title: "محذوفة",        docType: "other",          expiry: "2026-09-20", archived: true },
+    { id: "DOC-8", title: "بعيدة",         docType: "iso",            expiry: "2028-01-01" }
+  ];
+
+  /* ── (٣) الأفق: المنتهيةُ في كعبها، والشهرُ الخالي موجودٌ، وما بعد السنة يُلخَّص ── */
+  {
+    const h = V.horizonBuckets(DOCS, TODAY, 12);
+    T("★ dv: الأفقُ اثنا عشر شهراً يبدأ بالشهر الجاري وعليه علامتُه",
+      h.months.length === 12 && h.months[0].ym === "2026-09" && h.months[0].now === true);
+    T("★ dv: المنتهيةُ في الكعب لا في الأفق (وإلّا احتُسبت مرّتين)",
+      h.overdue.length === 1 && h.overdue[0].id === "DOC-1" &&
+      !h.months.some(m => m.docs.some(d => d.id === "DOC-1")));
+    T("★★ dv: المؤرشفةُ خارج الأفق كلِّه", 
+      !h.overdue.concat(h.beyond, ...h.months.map(m => m.docs)).some(d => d.id === "DOC-7"));
+    T("★ dv: الدائمةُ بلا انتهاءٍ لا تدخل الأفق",
+      !h.overdue.concat(h.beyond, ...h.months.map(m => m.docs)).some(d => d.id === "DOC-6"));
+    T("★ dv: الشهرُ الخالي موجودٌ في الأفق (الفراغُ نصفُ المعلومة)",
+      h.months[3].docs.length === 0 && h.months[3].label === "ديسمبر");
+    T("★ dv: ما بعد المدى يُلخَّص ولا يُفرَش (وإلّا امتدّ الشريطُ بلا حدّ)",
+      h.beyond.length === 1 && h.beyond[0].id === "DOC-8");
+    T("★★ dv: لا وثيقةَ تضيع ولا تتكرّر — مجموعُ الأفق = كلُّ ما له انتهاءٌ غيرُ مؤرشف",
+      h.overdue.length + h.months.reduce((s, m) => s + m.docs.length, 0) + h.beyond.length === 6);
+  }
+
+  /* ── (٤) الحصيلةُ والشارة: `act` ما يستحقّ عملاً اليوم لا الإجمالي ── */
+  {
+    const r = V.rollup(DOCS, TODAY);
+    T("★ dv: الحصيلةُ تتجاهل المؤرشف", r.total === 7);
+    T("★★ dv: `act` = منتهية + أسبوع + شهر (شارةٌ تحمل الإجماليَّ لا تسكت أبداً)",
+      r.act === 3 && r.expired === 1 && r.critical === 1 && r.urgent === 1, JSON.stringify(r));
+    T("★ dv: الدائمةُ تُعدّ في `none` لا في `ok`", r.none === 1);
+  }
+
+  /* ── (٥) التجديدُ يحفظ التاريخَ ولا يمحوه — وثيقةٌ تُكتب فوق أخرى دليلٌ يضيع ── */
+  {
+    const cur = { id: "DOC-2", title: "الزكاة", start: "2025-09-15", expiry: "2026-09-15",
+                  number: "A-1", files: [{ name: "قديم.pdf", url: "u1" }], history: [] };
+    const nx = V.renewDoc(cur, { start: "2026-09-15", expiry: "2027-09-15", number: "A-2",
+                                 files: [{ name: "جديد.pdf", url: "u2" }] },
+                          "2026-09-10T10:00:00Z", "المالك");
+    T("★★ dv: التجديدُ يُنزل المدّةَ القائمةَ بمرفقها إلى السجلّ",
+      nx.history.length === 1 && nx.history[0].expiry === "2026-09-15" &&
+      nx.history[0].files[0].url === "u1" && nx.history[0].renewedBy === "المالك");
+    T("★ dv: والمدّةُ الجديدةُ تحلّ محلَّها بمرفقها",
+      nx.expiry === "2027-09-15" && nx.number === "A-2" && nx.files[0].url === "u2");
+    T("★ dv: والوثيقةُ تبقى كياناً واحداً (لا صفٌّ ثانٍ بالاسم نفسِه)",
+      nx.id === "DOC-2" && nx.title === "الزكاة" && nx.renewCount === 1);
+    T("★★ dv: الدالّةُ نقيّةٌ — لا تمسّ الوثيقةَ الأصلَ",
+      cur.expiry === "2026-09-15" && cur.history.length === 0 && cur.files[0].url === "u1");
+    T("★ dv: لا نسخةَ خاويةٌ تنزل إلى السجلّ (وثيقةٌ أُنشئت ثمّ مُلئت)",
+      V.renewDoc({ id: "X", title: "جديدة" }, { start: "2026-01-01", expiry: "2027-01-01" }).history.length === 0);
+    T("★ dv: التجديدُ الثاني يُراكم ولا يستبدل، والأحدثُ في الرأس",
+      (function () {
+        const n2 = V.renewDoc(nx, { start: "2027-09-15", expiry: "2028-09-15" }, "2027-09-01T00:00:00Z", "المالك");
+        return n2.history.length === 2 && n2.history[0].expiry === "2027-09-15" &&
+               n2.history[1].expiry === "2026-09-15" && n2.renewCount === 2;
+      })());
+  }
+
+  /* ── (٦) الترقيمُ والترشيحُ والترتيب ── */
+  T("★ dv: الرقمُ المرجعيُّ يحمل شهرَ الإنشاء وتسلسلاً عاماً",
+    V.nextRef("DOC", 7, "2026-09-10") === "DOC-2609-0007" &&
+    V.nextRef("LTR", 1234, "2026-01-02") === "LTR-2601-1234");
+  T("★ dv: الترشيحُ بالنوع والمرتبة والشهر والبحث",
+    V.filterDocs(DOCS, { type: "cr" }, TODAY).length === 1 &&
+    V.filterDocs(DOCS, { level: "expired" }, TODAY).map(d => d.id).join() === "DOC-1" &&
+    V.filterDocs(DOCS, { ym: "2026-10" }, TODAY).map(d => d.id).join() === "DOC-3" &&
+    V.filterDocs(DOCS, { ym: "overdue" }, TODAY).map(d => d.id).join() === "DOC-1" &&
+    V.filterDocs(DOCS, { q: "زكاة" }, TODAY).length === 1);
+  T("★ dv: الترشيحُ يُسقط المؤرشفَ دائماً مهما كان الطلب",
+    V.filterDocs(DOCS, {}, TODAY).length === 7 &&
+    V.filterDocs(DOCS, { q: "محذوفة" }, TODAY).length === 0);
+  T("★ dv: الترتيبُ ثابت — الأقربُ انتهاءً أوّلاً والدائمةُ آخراً",
+    V.sortDocs(DOCS.filter(d => !d.archived), TODAY).map(d => d.id).join() ===
+    "DOC-1,DOC-2,DOC-3,DOC-4,DOC-5,DOC-8,DOC-6");
+
+  /* ── (٧) استنساخُ النموذج يُفرِّغ ما يخصّ الصادرَ وحدَه ──
+     نموذجٌ يُستنسَخ بجهةِ خطابٍ سابقٍ **يُرسَل إلى الجهة الخطأ**. */
+  {
+    const tpl = { id: "TPL-1", kind: "template", title: "طلب تمديد", subject: "تمديد",
+                  body: "إلى [الجهة]", party: "جهةٌ قديمة", letterDate: "2020-01-01",
+                  files: [{ url: "x" }] };
+    const cl = V.cloneTemplate(tpl, "2026-09-10T00:00:00Z");
+    T("★★ dv: الاستنساخُ يُفرِّغ الجهةَ والمرفقَ ويُبقي المتنَ والموضوع",
+      cl.kind === "issued" && cl.party === "" && cl.files.length === 0 &&
+      cl.body === "إلى [الجهة]" && cl.subject === "تمديد" &&
+      cl.letterDate === "2026-09-10" && cl.fromTemplate === "TPL-1", JSON.stringify(cl));
+    T("★ dv: تبويبا الخطابات يفصلان النماذجَ عن الصادرات",
+      V.filterLetters([tpl, { id: "LTR-1", kind: "issued", title: "خطاب" }], { kind: "template" }).length === 1 &&
+      V.filterLetters([tpl, { id: "LTR-1", kind: "issued", title: "خطاب" }], { kind: "issued" }).length === 1);
+  }
+
+  /* ── (٨) ★★ التركيبُ الذاتيّ ورسمُ الأفق في DOM حقيقيّ ──
+     الحسابُ صحيحٌ ولا يُرسَم = خطأٌ لا يُنذر. */
+  {
+    W.document.dispatchEvent(new W.Event("DOMContentLoaded"));
+    T("★ dv: الصفحتان رُكِّبتا ذاتياً بلا تعديلٍ في النواة",
+      !!W.document.getElementById("page-vault-docs") && !!W.document.getElementById("page-vault-letters"));
+    T("★ dv: مجموعةُ القائمة الجانبية وزرّاها",
+      !!W.document.getElementById("hdr-grp-vault") &&
+      !!W.document.getElementById("nav-vault-docs-btn") &&
+      !!W.document.getElementById("nav-vault-letters-btn"));
+    T("★★ dv: زرُّ البوّابة الخارجية بطراز `.pk-row` القائم (لا طرازَ ثانٍ يفترق)",
+      !!W.document.querySelector("#dv-landing-btn-wrap .pk-row") &&
+      !!W.document.querySelector("#dv-landing-btn-wrap .pk-row-ic") &&
+      !!W.document.querySelector("#dv-landing-btn-wrap .pk-row-sub"));
+
+    const pg = W.document.getElementById("page-vault-docs");
+    pg.classList.add("active");
+    V.__test_seed(DOCS, []);
+    V.render();
+    const html = pg.innerHTML;
+    T("★★ dv: الأفقُ يُرسَم بكعبِ المنتهيات واثني عشر شهراً",
+      W.document.querySelectorAll("#page-vault-docs .dv-hz-m").length === 12 &&
+      /class="dv-hz-past[^"]*"/.test(html) && html.includes(">1</span><span class=\"l\">منتهية<"));
+    T("★★ dv: نقاطُ الأفق = عددُ الوثائق المنتهية في كلّ شهرٍ فعلاً",
+      W.document.querySelectorAll("#page-vault-docs .dv-hz-m .dv-hz-dot").length === 4,
+      String(W.document.querySelectorAll("#page-vault-docs .dv-hz-m .dv-hz-dot").length));
+    T("★ dv: النقطةُ تحمل مرتبتَها لوناً (الأحمرُ وحدَه يصرخ)",
+      !!W.document.querySelector("#page-vault-docs .dv-hz-dot.l-critical") &&
+      !!W.document.querySelector("#page-vault-docs .dv-hz-dot.l-urgent"));
+    T("★★ dv: صفوفُ الجدول = ما مرّ بالترشيح، لا أقلّ ولا أكثر",
+      W.document.querySelectorAll("#page-vault-docs .dv-tbl tbody tr").length === 7,
+      String(W.document.querySelectorAll("#page-vault-docs .dv-tbl tbody tr").length));
+    T("★ dv: الدائمةُ تُقرأ «بلا انتهاء» لا خانةً فارغة", html.includes("بلا انتهاء"));
+
+    /* الترشيحُ بالنقر على شهرٍ في الأفق يجب أن يصل إلى الجدول فعلاً — وإلّا كان
+       الأفقُ زينةً تُنقَر بلا أثر. */
+    V.pickMonth("2026-10");
+    T("★★ dv: نقرُ الشهر يُرشّح الجدولَ فعلاً (الأفقُ أداةٌ لا زينة)",
+      W.document.querySelectorAll("#page-vault-docs .dv-tbl tbody tr").length === 1 &&
+      pg.innerHTML.includes("التأمينات"));
+    V.clearFilters();
+    T("★ dv: ومسحُ الترشيح يُرجع الكلّ",
+      W.document.querySelectorAll("#page-vault-docs .dv-tbl tbody tr").length === 7);
+  }
+
+  /* ── (٩) ★★ حلقةُ المراقب: الشارةُ تُكتب عند التغيّر وحدَه ──
+     وقعت فعلاً: `refreshBadges` كانت تُسند `textContent` في كلّ نداء، والإسنادُ
+     يُبدّل أبناءَ العنصر ولو بالنصّ نفسِه، فيراه `MutationObserver` تغييراً فينادي
+     الحقنَ فيكتب فيراه… تجمّدَ التبويبُ ولم يُطبع خطأٌ واحد. */
+  {
+    T("★★ dv: `refreshBadges` لا تكتب إلّا عند التغيّر (وإلّا حلقةُ مراقبٍ تُجمّد التبويب)",
+      /function _setText\(el, txt, disp, title\)\{[\s\S]{0,60}if\(el\.textContent !== txt\)/.test(src) &&
+      !/^\s*b\.textContent = /m.test(src));
+    T("★★ dv: ولا يُعاد ضبطُ الشارة من مسار الخروج المبكِّر للحقن",
+      !/getElementById\("hdr-grp-vault"\)\)\{ refreshBadges/.test(src) &&
+      !/getElementById\("dv-landing-btn-wrap"\)\)\{ refreshBadges/.test(src));
+    V.refreshBadges();          // أوّلُ رسمٍ بعد زرع البيانات
+    const before = W.document.getElementById("dv-nav-badge").textContent;
+    V.refreshBadges(); V.refreshBadges();
+    T("★ dv: والنداءُ المتكرّر لا يغيّر شيئاً (مُتساند)",
+      W.document.getElementById("dv-nav-badge").textContent === before);
+    T("★ dv: الشارةُ تحمل عددَ ما يستحقّ عملاً اليوم", before === "3", before);
+  }
+
+  /* ── (١٠) التنبيهُ يُطلَق مرّةً لكلّ (وثيقة · مرتبة · يوم) ── */
+  {
+    NOTIFS.length = 0;
+    const n1 = V.scanAndAlert(TODAY);
+    const n2 = V.scanAndAlert(TODAY);
+    T("★★ dv: التنبيهُ للمستحقّ وحدَه ثمّ يُكتَم في اليوم نفسِه",
+      n1 === 3 && n2 === 0 && NOTIFS.length === 3, n1 + "/" + n2 + "/" + NOTIFS.length);
+    /* وقعت فعلاً: `docLevel` لا تسأل عن الأرشفة (وهو صوابُها)، فكان الجرسُ يصرخ على
+       وثيقةٍ أُخرجت من الخزانة عمداً — `DOC-7` المؤرشفةُ تنتهي بعد ١٠ أيام. */
+    T("★★ dv: ولا يُنبَّه على المؤرشف (أُخرج من الخزانة عمداً)",
+      !NOTIFS.some(x => /محذوفة/.test(x.t)), NOTIFS.map(x => x.t).join(" · "));
+    T("★ dv: التنبيهُ يقول كم بقي ومَن المسؤول لا «انتبه» وحدَها",
+      NOTIFS.some(x => /تنتهي بعد \d+ يوماً/.test(x.b)) &&
+      NOTIFS.some(x => /انتهت منذ \d+ يوماً/.test(x.b)) &&
+      NOTIFS.every(x => x.k === "doc_expiry"));
+  }
+
+  /* ── (١١) ★★ المفتاحُ المانحُ ونطاقُ الكتابة ── */
+  {
+    const as = u => { W.currentUser = u; };
+    const prev = W.currentUser;
+    T("★★ dv: المستخدمُ القديمُ بلا حقل صلاحياتٍ لا تُفتح له الخزانة",
+      (as({ role: "مشرف", user: "old" }), V.canView() === false));
+    T("★★ dv: ولا تُفتح بعلامةٍ حاجبةٍ (`!== false`) — المانحُ لا يُقرأ إلّا `=== true`",
+      (as({ role: "مشرف", user: "s", permissions: { tickets: true } }), V.canView() === false));
+    T("★ dv: وتُفتح بمنحٍ صريح",
+      (as({ role: "مشرف", user: "s", permissions: { docVault: true } }), V.canView() === true));
+    T("★ dv: والأدمنُ يملكها بدوره بلا مفتاح",
+      (as({ role: "admin", user: "a" }), V.canView() === true && V.canEdit() === true && V.canDelete() === true));
+    T("★★ dv: الزائرُ والمراقبُ يريان ولا يكتبان وإن مُنحا",
+      (as({ role: "viewer", user: "v", permissions: { docVault: true } }),
+        V.canView() === true && V.canEdit() === false) &&
+      (as({ role: "observer", user: "o", permissions: { docVault: true } }),
+        V.canView() === true && V.canEdit() === false));
+    T("★★ dv: الحذفُ للأدمن وحدَه — مَن يحذف وثيقةً يمحو دليلاً",
+      (as({ role: "project_manager", user: "pm", permissions: { docVault: true } }),
+        V.canEdit() === true && V.canDelete() === false));
+    as(prev);
+  }
+
+  /* ── (١٢) المفتاحُ مسجَّلٌ في مصدر المفاتيح الواحد وفي فروع النافذة كلِّها ── */
+  T("★★ dv: `docVault` في مصدر المفاتيح وقائمةِ المانحين وخريطةِ الصفحات",
+    /docVault:"خزانة الوثائق"/.test(HTML) &&
+    /_PERM_GRANT_KEYS = \[[^\]]*"docVault"[^\]]*\]/.test(HTML) &&
+    /docVault:\s*\["vault-docs","vault-letters"\]/.test(HTML));
+  T("★★ dv: وخانتُه تُعرض لأدوار الوضع المركزيّ أيضاً (طلبُ المالك: في المشتريات كما في المشاريع)",
+    /ks\.push\("docVault"\);/.test(HTML) && /id="perm-docVault"/.test(HTML));
+  T("★ dv: ومربّعُه غيرُ مؤشَّرٍ افتراضاً (مانحٌ لا حاجب)",
+    !/id="perm-docVault"\s+checked/.test(HTML));
+  T("★ dv: ومجموعتُه ضمن مجموعات الصلاحيات المُدارة",
+    /_PERM_MANAGED_GROUPS = \[[^\]]*"grp-vault"[^\]]*\]/.test(HTML));
+  T("★ dv: وسمُ الوحدة في index.html", /<script src="doc-vault\.js\?v=[\d.]+"><\/script>/.test(HTML));
+
+  /* ── (١٣) المرفقُ يحفظ مسارَه، والمسارُ تحت البادئة القائمة `po/` ──
+     مسارٌ جذريٌّ جديد قد تردّه قواعدُ Storage صامتاً (درسُ `hr-payments.js`). */
+  /* ── ★★ الأرقامُ داخل جملةٍ عربية: `direction` وحدَها لا تكفي لصندوقٍ سطريّ ──
+     وقعت فعلاً ورُئيت في لقطة شاشة: «جُدِّدت 2025-09-02» صارت «02-09-2025» — تاريخٌ
+     آخرُ يُقرأ بثقة. الخليّةُ الكتليّةُ نجت (تفتح فقرتَها بنفسها) والسطريُّ لا،
+     فمرّت العلّةُ في الجدول وظهرت في سجلّ التجديدات وحدَه. ولا مترجمَ يُنذر بها. */
+  T("★★ dv: صنفُ الأرقام يعزل اتجاهَه (`unicode-bidi`) لا يكتفي بـ`direction`",
+    /\.dv-num\{[^}]*direction:ltr[^}]*unicode-bidi:isolate/.test(src));
+  T("★★ dv: ولا سهمَ محايدَ الاتجاه يصل تاريخين (يُقلب فيُقرأ المدى معكوساً)",
+    !/_esc\(h\.start[^)]*\) \+ ' ← '/.test(src) && /من <span class="dv-num">/.test(src));
+
+  T("★★ dv: المرفقاتُ تحت البادئة القائمة `po/vault/` لا تحت جذرٍ جديد",
+    /"po\/vault\/" \+ kind/.test(src));
+  T("★ dv: والمرفوعُ يحفظ `storagePath` مع الرابط (وإلّا بقي يتيماً في التخزين)",
+    /storagePath:ref\.fullPath/.test(src));
+  T("★ dv: والمجموعاتُ لها نسخةُ `_dev` كبقيّة المنصّة",
+    /global_docs_dev/.test(src) && /global_letters_dev/.test(src));
+}
+
 function projectHubGuards() {
   H("البطاقةُ الجامعة لبوّابة المشاريع");
 
@@ -18138,6 +18500,7 @@ function pageScrollResetGuards() {
   ticketMultiPhotoGuards();
   staffTasksGuards();
   projectHubGuards();
+  docVaultGuards();
   poCountGuards();
   rulesCoverageGuards();
   pageScrollResetGuards();
