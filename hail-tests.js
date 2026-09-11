@@ -14001,7 +14001,7 @@ function contractsPhase1() {
       T("⛔ لا قاعدةَ قراءةٍ داخل الوايلدكارد العوديّ (يُسقط استعلامَ كلّ مجموعة)",
         !!genBlk && !/allow read/.test(genBlk), genBlk ? "الكتابةُ وحدَها" : "لم يُعثر على البلوك العامّ");
       T("⛔ والقراءةُ على مطابقةٍ ثابتةِ المقاطع — `coll` محسومٌ وقتَ الـ`list`",
-        /match \/\{coll\}\/\{docId\} \{\s*\n\s*allow read: if hasRole\(\) && !vaultColl\(coll\);/.test(RUL));
+        /match \/\{coll\}\/\{docId\} \{\s*\n\s*allow read: if hasRole\(\) && !vaultColl\(coll\) && !signColl\(coll\);/.test(RUL));
       const readWilds = (RUL.match(/match \/[^\n]*\{[a-z]+=\*\*\}[^\n]*\{[\s\S]{0,400}?allow read/g) || []);
       T("⛔ ولا وايلدكارد عوديٌّ في أيّ قاعدة قراءة (`**` يطابق صفرَ مقاطعَ فيسرّب الجذر)",
         readWilds.length === 0, readWilds.length ? String(readWilds.length) : "لا شيء");
@@ -18452,6 +18452,63 @@ function docVaultGuards() {
         /غيرُ مضيَّقة بعد/.test(src) && /enableReaderLock/.test(src));
       T("★★ dv/read: والمنعُ من الخادم يُقال بلغةٍ تُفهَم لا بنصِّ Firestore الخام",
         /PERMISSION_DENIED/.test(src) && /غيرُ مُدرَجٍ في قرّاء الخزانة/.test(src));
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     (٢١ج) سجلُّ التواقيع — المخزنُ المقفول وقائمةُ المأذونين
+     ═══════════════════════════════════════════════════════════════════════ */
+  {
+    const NEEDS = ["signerAllowed", "mergeSigners", "canUseSigns", "migrateSigns", "saveSigners"];
+    const missS = NEEDS.filter(k => typeof V[k] !== "function");
+    T("★ dv/sign: دوالُّ الإذن مكشوفةٌ للفحص", missS.length === 0, missS.join(" · "));
+    if(!missS.length){
+      /* الإذنُ **مستقلٌّ عن مفتاح الخزانة**: من يرى الوثائقَ لا يرى التوقيع. */
+      T("★★★ dv/sign: المأذونُ وحدَه يصل الصورتين — ومفتاحُ الخزانة لا يكفي",
+        V.signerAllowed({ user:"رغده", role:"مشرف", permissions:{ docVault:true } }, ["رغده"]) === true &&
+        V.signerAllowed({ user:"خالد", role:"مشرف", permissions:{ docVault:true } }, ["رغده"]) === false &&
+        V.signerAllowed({ user:"ماجد", role:"project_manager", permissions:{ docVault:true } }, []) === false);
+      T("★★★ dv/sign: ومديرُ النظام مأذونٌ دائماً (وإلّا أُقفل التوقيعُ على مالكه)",
+        V.signerAllowed({ user:"المسؤول", role:"admin" }, []) === true &&
+        V.signerAllowed({ user:"المسؤول", role:"admin" }, null) === true);
+      T("★★★ dv/sign: وغيابُ القائمة يُقفل لا يفتح — عكسُ قرّاء الخزانة، عمداً",
+        V.signerAllowed({ user:"رغده", role:"مشرف" }, null) === false &&
+        V.signerAllowed({ user:"رغده", role:"مشرف" }, []) === false);
+      /* اللوحةُ تعرض مستخدمي الشاشة وحدَهم، فلا تنزع من لم يُعرض. */
+      T("★★★ dv/sign: والحفظُ لا ينزع مَن لم تعرضه اللوحةُ أصلاً (مستخدمو مشروعٍ آخر)",
+        V.mergeSigners(["رغده","سالم"], ["خالد"], ["خالد","رغده"]).join("|") === "خالد|سالم",
+        JSON.stringify(V.mergeSigners(["رغده","سالم"], ["خالد"], ["خالد","رغده"])));
+      T("★★ dv/sign: ونزعُ التأشير يُخرج فعلاً",
+        V.mergeSigners(["رغده"], [], ["رغده"]).length === 0);
+
+      /* البنية: الاستثناءُ باسم المجموعة — وشرطُ معرّف المستند يُسقط `list` */
+      T("★★★ dv/sign: السجلُّ خرج من `meta` إلى مجموعةٍ باسمها (شرطُ المعرّف يُسقط استعلامَ المجموعة)",
+        /function signColl\(coll\)/.test(RUL) &&
+        /!signColl\(coll\)/.test(RUL) &&
+        /match \/vault_signs\/\{id\}/.test(RUL) &&
+        /_dev\(\) \? "vault_signs_dev" : "vault_signs"/.test(src));
+      T("★★★ dv/sign: وقراءتُه بقائمةٍ **مستقلّةٍ** عن قرّاء الخزانة",
+        /meta\/vault_signers/.test(RUL) && /function signReadOk\(\)/.test(RUL) &&
+        !/vault_readers/.test((RUL.match(/function signReadOk\(\)[\s\S]*?\n    \}/) || [""])[0]));
+      T("★★ dv/sign: وكتابةُ السجلّ والقائمةِ للأدمن وحدَه ومستثناةٌ من القاعدة العامة",
+        /match \/vault_signs\/\{id\} \{[\s\S]{0,120}allow write: if isAdmin\(\);/.test(RUL) &&
+        /allow write: if isAdmin\(\) && doc == 'vault_signers';/.test(RUL) &&
+        /!signColl\(document\[0\]\)/.test(RUL) &&
+        /!isSignersDoc\(document\[0\], document\[1\]\)/.test(RUL));
+      /* النقلُ لا يمحو الأصلَ على وعدِ كتابةٍ لم تُقرأ. */
+      T("★★★ dv/sign: والنقلُ يتحقّق من وصول النسخة **قبل** حذف الأصل",
+        /newRef\.get\(\)/.test(src) && /لم يُحذف الأصل/.test(src) &&
+        src.indexOf("newRef.get()") < src.indexOf("oldRef.delete()"));
+      T("★★ dv/sign: والطباعةُ تحرس الصورتين بالإذن (لا تُرسمان من نسخةٍ عالقةٍ في الذاكرة)",
+        /l\.signId && canUseSigns\(\)/.test(src));
+      T("★★ dv/sign: واللوحةُ تقول إنّ مَن ليس فيها لا يتعطّل عملُه",
+        /لا يتعطّل عملُه/.test(src) && /يوقّعه باليد/.test(src));
+      /* مستمعُ المخزن الجديد لا يُعاد إطلاقُه حين يتغيّر **مستندٌ آخر**، فنتيجةُ
+         «أما زال في موضعه المكشوف؟» تجمُد على لحظة التحميل. أُمسكت في متصفّحٍ
+         حقيقيّ: التحذيرُ لم يظهر أصلاً. فيُعاد الفحصُ عند فتح اللوحة. */
+      T("★★★ dv/sign: وفحصُ «ما زال مكشوفاً» يُعاد عند فتح اللوحة لا مرّةً عند التحميل",
+        /if\(!_sPanel && _signsNew === false\) _readLegacySigns\(\);/.test(src) &&
+        /_signsNew = false;/.test(src));
     }
   }
 

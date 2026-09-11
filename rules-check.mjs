@@ -728,7 +728,7 @@ const APP_COLLS = [
   "hail_assets", "hail_ppm_plans", "hail_rollups",
   "global_vendors", "global_contract_requests", "global_contracts",
   "global_contract_extracts", "global_contract_changes",
-  "global_docs", "global_letters", "global_approvals"
+  "global_docs", "global_letters", "global_approvals", "vault_signs"
 ];
 for (const c of APP_COLLS) {
   await check("★ يستعلم الأدمن مجموعةَ " + c,
@@ -1091,7 +1091,8 @@ await check("★★ والأدمنُ يكتبها", assertSucceeds(setDoc(doc(AD
 await check("★★★ ولم يُصَب استعلامُ مجموعةٍ واحدةٍ في النظام (حادثةُ v18.9.2635)",
   assertSucceeds((async () => {
     for (const c of APP_COLLS) {
-      if (c === "global_docs" || c === "global_letters" || c === "global_approvals") continue;
+      if (c === "global_docs" || c === "global_letters" || c === "global_approvals"
+          || c === "vault_signs") continue;
       await getDocs(collection(SUP_OTHER, c));
     }
   })()));
@@ -1100,6 +1101,59 @@ await check("★★ ولا استعلامُ الأدوار الأخرى (كلٌ�
     for (const ctx of [WH, PROC, FIN, PM, CEO, VIEWER, OBS])
       for (const c of ["global_purchases", "global_inventory", "meta", "hail_tickets", "global_contracts"])
         await getDocs(collection(ctx, c));
+  })()));
+
+/* ══════════════════════════════════════════════════════════════════════
+   ١٦) سجلُّ التواقيع — مخزنٌ مقفولٌ وقائمةٌ أضيقُ من قرّاء الخزانة
+
+   يحمل روابطَ صورةِ التوقيع وختمِ الشركة. ومن يقرأ الرابطَ يُنزّل الصورة،
+   وهي `PNG` بخلفيةٍ شفافةٍ تُلصَق على أيّ ورقة. فالقائمةُ هنا **مستقلّةٌ**
+   عن قرّاء الخزانة: من يرى الوثائقَ لا يرى التوقيعَ إلّا إن أُذن له وحدَه.
+   والغيابُ هنا **يُقفل** لا يفتح — والتعطّلُ رفيق: يُطبَع الخطابُ بلا الصورتين.
+   ══════════════════════════════════════════════════════════════════════ */
+head("١٦) سجلُّ التواقيع — المخزنُ المقفول وقائمةُ المأذونين");
+
+const SG_C = "vault_signs";
+await seed(`${SG_C}/list`, { list: [{ id: "sg1", name: "المدير العام",
+  signUrl: "https://x/sig.png", stampUrl: "https://x/stamp.png" }] });
+
+/* بلا قائمةٍ: مقفولٌ على الأدمن — عكسُ قائمة القرّاء، عمداً. */
+await check("★★★ بلا قائمةِ مأذونين: مقفولٌ على الأدمن (الغيابُ هنا يُقفل لا يفتح)",
+  assertSucceeds(getDoc(doc(ADMIN, `${SG_C}/list`))) &&
+  assertFails(getDoc(doc(SUP_RGD, `${SG_C}/list`))) &&
+  assertFails(getDoc(doc(PM, `${SG_C}/list`))));
+
+await seed("meta/vault_signers", { users: ["رغده"] });
+
+await check("★★★ والمأذونُ يقرأ، وغيرُه يُردّ — ولو كان في قرّاء الخزانة",
+  assertSucceeds(getDoc(doc(SUP_RGD, `${SG_C}/list`))) &&
+  assertFails(getDoc(doc(SUP_OTHER, `${SG_C}/list`))));
+/* القائمتان مستقلّتان فعلاً: «المالية» في قرّاء الخزانة (قُدّمت في §15) وليست هنا. */
+await check("★★★ والقائمتان مستقلّتان: قارئُ الخزانة لا يصل التوقيعَ بلا إذنٍ خاصّ",
+  assertFails(getDoc(doc(FIN, `${SG_C}/list`))));
+await check("★★ والكتابةُ للأدمن وحدَه (من يكتبها يستبدل توقيعَ المدير بصورةٍ من عنده)",
+  assertFails(setDoc(doc(SUP_RGD, `${SG_C}/list`), { list: [] })) &&
+  assertFails(setDoc(doc(PM, `${SG_C}/list`), { list: [] })) &&
+  assertSucceeds(setDoc(doc(ADMIN, `${SG_C}/list`), { list: [] })));
+await check("★★★ وقائمةُ المأذونين لا يكتبها إلا الأدمن (وإلّا أذِن كلٌّ لنفسه)",
+  assertFails(setDoc(doc(PM, "meta/vault_signers"), { users: ["ماجد"] })) &&
+  assertFails(setDoc(doc(FIN, "meta/vault_signers"), { users: ["المالية"] })) &&
+  assertSucceeds(setDoc(doc(ADMIN, "meta/vault_signers"), { users: ["رغده"] })));
+await check("★★ ونسخةُ `_dev` محكومةٌ بالقاعدة نفسِها (لا بابَ يُفتح باسمٍ ثانٍ)",
+  assertFails(getDocs(collection(PM, "vault_signs_dev"))) &&
+  assertFails(setDoc(doc(PM, "vault_signs_dev/list"), { list: [] })));
+
+/* ⛔ والاستثناءُ باسم المجموعة لا بمعرّف المستند — والفرقُ قِيس: شرطُ المعرّف
+   يُسقط `list` على المجموعة كلِّها (صنفُ v18.9.2635). فيُعاد قياسُ `meta`. */
+await check("★★★ ولم يُصَب استعلامُ `meta` ولا غيرُها بإخراج السجلّ منها",
+  assertSucceeds((async () => {
+    await getDocs(collection(SUP_OTHER, "meta"));
+    await getDoc(doc(SUP_OTHER, "meta/settings"));
+    await getDoc(doc(SUP_OTHER, "meta/projects"));
+    for (const c of APP_COLLS) {
+      if (["global_docs", "global_letters", "global_approvals", "vault_signs"].indexOf(c) !== -1) continue;
+      await getDocs(collection(SUP_OTHER, c));
+    }
   })()));
 
 await env.cleanup();
