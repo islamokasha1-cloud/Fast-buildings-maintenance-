@@ -96,6 +96,14 @@ body.global-purchases-mode #hdr-grp-assets,
 body.global-purchases-mode #grp-assets,
 body.global-purchases-mode #hdr-grp-system,
 body.global-purchases-mode #grp-system{display:none!important}
+/* ══ v18.9ao: الوضعُ المستقلّ — وحدةٌ لا تتعلّق بمشروع (المهامّ والملاحظات) ══
+   **الإخفاءُ بالأصل والإظهارُ بالاستثناء** — عكسَ لائحة الوضع المركزي أعلاه.
+   السببُ أنّ لائحةَ إخفاءٍ بالأسماء تُنسى عند إضافة مجموعةٍ جديدةٍ إلى القائمة،
+   فتظهر شاشةُ مشروعٍ في وضعٍ لا مشروعَ فيه. القاعدةُ على الأبناء المباشرين
+   لـ`.sidebar-nav` فتشمل ما لم يُكتب بعد. (وزرُّ الرجوع في الهيدر لا في القائمة.) */
+body.standalone-mode .sidebar-nav > *{display:none!important}
+body.standalone-mode #nav-staff-tasks-btn{display:flex!important}
+
 /* ══ وضع Global: إخفاء عناصر الهيدر الخاصة بالمشاريع ══ */
 /* notif-bell يظهر في كل الأوضاع */
 body.global-purchases-mode #switch-project-btn{
@@ -848,11 +856,25 @@ html[data-theme="dark"] .login-error{background:#3a1717;border-color:#6e2a2a}
           mask-image:radial-gradient(135% 110% at 50% 28%, #000 40%, transparent 88%)}
 #project-screen.hidden{display:none}
 .project-picker-wrap{position:relative;z-index:1;width:100%;max-width:700px;margin:auto;animation:cardIn .6s cubic-bezier(.2,.7,.2,1) both}
+/* ══ v18.9ao: البوّابةُ تملأ العرض على الحاسوب والآيباد ══
+   الشكوى: ثلثا الشاشة فارغان يميناً ويساراً والأبوابُ الأخيرةُ دون حافّتها. والحدُّ
+   ٧٠٠ بكسل كان مقاسَ **عمودٍ واحد**؛ والصفحةُ صارت شبكةً فيتّسع الحدُّ لها.
+   ويبقى ٧٠٠ أصلاً للجوّال: سطرٌ أعرضُ من ذلك على شاشةٍ صغيرةٍ يُقرأ أسوأ. */
+@media(min-width:1024px){ .project-picker-wrap{max-width:1180px} }
 .project-picker-header{text-align:center;margin-bottom:26px}
 .project-picker-header img{width:104px;height:104px;object-fit:contain;filter:drop-shadow(0 8px 22px rgba(20,30,55,0.14))}
 .project-picker-header h2{color:var(--primary);font-size:20px;font-weight:900;margin-top:12px}
 .project-picker-header p{color:var(--muted);font-size:12.5px;margin-top:5px}
 .project-picker-user{background:rgba(27,58,107,0.07);border-radius:999px;padding:7px 16px;display:inline-flex;align-items:center;gap:8px;color:var(--primary);font-size:12px;font-weight:700;margin-top:14px;border:1px solid var(--border)}
+/* الترويسةُ شريطٌ أفقيٌّ على الواسع: الشعارُ يميناً والاسمُ بجواره والمستخدمُ يساراً —
+   فتُستعاد ثمانون بكسلاً رأسيةً تنزل بها الأبوابُ إلى داخل الشاشة بلا تمرير. */
+@media(min-width:1024px){
+  .project-picker-header{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:2px 18px;text-align:right;margin-bottom:22px}
+  .project-picker-header img{grid-row:1/3;width:76px;height:76px}
+  .project-picker-header h2{grid-column:2;grid-row:1;margin-top:0;align-self:end;font-size:21px}
+  .project-picker-header p{grid-column:2;grid-row:2;align-self:start}
+  .project-picker-user{grid-column:3;grid-row:1/3;margin-top:0;justify-self:start}
+}
 .project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:18px}
 .project-card{background:#fff;border-radius:16px;padding:22px 16px;cursor:pointer;transition:transform .18s,box-shadow .18s;text-align:center;position:relative;border:1px solid rgba(20,30,55,0.07);
   box-shadow:0 10px 26px rgba(20,30,55,0.10);animation:cardIn .55s cubic-bezier(.2,.7,.2,1) both}
@@ -966,6 +988,9 @@ html[data-theme="dark"] .login-error{background:#3a1717;border-color:#6e2a2a}
 .proj-hub-body>div{overflow:hidden}
 .proj-hub-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;padding:4px 18px 18px}
 @media(max-width:560px){.proj-hub-grid{grid-template-columns:1fr}}
+/* على الواسع: الصفُّ يتّسع لأربعةٍ — بطاقتان في إطارٍ عرضُه ١١٨٠ بكسلاً تتركان فراغاً
+   أكبرَ من البطاقتين نفسِهما. (`auto-fit` لا رقمٌ ثابت: عددُ المشاريع يتغيّر.) */
+@media(min-width:1024px){.proj-hub-grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}}
 .proj-hub .project-card{box-shadow:0 10px 24px rgba(10,20,40,.22);border-color:rgba(20,30,55,.07)}
 .proj-hub:not(.open) .project-card{animation:none;opacity:0}
 .proj-hub.open .project-card{animation:cardIn .5s cubic-bezier(.2,.7,.2,1) both}
@@ -986,6 +1011,24 @@ html[data-theme="dark"] .login-error{background:#3a1717;border-color:#6e2a2a}
 .pk-row-ch svg{width:16px;height:16px}
 .pk-row:hover .pk-row-ch{transform:translateX(3px);color:var(--primary)}
 html[data-theme="dark"] .pk-row-ic{background:rgba(91,141,239,.14)}
+/* أيقونةُ بابٍ آتيةٍ من مُصنّع المنصّة `_ic` تأتي ملفوفةً في `.ic` (مقاسُها ١٤) —
+   والصفُّ يريدها بمقاسه كبقية الأبواب. وزنُ الصنفين يغلب `.ic svg` بلا `!important`.
+   والابنُ المباشرُ (`>`) مقصودٌ لا زينة: حارسُ «مقاسُ المطبوع = مقاسُ الشاشة» يمسك
+   أوّلَ `.ic svg{width:` في الورقة ليقارنه بورقة الطباعة، وقاعدةٌ مخصّصةٌ تُكتب
+   بالصيغة نفسِها تسبقه فتُقرأ مقاساً عامّاً وليست كذلك. */
+.pk-row-ic .ic > svg{width:19px;height:19px}
+.pk-row-ch .ic > svg{width:16px;height:16px}
+/* ══ v18.9ao: شبكةُ أبواب البوّابة ══
+   الأبوابُ الثانوية كانت أشرطةً كاملةَ العرض واحداً تحت واحد. تُصفّ الآن أفقياً
+   أوّلاً: ثلاثةٌ على الحاسوب واثنان على الآيباد وواحدٌ على الجوّال. والمقاسُ الأدنى
+   ٣٠٠ بكسلاً لأنّ أطولَ عنوانٍ فيها («مركز العمليات — كل المشاريع») مع سطر وصفِه
+   يُقطَّع دون ذلك. `auto-fit` لا عددٌ ثابت: الوحداتُ تحقن أبوابَها فيتغيّر العدد.
+   والأبوابُ المحقونة تحمل هامشاً في سماتها (`margin:9px 0 0`) من زمن العمود —
+   تُبطله الشبكةُ هنا بمصدرٍ واحدٍ للتباعد (`gap`)، ويشمل الإبطالُ ما سيُحقن غداً. */
+.pk-rows{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}
+@media(min-width:640px){.pk-rows{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}}
+.pk-rows > div{margin:0!important;height:100%}
+.pk-rows .pk-row{height:100%}
 @media(prefers-reduced-motion:reduce){.proj-hub,.proj-hub-hair,.proj-hub-resume,.proj-hub-names span,.proj-hub-rk i,.proj-hub.open .project-card{animation:none}.proj-hub-hair{transform:none}.proj-hub-fold,.proj-hub-body,.proj-hub-chev,.proj-hub-ico{transition:none}.proj-hub:not(.open) .project-card{opacity:1}}
 .project-add-btn{width:100%;background:rgba(27,58,107,0.05);border:2px dashed rgba(27,58,107,0.28);border-radius:16px;padding:18px;color:var(--primary);font-size:13px;font-weight:800;cursor:pointer;transition:background .15s,border-color .15s;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px}
 .project-add-btn:hover{background:rgba(27,58,107,0.1);border-color:rgba(27,58,107,0.45)}

@@ -88,7 +88,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3151";
+  var MODULE_BUILD = "v18.9.3152";
 
   function COLL(){
     var dev=false;
@@ -591,13 +591,29 @@
      شيءَ في الشاشة الأولى يحتاج مهامَّ الآخرين. فصار الاشتراكُ واحداً للجميع
      (`array-contains` باسمي)، و«كل المهامّ» جلبةٌ واحدةٌ عند فتح خانتها.
      (درسُ `finance-audit`: دورٌ لا يرى الشاشة لا يُنزِّل مجموعتَها كلَّ جلسة.) */
+  /* ── مَن بُني عليه المستمعُ الحاليّ ──
+     الاستعلامُ مقيَّدٌ باسم دخولي (`participants array-contains <me>`)، والخروجُ
+     من الحساب **لا يفكّ مستمعي الوحدات** في هذه المنصّة. فلو خرج موظفٌ ودخل زميلُه
+     في التبويب نفسِه، رجعت `startSync` فوراً (`_unsub` موضوع) فبقيت لقطةُ الأوّل
+     حيّةً تحت اسم الثاني — وشارةُ الصفحة الرئيسية تُقرأ **قبل** دخول التطبيق، فيرى
+     الثاني عدداً ليس له. فالمقارنةُ هنا: اختلفَ الاسمُ ⇐ يُفكّ القديم ويُبنى الجديد. */
+  var _syncFor = "";
+
   function startSync(){
     if(typeof db==="undefined" || !db) return;
     if(!_canView()) return;
-    if(_unsub) return;                     // idempotent
-    var me=_me(), q;
+    var me=_me();
+    if(_syncFor === me) return;                // مشترَكٌ لهذا المستخدم — أو قيدَ الاشتراك الآن
+    if(_unsub) stopSync();                     // تبدّل المستخدمُ في التبويب نفسِه
+    /* يُوضَع **قبل** الاشتراك لا بعده، وهو الحارسُ من العَود لا مجرّدُ تسجيل:
+       `onSnapshot` قد تُسلّم أوّلَ لقطةٍ **أثناء النداء نفسِه** (وهو ما يفعله محاكي
+       `staff-tasks-check`)، فتمرّ اللقطةُ بـ`_rerender` ⇐ `render` ⇐ `startSync`
+       و`_unsub` لم يُسنَد بعد — فلو كان الحارسُ `_unsub` وحدَه لاشترك ثانيةً، ولَعادت
+       الحلقةُ على نفسها حتى ينفد المكدّس. */
+    _syncFor = me;
+    var q;
     try{ q = db.collection(COLL()).where("participants","array-contains", me); }
-    catch(e){ return; }
+    catch(e){ _syncFor=""; return; }           // لم يقم اشتراكٌ — فلا يُحجز الاسم
     try{
       q.get().then(function(s){ if(!_loaded) _applySnap(s); })
        .catch(function(e){ console.warn("staff-tasks first fetch failed:", e); });
@@ -609,7 +625,7 @@
   }
   function stopSync(){
     try{ if(_unsub) _unsub(); }catch(e){}
-    _unsub=null; _loaded=false; _connIssue=false; _tasks=[];
+    _unsub=null; _syncFor=""; _loaded=false; _connIssue=false; _tasks=[];
     _clearSlow();
   }
   function _applySnap(snap){
@@ -662,6 +678,7 @@
   /* ════════ شارةُ الشريط الجانبي ════════ */
   function refreshNav(){ _refreshNav(); }
   function _refreshNav(){
+    _refreshLandingBadge();   // الشارتان تتبعان اللقطةَ نفسَها — موضعٌ واحدٌ للنداء
     try{
       var btn=document.getElementById("nav-staff-tasks-btn");
       if(btn) btn.style.display = _canView() ? "" : "none";
@@ -671,6 +688,72 @@
       if(n>0){ b.textContent=String(n); b.style.display=""; }
       else { b.style.display="none"; }
     }catch(e){}
+  }
+
+  /* ════════ بابُ الصفحة الرئيسية (بوّابة المشاريع) ════════
+
+     ── لماذا هنا لا في المشروع ──
+     المهامُّ والملاحظاتُ لا تخصّ مشروعاً: تكليفُ زميلٍ وتذكيرٌ شخصيٌّ لا يقعان تحت
+     «أمانة حائل» ولا «دورات المياه». وكان بابُها الوحيدُ داخلَ المشروع، فمن يدخل
+     ليرى ما كُلِّف به يختار مشروعاً لا حاجةَ له به — **وقبلَ ذلك لا يعلم أصلاً أنّ
+     ثمّةَ ما ينتظره**، فالعددُ لا يظهر إلا بعد الاختيار. فصار البابُ على الصفحة
+     الرئيسية بعددِه معه، على طراز `.pk-row` القائم حرفاً بحرف — لا طرازَ ثانٍ.
+
+     ── الاشتراكُ يسبق الفتح ──
+     `startSync` تُنادى من `startPurchaseSync` أي **بعد** دخول التطبيق، فالشارةُ
+     على البوّابة تحتاج اشتراكاً قبل ذلك. والدالّةُ idempotent (ترجع فوراً إن كان
+     المستمعُ قائماً) والاستعلامُ مقصورٌ على ما أنا طرفٌ فيه — فلا حمولةَ زائدة،
+     وهو المستمعُ نفسُه الذي كان سيُركَّب بعد لحظات. */
+  function _landingBtnHTML(){
+    return '<button class="pk-row" onclick="staffTasks.openFromLanding()">'
+      + '<span class="pk-row-ic">' + _icn("clipboardCheck") + '</span>'
+      + '<span><span>المهامّ والملاحظات</span>'
+      +   '<span class="pk-row-sub" id="st-landing-sub">تكليفاتُك وتذكيراتُك — في كل المشاريع</span></span>'
+      + '<span class="pk-row-ch">' + _icn("chevronLeft") + '</span>'
+      + '</button>';
+  }
+
+  function refreshLanding(){
+    var ex=document.getElementById("st-landing-btn-wrap");
+    if(!_canView()){ if(ex) ex.remove(); return; }
+    if(!ex){
+      var host=document.getElementById("pk-rows");
+      if(!host) return;
+      ex=document.createElement("div");
+      ex.id="st-landing-btn-wrap";
+      ex.style.cssText="margin:9px 0 0;width:100%";
+      ex.innerHTML=_landingBtnHTML();
+      host.appendChild(ex);   // آخرُ الأبواب — الشبكةُ تُرتّبها لا الترتيبُ هنا
+    }
+    startSync();              // idempotent — الشارةُ تحتاج اشتراكاً قبل دخول التطبيق
+    _refreshLandingBadge();
+  }
+
+  /* الشارةُ **ما ينتظر عملاً** لا مجموعُ المهامّ: رقمٌ يحمل الإجماليَّ لا يسكت
+     أبداً فيُقرأ زينةً بعد يومين — وهي قاعدةُ شارات المنصّة نفسُها. */
+  function _refreshLandingBadge(){
+    try{
+      var sub=document.getElementById("st-landing-sub");
+      if(!sub) return;
+      var n=_countOpen(_visible(), _me());
+      var txt = n>0 ? (n + " بانتظارك — تكليفاتُك وتذكيراتُك")
+                    : "تكليفاتُك وتذكيراتُك — في كل المشاريع";
+      if(sub.textContent!==txt) sub.textContent=txt;
+      var col = n>0 ? "var(--danger)" : "";
+      if(sub.style.color!==col) sub.style.color=col;
+    }catch(e){}
+  }
+
+  /* الدخولُ من الصفحة الرئيسية: قشرةُ التطبيق بلا مشروعٍ ولا حمولةِ مشتريات.
+     والسقوطُ الآمن `showPage` المباشرة — نسخةٌ أقدمُ من النواة لا تكسر البابَ. */
+  function openFromLanding(){
+    try{
+      if(typeof openStandaloneModule==="function"){
+        openStandaloneModule("staff-tasks", "\ud83d\udcdd المهامّ والملاحظات");
+        return;
+      }
+    }catch(e){}
+    list();
   }
 
   /* ════════ الكتابة ════════ */
@@ -1877,6 +1960,7 @@
     startSync:startSync, stopSync:stopSync, render:render, list:list, retry:retry,
     loadAll:_loadAll,
     refreshNav:refreshNav, canView:_canView,
+    refreshLanding:refreshLanding, openFromLanding:openFromLanding,
     tab:tab, open:open, back:back, byId:byId,
     markDone:markDone, reopen:reopen, returnTask:returnTask, acceptBack:acceptBack,
     startEdit:startEdit, cancelEdit:cancelEdit, saveEdit:saveEdit,
