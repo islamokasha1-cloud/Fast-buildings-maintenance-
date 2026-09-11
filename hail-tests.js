@@ -735,7 +735,17 @@ function predelivery() {
          المحقونة، وموضعُها المستند.
        • سطرٌ في `showProjectPicker` ينادي `staffTasks.refreshLanding`، ومفتاحُ
          `chevronLeft` في كتالوج `_ICON` (سهمُ الصفّ — مصدرٌ واحدٌ للأيقونات). */
-    const IDX_CEILING = 39979;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 39979 إلى 40022 — ‏٤٣ سطراً لخصمِ الإيقاف الموثَّق من زمن SLA (v18.9zc)،
+       و**ليست ميزةً جديدة** بل إصلاحُ منطقٍ قائمٍ في موضعه كما تُلزم CLAUDE.md: محرّكُ
+       SLA كلُّه (`SLA_CONFIG`·`slaStatus`·`slaOf`·`_closeWorkH`) يعيش هنا منذ v18.9hn،
+       وكاتبُ `clockStops` (`perfClockToggle`) كذلك. ونقلُ الخصمِ وحدَه إلى وحدةٍ يشقّ
+       المحرّكَ مصدرَين ويُخفي الإصلاحَ داخل كتلةٍ منقولةٍ فتعجز المراجعةُ عن تمييزهما.
+       والأسطرُ ثلاثةُ مواضعَ لا رابعَ لها: `clockStopMinutes` (دالّةٌ نقيّةٌ يفحصها
+       hail-tests بلا متصفّح)، وتمريرُ `stops` في `slaStatus`/`slaOf`، ومثلُه في
+       `_elapsedHByTier`. وأكثرُها تعليقٌ يقول لِمَ يُخصَم بتقويم الفئة لا بالتقويم.
+       **وتوحيدُ المحرّك مع `tech-app.html` في `sla-engine.js` تغييرٌ مستقلٌّ لاحق** —
+       نقلٌ حرفيٌّ بعُدّة `global-surface-check`، لا يُخلط بهذا الإصلاح. */
+    const IDX_CEILING = 40022;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -5394,6 +5404,81 @@ function auditRound2() {
     }
     T("KPI-03 يستخدم _closedOnTime", HTML.includes("closedTix.filter(_closedOnTime)"));
     T("★ زال قياس الالتزام بـ getSLA التقويمي", !HTML.includes("return h<=getSLA(t.priority);") && !HTML.includes("if(h <= getSLA(t.priority))"));
+  }
+
+  // ── v18.9zc — SLA: الإيقافُ الموثَّق يُخصَم فعلاً من الزمن المنقضي ──────────
+  //  نافذةُ «إيقاف الساعة» تَعِد حرفياً بأن الفترةَ «تُستبعَد من زمن الاستجابة
+  //  والإصلاح»، وكانت `slaStatus` لا تقرأ `clockStops` إطلاقاً. هذه الحرّاسُ تمنع
+  //  عودةَ الوعدِ بلا وفاء: تُشغّل المحرّكَ الحقيقيَّ من index.html بلا متصفّح.
+  {
+    const _A = HTML.indexOf("const SLA_CONFIG = {");
+    const _B = HTML.indexOf("function responseH(t){", _A);
+    if (_A < 0 || _B < 0) { T("كتلةُ محرّك SLA قابلةٌ للاستخراج", false); }
+    else {
+      let E = null;
+      try {
+        E = new Function(HTML.slice(_A, _B) +
+          "\nreturn {slaStatus,clockStopMinutes,_closeWorkH,_closedOnTime,isOverdue};")();
+      } catch (e) { T("يُبنى محرّكُ SLA", false, String(e.message).slice(0, 120)); }
+      if (E) {
+        // تواريخُ محلّيةٌ بلا Z — المحرّكُ يبني منتصفَ الليل محلياً، فالفحصُ لا يتعلّق بمنطقةٍ زمنية
+        const c = new Date("2026-03-02T08:00:00");        // الإثنين، بدءُ الدوام
+        const n = new Date("2026-03-02T18:00:00");        // بعد 10 ساعاتٍ تقويمية
+
+        T("★ zc: «عاجل» بعد 10 ساعاتٍ بلا إيقاف = تجاوز",
+          E.slaStatus("عاجل", c, n).state === "تجاوز");
+        const st5 = E.slaStatus("عاجل", c, n, null, [{ from: "2026-03-02T10:00:00", to: "2026-03-02T15:00:00" }]);
+        T("★ zc: وبإيقافٍ موثَّقٍ 5 ساعات = داخل الوقت (300 دقيقة لا 600)",
+          st5.state === "داخل الوقت" && st5.elapsedMin === 300 && st5.stoppedMin === 300);
+
+        const stOpen = E.slaStatus("عاجل", c, n, null, [{ from: "2026-03-02T15:00:00", to: null }]);
+        T("★ zc: الإيقافُ المفتوح ينتهي عند طرفِ القياس لا عند الأبد",
+          stOpen.stoppedMin === 180 && stOpen.elapsedMin === 420 && stOpen.paused === true);
+
+        T("★ zc: الفتراتُ المتداخلةُ تُدمَج فلا تُخصَم مرّتين",
+          E.clockStopMinutes([{ from: "2026-03-02T10:00:00", to: "2026-03-02T14:00:00" },
+                              { from: "2026-03-02T12:00:00", to: "2026-03-02T15:00:00" }], c, n, false) === 300);
+
+        T("zc: إيقافٌ خارج نافذة القياس لا يُخصَم",
+          E.clockStopMinutes([{ from: "2026-03-01T01:00:00", to: "2026-03-01T05:00:00" }], c, n, false) === 0);
+
+        // الجوهر: إيقافٌ ليليٌّ لا يحمل دقيقةَ عملٍ واحدة — فخصمُه هديّةٌ لا إنصاف
+        T("★ zc: بتقويم ساعات العمل، إيقافٌ ليليٌّ (17:00→08:00) يُخصَم صفراً",
+          E.clockStopMinutes([{ from: "2026-03-02T17:00:00", to: "2026-03-03T08:00:00" }],
+                             c, new Date("2026-03-03T12:00:00"), true) === 0);
+
+        T("zc: الخصمُ لا يجعل المنقضيَ سالباً",
+          E.slaStatus("عاجل", c, n, null, [{ from: "2026-03-01T00:00:00", to: "2026-03-03T00:00:00" }]).elapsedMin === 0);
+
+        T("zc: بلاغٌ بلا clockStops يبقى كما كان (لا ارتداد)",
+          E.slaStatus("عاجل", c, n, null, undefined).elapsedMin === 600 &&
+          E.slaStatus("عاجل", c, n, null, []).elapsedMin === 600);
+
+        // السلسلةُ كاملةً: الخصمُ يبلغ قياسَ الالتزام لا حالةَ الشريط وحدها
+        const mk = stops => ({ priority: "عادي 🟢 (48 ساعة)", status: "مغلق",
+          createdAt: "2026-03-02T08:00:00", closedAt: "2026-03-04T12:00:00", clockStops: stops });
+        const six = [{ from: "2026-03-03T08:00:00", to: "2026-03-03T15:00:00" }];   // 7 ساعاتٍ ناقص راحة = 6 عمل
+        T("★ zc: «عادي» أُغلق بعد 20 ساعةَ عملٍ = متأخّر (مهلة 16)",
+          E._closeWorkH(mk(null)) === 20 && E._closedOnTime(mk(null)) === false);
+        T("★ zc: وبخصم 6 ساعاتِ إيقافٍ موثَّقٍ = 14 ساعةً ⇐ ملتزم",
+          E._closeWorkH(mk(six)) === 14 && E._closedOnTime(mk(six)) === true);
+
+        // isOverdue تقرأ slaOf — فالخصمُ يسري على شريط البلاغات ولوحة العمليات معاً
+        const ago = h => new Date(Date.now() - h * 3600e3).toISOString();
+        T("★ zc: isOverdue يحترم الإيقاف (حرجٌ بعد 3س وإيقافُ ساعتين = غيرُ متأخّر)",
+          E.isOverdue({ priority: "حرج 🔴 (2 ساعة)", status: "مفتوح", createdAt: ago(3) }) === true &&
+          E.isOverdue({ priority: "حرج 🔴 (2 ساعة)", status: "مفتوح", createdAt: ago(3),
+                        clockStops: [{ from: ago(3), to: ago(1) }] }) === false);
+      }
+    }
+    // حرّاسُ المصدر: المسارات الثلاثة تمرّر clockStops — لا يكفي أن تقبلها الدالّة
+    T("★ zc: slaOf تمرّر clockStops إلى slaStatus",
+      /function slaOf\(t\)\{[^}]*slaStatus\(tierOf\(t\.priority\),\s*new Date\(t\.createdAt\),\s*null,\s*null,\s*t\.clockStops\)/.test(HTML));
+    T("★ zc: _closeWorkH و responseH تمرّران clockStops",
+      HTML.includes("_elapsedHByTier(t.priority,new Date(t.createdAt),new Date(t.closedAt),t.clockStops)") &&
+      HTML.includes("_elapsedHByTier(t.priority,new Date(t.createdAt),to,t.clockStops)"));
+    T("★ zc: وعدُ الواجهة قائمٌ ومسنودٌ بالكود (تُستبعَد ⇐ خصمٌ فعليّ)",
+      HTML.includes("تُستبعَد من") && HTML.includes("function clockStopMinutes(stops,from,to,useWork,cfg){"));
   }
 
   // ── #3 Excel: التصدير يمرّ على المفلتر لا purchases كاملاً ──
