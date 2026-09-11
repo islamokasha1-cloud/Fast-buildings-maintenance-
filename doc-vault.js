@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3125";
+var MODULE_BUILD = "v18.9.3127";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -412,6 +412,100 @@ function filterLetters(list, f){
     }
     return true;
   });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   الباركود — Code 128-B مرسومٌ SVG بلا مكتبة (طلبُ المالك: «الخطاب الصادر يكون
+   له باركود مع رقم الخطاب»)
+
+   ── لماذا بلا مكتبة ──
+   المطبوعةُ تُبنى في **نافذةٍ جديدة** بـ`document.write` (وعلى iOS مستندُ `blob:`
+   لا أصلَ له). ووسمُ <script> من CDN هناك سباقٌ مع أمر الطباعة: تُطبَع الورقةُ
+   قبل أن يصل الملفُّ فيخرج الخطابُ **بلا باركود ولا خطأٍ يُنذر**. والرسمُ SVG
+   **نصٌّ داخل الصفحة نفسِها** — يصل معها أو لا تصل هي.
+
+   ── ولماذا Code 128-B لا QR ──
+   المطلوبُ رقمُ الخطاب لا محتواه: سطرٌ من أربعة عشر محرفاً يُقرأ بأيّ ماسحٍ
+   مكتبيّ. و128-B يغطّي الحروفَ اللاتينية والأرقام والشرطة — وهو بالضبط شكلُ
+   `LTR-YYMM-NNNN`. وQR يلزمه مُرمِّزٌ بمئاتِ الأسطر لفائدةٍ لا تُطلَب هنا.
+
+   ── والرقمُ مكتوبٌ تحت الأعمدة ──
+   ماسحٌ يعطب أو طابعةٌ تُشوّه الأعمدةَ تجعل الباركودَ حبراً لا يُقرأ. والرقمُ
+   المقروءُ بالعين تحته هو ما يُنقذ الورقةَ حينها — وهو عُرفُ كلّ مطبوعةٍ مرقَّمة.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* جدولُ الرموز القياسيّ: ١٠٧ نمطاً، كلٌّ منها ١١ وحدةً (١ = عمودٌ أسود). */
+var C128 = [
+"11011001100","11001101100","11001100110","10010011000","10010001100","10001001100",
+"10011001000","10011000100","10001100100","11001001000","11001000100","11000100100",
+"10110011100","10011011100","10011001110","10111001100","10011101100","10011100110",
+"11001110010","11001011100","11001001110","11011100100","11001110100","11101101110",
+"11101001100","11100101100","11100100110","11101100100","11100110100","11100110010",
+"11011011000","11011000110","11000110110","10100011000","10001011000","10001000110",
+"10110001000","10001101000","10001100010","11010001000","11000101000","11000100010",
+"10110111000","10110001110","10001101110","10111011000","10111000110","10001110110",
+"11101110110","11010001110","11000101110","11011101000","11011100010","11011101110",
+"11101011000","11101000110","11100010110","11101101000","11101100010","11100011010",
+"11101111010","11001000010","11110001010","10100110000","10100001100","10010110000",
+"10010000110","10000101100","10000100110","10110010000","10110000100","10011010000",
+"10011000010","10000110100","10000110010","11000010010","11001010000","11110111010",
+"11000010100","10001111010","10100111100","10010111100","10010011110","10111100100",
+"10011110100","10011110010","11110100100","11110010100","11110010010","11011011110",
+"11011110110","11110110110","10101111000","10100011110","10001011110","10111101000",
+"10111100010","11110101000","11110100010","10111011110","10111101110","11101011110",
+"11110101110","11010000100","11010010000","11010011100","11000111010"];
+var C128_START_B = 104, C128_STOP = 106;
+
+/* ما يقبله الترميزُ: ASCII ٣٢–١٢٦. وما خرج عنه يُسقَط بدل أن يُنتج أعمدةً
+   لا تُقرأ — باركودٌ صامتُ العطب أسوأُ من غيابه. */
+function code128Sanitize(text){
+  var s = String(text == null ? "" : text), out = "";
+  for(var i = 0; i < s.length; i++){
+    var c = s.charCodeAt(i);
+    if(c >= 32 && c <= 126) out += s.charAt(i);
+  }
+  return out;
+}
+
+/* سلسلةُ الوحدات الثنائية كاملةً: بدءٌ + بيانات + خانةُ تحقّق + وقوف + عمودان.
+   خانةُ التحقّق مجموعٌ موزونٌ بموضع المحرف (والبدءُ وزنُه واحد) بباقي ١٠٣ — وهي
+   ما يجعل الماسحَ يرفض قراءةً ناقصةً بدل أن يسلّم رقماً خطأً. */
+function code128Bits(text){
+  var s = code128Sanitize(text);
+  if(!s) return "";
+  var sum = C128_START_B, bits = C128[C128_START_B], i, v;
+  for(i = 0; i < s.length; i++){
+    v = s.charCodeAt(i) - 32;
+    bits += C128[v];
+    sum += v * (i + 1);
+  }
+  bits += C128[sum % 103];
+  bits += C128[C128_STOP] + "11";
+  return bits;
+}
+
+/* رسمُ الأعمدة SVG. `viewBox` بوحدات الترميز و`width` بالمليمتر — فالطابعةُ تقيس
+   بالورقة لا بالبكسل، والأعمدةُ تبقى بنِسَبها مهما تغيّر المقاس. والأعمدةُ
+   المتجاورةُ تُدمَج في مستطيلٍ واحد: مستطيلاتٌ متلاصقةٌ يفصلها التقريبُ بشعرةٍ
+   بيضاء فيقرؤها الماسحُ فاصلاً كاذباً. */
+function code128SVG(text, opt){
+  var o = opt || {};
+  var bits = code128Bits(text);
+  if(!bits) return "";
+  var h = Number(o.height) || 34;          // ارتفاعُ الأعمدة بوحدات الرسم
+  var mm = Number(o.widthMM) || 46;        // عرضُ الوسم على الورق
+  var rects = "", i = 0, start;
+  while(i < bits.length){
+    if(bits.charAt(i) === "1"){
+      start = i;
+      while(i < bits.length && bits.charAt(i) === "1") i++;
+      rects += '<rect x="' + start + '" y="0" width="' + (i - start) + '" height="' + h + '"/>';
+    } else i++;
+  }
+  return '<svg class="bc" role="img" aria-label="باركود ' + _esc(code128Sanitize(text)) + '"'
+    + ' viewBox="0 0 ' + bits.length + ' ' + h + '" width="' + mm + 'mm" height="' + (h * mm / bits.length * 2.2) + 'mm"'
+    + ' preserveAspectRatio="none" shape-rendering="crispEdges" fill="#000"'
+    + ' xmlns="http://www.w3.org/2000/svg">' + rects + '</svg>';
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1052,6 +1146,7 @@ function _letterCardHTML(l){
       + '<div class="dv-panel-s dv-num" style="margin-bottom:0">' + _esc(l.id) + (isTpl ? " — نموذج" : "") + '</div>'
     + '</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
       + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.backToLetters()">' + _icon("rotateCcw", "ic-sm") + ' رجوع</button>'
+      + '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.printLetter(\'' + _jq(l.id) + '\')">' + _icon("printer", "ic-sm") + ' طباعة على ورق الشركة</button>'
       + (isTpl && canEdit() ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.useTemplate(\'' + _jq(l.id) + '\')">' + _icon("filePlus", "ic-sm") + ' استنسخ خطاباً منه</button>' : "")
       + (canEdit() ? '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.editLetter(\'' + _jq(l.id) + '\')">' + _icon("edit", "ic-sm") + ' تعديل</button>' : "")
       + (canDelete() ? '<button type="button" class="btn btn-delete btn-sm" onclick="docVault.delLetter(\'' + _jq(l.id) + '\')">' + _icon("trash", "ic-sm") + '</button>' : "")
@@ -1066,6 +1161,148 @@ function _letterCardHTML(l){
           + _esc(l.body) + '</div></div>' : "")
       + '<div class="dv-f wide"><span class="dv-l">المرفقات</span>' + _filesHTML(l.files, null) + '</div>'
     + '</div></div>';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   المطبوعة — الخطابُ على الورقة الرسمية (طلبُ المالك: «مثل العقود والمستخلصات»)
+
+   ── الورقةُ تُستعار ولا تُنسَخ ──
+   `contracts.js` يملك خطَّ الورقة الرسمية كاملاً — الصورُ الثلاث وهوامشُ `@page`
+   وحيلةُ `thead/tfoot` التي تُكرّر الترويسةَ على كل صفحة — وهو **مضبوطٌ بالمليمتر**
+   على قالب الشركة الحقيقيّ. فنُناديه بأسمائه المعروضة (`_letterheadCSS` ·
+   `_letterheadWrap` · `_letterheadAssets` · `_docHeadHTML`).
+
+   **ولماذا نُنادي هنا ولم نُنادِ في محرّك الانتهاء؟** الفرقُ أنّ ذاك **سياسةٌ**
+   تختلف بين الوحدتين عمداً (سلّمٌ ثلاثيٌّ مقابل خماسيّ)، وهذه **أصلٌ بصريٌّ واحدٌ
+   لا يصحّ أن يختلف**: ورقتان للشركة تفترقان بمليمترٍ فضيحةٌ تُرى بالعين على مطبوعةٍ
+   تخرج باسمها. والنداءُ هنا آمنٌ زمنياً: الطباعةُ فعلُ مستخدمٍ لا حدثُ تحميل،
+   فالوحدةُ محمَّلةٌ قطعاً. وإن غابت — سقطنا إلى ترويسةٍ نصّيةٍ بلا ورقة، لا إلى عطب.
+
+   ── والنموذجُ يُطبَع موسوماً ──
+   نموذجٌ يخرج على ورقة الشركة نظيفاً يُشبه خطاباً صادراً تمامَ الشبه، فيُرسَل
+   بعناصرَ نائبةٍ بين قوسين أو يُحفَظ في ملفٍّ على أنه مراسلة. فشريطٌ صريحٌ يعلوه،
+   **ولا باركودَ له**: الباركودُ رقمُ قيدٍ في سجلّ الصادر، والنموذجُ ليس قيداً.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function _ctr(){ try{ return (typeof contracts !== "undefined") ? contracts : null; }catch(e){ return null; } }
+/* الشعارُ للحالة التي تغيب فيها الورقةُ الرسمية — قراءةُ مُحدِّدٍ لا منطقٌ يُنسَخ. */
+function _printLogo(){
+  try{
+    var im = document.querySelector('img[data-logo="1"]');
+    if(im && im.src && im.src.indexOf("data:,") !== 0) return im.src;
+  }catch(e){}
+  return "";
+}
+
+/* نصُّ المتن: يُهرَّب ثمّ تُبرَز العناصرُ النائبة `[...]` — فالفراغُ الذي يجب أن
+   يُملأ يُرى قبل أن تُرسَل الورقة، لا بعد. */
+function _bodyHTML(text){
+  var t = _esc(String(text == null ? "" : text));
+  return t.replace(/\[([^\]\n]{1,60})\]/g, '<span class="ph">[$1]</span>');
+}
+
+function letterPaperHTML(l){
+  var isTpl = (l.kind === "template");
+  var ctr = _ctr();
+  var lh  = (ctr && ctr._letterheadAssets) ? ctr._letterheadAssets() : null;
+  var on  = !!(ctr && ctr._letterheadOn && ctr._letterheadOn(lh));
+  var head = (ctr && ctr._docHeadHTML)
+    ? ctr._docHeadHTML({ on:on, logo:_printLogo(), docNo:l.id || "",
+                         subtitle:(isTpl ? "نموذج خطاب" : "خطاب صادر") })
+    : '<div class="dochead"><div class="dh-t">' + (isTpl ? "نموذج خطاب" : "خطاب صادر")
+      + '</div><div class="doc-no">' + _esc(l.id || "") + '</div></div>';
+
+  var inner =
+    head
+    + (isTpl
+        ? '<div class="band">نموذج — يُستنسَخ ولا يُرسَل. ما بين قوسين مربّعين يُملأ عند الاستعمال.</div>'
+        : '')
+    + '<div class="meta">'
+      + '<div><span class="ml">الرقم</span><span class="mv dv-num">' + _esc(l.id || "—") + '</span></div>'
+      + (isTpl ? ""
+          : '<div><span class="ml">التاريخ</span><span class="mv dv-num">' + _esc(l.letterDate || "—") + '</span></div>'
+            /* بلا `dv-num`: رقمُ الجهة نصٌّ حرٌّ قد يكون عربياً («أ ح/4471»)، وقلبُ
+               اتّجاهه يبعثر مقاطعَه. والرقمُ الداخليُّ وحدَه لاتينيٌّ مضمون. */
+            + (l.ref ? '<div><span class="ml">الرقم لدى الجهة</span><span class="mv">' + _esc(l.ref) + '</span></div>' : ""))
+    + '</div>'
+    + (isTpl ? ""
+        : '<div class="to">سعادة / <b>' + _esc(l.party || "[الجهة]") + '</b>'
+          + '<span class="resp">المحترم</span></div>'
+          + '<div class="greet">السلام عليكم ورحمة الله وبركاته،</div>')
+    + (l.subject ? '<div class="subj">الموضوع: <b>' + _esc(l.subject) + '</b></div>' : "")
+    + '<div class="body">' + _bodyHTML(l.body || "") + '</div>'
+    + (isTpl ? "" : '<div class="close">وتفضلوا بقبول فائق الاحترام والتقدير،</div>')
+    + '<div class="sign"><div class="sg">'
+      + '<div class="sg-r"><span>الاسم</span><i></i></div>'
+      + '<div class="sg-r"><span>الصفة</span><i></i></div>'
+      + '<div class="sg-r"><span>التوقيع والختم</span><i></i></div>'
+    + '</div></div>'
+    /* الباركودُ للصادر وحدَه — رقمُ قيدٍ في سجلّ المراسلات، والنموذجُ ليس قيداً. */
+    + (isTpl ? "" :
+        '<div class="bcw"><div class="bcb">' + code128SVG(l.id || "")
+        + '<div class="bcn">' + _esc(l.id || "") + '</div></div></div>');
+
+  return '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'
+    + '<title>' + _esc((isTpl ? "نموذج — " : "خطاب — ") + (l.title || l.id || "")) + '</title><style>'
+    + '*{box-sizing:border-box}'
+    + 'body{font-family:"Segoe UI",Tahoma,Arial,sans-serif;margin:0;padding:26px;color:#111827;direction:rtl;font-size:13.5px;line-height:2}'
+    + '.header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1b3a6b;padding-bottom:12px}'
+    + '.header-right{display:flex;align-items:center;gap:12px}'
+    + '.company-logo{width:56px;height:56px;object-fit:contain}'
+    + '.company{font-size:18px;font-weight:800}.subtitle{font-size:13px;color:#1b3a6b;font-weight:700}'
+    + '.dochead{display:flex;justify-content:space-between;align-items:center;gap:14px;border-bottom:3px solid #1b3a6b;padding-bottom:10px}'
+    + '.dh-t{font-size:17px;font-weight:800;color:#1b3a6b}'
+    + '.doc-no{background:#eef2f7;color:#1b3a6b;border-radius:8px;padding:8px 14px;font-weight:800;font-family:monospace;direction:ltr;unicode-bidi:isolate}'
+    + '.band{margin-top:14px;border-radius:8px;padding:9px 13px;font-weight:800;font-size:12.5px;'
+      + 'background:#fffbeb;border:2px solid #d97706;color:#92400e}'
+    + '.meta{display:flex;gap:26px;flex-wrap:wrap;margin-top:16px;font-size:12.5px}'
+    + '.ml{color:#64748b;font-weight:700;margin-left:7px}'
+    + '.mv{font-weight:800}'
+    + '.dv-num{font-family:monospace;direction:ltr;unicode-bidi:isolate}'
+    + '.to{margin-top:22px;font-size:14.5px;display:flex;align-items:baseline;gap:10px}'
+    + '.to .resp{color:#64748b;font-size:12.5px}'
+    + '.greet{margin-top:6px;font-size:13.5px}'
+    + '.subj{margin-top:18px;font-size:14px;border-right:3px solid #1b3a6b;padding-right:10px}'
+    + '.body{margin-top:16px;white-space:pre-wrap;text-align:justify;min-height:60mm}'
+    /* العنصرُ النائبُ يُبرَز ليُرى الفراغُ قبل الإرسال لا بعده */
+    + '.ph{background:#fef3c7;border-bottom:1px dashed #b45309;padding:0 2px;font-weight:700}'
+    + '.close{margin-top:22px}'
+    /* خانةُ توقيعٍ واحدةٌ مكدَّسةٌ إلى اليسار — الخطابُ يوقّعه شخصٌ واحد، وثلاثةُ
+       أعمدةٍ متجاورةٍ شكلُ **نموذجٍ يُملأ** لا خطابٍ يُرسَل. */
+    + '.sign{margin-top:26px;break-inside:avoid;display:flex;justify-content:flex-end}'
+    + '.sg{width:82mm}'
+    + '.sg-r{display:flex;align-items:flex-end;gap:9px;margin-bottom:13px}'
+    + '.sg-r span{font-size:11.5px;color:#64748b;white-space:nowrap}'
+    + '.sg-r i{flex:1;border-bottom:1px dotted #9ca3af;height:15px}'
+    /* الباركودُ ورقمُه كتلةٌ واحدة: رقمٌ في طرفِ الورقة وأعمدةٌ في طرفها لا يُقرآن
+       معاً، والرقمُ إنّما وُضع ليُنقذ الورقةَ حين يعجز الماسحُ عن الأعمدة فوقه. */
+    + '.bcw{margin-top:22px;break-inside:avoid;direction:ltr;display:flex;justify-content:flex-start}'
+    + '.bcb{display:inline-block;text-align:center}'
+    + '.bc{display:block}'
+    + '.bcn{font-size:11px;letter-spacing:1.6px;color:#374151;margin-top:2px;font-family:monospace}'
+    + '@media print{body{padding:14px}@page{margin:14mm}}'
+    + (on && ctr._letterheadCSS ? ctr._letterheadCSS() : "")
+    + '</style></head><body>'
+    + ((on && ctr._letterheadWrap) ? ctr._letterheadWrap(inner, lh) : inner)
+    + '</body></html>';
+}
+
+function printLetter(id){
+  var l = letterById(id);
+  if(!l){ _toast("⚠ لم يعد هذا الخطاب موجوداً","warn"); return false; }
+  var html = letterPaperHTML(l);
+  try{
+    if(typeof _openPrintWindow === "function") _openPrintWindow(html);
+    else {
+      var w = window.open("", "_blank");
+      if(!w){ _toast("⚠ تعذّر فتح نافذة الطباعة","warn"); return false; }
+      w.document.write(html); w.document.close();
+    }
+    _audit("طباعة خطاب من الخزانة", l.id + " — " + (l.title || ""));
+    return true;
+  }catch(e){
+    _toast("⚠ تعذّر فتح نافذة الطباعة","warn");
+    return false;
+  }
 }
 
 function renderLetters(){
@@ -1596,6 +1833,7 @@ window.docVault = {
   backToLetters:backToLetters, newLetter:newLetter, editLetter:editLetter,
   cancelLetter:cancelLetter, saveLetter:saveLetter, delLetter:delLetter,
   useTemplate:useTemplate, addLetterFile:addLetterFile, delLetterDraftFile:delLetterDraftFile,
+  printLetter:printLetter, letterPaperHTML:letterPaperHTML,
   // القراءة
   docs:docs, letters:letters, docById:docById, letterById:letterById,
   canView:canView, canEdit:canEdit, canDelete:canDelete, roleEligible:roleEligible,
@@ -1604,6 +1842,7 @@ window.docVault = {
   daysUntil:daysUntil, alertLevel:alertLevel, docLevel:docLevel, needsAction:needsAction,
   horizonBuckets:horizonBuckets, rollup:rollup, nextRef:nextRef, renewDoc:renewDoc,
   typeLabel:typeLabel, ownerLabel:ownerLabel,
+  code128SVG:code128SVG, _code128Bits:code128Bits, _code128Sanitize:code128Sanitize,
   filterDocs:filterDocs, sortDocs:sortDocs, cloneTemplate:cloneTemplate, filterLetters:filterLetters,
   _DOC_TYPES:DOC_TYPES, _LEVELS:LEVELS, _PERM_KEY:PERM_KEY,
   _PAGE_DOCS:PAGE_DOCS, _PAGE_LETTERS:PAGE_LETTERS, _HORIZON_MONTHS:HORIZON_MONTHS,
