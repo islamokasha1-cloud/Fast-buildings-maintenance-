@@ -56,7 +56,7 @@
 
 const PAGE_ID      = "performance";
 const VERSION      = "0.3";
-const MODULE_BUILD = "v18.9.3162";
+const MODULE_BUILD = "v18.9.3164";
 
 /* ════════════ خدمات النواة (قراءة بالاسم مع بدائل آمنة) ════════════ */
 function _esc(s){ try{ return (typeof esc==="function") ? esc(s) : String(s==null?"":s); }catch(e){ return String(s==null?"":s); } }
@@ -334,6 +334,9 @@ function coverage(){
     monthLabel: n.toLocaleDateString("ar-SA-u-ca-gregory-nu-latn",{year:"numeric",month:"long"}),
     total: all.length,
     responded:{ n:all.filter(t=>t.respondedAt).length, d:all.length, pct:pct(all.filter(t=>t.respondedAt).length, all.length) },
+    /* التغطيةُ تقول «كم بلاغاً سُجّل وصولُه»، وهذا يقول «وكم استغرق». صار يُقاس منذ
+       أن اكتمل الالتقاط — والرقمان يُعرضان معاً: متوسّطٌ بلا مقامِه يُقرأ خطأً. */
+    respondedAvgH: (typeof firstResponseStats==="function") ? firstResponseStats(all).avg : null,
     restored:{  n:closed.filter(t=>t.restoredAt).length, d:closed.length, pct:pct(closed.filter(t=>t.restoredAt).length, closed.length) },
     scheduled:{ n:prev.filter(t=>t.scheduledFor).length, d:prev.length, pct:pct(prev.filter(t=>t.scheduledFor).length, prev.length) },
     stops:      all.filter(t=>Array.isArray(t.clockStops) && t.clockStops.length).length,
@@ -361,7 +364,8 @@ function coverageHTML(){
     <div class="pf-hint">هذا <b>مقياسُ التقاطِ البيانات لا مقياسُ أداءِ الفريق</b>. في العقد الحقيقي
       كلُّ بلاغٍ بلا طابعٍ زمنيٍّ يسقط من مؤشره — فالتغطيةُ هي جاهزيتنا للقياس. ابدأ هنا، والدرجةُ تأتي بعدها.</div>
     <div class="pf-covs">
-      ${row("زمن الاستجابة (وصول الفني)", c.responded, "مؤشر ٣٫١ — وزن ٤٪")}
+      ${row("زمن الاستجابة (وصول الفني)", c.responded, "مؤشر ٣٫١ — وزن ٤٪"
+        + (c.respondedAvgH!==null ? " · متوسّطُ المسجَّل: "+(Math.round(c.respondedAvgH*10)/10)+" ساعةَ عمل" : ""))}
       ${row("عودة الخدمة", c.restored, "مؤشر ٣٫٣ — وزن ٤٪")}
       ${row("الاستحقاق المخطَّط للوقائي", c.scheduled, "مؤشرا ٤٫١ و٤٫٢ — وزن ٢٠٪")}
     </div>

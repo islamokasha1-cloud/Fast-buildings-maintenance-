@@ -27,12 +27,16 @@
    **مفقود = صفر**. و`slaEngine` كائنُ الواجهة المسمّى كما تقتضي CLAUDE.md.
 
    ── حدُّ النقل ──
-   ما بين علامتَي `==SLA-MOVED-*==` أدناه **منقولٌ بايتاً ببايت** من `index.html`،
-   فإعادةُ تركيبه في موضعه تُنتج الأصلَ حرفياً — وهو الضابطُ الذي يمسك خطأَ الحدود.
+   ما بين علامتَي `==SLA-MOVED-*==` أدناه نُقل **بايتاً ببايت** من `index.html` في
+   قيد النقل، وأُثبت حينَها بإعادةِ تركيبٍ طابقت الأصلَ حرفياً — وهو الضابطُ الذي
+   يمسك خطأَ الحدود. **وقد تطوّر بعدها بتعديلاتٍ لاحقة** (أوّلُها فصلُ زمن الاستجابة
+   عن زمن الإصلاح)، فلا تُقرأ الدعوى على الحاضر: برهانُها في تاريخ git عند قيد النقل.
+   والعلامتان تبقيان لعملهما الجاري: بهما يُعيد `hail-tests` الكتلةَ إلى موضعها
+   الأصليّ قبل الفحص، فلا يُتخطّى حارسٌ بصمت.
    ═══════════════════════════════════════════════════════════════════════════ */
 (function(){
 
-const MODULE_BUILD = "v18.9.3162";
+const MODULE_BUILD = "v18.9.3164";
 
 /* ==SLA-MOVED-A-START== */
 const PRIORITIES = ["حرج 🔴 (2 ساعة)","عاجل 🟡 (8 ساعات)","عادي 🟢 (48 ساعة)","روتيني 🔵 (صيانة دورية)"];
@@ -232,10 +236,37 @@ function _closedOnTime(t){
   const budgetH = (k && SLA_CONFIG.tiers[k]) ? SLA_CONFIG.tiers[k].budgetMin/60 : 48;
   return _closeWorkH(t) <= budgetH + 1e-6;
 }
-function responseH(t){
+/* ═══════════ فصلُ زمن الاستجابة عن زمن الإصلاح (v18.9zf) ═══════════
+   العقدُ القائم على الأداء يقيسهما **مؤشّرين مستقلّين**: «متى وصلَ الفنّيّ» غيرُ
+   «متى عادت الخدمة». وكان في المنصّة رقمٌ واحدٌ اسمُه `responseH` ومعناه زمنُ
+   الإقفال — فالتسميةُ تَعِد بما لا تقيس، وتقريرٌ يُبنى عليها يخلط المؤشّرين.
+   • `resolutionH` — الاسمُ الصادق لما كانت تقيسه: البلاغ ← الإقفال (أو ← الآن).
+   • `firstResponseH` — البلاغ ← **وصولُ الفنّيّ** (`respondedAt`)، وهو الطابعُ الذي
+     يُكتب مرّةً واحدةً عند أوّل بدءٍ في تطبيق الفنّيّ وبزرّ «وصلتُ للموقع».
+   وكلاهما بتقويم الفئة وبخصمِ الإيقاف الموثَّق — فالمقياسان متّسقان مع `isOverdue`.
+
+   **ولِمَ `null` لا صفر عند غياب الطابع؟** لأن الصفرَ يدخل المتوسّطَ فيجمّله:
+   بلاغٌ لم يُسجَّل وصولُه يُقرأ «استُجيب فوراً». و`null` تُخرجه من القياس وتُحصى
+   في التغطية — وهي القراءةُ الصادقة: **متوسّطٌ بلا تغطيةٍ بجانبه رقمٌ أعمى.** */
+function resolutionH(t){
   if(!t||!t.createdAt) return 0;
   const to=(t.status==="مغلق" && t.closedAt)?new Date(t.closedAt):new Date();
   return _elapsedHByTier(t.priority,new Date(t.createdAt),to,t.clockStops);
+}
+function firstResponseH(t){
+  if(!t||!t.createdAt||!t.respondedAt) return null;
+  const from=new Date(t.createdAt), to=new Date(t.respondedAt);
+  if(!isFinite(+from)||!isFinite(+to)||to<from) return null;   // طابعٌ فاسدٌ لا يُقاس
+  return _elapsedHByTier(t.priority,from,to,t.clockStops);
+}
+/* متوسّطُ زمن الاستجابة مع تغطيتِه — لا يُفصلان: الرقمُ بلا مقامِه يُقرأ خطأً.
+   `avg` = null متى لم يُسجَّل وصولٌ واحد، فلا يُعرَض صفرٌ كإنجاز. */
+function firstResponseStats(list){
+  const all=(Array.isArray(list)?list:[]).filter(t=>t&&t.createdAt);
+  const vals=[]; for(const t of all){ const h=firstResponseH(t); if(h!==null) vals.push(h); }
+  return { avg: vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null,
+           n: vals.length, d: all.length,
+           coverage: all.length?Math.round(vals.length/all.length*100):null };
 }
 /* ==SLA-MOVED-B-END== */
 
@@ -246,6 +277,6 @@ function responseH(t){
   for (var k in x) if (Object.prototype.hasOwnProperty.call(x,k)) window[k] = x[k];
   /* كائنُ الواجهة المسمّى — للقراءة المقصودة ولفحصِ البناء. */
   window.slaEngine = Object.assign({ build: MODULE_BUILD }, x);
-})({ PRIORITIES, getSLA, elapsedH, SLA_CONFIG, tierOf, priorityHead, priorityCanonical, prioritySame, slaBudgetLabel, priorityLabel, _ymd, _ym, _parseLocalDate, _isWorkingDay, workingMinutesBetween, calendarMinutesBetween, addWorkingMinutes, clockStopMinutes, slaStatus, slaOf, isOverdue, _elapsedHByTier, _closeWorkH, _closedOnTime, responseH });
+})({ PRIORITIES, getSLA, elapsedH, SLA_CONFIG, tierOf, priorityHead, priorityCanonical, prioritySame, slaBudgetLabel, priorityLabel, _ymd, _ym, _parseLocalDate, _isWorkingDay, workingMinutesBetween, calendarMinutesBetween, addWorkingMinutes, clockStopMinutes, slaStatus, slaOf, isOverdue, _elapsedHByTier, _closeWorkH, _closedOnTime, resolutionH, firstResponseH, firstResponseStats });
 
 })();

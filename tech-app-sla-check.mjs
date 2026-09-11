@@ -50,7 +50,7 @@ check('تطبيقُ الفنّيّ يُقلع بلا أخطاء جافاسكرب
 check('★★ محرّكُ SLA حُمِّل فعلاً في الصفحة (لا وسمٌ ميت)',
   await T.page.evaluate(() => typeof window.slaEngine === 'object' && !!window.slaEngine.build));
 
-const NAMES = ['slaOf', 'isOverdue', 'getSLA', 'tierOf', 'slaBudgetLabel', 'responseH', 'clockStopMinutes'];
+const NAMES = ['slaOf', 'isOverdue', 'getSLA', 'tierOf', 'slaBudgetLabel', 'resolutionH', 'firstResponseH', 'clockStopMinutes'];
 const missing = await T.page.evaluate(ns => ns.filter(n => typeof window[n] !== 'function'), NAMES);
 check('★★ كلُّ ما يستدعيه تطبيقُ الفنّيّ معرَّفٌ وقتَ التشغيل', missing.length === 0, missing.join(','));
 
