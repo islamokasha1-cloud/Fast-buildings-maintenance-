@@ -10583,7 +10583,7 @@ function hrPurchaseRequestGuards() {
        وهو **أثرُ المفتاح المانح لا حجبٌ أُقحم**: خزانةُ وثائق الشركة لا تنفتح لأحدٍ
        بأثرٍ رجعيّ. ولأنّ القوائم أدناه تُطابَق **حرفياً**، تُذكر الصفحتان صراحةً في
        كلّ توقّع — فلو انقلب المفتاحُ حاجباً يوماً لَسقطت هذه الفحوصُ فوراً. */
-    const VAULT = ["vault-docs","vault-letters","vault-approvals"];
+    const VAULT = ["vault-docs","vault-letters","vault-approvals","vault-project"];
     const sup = B({role:"supervisor",permissions:{assets:false}});
     T("★ hrpo: والمشرفُ يبقى بلا مسارِ شراءٍ أُقحم عليه (المحجوبُ: أصولُه وتعاقداتُه وخزانتُه)",
       JSON.stringify(sup) === JSON.stringify(["assets","vendors","contract-requests","contracts-list"].concat(VAULT)),
@@ -10607,7 +10607,7 @@ function hrPurchaseRequestGuards() {
   }
   T("★ hrpo: ومسؤولُ المشتريات لا يمسّه الحجبُ الجديد (والخزانةُ وحدَها تنتظر منحاً)",
     JSON.stringify(B({role:"procurement_officer",permissions:{}}))
-      === JSON.stringify(["vault-docs","vault-letters","vault-approvals"]) &&
+      === JSON.stringify(["vault-docs","vault-letters","vault-approvals","vault-project"]) &&
     B({role:"procurement_officer",permissions:{docVault:true}}).length === 0,
     B({role:"procurement_officer",permissions:{}}).join(","));
 
@@ -18359,6 +18359,181 @@ function docVaultGuards() {
     /storagePath:ref\.fullPath/.test(src));
   T("★ dv: والمجموعاتُ لها نسخةُ `_dev` كبقيّة المنصّة",
     /global_docs_dev/.test(src) && /global_letters_dev/.test(src));
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     (٢٢) طبقةُ المشروع — التصنيفُ وحصرُ الرؤية ومِلَفُّ المشروع
+     ═══════════════════════════════════════════════════════════════════════ */
+  {
+    const NEEDP = ["projRef", "projLabel", "projKey", "inProject", "visibleTo",
+                   "visibleList", "normalizeProjectPick", "renderProjectFile"];
+    const missP = NEEDP.filter(k => typeof V[k] !== "function");
+    T("★ dv/proj: طبقةُ المشروع مكشوفةٌ للفحص بلا متصفّح", missP.length === 0, missP.join(" · "));
+
+    if (!missP.length) {
+      const CO = V._FILTER_COMPANY, UN = V._FILTER_UNLINKED, MAN = V._MANUAL_ID;
+
+      /* ── القراءةُ من سجلٍّ **بأيّ عمر**: لا ترحيلَ شرطاً لقراءةٍ صحيحة ── */
+      {
+        const legacyDoc = { id:"DOC-1", title:"السجل التجاري" };               // ما في الخزانة اليوم
+        const legacyApr = { id:"APR-1", projectName:"برج هيل" };               // اسمٌ حُرٌّ بلا معرّف
+        const linked    = { id:"APR-2", scope:"project", projectId:"hail", projectName:"هايل" };
+        const manual    = { id:"APR-3", scope:"project", projectId:MAN, projectName:"فيلا خاصة", isCustomProject:true };
+        T("★★★ dv/proj: الوثيقةُ القديمةُ بلا حقلٍ تُقرأ «على مستوى الشركة» لا «غير مربوطة»",
+          V.projRef(legacyDoc).scope === V._SCOPE_COMPANY && V.projRef(legacyDoc).unlinked === false,
+          JSON.stringify(V.projRef(legacyDoc)));
+        T("★★★ dv/proj: والمعتمَدُ القديمُ باسمٍ حُرٍّ بلا معرّف يُوسَم **غير مربوط** ولا يُخمَّن له مشروع",
+          V.projRef(legacyApr).unlinked === true && V.projRef(legacyApr).id === "" &&
+          V.projRef(legacyApr).name === "برج هيل");
+        T("★★ dv/proj: والمربوطُ واليدويُّ يُقرآن بمعرّفَيهما",
+          V.projRef(linked).id === "hail" && V.projRef(linked).manual === false &&
+          V.projRef(manual).manual === true && V.projRef(manual).name === "فيلا خاصة");
+
+        /* ── أربعُ دلالاتٍ **متمايزة**: لولا تمايزُها لانطوى بعضُها في بعض ── */
+        T("★★★ dv/proj: «الشركة» و«غير المربوط» و«مشروعٌ بعينه» ثلاثةُ مفاتيحَ لا واحد",
+          V.projKey(legacyDoc) === CO && V.projKey(legacyApr) === UN && V.projKey(linked) === "hail",
+          [V.projKey(legacyDoc), V.projKey(legacyApr), V.projKey(linked)].join(" · "));
+        T("★★★ dv/proj: ومشروعان يدويّان باسمين مختلفين لا ينطويان في خيارٍ واحد",
+          V.projKey(manual) !== V.projKey({ scope:"project", projectId:MAN, projectName:"شقة", isCustomProject:true }));
+        T("★★ dv/proj: و«كلُّ المشاريع» تُمرّر الجميع، والمشروعُ بعينه يُمرّر سجلَّه وحدَه",
+          V.inProject(legacyDoc, "") && V.inProject(linked, "") &&
+          V.inProject(linked, "hail") && !V.inProject(legacyDoc, "hail") && !V.inProject(legacyApr, "hail"));
+
+        /* ── الاسمُ المعروض: الطازجُ أوّلاً، ولا معرّفٌ خامٌّ على الشاشة أبداً ── */
+        const PL = [{ id:"hail", name:"مشروع حائل الجديد" }];
+        T("★★★ dv/proj: الاسمُ الطازجُ من القائمة يسبق المنسوخ (إعادةُ التسمية تظهر)",
+          V.projLabel(linked, PL) === "مشروع حائل الجديد");
+        T("★★★ dv/proj: ومشروعٌ رُفع من القائمة يرتدّ إلى الاسم المنسوخ — **لا إلى معرّفه**",
+          V.projLabel(linked, []) === "هايل" &&
+          V.projLabel({ scope:"project", projectId:"gone" }, []) !== "gone",
+          V.projLabel({ scope:"project", projectId:"gone" }, []));
+
+        /* ── الحفظ: لا مفتاحَ عرضٍ يُخزَّن، والقديمُ لا يُمحى بحفظةٍ واحدة ── */
+        const asCompany = V.normalizeProjectPick({ sel:CO });
+        T("★★ dv/proj: «الشركة» تُخزَّن نطاقاً بلا معرّفٍ ولا اسم",
+          asCompany.scope === V._SCOPE_COMPANY && asCompany.projectId === "" &&
+          asCompany.projectName === "" && asCompany.isCustomProject === false);
+        const keepUnlinked = V.normalizeProjectPick({ sel:UN, prevName:"برج هيل" });
+        T("★★★ dv/proj: وحفظُ سجلٍّ غيرِ مربوطٍ دون لمسِ الخانة **لا يحوّله إلى «الشركة»** ولا يمحو اسمَه",
+          keepUnlinked.scope === V._SCOPE_PROJECT && keepUnlinked.projectId === "" &&
+          keepUnlinked.projectName === "برج هيل",
+          JSON.stringify(keepUnlinked));
+        const pick = V.normalizeProjectPick({ sel:"hail", projects:PL });
+        T("★★★ dv/proj: واختيارُ مشروعٍ يخزّن **المعرّفَ والاسمَ معاً** (اسمٌ بلا معرّفٍ لا يُصنِّف، ومعرّفٌ بلا اسمٍ يصير رمزاً بعد سنة)",
+          pick.projectId === "hail" && pick.projectName === "مشروع حائل الجديد");
+        const manualPick = V.normalizeProjectPick({ sel:MAN, manualName:" فيلا خاصة " });
+        T("★★ dv/proj: واليدويُّ يحمل سنتينل المنصّة والعلَمَ والاسمَ المقلَّم",
+          manualPick.projectId === MAN && manualPick.isCustomProject === true &&
+          manualPick.projectName === "فيلا خاصة");
+        T("★★★ dv/proj: ولا يُخزَّن مفتاحُ عرضٍ قطُّ (`__COMPANY__` · `__UNLINKED__` · `__CUSTOM__:`)",
+          [asCompany, keepUnlinked, pick, manualPick].every(x =>
+            x.projectId !== CO && x.projectId !== UN && String(x.projectId).indexOf("__CUSTOM__") === -1));
+
+        /* ── حصرُ الرؤية: مشاريعُه + **كلُّ ما نطاقُه الشركة** ── */
+        const ALLOW = ["hail"];
+        T("★★★ dv/proj: وثيقةُ الشركة لا تُحجب عن أحدٍ — حجبُها يكتم تنبيهَ انتهائها عن مسؤول تجديدها",
+          V.visibleTo(legacyDoc, ALLOW) === true);
+        T("★★ dv/proj: ويرى سجلَّ مشروعه ولا يرى سجلَّ غيره",
+          V.visibleTo(linked, ALLOW) === true &&
+          V.visibleTo({ scope:"project", projectId:"other" }, ALLOW) === false);
+        T("★★ dv/proj: وغيرُ المربوط واليدويُّ محجوبان عن المحصور — لا معرّفَ يُطابَق به",
+          V.visibleTo(legacyApr, ALLOW) === false && V.visibleTo(manual, ALLOW) === false);
+        T("★★★ dv/proj: و`null` (أدمن أو بلا قائمةِ مشاريع) تعني **بلا حصر** — لا «لا شيء»",
+          V.visibleList([legacyDoc, linked, manual, legacyApr], null).length === 4 &&
+          V.visibleList([legacyDoc, linked, manual, legacyApr], ALLOW).length === 2);
+      }
+
+      /* ── الرسمُ الحقيقيّ: مِلَفُّ المشروع ── */
+      {
+        const prevU5 = W.currentUser, prevPL = W._projectsList, prevCP = W.CURRENT_PROJECT;
+        W.currentUser = { name:"المالك", user:"owner", role:"admin" };
+        W._projectsList = [{ id:"hail", name:"مشروع حائل" }, { id:"riyadh", name:"مشروع الرياض" }];
+        const pgf = W.document.getElementById("page-" + V._PAGE_FILE);
+        T("★★★ dv/proj: صفحةُ ملفّ المشروع تُركَّب ذاتياً كأخواتها", !!pgf);
+        if (pgf) {
+          W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+          pgf.classList.add("active");
+          V.__test_seed(
+            [{ id:"DOC-1", title:"سجلّ الشركة التجاريّ", docType:"cr", expiry:"2027-01-01" },
+             { id:"DOC-2", title:"تأمين مشروع حائل", docType:"insurance", expiry:"2027-02-01",
+               scope:"project", projectId:"hail", projectName:"مشروع حائل" }],
+            [{ id:"LTR-1", kind:"issued", title:"خطاب تسليم", letterDate:"2026-09-01",
+               scope:"project", projectId:"hail", projectName:"مشروع حائل" },
+             { id:"TPL-1", kind:"template", title:"نموذج عام" }],
+            [],
+            [{ id:"APR-1", title:"المستخلص الأول", docType:"extract", party:"العميل",
+               submittedAt:"2026-08-01", status:"submitted", amountSubmitted:100000,
+               scope:"project", projectId:"hail", projectName:"مشروع حائل" },
+             { id:"APR-2", title:"مستخلص الرياض", docType:"extract", party:"العميل",
+               submittedAt:"2026-08-01", status:"submitted", amountSubmitted:500000,
+               scope:"project", projectId:"riyadh", projectName:"مشروع الرياض" },
+             /* سجلٌّ من قبل الربط: اسمُ مشروعٍ نصّاً بلا معرّف */
+             { id:"APR-3", title:"مستخلص قديم قبل الربط", docType:"extract", party:"العميل",
+               submittedAt:"2026-05-02", status:"submitted", amountSubmitted:42000,
+               projectName:"برج هيل" }]);
+
+          V.setFileProj("");
+          T("★★★ dv/proj: و«كلُّ المشاريع» ليست ملفَّ مشروع — تُطلب تسميةُ واحدٍ بدل كومةٍ لا تقول شيئاً",
+            /اختَرْ مشروعاً/.test(pgf.innerHTML) && !/المستخلص الأول/.test(pgf.innerHTML));
+
+          V.setFileProj("hail");
+          const html = pgf.innerHTML;
+          T("★★★ dv/proj: وملفُّ المشروع يجمع الثلاثةَ في مكانٍ واحد (وثيقتُه · خطابُه · معتمَدُه)",
+            /تأمين مشروع حائل/.test(html) && /خطاب تسليم/.test(html) && /المستخلص الأول/.test(html));
+          /* اسمُ المشروع الآخر يظهر في **قائمة الاختيار** حتماً — فالادّعاءُ يُقاس على
+             الصفوف لا على نصّ الصفحة كلِّه، وإلّا فحصَ شيئاً لم يُدَّعَ قطّ. */
+          T("★★★ dv/proj: ولا يتسرّب إليه سجلُّ مشروعٍ آخر",
+            !/مستخلص الرياض/.test(html) &&
+            pgf.querySelectorAll(".dv-ap-tbl tbody tr").length === 1,
+            String(pgf.querySelectorAll(".dv-ap-tbl tbody tr").length));
+          T("★★★ dv/proj: ووثائقُ الشركة قسمٌ **مفصولٌ** بعنوانه — دمجُها يجعل «وثائق هذا المشروع» رقماً كاذباً",
+            /وثائقُ الشركة السارية/.test(html) && /سجلّ الشركة التجاريّ/.test(html));
+          T("★★ dv/proj: والنموذجُ (قالبٌ يُستنسَخ) ليس من خطابات المشروع",
+            !/نموذج عام/.test(html));
+          T("★★ dv/proj: وحصيلةُ المعتمدات تقول رقمَ هذا المشروع لا رقمَ الشركة",
+            /100,000/.test(html) && !/500,000/.test(html));
+          /* اختيارُ «الشركة» يعرض وثائقَها مرّةً واحدةً لا مرّتين تحت عنوانين */
+          V.setFileProj(CO);
+          T("★★ dv/proj: واختيارُ «الشركة» لا يُكرّر قائمتَها في قسمين",
+            (pgf.innerHTML.match(/سجلّ الشركة التجاريّ/g) || []).length === 1,
+            String((pgf.innerHTML.match(/سجلّ الشركة التجاريّ/g) || []).length));
+        }
+
+        /* ── نداءُ ربطِ القديم: يُرى فوق الجدول، ولا يُنتظَر أن يُبحَث عنه ── */
+        {
+          const pga2 = W.document.getElementById("page-" + V._PAGE_APPROVALS);
+          W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+          pga2.classList.add("active");
+          V.setAprProj("hail");
+          T("★★★ dv/proj: السجلُّ القديمُ لا مشروعَ له فلا يظهر في أيّ مُرشِّح — فيُنادى عليه فوق الجدول",
+            /بلا ربط/.test(pga2.innerHTML) && /أظهِرها لأربطها/.test(pga2.innerHTML));
+          V.setAprProj(V._FILTER_UNLINKED);
+          T("★★ dv/proj: وزرُّه يُظهرها فعلاً، والنداءُ يصمت وقد استُجيب له",
+            /مستخلص قديم/.test(pga2.innerHTML) && !/أظهِرها لأربطها/.test(pga2.innerHTML));
+          V.setAprProj("");
+        }
+
+        /* ── التنبيهُ لا يُرشَّح — وهو الفرقُ بين «ما أراه» و«ما يخصّني» ── */
+        {
+          W.localStorage.removeItem("hail_vault_alerted");
+          NOTIFS.length = 0;
+          V.setFilterProj("riyadh");          // أنظر في مشروعٍ آخر
+          const n = V.scanAndAlert(new Date("2026-12-20T09:00:00Z"));
+          T("★★★ dv/proj: مُرشِّحُ العرض **لا يكتم تنبيهَ انتهاء** — شهادةُ الشركة تصرخ ولو كنتَ تنظر في مشروعٍ آخر",
+            n > 0 && NOTIFS.length > 0, String(n));
+          V.setFilterProj("");
+        }
+
+        W.currentUser = prevU5; W._projectsList = prevPL; W.CURRENT_PROJECT = prevCP;
+      }
+
+      /* ── المصدرُ الواحد لمشاريع المستخدم يُقرأ ولا يُخترَع ── */
+      T("★★ dv/proj: قاعدةُ الحصر مأخوذةٌ من قاعدة المنصّة (`user.projects` غيرُ الفارغة تحصر، والأدمن يرى الكلَّ)",
+        /role === "admin"/.test(src) && /u\.projects/.test(src) &&
+        /_visibleProjectsFor/.test(HTML));
+      T("★★★ dv/proj: والترويسةُ تقول صراحةً إنّ الحصرَ **حجبُ عرضٍ لا حدُّ أمان** (وإلّا وُعد بخصوصيةٍ لا يفرضها الخادم)",
+        /حجبُ عرضٍ ولا يُسمّى خصوصية/.test(src));
+    }
+  }
 }
 
 function projectHubGuards() {

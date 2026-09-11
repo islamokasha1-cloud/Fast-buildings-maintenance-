@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3139";
+var MODULE_BUILD = "v18.9.3141";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -77,7 +77,8 @@ var PAGE_LETTERS = "vault-letters";
    في لفّ `showPage` بصمتٍ تامّ: تُطفَأ كلُّ الصفحات ولا تُضاء واحدة، فيرى المستخدم
    شاشةً بيضاءَ بلا خطأٍ في وحدة التحكّم. */
 var PAGE_APPROVALS = "vault-approvals";
-var PAGES        = [PAGE_DOCS, PAGE_LETTERS, PAGE_APPROVALS];
+var PAGE_FILE      = "vault-project";
+var PAGES        = [PAGE_DOCS, PAGE_LETTERS, PAGE_APPROVALS, PAGE_FILE];
 var PERM_KEY     = "docVault";
 
 var HORIZON_MONTHS = 12;     // مدى الأفق — سنةٌ تُغطّي كلَّ دوراتِ التجديد السنوية
@@ -187,6 +188,302 @@ function _userByLogin(login){
 /* أللمستخدم رقمُ واتساب مفعَّل؟ الشرطان معاً كما يقرؤهما الخادم حرفياً
    (`u.phone && u.waOptIn === true`) — فلا تَعِد الشاشةُ بوصولٍ يردّه الخادم. */
 function _hasWa(u){ return !!(u && u.phone && u.waOptIn === true); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   طبقةُ المشروع — تصنيفُ الخزانة، ومِلَفُّ كلّ مشروع  (طلبُ المالك)
+
+   ── المشكلة ──
+   الخزانةُ كانت تعرف «الجهة» ولا تعرف **المشروع**: الوثائقُ والخطاباتُ بلا حقلٍ
+   أصلاً، والمعتمداتُ بحقلٍ **حُرٍّ** يُكتب بيده. والحقلُ الحرُّ لا يصنّف — «برج هيل»
+   و«برج هايل» و«مشروع هيل» ثلاثةُ مشاريعَ في نظر الجدول — فلا ترشيحٌ يُبنى عليه
+   ولا أرشيفٌ يُجمَع به. فالربطُ الحقيقيُّ شرطُ كلِّ ما بعده لا زينةٌ فوقه.
+
+   ── المبدأ الأوّل: معرّفٌ واسمٌ معاً، لا أحدُهما ──
+   يُخزَّن **ثلاثيُّ المنصّة القياسيّ** (`projectId` · `projectName` ·
+   `isCustomProject`) كما تفعل طلباتُ الشراء والتعاقدات حرفاً بحرف. المعرّفُ للربط،
+   **والاسمُ لأنّ الأرشيفَ يُقرأ بعد سنوات**: مشروعٌ يُعاد تسميتُه أو يُرفَع من
+   `meta/projects` يُحيل سجلَّه كلَّه إلى رموزٍ إنجليزيةٍ لا تُقرأ إن لم يكن الاسمُ
+   منسوخاً بجانبه — وهي علّةٌ وقعت في المنصّة فعلاً وأُصلحت في `v18.9rr`. والعرضُ
+   يفضّل الاسمَ **الطازج** من القائمة ويرتدّ إلى المنسوخ، كما يفعل `_getProjName`.
+
+   ── المبدأ الثاني: نطاقٌ قبل المشروع ──
+   السجلُّ التجاريُّ وشهادةُ الزكاة **لا تخصّان مشروعاً** — تخصّان الشركة. وفرضُ
+   مشروعٍ عليهما كذبٌ على قارئها. فلكلّ سجلٍّ **نطاق**: `company` أو `project`.
+   والسجلّاتُ القائمةُ بلا حقلٍ تُقرأ `company` — وهو الصحيحُ لا افتراضاً مريحاً:
+   ما في الخزانة اليومَ وثائقُ شركةٍ وخطاباتُها.
+
+   ── المبدأ الثالث: القديمُ لا يُطابَق بالاسم ──
+   في المعتمدات سجلّاتٌ تحمل اسمَ مشروعٍ نصّاً بلا معرّف. **لا تُطابَق تلقائياً.**
+   مطابقةٌ ظنّيةٌ تنسب مستخلصاً لمشروعٍ خطأ، وذلك **أسوأُ من «غير مربوط»** لأنّ
+   الخطأ يُصدَّق ويُبنى عليه. تُعرض موسومةً وبجانبها زرُّ ربطٍ بنقرة، والقرارُ لعينٍ
+   تقرأ.
+
+   ── وحصرُ الرؤية: حجبُ عرضٍ لا حدُّ أمان ──
+   `_visibleProjectsFor` مصدرٌ واحدٌ تقرؤه بوّابةُ المشاريع ومركزُ العمليات، وقاعدتُه
+   «قائمةُ `user.projects` غيرُ الفارغة تحصر، والأدمن يرى الكلَّ» — نقرؤها هنا ولا
+   نخترع غيرَها.
+   **لكنّه حجبُ عرضٍ ولا يُسمّى خصوصية:** التوكِن لا يحمل إلا الدورَ واسمَ الدخول،
+   والمستخدمون عناصرُ **مصفوفةٍ** داخل `meta/users` — وقاعدةُ Firestore لا تستطيع
+   البحثَ في مصفوفةٍ عن العنصر الذي اسمُه كذا، فلا سبيلَ لكتابة «هذا لمشاريعه
+   وحدَها» على الخادم اليوم. والحصرُ هنا في الواجهة **كما هو في البلاغات والأصول
+   والوقائية وكلِّ بيانات المشاريع في المنصّة** — متّسقٌ معها، لا ثغرةٌ جديدةٌ فيها.
+   وما يلزم لفرضه على الخادم مذكورٌ بنداً مؤجّلاً باسمه في `NOTES §6`.
+
+   ── ووثائقُ الشركة لا تُحجب عن أحدٍ في الخزانة ──
+   حجبُها عمّن يملك مفتاحَ الخزانة **يكتم تنبيهَ انتهائها** عمّن قد يكون هو المسؤولَ
+   عن تجديدها. فهي مرئيةٌ لكلّ ذي مفتاحٍ مهما حُصرت مشاريعُه.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+var SCOPE_COMPANY = "company";     // نطاقٌ: يخصّ الشركةَ كلَّها
+var SCOPE_PROJECT = "project";     // نطاقٌ: يخصّ مشروعاً بعينه
+var MANUAL_ID     = "__OTHER__";   // سنتينل المشروع اليدويّ — اصطلاحُ المنصّة، يُخزَّن
+/* مفاتيحُ **عرضٍ وترشيحٍ لا تُخزَّن أبداً** — تُميّز حالاتٍ لا يميّزها معرّفٌ فارغ. */
+var FILTER_ALL      = "";
+var FILTER_COMPANY  = "__COMPANY__";
+var FILTER_UNLINKED = "__UNLINKED__";
+var SCOPE_LBL       = "على مستوى الشركة";
+
+/* ══ قراءةُ خدمات النواة بالاسم المجرّد — كـ`_users()` تماماً ══ */
+function _projList(){
+  try{
+    var a = (typeof window !== "undefined") ? window._projectsList : null;
+    return Array.isArray(a) ? a : [];
+  }catch(e){ return []; }
+}
+function _curProjId(){
+  try{
+    if(_isCentral()) return "";
+    return (typeof CURRENT_PROJECT !== "undefined" && CURRENT_PROJECT && CURRENT_PROJECT.id)
+      ? String(CURRENT_PROJECT.id) : "";
+  }catch(e){ return ""; }
+}
+function _isCentral(){
+  try{ return !!(document.body && document.body.classList.contains("global-purchases-mode")); }
+  catch(e){ return false; }
+}
+/* `null` = بلا حصر (أدمن، أو مستخدمٌ بلا قائمةِ مشاريع). وإلّا مصفوفةُ معرّفات. */
+function allowedProjectIds(){
+  var u = _me();
+  if(!u || u.role === "admin") return null;
+  if(!Array.isArray(u.projects) || !u.projects.length) return null;
+  return u.projects.map(String);
+}
+
+/* ══ الدوالُّ النقيّة — يفحصها `hail-tests.js` بلا متصفّح ══ */
+
+/* مرجعُ المشروع مقروءاً من سجلٍّ **بأيّ عمر**: بحقلِ نطاقٍ أو بلا، بمعرّفٍ أو باسمٍ
+   وحدَه. فلا يحتاج السجلُّ القديمُ ترحيلاً ليُقرأ. */
+function projRef(rec){
+  rec = rec || {};
+  var id    = String(rec.projectId || "");
+  var name  = String(rec.projectName || "");
+  var scope = (rec.scope === SCOPE_PROJECT || rec.scope === SCOPE_COMPANY) ? rec.scope : "";
+  if(!scope) scope = (id || name) ? SCOPE_PROJECT : SCOPE_COMPANY;
+  var manual = (rec.isCustomProject === true) || id === MANUAL_ID;
+  return { scope:scope, id:id, name:name, manual:manual,
+           /* اسمٌ بلا معرّف = سجلٌّ من قبل الربط، يُوسَم ولا يُخمَّن له مشروع. */
+           unlinked: scope === SCOPE_PROJECT && !id && !!name };
+}
+
+/* الاسمُ المعروض — الطازجُ من القائمة أوّلاً، ثمّ المنسوخ، ولا يُعرض معرّفٌ خام. */
+function projLabel(rec, projects){
+  var r = projRef(rec);
+  if(r.scope === SCOPE_COMPANY) return SCOPE_LBL;
+  if(r.manual) return r.name || "مشروع يدويّ";
+  var arr = Array.isArray(projects) ? projects : _projList();
+  for(var i = 0; i < arr.length; i++){
+    if(arr[i] && String(arr[i].id) === r.id && arr[i].name) return String(arr[i].name);
+  }
+  return r.name || "غير مربوط بمشروع";
+}
+
+/* مفتاحُ التجميع والترشيح — يفصل مشروعَين يدويَّين باسمين مختلفين (اصطلاحُ
+   `__CUSTOM__:` في النواة)، ويميّز «غيرَ المربوط» عن «الشركة» عن «الكلّ». */
+function projKey(rec){
+  var r = projRef(rec);
+  if(r.scope === SCOPE_COMPANY) return FILTER_COMPANY;
+  if(r.unlinked) return FILTER_UNLINKED;
+  if(r.manual)   return "__CUSTOM__:" + r.name;
+  return r.id;
+}
+function inProject(rec, sel){
+  sel = String(sel || "");
+  if(sel === FILTER_ALL) return true;
+  return projKey(rec) === sel;
+}
+
+/* حصرُ الرؤية. وغيرُ المربوط والمشروعُ اليدويُّ محجوبان عن المحصور: لا معرّفَ
+   يُطابَق به، وعرضُ ما **قد** يكون له أسوأُ من حجبِه — وربطُ القديم عملُ مَن يرى
+   الكلَّ أصلاً. */
+function visibleTo(rec, allowedIds){
+  if(!Array.isArray(allowedIds)) return true;
+  var r = projRef(rec);
+  if(r.scope === SCOPE_COMPANY) return true;
+  if(r.unlinked || r.manual) return false;
+  return allowedIds.indexOf(r.id) !== -1;
+}
+function visibleList(list, allowedIds){
+  if(!Array.isArray(allowedIds)) return Array.isArray(list) ? list.slice() : [];
+  return (Array.isArray(list) ? list : []).filter(function(x){ return visibleTo(x, allowedIds); });
+}
+
+/* من قيمة الـ`select` إلى **الشكل المخزَّن**. ولا يُخزَّن `__COMPANY__` ولا
+   `__UNLINKED__` ولا `__CUSTOM__:` أبداً — تلك مفاتيحُ عرضٍ، والمخزَّنُ ثلاثيُّ
+   المنصّة وحدَه ومعه النطاق. و`prevName` يحفظ اسمَ مشروعٍ لم يعد في القائمة من أن
+   يُمحى بمجرّد حفظِ السجلّ من شاشته. */
+function normalizeProjectPick(o){
+  o = o || {};
+  var sel = String(o.sel || "");
+  /* «غيرُ المربوط» يبقى غيرَ مربوط. حفظُ سجلٍّ قديمٍ من شاشته دون لمسِ خانةِ
+     المشروع **لا يجوز أن يحوّله إلى «على مستوى الشركة»** — ذلك ادّعاءٌ لم يقلْه
+     أحد، ويمحو اسمَ المشروع المكتوبَ فيه فيضيع آخرُ دليلٍ على انتمائه. */
+  if(sel === FILTER_UNLINKED){
+    return { scope:SCOPE_PROJECT, projectId:"",
+             projectName:String(o.prevName || ""), isCustomProject:false };
+  }
+  if(sel === FILTER_ALL || sel === FILTER_COMPANY){
+    return { scope:SCOPE_COMPANY, projectId:"", projectName:"", isCustomProject:false };
+  }
+  if(sel === MANUAL_ID){
+    return { scope:SCOPE_PROJECT, projectId:MANUAL_ID,
+             projectName:String(o.manualName || "").trim(), isCustomProject:true };
+  }
+  var arr = Array.isArray(o.projects) ? o.projects : _projList(), nm = "";
+  for(var i = 0; i < arr.length; i++){
+    if(arr[i] && String(arr[i].id) === sel){ nm = String(arr[i].name || ""); break; }
+  }
+  return { scope:SCOPE_PROJECT, projectId:sel,
+           projectName:nm || String(o.prevName || ""), isCustomProject:false };
+}
+
+/* ══ ما يجوز للمستخدم أن يُودع فيه ويرى ══
+   المحصورُ لا يُعرض له في النموذج إلا مشاريعُه: قائمةٌ تعرض ما لا يراه بعدها
+   تصنع سجلّاتٍ تختفي من صاحبها لحظةَ حفظِها. */
+function _projSortName(a, b){
+  return String((a && (a.name || a.id)) || "")
+    .localeCompare(String((b && (b.name || b.id)) || ""), "ar");
+}
+function _pickableProjects(){
+  var allowed = allowedProjectIds(), arr = _projList().slice();
+  if(Array.isArray(allowed)){
+    arr = arr.filter(function(p){ return p && allowed.indexOf(String(p.id)) !== -1; });
+  }
+  return arr.sort(_projSortName);
+}
+/* قيمةُ الـ`select` المقابلةُ لسجلٍّ قائم. */
+function _projSelFor(rec){
+  var r = projRef(rec);
+  if(r.unlinked) return FILTER_UNLINKED;
+  if(r.scope === SCOPE_COMPANY) return FILTER_COMPANY;
+  if(r.manual) return MANUAL_ID;
+  return r.id || FILTER_COMPANY;
+}
+
+/* ══ منتقي المشروع في النماذج ══
+   `<select>` لا `datalist`: الأخيرُ **لا يفتح قائمتَه على iPadOS** أصلاً — بلاغُ
+   المالك في `v18.9.3135`، والمالكُ يعمل من iPad. والخيارُ اللاصقُ لمشروعٍ لم يعد
+   في القائمة يحفظ انتماءَ السجلّ من أن يُمحى بحفظةٍ واحدة. */
+function _projFieldHTML(e, setter){
+  var sel = String(e.projSel || FILTER_COMPANY);
+  var arr = _pickableProjects(), seen = false;
+  var opts = '<option value="' + FILTER_COMPANY + '"' + (sel === FILTER_COMPANY ? " selected" : "") + '>'
+           + '— ' + _esc(SCOPE_LBL) + ' (لا يخصّ مشروعاً) —</option>';
+  if(sel === FILTER_UNLINKED){
+    opts += '<option value="' + FILTER_UNLINKED + '" selected>⚠ غير مربوط — '
+          + _esc(e.projectName || "اسمٌ قديمٌ بلا مشروع") + '</option>';
+  }
+  arr.forEach(function(p){
+    if(!p || !p.id) return;
+    if(String(p.id) === sel) seen = true;
+    opts += '<option value="' + _esc(p.id) + '"' + (String(p.id) === sel ? " selected" : "") + '>'
+          + _esc(p.name || p.id) + '</option>';
+  });
+  if(sel && sel !== FILTER_COMPANY && sel !== FILTER_UNLINKED && sel !== MANUAL_ID && !seen){
+    opts += '<option value="' + _esc(sel) + '" selected>'
+          + _esc(e.projectName || sel) + ' (خارج القائمة)</option>';
+  }
+  opts += '<option value="' + MANUAL_ID + '"' + (sel === MANUAL_ID ? " selected" : "") + '>'
+        + '— مشروع يدويّ (اكتب اسمه) —</option>';
+  var html = '<select class="form-input" onchange="docVault.' + setter + '(this.value)">' + opts + '</select>';
+  if(sel === MANUAL_ID){
+    html += '<input class="form-input" id="dv-proj-manual" style="margin-top:6px"'
+          + ' value="' + _esc(e.projManual || "") + '" placeholder="اسم المشروع كما تكتبه">'
+          + '<div class="dv-hint">المشروعُ اليدويُّ لا يظهر لمن حُصرت مشاريعُه — لا معرّفَ يُطابَق به.</div>';
+  } else if(sel === FILTER_UNLINKED){
+    html += '<div class="dv-hint">سجلٌّ من قبل الربط: فيه اسمُ مشروعٍ نصّاً بلا معرّف. '
+          + 'اخترِ المشروعَ من القائمة ليدخل ملفَّه — ولا يُخمَّن له مشروعٌ تلقائياً.</div>';
+  }
+  return html;
+}
+
+/* ══ مُرشِّحُ المشروع في الشاشات ══
+   افتراضُه المشروعُ المفتوح، و«كلُّ المشاريع» في الوضع المركزيّ — يُحسَب مرّةً عند
+   أوّل رسمٍ لا في كلّ رسمة، وإلّا أعاد كلُّ تحديثٍ للقائمة ضبطَ ما اختاره المستخدم.
+   و«غيرُ المربوط» خيارٌ **لا يظهر إلا إن وُجد** — فلا يُعلَن نقصٌ ليس موجوداً. */
+function _projFilterHTML(cur, setter, list){
+  var arr = _pickableProjects(), sel = String(cur || FILTER_ALL), seen = false;
+  var anyUnlinked = (Array.isArray(list) ? list : []).some(function(x){ return projRef(x).unlinked; });
+  var opts = '<option value="' + FILTER_ALL + '"' + (sel === FILTER_ALL ? " selected" : "") + '>كل المشاريع</option>'
+           + '<option value="' + FILTER_COMPANY + '"' + (sel === FILTER_COMPANY ? " selected" : "") + '>'
+           + _esc(SCOPE_LBL) + '</option>';
+  arr.forEach(function(p){
+    if(!p || !p.id) return;
+    if(String(p.id) === sel) seen = true;
+    opts += '<option value="' + _esc(p.id) + '"' + (String(p.id) === sel ? " selected" : "") + '>'
+          + _esc(p.name || p.id) + '</option>';
+  });
+  if(anyUnlinked || sel === FILTER_UNLINKED){
+    opts += '<option value="' + FILTER_UNLINKED + '"' + (sel === FILTER_UNLINKED ? " selected" : "") + '>'
+          + '⚠ غير مربوط بمشروع</option>';
+  }
+  if(sel && sel !== FILTER_ALL && sel !== FILTER_COMPANY && sel !== FILTER_UNLINKED && !seen){
+    opts += '<option value="' + _esc(sel) + '" selected>' + _esc(sel) + ' (خارج القائمة)</option>';
+  }
+  return '<select class="form-input" onchange="docVault.' + setter + '(this.value)">' + opts + '</select>';
+}
+
+/* سطرُ المشروع تحت اسم السجلّ في الجدول — **لا عمودٌ إضافيّ**: الجداولُ الثلاثةُ
+   بلغت تسعةَ أعمدةٍ وعاشرٍ يخنقها على الجوّال. ويصمت حين لا يقول شيئاً: مع
+   مُرشِّحِ مشروعٍ بعينه كلُّ صفٍّ من ذلك المشروع، فتكرارُ اسمه في كلّ سطرٍ ضجيج.
+   وغيرُ المربوط يُعلَن **دائماً** — هو نداءُ عملٍ لا وصفُ حال. */
+function _projSubHTML(rec, curFilter){
+  var r = projRef(rec);
+  if(r.unlinked){
+    return '<div class="t-dim" style="font-weight:400">⚠ غير مربوط — «' + _esc(r.name) + '»</div>';
+  }
+  if(String(curFilter || "") !== FILTER_ALL) return "";
+  if(r.scope === SCOPE_COMPANY) return '<div class="t-dim" style="font-weight:400">' + _esc(SCOPE_LBL) + '</div>';
+  return '<div class="t-dim" style="font-weight:400">' + _esc(projLabel(rec)) + '</div>';
+}
+
+/* ══ نداءُ ربطِ القديم ══
+   المُرشِّحُ يفتح على المشروع المفتوح، فالسجلّاتُ غيرُ المربوطة **لا مشروعَ لها
+   فلا تظهر في أيّ منها** — فتبقى أبداً بلا أن يعلم بها أحد. والوسمُ في الصفّ لا
+   يُغني: لا يُرى إلّا لمن وصل إلى الصفّ أصلاً. فالنداءُ فوق الجدول دائماً، بعددِه
+   وبزرٍّ يُظهرها. ويختفي وحدَه حين لا يبقى منها شيء — فلا يصير أثاثاً يُتجاهَل. */
+function _unlinkedNoticeHTML(list, setter, cur){
+  if(String(cur || "") === FILTER_UNLINKED) return "";
+  var n = (Array.isArray(list) ? list : []).filter(function(x){
+    return !x.archived && projRef(x).unlinked;
+  }).length;
+  if(!n) return "";
+  return '<div class="dv-note-link">' + _icon("alertTriangle", "ic-sm")
+    + '<span>' + n + (n === 1 ? " سجلٌّ" : " سجلّاً") + ' فيه اسمُ مشروعٍ نصّاً بلا ربط — '
+    + 'لا يظهر في ملفّ أيّ مشروع حتى يُربَط.</span>'
+    + '<button type="button" class="dv-clear" onclick="docVault.' + setter + '(\'' + FILTER_UNLINKED + '\')">'
+    + 'أظهِرها لأربطها</button></div>';
+}
+
+/* رقاقةُ المشروع في الجداول والبطاقات — موحَّدةٌ في الشاشات الثلاث. */
+function _projChipHTML(rec){
+  var r = projRef(rec);
+  if(r.unlinked){
+    return '<span class="dv-chip l-urgent" title="سجلٌّ قديمٌ بلا معرّف مشروع">⚠ '
+         + _esc(r.name) + '</span>';
+  }
+  if(r.scope === SCOPE_COMPANY) return '<span class="dv-chip l-plan">' + _esc(SCOPE_LBL) + '</span>';
+  return '<span class="dv-chip l-ok">' + _esc(projLabel(rec)) + '</span>';
+}
 
 /* ════════ اسمُ مسؤول التجديد كما يُعرض ════════
    المصدرُ الأوّل `ownerUser` (اسمُ الدخول — المفتاحُ الثابت الذي يصل به التنبيهُ إلى
@@ -379,6 +676,7 @@ function filterDocs(list, f, today){
   var ym    = String((f && f.ym)    || "");
   return (Array.isArray(list) ? list : []).filter(function(doc){
     if(!doc || doc.archived) return false;
+    if(!inProject(doc, (f && f.proj) || "")) return false;
     if(type  && doc.docType !== type) return false;
     if(level && docLevel(doc, today) !== level) return false;
     if(ym){
@@ -390,7 +688,7 @@ function filterDocs(list, f, today){
          الهيئة» في الجدول يبحث عنها بنصّها، لا بـ`other`. ويُضاف اسمُ المسؤول
          الطازجُ واسمُ دخوله معاً — يُبحَث بأيّهما. */
       var hay = [doc.title, doc.number, doc.issuer, doc.notes, doc.id,
-                 typeLabel(doc), doc.docTypeOther,
+                 typeLabel(doc), doc.docTypeOther, projLabel(doc), doc.projectName,
                  ownerLabel(doc), doc.owner, doc.ownerUser].join(" ").toLowerCase();
       if(hay.indexOf(q) === -1) return false;
     }
@@ -439,9 +737,11 @@ function filterLetters(list, f){
   var kind = String((f && f.kind) || "");
   return (Array.isArray(list) ? list : []).filter(function(l){
     if(!l || l.archived) return false;
+    if(!inProject(l, (f && f.proj) || "")) return false;
     if(kind && l.kind !== kind) return false;
     if(q){
-      var hay = [l.title, l.subject, l.party, l.ref, l.id, l.body].join(" ").toLowerCase();
+      var hay = [l.title, l.subject, l.party, l.ref, l.id, l.body,
+                 projLabel(l), l.projectName].join(" ").toLowerCase();
       if(hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -592,7 +892,7 @@ var APR_STATUS = [
 var APR_ST_LBL = (function(){ var m={}; APR_STATUS.forEach(function(x){ m[x.key]=x.lbl; }); return m; })();
 
 var _aprs = [], _aprsUnsub = null, _aprsLoaded = false;
-var _aview = { q:"", type:"", status:"", open:null };
+var _aview = { q:"", type:"", status:"", open:null, proj:null };
 var _aEdit = null;
 
 function approvals(){ return _aprs.slice(); }
@@ -655,11 +955,12 @@ function filterApprovals(list, f, today){
   var ty = String((f && f.type) || ""), st = String((f && f.status) || "");
   return (Array.isArray(list) ? list : []).filter(function(a){
     if(!a || a.archived) return false;
+    if(!inProject(a, (f && f.proj) || "")) return false;
     if(ty && a.docType !== ty) return false;
     if(st && String(a.status || "submitted") !== st) return false;
     if(q){
       var hay = [a.title, a.party, a.projectName, a.ourRef, a.theirRef, a.notes, a.id,
-                 APR_LBL[a.docType] || a.docType].join(" ").toLowerCase();
+                 projLabel(a), APR_LBL[a.docType] || a.docType].join(" ").toLowerCase();
       if(hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -696,12 +997,24 @@ var _docs = [], _ltrs = [];
 var _docsUnsub = null, _ltrsUnsub = null;
 var _docsLoaded = false, _ltrsLoaded = false, _err = "";
 
-var _view = { q:"", type:"", level:"", ym:"" };      // ترشيحُ شاشة الوثائق
-var _lview = { q:"", kind:"issued" };                // ترشيحُ شاشة الخطابات
+/* `proj:null` تعني **«لم يُضبَط بعد»** لا «كلّ المشاريع»: الوحدةُ تُحمَّل قبل اختيار
+   المشروع، فلو ضُبط الافتراضُ هنا لَجُمِّد على قيمةِ لحظةِ التحميل. ويُشتقّ من
+   المشروع المفتوح عند **أوّل رسمةٍ فقط** — واشتقاقُه في كلّ رسمةٍ يُلغي اختيارَ
+   المستخدم مع كلّ تحديثٍ يصل من `onSnapshot`. */
+var _view = { q:"", type:"", level:"", ym:"", proj:null };   // ترشيحُ شاشة الوثائق
+var _lview = { q:"", kind:"issued", proj:null };             // ترشيحُ شاشة الخطابات
 var _edit = null;        // مسوّدةُ الوثيقة قيدَ التحرير (null = لا نموذج مفتوح)
 var _ledit = null;       // مسوّدةُ الخطاب
 var _open = null;        // معرّفُ الوثيقة المفتوحة (بطاقةُ التفاصيل)
 var _renew = null;       // مسوّدةُ التجديد
+
+/* ══ الأساسُ الذي تُبنى عليه كلُّ شاشة ══
+   **ما يحقّ للمستخدم أن يراه — لا ما اختار ترشيحَه.** والفرقُ بينهما ليس لفظياً:
+   الشاراتُ والحصائلُ و**التنبيهات** تُحسَب على هذا الأساس وحدَه، فلا يكتم مُرشِّحُ
+   عرضٍ تنبيهَ انتهاءِ شهادةٍ لأنّ صاحبَه كان ينظر في مشروعٍ آخرَ لحظتها. */
+function _visDocs(){ return visibleList(_docs, allowedProjectIds()); }
+function _visLtrs(){ return visibleList(_ltrs, allowedProjectIds()); }
+function _visAprs(){ return visibleList(_aprs, allowedProjectIds()); }
 
 function docs(){ return _docs.slice(); }
 function letters(){ return _ltrs.slice(); }
@@ -795,7 +1108,7 @@ function scanAndAlert(today){
   var t = today || new Date();
   var day = new Date(t).toISOString().slice(0, 10);
   var seen = _alertedKey(), fired = 0, next = {};
-  _docs.forEach(function(doc){
+  _visDocs().forEach(function(doc){
     /* المؤرشفةُ خارج التنبيه — `docLevel` تحسب المرتبةَ ولا تسأل عن الأرشفة (وهو
        صوابُها: الأرشفةُ قرارُ عرضٍ لا خاصيّةُ تاريخ). فالسؤالُ هنا، وإلّا صرخ الجرسُ
        على وثيقةٍ أُخرجت من الخزانة عمداً. أُمسك في الفحص قبل أن يصل مستخدماً. */
@@ -956,6 +1269,11 @@ function injectCSS(){
 ".dv-tab:hover{color:var(--text)}",
 ".dv-tab.on{color:var(--primary);border-bottom-color:var(--primary)}",
 ".dv-tab .n{font-family:'JetBrains Mono',monospace;font-size:11px;opacity:.75;margin-right:4px}",
+    ".dv-note-link{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;padding:9px 12px;"
+      + "border:1px solid var(--warning,#d98324);border-radius:10px;background:rgba(217,131,36,.10);font-size:.86rem}",
+    ".dv-cnt{display:inline-flex;align-items:center;justify-content:center;min-width:20px;padding:1px 6px;"
+      + "border-radius:9px;background:var(--surface-2,rgba(127,127,127,.14));color:var(--text-dim,inherit);"
+      + "font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;opacity:.85}",
 
 /* ── شارةُ القائمة الجانبية وزرِّ البوّابة ── */
 ".dv-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-right:auto;border-radius:9px;background:var(--danger);color:#fff;font-size:10px;font-weight:800;font-family:'JetBrains Mono',monospace}",
@@ -1018,10 +1336,11 @@ function _filterBarHTML(){
   var lvls = LEVELS.map(function(l){
     return '<option value="' + l.key + '"' + (_view.level === l.key ? " selected" : "") + '>' + _esc(l.lbl) + '</option>';
   }).join("");
-  var dirty = _view.q || _view.type || _view.level || _view.ym;
+  var dirty = _view.q || _view.type || _view.level || _view.ym || _view.proj;
   return '<div class="dv-bar">'
-    + '<input class="form-input dv-search" type="search" placeholder="ابحث بالعنوان أو الرقم أو الجهة…"'
+    + '<input class="form-input dv-search" type="search" placeholder="ابحث بالعنوان أو الرقم أو الجهة أو المشروع…"'
     + ' value="' + _esc(_view.q) + '" oninput="docVault.setFilter(\'q\',this.value)">'
+    + _projFilterHTML(_view.proj, "setFilterProj", _visDocs())
     + '<select class="form-input" onchange="docVault.setFilter(\'type\',this.value)"><option value="">كل الأنواع</option>' + types + '</select>'
     + '<select class="form-input" onchange="docVault.setFilter(\'level\',this.value)"><option value="">كل الحالات</option>' + lvls + '</select>'
     + (dirty ? '<button type="button" class="dv-clear" onclick="docVault.clearFilters()">مسح الترشيح</button>' : "")
@@ -1039,9 +1358,9 @@ function _filesHTML(files, onDel){
   }).join("") + '</div>';
 }
 
-function _tableHTML(list, today){
+function _tableHTML(list, today, curProj){
   if(!list.length){
-    var any = _docs.filter(function(d){ return !d.archived; }).length;
+    var any = _visDocs().filter(function(d){ return !d.archived; }).length;
     return '<div class="dv-wrap"><div class="dv-empty">'
       + (any ? 'لا وثيقة تطابق الترشيح الحالي.<br><button type="button" class="dv-clear" onclick="docVault.clearFilters()">امسح الترشيح</button>'
              : 'الخزانة فارغة.<br>ابدأ بإضافة السجل التجاري وشهادات الزكاة والتأمينات — لكلٍّ تاريخُ بدءٍ وانتهاءٍ ومرفق،<br>ويصلك التنبيه قبل انتهائها بتسعين يوماً.')
@@ -1052,7 +1371,8 @@ function _tableHTML(list, today){
     var days = (d.noExpiry || !d.expiry) ? null : daysUntil(d.expiry, today);
     return '<tr class="dv-row-act" onclick="docVault.open(\'' + _jq(d.id) + '\')">'
       + '<td class="t-name">' + _esc(d.title || "—")
-        + (d.renewCount ? ' <span class="t-dim dv-num">(جُدِّدت ' + d.renewCount + ')</span>' : "") + '</td>'
+        + (d.renewCount ? ' <span class="t-dim dv-num">(جُدِّدت ' + d.renewCount + ')</span>' : "")
+        + _projSubHTML(d, curProj) + '</td>'
       + '<td class="t-dim">' + _esc(typeLabel(d)) + '</td>'
       + '<td class="dv-num t-dim">' + _esc(d.number || "—") + '</td>'
       + '<td class="t-dim">' + _esc(d.issuer || "—") + '</td>'
@@ -1098,6 +1418,12 @@ function _formHTML(){
       + '<input class="form-input dv-num" id="dv-number" value="' + _esc(e.number || "") + '" placeholder="1010xxxxxx"></div>'
     + '<div class="dv-f"><label class="dv-l" for="dv-issuer">الجهة المُصدِرة</label>'
       + '<input class="form-input" id="dv-issuer" value="' + _esc(e.issuer || "") + '" placeholder="وزارة التجارة"></div>'
+    /* النطاقُ قبل المشروع: شهادةُ الزكاة تخصّ الشركةَ كلَّها، ونسبتُها لمشروعٍ
+       تُخفيها عن باقي المشاريع وتُوهم بأنّها تخصّه وحدَه. */
+    + '<div class="dv-f wide"><label class="dv-l">النطاق</label>' + _projFieldHTML(e, "setDocProj")
+      + (e.projSel === FILTER_COMPANY
+          ? '<div class="dv-hint">وثيقةُ شركةٍ: تظهر في ملفّ كلّ مشروع، ولا تُحجب عن أحدٍ في الخزانة.</div>' : "")
+      + '</div>'
     + '<div class="dv-f wide"><label class="dv-l" for="dv-owner">مسؤول التجديد</label>'
       + _ownerSelectHTML(e) + _ownerHintHTML(e) + '</div>'
     /* ── مدّةُ الصلاحية كتلةٌ واحدةٌ لا حقلين متجاورَين بالمصادفة ──
@@ -1189,6 +1515,7 @@ function _cardHTML(d, today){
     + '</div></div>'
     + '<div class="dv-grid">'
       + row("النوع", _esc(typeLabel(d)))
+      + row("النطاق", _projChipHTML(d))
       + row("رقم الوثيقة", '<span class="dv-num">' + _esc(d.number || "—") + '</span>')
       + row("الجهة المُصدِرة", _esc(d.issuer || "—"))
       + row("مسؤول التجديد", _esc(ownerLabel(d) || "—")
@@ -1281,8 +1608,13 @@ function render(){
     var d = docById(_open);
     body = d ? _cardHTML(d, today) : '<div class="dv-empty">لم تعد هذه الوثيقة موجودة.</div>';
   } else {
-    var list = sortDocs(filterDocs(_docs, _view, today), today);
-    body = _horizonHTML(_docs, today) + _filterBarHTML() + _tableHTML(list, today);
+    _view.proj = _seedProj(_view.proj);
+    /* الأفقُ يتبع المُرشِّحَ — سؤالُه «متى يتزاحم ما أنظر إليه؟» لا «كم في الخزانة».
+       والتنبيهاتُ **لا تتبعه**: تلك تُحسَب في `scanAndAlert` على المرئيّ كلِّه. */
+    var vis  = _visDocs();
+    var list = sortDocs(filterDocs(vis, _view, today), today);
+    body = _unlinkedNoticeHTML(vis, "setFilterProj", _view.proj) + _horizonHTML(filterDocs(vis, { proj:_view.proj }, today), today)
+         + _filterBarHTML() + _tableHTML(list, today, _view.proj);
   }
   host.innerHTML = head + body;
 }
@@ -1317,6 +1649,10 @@ function _letterFormHTML(){
         + '<input class="form-input dv-num" type="date" id="dv-l-date" value="' + _esc(e.letterDate || "") + '"></div>'
       + '<div class="dv-f"><label class="dv-l" for="dv-l-ref">الرقم المرجعي الخارجي</label>'
         + '<input class="form-input dv-num" id="dv-l-ref" value="' + _esc(e.ref || "") + '" placeholder="إن كان للخطاب رقمٌ لدى الجهة"></div>'
+      /* المشروعُ خاصيّةُ **الصادر** وحدَه: النموذجُ قالبٌ يُستنسَخ، وربطُه بمشروعٍ
+         يُخفيه عن باقي المشاريع — فيُعاد كتابتُه في كلّ مشروعٍ وهو عينُ ما جاء
+         النموذجُ ليمنعه. فالنماذجُ كلُّها على مستوى الشركة بلا خيار. */
+      + '<div class="dv-f"><label class="dv-l">المشروع</label>' + _projFieldHTML(e, "setLetterFormProj") + '</div>'
       /* التوقيعُ خاصيّةُ الصادر وحدَه — نموذجٌ يخرج موقَّعاً ومختوماً خطابٌ جاهزٌ
          للإرسال بعناصرَ نائبةٍ بين قوسين. فلا خيارَ له في نموذج النموذج أصلاً. */
       + '<div class="dv-f wide"><label class="dv-l" for="dv-l-sign">التوقيع</label>'
@@ -1628,7 +1964,7 @@ function _signFormHTML(){
     + '</div></div>';
 }
 
-function _letterTableHTML(list){
+function _letterTableHTML(list, curProj){
   var isTpl = _lview.kind === "template";
   if(!list.length){
     return '<div class="dv-wrap"><div class="dv-empty">'
@@ -1639,7 +1975,7 @@ function _letterTableHTML(list){
   var rows = list.map(function(l){
     return '<tr class="dv-row-act" onclick="docVault.openLetter(\'' + _jq(l.id) + '\')">'
       + '<td class="dv-num t-name">' + _esc(l.id) + '</td>'
-      + '<td class="t-name">' + _esc(l.title || "—") + '</td>'
+      + '<td class="t-name">' + _esc(l.title || "—") + _projSubHTML(l, curProj) + '</td>'
       + (isTpl ? "" : '<td class="t-dim">' + _esc(l.party || "—") + '</td>'
                     + '<td class="dv-num t-dim">' + _esc(l.letterDate || "—") + '</td>')
       + '<td class="t-dim">' + _esc(l.subject || "—") + '</td>'
@@ -1672,6 +2008,7 @@ function _letterCardHTML(l){
                     + row("تاريخ الخطاب", '<span class="dv-num">' + _esc(l.letterDate || "—") + '</span>')
                     + (l.ref ? row("الرقم لدى الجهة", '<span class="dv-num">' + _esc(l.ref) + '</span>') : ""))
       + row("الموضوع", _esc(l.subject || "—"))
+      + (isTpl ? "" : row("المشروع", _projChipHTML(l)))
       + (isTpl ? "" : row("التوقيع", (function(){
           if(!l.signName && !l.signTitle) return '<span class="dv-none">بلا توقيع — يُوقَّع باليد</span>';
           var sg = l.signId ? signatoryById(l.signId) : null;
@@ -2122,8 +2459,12 @@ function renderLetters(){
     host.innerHTML = '<div class="dv-empty">🔒 خزانة الوثائق غير متاحة لحسابك.</div>';
     return;
   }
-  var nTpl = filterLetters(_ltrs, { kind:"template" }).length;
-  var nIss = filterLetters(_ltrs, { kind:"issued" }).length;
+  _lview.proj = _seedProj(_lview.proj);
+  var _lvis = _visLtrs();
+  /* عدّادا الخانتين يتبعان المُرشِّحَ — رقمٌ في خانةٍ لا يطابق ما فيها كذبةٌ صغيرةٌ
+     تُفقد الثقةَ بالعدّاد كلِّه. */
+  var nTpl = filterLetters(_lvis, { kind:"template", proj:_lview.proj }).length;
+  var nIss = filterLetters(_lvis, { kind:"issued",   proj:_lview.proj }).length;
   var head = '<div class="dv-head"><div>'
     + '<h2 class="dv-ttl">' + _icon("scrollText") + ' خزانة الوثائق — الخطابات</h2>'
     + '<div class="dv-sub">نماذجُ الخطابات تُستنسَخ ولا تُكتب من جديد، والخطاباتُ الصادرةُ تُحفَظ برقمٍ مرجعيٍّ يُرجَع إليها به.</div>'
@@ -2147,14 +2488,15 @@ function renderLetters(){
       + '<button type="button" class="dv-tab' + (_lview.kind === "template" ? " on" : "") + '" onclick="docVault.letterTab(\'template\')">النماذج<span class="n">' + nTpl + '</span></button>'
       + '</div>';
     var bar = '<div class="dv-bar">'
-      + '<input class="form-input dv-search" type="search" placeholder="ابحث بالعنوان أو الجهة أو الموضوع…"'
+      + '<input class="form-input dv-search" type="search" placeholder="ابحث بالعنوان أو الجهة أو الموضوع أو المشروع…"'
       + ' value="' + _esc(_lview.q) + '" oninput="docVault.setLetterFilter(this.value)">'
-      + (_lview.q ? '<button type="button" class="dv-clear" onclick="docVault.setLetterFilter(\'\')">مسح البحث</button>' : "")
+      + _projFilterHTML(_lview.proj, "setLetterProj", _lvis)
+      + ((_lview.q || _lview.proj) ? '<button type="button" class="dv-clear" onclick="docVault.clearLetterFilters()">مسح الترشيح</button>' : "")
       + '</div>';
-    var list = filterLetters(_ltrs, _lview).sort(function(a, b){
+    var list = filterLetters(_lvis, _lview).sort(function(a, b){
       return String(b.letterDate || b.createdAt || "").localeCompare(String(a.letterDate || a.createdAt || ""));
     });
-    body = tabs + bar + _letterTableHTML(list);
+    body = _unlinkedNoticeHTML(_lvis, "setLetterProj", _lview.proj) + tabs + bar + _letterTableHTML(list, _lview.proj);
   }
   host.innerHTML = head + body;
 }
@@ -2213,9 +2555,9 @@ function _aprChip(a, today){
     + (w === null ? "مُقدَّم" : ("بانتظار " + w + " يوماً")) + '</span>';
 }
 
-function _aprTableHTML(list, today){
+function _aprTableHTML(list, today, curProj){
   if(!list.length){
-    var any = _aprs.filter(function(x){ return !x.archived; }).length;
+    var any = _visAprs().filter(function(x){ return !x.archived; }).length;
     return '<div class="dv-wrap"><div class="dv-empty">'
       + (any ? 'لا مستندَ يطابق الترشيح.<br><button type="button" class="dv-clear" onclick="docVault.clearAprFilters()">امسح الترشيح</button>'
              : 'لا معتمداتٍ بعد.<br>سجّل هنا ما تُقدّمه للعميل — مستخلصاً أو مطالبةً أو خطاباً — بتاريخ تقديمه،<br>'
@@ -2226,8 +2568,7 @@ function _aprTableHTML(list, today){
     var fin = aprIsFinancial(a.docType), v = aprVariance(a);
     return '<tr class="dv-row-act" onclick="docVault.openApr(\'' + _jq(a.id) + '\')">'
       + '<td class="dv-num t-name">' + _esc(a.id) + '</td>'
-      + '<td class="t-name">' + _esc(a.title || "—")
-        + (a.projectName ? '<span class="t-dim"> · ' + _esc(a.projectName) + '</span>' : '') + '</td>'
+      + '<td class="t-name">' + _esc(a.title || "—") + _projSubHTML(a, curProj) + '</td>'
       + '<td class="t-dim">' + _esc(APR_LBL[a.docType] || "—") + '</td>'
       + '<td class="t-dim">' + _esc(a.party || "—") + '</td>'
       + '<td class="dv-num t-dim">' + _esc(a.submittedAt || "—") + '</td>'
@@ -2266,8 +2607,7 @@ function _aprFormHTML(){
       + '<select class="form-input" id="dv-a-type" onchange="docVault.setAprType(this.value)">' + types + '</select></div>'
     + '<div class="dv-f"><label class="dv-l" for="dv-a-party">الجهة <b>*</b></label>'
       + '<input class="form-input" id="dv-a-party" value="' + _esc(e.party || "") + '" placeholder="وكالة الأنباء السعودية"></div>'
-    + '<div class="dv-f"><label class="dv-l" for="dv-a-proj">المشروع</label>'
-      + '<input class="form-input" id="dv-a-proj" value="' + _esc(e.projectName || "") + '" placeholder="اسم المشروع أو العقد"></div>'
+    + '<div class="dv-f"><label class="dv-l">المشروع</label>' + _projFieldHTML(e, "setAprFormProj") + '</div>'
     + '<div class="dv-f"><label class="dv-l" for="dv-a-ourref">رقمنا المرجعي</label>'
       + '<input class="form-input dv-num" id="dv-a-ourref" value="' + _esc(e.ourRef || "") + '" placeholder="LTR-2609-0004 أو رقمٌ يدويّ"></div>'
     + '<div class="dv-f wide"><div class="dv-dates">'
@@ -2316,7 +2656,7 @@ function _aprCardHTML(a, today){
     + '<div class="dv-grid">'
       + row("النوع", _esc(APR_LBL[a.docType] || "—"))
       + row("الجهة", _esc(a.party || "—"))
-      + (a.projectName ? row("المشروع", _esc(a.projectName)) : "")
+      + row("المشروع", _projChipHTML(a))
       + (a.ourRef ? row("رقمنا المرجعي", '<span class="dv-num">' + _esc(a.ourRef) + '</span>') : "")
       + (a.theirRef ? row("رقمهم المرجعي", _esc(a.theirRef)) : "")
       + row("تاريخ التقديم", '<span class="dv-num">' + _esc(a.submittedAt || "—") + '</span>')
@@ -2344,6 +2684,8 @@ function renderApprovals(){
     + '</div></div>';
 
   if(!_aprsLoaded){ host.innerHTML = head + '<div class="dv-empty">جارٍ التحميل…</div>'; return; }
+  _aview.proj = _seedProj(_aview.proj);
+  var _avis = _visAprs();
 
   var body;
   if(_aEdit){ body = _aprFormHTML(); }
@@ -2357,21 +2699,31 @@ function renderApprovals(){
     var sts = APR_STATUS.map(function(x){
       return '<option value="' + x.key + '"' + (_aview.status === x.key ? " selected" : "") + '>' + _esc(x.lbl) + '</option>';
     }).join("");
-    var dirty = _aview.q || _aview.type || _aview.status;
+    var dirty = _aview.q || _aview.type || _aview.status || _aview.proj;
     var bar = '<div class="dv-bar">'
       + '<input class="form-input dv-search" type="search" placeholder="ابحث بالعنوان أو الجهة أو المشروع أو الرقم…"'
       + ' value="' + _esc(_aview.q) + '" oninput="docVault.setAprFilter(\'q\',this.value)">'
+      + _projFilterHTML(_aview.proj, "setAprProj", _avis)
       + '<select class="form-input" onchange="docVault.setAprFilter(\'type\',this.value)"><option value="">كل الأنواع</option>' + types + '</select>'
       + '<select class="form-input" onchange="docVault.setAprFilter(\'status\',this.value)"><option value="">كل الحالات</option>' + sts + '</select>'
       + (dirty ? '<button type="button" class="dv-clear" onclick="docVault.clearAprFilters()">مسح الترشيح</button>' : "")
       + '</div>';
-    var list = sortApprovals(filterApprovals(_aprs, _aview, today), today);
-    body = _aprSummaryHTML(aprRollup(_aprs, today)) + bar + _aprTableHTML(list, today);
+    var list = sortApprovals(filterApprovals(_avis, _aview, today), today);
+    /* الحصيلةُ تتبع المُرشِّح: «كم مالٌ واقفٌ» سؤالٌ يُسأل عن مشروعٍ بعينه كما يُسأل
+       عن الشركة كلِّها — ورقمُ الشركة فوق جدولِ مشروعٍ واحدٍ يُقرأ على أنّه رقمُه. */
+    body = _unlinkedNoticeHTML(_avis, "setAprProj", _aview.proj)
+         + _aprSummaryHTML(aprRollup(filterApprovals(_avis, { proj:_aview.proj }, today), today))
+         + bar + _aprTableHTML(list, today, _aview.proj);
   }
   host.innerHTML = head + body;
 }
 
 function _repaint(page){
+  /* ملفُّ المشروع يقرأ السجلّاتِ الثلاثةَ كلَّها، فأيُّ تحديثٍ يصل من أيٍّ منها
+     يعنيه — ويُفحَص **قبل** المسارَين اللذين ينصرفان بـ`return`، وإلّا لم يُعَد
+     رسمُه إلا على تحديثِ الوثائق وحدَها. وصفحةٌ واحدةٌ نشطةٌ في كلّ وقت، فالانصرافُ
+     بعده صحيح. */
+  if(_isActive(PAGE_FILE)){ renderProjectFile(); return; }
   if(page === PAGE_LETTERS){   if(_isActive(PAGE_LETTERS))   renderLetters();   return; }
   if(page === PAGE_APPROVALS){ if(_isActive(PAGE_APPROVALS)) renderApprovals(); return; }
   if(_isActive(PAGE_DOCS)) render();
@@ -2386,7 +2738,51 @@ function _isActive(id){
    ═══════════════════════════════════════════════════════════════════════════ */
 function setFilter(k, v){ _view[k] = String(v == null ? "" : v); render(); }
 function pickMonth(ym){ _view.ym = (_view.ym === ym) ? "" : String(ym); _view.level = ""; render(); }
-function clearFilters(){ _view = { q:"", type:"", level:"", ym:"" }; render(); }
+/* اشتقاقُ افتراضِ المُرشِّح من المشروع المفتوح — **مرّةً واحدةً لكلّ شاشة**.
+   `null` وحدَها تُشتقّ؛ و`""` اختيارٌ صريحٌ من المستخدم («كل المشاريع») يُحترَم. */
+function _seedProj(v){ return (v === null || v === undefined) ? _curProjId() : String(v); }
+
+/* افتراضُ **النموذج الجديد** يختلف عن افتراض المُرشِّح، لأنّ الواقعَ يختلف:
+   وثائقُ الخزانة أغلبُها وثائقُ شركةٍ (سجلٌّ · زكاةٌ · تأمينات) فافتراضُها الشركة
+   ولو كنتَ داخل مشروع — وإلّا نُسبت شهادةُ الشركة لمشروعٍ بمجرّد أنّه كان مفتوحاً.
+   والخطاباتُ والمعتمداتُ عكسُها: تُكتب **من داخل المشروع ولمشروع**، فافتراضُها هو
+   المفتوح. الافتراضُ مقروءٌ من الواقع لا موحَّدٌ للتناسق. */
+function _newProjSelDoc(){ return FILTER_COMPANY; }
+function _newProjSelWork(){ return _curProjId() || FILTER_COMPANY; }
+/* حقولُ المشروع على المسوّدة، مقروءةً من سجلٍّ قائمٍ أو من الافتراض. */
+function _projDraft(rec, dflt){
+  if(!rec) return { projSel:dflt, projManual:"", projectName:"", projectId:"",
+                    scope:(dflt === FILTER_COMPANY ? SCOPE_COMPANY : SCOPE_PROJECT),
+                    isCustomProject:false };
+  var r = projRef(rec);
+  return { projSel:_projSelFor(rec), projManual:(r.manual ? r.name : ""),
+           projectName:r.name, projectId:r.id, scope:r.scope, isCustomProject:r.manual };
+}
+/* والعكس: من المسوّدة إلى الحقول الأربعة المخزَّنة. */
+function _projBody(e){
+  return normalizeProjectPick({ sel:e.projSel, manualName:e.projManual,
+                                prevName:e.projectName, projects:_projList() });
+}
+/* مبدّلُ المشروع في النماذج الثلاثة — يقرأ الحقولَ أوّلاً فلا يضيع ما كُتب. */
+function _setProjOn(draft, v, reader, painter){
+  if(!draft) return;
+  try{ reader(); }catch(e){}
+  draft.projSel = String(v || FILTER_COMPANY);
+  if(draft.projSel !== MANUAL_ID) draft.projManual = "";
+  painter();
+  try{ var el = document.getElementById("dv-proj-manual"); if(el) el.focus(); }catch(e){}
+}
+
+function setFilterProj(v){
+  _view.proj = String(v || "");
+  _view.ym = "";        // شهرٌ مختارٌ من أفقِ مشروعٍ آخرَ لا معنى له هنا
+  render();
+}
+function setLetterProj(v){ _lview.proj = String(v || ""); renderLetters(); }
+function clearLetterFilters(){ _lview.q = ""; _lview.proj = _curProjId(); renderLetters(); }
+function setAprProj(v){ _aview.proj = String(v || ""); renderApprovals(); }
+
+function clearFilters(){ _view = { q:"", type:"", level:"", ym:"", proj:_curProjId() }; render(); }
 function open(id){ _open = String(id); _edit = null; _renew = null; render(); _top(); }
 function backToList(){ _open = null; _renew = null; render(); _top(); }
 function _top(){ try{ (window._scrollAppToTop || function(){ window.scrollTo(0, 0); })(); }catch(e){} }
@@ -2396,6 +2792,8 @@ function newDoc(){
   _edit = { title:"", docType:"cr", docTypeOther:"", number:"", issuer:"",
             owner:"", ownerUser:"", start:"", expiry:"",
             noExpiry:false, notes:"", files:[] };
+  var _pd0 = _projDraft(null, _newProjSelDoc());
+  Object.keys(_pd0).forEach(function(k){ _edit[k] = _pd0[k]; });
   _open = null; _renew = null; render(); _top();
 }
 function editDoc(id){
@@ -2408,6 +2806,7 @@ function editDoc(id){
             start:d.start||"", expiry:d.expiry||"",
             noExpiry:!!d.noExpiry, notes:d.notes||"",
             files:Array.isArray(d.files) ? d.files.slice() : [] };
+  var _pd = _projDraft(d); Object.keys(_pd).forEach(function(k){ _edit[k] = _pd[k]; });
   render(); _top();
 }
 function cancelEdit(){ _edit = null; render(); }
@@ -2432,6 +2831,7 @@ function _readForm(){
   _edit.noExpiry= c("dv-noexp");
   _edit.expiry  = _edit.noExpiry ? "" : g("dv-expiry");
   _edit.notes   = g("dv-notes");
+  if(_edit.projSel === MANUAL_ID) _edit.projManual = g("dv-proj-manual");
 }
 function toggleNoExpiry(on){ _readForm(); _edit.noExpiry = !!on; if(on) _edit.expiry = ""; render(); }
 /* تبديلُ النوع يُعيد الرسمَ لتظهر خانةُ الاسم اليدويّ أو تختفي — و`_readForm` قبلَه
@@ -2480,6 +2880,9 @@ function saveEdit(){
     start:_edit.start, expiry:_edit.expiry, noExpiry:!!_edit.noExpiry,
     notes:_edit.notes, files:_edit.files || [], updatedAt:now, updatedBy:me
   };
+  var _pb = _projBody(_edit);
+  body.scope = _pb.scope; body.projectId = _pb.projectId;
+  body.projectName = _pb.projectName; body.isCustomProject = _pb.isCustomProject;
   var was = _edit.id;
   var p = was
     ? d.collection(DOCS_COLL()).doc(was).set(body, { merge:true }).then(function(){ return was; })
@@ -2583,6 +2986,8 @@ function newLetter(kind, seed){
                party:"", letterDate:new Date().toISOString().slice(0, 10), ref:"", body:"",
                signId:"", signName:"", signTitle:"",
                prefix:DEF_PREFIX, honorific:DEF_HONORIFIC, closing:DEF_CLOSING, files:[] };
+  var _pl = _projDraft(null, base.kind === "template" ? FILTER_COMPANY : _newProjSelWork());
+  Object.keys(_pl).forEach(function(k){ base[k] = _pl[k]; });
   if(seed) Object.keys(seed).forEach(function(k){ base[k] = seed[k]; });
   _letterMode("form");
   _ledit = base;
@@ -2600,6 +3005,7 @@ function editLetter(id){
              prefix:_orDef(l.prefix, DEF_PREFIX), honorific:_orDef(l.honorific, DEF_HONORIFIC),
              closing:_orDef(l.closing, DEF_CLOSING),
              files:Array.isArray(l.files) ? l.files.slice() : [] };
+  var _pl2 = _projDraft(l); Object.keys(_pl2).forEach(function(k){ _ledit[k] = _pl2[k]; });
   renderLetters(); _top();
 }
 function cancelLetter(){ _letterMode("list"); renderLetters(); }
@@ -2633,6 +3039,7 @@ function _readLetterForm(){
     _ledit.signName  = _sg ? String(_sg.name  || "") : "";
     _ledit.signTitle = _sg ? String(_sg.title || "") : "";
   }
+  if(_ledit.projSel === MANUAL_ID) _ledit.projManual = g("dv-proj-manual");
 }
 function addLetterFile(){
   if(!_ledit) return;
@@ -2662,6 +3069,9 @@ function saveLetter(){
                honorific:_orDef(_ledit.honorific, DEF_HONORIFIC),
                closing:_orDef(_ledit.closing, DEF_CLOSING),
                files:_ledit.files || [], updatedAt:now, updatedBy:me };
+  var _pb = _projBody(_ledit);
+  body.scope = _pb.scope; body.projectId = _pb.projectId;
+  body.projectName = _pb.projectName; body.isCustomProject = _pb.isCustomProject;
   if(_ledit.fromTemplate) body.fromTemplate = _ledit.fromTemplate;
   var was = _ledit.id;
   var p = was
@@ -2701,9 +3111,11 @@ function backToApr(){ _aEdit = null; _aview.open = null; renderApprovals(); _top
 
 function newApr(){
   if(!canEdit()){ _toast("🔒 لا صلاحية للإضافة","warn"); return; }
-  _aEdit = { title:"", docType:"extract", party:"", projectName:"", ourRef:"", theirRef:"",
+  _aEdit = { title:"", docType:"extract", party:"", ourRef:"", theirRef:"",
              submittedAt:new Date().toISOString().slice(0,10), approvedAt:"",
              status:"submitted", amountSubmitted:"", amountApproved:"", notes:"", files:[] };
+  var _pa0 = _projDraft(null, _newProjSelWork());
+  Object.keys(_pa0).forEach(function(k){ _aEdit[k] = _pa0[k]; });
   _aview.open = null; renderApprovals(); _top();
 }
 function editApr(id){
@@ -2711,12 +3123,13 @@ function editApr(id){
   var a = approvalById(id);
   if(!a) return;
   _aEdit = { id:a.id, title:a.title||"", docType:a.docType||"other", party:a.party||"",
-             projectName:a.projectName||"", ourRef:a.ourRef||"", theirRef:a.theirRef||"",
+             ourRef:a.ourRef||"", theirRef:a.theirRef||"",
              submittedAt:a.submittedAt||"", approvedAt:a.approvedAt||"",
              status:a.status||"submitted",
              amountSubmitted:(a.amountSubmitted === 0 || a.amountSubmitted) ? String(a.amountSubmitted) : "",
              amountApproved:(a.amountApproved === 0 || a.amountApproved) ? String(a.amountApproved) : "",
              notes:a.notes||"", files:Array.isArray(a.files) ? a.files.slice() : [] };
+  var _pa = _projDraft(a); Object.keys(_pa).forEach(function(k){ _aEdit[k] = _pa[k]; });
   _aview.open = null; renderApprovals(); _top();
 }
 function cancelApr(){ _aEdit = null; renderApprovals(); }
@@ -2726,7 +3139,7 @@ function _readAprForm(){
   _aEdit.title       = g("dv-a-title");
   _aEdit.docType     = g("dv-a-type") || "other";
   _aEdit.party       = g("dv-a-party");
-  _aEdit.projectName = g("dv-a-proj");
+  if(_aEdit.projSel === MANUAL_ID) _aEdit.projManual = g("dv-proj-manual");
   _aEdit.ourRef      = g("dv-a-ourref");
   _aEdit.theirRef    = g("dv-a-theirref");
   _aEdit.submittedAt = g("dv-a-sub");
@@ -2743,6 +3156,9 @@ function _readAprForm(){
   _aEdit.notes = g("dv-a-notes");
 }
 function setAprType(v){ if(!_aEdit) return; _readAprForm(); _aEdit.docType = String(v || "other"); renderApprovals(); }
+function setDocProj(v){    _setProjOn(_edit,  v, _readForm,       render); }
+function setLetterFormProj(v){ _setProjOn(_ledit, v, _readLetterForm, renderLetters); }
+function setAprFormProj(v){ _setProjOn(_aEdit, v, _readAprForm,    renderApprovals); }
 function setAprStatus(v){
   if(!_aEdit) return;
   _readAprForm();
@@ -2782,7 +3198,7 @@ function saveApr(){
   var now = new Date().toISOString(), me = _myName();
   var body = {
     title:_aEdit.title, docType:_aEdit.docType, party:_aEdit.party,
-    projectName:_aEdit.projectName, ourRef:_aEdit.ourRef, theirRef:_aEdit.theirRef,
+    ourRef:_aEdit.ourRef, theirRef:_aEdit.theirRef,
     submittedAt:_aEdit.submittedAt, approvedAt:_aEdit.approvedAt || "",
     status:_aEdit.status,
     /* غيرُ الماليّ لا يحمل مبلغاً أصلاً — ورقمٌ عالقٌ من نوعٍ سابقٍ يدخل الإجماليّ */
@@ -2790,6 +3206,9 @@ function saveApr(){
     amountApproved:  fin ? num(_aEdit.amountApproved)  : "",
     notes:_aEdit.notes, files:_aEdit.files || [], updatedAt:now, updatedBy:me
   };
+  var _pb = _projBody(_aEdit);
+  body.scope = _pb.scope; body.projectId = _pb.projectId;
+  body.projectName = _pb.projectName; body.isCustomProject = _pb.isCustomProject;
   var was = _aEdit.id;
   var p = was
     ? d.collection(APRS_COLL()).doc(was).set(body, { merge:true }).then(function(){ return was; })
@@ -2819,6 +3238,124 @@ function delApr(id){
       }).catch(function(e){ _toast("⚠ تعذّر الحذف: " + String((e && e.message) || e), "warn"); });
     }).catch(function(){});
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   الشاشةُ الرابعة — مِلَفُّ المشروع  (طلبُ المالك: «أرشيف لكل مشروع»)
+
+   ── لماذا شاشةٌ لا مجرّدُ مُرشِّح ──
+   المُرشِّحُ يجيب «أرِني معتمداتِ هذا المشروع» — سؤالٌ عن **سجلٍّ واحد**. وملفُّ
+   المشروع يجيب سؤالاً آخر: **«أعطني كلَّ ما لهذا المشروع»** — وهو السؤالُ الذي
+   يُسأل يومَ تسليمِ مشروعٍ، أو دفاعاً عن مطالبة، أو حين يُطلب ملفُّه في تدقيق.
+   جوابُه في ثلاث شاشاتٍ يُرشَّح كلٌّ منها بيدها ليس جواباً، وإنّما ثلاثةُ أرباعِ
+   جوابٍ يجمعها القارئُ بنفسه فينسى ربعاً.
+
+   ── وهي طبقةٌ رقيقةٌ فوق ما بُني، لا نسخةٌ ثانيةٌ منه ──
+   لا تقرأ من قاعدة البيانات ولا تحمل حالةَ تحريرٍ ولا نموذجَ رفعٍ خاصّاً بها:
+   تستدعي الدوالَّ النقيّةَ نفسَها (`filterDocs` · `filterLetters` ·
+   `filterApprovals` · `aprRollup`)، وأزرارُ الإضافة فيها تفتح **النماذجَ القائمة**
+   بالمشروع مضبوطاً سلفاً. فمسارُ الرفع واحدٌ ومفحوصٌ، ولا يتفرّع مسارٌ ثانٍ
+   ينحرف عنه بعد شهرين.
+
+   ── ووثائقُ الشركة قسمٌ مفصولٌ لا مدسوسٌ بين وثائق المشروع ──
+   ملفُّ المشروع يحتاج السجلَّ التجاريَّ وشهادةَ الزكاة (تُطلَب مع كلّ تقديم)، لكنّها
+   **ليست وثائقَه**. دمجُها في قائمته يجعل «وثائقُ هذا المشروع: ١٤» رقماً كاذباً.
+   فقسمٌ ثانٍ بعنوانه، والعددان منفصلان.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+var _fview = { proj:null };
+
+function _fileHead(){
+  return '<div class="dv-head"><div>'
+    + '<h2 class="dv-ttl">' + _icon("briefcase") + ' خزانة الوثائق — ملفّ المشروع</h2>'
+    + '<div class="dv-sub">كلُّ ما لمشروعٍ واحدٍ في مكانٍ واحد: وثائقُه وخطاباتُه الصادرة وما قُدِّم للعميل فيه. '
+      + 'والإضافةُ من هنا تفتح النموذجَ نفسَه بالمشروع مضبوطاً سلفاً.</div>'
+    + '</div></div>';
+}
+
+/* رأسُ قسمٍ: عنوانٌ وعددٌ وزرُّ «افتح السجلّ» (يَنقل المُرشِّحَ معه) وزرُّ إضافة. */
+function _fSec(title, icon, n, openFn, addFn, addLbl){
+  return '<div class="dv-head" style="margin:18px 0 8px">'
+    + '<div><h3 class="dv-ttl" style="font-size:1.02rem">' + _icon(icon) + ' ' + _esc(title)
+      + ' <span class="dv-cnt">' + n + '</span></h3></div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.' + openFn + '()">افتح السجلّ</button>'
+    + (canEdit() && addFn ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.' + addFn + '()">'
+        + _icon("plus", "ic-sm") + ' ' + _esc(addLbl) + '</button>' : "")
+    + '</div></div>';
+}
+
+function renderProjectFile(){
+  var host = document.getElementById("page-" + PAGE_FILE);
+  if(!host) return;
+  if(!canView()){ host.innerHTML = '<div class="dv-empty">🔒 خزانة الوثائق غير متاحة لحسابك.</div>'; return; }
+  var today = new Date();
+  _fview.proj = _seedProj(_fview.proj);
+
+  var head = _fileHead();
+  var picker = '<div class="dv-bar"><label class="dv-l" style="align-self:center;margin:0">المشروع</label>'
+    + _projFilterHTML(_fview.proj, "setFileProj", _visAprs().concat(_visDocs())) + '</div>';
+
+  /* «كلُّ المشاريع» ليست ملفَّ مشروع: الشاشةُ تسأل عن واحدٍ بعينه، فتُطلب تسميتُه
+     بدل أن تُعرض عليه كومةٌ لا تقول شيئاً. */
+  if(String(_fview.proj || "") === FILTER_ALL){
+    host.innerHTML = head + picker
+      + '<div class="dv-empty">اختَرْ مشروعاً من القائمة أعلاه ليُعرَض ملفُّه كاملاً — '
+      + 'أو اخترْ «' + _esc(SCOPE_LBL) + '» لوثائق الشركة وخطاباتها.</div>';
+    return;
+  }
+  if(!_docsLoaded || !_ltrsLoaded || !_aprsLoaded){
+    host.innerHTML = head + picker + '<div class="dv-empty">جارٍ التحميل…</div>';
+    return;
+  }
+
+  var f = { proj:_fview.proj };
+  var dcs = sortDocs(filterDocs(_visDocs(), f, today), today);
+  var lts = filterLetters(_visLtrs(), { proj:_fview.proj, kind:"issued" }).sort(function(a, b){
+    return String(b.letterDate || b.createdAt || "").localeCompare(String(a.letterDate || a.createdAt || ""));
+  });
+  var aps = sortApprovals(filterApprovals(_visAprs(), f, today), today);
+  /* وثائقُ الشركة قسمٌ ثانٍ — وتُسقَط حين يكون المعروضُ **هو** نطاقَ الشركة، وإلّا
+     ظهرت القائمةُ نفسُها مرّتين تحت عنوانين. */
+  var comp = (String(_fview.proj) === FILTER_COMPANY) ? []
+           : sortDocs(filterDocs(_visDocs(), { proj:FILTER_COMPANY }, today), today);
+
+  var body = picker
+    + _fSec("وثائق المشروع", "shield", dcs.length, "openDocsForFile", "newDocHere", "وثيقة")
+    + _tableHTML(dcs, today, _fview.proj)
+    + (comp.length
+        ? '<div class="dv-head" style="margin:18px 0 8px"><div>'
+          + '<h3 class="dv-ttl" style="font-size:1.02rem">' + _icon("shield") + ' وثائقُ الشركة السارية على كلّ المشاريع'
+          + ' <span class="dv-cnt">' + comp.length + '</span></h3>'
+          + '<div class="dv-sub">تُطلَب مع كلّ تقديم، وليست من وثائق هذا المشروع — فعددُها منفصل.</div>'
+          + '</div></div>' + _tableHTML(comp, today, FILTER_COMPANY)
+        : "")
+    + _fSec("الخطابات الصادرة", "scrollText", lts.length, "openLettersForFile", "newLetterHere", "خطاب صادر")
+    + _letterTableHTML(lts, _fview.proj)
+    + _fSec("المعتمدات — ما قُدِّم للعميل", "clipboardCheck", aps.length, "openAprForFile", "newAprHere", "مستند مُقدَّم")
+    + _aprSummaryHTML(aprRollup(aps, today))
+    + _aprTableHTML(aps, today, _fview.proj);
+
+  host.innerHTML = head + body;
+}
+
+function setFileProj(v){ _fview.proj = String(v || ""); renderProjectFile(); }
+
+/* «افتح السجلّ» ينقل المُرشِّحَ معه — وإلّا فتح المستخدمُ شاشةً تعرض شيئاً آخرَ
+   فظنّ أنّ ما رآه في الملفّ ناقص. */
+function openDocsForFile(){    _view.proj  = _fview.proj; _view.ym = ""; try{ showPage(PAGE_DOCS); }catch(e){} }
+function openLettersForFile(){ _lview.proj = _fview.proj; _lview.kind = "issued"; try{ showPage(PAGE_LETTERS); }catch(e){} }
+function openAprForFile(){     _aview.proj = _fview.proj; try{ showPage(PAGE_APPROVALS); }catch(e){} }
+
+/* والإضافةُ تفتح النموذجَ **القائم** بالمشروع مضبوطاً — لا نموذجَ ثانياً هنا. */
+function _withProj(draft){
+  if(!draft) return;
+  draft.projSel = String(_fview.proj || FILTER_COMPANY);
+  if(draft.projSel === FILTER_UNLINKED) draft.projSel = FILTER_COMPANY;
+}
+function newDocHere(){    openDocsForFile();    newDoc();    _withProj(_edit);  render(); }
+function newLetterHere(){ openLettersForFile(); newLetter("issued"); _withProj(_ledit); renderLetters(); }
+function newAprHere(){    openAprForFile();     newApr();    _withProj(_aEdit); renderApprovals(); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    التركيبُ الذاتيّ — صفحتان · مجموعةُ قائمةٍ جانبية · زرُّ البوّابة · لفُّ showPage
@@ -2864,7 +3401,8 @@ function injectSidebarGroup(){
 
   [{ id:"nav-vault-docs-btn",    page:PAGE_DOCS,    icon:"shield",     lbl:"السجلّات والشهادات" },
    { id:"nav-vault-letters-btn", page:PAGE_LETTERS, icon:"scrollText", lbl:"الخطابات" },
-   { id:"nav-vault-apr-btn", page:PAGE_APPROVALS, icon:"clipboardCheck", lbl:"المعتمدات" }].forEach(function(b){
+   { id:"nav-vault-apr-btn", page:PAGE_APPROVALS, icon:"clipboardCheck", lbl:"المعتمدات" },
+   { id:"nav-vault-file-btn", page:PAGE_FILE, icon:"briefcase", lbl:"ملفّ المشروع" }].forEach(function(b){
     var btn = document.createElement("button");
     btn.className = "sidebar-nav-btn sidebar-child";
     btn.id = b.id; btn.dataset.page = b.page;
@@ -2912,7 +3450,7 @@ function injectLandingButton(){
    العددُ **ما يستحقّ عملاً اليوم** (منتهية + أسبوع + شهر) لا مجموعُ الوثائق: شارةٌ
    تحمل الإجماليَّ لا تقول شيئاً ولا تسكت أبداً، فتُقرأ زينةً بعد يومين. */
 function refreshBadges(){
-  var roll = _docsLoaded ? rollup(_docs, new Date()) : { act:0, total:0 };
+  var roll = _docsLoaded ? rollup(_visDocs(), new Date()) : { act:0, total:0 };
   var n = roll.act;
   var b = document.getElementById("dv-nav-badge");
   if(b) _setText(b, n ? String(n) : "", n ? "" : "none", n ? (n + " وثيقة تحتاج تجديداً") : "");
@@ -2972,6 +3510,7 @@ function hookShowPage(){
     startSync();
     if(id === PAGE_LETTERS) renderLetters();
     else if(id === PAGE_APPROVALS) renderApprovals();
+    else if(id === PAGE_FILE) renderProjectFile();
     else render();
   };
   window._dvHooked = true;
@@ -3043,7 +3582,20 @@ window.docVault = {
   code128SVG:code128SVG, _code128Bits:code128Bits, _code128Sanitize:code128Sanitize,
   filterDocs:filterDocs, sortDocs:sortDocs, cloneTemplate:cloneTemplate, filterLetters:filterLetters,
   _DOC_TYPES:DOC_TYPES, _LEVELS:LEVELS, _PERM_KEY:PERM_KEY,
-  _PAGE_DOCS:PAGE_DOCS, _PAGE_LETTERS:PAGE_LETTERS, _PAGES:PAGES, _HORIZON_MONTHS:HORIZON_MONTHS,
+  _PAGE_DOCS:PAGE_DOCS, _PAGE_LETTERS:PAGE_LETTERS, _PAGE_FILE:PAGE_FILE,
+  _PAGES:PAGES, _HORIZON_MONTHS:HORIZON_MONTHS,
+  /* ══ طبقةُ المشروع — نقيّةٌ تُفحَص بلا متصفّح ══ */
+  projRef:projRef, projLabel:projLabel, projKey:projKey, inProject:inProject,
+  visibleTo:visibleTo, visibleList:visibleList, normalizeProjectPick:normalizeProjectPick,
+  allowedProjectIds:allowedProjectIds,
+  renderProjectFile:renderProjectFile, setFileProj:setFileProj,
+  setFilterProj:setFilterProj, setLetterProj:setLetterProj, setAprProj:setAprProj,
+  clearLetterFilters:clearLetterFilters,
+  setDocProj:setDocProj, setLetterFormProj:setLetterFormProj, setAprFormProj:setAprFormProj,
+  openDocsForFile:openDocsForFile, openLettersForFile:openLettersForFile, openAprForFile:openAprForFile,
+  newDocHere:newDocHere, newLetterHere:newLetterHere, newAprHere:newAprHere,
+  _SCOPE_COMPANY:SCOPE_COMPANY, _SCOPE_PROJECT:SCOPE_PROJECT, _MANUAL_ID:MANUAL_ID,
+  _FILTER_ALL:FILTER_ALL, _FILTER_COMPANY:FILTER_COMPANY, _FILTER_UNLINKED:FILTER_UNLINKED,
   /* ثقبُ فحصٍ صريحٌ لا بابٌ خلفيّ: يزرع بياناتٍ في الحالة **بلا شبكة** ليُرسَم الأفقُ
      والجدولُ في DOM حقيقيّ داخل `hail-tests.js`. لأنّ الحسابَ الصحيحَ الذي لا يُرسَم
      خطأٌ لا يُنذر، ولا سبيلَ لفحص الرسم بلا مصدرِ بياناتٍ سوى `onSnapshot`.
