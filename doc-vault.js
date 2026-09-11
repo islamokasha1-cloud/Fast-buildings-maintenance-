@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3131";
+var MODULE_BUILD = "v18.9.3133";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -208,6 +208,31 @@ var LEVEL_LBL = (function(){ var m = {}; LEVELS.forEach(function(l){ m[l.key] = 
 
 var MONTH_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
                 "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
+
+/* ════════ عباراتُ الخطاب الرسميّ — اختياريةٌ قابلةٌ للتعديل ════════
+   طلبُ المالك: «كلمة سعادة و المحترم اجعلهم اختيارين للتعديل واعطيني اختيارات كل
+   واحد حسب منصبه»، و«عبارة النهاية اجعلها اخيارية قابلة للتعديل».
+
+   القوائمُ **اقتراحاتٌ لا حصر**: الحقلُ نصٌّ حرٌّ تحته `datalist`، فيُكتب ما ليس
+   فيها ويُختار ما فيها بنقرة. و`<select>` كان سيُغلق البابَ على لقبٍ لم نُحصِه
+   (ولقبُ المخاطَبة في المراسلات الرسمية لا يُحصى: جهاتٌ وهيئاتٌ ورتبٌ عسكريةٌ
+   وألقابٌ شرعية). وإن لم يدعم المتصفّحُ `datalist` بقي الحقلُ خانةَ كتابةٍ عادية —
+   يسقط الاقتراحُ ولا يسقط الحقل.
+
+   والفراغُ يعني **لا تطبع السطر** — وهو معنى «اختيارية». */
+var PREFIX_OPTS = ["سعادة", "معالي", "سمو", "السيد", "السادة", "فضيلة",
+                   "الأستاذ", "الدكتور", "المهندس", "العميد", "اللواء"];
+var HONORIFIC_OPTS = ["المحترم", "المحترمين", "حفظه الله", "حفظهم الله",
+                      "سلّمه الله", "الموقّر", "الموقّرين"];
+var DEF_PREFIX    = "سعادة";
+var DEF_HONORIFIC = "المحترم";
+var DEF_GREET     = "السلام عليكم ورحمة الله وبركاته،";
+var DEF_CLOSING   = "وتفضلوا بقبول فائق الاحترام والتقدير،";
+
+/* الحقلُ الغائبُ (خطابٌ قديمٌ حُفظ قبل هذه الحقول) يأخذ الافتراض، والفارغُ صراحةً
+   يبقى فارغاً. ولولا التفريقُ لَما أمكن **إلغاءُ** عبارةٍ أبداً: الفراغُ يُقرأ
+   «لم يُحدَّد» فيُعاد الافتراضُ فوقه في كلّ طباعة. */
+function _orDef(v, dflt){ return (v === undefined || v === null) ? String(dflt) : String(v); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    الدوالُّ النقيّة — لا DOM ولا شبكة ولا ساعة. `today` يُمرَّر ولا يُقرأ، فيفحصها
@@ -396,6 +421,9 @@ function cloneTemplate(tpl, at){
     body:    String(t.body || ""),
     party:   "",
     letterDate: String(at || "").slice(0, 10),
+    prefix:    _orDef(t.prefix, DEF_PREFIX),
+    honorific: _orDef(t.honorific, DEF_HONORIFIC),
+    closing:   _orDef(t.closing, DEF_CLOSING),
     files:   [],
     fromTemplate: String(t.id || "")
   };
@@ -764,6 +792,9 @@ function injectCSS(){
 /* ── شارةُ القائمة الجانبية وزرِّ البوّابة ── */
 ".dv-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-right:auto;border-radius:9px;background:var(--danger);color:#fff;font-size:10px;font-weight:800;font-family:'JetBrains Mono',monospace}",
 ".dv-err{background:var(--surface2);border:1px solid var(--danger);color:var(--danger);border-radius:10px;padding:11px 14px;font-size:12px;font-weight:700;margin-bottom:12px}",
+".dv-ai{background:var(--surface2);border:1px solid var(--ai);border-radius:12px;padding:14px 15px;margin-top:4px}",
+".dv-ai-h{font-size:13px;font-weight:800;color:var(--ai-ink);display:flex;align-items:center;gap:7px;margin-bottom:4px}",
+".dv-ai-s{font-size:11.5px;color:var(--muted);line-height:1.8;margin-bottom:10px}",
 
 "@media (max-width:760px){.dv-grid{grid-template-columns:1fr}.dv-horizon{padding:10px}.dv-hz-track{min-width:460px}.dv-head{gap:10px}.dv-bar .dv-search{min-width:100%}}",
 "@media (prefers-reduced-motion:reduce){.dv-hz-m,.dv-tbl tbody tr{transition:none}}"
@@ -1102,8 +1133,24 @@ function _letterFormHTML(){
     + '<div class="dv-f wide"><label class="dv-l" for="dv-l-title">العنوان <b>*</b></label>'
       + '<input class="form-input" id="dv-l-title" value="' + _esc(e.title || "") + '" placeholder="' + (isTpl ? "نموذج خطاب طلب تمديد" : "خطاب ترشيح مقاول") + '"></div>'
     + (isTpl ? "" :
-        '<div class="dv-f"><label class="dv-l" for="dv-l-party">الجهة الموجَّه إليها</label>'
-        + '<input class="form-input" id="dv-l-party" value="' + _esc(e.party || "") + '" placeholder="أمانة منطقة حائل"></div>'
+        '<div class="dv-f"><label class="dv-l" for="dv-l-prefix">لقب المخاطَبة</label>'
+        + '<input class="form-input" id="dv-l-prefix" list="dv-prefix-list" autocomplete="off"'
+        + ' value="' + _esc(_orDef(e.prefix, DEF_PREFIX)) + '" placeholder="اتركه فارغاً ليُحذف">'
+        + '<datalist id="dv-prefix-list">'
+        + PREFIX_OPTS.map(function(o){ return '<option value="' + _esc(o) + '">'; }).join("")
+        + '</datalist></div>'
+        + '<div class="dv-f"><label class="dv-l" for="dv-l-honor">لقب التشريف</label>'
+        + '<input class="form-input" id="dv-l-honor" list="dv-honor-list" autocomplete="off"'
+        + ' value="' + _esc(_orDef(e.honorific, DEF_HONORIFIC)) + '" placeholder="اتركه فارغاً ليُحذف">'
+        + '<datalist id="dv-honor-list">'
+        + HONORIFIC_OPTS.map(function(o){ return '<option value="' + _esc(o) + '">'; }).join("")
+        + '</datalist></div>'
+        + '<div class="dv-f wide"><label class="dv-l" for="dv-l-party">الجهة الموجَّه إليها</label>'
+        + '<input class="form-input" id="dv-l-party" value="' + _esc(e.party || "") + '" placeholder="أمانة منطقة حائل">'
+        + '<div class="dv-hint">تُطبَع هكذا: <b>' + _esc(_orDef(e.prefix, DEF_PREFIX))
+          + (_orDef(e.prefix, DEF_PREFIX) ? " / " : "") + (_esc(e.party) || "[الجهة]") + '</b> '
+          + '<span class="t-dim">' + _esc(_orDef(e.honorific, DEF_HONORIFIC)) + '</span> — '
+          + 'واللقبان اختياريان، يُحذف أيُّهما بإفراغ خانته.</div></div>'
       + '<div class="dv-f"><label class="dv-l" for="dv-l-date">تاريخ الخطاب</label>'
         + '<input class="form-input dv-num" type="date" id="dv-l-date" value="' + _esc(e.letterDate || "") + '"></div>'
       + '<div class="dv-f"><label class="dv-l" for="dv-l-ref">الرقم المرجعي الخارجي</label>'
@@ -1115,7 +1162,16 @@ function _letterFormHTML(){
     + '<div class="dv-f' + (isTpl ? " wide" : "") + '"><label class="dv-l" for="dv-l-subject">الموضوع</label>'
       + '<input class="form-input" id="dv-l-subject" value="' + _esc(e.subject || "") + '"></div>'
     + '<div class="dv-f wide"><label class="dv-l" for="dv-l-body">متن الخطاب</label>'
-      + '<textarea class="form-input" id="dv-l-body" rows="7" placeholder="نصُّ الخطاب — يُنسَخ منه عند الاستعمال">' + _esc(e.body || "") + '</textarea></div>'
+      + '<textarea class="form-input" id="dv-l-body" rows="9" placeholder="نصُّ الخطاب — يُنسَخ منه عند الاستعمال">' + _esc(e.body || "") + '</textarea>'
+      + (isTpl ? "" : '<div style="margin-top:7px"><button type="button" class="btn btn-ai btn-sm" onclick="docVault.openAI()">'
+          + _icon("sparkles", "ic-sm") + ' صياغة بالذكاء الاصطناعي</button></div>')
+      + '</div>'
+    + (isTpl || !_ai ? "" : _aiPanelHTML())
+    + (isTpl ? "" :
+        '<div class="dv-f wide"><label class="dv-l" for="dv-l-closing">عبارة الختام</label>'
+        + '<input class="form-input" id="dv-l-closing" value="' + _esc(_orDef(e.closing, DEF_CLOSING)) + '"'
+        + ' placeholder="اتركها فارغةً فلا تُطبَع">'
+        + '<div class="dv-hint">اختيارية — أفرغ الخانة فلا تظهر في المطبوعة.</div></div>')
     + '<div class="dv-f wide"><label class="dv-l">المرفقات</label>'
       + _filesHTML(e.files, "docVault.delLetterDraftFile")
       + '<div style="margin-top:7px"><button type="button" class="btn btn-ghost btn-sm" onclick="docVault.addLetterFile()">'
@@ -1125,6 +1181,133 @@ function _letterFormHTML(){
       + '<button type="button" class="btn btn-ghost" onclick="docVault.cancelLetter()">إلغاء</button>'
       + '<button type="button" class="btn btn-primary" onclick="docVault.saveLetter()">' + _icon("save", "ic-sm") + ' حفظ</button>'
     + '</div></div>';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   مساعدُ الصياغة — يُنادي محرّكَ المنصّة ولا يبني ثانياً
+   (طلبُ المالك: «اضف مساعد ذكاء اصطناعي لصياغة الخطاب»)
+
+   ── نداءٌ واحدٌ للمنصّة كلِّها ──
+   `_aiText` في النواة تحمل: رابطَ الـProxy وتحميلَه الكسول، واختيارَ النموذج،
+   وترجمةَ أخطاء Anthropic إلى عربيةٍ مفهومة (`_msgErr`)، وقيدَ الاستهلاك. ونسخُ
+   شيءٍ من ذلك هنا يُنتج مساعداً يفترق عن بقيّة مساعدات المنصّة عند أوّل تغييرٍ في
+   المفتاح أو النموذج — **ولا نختار نموذجاً هنا أصلاً**: اختيارُه قرارُ النواة
+   الواحد، ولو كتبناه لانحرفنا عنها بصمت.
+
+   ── و`maxTokens` تُرفَع عن الافتراض ──
+   افتراضُ `_aiText` ستّمئة رمزٍ يكفي تصنيفَ بلاغٍ أو جملةَ تلخيص، والخطابُ الرسميُّ
+   ثلاثُ فقراتٍ فأكثر. والاقتطاعُ هنا **لا يُنذر**: يصل الخطابُ مبتوراً في منتصف
+   جملةٍ فيُظنّ صياغةً رديئة.
+
+   ── والمخرَجُ يُملأ في الخانة ولا يُحفَظ ──
+   لا كتابةَ في Firestore من هنا. المستخدمُ يقرأ ويعدّل ثمّ يحفظ بنفسه — ونصٌّ
+   يولّده نموذجٌ ويُحفَظ بلا مراجعةٍ على ورقةٍ تخرج باسم الشركة ليس خياراً.
+
+   ── والمتنُ القائمُ لا يُدهَس بصمت ──
+   الاستبدالُ يسأل أوّلاً. وأسوأُ ما في مساعدٍ أن يمحو عملَ نصفِ ساعةٍ بنقرةٍ واحدة.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var _ai = null;      // { points, busy, err } — مفتوحةٌ حين لا تساوي null
+
+function aiReady(){ return typeof _aiText === "function"; }
+
+function openAI(){
+  if(!_ledit || _ledit.kind === "template") return;
+  if(!aiReady()){ _toast("⚠ الذكاء الاصطناعي غير مُفعّل — راجع: الإدارة › إعدادات الذكاء الاصطناعي","warn"); return; }
+  _readLetterForm();
+  _ai = { points:"", busy:false, err:"" };
+  renderLetters();
+  try{ var el = document.getElementById("dv-ai-points"); if(el) el.focus(); }catch(e){}
+}
+function closeAI(){ _ai = null; renderLetters(); }
+
+function _aiPanelHTML(){
+  var a = _ai;
+  return '<div class="dv-f wide"><div class="dv-ai">'
+    + '<div class="dv-ai-h">' + _icon("sparkles", "ic-sm") + ' صياغة الخطاب بالذكاء الاصطناعي</div>'
+    + '<div class="dv-ai-s">اكتب النقاطَ الأساسيةَ بالعامّية أو مختصرةً — تُصاغ خطاباً رسمياً كاملاً. '
+      + 'الجهةُ والموضوعُ يُقرآن من الحقول أعلاه. <b>راجع الناتجَ قبل الحفظ</b>؛ لا يُحفَظ شيءٌ تلقائياً.</div>'
+    + '<textarea class="form-input" id="dv-ai-points" rows="4" ' + (a.busy ? "disabled " : "")
+      + 'placeholder="مثال: نبي نمدد العقد 45 يوم بسبب تأخر توريد المصاعد، والعقد رقم ع/2026/118">'
+      + _esc(a.points || "") + '</textarea>'
+    + (a.err ? '<div class="dv-err" style="margin:9px 0 0">' + _esc(a.err) + '</div>' : "")
+    + '<div class="dv-acts" style="margin-top:11px">'
+      + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.closeAI()">إغلاق</button>'
+      + '<button type="button" class="btn btn-ai btn-sm"' + (a.busy ? " disabled" : "")
+        + ' onclick="docVault.runAI()">' + (a.busy ? "⏳ جارٍ الصياغة…" : (_icon("sparkles", "ic-sm") + " صُغ الخطاب")) + '</button>'
+    + '</div></div></div>';
+}
+
+/* ════════ بناءُ الطلب — دالّةٌ نقيّةٌ يفحصها `hail-tests` بلا شبكة ════════
+   تُبنى من حقول النموذج لا من الوثيقة المحفوظة: المستخدمُ يكتب الموضوعَ ثمّ يطلب
+   الصياغةَ قبل أن يحفظ. */
+function aiPrompt(o){
+  o = o || {};
+  var L = [];
+  L.push("اكتب خطاباً رسمياً بالعربية الفصحى وبالصيغة الإدارية السعودية المعتمدة، صادراً من «شركة المباني السريعة للمقاولات».");
+  L.push("");
+  L.push("الجهة الموجَّه إليها: " + (String(o.party || "").trim() || "[الجهة]"));
+  L.push("موضوع الخطاب: "        + (String(o.subject || "").trim() || "[الموضوع]"));
+  L.push("");
+  L.push("النقاط الأساسية التي يجب أن يغطّيها الخطاب:");
+  L.push(String(o.points || "").trim() || "—");
+  L.push("");
+  L.push("قواعد إلزامية:");
+  /* المخاطَبةُ والتحيةُ والختامُ والتوقيعُ **تطبعها المنصّةُ** من حقولها. ولو كتبها
+     النموذجُ في المتن لخرجت الورقةُ بتحيتين وخاتمتين — وهو أوّلُ ما يقع لو تُرك
+     الطلبُ عامّاً. */
+  L.push("- اكتب **متن الخطاب فقط**: لا تكتب التاريخ ولا الرقم المرجعي ولا سطر المخاطَبة (سعادة/المحترم) ولا التحية الافتتاحية ولا عبارة الختام ولا خانة التوقيع — كلُّها يضيفها النظام تلقائياً.");
+  L.push("- ابدأ مباشرةً بمتن الموضوع (مثل: «إشارةً إلى…» أو «نفيدكم بأنّ…»).");
+  L.push("- التزم بالحقائق والأرقام الواردة في النقاط أعلاه فقط. **لا تختلق** رقمَ عقدٍ ولا تاريخاً ولا مبلغاً ولا اسماً لم يُذكر.");
+  L.push("- ما نقص من معلومة اجعله عنصراً نائباً بين قوسين مربّعين، مثل [رقم العقد].");
+  L.push("- فقرتان إلى أربع فقرات، بأسطر فارغة بينها، بلا عناوين ولا تعداد نقطيّ إلا إن اقتضت النقاطُ تعداداً.");
+  L.push("- أعِد النصَّ وحدَه بلا أيّ شرحٍ أو مقدّمةٍ منك، وبلا علامات Markdown.");
+  return L.join("\n");
+}
+
+function runAI(){
+  if(!_ai || _ai.busy || !_ledit) return;
+  var el = document.getElementById("dv-ai-points");
+  _ai.points = el ? String(el.value || "").trim() : "";
+  if(!_ai.points){ _ai.err = "اكتب النقاطَ الأساسيةَ أولاً."; renderLetters(); return; }
+  _readLetterForm();
+  var prompt = aiPrompt({ party:_ledit.party, subject:_ledit.subject, points:_ai.points });
+  _ai.busy = true; _ai.err = ""; renderLetters();
+
+  var finish = function(){ _ai.busy = false; renderLetters(); };
+  var apply = function(text){
+    var body = String(text || "").trim();
+    if(!body){ _ai.err = "عاد الردُّ فارغاً — أعِد المحاولة أو فصّل النقاط أكثر."; finish(); return; }
+    var cur = String(_ledit.body || "").trim();
+    var put = function(){
+      _ledit.body = body;
+      _ai = null;
+      renderLetters();
+      _toast("✨ صيغ الخطاب — راجعه وعدّله ثمّ احفظ", "success");
+      try{ var b = document.getElementById("dv-l-body"); if(b){ b.focus(); b.setSelectionRange(0, 0); } }catch(e){}
+    };
+    if(!cur) return put();
+    /* متنٌ مكتوبٌ لا يُدهَس بصمت */
+    _confirm({ title:"استبدال المتن", icon:"✨", okText:"استبدل", okClass:"btn-primary",
+      msg:"المتنُ الحاليُّ مكتوبٌ بالفعل. أستبدله بما صاغه الذكاء الاصطناعي؟" })
+      .then(function(ok){ if(ok) put(); else finish(); })
+      .catch(function(){ finish(); });
+  };
+
+  try{
+    _aiText([{ role:"user", content:prompt }], {
+      /* ستّمئةٌ (افتراضُ النواة) تقطع خطاباً في منتصف جملةٍ بلا إنذار */
+      maxTokens: 4000,
+      feature: "صياغة خطاب — خزانة الوثائق"
+    }).then(apply).catch(function(e){
+      var m = "";
+      try{ m = (typeof _msgErr === "function") ? _msgErr(e) : ((e && e.message) || ""); }catch(_){}
+      _ai.err = m || "تعذّرت الصياغة — أعِد المحاولة.";
+      finish();
+    });
+  }catch(e){
+    _ai.err = "تعذّر بدء الطلب — راجع إعدادات الذكاء الاصطناعي.";
+    finish();
+  }
 }
 
 /* ════════ منتقي الموقّع في نموذج الخطاب ════════
@@ -1357,6 +1540,7 @@ function _saveSigns(list){
 function _letterMode(m){
   _sPanel = (m === "signs");
   _sEdit  = null;
+  if(m !== "form") _ai = null;     // لوحةُ المساعد تعيش داخل نموذج الخطاب وحدَه
   if(m !== "form") _ledit = null;
   if(m !== "open") _lview.open = null;
 }
@@ -1542,32 +1726,53 @@ function letterPaperHTML(l){
   var ctr = _ctr();
   var lh  = (ctr && ctr._letterheadAssets) ? ctr._letterheadAssets() : null;
   var on  = !!(ctr && ctr._letterheadOn && ctr._letterheadOn(lh));
-  var head = (ctr && ctr._docHeadHTML)
-    ? ctr._docHeadHTML({ on:on, logo:_printLogo(), docNo:l.id || "",
-                         subtitle:(isTpl ? "نموذج خطاب" : "خطاب صادر") })
-    : '<div class="dochead"><div class="dh-t">' + (isTpl ? "نموذج خطاب" : "خطاب صادر")
-      + '</div><div class="doc-no">' + _esc(l.id || "") + '</div></div>';
+  /* طلبُ المالك: «الغِ كلمة خطاب صادر وأبقِ فقط رقم الخطاب». والخطابُ الرسميُّ لا
+     يحمل عنوانَ نوعه أصلاً — ورقةُ الشركة تقول مَن أرسل، والرقمُ يقول أيُّ خطاب.
+     **والنموذجُ يبقى موسوماً** بشريطه أدناه: وسمُه تحذيرٌ لا عنوان.
+     ولا نُنادي `_docHeadHTML` هنا حين تحضر الورقةُ الرسمية — دالّتُها تبني شريطاً
+     بعنوانٍ ورقم، ونحن نريد الرقمَ وحدَه. وتبقى نداءً عند غياب الورقة، فترويستُها
+     النصّيةُ تحمل الشعارَ واسمَ الشركة وهما لازمان حينها. */
+  var head = on
+    ? '<div class="dochead only-no"><div class="doc-no">' + _esc(l.id || "") + '</div></div>'
+    : ((ctr && ctr._docHeadHTML)
+        ? ctr._docHeadHTML({ on:false, logo:_printLogo(), docNo:l.id || "",
+                             subtitle:(isTpl ? "نموذج خطاب" : "") })
+        : '<div class="dochead only-no"><div class="doc-no">' + _esc(l.id || "") + '</div></div>');
 
   var inner =
     head
     + (isTpl
         ? '<div class="band">نموذج — يُستنسَخ ولا يُرسَل. ما بين قوسين مربّعين يُملأ عند الاستعمال.</div>'
         : '')
-    + '<div class="meta">'
-      + '<div><span class="ml">الرقم</span><span class="mv dv-num">' + _esc(l.id || "—") + '</span></div>'
-      + (isTpl ? ""
-          : '<div><span class="ml">التاريخ</span><span class="mv dv-num">' + _esc(l.letterDate || "—") + '</span></div>'
+    /* الرقمُ لم يعد هنا — صار وحدَه في الترويسة، وذِكرُه مرّتين على ورقةٍ واحدة
+       تكرارٌ يُقرأ إهمالاً. */
+    + (isTpl ? '' : '<div class="meta">'
+          + '<div><span class="ml">التاريخ</span><span class="mv dv-num">' + _esc(l.letterDate || "—") + '</span></div>'
             /* بلا `dv-num`: رقمُ الجهة نصٌّ حرٌّ قد يكون عربياً («أ ح/4471»)، وقلبُ
                اتّجاهه يبعثر مقاطعَه. والرقمُ الداخليُّ وحدَه لاتينيٌّ مضمون. */
-            + (l.ref ? '<div><span class="ml">الرقم لدى الجهة</span><span class="mv">' + _esc(l.ref) + '</span></div>' : ""))
-    + '</div>'
-    + (isTpl ? ""
-        : '<div class="to">سعادة / <b>' + _esc(l.party || "[الجهة]") + '</b>'
-          + '<span class="resp">المحترم</span></div>'
-          + '<div class="greet">السلام عليكم ورحمة الله وبركاته،</div>')
+          + (l.ref ? '<div><span class="ml">الرقم لدى الجهة</span><span class="mv">' + _esc(l.ref) + '</span></div>' : "")
+        + '</div>')
+    + (isTpl ? "" : (function(){
+        var pf = _orDef(l.prefix, DEF_PREFIX).trim();
+        var hn = _orDef(l.honorific, DEF_HONORIFIC).trim();
+        var pt = String(l.party || "").trim();
+        /* لا سطرَ مخاطَبةٍ إن خلا من اللقبين والجهة معاً — سطرٌ فارغٌ فوق التحية
+           يُقرأ خطأً في الطباعة لا اختياراً. */
+        if(!pf && !hn && !pt) return '<div class="greet">' + _esc(DEF_GREET) + '</div>';
+        return '<div class="to">'
+          + (pf ? _esc(pf) + ' / ' : '')
+          + '<b>' + _esc(pt || "[الجهة]") + '</b>'
+          + (hn ? '<span class="resp">' + _esc(hn) + '</span>' : '')
+          + '</div><div class="greet">' + _esc(DEF_GREET) + '</div>';
+      })())
     + (l.subject ? '<div class="subj">الموضوع: <b>' + _esc(l.subject) + '</b></div>' : "")
     + '<div class="body">' + _bodyHTML(l.body || "") + '</div>'
-    + (isTpl ? "" : '<div class="close">وتفضلوا بقبول فائق الاحترام والتقدير،</div>')
+    /* الختامُ اختياريّ: الفراغُ **لا يُطبَع سطراً فارغاً** بل لا يُطبَع شيئاً. */
+    + (function(){
+        if(isTpl) return "";
+        var cl = _orDef(l.closing, DEF_CLOSING).trim();
+        return cl ? '<div class="close">' + _esc(cl) + '</div>' : "";
+      })()
     /* ذيلُ الورقة صفٌّ واحد: الباركودُ في أوّله (يميناً) وكتلةُ التوقيع في آخره
        (يساراً كما في ورق الشركة). ولو تُركا كتلتين متتاليتين لتزاحما على الحافّة
        نفسِها أو تباعدا بفراغٍ لا معنى له. والباركودُ للصادر وحدَه. */
@@ -1616,8 +1821,13 @@ function letterPaperHTML(l){
     /* كتلةُ الموقّع أسفل **يسار** الورقة (طلبُ المالك) — و`flex-end` في صفحةٍ
        عربيةٍ هو اليسار. والاسمُ عريضٌ بحجمٍ يزيد على المتن قليلاً: هو ما تبحث عنه
        العينُ في ورقةٍ رسمية، لا المتن. */
-    + '.ftr{margin-top:24px;break-inside:avoid;display:flex;justify-content:space-between;'
-      + 'align-items:flex-end;gap:14px}'
+    /* الارتفاعُ الأدنى مقيسٌ على ما تتركه الورقةُ الرسمية: A4 ‏٢٩٧مم ناقصَ هوامش
+       `@page` (٣ + ١١٫٥) وناقصَ حاجزَي الترويسة والتذييل (٣٥٫٦ + ٢٤٫٩) ≈ ‏٢٢٢مم.
+       و**أدنى** لا ثابت: متنٌ أطولُ يتجاوزه ويتدفّق على صفحةٍ ثانيةٍ كما كان. */
+    + '.sheet{display:flex;flex-direction:column;min-height:' + (on ? "222mm" : "248mm") + '}'
+    + '.ftr{margin-top:auto;padding-top:24px;break-inside:avoid;display:flex;'
+      + 'justify-content:space-between;align-items:flex-end;gap:14px}'
+    + '.dochead.only-no{justify-content:flex-start;border-bottom:none;padding-bottom:0}'
     /* الكتلةُ إلى **يسار** الورقة (طلبُ المالك). وفي صفحةٍ عربيةٍ اليسارُ هو نهايةُ
        السطر، فالهامشُ التلقائيُّ يُوضع على **البداية** (`inline-start`) ليدفعها إليه. */
     + '.sgn{width:76mm;text-align:center;margin-inline-start:auto}'
@@ -1638,7 +1848,20 @@ function letterPaperHTML(l){
     + '@media print{body{padding:14px}@page{margin:14mm}}'
     + (on && ctr._letterheadCSS ? ctr._letterheadCSS() : "")
     + '</style></head><body>'
-    + ((on && ctr._letterheadWrap) ? ctr._letterheadWrap(inner, lh) : inner)
+    /* غلافٌ عموديٌّ بارتفاعٍ أدنى: يدفع الذيلَ (الباركود والتوقيع) إلى **أسفل
+       الورقة** بـ`margin-top:auto` بدل أن يعلق تحت المتن مباشرةً فتبقى نصفُ الصفحة
+       بياضاً تحته (طلبُ المالك). والارتفاعُ مقيسٌ على ما تتركه الورقةُ الرسمية:
+       ‏A4 ‏٢٩٧مم ناقصَ هوامش `@page` (٣ + ١١٫٥) وناقصَ حاجزَي الترويسة والتذييل
+       (٣٥٫٦ + ٢٤٫٩) ≈ ‏٢٢٢مم. وهو **أدنى** لا ثابت: متنٌ أطولُ يتجاوزه ويتدفّق على
+       صفحةٍ ثانيةٍ كما كان. */
+    /* الغلافُ **داخل** إطار الورقة لا حوله: `letterheadWrap` يبني جدولاً بـ
+       `thead`/`tfoot` هما الطريقةُ الوحيدةُ المضمونةُ لتكرار الترويسة على كلّ صفحة.
+       ولفُّه من الخارج بـ`display:flex` **يُلغي كونَه جدولاً** فيسقط التكرارُ كلُّه —
+       وقع فعلاً ورُئي في أوّل لقطة. فالغلافُ يسكن داخل خليّة المحتوى، والجدولُ
+       يبقى جدولاً بلا حرفٍ يمسّه. */
+    + ((on && ctr._letterheadWrap)
+        ? ctr._letterheadWrap('<div class="sheet">' + inner + '</div>', lh)
+        : '<div class="sheet">' + inner + '</div>')
     + '</body></html>';
 }
 
@@ -1914,7 +2137,8 @@ function newLetter(kind, seed){
   if(!canEdit()){ _toast("🔒 لا صلاحية لإضافة خطاب","warn"); return; }
   var base = { kind:(kind === "template" ? "template" : "issued"), title:"", subject:"",
                party:"", letterDate:new Date().toISOString().slice(0, 10), ref:"", body:"",
-               signId:"", signName:"", signTitle:"", files:[] };
+               signId:"", signName:"", signTitle:"",
+               prefix:DEF_PREFIX, honorific:DEF_HONORIFIC, closing:DEF_CLOSING, files:[] };
   if(seed) Object.keys(seed).forEach(function(k){ base[k] = seed[k]; });
   _letterMode("form");
   _ledit = base;
@@ -1929,6 +2153,8 @@ function editLetter(id){
   _ledit = { id:l.id, kind:l.kind || "issued", title:l.title||"", subject:l.subject||"",
              party:l.party||"", letterDate:l.letterDate||"", ref:l.ref||"", body:l.body||"",
              signId:l.signId||"", signName:l.signName||"", signTitle:l.signTitle||"",
+             prefix:_orDef(l.prefix, DEF_PREFIX), honorific:_orDef(l.honorific, DEF_HONORIFIC),
+             closing:_orDef(l.closing, DEF_CLOSING),
              files:Array.isArray(l.files) ? l.files.slice() : [] };
   renderLetters(); _top();
 }
@@ -1949,6 +2175,11 @@ function _readLetterForm(){
     _ledit.party      = g("dv-l-party");
     _ledit.letterDate = g("dv-l-date");
     _ledit.ref        = g("dv-l-ref");
+    /* `g` تردّ "" للحقل الغائب كما للفارغ. والحقولُ الثلاثةُ موجودةٌ دائماً في
+       نموذج الصادر، فالفراغُ هنا **قرارُ حذفٍ صريح** لا غيابُ حقل. */
+    _ledit.prefix     = g("dv-l-prefix");
+    _ledit.honorific  = g("dv-l-honor");
+    _ledit.closing    = g("dv-l-closing");
     /* الاسمُ والصفةُ يُثبَّتان على الخطاب عند الحفظ، ولا يُقرآن من السجلّ وقتَ
        الطباعة: خطابٌ خرج باسمِ موقّعٍ ثمّ تغيّرت صفتُه في السجلّ **لا تتغيّر
        ورقتُه** — المطبوعُ سجلٌّ لما وُقِّع، لا مرآةٌ لحاضر السجلّ. والصورتان
@@ -1983,6 +2214,9 @@ function saveLetter(){
   var body = { kind:_ledit.kind, title:_ledit.title, subject:_ledit.subject, body:_ledit.body,
                party:_ledit.party || "", letterDate:_ledit.letterDate || "", ref:_ledit.ref || "",
                signId:_ledit.signId || "", signName:_ledit.signName || "", signTitle:_ledit.signTitle || "",
+               prefix:_orDef(_ledit.prefix, DEF_PREFIX),
+               honorific:_orDef(_ledit.honorific, DEF_HONORIFIC),
+               closing:_orDef(_ledit.closing, DEF_CLOSING),
                files:_ledit.files || [], updatedAt:now, updatedBy:me };
   if(_ledit.fromTemplate) body.fromTemplate = _ledit.fromTemplate;
   var was = _ledit.id;
@@ -2205,6 +2439,9 @@ window.docVault = {
   cancelLetter:cancelLetter, saveLetter:saveLetter, delLetter:delLetter,
   useTemplate:useTemplate, addLetterFile:addLetterFile, delLetterDraftFile:delLetterDraftFile,
   printLetter:printLetter, letterPaperHTML:letterPaperHTML,
+  openAI:openAI, closeAI:closeAI, runAI:runAI, aiPrompt:aiPrompt, aiReady:aiReady,
+  _PREFIX_OPTS:PREFIX_OPTS, _HONORIFIC_OPTS:HONORIFIC_OPTS,
+  _DEF_PREFIX:DEF_PREFIX, _DEF_HONORIFIC:DEF_HONORIFIC, _DEF_CLOSING:DEF_CLOSING,
   // سجلُّ التواقيع
   signatories:signatories, signatoryById:signatoryById, canManageSigns:canManageSigns,
   toggleSignPanel:toggleSignPanel, newSignatory:newSignatory, editSignatory:editSignatory,
