@@ -5520,6 +5520,36 @@ function auditRound2() {
     }
   }
 
+  // ── محرّكٌ واحدٌ للتطبيقين — لا نسخةَ ثانيةً في تطبيق الفنّيّ ────────────────
+  //  كان لـtech-app.html محرّكُه الخاصّ: ساعاتٌ تقويميةٌ بلا ساعاتِ عملٍ ولا إجازات
+  //  ولا clockStops ولا فئةِ «روتيني». فالبلاغُ الواحد ملتزمٌ في شاشةٍ ومتأخّرٌ في
+  //  أخرى — ولا خطأَ يُنذر. هذه الحرّاسُ تمنع عودةَ النسخة الثانية.
+  {
+    const _tp = path.resolve(path.dirname(IDX), "tech-app.html");
+    if (!fs.existsSync(_tp)) { T("tech-app.html موجود", false); }
+    else {
+      const TA = fs.readFileSync(_tp, "utf8");
+      T("★★ تطبيقُ الفنّيّ يقرأ محرّكَ SLA المشترك (لا نسخةً خاصّةً به)",
+        /<script src="sla-engine\.js\?v=[^"]+"><\/script>/.test(TA));
+      T("★★ والوسمُ قبل السكربت المضمَّن (أسماءُ المحرّك عالميةٌ يعتمد عليها)",
+        TA.indexOf('<script src="sla-engine.js?v=') < TA.indexOf("const PHOTO_MAX_PX"));
+      T("★★ زالت خريطةُ SLA المحلّية من تطبيق الفنّيّ (كانت بلا «روتيني» وتسقط إلى 48)",
+        !/^const SLA = \{/m.test(TA) && !/SLA\[p\]/.test(TA));
+      T("★★ وزالت isOverdue المحلّيةُ التي تقيس ساعاتٍ تقويمية",
+        !/function isOverdue\(t\)\{\s*return t\.status!=="مغلق" && elapsedH/.test(TA) &&
+        !/^function getSLA\(/m.test(TA) && !/^function elapsedH\(/m.test(TA));
+      T("★ وشريطُ المهلة يعرض تسميةَ المحرّك لا رقماً خاماً",
+        TA.includes("SLA — ${esc(slaLabel)}") && TA.includes("slaBudgetLabel(t.priority)"));
+      T("★★ و«روتيني» بلا شريطِ مهلةٍ عند الفنّيّ أيضاً (مُستبعَدٌ من القياس عمداً)",
+        TA.includes("const slaTier=tierOf(t.priority);") && TA.includes("slaPct===null"));
+      T("★ ونسبةُ الشريط من responseH (تقويمُ الفئة + خصمُ الإيقاف) لا من طرحِ تاريخين",
+        TA.includes("responseH(t)/getSLA(t.priority)") &&
+        !/usedH=\(t\.closedAt\?new Date\(t\.closedAt\)-new Date\(t\.createdAt\)/.test(TA));
+      T("fmtH تبقى محلّيةً في تطبيق الفنّيّ (صياغةٌ مختصرةٌ للجوّال: «س» لا «ساعة»)",
+        /function fmtH\(h\)\{[^}]*" س"/.test(TA));
+    }
+  }
+
   // ── v18.9zc — SLA: الإيقافُ الموثَّق يُخصَم فعلاً من الزمن المنقضي ──────────
   //  نافذةُ «إيقاف الساعة» تَعِد حرفياً بأن الفترةَ «تُستبعَد من زمن الاستجابة
   //  والإصلاح»، وكانت `slaStatus` لا تقرأ `clockStops` إطلاقاً. هذه الحرّاسُ تمنع
