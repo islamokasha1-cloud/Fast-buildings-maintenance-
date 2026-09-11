@@ -13982,13 +13982,30 @@ function contractsPhase1() {
       /function srvOnly\(coll\) \{\s*\n\s*return coll in \['wa_outbox', 'wa_log'\];/.test(RUL) &&
       /allow write:[\s\S]{0,330}!srvOnly\(document\[0\]\)/.test(RUL));
     /* ⛔⛔ **الحارسُ الأغلى في الملفّ — ثمنُه انقطاعُ إنتاج (v18.9.2635).**
-       شرطٌ على `document[…]` في قاعدة **القراءة** يُسقط `list` — أي استعلامَ كلّ
-       مجموعةٍ في النظام — بينما `get` يعمل فيبدو كلُّ شيءٍ سليماً في فحصٍ يقرأ
-       مستنداتٍ مفردة. والكتابةُ لا تُصاب (لا `list` فيها) فالنمطُ يبدو مُجرَّباً.
-       فالقاعدةُ العامةُ لقراءةٍ **بلا أيّ شرطِ مسار**، ولا استثناء. */
-    T("⛔ ولا شرطَ مسارٍ في قاعدة القراءة العامة (يُسقط استعلامَ كلّ مجموعة)",
-      /match \/\{document=\*\*\} \{[\s\S]{0,1200}?allow read:\s+if hasRole\(\);/.test(RUL) &&
-      !/allow read:\s+if hasRole\(\)\s*&&/.test(RUL));
+       شرطٌ على مقاطع المسار في قاعدة **القراءة** داخل وايلدكاردَ عوديٍّ يُسقط
+       `list` — أي استعلامَ كلّ مجموعةٍ في النظام — بينما `get` يعمل فيبدو كلُّ
+       شيءٍ سليماً في فحصٍ يقرأ مستنداتٍ مفردة. والكتابةُ لا تُصاب (لا `list` فيها)
+       فالنمطُ يبدو مُجرَّباً.
+
+       **وقد تغيّرت البنيةُ ولم تتغيّر العلّة** (v18.9: تضييقُ قراءة الخزانة):
+       القراءةُ العامةُ لم تعد في `{document=**}` إطلاقاً — نُقلت إلى مطابقةٍ
+       **ثابتةِ المقاطع** `/{coll}/{docId}` حيث `coll` محسومٌ حتى في الـ`list`،
+       وهناك وحدَه يجوز الشرط. فالحارسُ يُثبّت الشقّين معاً:
+         (١) لا `allow read` داخل `{document=**}` أصلاً — لا مشروطةً ولا مطلقة.
+         (٢) ولا وايلدكارد عوديّ `{x=**}` في أيّ قاعدة قراءة: `**` يطابق **صفرَ
+             مقاطعَ أيضاً**، فمطابقةٌ كهذه تلتقط مستندَ الجذر وتُعيد فتحَ ما أُغلق.
+       والبرهانُ الحقيقيُّ في `rules-check.mjs §15`: سياحةُ `list` على كلّ مجموعةٍ
+       في `APP_COLLS` بدورٍ غيرِ ممنوحٍ **بعد** التضييق. */
+    {
+      const genBlk = (RUL.match(/match \/\{document=\*\*\} \{[\s\S]*?\n    \}/) || [""])[0];
+      T("⛔ لا قاعدةَ قراءةٍ داخل الوايلدكارد العوديّ (يُسقط استعلامَ كلّ مجموعة)",
+        !!genBlk && !/allow read/.test(genBlk), genBlk ? "الكتابةُ وحدَها" : "لم يُعثر على البلوك العامّ");
+      T("⛔ والقراءةُ على مطابقةٍ ثابتةِ المقاطع — `coll` محسومٌ وقتَ الـ`list`",
+        /match \/\{coll\}\/\{docId\} \{\s*\n\s*allow read: if hasRole\(\) && !vaultColl\(coll\);/.test(RUL));
+      const readWilds = (RUL.match(/match \/[^\n]*\{[a-z]+=\*\*\}[^\n]*\{[\s\S]{0,400}?allow read/g) || []);
+      T("⛔ ولا وايلدكارد عوديٌّ في أيّ قاعدة قراءة (`**` يطابق صفرَ مقاطعَ فيسرّب الجذر)",
+        readWilds.length === 0, readWilds.length ? String(readWilds.length) : "لا شيء");
+    }
     /* والفحصُ الذي كان غائباً: **الاستعلامُ نفسُه**. ١٣٣ فحصاً مرّت والصنفُ أعمى،
        لأنّ كلَّها `getDoc`/`setDoc` على مستندٍ واحد. القائمةُ تُشتقّ من الفحص. */
     {
@@ -17249,7 +17266,13 @@ function rulesCoverageGuards() {
     let src2 = ""; try { src2 = fs.readFileSync(path.resolve(path.dirname(IDX), f), "utf8"); } catch { continue; }
     /* نمطان في الوحدات: `dev ? …` داخل IIFE، و`_dev() ? …` في وحدة التعاقدات.
        والمسافاتُ بينهما حرّة (محاذاةٌ بصرية) — فلا يُشترط عددُها. */
-    for (const m of src2.matchAll(/(?:dev|_dev\(\))\s*\?\s*"[a-z0-9_]+_dev"\s*:\s*"([a-z0-9_]+)"/g)) found.add(m[1]);
+    /* واسمٌ يبدأ بشرطةٍ سفلية **لاحقةُ مستندٍ لا مجموعة**: مجموعاتُ المنصّة كلُّها
+       `global_*` أو `hail_*` أو `meta`/`staff_tasks`/`audit_log`. والنمطُ نفسُه
+       يُستعمل لبناء مسارِ مستند (`"meta/" + projId + (_dev() ? "_users_dev" : "_users")`)
+       فيُقرأ لاحقتُه اسمَ مجموعةٍ وهمية. */
+    for (const m of src2.matchAll(/(?:dev|_dev\(\))\s*\?\s*"[a-z0-9_]+_dev"\s*:\s*"([a-z0-9_]+)"/g)){
+      if(m[1].charAt(0) !== "_") found.add(m[1]);
+    }
   }
   T("★ أسماءُ المجموعات مُشتقّةٌ من الكود لا مكتوبةٌ بيد", found.size > 10, found.size + " مجموعة");
 
@@ -18361,6 +18384,60 @@ function docVaultGuards() {
     /global_docs_dev/.test(src) && /global_letters_dev/.test(src));
 
   /* ═══════════════════════════════════════════════════════════════════════
+     (٢١ب) قائمةُ قرّاء الخزانة — تسطيحُ المنح ليقرأه الخادم
+     ═══════════════════════════════════════════════════════════════════════ */
+  {
+    T("★ dv/read: دوالُّ القائمة مكشوفةٌ للفحص",
+      typeof V.mergeReaders === "function" && typeof V.grantsVault === "function" &&
+      typeof V.syncReaders === "function" && typeof V.enableReaderLock === "function");
+    if(typeof V.mergeReaders === "function"){
+      /* القائمةُ تُبنى **بقراءة `canView` نفسِها**: قائمةٌ تُبنى بقاعدةٍ أخرى
+         تحجب على الخادم مَن تُريه الشاشةُ — وذاك أسوأُ من ألّا تُبنى. */
+      T("★★★ dv/read: الممنوحُ وحدَه يدخل القائمة — والأدمنُ معه، والمانحُ يُقرأ بـ`=== true`",
+        V.grantsVault({ user:"أ", role:"مشرف", permissions:{ docVault:true } }) === true &&
+        V.grantsVault({ user:"ب", role:"مشرف", permissions:{ docVault:false } }) === false &&
+        V.grantsVault({ user:"ج", role:"project_manager", permissions:{} }) === false &&
+        V.grantsVault({ user:"د", role:"admin" }) === true &&
+        V.grantsVault({ role:"admin" }) === false);      // بلا اسمِ دخولٍ لا مفتاحَ له
+      /* الزائرُ والمراقبُ يريان ولا يكتبان — فلا بدّ أن يدخلا القائمة، وإلّا
+         حُجبت عنهما القراءةُ على الخادم وانكسرت شاشتُهما. */
+      T("★★★ dv/read: والزائرُ والمراقبُ الممنوحان يدخلانها (يريان ولا يكتبان — فالقراءةُ حقُّهما)",
+        V.grantsVault({ user:"ز", role:"viewer",   permissions:{ docVault:true } }) === true &&
+        V.grantsVault({ user:"ح", role:"observer", permissions:{ docVault:true } }) === true);
+
+      /* الدمج: حفظُ مستخدمي مشروعٍ **لا يمسّ** ممنوحي مشروعٍ آخر — لكلٍّ مستندُه. */
+      const cur = ["رغده", "سالم", "ماجد"];
+      const saved = [{ user:"رغده", role:"مشرف", permissions:{ docVault:true } },
+                     { user:"سالم", role:"viewer", permissions:{ docVault:false } }];
+      const next = V.mergeReaders(cur, saved);
+      T("★★★ dv/read: الحفظُ يضيف الممنوحَ وينزع المسحوبَ منه — **ولا يمسّ مَن لم يشمله الحفظ**",
+        next.indexOf("رغده") !== -1 && next.indexOf("سالم") === -1 && next.indexOf("ماجد") !== -1,
+        JSON.stringify(next));
+      T("★★ dv/read: ولا تكرارَ ولا فراغَ في القائمة",
+        V.mergeReaders(["رغده","رغده"], [{ user:"رغده", role:"admin" }, { user:"", role:"admin" }])
+          .join("|") === "رغده");
+      T("★★★ dv/read: وقائمةٌ فارغةٌ من حفظٍ بلا ممنوحين تعني **نزعَهم** لا إبقاءهم",
+        V.mergeReaders(["رغده"], [{ user:"رغده", role:"مشرف", permissions:{ docVault:false } }]).length === 0);
+
+      /* الغيابُ = «كما كان» لا «مقفول» — وهو ما يجعل نشرَ القواعد آمناً وحدَه. */
+      T("★★★ dv/read: والقاعدةُ تُبقي القراءةَ كما هي ما دامت القائمةُ غيرَ موجودة (نشرٌ لا يحجب أحداً)",
+        /!exists\(vaultReadersDoc\(\)\)/.test(RUL) && /hasRole\(\) && !exists/.test(RUL));
+      T("★★★ dv/read: والأدمنُ يقرأ دائماً ولو لم يكن فيها (وإلّا أُقفلت الخزانةُ على مالكها)",
+        /function vaultReadOk\(\) \{\s*\n\s*return isAdmin\(\)/.test(RUL));
+      T("★★★ dv/read: والقائمةُ نفسُها لا يكتبها إلا الأدمن (من يكتبها يمنح نفسَه القراءة)",
+        /allow write: if isAdmin\(\) && doc == 'vault_readers';/.test(RUL) &&
+        /!isVaultReadersDoc\(document\[0\], document\[1\]\)/.test(RUL));
+      T("★★ dv/read: والمزامنةُ معلَّقةٌ على مسار الحفظ الوحيد في النواة",
+        /docVault\.syncReaders\(USERS\)/.test(HTML) &&
+        /await db\.doc\(USERS_DOC\(\)\)\.set/.test(HTML));
+      T("★★★ dv/read: والشاشةُ تُعلن للأدمن أنّ التضييقَ غيرُ مفعَّل (قاعدةٌ تُنشَر ولا تُفعَّل تُوهم بحمايةٍ لا وجودَ لها)",
+        /غيرُ مضيَّقة بعد/.test(src) && /enableReaderLock/.test(src));
+      T("★★ dv/read: والمنعُ من الخادم يُقال بلغةٍ تُفهَم لا بنصِّ Firestore الخام",
+        /PERMISSION_DENIED/.test(src) && /غيرُ مُدرَجٍ في قرّاء الخزانة/.test(src));
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
      (٢٢) طبقةُ المشروع — التصنيفُ وحصرُ الرؤية ومِلَفُّ المشروع
      ═══════════════════════════════════════════════════════════════════════ */
   {
@@ -18521,6 +18598,29 @@ function docVaultGuards() {
           T("★★★ dv/proj: مُرشِّحُ العرض **لا يكتم تنبيهَ انتهاء** — شهادةُ الشركة تصرخ ولو كنتَ تنظر في مشروعٍ آخر",
             n > 0 && NOTIFS.length > 0, String(n));
           V.setFilterProj("");
+        }
+
+        /* ── افتراضُ المُرشِّح يتبع ما في الشاشة لا ما هو موحَّد ── */
+        {
+          const pgd = W.document.getElementById("page-" + V._PAGE_DOCS);
+          W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+          pgd.classList.add("active");
+          W.CURRENT_PROJECT = { id:"hail", name:"مشروع حائل" };
+          V.__test_seed(
+            [{ id:"DOC-9", title:"شهادة الزكاة والدخل", docType:"zakat", expiry:"2027-03-01" }],
+            [], [], []);
+          V.render();     // `__test_seed` أعادت المُرشِّحات إلى ما قبل الاشتقاق
+          /* وثائقُ الشركة أغلبُ ما في الشاشة. فلو فُتحت على المشروع المفتوح لَبدت
+             فارغةً لمن دخل من داخل مشروع — وشاشةٌ تبدو فارغةً وهي عامرةٌ أسوأُ من
+             ترشيحٍ عريض. */
+          /* والقياسُ على **صفوف الجدول** لا على نصّ الصفحة: عنوانُ الوثيقة يظهر في
+             شريط الأفق أيضاً، فمطابقةُ النصّ تمرّ والجدولُ فارغ. (مرّت فعلاً في أوّل
+             كتابةٍ لهذا الحارس، فلم يمسك شيئاً.) */
+          T("★★★ dv/proj: شاشةُ السجلّات تفتح على **كلّ المشاريع** — وإلّا بدت فارغةً داخل أيّ مشروع",
+            pgd.querySelectorAll(".dv-tbl tbody tr").length === 1 &&
+            !/لا وثيقة تطابق/.test(pgd.innerHTML),
+            pgd.querySelectorAll(".dv-tbl tbody tr").length + " صفّاً");
+          W.CURRENT_PROJECT = null;
         }
 
         /* ── المشاريعُ المُدخَلةُ يدوياً: تُودَع **ويُعثَر عليها** ── */

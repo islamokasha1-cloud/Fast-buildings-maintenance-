@@ -1041,6 +1041,67 @@ await check("★★ ونسختا `_dev` تحكمهما القاعدةُ نفسُ
 await check("★★ والكتابةُ في `_dev` تمرّ للدور المصرَّح",
   assertSucceeds(setDoc(doc(ADMIN, "global_docs_dev/DOC-X"), { title: "ت" })));
 
+/* ══════════════════════════════════════════════════════════════════════
+   ١٥) تضييقُ قراءة الخزانة — بقائمةِ أشخاصٍ لا بقائمةِ أدوار
+
+   الواجهةُ تمنح `permissions.docVault` **لشخصٍ بعينه**، والخادمُ لا يرى
+   `permissions`. وخانةُ المنح تُعرض **لكلّ الأدوار** — فقائمةُ أدوارٍ إمّا تُدخل
+   مديرَ مشاريعَ لم يُمنح أو تُخرج مشرفاً ممنوحاً، وكلاهما خطأ. والقياسُ أدناه
+   يُثبت الاثنين معاً: المشرفُ الممنوحُ يقرأ، ومديرُ المشاريع غيرُ الممنوح يُردّ.
+   ══════════════════════════════════════════════════════════════════════ */
+head("١٥) قراءةُ الخزانة — قائمةُ الممنوحين على الخادم");
+
+/* قبل إنشاء القائمة: **كما كان** — فنشرُ القواعد وحدَه لا يقفل البابَ على أحد. */
+await check("★★★ قبل إنشاء القائمة تبقى القراءةُ كما هي (نشرُ القواعد وحدَه لا يحجب أحداً)",
+  assertSucceeds(getDocs(collection(SUP_RGD, DOCS_C))));
+
+await seed("meta/vault_readers", { users: ["رغده", "المالية"] });
+
+await check("★★★ وبعد إنشائها: الممنوحُ يقرأ ولو كان دورُه مشرفاً",
+  assertSucceeds((async () => {
+    for (const c of [DOCS_C, LTRS_C, APR_C]) await getDocs(collection(SUP_RGD, c));
+  })()));
+await check("★★★ وغيرُ الممنوح يُردّ ولو كان دورُه مشرفاً (نفسُ الدور — والفرقُ هو المنح)",
+  assertFails(getDocs(collection(SUP_OTHER, DOCS_C))));
+await check("★★★ ومديرُ المشاريع **غيرُ الممنوح** يُردّ — وهو ما يعجز عنه التضييقُ بالدور",
+  assertFails(getDocs(collection(PM, DOCS_C))));
+await check("★★ والمستودعُ والمشترياتُ والمراقبُ كذلك",
+  assertFails(getDocs(collection(WH, LTRS_C))) &&
+  assertFails(getDocs(collection(PROC, APR_C))) &&
+  assertFails(getDocs(collection(OBS, DOCS_C))));
+await check("★★★ والأدمنُ يقرأ دائماً — ولو لم يكن في القائمة (وإلّا أُقفلت الخزانةُ على مالكها)",
+  assertSucceeds(getDocs(collection(ADMIN, DOCS_C))));
+await check("★★ و`get` مستندٍ بعينه محكومٌ بالحكم نفسِه (لا بابٌ خلفيٌّ بالمعرّف)",
+  assertFails(getDoc(doc(PM, `${DOCS_C}/DOC-1`))));
+await check("★★ ونسخُ `_dev` الثلاثُ محكومةٌ بها كذلك (لا بابَ يُفتح باسمٍ ثانٍ)",
+  assertFails(getDocs(collection(PM, "global_docs_dev"))) &&
+  assertFails(getDocs(collection(PM, "global_letters_dev"))) &&
+  assertFails(getDocs(collection(PM, "global_approvals_dev"))));
+
+/* قائمةُ الممنوحين **نفسُها** بابٌ: من يكتبها يمنح نفسَه القراءة. */
+await check("★★★ وقائمةُ الممنوحين لا يكتبها إلا الأدمن — وإلّا منح كلُّ دورٍ نفسَه",
+  assertFails(setDoc(doc(PM, "meta/vault_readers"), { users: ["ماجد"] })) &&
+  assertFails(updateDoc(doc(PROC, "meta/vault_readers"), { users: arrayUnion("فهد") })) &&
+  assertFails(setDoc(doc(FIN, "meta/vault_readers"), { users: ["المالية"] })));
+await check("★★ والأدمنُ يكتبها", assertSucceeds(setDoc(doc(ADMIN, "meta/vault_readers"), { users: ["رغده"] })));
+
+/* ⛔ شبكةُ الأمان: إعادةُ صياغة القراءة العامة هي عينُ ما أسقط الإنتاج في
+   `v18.9.2635`. فتُعاد سياحةُ الـ`list` **بعد** التضييق، وبدورٍ غيرِ ممنوحٍ —
+   فلو أصاب الشرطُ الجديدُ غيرَ الخزانة لَسقط هنا لا في وجه المستخدم. */
+await check("★★★ ولم يُصَب استعلامُ مجموعةٍ واحدةٍ في النظام (حادثةُ v18.9.2635)",
+  assertSucceeds((async () => {
+    for (const c of APP_COLLS) {
+      if (c === "global_docs" || c === "global_letters" || c === "global_approvals") continue;
+      await getDocs(collection(SUP_OTHER, c));
+    }
+  })()));
+await check("★★ ولا استعلامُ الأدوار الأخرى (كلٌّ يفتح شاشاتِه)",
+  assertSucceeds((async () => {
+    for (const ctx of [WH, PROC, FIN, PM, CEO, VIEWER, OBS])
+      for (const c of ["global_purchases", "global_inventory", "meta", "hail_tickets", "global_contracts"])
+        await getDocs(collection(ctx, c));
+  })()));
+
 await env.cleanup();
 console.log(results.join("\n"));
 console.log("\n" + "═".repeat(58));

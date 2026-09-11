@@ -48,7 +48,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.3143";
+  const MODULE_BUILD = "v18.9.3145";
 
   const PRICE_SRC = { in:"آخر وارد", doc:"وثيقة الصنف", cat:"الكتالوج", none:"—" };
   const LINK_VIA  = { link:"ربط يدوي", id:"المعرّف", code:"الكود", name:"الاسم" };
