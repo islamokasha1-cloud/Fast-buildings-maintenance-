@@ -754,7 +754,11 @@ function predelivery() {
        يفحصها hail-tests بلا متصفّح**، وموضعُها بجوار `PRIORITIES` و`SLA_CONFIG`
        اللذَين تشتقّ منهما — ونقلُها وحدَها يشقّ تعريفَ الأولوية مصدرَين. وأكثرُ
        الزيادة تعليقٌ يقول لِمَ لا تُعاد خريطةُ `SLA` المحذوفة. */
-    const IDX_CEILING = 40066;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 40066 إلى 40079 — ‏١٣ سطراً لسُلَّم KPI-02 (v18.9ze)، وأكثرُها تعليقٌ
+       يشرح لِمَ سقط السقفُ 48 المخفيّ. والسطورُ الفعليةُ ثلاثةٌ داخل `renderKPIData`
+       نفسِها (ثابتُ الهدف · الصيغة · بسطُ البطاقة) — منطقُ مؤشّرٍ قائمٍ يُصلَح في
+       موضعه كما تُلزم CLAUDE.md، ونقلُه وحدَه يشقّ حسابَ المؤشّرات السبعة. */
+    const IDX_CEILING = 40079;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -5412,6 +5416,49 @@ function auditRound2() {
       T("غير المغلق ليس «ملتزماً»", fn({ priority: 'عادي', status: 'مفتوح', _wh: 1 }) === false);
     }
     T("KPI-03 يستخدم _closedOnTime", HTML.includes("closedTix.filter(_closedOnTime)"));
+
+  // ── v18.9ze — KPI-02: سُلَّمٌ من الهدف المعلَن لا من سقفٍ مخفيّ ──────────────
+  //  كان يقيس على 48 ساعةً لا تظهر في البطاقة، فيُعطي فريقاً بلغ الهدفَ المعلَن
+  //  (8 ساعات) 83٪، و100٪ مستحيلةً (تتطلّب متوسطاً = صفر). وكان يعرض closedInSLA —
+  //  بسطَ KPI-03 لا بسطَه — فتُقرأ البطاقةُ متناقضةً مع نسبتها.
+  {
+    const _b = HTML.indexOf("const RESPONSE_TARGET_H = 8;");
+    if (_b < 0) { T("★ ze: هدفُ KPI-02 ثابتٌ مسمّى", false); }
+    else {
+      const _e = HTML.indexOf("const closedWithinTarget", _b);
+      let score = null;
+      try {
+        score = new Function("avgResponseH", HTML.slice(_b, _e) + "\nreturn responseScore;");
+      } catch (e) { T("تُبنى صيغةُ KPI-02", false, String(e.message).slice(0, 100)); }
+      if (score) {
+        T("★★ ze: بلوغُ الهدف المعلَن (8 ساعاتِ عمل) = 100٪ (كان 83٪)", score(8) === 100);
+        T("★ ze: و100٪ صارت بالغةً لا مستحيلة (كانت تتطلّب متوسطاً = صفر)",
+          score(4) === 100 && score(7.9) === 100);
+        T("★ ze: وما بعد الهدف يتدرّج بنسبته إلى المتوسط — 16 ساعةً ⇐ 50٪",
+          score(16) === 50 && score(32) === 25);
+        T("ze: بلا بلاغاتٍ مغلقة (متوسط 0) = 100٪ لا قسمةَ على صفر",
+          score(0) === 100 && Number.isFinite(score(0)));
+        T("ze: النسبةُ محصورةٌ في [0,100] مهما كان المتوسط",
+          score(1e9) >= 0 && score(0.001) === 100);
+        T("★ ze: زال السقفُ 48 المخفيّ من الصيغة",
+          !/Math\.min\(avgResponseH,48\)\/48/.test(HTML));
+      }
+    }
+    //  أرقامُ البطاقتين تشتقّ نسبتَهما — لا رقمَ من مؤشّرٍ آخر
+    T("★★ ze: KPI-02 يعرض «أُغلق خلال الهدف» لا بسطَ KPI-03 (538 المضلّل)",
+      HTML.includes('["أُغلق خلال الهدف",closedWithinTarget') &&
+      !HTML.includes('["مغلق في الوقت",closedInSLA'));
+    T("★ ze: وبسطُه من منطقه — _closeWorkH ضمن الهدف نفسِه",
+      HTML.includes("closedTix.filter(t=>_closeWorkH(t)<=RESPONSE_TARGET_H).length"));
+    T("★ ze: وتسميةُ الهدف تقول «ساعة عمل» (المقياسُ _closeWorkH لا ساعاتِ جدار)",
+      HTML.includes('"≤ "+RESPONSE_TARGET_H+" ساعة عمل"'));
+    T("★★ ze: مقامُ KPI-03 المعروضُ = المقامُ المحسوب (closedTix لا كلُّ المغلقة)",
+      HTML.includes('["إجمالي مغلقة",closedTix.length],["داخل SLA",closedInSLA') &&
+      HTML.includes("closedTix.length-closedInSLA") &&
+      !HTML.includes('["تجاوز SLA",closed-closedInSLA'));
+    T("★ ze: ومقامُ KPI-02 المعروضُ مثلُه (المتوسطُ يُحسب على closedTix)",
+      HTML.includes('["بلاغات مغلقة",closedTix.length]'));
+  }
     T("★ زال قياس الالتزام بـ getSLA التقويمي", !HTML.includes("return h<=getSLA(t.priority);") && !HTML.includes("if(h <= getSLA(t.priority))"));
   }
 
