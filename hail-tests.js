@@ -17381,6 +17381,8 @@ function docVaultGuards() {
   if (miss.length) return;
 
   const TODAY = new Date("2026-09-10T09:00:00Z");
+  const RUL = (() => { const p = path.resolve(path.dirname(IDX), "firestore.rules");
+                       return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""; })();
 
   /* ── (١) ★★ حسابُ الأيام مربوطٌ بمحرّك `contracts.js` — لا انحرافَ صامت ──
      المحرّكان منفصلان عمداً وقتَ التشغيل. وهذا الحارسُ هو الرباطُ الوحيد بينهما:
@@ -17839,6 +17841,102 @@ function docVaultGuards() {
       /docVault\.printLetter\(/.test(src) && /طباعة على ورق الشركة/.test(src));
     T("★ dv: والطباعةُ تمرّ بنافذة المنصّة الواحدة (تعالج iOS وفشلَ الفتح)",
       /typeof _openPrintWindow === "function"/.test(src) && /_audit\("طباعة خطاب/.test(src));
+  }
+
+
+  /* ── (١٦) ★★ سجلُّ التواقيع: الاسمُ والتوقيعُ والختمُ على ورق الشركة ──
+     طلبُ المالك: «اسم التوقيع اسفل يسار ورقة الشركة بخط bold، ويكون محفوظاً
+     للاختيار في كل مرة، واضافة توقيع وختم الشركة».
+
+     وما يُحرَس هنا ليس الرسمَ وحدَه بل **ثلاثةُ أشياءَ تصنع الفرقَ بين وثيقةٍ
+     وتزوير**: أن الإدارةَ للأدمن وحدَه، وأن النموذجَ لا يُوقَّع أبداً، وأن الاسمَ
+     المطبوعَ من **الخطاب** لا من السجلّ الحيّ. */
+  {
+    const prevU = W.currentUser;
+    const SG = [{ id:"SG-1", name:"عادل فهيد العارضي", title:"المدير العام",
+                  signUrl:"https://x.test/sig.png", stampUrl:"https://x.test/stamp.png" },
+                { id:"SG-2", name:"سعد القحطاني", title:"مدير المشاريع" }];
+    V.__test_seed([], [], SG);
+
+    /* ── الإدارةُ للأدمن وحدَه — والخادمُ يردّ غيرَه (حارسُ القواعد أدناه) ── */
+    T("★★★ dv: إدارةُ التواقيع للأدمن وحدَه — صورةُ التوقيع والختم أداتا إلزامٍ لا عرض",
+      (W.currentUser = { role:"admin", user:"a" }, V.canManageSigns() === true) &&
+      ["project_manager","procurement_officer","finance","hr_officer","مشرف","viewer"]
+        .every(r => (W.currentUser = { role:r, user:"u", permissions:{ docVault:true } },
+                     V.canManageSigns() === false)));
+    W.currentUser = prevU;
+    T("★★★ dv: ومستندُ السجلّ مقفولٌ على الخادم — مُستثنىً من القاعدة العامة أوّلاً",
+      /function isVaultSignDoc\(coll, doc\)/.test(RUL) &&
+      /doc\.matches\('vault_signatories\(_dev\)\?'\)/.test(RUL) &&
+      /allow write: if isAdmin\(\) && doc\.matches\('vault_signatories\(_dev\)\?'\)/.test(RUL) &&
+      /!isVaultSignDoc\(document\[0\], document\[1\]\)/.test(RUL));
+
+    /* ── المطبوعة: ثلاثُ حالاتٍ لا حالتان ── */
+    const withSig = { id:"LTR-1", kind:"issued", title:"خ", party:"جهة", letterDate:"2026-09-01",
+                      subject:"م", body:"ن", signId:"SG-1",
+                      signName:"عادل فهيد العارضي", signTitle:"المدير العام" };
+    const noImg   = { ...withSig, id:"LTR-2", signId:"SG-2", signName:"سعد القحطاني", signTitle:"مدير المشاريع" };
+    const gone    = { ...withSig, id:"LTR-3", signId:"SG-GONE", signName:"من غادر", signTitle:"مدير سابق" };
+    const plain   = { ...withSig, id:"LTR-4", signId:"", signName:"", signTitle:"" };
+    const tplSign = { id:"TPL-1", kind:"template", title:"ن", subject:"م", body:"ن",
+                      signId:"SG-1", signName:"عادل فهيد العارضي", signTitle:"المدير العام" };
+    const P = o => V.letterPaperHTML(o);
+
+    T("★★ dv: الاسمُ والصفةُ أسفل الورقة بخطٍّ عريضٍ وحجمٍ يزيد على المتن",
+      /<div class="sgn-nm">المدير العام: عادل فهيد العارضي<\/div>/.test(P(withSig)) &&
+      /\.sgn-nm\{[^}]*font-weight:800/.test(src) &&
+      /\.sgn-nm\{[^}]*font-size:14\.5px/.test(src));
+    /* «أسفل يسار» في صفحةٍ عربية: الهامشُ التلقائيُّ على **البداية** يدفع الكتلةَ
+       إلى النهاية (اليسار). ووضعُه على النهاية كان يدفعها يميناً — ووقع فعلاً. */
+    T("★★ dv: والكتلةُ إلى يسار الورقة (`margin-inline-start:auto` لا `-end`)",
+      /\.sgn\{[^}]*margin-inline-start:auto/.test(src) &&
+      !/\.sgn\{[^}]*margin-inline-end:auto/.test(src));
+    T("★★ dv: والتوقيعُ والختمُ يُطبَعان، والختمُ فوق التوقيع كما يُختَم الورقُ فعلاً",
+      /<img class="sgn-sig" src="https:\/\/x\.test\/sig\.png"/.test(P(withSig)) &&
+      /<img class="sgn-stp" src="https:\/\/x\.test\/stamp\.png"/.test(P(withSig)) &&
+      /\.sgn-stp\{[^}]*z-index:2/.test(src) && /\.sgn-sig\{[^}]*z-index:1/.test(src));
+    /* النفيُ يطابق **الترميزَ** لا المستندَ كلَّه: ورقةُ الطباعة تحمل أنماطَها
+       في `<style>` داخلها، فـ`sgn-sig` موجودةٌ فيها دائماً كقاعدةِ نمط. ومطابقةُ
+       الاسم المجرّد كانت تسأل عن الأنماط لا عن الصورة. (أُمسك في أوّل تشغيل.) */
+    const IMG_SIG = /<img class="sgn-sig"/, IMG_STP = /<img class="sgn-stp"/;
+    const BLOCK   = /<div class="sgn">/;
+    T("★★★ dv: وموقّعٌ بلا صورةٍ يُطبَع اسمُه فوق **سطرِ توقيعٍ يدويّ** — لا ورقةٌ باسمِ مسؤولٍ بلا موضعٍ يوقّع فيه",
+      /<div class="sgn-line">/.test(P(noImg)) && /سعد القحطاني/.test(P(noImg)) &&
+      !IMG_SIG.test(P(noImg)) && !IMG_STP.test(P(noImg)));
+    T("★★ dv: ومَن حُذف من السجلّ يبقى اسمُه على الورقة وتسقط صورتاه",
+      /من غادر/.test(P(gone)) && /<div class="sgn-line">/.test(P(gone)) && !IMG_SIG.test(P(gone)));
+    T("★ dv: وبلا موقّعٍ تُطبَع الأسطرُ الفارغةُ كما كانت",
+      /class="sg-r"/.test(P(plain)) && !BLOCK.test(P(plain)));
+    T("★★★ dv: والنموذجُ لا يُوقَّع أبداً — نموذجٌ موقَّعٌ مختومٌ خطابٌ جاهزٌ للإرسال بعناصرَ نائبة",
+      !BLOCK.test(P(tplSign)) && !IMG_SIG.test(P(tplSign)) &&
+      !IMG_STP.test(P(tplSign)) && /class="sg-r"/.test(P(tplSign)));
+    T("★★ dv: ولا خيارَ توقيعٍ أصلاً في نموذج النموذج (لا يُحجَب بالرسم وحدَه)",
+      /id="dv-l-sign"/.test(src) && /isTpl \? "" :/.test(src));
+
+    /* ── الاسمُ من الخطاب لا من السجلّ الحيّ ──
+       خطابٌ خرج ثمّ تغيّرت صفةُ موقّعه: المطبوعُ سجلٌّ لما وُقِّع لا مرآةٌ للحاضر. */
+    T("★★★ dv: الاسمُ المطبوعُ مثبَّتٌ على الخطاب — تغيُّرُ السجلّ لا يُغيّر ورقةً خرجت",
+      (() => {
+        V.__test_seed([], [], [{ id:"SG-1", name:"اسمٌ جديدٌ تماماً", title:"صفةٌ جديدة",
+                                 signUrl:"https://x.test/sig.png" }]);
+        const out = P(withSig);
+        V.__test_seed([], [], SG);
+        return /المدير العام: عادل فهيد العارضي/.test(out) && !/اسمٌ جديدٌ تماماً/.test(out);
+      })());
+
+    /* ── والباركودُ وكتلةُ التوقيع لا يتزاحمان على حافّةٍ واحدة ── */
+    T("★★ dv: وذيلُ الورقة صفٌّ واحد — الباركودُ يميناً والتوقيعُ يساراً",
+      /<div class="ftr">[\s\S]*class="bcw"[\s\S]*class="sgn"[\s\S]*<\/div>/.test(P(withSig)) &&
+      /\.ftr\{[^}]*justify-content:space-between/.test(src));
+
+    /* ── والسجلُّ يُخزَّن حيث تحرسه القاعدة ── */
+    T("★ dv: السجلُّ في `meta/vault_signatories` (+نسخةُ dev) لا في مجموعةٍ مفتوحة",
+      /meta\/vault_signatories_dev/.test(src) && /meta\/vault_signatories"/.test(src));
+    T("★ dv: وصورتاه تُرفعان تحت البادئة القائمة `po/vault/`",
+      /_upload\("sign"/.test(src));
+    T("★ dv: ولوحةُ الإدارة لا تُعرض ولا تُفتح لغير الأدمن",
+      /_sPanel && canManageSigns\(\)/.test(src) &&
+      /canManageSigns\(\) \? '<button[^']*docVault\.toggleSignPanel/.test(src));
   }
 
   /* ── (١٣) المرفقُ يحفظ مسارَه، والمسارُ تحت البادئة القائمة `po/` ──
