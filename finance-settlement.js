@@ -27,7 +27,7 @@
    ════════════════════════════════════════════════════════════════════ */
 (function(){
   'use strict';
-  const MODULE_BUILD = "v18.9.3133";
+  const MODULE_BUILD = "v18.9.3135";
 
   // ══ جسور آمنة لدوال النواة ══
   function T(msg,type){ try{ if(typeof toast==='function') toast(msg,type); }catch(e){} }

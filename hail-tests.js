@@ -18053,8 +18053,9 @@ function docVaultGuards() {
     T("★★ dv: وسطرُ المخاطَبة يسقط كلُّه إن خلا من اللقبين والجهة (لا سطرٌ فارغٌ يُقرأ خطأً)",
       (() => { const h = P({ ...L0, prefix:"", honorific:"", party:"" });
                return !/class="to"/.test(h) && /class="greet"/.test(h); })());
-    T("★ dv: والقوائمُ المقترحةُ معروضةٌ في النموذج (اقتراحٌ لا حصر — الحقلُ نصٌّ حرّ)",
-      /list="dv-prefix-list"/.test(src) && /list="dv-honor-list"/.test(src) &&
+    T("★ dv: والقوائمُ المقترحةُ معروضةٌ في النموذج (اقتراحٌ لا حصر — و«أخرى…» تفتح الباب)",
+      /_pickHTML\("prefix", /.test(src) && /_pickHTML\("honor", /.test(src) &&
+      /id="dv-l-' \+ key \+ '-sel"/.test(src) &&
       V._PREFIX_OPTS.indexOf("سعادة") >= 0 && V._PREFIX_OPTS.indexOf("معالي") >= 0 &&
       V._HONORIFIC_OPTS.indexOf("المحترم") >= 0 && V._HONORIFIC_OPTS.indexOf("حفظه الله") >= 0 &&
       V._PREFIX_OPTS.length >= 8 && V._HONORIFIC_OPTS.length >= 5);
@@ -18113,6 +18114,78 @@ function docVaultGuards() {
       !/runAI[\s\S]{0,1400}collection\(/.test(src));
     T("★★ dv: ولوحةُ المساعد تُغلَق مع تبديل وضع الشاشة (لا تعلق فوق قائمةٍ أو لوحة)",
       /if\(m !== "form"\) _ai = null;/.test(src));
+  }
+
+
+  /* ── (١٩) ★★★ منتقي اللقب يُفتح فعلاً · والختامُ في وسط الصفحة ──
+     بلاغُ المالك: «غير قادر على اختيار اللقب او التشريف» و«عبارة تفضلوا احتاجها
+     في منتصف الصفحة كما قلت لك سابقا».
+
+     الجذر الأوّل — **`datalist` لا يعرض قائمتَه على iPadOS إطلاقاً**: لا سهمَ ولا
+     لمسةَ فتح، والاقتراحاتُ لا تظهر إلا أثناء الكتابة وبعد مطابقة حرف. فالحقلُ
+     يبدو خانةَ كتابةٍ عاديّةً والخياراتُ حاضرةٌ لا سبيلَ إلى رؤيتها — **ميزةٌ
+     حاضرةٌ غائبة، ولا خطأَ يُنذر بها**.
+     والجذر الثاني: الختامُ كان محاذياً للمتن، وورقةُ المالك المرفقة تُوسّطه. */
+  {
+    const prevU3 = W.currentUser;
+    W.currentUser = { name:"المالك", user:"owner", role:"admin" };
+    const pgl2 = W.document.getElementById("page-vault-letters");
+    W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    pgl2.classList.add("active");
+    V.__test_seed([], [], []);
+
+    /* ★★★ لا `datalist` في الوحدة — الحارسُ يمنع عودتَه */
+    T("★★★ dv: لا `datalist` في منتقي اللقب (لا يعرض قائمتَه على iPadOS أصلاً)",
+      !/<datalist/.test(src) && !/ list="dv-/.test(src));
+
+    V.newLetter("issued");
+    const sel = id => pgl2.querySelector("#dv-l-" + id + "-sel");
+    T("★★★ dv: واللقبان `<select>` يُفتحان فعلاً (ورقةُ النظام على الـiPad)",
+      !!sel("prefix") && !!sel("honor") &&
+      sel("prefix").tagName === "SELECT" && sel("honor").tagName === "SELECT");
+    T("★★ dv: والقائمةُ تحمل «بلا لقب» + الاقتراحات + «أخرى…» — والحذفُ خيارٌ صريحٌ لا إفراغُ خانةٍ يُخمَّن",
+      (() => { const o = [...sel("prefix").options].map(x => x.value);
+               return o[0] === V._PICK_NONE && o[o.length - 1] === V._PICK_OTHER &&
+                      o.indexOf("سعادة") > 0 && o.indexOf("معالي") > 0 &&
+                      o.length === V._PREFIX_OPTS.length + 2; })(),
+      String(sel("prefix").options.length));
+    T("★ dv: والافتراضُ مختارٌ عند الفتح (سعادة · المحترم)",
+      sel("prefix").value === "سعادة" && sel("honor").value === "المحترم");
+
+    /* ★★★ الاختيارُ يصل إلى المطبوعة — لا يكفي أن تُرسَم القائمة */
+    V.setPick("prefix", "معالي");
+    T("★★★ dv: واختيارُ لقبٍ من القائمة يصل إلى الحالة والمطبوعة",
+      sel("prefix").value === "معالي" &&
+      /معالي \//.test(V.letterPaperHTML({ id:"L", kind:"issued", party:"ج",
+        prefix:"معالي", honorific:"المحترم", body:"ن" })));
+    V.setPick("honor", V._PICK_NONE);
+    T("★★★ dv: و«بلا لقب» يحذفه فعلاً", sel("honor").value === V._PICK_NONE);
+    V.setPick("honor", V._PICK_OTHER);
+    T("★★★ dv: و«أخرى…» تكشف خانةَ كتابةٍ — فلا تُغلق القائمةُ البابَ على لقبٍ لم يُحصَ",
+      !!pgl2.querySelector("#dv-l-honor"));
+    /* وتبديلُ القائمة لا يُفقد ما كُتب في بقيّة الحقول (هي في الـDOM لا في الحالة) */
+    pgl2.querySelector("#dv-l-title").value = "خطاب تجربة";
+    pgl2.querySelector("#dv-l-honor").value = "سلّمه الله ورعاه";
+    V.setPick("prefix", "سمو");
+    T("★★ dv: وتبديلُ القائمة يحفظ العنوانَ واللقبَ المخصَّصَ معاً",
+      pgl2.querySelector("#dv-l-title").value === "خطاب تجربة" &&
+      pgl2.querySelector("#dv-l-honor").value === "سلّمه الله ورعاه");
+    V.cancelLetter();
+    W.currentUser = prevU3;
+
+    /* الدالّةُ النقيّةُ خلف المنتقي */
+    T("★★ dv: `pickState` — فارغٌ «بلا» · معروفٌ هو · غريبٌ «أخرى» · والعلَمُ يغلبها",
+      V.pickState("", V._PREFIX_OPTS, false) === V._PICK_NONE &&
+      V.pickState("سعادة", V._PREFIX_OPTS, false) === "سعادة" &&
+      V.pickState("لقبٌ نادر", V._PREFIX_OPTS, false) === V._PICK_OTHER &&
+      V.pickState("", V._PREFIX_OPTS, true) === V._PICK_OTHER &&
+      V.pickState(null, V._PREFIX_OPTS, false) === V._PICK_NONE);
+
+    /* ★★ الختامُ في وسط الصفحة — كما في ورقة المالك المرفقة */
+    T("★★★ dv: وعبارةُ الختام في وسط الصفحة لا محاذيةً للمتن",
+      /\.close\{[^}]*text-align:center/.test(src));
+    T("★ dv: والمتنُ يبقى مضبوطاً (المتنُ يُضبَط والخاتمةُ تتوسّط — عُرفُ الخطاب الرسميّ)",
+      /\.body\{[^}]*text-align:justify/.test(src));
   }
 
   /* ── (١٣) المرفقُ يحفظ مسارَه، والمسارُ تحت البادئة القائمة `po/` ──
