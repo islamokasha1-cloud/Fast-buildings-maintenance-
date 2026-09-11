@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3148";
+var MODULE_BUILD = "v18.9.3151";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1510,6 +1510,11 @@ function injectCSS(){
 ".dv-tab .n{font-family:'JetBrains Mono',monospace;font-size:11px;opacity:.75;margin-right:4px}",
     ".dv-note-link{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;padding:9px 12px;"
       + "border:1px solid var(--warning,#d98324);border-radius:10px;background:rgba(217,131,36,.10);font-size:.86rem}",
+    ".dv-sgr-wrap{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;margin:10px 0}",
+    ".dv-sgr{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border);"
+      + "border-radius:8px;cursor:pointer;font-size:.88rem}",
+    ".dv-sgr input{margin:0;flex:none}",
+    ".dv-sgr .t-dim{margin-inline-start:auto;font-size:.78rem}",
     ".dv-cnt{display:inline-flex;align-items:center;justify-content:center;min-width:20px;padding:1px 6px;"
       + "border-radius:9px;background:var(--surface-2,rgba(127,127,127,.14));color:var(--text-dim,inherit);"
       + "font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;opacity:.85}",
@@ -2305,6 +2310,166 @@ function _letterCardHTML(l){
    ═══════════════════════════════════════════════════════════════════════════ */
 function SIGNS_DOC(){ return _dev() ? "meta/vault_signatories_dev" : "meta/vault_signatories"; }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   مخزنُ التواقيع المقفول، وقائمةُ مَن يُؤذَن له  (طلبُ المالك: «أفتحه لبعض الأشخاص»)
+
+   ── لماذا انتقل السجلُّ من `meta` إلى مجموعةٍ باسمه ──
+   استثناءُ **مستندٍ بعينه** من قاعدة القراءة يحتاج شرطاً على معرّف المستند، وذاك
+   **يُسقط `list` على المجموعة كلِّها** — صنفُ `v18.9.2635`، وقِيس على المحاكي فسقط
+   استعلامُ `meta`. والشرطُ على **اسم المجموعة** يعمل. فالمخرجُ بنيويٌّ: يخرج
+   السجلُّ من `meta` إلى `vault_signs`.
+
+   ── والنقلُ فعلٌ صريحٌ لا ترحيلٌ صامت ──
+   القديمُ يحمل روابطَ صورةِ توقيعٍ وختم. نسخُه ثمّ **حذفُ الأصل** عملٌ لا رجعةَ
+   فيه، ولا يُفعَل خلسةً وقتَ التحميل: زرٌّ للأدمن، ونسخٌ ثمّ **تحقّقٌ من وصول
+   النسخة** ثمّ حذف. ولو انقطع بينهما بقي القديمُ سليماً فيُعاد.
+
+   ── والقراءةُ ترتدّ ما دام النقلُ لم يتمّ ──
+   تُقرأ المجموعةُ الجديدةُ أوّلاً، فإن كانت فارغةً قُرئ القديم. فالشاشةُ تعمل قبل
+   النقل وبعده، ولا لحظةَ تنقطع فيها التواقيع.
+
+   ── وقائمةُ المأذونين أضيقُ من قائمة قرّاء الخزانة عمداً ──
+   `meta/vault_signers` مستقلٌّ عن `meta/vault_readers`: من يرى الوثائقَ لا يرى
+   التوقيعَ إلّا إن أُذن له وحدَه.
+
+   ── والغيابُ هنا يُقفل لا يفتح ──
+   عكسُ قائمة القرّاء، **لأنّ التعطّلَ رفيق**: من ليس في القائمة يظلّ يطبع الخطابَ
+   باسم الموقّع وصفته على ورق الشركة — بلا الصورتين فيُوقَّع باليد، أي كما كان قبل
+   الميزة. فالإقفالُ الافتراضيُّ لا يمنع أحداً من عمله، والانفتاحُ الافتراضيُّ
+   يُبقي البابَ مفتوحاً بلا أن يشعر أحد.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function SIGNS_COLL(){ return _dev() ? "vault_signs_dev" : "vault_signs"; }
+function SIGNS_NEW(){  return SIGNS_COLL() + "/list"; }
+function SIGNERS_DOC(){ return "meta/vault_signers"; }
+
+var _signers = null;       // null = لم يُقرأ · مصفوفة = القائمة (وقد تكون فارغة)
+var _signsLegacy = false;  // أما زال السجلُّ في موضعه القديم؟
+var _signsNew    = null;   // null = لم يُعرَف · true/false = أموجودٌ المخزنُ الجديد؟
+
+/* أمأذونٌ لهذا المستخدم بصورتَي التوقيع والختم؟ دالّةٌ نقيّةٌ تُفحَص بلا متصفّح. */
+function signerAllowed(user, list){
+  if(!user || !user.user) return false;
+  if(user.role === "admin") return true;
+  if(!Array.isArray(list)) return false;
+  return list.indexOf(String(user.user)) !== -1;
+}
+function canUseSigns(){ return signerAllowed(_me(), _signers); }
+
+/* دمجُ اختيارِ اللوحة: `picked` أسماءُ من أُشّر عليهم، و`shown` مَن عُرضوا —
+   فلا يُنزَع من لم يُعرض أصلاً (مستخدمو مشروعٍ آخرَ ليسوا على الشاشة). */
+function mergeSigners(current, picked, shown){
+  var cur = Array.isArray(current) ? current.map(String) : [];
+  var pick = {}, seen = {};
+  (Array.isArray(picked) ? picked : []).forEach(function(n){ if(n) pick[String(n)] = 1; });
+  (Array.isArray(shown) ? shown : []).forEach(function(n){ if(n) seen[String(n)] = 1; });
+  var out = cur.filter(function(n){ return !seen[n]; }).concat(Object.keys(pick));
+  var uniq = {};
+  return out.filter(function(n){ if(!n || uniq[n]) return false; uniq[n] = 1; return true; })
+            .sort(function(a, b){ return a.localeCompare(b, "ar"); });
+}
+
+function _readSigners(){
+  var d = _db();
+  if(!d || _signers !== null) return;
+  d.doc(SIGNERS_DOC()).get().then(function(s){
+    _signers = (s.exists && Array.isArray((s.data() || {}).users)) ? s.data().users.map(String) : [];
+    _repaint(PAGE_LETTERS);
+  }).catch(function(){ _signers = null; });
+}
+
+/* ══ النقلُ إلى المخزن المقفول — فعلٌ صريحٌ للأدمن ══ */
+function migrateSigns(){
+  var d = _db(), me = _me();
+  if(!d) return Promise.resolve(false);
+  if(!me || me.role !== "admin"){ _toast("🔒 النقل من صلاحية مدير النظام", "warn"); return Promise.resolve(false); }
+  var oldRef = d.doc(SIGNS_DOC()), newRef = d.doc(SIGNS_NEW());
+  return oldRef.get().then(function(o){
+    var list = (o.exists && Array.isArray((o.data() || {}).list)) ? o.data().list : [];
+    if(!o.exists){ _toast("لا سجلَّ قديمٌ يُنقَل — المخزنُ الجديد هو المستعمَل", ""); _signsLegacy = false; return false; }
+    return newRef.set({ list:list, movedAt:new Date().toISOString(), movedBy:_myName() })
+      /* التحقّقُ قبل الحذف: لا يُمحى الأصلُ على وعدِ كتابةٍ لم تُقرأ. */
+      .then(function(){ return newRef.get(); })
+      .then(function(chk){
+        var got = (chk.exists && Array.isArray((chk.data() || {}).list)) ? chk.data().list : null;
+        if(!got || got.length !== list.length) throw new Error("النسخةُ لم تكتمل — لم يُحذف الأصل");
+        return oldRef.delete();
+      })
+      .then(function(){
+        _signsLegacy = false;
+        _audit("نقل سجلّ التواقيع إلى مخزنٍ مقفول", list.length + " موقّعاً");
+        _toast("✅ نُقل السجلُّ وحُذف الأصلُ المكشوف — " + list.length + " موقّعاً", "success");
+        stopSignSync(); startSignSync(); renderLetters();
+        return true;
+      });
+  }).catch(function(e){
+    _toast("⚠ تعذّر النقل: " + String((e && e.message) || e), "warn");
+    return false;
+  });
+}
+
+/* ══ حفظُ قائمة المأذونين ══ */
+function saveSigners(){
+  var d = _db(), me = _me();
+  if(!d) return Promise.resolve(false);
+  if(!me || me.role !== "admin"){ _toast("🔒 من صلاحية مدير النظام", "warn"); return Promise.resolve(false); }
+  var shown = [], picked = [];
+  try{
+    var boxes = document.querySelectorAll("input.dv-sgr-box");
+    for(var i = 0; i < boxes.length; i++){
+      var u = String(boxes[i].getAttribute("data-user") || "");
+      if(!u) continue;
+      shown.push(u);
+      if(boxes[i].checked) picked.push(u);
+    }
+  }catch(e){}
+  var next = mergeSigners(_signers, picked, shown);
+  return d.doc(SIGNERS_DOC()).set({ users:next, updatedAt:new Date().toISOString(), updatedBy:_myName() })
+    .then(function(){
+      _signers = next;
+      _audit("تحديث المأذونين باستعمال التوقيع والختم", next.length + " مستخدماً");
+      _toast("✅ حُفظت القائمة — " + next.length + " مأذوناً", "success");
+      renderLetters();
+      return true;
+    })
+    .catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); return false; });
+}
+
+/* ══ لوحةُ المأذونين داخل سجلّ التواقيع ══ */
+function _signersPanelHTML(){
+  if(!canManageSigns()) return "";
+  var cur = Array.isArray(_signers) ? _signers : [];
+  var arr = _users().slice().sort(function(a, b){
+    return String((a && (a.name || a.user)) || "").localeCompare(String((b && (b.name || b.user)) || ""), "ar");
+  });
+  var rows = arr.filter(function(u){ return u && u.user && u.role !== "admin"; }).map(function(u){
+    var on = cur.indexOf(String(u.user)) !== -1;
+    return '<label class="dv-sgr">'
+      + '<input type="checkbox" class="dv-sgr-box" data-user="' + _esc(u.user) + '"' + (on ? " checked" : "") + '>'
+      + '<span>' + _esc(u.name || u.user) + '</span>'
+      + '<span class="t-dim">' + _esc(u.user) + '</span></label>';
+  }).join("");
+  return '<div class="dv-panel" style="margin-top:14px">'
+    + '<div class="dv-panel-h">مَن يُؤذَن له بصورتَي التوقيع والختم</div>'
+    + '<div class="dv-panel-s">صورةُ التوقيع والختم تُلصَق على أيّ ورقةٍ لمن يملكها، '
+      + 'فلا يراها إلّا من تختاره. <b>ومن ليس هنا لا يتعطّل عملُه</b>: يطبع الخطابَ '
+      + 'باسم الموقّع وصفته على ورق الشركة ويوقّعه باليد — كما كان قبل الميزة. '
+      + 'ومديرُ النظام مأذونٌ دائماً.</div>'
+    + (_signsLegacy
+        ? '<div class="dv-note-link">' + _icon("alertTriangle", "ic-sm")
+          + '<span><b>السجلُّ ما زال في موضعه المكشوف.</b> القائمةُ أدناه لا تحمي شيئاً '
+          + 'حتى يُنقَل إلى المخزن المقفول.</span>'
+          + '<button type="button" class="dv-clear" onclick="docVault.migrateSigns()">انقله الآن</button></div>'
+        : "")
+    + (rows
+        ? '<div class="dv-sgr-wrap">' + rows + '</div>'
+          + '<div class="dv-acts"><button type="button" class="btn btn-primary btn-sm" onclick="docVault.saveSigners()">حفظ القائمة</button></div>'
+          + (cur.length ? "" : '<div class="dv-hint">لم يُؤذَن لأحدٍ بعد — الخطاباتُ تخرج بلا الصورتين حتى تختار.</div>')
+        : '<div class="dv-empty">لا مستخدمين في هذا المشروع سوى مديري النظام.</div>')
+    + '</div>';
+}
+
 var _signs = [], _signsUnsub = null, _signsLoaded = false;
 var _sEdit = null;        // مسوّدةُ الموقّع قيدَ التحرير
 var _sPanel = false;      // أمفتوحةٌ لوحةُ إدارة التواقيع؟
@@ -2321,12 +2486,36 @@ function canManageSigns(){ var u = _me(); return !!(u && u.role === "admin"); }
 function startSignSync(){
   var d = _db();
   if(!d || _signsUnsub || !canView()) return;
-  _signsUnsub = d.doc(SIGNS_DOC()).onSnapshot(function(snap){
+  _readSigners();
+  /* المخزنُ الجديدُ هو المصدر. وخطؤه ليس عطلاً بل **جواباً**: من لم يُؤذَن له
+     تُردّ قراءتُه، فتبقى القائمةُ فارغةً ويخرج الخطابُ بلا الصورتين — وهو
+     المقصود. فلا رسالةَ خطأٍ تُعرض عليه. */
+  _signsUnsub = d.doc(SIGNS_NEW()).onSnapshot(function(snap){
     var v = (snap.exists && snap.data()) || {};
+    if(snap.exists){
+      _signs = Array.isArray(v.list) ? v.list : [];
+      _signsLoaded = true; _signsLegacy = false; _signsNew = true;
+      _repaint(PAGE_LETTERS);
+      return;
+    }
+    _signsNew = false;
+    /* لا مخزنَ جديداً بعد ⇒ السجلُّ ما زال في موضعه القديم المكشوف. يُقرأ ليعمل
+       كلُّ شيءٍ كما كان، ويُعلَن للأدمن أنّ النقلَ لم يتمّ. */
+    _readLegacySigns();
+  }, function(){
+    _signs = []; _signsLoaded = true;
+    _repaint(PAGE_LETTERS);
+  });
+}
+function _readLegacySigns(){
+  var d = _db(); if(!d) return;
+  d.doc(SIGNS_DOC()).get().then(function(o){
+    var v = (o.exists && o.data()) || {};
     _signs = Array.isArray(v.list) ? v.list : [];
+    _signsLegacy = !!o.exists;
     _signsLoaded = true;
     _repaint(PAGE_LETTERS);
-  }, function(){ _signsLoaded = true; });
+  }).catch(function(){ _signs = []; _signsLoaded = true; _repaint(PAGE_LETTERS); });
 }
 function stopSignSync(){
   try{ if(_signsUnsub) _signsUnsub(); }catch(e){}
@@ -2337,7 +2526,7 @@ function stopSignSync(){
 function _saveSigns(list){
   var d = _db();
   if(!d) return Promise.reject(new Error("no-db"));
-  return d.doc(SIGNS_DOC()).set({ list:list, updatedAt:new Date().toISOString(),
+  return d.doc(SIGNS_NEW()).set({ list:list, updatedAt:new Date().toISOString(),
                                   updatedBy:_myName() }, { merge:true });
 }
 
@@ -2363,6 +2552,11 @@ function _letterMode(m){
 
 function toggleSignPanel(){
   if(!canManageSigns()){ _toast("🔒 إدارة التواقيع لمدير النظام وحدَه","warn"); return; }
+  /* فحصُ «أما زال في موضعه المكشوف؟» يُعاد عند فتح اللوحة، ولا يُكتفى بنتيجة
+     لحظةِ التحميل: مستمعُ المخزن الجديد لا يُعاد إطلاقُه حين يتغيّر **مستندٌ آخر**،
+     فسجلٌّ قديمٌ ظهر بعد التحميل يبقى بلا تحذيرٍ إلى الأبد. واللوحةُ هي موضعُ
+     القرار، ففحصُها عندها. */
+  if(!_sPanel && _signsNew === false) _readLegacySigns();
   _letterMode(_sPanel ? "list" : "signs");
   renderLetters(); _top();
 }
@@ -2522,7 +2716,10 @@ function _signBlockHTML(l, isTpl){
   if(isTpl) return blank;
   var nm = String(l.signName || "").trim(), ti = String(l.signTitle || "").trim();
   if(!nm && !ti) return blank;
-  var s = l.signId ? signatoryById(l.signId) : null;
+  /* الاسمُ والصفةُ مثبَّتان على الخطاب وقتَ حفظه فيُطبَعان دائماً. والصورتان
+     تُقرآن حيّتين — ومن لم يُؤذَن له لا يصلانه أصلاً (الخادمُ يردّ)، وهذا الشرطُ
+     حارسٌ ثانٍ يمنع رسمَهما من نسخةٍ قديمةٍ عالقةٍ في الذاكرة. */
+  var s = (l.signId && canUseSigns()) ? signatoryById(l.signId) : null;
   var sig = (s && s.signUrl) ? s.signUrl : "";
   var stp = (s && s.stampUrl) ? s.stampUrl : "";
   return '<div class="sgn">'
@@ -2727,7 +2924,7 @@ function renderLetters(){
   if(!_ltrsLoaded){ host.innerHTML = head + '<div class="dv-empty">جارٍ تحميل الخطابات…</div>'; return; }
 
   var body = "";
-  if(_sPanel && canManageSigns()){ body = _signPanelHTML(); }
+  if(_sPanel && canManageSigns()){ body = _signPanelHTML() + _signersPanelHTML(); }
   else if(_ledit){ body = _letterFormHTML(); }
   else if(_lview.open){
     var l = letterById(_lview.open);
@@ -3847,6 +4044,9 @@ window.docVault = {
   _PAGES:PAGES, _HORIZON_MONTHS:HORIZON_MONTHS,
   /* ══ طبقةُ المشروع — نقيّةٌ تُفحَص بلا متصفّح ══ */
   syncReaders:syncReaders, enableReaderLock:enableReaderLock,
+  migrateSigns:migrateSigns, saveSigners:saveSigners,
+  signerAllowed:signerAllowed, mergeSigners:mergeSigners, canUseSigns:canUseSigns,
+  _SIGNS_NEW:SIGNS_NEW, _SIGNERS_DOC:SIGNERS_DOC,
   mergeReaders:mergeReaders, grantsVault:grantsVault, _READERS_DOC:READERS_DOC,
   projRef:projRef, projLabel:projLabel, projKey:projKey, inProject:inProject,
   visibleTo:visibleTo, visibleList:visibleList, normalizeProjectPick:normalizeProjectPick,

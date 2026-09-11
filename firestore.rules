@@ -355,7 +355,9 @@ service cloud.firestore {
                       && !isAuditColl(document[0])
                       && !vaultColl(document[0])
                       && !isVaultSignDoc(document[0], document[1])
-                      && !isVaultReadersDoc(document[0], document[1]);
+                      && !isVaultReadersDoc(document[0], document[1])
+                      && !isSignersDoc(document[0], document[1])
+                      && !signColl(document[0]);
     }
 
     /* ══ القراءةُ العامة — بمقطعين لا بوايلدكاردَ عوديّ ══
@@ -367,7 +369,7 @@ service cloud.firestore {
        يطابق **صفرَ مقاطعَ أيضاً**، فيلتقط مستندَ الجذر نفسَه ويُعيد فتحَ ما أُغلق
        (وقعت في التجربة قبل الاعتماد). فالعمقُ يُكتب صريحاً. */
     match /{coll}/{docId} {
-      allow read: if hasRole() && !vaultColl(coll);
+      allow read: if hasRole() && !vaultColl(coll) && !signColl(coll);
     }
     match /{coll}/{docId}/{sub}/{subId} {
       allow read: if hasRole();
@@ -508,6 +510,52 @@ service cloud.firestore {
        أحد** — وهو المقصود: قفلٌ يسبق قائمتَه يحجب الخزانةَ عن أصحابها. والوحدةُ
        تُنبّه الأدمنَ في الشاشة ما دام التضييقُ غيرَ مفعَّل، فلا يُظنّ مفعَّلاً وهو
        ليس كذلك. وحذفُ المستند للأدمن وحدَه — وهو يقرأ أصلاً. */
+    /* ═══════════ سجلُّ التواقيع — مجموعةٌ مستقلّةٌ لا مستندٌ في `meta` ═══════════
+       يحمل **روابطَ صورةِ توقيع المدير العام وختمِ الشركة**. وكتابتُه مقفولةٌ على
+       الأدمن منذ البداية، لكنّ **قراءتَه كانت مفتوحةً لكلّ ذي دور** — ومن يقرأ
+       الرابطَ يُنزّل الصورة، والصورةُ `PNG` بخلفيةٍ شفافةٍ تُلصَق على أيّ ورقة.
+
+       **ولماذا انتقل من `meta` إلى مجموعةٍ باسمه:** استثناءُ مستندٍ بعينه من قاعدة
+       القراءة يحتاج شرطاً على **معرّف المستند**، وذاك **يُسقط `list` على المجموعة
+       كلِّها** — صنفُ `v18.9.2635` نفسُه، وقِيس على المحاكي فسقط استعلامُ `meta`.
+       والشرطُ على **اسم المجموعة** يعمل (`coll` محسومٌ وقتَ الـ`list`). فالمخرجُ
+       بنيويٌّ لا لفظيّ: يخرج السجلُّ من `meta` إلى `vault_signs` فيُستثنى باسمها.
+
+       **والقائمةُ هنا أضيقُ من قائمة الخزانة عمداً** (طلبُ المالك: «أفتحه لبعض
+       الأشخاص»): `meta/vault_signers` مستقلٌّ عن `meta/vault_readers` — فمن يرى
+       الوثائقَ لا يرى التوقيعَ إلا إن أُذن له وحدَه.
+
+       **والغيابُ هنا يُقفل لا يفتح** — بخلاف قائمة القرّاء. والسببُ أنّ التعطّلَ
+       رفيقٌ: من ليس في القائمة يظلّ يطبع الخطابَ باسم الموقّع وصفته على ورق
+       الشركة، بلا الصورتين فيُوقَّع باليد — أي **كما كان قبل الميزة**. فالإقفالُ
+       الافتراضيُّ لا يمنع أحداً من عمله، والانفتاحُ الافتراضيُّ يُبقي البابَ
+       مفتوحاً بلا أن يشعر أحد. */
+    function signColl(coll) {
+      return coll in ['vault_signs', 'vault_signs_dev'];
+    }
+    function signersDoc() {
+      return /databases/$(database)/documents/meta/vault_signers;
+    }
+    function signReadOk() {
+      return isAdmin()
+        || (hasRole() && vaultUser() != '' && exists(signersDoc())
+            && vaultUser() in get(signersDoc()).data.users);
+    }
+    function isSignersDoc(coll, doc) {
+      return coll == 'meta' && doc == 'vault_signers';
+    }
+    match /meta/{doc} {
+      allow write: if isAdmin() && doc == 'vault_signers';
+    }
+    match /vault_signs/{id} {
+      allow read:  if signReadOk();
+      allow write: if isAdmin();
+    }
+    match /vault_signs_dev/{id} {
+      allow read:  if signReadOk();
+      allow write: if isAdmin();
+    }
+
     function vaultReadersDoc() {
       return /databases/$(database)/documents/meta/vault_readers;
     }
