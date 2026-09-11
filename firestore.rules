@@ -37,7 +37,8 @@ service cloud.firestore {
        يكتب فيه** بالدور — والزائرُ والمراقبُ مردودان هنا مهما مُنحا هناك.
        والحذفُ للأدمن وحدَه: مَن يحذف وثيقةً يمحو دليلاً. */
     function vaultColl(coll) {
-      return coll in ['global_docs', 'global_docs_dev', 'global_letters', 'global_letters_dev'];
+      return coll in ['global_docs', 'global_docs_dev', 'global_letters', 'global_letters_dev',
+                      'global_approvals', 'global_approvals_dev'];
     }
     function ctrLocked(coll) {
       return coll in [
@@ -479,6 +480,19 @@ service cloud.firestore {
       allow delete:       if isAdmin();
     }
     match /global_letters_dev/{id} {
+      allow read:         if hasRole();
+      allow create, update: if vaultWriteOk();
+      allow delete:       if isAdmin();
+    }
+    /* سجلُّ المعتمدات — ما قدّمناه للعميل: مستخلصاتٌ ومطالبات. اتجاهٌ معاكسٌ
+       لمستخلصات `global_contract_extracts` (تلك من المقاول إلينا)، فلا تداخُل.
+       والقاعدةُ نفسُها: قراءةٌ لكلّ ذي دور، وكتابةٌ بالدور، وحذفٌ للأدمن وحدَه. */
+    match /global_approvals/{id} {
+      allow read:         if hasRole();
+      allow create, update: if vaultWriteOk();
+      allow delete:       if isAdmin();
+    }
+    match /global_approvals_dev/{id} {
       allow read:         if hasRole();
       allow create, update: if vaultWriteOk();
       allow delete:       if isAdmin();
