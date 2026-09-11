@@ -10583,7 +10583,7 @@ function hrPurchaseRequestGuards() {
        وهو **أثرُ المفتاح المانح لا حجبٌ أُقحم**: خزانةُ وثائق الشركة لا تنفتح لأحدٍ
        بأثرٍ رجعيّ. ولأنّ القوائم أدناه تُطابَق **حرفياً**، تُذكر الصفحتان صراحةً في
        كلّ توقّع — فلو انقلب المفتاحُ حاجباً يوماً لَسقطت هذه الفحوصُ فوراً. */
-    const VAULT = ["vault-docs","vault-letters"];
+    const VAULT = ["vault-docs","vault-letters","vault-approvals"];
     const sup = B({role:"supervisor",permissions:{assets:false}});
     T("★ hrpo: والمشرفُ يبقى بلا مسارِ شراءٍ أُقحم عليه (المحجوبُ: أصولُه وتعاقداتُه وخزانتُه)",
       JSON.stringify(sup) === JSON.stringify(["assets","vendors","contract-requests","contracts-list"].concat(VAULT)),
@@ -10606,7 +10606,8 @@ function hrPurchaseRequestGuards() {
       mk().on(undefined,"contracts",{role:"project_manager"}) === true);
   }
   T("★ hrpo: ومسؤولُ المشتريات لا يمسّه الحجبُ الجديد (والخزانةُ وحدَها تنتظر منحاً)",
-    JSON.stringify(B({role:"procurement_officer",permissions:{}})) === JSON.stringify(["vault-docs","vault-letters"]) &&
+    JSON.stringify(B({role:"procurement_officer",permissions:{}}))
+      === JSON.stringify(["vault-docs","vault-letters","vault-approvals"]) &&
     B({role:"procurement_officer",permissions:{docVault:true}}).length === 0,
     B({role:"procurement_officer",permissions:{}}).join(","));
 
@@ -17627,10 +17628,18 @@ function docVaultGuards() {
   }
 
   /* ── (١٢) المفتاحُ مسجَّلٌ في مصدر المفاتيح الواحد وفي فروع النافذة كلِّها ── */
-  T("★★ dv: `docVault` في مصدر المفاتيح وقائمةِ المانحين وخريطةِ الصفحات",
-    /docVault:"خزانة الوثائق"/.test(HTML) &&
-    /_PERM_GRANT_KEYS = \[[^\]]*"docVault"[^\]]*\]/.test(HTML) &&
-    /docVault:\s*\["vault-docs","vault-letters"\]/.test(HTML));
+  /* خريطةُ الصفحات تُقاس **بصفحات الوحدة نفسِها** لا بقائمةٍ مكتوبةٍ هنا: صفحةٌ
+     تُضاف إلى الوحدة وتسقط من الخريطة تبقى مفتوحةً بـ`showPage` المباشرة لمن لا
+     يملك المفتاح — حجبٌ ناقصٌ لا يُعلن عن نفسه. */
+  {
+    const mapLine = (HTML.match(/docVault:\s*\[[^\]]*\]/) || [])[0] || "";
+    const missing = (V._PAGES || []).filter(id => mapLine.indexOf('"' + id + '"') === -1);
+    T("★★ dv: `docVault` في مصدر المفاتيح وقائمةِ المانحين وخريطةِ الصفحات",
+      /docVault:"خزانة الوثائق"/.test(HTML) &&
+      /_PERM_GRANT_KEYS = \[[^\]]*"docVault"[^\]]*\]/.test(HTML) &&
+      !!mapLine && missing.length === 0,
+      missing.length ? "خارج الخريطة: " + missing.join(" · ") : mapLine);
+  }
   T("★★ dv: وخانتُه تُعرض لأدوار الوضع المركزيّ أيضاً (طلبُ المالك: في المشتريات كما في المشاريع)",
     /ks\.push\("docVault"\);/.test(HTML) && /id="perm-docVault"/.test(HTML));
   T("★ dv: ومربّعُه غيرُ مؤشَّرٍ افتراضاً (مانحٌ لا حاجب)",
@@ -18270,9 +18279,23 @@ function docVaultGuards() {
     {
       const prevU4 = W.currentUser;
       W.currentUser = { name:"المالك", user:"owner", role:"admin" };
-      W.document.body.insertAdjacentHTML("beforeend",
-        '<div class="page" id="page-' + V._PAGE_APPROVALS + '"></div>');
+      /* ★★★ الصفحاتُ الثلاثُ تُركَّب **ذاتياً**، ولا تُصنَع هنا باليد.
+         الثالثةُ كانت تسقط بصمتٍ تامّ: `PAGES` تُبنى وقتَ التحميل من `PAGE_APPROVALS`
+         المعرَّفةِ بـ`var` **بعد** ذلك السطر، و`var` تُرفَع اسماً بلا قيمة — فتحمل
+         المصفوفةُ `undefined`، فيُنشأ `page-undefined`، ولا تعرف لفّةُ `showPage`
+         الصفحةَ فتمضي بعد أن أطفأت النواةُ كلَّ الصفحات ولم تُضئ واحدة: شاشةٌ
+         بيضاءُ بلا خطأٍ في وحدة التحكّم ولا مترجمٍ يُنذر. ولذلك يُقاس التركيبُ من
+         DOM الحقيقيّ ومن سلوك `showPage` — لا من مصفوفةٍ مُعلَنة. */
+      const mounted = ["vault-docs", "vault-letters", "vault-approvals"]
+        .filter(id => !!W.document.getElementById("page-" + id));
+      T("★★★ dv: الصفحاتُ الثلاثُ تُركَّب فعلاً في DOM (ولا `page-undefined`)",
+        mounted.length === 3 && !W.document.getElementById("page-undefined"),
+        mounted.join(" · ") || "لا شيء");
       const pga = W.document.getElementById("page-" + V._PAGE_APPROVALS);
+      if (!pga) { T("dv: صفحةُ المعتمدات مُركَّبة فيُكمَل فحصُ رسمها", false); return; }
+      W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+      T("★★★ dv: ولفُّ showPage يُضيء صفحةَ المعتمدات (لا يُطفئ الكلَّ ثم يمضي)",
+        (W.showPage("vault-approvals"), pga.classList.contains("active")));
       W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
       pga.classList.add("active");
       V.__test_seed([], [], [], A);
