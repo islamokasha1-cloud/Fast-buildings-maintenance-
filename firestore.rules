@@ -3,20 +3,27 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ═══════════ دوال مساعدة ═══════════
+    /* ⚠ **الدورُ يُقرأ بـ`get(key, default)` لا بالنقطة.** الوصولُ المباشرُ إلى ادّعاءٍ
+       **غائبٍ** عن التوكِن ليس «فارغاً» بل **خطأُ تقييم** — أُثبت على محاكٍ حقيقيّ
+       بالنفي: `!(request.auth.token.role != null)` يُردّ على توكِنٍ بلا الحقل، بينما
+       `!(request.auth.token.get('role','') != '')` يمرّ. وتطبيقُ الفنيين يدخل
+       **مُصادَقاً مجهولاً بلا `role`**، فكلُّ نداءٍ منه كان يُقيّم القاعدةَ العامة
+       فيُسجَّل **خطأٌ** في `Rules metrics` (‏11 ⇐ 82 بين قياسَي 04/09 و09/09).
+       والخطرُ ليس الرقمَ بل أنّ الخطأ **يسري تحت النفي**: `!hasRole()` منعت الفنّيَّ
+       من الكتابة مرّةً وبدت صحيحةً (البند M11). والصياغةُ أدناه **مكافئةٌ حرفياً**
+       في كلّ حالة (توكِنٌ بدورٍ · بلا دور · بدورٍ فارغ · بلا مصادقة) — تُزيل الخطأَ
+       ولا تغيّر سياسةً. */
     function hasRole() {
-      return request.auth != null
-        && request.auth.token.role != null
-        && request.auth.token.role != '';
+      return tokRole() != null && tokRole() != '';
     }
     function isViewer() {
-      return request.auth != null
-        && request.auth.token.role == 'viewer';
+      return tokRole() == 'viewer';
     }
     // مُصادَق (يشمل المجهول) — يستخدمه تطبيق الفنيين
     function isSignedIn() {
       return request.auth != null;
     }
-    function role()          { return request.auth.token.role; }
+    function role()          { return tokRole(); }
     function isAdmin()       { return hasRole() && role() == 'admin'; }
     function anyRole(list)   { return hasRole() && role() in list; }
     // الحقولُ التي لا يجوز أن يمسّها التعديل — تُقارَن بفارق الوثيقتين لا حقلاً حقلاً
@@ -306,14 +313,17 @@ service cloud.firestore {
              && stUser() != ''
              && resource.data.get('createdByUser', '') == stUser() );
     }
+    /* `resource` **معدومٌ** على قراءةِ مستندٍ غير موجود، و`resource.data` عليه
+       خطأُ تقييمٍ لا `false` (أُثبت على المحاكي كما أُثبت خطأُ التوكِن). فالحارسُ
+       صريح: النتيجةُ هي هي (يُردّ)، لكن بلا خطأٍ يُسجَّل. */
     match /staff_tasks/{id} {
-      allow read:   if isAdmin() || stPart(resource.data);
+      allow read:   if isAdmin() || (resource != null && stPart(resource.data));
       allow create: if stCreateOk();
       allow update: if stUpdateOk();
       allow delete: if stDeleteOk();
     }
     match /staff_tasks_dev/{id} {
-      allow read:   if isAdmin() || stPart(resource.data);
+      allow read:   if isAdmin() || (resource != null && stPart(resource.data));
       allow create: if stCreateOk();
       allow update: if stUpdateOk();
       allow delete: if stDeleteOk();
