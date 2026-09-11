@@ -67,10 +67,16 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3137";
+var MODULE_BUILD = "v18.9.3139";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
+/* معرّفاتُ الصفحات الثلاثةِ **مجتمعةً هنا** ولو كان منطقُ كلٍّ منها أبعدَ في الملفّ:
+   `PAGES` تُبنى وقتَ التحميل، و`var` المعرَّفةُ لاحقاً تُرفَع اسماً بلا قيمة — فوضعُ
+   أحدِ المعرّفات بعد هذا السطر يدسّ `undefined` في المصفوفة، فتفشل `PAGES.indexOf`
+   في لفّ `showPage` بصمتٍ تامّ: تُطفَأ كلُّ الصفحات ولا تُضاء واحدة، فيرى المستخدم
+   شاشةً بيضاءَ بلا خطأٍ في وحدة التحكّم. */
+var PAGE_APPROVALS = "vault-approvals";
 var PAGES        = [PAGE_DOCS, PAGE_LETTERS, PAGE_APPROVALS];
 var PERM_KEY     = "docVault";
 
@@ -563,7 +569,7 @@ function code128SVG(text, opt){
 function APRS_COLL(){ return _dev() ? "global_approvals_dev" : "global_approvals"; }
 function APRS_CTR(){  return _dev() ? "meta/global_approvals_counter_dev" : "meta/global_approvals_counter"; }
 
-var PAGE_APPROVALS = "vault-approvals";
+/* `PAGE_APPROVALS` معرَّفٌ مع أخويه في رأس الملفّ — انظر التعليل هناك. */
 
 /* أنواعُ المستند — `fin` تعني أنّ له مبلغاً يُقاس فارقُه. */
 var APR_TYPES = [
@@ -3037,7 +3043,7 @@ window.docVault = {
   code128SVG:code128SVG, _code128Bits:code128Bits, _code128Sanitize:code128Sanitize,
   filterDocs:filterDocs, sortDocs:sortDocs, cloneTemplate:cloneTemplate, filterLetters:filterLetters,
   _DOC_TYPES:DOC_TYPES, _LEVELS:LEVELS, _PERM_KEY:PERM_KEY,
-  _PAGE_DOCS:PAGE_DOCS, _PAGE_LETTERS:PAGE_LETTERS, _HORIZON_MONTHS:HORIZON_MONTHS,
+  _PAGE_DOCS:PAGE_DOCS, _PAGE_LETTERS:PAGE_LETTERS, _PAGES:PAGES, _HORIZON_MONTHS:HORIZON_MONTHS,
   /* ثقبُ فحصٍ صريحٌ لا بابٌ خلفيّ: يزرع بياناتٍ في الحالة **بلا شبكة** ليُرسَم الأفقُ
      والجدولُ في DOM حقيقيّ داخل `hail-tests.js`. لأنّ الحسابَ الصحيحَ الذي لا يُرسَم
      خطأٌ لا يُنذر، ولا سبيلَ لفحص الرسم بلا مصدرِ بياناتٍ سوى `onSnapshot`.
