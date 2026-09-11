@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3129";
+var MODULE_BUILD = "v18.9.3131";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1343,23 +1343,44 @@ function _saveSigns(list){
 }
 
 /* ════════ لوحةُ الإدارة ════════ */
+/* ════════ أوضاعُ شاشة الخطابات يُقصي بعضُها بعضاً ════════
+   أربعةٌ لا تجتمع: `signs` لوحةُ التواقيع · `form` نموذجُ خطاب · `open` بطاقةُ
+   خطابٍ مفتوح · `list` القائمة. وكان كلُّ وضعٍ علَماً مستقلاًّ يُرفَع ولا يُخفضه
+   غيرُه، والرسمُ يفحصها **بترتيب**: فاللوحةُ المفتوحةُ تعلو كلَّ ما بعدها.
+
+   وأثرُه بلاغُ المالك: «نموذج جديد» و«خطاب صادر» — واللوحةُ مفتوحة — يبنيان
+   المسوّدةَ في الحالة **ولا تظهر**، إذ تُعاد رسمُ اللوحة فوقها. فيبدو الزرُّ ميتاً
+   بلا خطأٍ في وحدة التحكّم ولا شيءٍ يُنذر.
+
+   فالوضعُ **يُصرَّح به** الآن في دالّةٍ واحدةٍ تُغلق ما عداه — والتصريحُ أضمنُ من
+   ترتيبِ فحوصٍ يُنسى عند إضافة الوضع الخامس. */
+function _letterMode(m){
+  _sPanel = (m === "signs");
+  _sEdit  = null;
+  if(m !== "form") _ledit = null;
+  if(m !== "open") _lview.open = null;
+}
+
 function toggleSignPanel(){
   if(!canManageSigns()){ _toast("🔒 إدارة التواقيع لمدير النظام وحدَه","warn"); return; }
-  _sPanel = !_sPanel; _sEdit = null; renderLetters(); _top();
+  _letterMode(_sPanel ? "list" : "signs");
+  renderLetters(); _top();
 }
 function newSignatory(){
   if(!canManageSigns()) return;
+  _letterMode("signs");
   _sEdit = { name:"", title:"", signUrl:"", signPath:"", stampUrl:"", stampPath:"" };
-  _sPanel = true; renderLetters(); _top();
+  renderLetters(); _top();
 }
 function editSignatory(id){
   if(!canManageSigns()) return;
   var s = signatoryById(id);
   if(!s) return;
+  _letterMode("signs");
   _sEdit = { id:s.id, name:s.name||"", title:s.title||"",
              signUrl:s.signUrl||"", signPath:s.signPath||"",
              stampUrl:s.stampUrl||"", stampPath:s.stampPath||"" };
-  _sPanel = true; renderLetters(); _top();
+  renderLetters(); _top();
 }
 function cancelSignatory(){ _sEdit = null; renderLetters(); }
 
@@ -1884,10 +1905,10 @@ function saveRenew(){
 /* ═══════════════════════════════════════════════════════════════════════════
    الأفعال — الخطابات
    ═══════════════════════════════════════════════════════════════════════════ */
-function letterTab(kind){ _lview.kind = kind; _lview.open = null; renderLetters(); }
+function letterTab(kind){ _letterMode("list"); _lview.kind = kind; renderLetters(); }
 function setLetterFilter(v){ _lview.q = String(v == null ? "" : v); renderLetters(); }
-function openLetter(id){ _lview.open = String(id); _ledit = null; renderLetters(); _top(); }
-function backToLetters(){ _lview.open = null; renderLetters(); _top(); }
+function openLetter(id){ _letterMode("open"); _lview.open = String(id); renderLetters(); _top(); }
+function backToLetters(){ _letterMode("list"); renderLetters(); _top(); }
 
 function newLetter(kind, seed){
   if(!canEdit()){ _toast("🔒 لا صلاحية لإضافة خطاب","warn"); return; }
@@ -1895,7 +1916,8 @@ function newLetter(kind, seed){
                party:"", letterDate:new Date().toISOString().slice(0, 10), ref:"", body:"",
                signId:"", signName:"", signTitle:"", files:[] };
   if(seed) Object.keys(seed).forEach(function(k){ base[k] = seed[k]; });
-  _ledit = base; _lview.open = null;
+  _letterMode("form");
+  _ledit = base;
   _lview.kind = base.kind;
   renderLetters(); _top();
 }
@@ -1903,13 +1925,14 @@ function editLetter(id){
   if(!canEdit()){ _toast("🔒 لا صلاحية للتعديل","warn"); return; }
   var l = letterById(id);
   if(!l) return;
+  _letterMode("form");
   _ledit = { id:l.id, kind:l.kind || "issued", title:l.title||"", subject:l.subject||"",
              party:l.party||"", letterDate:l.letterDate||"", ref:l.ref||"", body:l.body||"",
              signId:l.signId||"", signName:l.signName||"", signTitle:l.signTitle||"",
              files:Array.isArray(l.files) ? l.files.slice() : [] };
   renderLetters(); _top();
 }
-function cancelLetter(){ _ledit = null; renderLetters(); }
+function cancelLetter(){ _letterMode("list"); renderLetters(); }
 function useTemplate(id){
   var t = letterById(id);
   if(!t){ return; }
@@ -1971,7 +1994,7 @@ function saveLetter(){
       });
   p.then(function(id){
     _audit(was ? "تعديل خطاب في الخزانة" : "إضافة خطاب إلى الخزانة", id + " — " + body.title);
-    _ledit = null; _lview.open = id; renderLetters(); _top();
+    _letterMode("open"); _lview.open = id; renderLetters(); _top();
     _toast(was ? "✅ حُفظ التعديل" : "✅ حُفظ في الخزانة برقم " + id, "success");
   }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
 }
@@ -1987,7 +2010,7 @@ function delLetter(id){
       var d = _db(); if(!d) return;
       d.collection(LTRS_COLL()).doc(id).delete().then(function(){
         _audit("حذف خطاب من الخزانة", id + " — " + (l.title || ""));
-        _lview.open = null; renderLetters(); _toast("✅ حُذف الخطاب", "success");
+        _letterMode("list"); renderLetters(); _toast("✅ حُذف الخطاب", "success");
       }).catch(function(e){ _toast("⚠ تعذّر الحذف: " + String((e && e.message) || e), "warn"); });
     }).catch(function(){});
 }
