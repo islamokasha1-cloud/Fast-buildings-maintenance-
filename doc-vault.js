@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3133";
+var MODULE_BUILD = "v18.9.3135";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1133,24 +1133,18 @@ function _letterFormHTML(){
     + '<div class="dv-f wide"><label class="dv-l" for="dv-l-title">العنوان <b>*</b></label>'
       + '<input class="form-input" id="dv-l-title" value="' + _esc(e.title || "") + '" placeholder="' + (isTpl ? "نموذج خطاب طلب تمديد" : "خطاب ترشيح مقاول") + '"></div>'
     + (isTpl ? "" :
-        '<div class="dv-f"><label class="dv-l" for="dv-l-prefix">لقب المخاطَبة</label>'
-        + '<input class="form-input" id="dv-l-prefix" list="dv-prefix-list" autocomplete="off"'
-        + ' value="' + _esc(_orDef(e.prefix, DEF_PREFIX)) + '" placeholder="اتركه فارغاً ليُحذف">'
-        + '<datalist id="dv-prefix-list">'
-        + PREFIX_OPTS.map(function(o){ return '<option value="' + _esc(o) + '">'; }).join("")
-        + '</datalist></div>'
-        + '<div class="dv-f"><label class="dv-l" for="dv-l-honor">لقب التشريف</label>'
-        + '<input class="form-input" id="dv-l-honor" list="dv-honor-list" autocomplete="off"'
-        + ' value="' + _esc(_orDef(e.honorific, DEF_HONORIFIC)) + '" placeholder="اتركه فارغاً ليُحذف">'
-        + '<datalist id="dv-honor-list">'
-        + HONORIFIC_OPTS.map(function(o){ return '<option value="' + _esc(o) + '">'; }).join("")
-        + '</datalist></div>'
+        '<div class="dv-f"><label class="dv-l" for="dv-l-prefix-sel">لقب المخاطَبة</label>'
+        + _pickHTML("prefix", "اللقب", "— بلا لقب —", _orDef(e.prefix, DEF_PREFIX), PREFIX_OPTS, e._pfOther)
+        + '</div>'
+        + '<div class="dv-f"><label class="dv-l" for="dv-l-honor-sel">لقب التشريف</label>'
+        + _pickHTML("honor", "اللقب", "— بلا لقب —", _orDef(e.honorific, DEF_HONORIFIC), HONORIFIC_OPTS, e._hnOther)
+        + '</div>'
         + '<div class="dv-f wide"><label class="dv-l" for="dv-l-party">الجهة الموجَّه إليها</label>'
         + '<input class="form-input" id="dv-l-party" value="' + _esc(e.party || "") + '" placeholder="أمانة منطقة حائل">'
         + '<div class="dv-hint">تُطبَع هكذا: <b>' + _esc(_orDef(e.prefix, DEF_PREFIX))
           + (_orDef(e.prefix, DEF_PREFIX) ? " / " : "") + (_esc(e.party) || "[الجهة]") + '</b> '
           + '<span class="t-dim">' + _esc(_orDef(e.honorific, DEF_HONORIFIC)) + '</span> — '
-          + 'واللقبان اختياريان، يُحذف أيُّهما بإفراغ خانته.</div></div>'
+          + 'واللقبان اختياريان: اختر «بلا لقب» ليُحذف، أو «أخرى…» لتكتبه بنفسك.</div></div>'
       + '<div class="dv-f"><label class="dv-l" for="dv-l-date">تاريخ الخطاب</label>'
         + '<input class="form-input dv-num" type="date" id="dv-l-date" value="' + _esc(e.letterDate || "") + '"></div>'
       + '<div class="dv-f"><label class="dv-l" for="dv-l-ref">الرقم المرجعي الخارجي</label>'
@@ -1308,6 +1302,73 @@ function runAI(){
     _ai.err = "تعذّر بدء الطلب — راجع إعدادات الذكاء الاصطناعي.";
     finish();
   }
+}
+
+/* ════════ منتقي اللقب: قائمةٌ صريحةٌ + «أخرى…» ════════
+   كان `datalist` — وهو الخطأ. على iPadOS **لا يعرض قائمتَه إطلاقاً**: لا سهمَ ولا
+   لمسةَ فتحٍ، والاقتراحاتُ لا تظهر إلا أثناء الكتابة وبعد أن يطابق حرفٌ. فالحقلُ
+   يبدو خانةَ كتابةٍ عاديّةً والخياراتُ موجودةٌ ولا سبيلَ إلى رؤيتها — **ميزةٌ
+   حاضرةٌ غائبة**. بلاغُ المالك: «غير قادر على اختيار اللقب أو التشريف».
+
+   والبديلُ `<select>` يفتح ورقةَ النظام على الـiPad — تُقرأ بالإصبع وتُمرَّر —
+   **و«أخرى…» تكشف خانةَ كتابةٍ** فلا تُغلق القائمةُ البابَ على لقبٍ لم نُحصِه
+   (وهو سببُ اختيار `datalist` أصلاً؛ نُبقي الفائدةَ ونُسقط العطب). وهو نمطُ
+   «وثيقة أخرى» نفسُه في السجلّات — والمالكُ يعرفه ويستعمله.
+
+   و«بلا لقب» خيارٌ **صريحٌ في القائمة** لا إفراغَ خانةٍ يُخمَّن. */
+var PICK_NONE = "__none__", PICK_OTHER = "__other__";
+
+/* أيُّ خيارٍ يقع عليه الاختيار؟ دالّةٌ نقيّةٌ تُفحص بلا متصفّح:
+   فارغٌ ⇒ «بلا» · موجودٌ في القائمة ⇒ هو · غيرُ ذلك ⇒ «أخرى». والعلَمُ يغلبها
+   جميعاً ليبقى الحقلُ مفتوحاً بعد اختيار «أخرى» وقبل أن يُكتب فيه حرف. */
+function pickState(cur, opts, otherFlag){
+  if(otherFlag) return PICK_OTHER;
+  var c = String(cur == null ? "" : cur);
+  if(!c) return PICK_NONE;
+  return (opts || []).indexOf(c) >= 0 ? c : PICK_OTHER;
+}
+
+function _pickHTML(key, lbl, noneLbl, cur, opts, otherFlag){
+  var st = pickState(cur, opts, otherFlag), isOther = (st === PICK_OTHER);
+  var o = '<option value="' + PICK_NONE + '"' + (st === PICK_NONE ? " selected" : "") + '>'
+        + _esc(noneLbl) + '</option>';
+  (opts || []).forEach(function(x){
+    o += '<option value="' + _esc(x) + '"' + (st === x ? " selected" : "") + '>' + _esc(x) + '</option>';
+  });
+  o += '<option value="' + PICK_OTHER + '"' + (isOther ? " selected" : "") + '>أخرى… (اكتبه بنفسك)</option>';
+  return '<select class="form-input" id="dv-l-' + key + '-sel"'
+       + ' onchange="docVault.setPick(\'' + key + '\',this.value)">' + o + '</select>'
+       + (isOther
+           ? '<input class="form-input" id="dv-l-' + key + '" style="margin-top:7px" autocomplete="off"'
+             + ' value="' + _esc(cur || "") + '" placeholder="اكتب ' + _esc(lbl) + '">'
+           : '');
+}
+
+/* القراءة: القائمةُ هي المصدر، والخانةُ لا تُقرأ إلا مع «أخرى». وغيابُ القائمة
+   (نموذجُ النموذج) يردّ `undefined` فلا يُكتب على القيمة المحفوظة. */
+function _readPick(key){
+  var sel = document.getElementById("dv-l-" + key + "-sel");
+  if(!sel) return undefined;
+  var v = String(sel.value || "");
+  if(v === PICK_NONE) return "";
+  if(v === PICK_OTHER){
+    var t = document.getElementById("dv-l-" + key);
+    return t ? String(t.value || "").trim() : "";
+  }
+  return v;
+}
+
+function setPick(key, v){
+  if(!_ledit) return;
+  _readLetterForm();
+  var flag = (key === "prefix") ? "_pfOther" : "_hnOther";
+  if(v === PICK_OTHER){ _ledit[flag] = true; }
+  else {
+    _ledit[flag] = false;
+    _ledit[key === "prefix" ? "prefix" : "honorific"] = (v === PICK_NONE) ? "" : String(v);
+  }
+  renderLetters();
+  if(_ledit[flag]){ try{ var el = document.getElementById("dv-l-" + key); if(el) el.focus(); }catch(e){} }
 }
 
 /* ════════ منتقي الموقّع في نموذج الخطاب ════════
@@ -1808,7 +1869,9 @@ function letterPaperHTML(l){
     + '.body{margin-top:16px;white-space:pre-wrap;text-align:justify;min-height:60mm}'
     /* العنصرُ النائبُ يُبرَز ليُرى الفراغُ قبل الإرسال لا بعده */
     + '.ph{background:#fef3c7;border-bottom:1px dashed #b45309;padding:0 2px;font-weight:700}'
-    + '.close{margin-top:22px}'
+    /* الختامُ **في وسط الصفحة** كما في ورقة المالك المرفقة — لا محاذياً للمتن.
+       وهو عُرفُ الخطاب الرسميّ السعوديّ: المتنُ مضبوطٌ والخاتمةُ تتوسّط. */
+    + '.close{margin-top:24px;text-align:center}'
     /* خانةُ توقيعٍ واحدةٌ مكدَّسةٌ إلى اليسار — الخطابُ يوقّعه شخصٌ واحد، وثلاثةُ
        أعمدةٍ متجاورةٍ شكلُ **نموذجٍ يُملأ** لا خطابٍ يُرسَل. */
     + '.sign{margin-top:26px;break-inside:avoid;display:flex;justify-content:flex-end}'
@@ -2175,11 +2238,11 @@ function _readLetterForm(){
     _ledit.party      = g("dv-l-party");
     _ledit.letterDate = g("dv-l-date");
     _ledit.ref        = g("dv-l-ref");
-    /* `g` تردّ "" للحقل الغائب كما للفارغ. والحقولُ الثلاثةُ موجودةٌ دائماً في
-       نموذج الصادر، فالفراغُ هنا **قرارُ حذفٍ صريح** لا غيابُ حقل. */
-    _ledit.prefix     = g("dv-l-prefix");
-    _ledit.honorific  = g("dv-l-honor");
-    _ledit.closing    = g("dv-l-closing");
+    /* اللقبان من قائمتيهما («بلا لقب» خيارٌ صريح)، والختامُ خانةُ كتابةٍ فراغُها
+       حذف. و`undefined` من `_readPick` تعني غيابَ الحقل فلا تُكتب على المحفوظ. */
+    var _pf = _readPick("prefix"); if(_pf !== undefined) _ledit.prefix    = _pf;
+    var _hn = _readPick("honor");  if(_hn !== undefined) _ledit.honorific = _hn;
+    _ledit.closing = g("dv-l-closing");
     /* الاسمُ والصفةُ يُثبَّتان على الخطاب عند الحفظ، ولا يُقرآن من السجلّ وقتَ
        الطباعة: خطابٌ خرج باسمِ موقّعٍ ثمّ تغيّرت صفتُه في السجلّ **لا تتغيّر
        ورقتُه** — المطبوعُ سجلٌّ لما وُقِّع، لا مرآةٌ لحاضر السجلّ. والصورتان
@@ -2440,6 +2503,7 @@ window.docVault = {
   useTemplate:useTemplate, addLetterFile:addLetterFile, delLetterDraftFile:delLetterDraftFile,
   printLetter:printLetter, letterPaperHTML:letterPaperHTML,
   openAI:openAI, closeAI:closeAI, runAI:runAI, aiPrompt:aiPrompt, aiReady:aiReady,
+  setPick:setPick, pickState:pickState, _PICK_NONE:PICK_NONE, _PICK_OTHER:PICK_OTHER,
   _PREFIX_OPTS:PREFIX_OPTS, _HONORIFIC_OPTS:HONORIFIC_OPTS,
   _DEF_PREFIX:DEF_PREFIX, _DEF_HONORIFIC:DEF_HONORIFIC, _DEF_CLOSING:DEF_CLOSING,
   // سجلُّ التواقيع
