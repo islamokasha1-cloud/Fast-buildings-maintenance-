@@ -311,6 +311,37 @@ check('★ ao: لا اسمَ مقصوصٌ في بطاقة مبنًى ولا في
 check('★ ao: سطورُ الحلقة الأربعةُ لا تتداخل ولا تخرج عن مركزها',
   fitAll.some(f => f.lines === 4) && fitAll.every(f => !f.lap && !f.outside),
   JSON.stringify(fitAll.map(f => `${f.v}/${f.s}:${f.lines}${f.lap ? '⚠تداخل' : ''}`)));
+
+/* ══ v18.9aq: بطاقةُ «حالة التشغيل» لا تقصّ نصّاً على أيّ مقاس ══
+   الشكوى: «مؤشر الجاهزية» مقطوعٌ من نصفه أعلى البطاقة على آيباد. السببُ أنّ قطرَ
+   الحلقة كان بوحدات الشاشة (`vh`) بينما ارتفاعُ البطاقة يأتي ممّا تبقّى من اللوحة
+   (`dvh` على سفاري — أقصرُ من `vh`)، والبطاقةُ `overflow:hidden` ومحتواها موسَّطٌ
+   فيُقصّ الفائضُ من طرفيها. القياسُ هنا على البطاقة نفسِها: صفرُ فيضٍ، وحلقةٌ
+   تبقى مقروءةً، وترويسةٌ وتذييلٌ كاملان — على مقاساتِ الجدار والآيبادِ بوضعيه. */
+const beaconFit = [];
+for (const [w, h] of [[1920, 1080], [1366, 1024], [1366, 768], [1180, 700], [1080, 810], [1024, 768], [900, 700]]) {
+  await page.setViewportSize({ width: w, height: h });
+  await page.waitForTimeout(500);
+  beaconFit.push(Object.assign({ v: `${w}×${h}` }, await page.evaluate(() => {
+    const b = document.querySelector('#tvwall-screen .tvl-screen-proj .tvw-beacon');
+    if (!b) return { cut: 999, out: ['مفقودة'], ring: 0, rw: 0 };
+    const br = b.getBoundingClientRect();
+    const out = Array.from(b.children)
+      .filter(e => { const r = e.getBoundingClientRect(); return r.top < br.top - 0.5 || r.bottom > br.bottom + 0.5; })
+      .map(e => e.className);
+    const ring = b.querySelector('.tvw-ring-wrap').getBoundingClientRect();
+    return { cut: b.scrollHeight - b.clientHeight, out, ring: Math.round(ring.height), rw: Math.round(ring.width) };
+  })));
+}
+await page.setViewportSize({ width: 1600, height: 950 });
+await page.waitForTimeout(500);
+check('★ aq: بطاقةُ حالة التشغيل لا تقصّ محتواها على أيّ مقاس (ولا يخرج طفلٌ عن حدّها)',
+  beaconFit.every(f => f.cut <= 0 && f.out.length === 0),
+  JSON.stringify(beaconFit.filter(f => f.cut > 0 || f.out.length).map(f => [f.v, f.cut, f.out])) || 'كلها كاملة');
+check('★ aq: الحلقةُ تبقى دائرةً مقروءةً (≥١١٠px) لا شعرةً منكمشة',
+  beaconFit.every(f => f.ring >= 110 && Math.abs(f.ring - f.rw) <= 2),
+  JSON.stringify(beaconFit.map(f => `${f.v}:${f.ring}×${f.rw}`)));
+
 await page.evaluate(() => _tvwallShowScreen(1));
 await page.waitForTimeout(400);
 

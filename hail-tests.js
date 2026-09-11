@@ -11083,6 +11083,21 @@ function tvWallGuards() {
       /\.tvw-status-pct\{[^}]*font-size:clamp\([^)]*\);font-size:9\.5cqw/.test(HTML) &&
       /\.tvw-status-why\{font-size:clamp\([^)]*\);font-size:5\.6cqw/.test(HTML),
       "نصٌّ مقيسٌ بـvw داخل حلقةٍ مقيسةٍ بـvh ⇒ تداخلُ سطورٍ على شاشةٍ عريضةٍ قصيرة");
+    /* v18.9aq: بطاقةُ «حالة التشغيل» تقصّ نصَّها متى كانت أقصرَ ممّا يفترضه مقاسُ
+       الحلقة — وهو حالُ سفاري على الآيباد (`vh` بلا شريط العناوين واللوحةُ بـ`dvh`).
+       الحكمُ: الحلقةُ وحدَها تنكمش، والترويسةُ والتذييلُ لا ينكمشان أبداً. */
+    T("★ aq: الحلقةُ تُقاس بالارتفاع وتنكمش وحدَها (لا vh في مقاسها)",
+      /\.tvw-ring-wrap\{[^}]*flex:0 1 auto[^}]*min-height:0[^}]*height:clamp\(160px,16vw,270px\)[^}]*aspect-ratio:1/.test(HTML) &&
+      !/\.tvw-ring-wrap\{[^}]*width:min\(/.test(HTML) &&
+      !/#tvwall-screen \.tvl-screen-proj \.tvw-ring-wrap\{[^}]*vh\)/.test(HTML),
+      "مقاسٌ بوحدات الشاشة داخل بطاقةٍ ترتفع بغيرها ⇒ فيضٌ يُقصّ نصفُه من أعلى");
+    T("★ aq: ترويسةُ البطاقة وتذييلُها لا ينكمشان (flex:none)",
+      /\.tvw-beacon-eyebrow\{flex:none/.test(HTML) && /\.tvw-beacon-foot\{flex:none/.test(HTML),
+      "نصٌّ قابلٌ للانكماش يُقصّ داخل صندوقه بلا أن يفيض عن البطاقة");
+    T("★ aq: التكديسُ تحت ١١٠٠ بكسل يعطي كلَّ كتلةٍ حدّاً أدنى ويمرّر الصفحة",
+      /@media\(max-width:1100px\)\{[\s\S]{0,600}?\.tvw-stage\{[^}]*overflow:visible[^}]*min-height:auto/.test(HTML) &&
+      /@media\(max-width:1100px\)\{[\s\S]{0,600}?\.tvw-beacon\{min-height:clamp\(/.test(HTML),
+      "ثلاثةُ صفوفٍ في ارتفاعِ عمودٍ واحدٍ تُسحق كلُّها فتصير الحلقةُ شعرة");
     T("★ ao: اسمُ الصفّ في الرسم سطران بحصّةٍ أوسعَ من شريطه",
       /\.tvl-hb \.r\{[^}]*minmax\(0,1\.45fr\) minmax\(0,1\.15fr\) auto/.test(HTML) &&
       /\.tvl-hb \.r \.n\{[^}]*-webkit-line-clamp:2/.test(HTML) &&
@@ -11148,7 +11163,7 @@ function tvWallGuards() {
         !/\.tvl-hb \.r:nth-child/.test(HTML), "إخفاءُ صفٍّ بـCSS قصٌّ صامتٌ يُقرأ «هذا كلُّ شيء»");
       T("★ al: نبضُ التشغيل وحلقةُ الجاهزية في المركز محدودان بالارتفاع أيضاً",
         /#tvwall-screen \.tvl-screen-proj \.tvw-kpi \.kv\{font-size:clamp\([^)]*min\(4\.2vw,/.test(HTML) &&
-        /#tvwall-screen \.tvl-screen-proj \.tvw-ring-wrap\{width:min\(/.test(HTML),
+        /#tvwall-screen \.tvl-screen-proj \.tvw-ring-wrap\{height:clamp\(/.test(HTML),
         "قياسٌ بالعرض وحدَه يفيض على عمودٍ أقصر ويقصّ التسمية");
     }
     // (٢) حركةُ ١٤ يوماً — تنفيذٌ حقيقيٌّ للدالة

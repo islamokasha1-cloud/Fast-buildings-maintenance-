@@ -2359,14 +2359,23 @@ html[data-theme="dark"] .ppm-approval-row{background:#1a2d45;border-color:#2e4a6
 .tvw-kpi.alert.hot::after{content:"";position:absolute;inset:0;border-radius:16px;border:1.5px solid rgba(240,67,90,.4);animation:tvwAlertGlow 2.4s ease-in-out infinite}
 /* beacon */
 .tvw-beacon{flex:1;min-height:0;background:radial-gradient(120% 90% at 50% 8%,rgba(76,134,232,.1),transparent 62%),linear-gradient(160deg,rgba(19,40,69,.9),rgba(13,27,49,.7));border:1px solid var(--line);border-radius:22px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:clamp(14px,1.6vw,26px);position:relative;overflow:hidden;box-shadow:0 14px 40px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.04)}
-.tvw-beacon-eyebrow{font-size:clamp(11px,.95vw,14px);font-weight:800;color:var(--tv-muted);letter-spacing:1px;margin-bottom:clamp(6px,1vh,14px)}
+.tvw-beacon-eyebrow{flex:none;font-size:clamp(11px,.95vw,14px);font-weight:800;color:var(--tv-muted);letter-spacing:1px;margin-bottom:clamp(6px,1vh,14px)}
 /* v18.9ao: **الحلقةُ حاويةُ قياسٍ لنصّها.** كان نصُّ المركز (الكلمة · سببُها ·
    التسمية · النسبة) مقيساً بعرض **الشاشة** (`vw`) بينما قُطرُ الحلقة محدودٌ
    بارتفاعها (`19vh`) — فعلى شاشةٍ عريضةٍ قصيرةٍ يكبر النصُّ وتصغر الحلقة، فتتداخل
    السطورُ ويخرج بعضُها فوق قوس الحلقة. الآن الحلقةُ `container` والنصُّ بوحدات
    `cqw`: يكبر ويصغر **معها** مهما كان مقاسُ الشاشة. والقياسُ بـ`clamp` يبقى
    قبله كاحتياطٍ لمتصفّحٍ بلا استعلامات الحاويات. */
-.tvw-ring-wrap{position:relative;width:clamp(160px,16vw,270px);aspect-ratio:1;display:grid;place-items:center;container-type:size;container-name:tvring}
+/* v18.9aq: **الحلقةُ هي التي تتنازل، لا النصّ.** كان مقاسُها بوحدات الشاشة
+   (`vw`/`vh`) وبطاقتُها `overflow:hidden` — فمتى كانت البطاقةُ أقصرَ ممّا يفترضه
+   ذلك المقاس (وهو حالُ سفاري على الآيباد: `vh` تُقاس على الشاشة الكبرى بلا شريط
+   العناوين بينما اللوحةُ ترتفع بـ`dvh` المرئيّة) فاض المحتوى فوق البطاقة وتحتها،
+   ووسطُ المحتوى (`justify-content:center`) يجعل الفائضَ **نصفين** فيُقصّ أعلاه:
+   «مؤشر الجاهزية» مقطوعٌ من نصفه بلا خطأٍ واحدٍ في وحدة التحكّم. الآن المقاسُ
+   بـ`height` مع `aspect-ratio` والحلقةُ **وحدَها قابلةٌ للانكماش** (`flex:0 1 auto`
+   و`min-height:0`) بينما الترويسةُ والتذييلُ `flex:none` — فالنقصُ يقع على قطر
+   الحلقة (والنصُّ داخلها يتبعها بـ`cqw`) ولا يُقصّ حرفٌ واحد. */
+.tvw-ring-wrap{position:relative;flex:0 1 auto;min-height:0;height:clamp(160px,16vw,270px);width:auto;max-width:100%;aspect-ratio:1;display:grid;place-items:center;container-type:size;container-name:tvring}
 .tvw-ring-wrap svg{width:100%;height:100%;transform:rotate(-90deg) scaleX(-1);overflow:visible}
 .tvw-ring-track{fill:none;stroke:rgba(120,155,215,.13);stroke-width:13}
 .tvw-ring-prog{fill:none;stroke-width:13;stroke-linecap:round;stroke:var(--rate,var(--health));transition:stroke-dashoffset 1.1s cubic-bezier(.5,0,.2,1),stroke .5s}
@@ -2377,7 +2386,7 @@ html[data-theme="dark"] .ppm-approval-row{background:#1a2d45;border-color:#2e4a6
 .tvw-status-pct{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:clamp(15px,1.4vw,22px);font-size:9.5cqw;color:var(--rate,var(--ink));margin-top:2px;margin-top:1.5cqw;line-height:1.1;font-variant-numeric:tabular-nums}
 /* سببُ الكلمة تحتها مباشرةً بلونها: «حرِج» وحدَها تُقرأ حكماً على النسبة فوقها */
 .tvw-status-why{font-size:clamp(9px,.78vw,12px);font-size:5.6cqw;font-weight:800;color:var(--health);opacity:.92;margin-top:3px;margin-top:2.6cqw;max-width:100%;text-align:center;line-height:1.2;text-shadow:none}
-.tvw-beacon-foot{display:flex;gap:clamp(14px,1.6vw,30px);margin-top:clamp(12px,1.6vh,22px)}
+.tvw-beacon-foot{flex:none;display:flex;gap:clamp(14px,1.6vw,30px);margin-top:clamp(12px,1.6vh,22px)}
 .tvw-bf{text-align:center}
 .tvw-bf .v{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:clamp(18px,1.7vw,28px);line-height:1;font-variant-numeric:tabular-nums}
 .tvw-bf .l{font-size:clamp(9.5px,.8vw,12px);color:var(--tv-muted-2);font-weight:700;margin-top:5px}
@@ -2458,9 +2467,18 @@ html[data-theme="dark"] .ppm-approval-row{background:#1a2d45;border-color:#2e4a6
      (كان تفعيل "تقليل الحركة" في iPadOS يجمّد الشريط فيظهر فارغاً بعد نهاية البلاغات) */
   #page-tv *:not(.tvw-ticker-track){animation:none!important;transition:none!important}
 }
+/* v18.9aq: **التكديسُ لا يُنجي إن بقي الارتفاعُ ثابتاً.** الأعمدةُ الثلاثةُ تصير
+   هنا صفوفاً، لكنّ المسرحَ يظلّ `flex:1;min-height:0` في ارتفاعِ الشاشة و`overflow:
+   hidden` — فتُسحق الصفوفُ الثلاثةُ في ثلث المساحة: حلقةُ الجاهزية شعرةٌ من بضع
+   بكسلات، وتسمياتُ نبض التشغيل مقصوصة. المقاسُ الرأسيُّ لشاشةِ جدارٍ لا يصلح
+   لآيبادٍ رأسيّ: لكلِّ كتلةٍ حدٌّ أدنى يُقرأ، **والصفحةُ تمرّر** بدل أن تسحق. */
 @media(max-width:1100px){
-  .tvw-stage{grid-template-columns:1fr 1fr;grid-auto-rows:auto}
+  .tvw-stage{grid-template-columns:1fr 1fr;grid-auto-rows:auto;overflow:visible;min-height:auto}
   .tvw-col.tvw-center{grid-column:1 / -1;order:-1}
+  .tvw-beacon{min-height:clamp(230px,30vw,330px)}
+  .tvw-kpi{min-height:clamp(58px,8vw,96px)}
+  .tvw-blds{min-height:clamp(130px,22vw,240px)}
+  #tvwall-screen .tvl-screen,#tvwall-screen .tvl-screen .tvw-stage{min-height:auto}
 }
 
 /* ══ v18.9ag: مركز العمليات — كل لوحات TV في شاشةٍ واحدة (متابعةُ كل المشاريع من مكان واحد) ══
@@ -2607,10 +2625,11 @@ html[data-theme="dark"] .ppm-approval-row{background:#1a2d45;border-color:#2e4a6
 /* لوحةُ المشروع في المركز أقصرُ من لوحة العرض المفردة (شريطُ التحليلات تحتها)،
    ورقمُ نبض التشغيل مقيسٌ على **عرض** الشاشة وحدَه — فيفيض على ارتفاعها ويقصّ
    تسميتَه. هنا يحدُّه أصغرُ البعدين، فالتسميةُ تبقى مقروءةً على أيّ ارتفاع. */
-/* وحلقةُ الجاهزية مقيسةٌ بالعرض وحدَه كذلك — فتفيض على عمودٍ أقصر وتقصّ تذييلَها
-   (قيد التنفيذ · في الانتظار · أُغلقت اليوم). هنا يحدُّها الارتفاعُ أيضاً. */
+/* وحلقةُ الجاهزية كانت تُحَدُّ هنا بـ`19vh` لأنّ العمودَ أقصر — و`vh` كذبةٌ على
+   سفاري (تُقاس بلا شريط العناوين، واللوحةُ ترتفع بـ`dvh`). الحدُّ الآن **بطاقتُها
+   نفسُها**: تنكمش بـflex بقدر ما ينقص، فلا تقصّ ترويسةً ولا تذييلاً على أيّ جهاز. */
 #tvwall-screen .tvl-screen-proj .tvw-beacon{padding:clamp(10px,1.4vh,24px)}
-#tvwall-screen .tvl-screen-proj .tvw-ring-wrap{width:min(clamp(130px,16vw,270px),19vh)}
+#tvwall-screen .tvl-screen-proj .tvw-ring-wrap{height:clamp(130px,16vw,270px);width:auto}
 #tvwall-screen .tvl-screen-proj .tvw-beacon-eyebrow{font-size:clamp(9.5px,min(.95vw,1.35vh),14px);margin-bottom:clamp(4px,.8vh,12px)}
 /* النصُّ داخل الحلقة يتبع الحلقةَ (cqw) فلا يحتاج قيداً بالارتفاع هنا */
 #tvwall-screen .tvl-screen-proj .tvw-beacon-foot{margin-top:clamp(8px,1.3vh,20px)}
@@ -2626,7 +2645,7 @@ html[data-theme="dark"] .ppm-approval-row{background:#1a2d45;border-color:#2e4a6
   .tvl-hb{gap:clamp(3px,.7vh,8px)}
   .tvl-hb .r{font-size:clamp(8px,1.25vh,10.5px)}
   .tvl-hb .tk{height:6px}
-  #tvwall-screen .tvl-screen-proj .tvw-ring-wrap{width:min(clamp(110px,16vw,270px),17.5vh)}
+  #tvwall-screen .tvl-screen-proj .tvw-ring-wrap{height:clamp(110px,16vw,270px);width:auto}
   #tvwall-screen .tvl-screen-proj .tvw-kpi .kv{font-size:clamp(18px,min(4.2vw,4.3vh),40px)}
   #tvwall-screen .tvl-screen-proj .tvw-kpi .kl{font-size:clamp(9px,1.3vh,12px);margin-top:3px}
 }
