@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3141";
+var MODULE_BUILD = "v18.9.3143";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -344,6 +344,12 @@ function normalizeProjectPick(o){
   if(sel === FILTER_ALL || sel === FILTER_COMPANY){
     return { scope:SCOPE_COMPANY, projectId:"", projectName:"", isCustomProject:false };
   }
+  /* اختيارُ اسمٍ يدويٍّ قائم، أو كتابةُ اسمٍ جديد — كلاهما يُخزَّن **بالشكل نفسِه**
+     (سنتينل المنصّة والعلَم والاسم)، فلا يتفرّع شكلان لمعنى واحد. */
+  if(_isManualKey(sel)){
+    return { scope:SCOPE_PROJECT, projectId:MANUAL_ID,
+             projectName:_manualKeyName(sel).trim(), isCustomProject:true };
+  }
   if(sel === MANUAL_ID){
     return { scope:SCOPE_PROJECT, projectId:MANUAL_ID,
              projectName:String(o.manualName || "").trim(), isCustomProject:true };
@@ -363,6 +369,48 @@ function _projSortName(a, b){
   return String((a && (a.name || a.id)) || "")
     .localeCompare(String((b && (b.name || b.id)) || ""), "ar");
 }
+/* ══ المشاريعُ المُدخَلةُ يدوياً ══
+   مشروعٌ يدويٌّ ليس في `meta/projects`، فهو **غائبٌ عن `_projectsList` بالكامل**.
+   ولولا هذا لَأمكن إيداعُ سجلٍّ فيه ثمّ **تعذّر العثورُ عليه أبداً**: لا خيارَ له في
+   المُرشِّح، ولا ملفَّ مشروعٍ يفتحه — يُرى تحت «كلّ المشاريع» فقط، وهو عينُ الضياع
+   الذي جاء التصنيفُ ليمنعه.
+   والمصدرُ `_manualProjectNamesAll()` في النواة (أسماءُ `meta/manual_projects`
+   موحَّدةً مع المشتقّة من طلبات الشراء) — **يُقرأ ولا يُعاد اشتقاقُه هنا**، وإلّا
+   افترقت قائمةُ الخزانة عن قائمة المشتريات فصار للمشروع الواحد اسمان.
+   والمفتاحُ `__CUSTOM__:<الاسم>` اصطلاحُ النواة نفسُه — **عرضاً وترشيحاً لا تخزيناً**:
+   المخزَّنُ يبقى `__OTHER__` مع الاسم والعلَم. */
+function _manualNames(){
+  try{
+    if(typeof _manualProjectNamesAll === "function"){
+      var a = _manualProjectNamesAll();
+      if(Array.isArray(a)) return a.map(String).filter(Boolean);
+    }
+  }catch(e){}
+  try{
+    var b = (typeof _manualProjectNames !== "undefined") ? _manualProjectNames : null;
+    return Array.isArray(b) ? b.map(String).filter(Boolean) : [];
+  }catch(e){ return []; }
+}
+function _manualKey(name){ return "__CUSTOM__:" + String(name || ""); }
+function _isManualKey(v){ return String(v || "").indexOf("__CUSTOM__:") === 0; }
+function _manualKeyName(v){ return _isManualKey(v) ? String(v).slice(11) : ""; }
+
+/* المشاريعُ اليدويةُ المعروضة: المعروفةُ من النواة، **وما وُجد في سجلّات الخزانة
+   نفسِها** — سجلٌّ باسمٍ يدويٍّ لم يعد في قائمة النواة يبقى له خيارٌ يُعثَر به عليه. */
+function _manualOptions(list){
+  /* والمحصورُ بمشاريعَ بعينها لا تُعرض له المشاريعُ اليدوية أصلاً: لا معرّفَ لها
+     يُطابَق بقائمته، فهو **لا يرى سجلَّها ولو أودعه بنفسه**. وخيارٌ يُودَع فيه ثمّ
+     يختفي فورَ حفظه أسوأُ من غيابه. */
+  if(Array.isArray(allowedProjectIds())) return [];
+  var seen = {}, out = [];
+  _manualNames().forEach(function(nm){ if(nm && !seen[nm]){ seen[nm] = 1; out.push(nm); } });
+  (Array.isArray(list) ? list : []).forEach(function(x){
+    var r = projRef(x);
+    if(r.manual && r.name && !seen[r.name]){ seen[r.name] = 1; out.push(r.name); }
+  });
+  return out.sort(function(a, b){ return a.localeCompare(b, "ar"); });
+}
+
 function _pickableProjects(){
   var allowed = allowedProjectIds(), arr = _projList().slice();
   if(Array.isArray(allowed)){
@@ -375,7 +423,9 @@ function _projSelFor(rec){
   var r = projRef(rec);
   if(r.unlinked) return FILTER_UNLINKED;
   if(r.scope === SCOPE_COMPANY) return FILTER_COMPANY;
-  if(r.manual) return MANUAL_ID;
+  /* اليدويُّ يُنتقى **باسمه** لا بخيار «اكتب اسماً جديداً»: فتحُ التحرير على خانةٍ
+     نصّيةٍ يدعو إلى إعادة كتابة الاسم، وحرفٌ يختلف يُنشئ مشروعاً ثانياً. */
+  if(r.manual) return r.name ? _manualKey(r.name) : MANUAL_ID;
   return r.id || FILTER_COMPANY;
 }
 
@@ -383,7 +433,7 @@ function _projSelFor(rec){
    `<select>` لا `datalist`: الأخيرُ **لا يفتح قائمتَه على iPadOS** أصلاً — بلاغُ
    المالك في `v18.9.3135`، والمالكُ يعمل من iPad. والخيارُ اللاصقُ لمشروعٍ لم يعد
    في القائمة يحفظ انتماءَ السجلّ من أن يُمحى بحفظةٍ واحدة. */
-function _projFieldHTML(e, setter){
+function _projFieldHTML(e, setter, list){
   var sel = String(e.projSel || FILTER_COMPANY);
   var arr = _pickableProjects(), seen = false;
   var opts = '<option value="' + FILTER_COMPANY + '"' + (sel === FILTER_COMPANY ? " selected" : "") + '>'
@@ -398,12 +448,26 @@ function _projFieldHTML(e, setter){
     opts += '<option value="' + _esc(p.id) + '"' + (String(p.id) === sel ? " selected" : "") + '>'
           + _esc(p.name || p.id) + '</option>';
   });
-  if(sel && sel !== FILTER_COMPANY && sel !== FILTER_UNLINKED && sel !== MANUAL_ID && !seen){
+  if(sel && sel !== FILTER_COMPANY && sel !== FILTER_UNLINKED && sel !== MANUAL_ID
+     && !_isManualKey(sel) && !seen){
     opts += '<option value="' + _esc(sel) + '" selected>'
           + _esc(e.projectName || sel) + ' (خارج القائمة)</option>';
   }
+  /* المشاريعُ اليدويةُ المعروفةُ **خياراتٌ تُنتقى** — و«اكتب اسمه» في الذيل للجديد
+     وحدَه. عكسُه يدفع إلى إعادة كتابة اسمٍ قائمٍ فيتولّد منه مشروعٌ ثانٍ بحرف. */
+  var mans = _manualOptions(list), mseen = false;
+  mans.forEach(function(nm){
+    var k = _manualKey(nm);
+    if(k === sel) mseen = true;
+    opts += '<option value="' + _esc(k) + '"' + (k === sel ? " selected" : "") + '>'
+          + _esc(nm) + ' — يدويّ</option>';
+  });
+  if(_isManualKey(sel) && !mseen){
+    opts += '<option value="' + _esc(sel) + '" selected>'
+          + _esc(_manualKeyName(sel)) + ' — يدويّ</option>';
+  }
   opts += '<option value="' + MANUAL_ID + '"' + (sel === MANUAL_ID ? " selected" : "") + '>'
-        + '— مشروع يدويّ (اكتب اسمه) —</option>';
+        + '— مشروع يدويّ جديد (اكتب اسمه) —</option>';
   var html = '<select class="form-input" onchange="docVault.' + setter + '(this.value)">' + opts + '</select>';
   if(sel === MANUAL_ID){
     html += '<input class="form-input" id="dv-proj-manual" style="margin-top:6px"'
@@ -432,11 +496,23 @@ function _projFilterHTML(cur, setter, list){
     opts += '<option value="' + _esc(p.id) + '"' + (String(p.id) === sel ? " selected" : "") + '>'
           + _esc(p.name || p.id) + '</option>';
   });
+  var mans = _manualOptions(list), mseen = false;
+  mans.forEach(function(nm){
+    var k = _manualKey(nm);
+    if(k === sel) mseen = true;
+    opts += '<option value="' + _esc(k) + '"' + (k === sel ? " selected" : "") + '>'
+          + _esc(nm) + ' — يدويّ</option>';
+  });
+  if(_isManualKey(sel) && !mseen){
+    opts += '<option value="' + _esc(sel) + '" selected>'
+          + _esc(_manualKeyName(sel)) + ' — يدويّ</option>';
+  }
   if(anyUnlinked || sel === FILTER_UNLINKED){
     opts += '<option value="' + FILTER_UNLINKED + '"' + (sel === FILTER_UNLINKED ? " selected" : "") + '>'
           + '⚠ غير مربوط بمشروع</option>';
   }
-  if(sel && sel !== FILTER_ALL && sel !== FILTER_COMPANY && sel !== FILTER_UNLINKED && !seen){
+  if(sel && sel !== FILTER_ALL && sel !== FILTER_COMPANY && sel !== FILTER_UNLINKED
+     && !_isManualKey(sel) && !seen){
     opts += '<option value="' + _esc(sel) + '" selected>' + _esc(sel) + ' (خارج القائمة)</option>';
   }
   return '<select class="form-input" onchange="docVault.' + setter + '(this.value)">' + opts + '</select>';
@@ -1358,8 +1434,9 @@ function _filesHTML(files, onDel){
   }).join("") + '</div>';
 }
 
-function _tableHTML(list, today, curProj){
+function _tableHTML(list, today, curProj, emptyNote){
   if(!list.length){
+    if(emptyNote) return '<div class="dv-wrap"><div class="dv-empty">' + emptyNote + '</div></div>';
     var any = _visDocs().filter(function(d){ return !d.archived; }).length;
     return '<div class="dv-wrap"><div class="dv-empty">'
       + (any ? 'لا وثيقة تطابق الترشيح الحالي.<br><button type="button" class="dv-clear" onclick="docVault.clearFilters()">امسح الترشيح</button>'
@@ -1420,7 +1497,7 @@ function _formHTML(){
       + '<input class="form-input" id="dv-issuer" value="' + _esc(e.issuer || "") + '" placeholder="وزارة التجارة"></div>'
     /* النطاقُ قبل المشروع: شهادةُ الزكاة تخصّ الشركةَ كلَّها، ونسبتُها لمشروعٍ
        تُخفيها عن باقي المشاريع وتُوهم بأنّها تخصّه وحدَه. */
-    + '<div class="dv-f wide"><label class="dv-l">النطاق</label>' + _projFieldHTML(e, "setDocProj")
+    + '<div class="dv-f wide"><label class="dv-l">النطاق</label>' + _projFieldHTML(e, "setDocProj", _docs)
       + (e.projSel === FILTER_COMPANY
           ? '<div class="dv-hint">وثيقةُ شركةٍ: تظهر في ملفّ كلّ مشروع، ولا تُحجب عن أحدٍ في الخزانة.</div>' : "")
       + '</div>'
@@ -1652,7 +1729,7 @@ function _letterFormHTML(){
       /* المشروعُ خاصيّةُ **الصادر** وحدَه: النموذجُ قالبٌ يُستنسَخ، وربطُه بمشروعٍ
          يُخفيه عن باقي المشاريع — فيُعاد كتابتُه في كلّ مشروعٍ وهو عينُ ما جاء
          النموذجُ ليمنعه. فالنماذجُ كلُّها على مستوى الشركة بلا خيار. */
-      + '<div class="dv-f"><label class="dv-l">المشروع</label>' + _projFieldHTML(e, "setLetterFormProj") + '</div>'
+      + '<div class="dv-f"><label class="dv-l">المشروع</label>' + _projFieldHTML(e, "setLetterFormProj", _ltrs) + '</div>'
       /* التوقيعُ خاصيّةُ الصادر وحدَه — نموذجٌ يخرج موقَّعاً ومختوماً خطابٌ جاهزٌ
          للإرسال بعناصرَ نائبةٍ بين قوسين. فلا خيارَ له في نموذج النموذج أصلاً. */
       + '<div class="dv-f wide"><label class="dv-l" for="dv-l-sign">التوقيع</label>'
@@ -1964,9 +2041,10 @@ function _signFormHTML(){
     + '</div></div>';
 }
 
-function _letterTableHTML(list, curProj){
+function _letterTableHTML(list, curProj, emptyNote){
   var isTpl = _lview.kind === "template";
   if(!list.length){
+    if(emptyNote) return '<div class="dv-wrap"><div class="dv-empty">' + emptyNote + '</div></div>';
     return '<div class="dv-wrap"><div class="dv-empty">'
       + (isTpl ? 'لا نماذج بعد.<br>احفظ هنا قوالبَ الخطابات التي تتكرّر — طلبُ تمديد · ترشيحُ مقاول · تفويض — لتُستنسَخ بدل أن تُكتب من جديد.'
                : 'لا خطابات صادرة بعد.<br>كلُّ خطابٍ يُحفَظ برقمٍ مرجعيٍّ من النظام وبنسخته الموقَّعة، فيُرجَع إليه برقمه.')
@@ -2555,8 +2633,9 @@ function _aprChip(a, today){
     + (w === null ? "مُقدَّم" : ("بانتظار " + w + " يوماً")) + '</span>';
 }
 
-function _aprTableHTML(list, today, curProj){
+function _aprTableHTML(list, today, curProj, emptyNote){
   if(!list.length){
+    if(emptyNote) return '<div class="dv-wrap"><div class="dv-empty">' + emptyNote + '</div></div>';
     var any = _visAprs().filter(function(x){ return !x.archived; }).length;
     return '<div class="dv-wrap"><div class="dv-empty">'
       + (any ? 'لا مستندَ يطابق الترشيح.<br><button type="button" class="dv-clear" onclick="docVault.clearAprFilters()">امسح الترشيح</button>'
@@ -2607,7 +2686,7 @@ function _aprFormHTML(){
       + '<select class="form-input" id="dv-a-type" onchange="docVault.setAprType(this.value)">' + types + '</select></div>'
     + '<div class="dv-f"><label class="dv-l" for="dv-a-party">الجهة <b>*</b></label>'
       + '<input class="form-input" id="dv-a-party" value="' + _esc(e.party || "") + '" placeholder="وكالة الأنباء السعودية"></div>'
-    + '<div class="dv-f"><label class="dv-l">المشروع</label>' + _projFieldHTML(e, "setAprFormProj") + '</div>'
+    + '<div class="dv-f"><label class="dv-l">المشروع</label>' + _projFieldHTML(e, "setAprFormProj", _aprs) + '</div>'
     + '<div class="dv-f"><label class="dv-l" for="dv-a-ourref">رقمنا المرجعي</label>'
       + '<input class="form-input dv-num" id="dv-a-ourref" value="' + _esc(e.ourRef || "") + '" placeholder="LTR-2609-0004 أو رقمٌ يدويّ"></div>'
     + '<div class="dv-f wide"><div class="dv-dates">'
@@ -3293,8 +3372,10 @@ function renderProjectFile(){
   _fview.proj = _seedProj(_fview.proj);
 
   var head = _fileHead();
+  /* قائمةُ الاختيار تُجمع من السجلّات الثلاثة: مشروعٌ يدويٌّ لا يُعرَف إلا من خطابٍ
+     واحدٍ يجب أن يكون له خيارٌ يُفتَح به ملفُّه. */
   var picker = '<div class="dv-bar"><label class="dv-l" style="align-self:center;margin:0">المشروع</label>'
-    + _projFilterHTML(_fview.proj, "setFileProj", _visAprs().concat(_visDocs())) + '</div>';
+    + _projFilterHTML(_fview.proj, "setFileProj", _visDocs().concat(_visLtrs(), _visAprs())) + '</div>';
 
   /* «كلُّ المشاريع» ليست ملفَّ مشروع: الشاشةُ تسأل عن واحدٍ بعينه، فتُطلب تسميتُه
      بدل أن تُعرض عليه كومةٌ لا تقول شيئاً. */
@@ -3322,7 +3403,7 @@ function renderProjectFile(){
 
   var body = picker
     + _fSec("وثائق المشروع", "shield", dcs.length, "openDocsForFile", "newDocHere", "وثيقة")
-    + _tableHTML(dcs, today, _fview.proj)
+    + _tableHTML(dcs, today, _fview.proj, 'لا وثائقَ خاصّةً بهذا المشروع بعد.')
     + (comp.length
         ? '<div class="dv-head" style="margin:18px 0 8px"><div>'
           + '<h3 class="dv-ttl" style="font-size:1.02rem">' + _icon("shield") + ' وثائقُ الشركة السارية على كلّ المشاريع'
@@ -3331,10 +3412,10 @@ function renderProjectFile(){
           + '</div></div>' + _tableHTML(comp, today, FILTER_COMPANY)
         : "")
     + _fSec("الخطابات الصادرة", "scrollText", lts.length, "openLettersForFile", "newLetterHere", "خطاب صادر")
-    + _letterTableHTML(lts, _fview.proj)
+    + _letterTableHTML(lts, _fview.proj, 'لا خطاباتٍ صادرةً لهذا المشروع بعد.')
     + _fSec("المعتمدات — ما قُدِّم للعميل", "clipboardCheck", aps.length, "openAprForFile", "newAprHere", "مستند مُقدَّم")
     + _aprSummaryHTML(aprRollup(aps, today))
-    + _aprTableHTML(aps, today, _fview.proj);
+    + _aprTableHTML(aps, today, _fview.proj, 'لم يُسجَّل بعدُ ما قُدِّم للعميل في هذا المشروع.');
 
   host.innerHTML = head + body;
 }

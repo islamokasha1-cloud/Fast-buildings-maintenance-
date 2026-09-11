@@ -18523,6 +18523,55 @@ function docVaultGuards() {
           V.setFilterProj("");
         }
 
+        /* ── المشاريعُ المُدخَلةُ يدوياً: تُودَع **ويُعثَر عليها** ── */
+        {
+          const pga3 = W.document.getElementById("page-" + V._PAGE_APPROVALS);
+          W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+          pga3.classList.add("active");
+          const prevMan = W._manualProjectNamesAll;
+          W._manualProjectNamesAll = () => ["فيلا الأمير", "شقة نموذجية"];
+          V.setAprProj("");
+          /* مشروعٌ يدويٌّ غائبٌ عن `meta/projects` بالكامل. لولا خيارٍ له في المُرشِّح
+             لَأُودع السجلُّ ثمّ تعذّر العثورُ عليه أبداً — وهو عينُ الضياع الذي جاء
+             التصنيفُ ليمنعه. */
+          T("★★★ dv/proj: المشروعُ اليدويُّ له خيارٌ في المُرشِّح (وإلّا أُودع سجلُّه فلم يُعثَر عليه أبداً)",
+            /فيلا الأمير — يدويّ/.test(pga3.innerHTML) && /شقة نموذجية — يدويّ/.test(pga3.innerHTML));
+          /* والمصدرُ مصدرُ المنصّة نفسُه — لا قائمةٌ ثانيةٌ تفترق عن قائمة المشتريات */
+          T("★★ dv/proj: ومصدرُ أسمائه هو `_manualProjectNamesAll` في النواة لا اشتقاقٌ ثانٍ",
+            /_manualProjectNamesAll/.test(src) && /function _manualProjectNamesAll/.test(HTML));
+          W._manualProjectNamesAll = () => [];
+          V.__test_seed([], [], [], [
+            { id:"APR-M1", title:"مستخلص فيلا", docType:"extract", party:"المالك",
+              submittedAt:"2026-07-01", status:"submitted", amountSubmitted:30000,
+              scope:"project", projectId:V._MANUAL_ID, projectName:"فيلا الأمير", isCustomProject:true }]);
+          V.setAprProj("");
+          T("★★★ dv/proj: واسمٌ يدويٌّ لم يعد في قائمة النواة يبقى له خيارٌ من سجلّات الخزانة نفسِها",
+            /فيلا الأمير — يدويّ/.test(pga3.innerHTML));
+          V.setAprProj("__CUSTOM__:فيلا الأمير");
+          T("★★★ dv/proj: والترشيحُ به يعمل فعلاً — يُظهر سجلَّه",
+            /مستخلص فيلا/.test(pga3.innerHTML));
+          /* والانتقاءُ باسمه لا بخانةٍ نصّية: إعادةُ الكتابة تولّد مشروعاً ثانياً بحرف */
+          const manualPick2 = V.normalizeProjectPick({ sel:"__CUSTOM__:فيلا الأمير" });
+          T("★★★ dv/proj: واختيارُ اسمٍ يدويٍّ قائمٍ يُخزَّن بشكل المنصّة نفسِه — لا مفتاحَ عرضٍ",
+            manualPick2.projectId === V._MANUAL_ID && manualPick2.isCustomProject === true &&
+            manualPick2.projectName === "فيلا الأمير",
+            JSON.stringify(manualPick2));
+          /* والمحصورُ لا تُعرض له أصلاً: لا يرى سجلَّها ولو أودعه بنفسه، وخيارٌ
+             يُودَع فيه ثمّ يختفي فورَ حفظه أسوأُ من غيابه. */
+          W._manualProjectNamesAll = () => ["فيلا الأمير"];
+          const prevU6 = W.currentUser;
+          W.currentUser = { name:"مشرف", user:"sv", role:"supervisor",
+                            projects:["hail"], permissions:{ docVault:true } };
+          V.setAprProj("");
+          T("★★★ dv/proj: والمحصورُ بمشاريعَ بعينها لا تُعرض له المشاريعُ اليدوية (يودعها فتختفي عنه)",
+            !/يدويّ<\/option>/.test(pga3.innerHTML));
+          W.currentUser = prevU6;
+          V.setAprProj("");
+          T("★★ dv/proj: وتعود لغير المحصور", /فيلا الأمير — يدويّ/.test(pga3.innerHTML));
+          W._manualProjectNamesAll = prevMan;
+          V.setAprProj("");
+        }
+
         W.currentUser = prevU5; W._projectsList = prevPL; W.CURRENT_PROJECT = prevCP;
       }
 
