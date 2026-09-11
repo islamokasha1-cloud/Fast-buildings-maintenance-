@@ -41,8 +41,32 @@ const HTML = (() => {
   if (!fs.existsSync(cssPath)) return IDX_RAW;
   const css = fs.readFileSync(cssPath, "utf8")
     .replace(/^\/\* [\s\S]*?\*\/\n\n/, "");   // ترويسةُ الوحدة ليست قاعدةَ أنماط
-  return IDX_RAW.replace(m[0], "<style>\n" + css.replace(/\n$/, "") + "\n</style>");
+  return _spliceSlaEngine(IDX_RAW.replace(m[0], "<style>\n" + css.replace(/\n$/, "") + "\n</style>"));
 })();
+/* ــ محرّكُ SLA خرج إلى `sla-engine.js` ــ يُعاد إلى **موضعه الأصليّ بالضبط** ــــــــ
+   للسبب نفسِه الذي أُعيدت به ورقةُ الأنماط أعلاه، وأشدَّ: في هذا الملفّ عشراتُ
+   الحرّاس على محرّك SLA، وكثيرٌ منها كتلٌ تبدأ بـ`indexOf(...)` ثم `if (i < 0)`.
+   فلو قُرئ `index.html` وحدَه **لتخطّتها `if` صامتةً** — ٤٨ فحصاً اختفت فعلاً عند
+   أوّل تشغيلٍ بعد النقل، لا بفشلٍ بل بنقصانٍ في العدد. والتأكيداتُ السالبة أخطر:
+   «هذه الصيغةُ غائبة» تمرّ مجّاناً بعد أن انتقلت الصيغةُ لا زالت.
+   فالنصُّ الذي تراه الحرّاسُ يبقى **مطابقاً لما كان قبل النقل** حرفياً. */
+function _spliceSlaEngine(src) {
+  const modPath = path.resolve(path.dirname(IDX), "sla-engine.js");
+  if (!fs.existsSync(modPath)) return src;
+  const mod = fs.readFileSync(modPath, "utf8");
+  const cut = (tag) => {
+    const a = mod.indexOf(`/* ==SLA-MOVED-${tag}-START== */\n`);
+    const b = mod.indexOf(`\n/* ==SLA-MOVED-${tag}-END== */`);
+    return (a < 0 || b < 0) ? null : mod.slice(a + `/* ==SLA-MOVED-${tag}-START== */\n`.length, b);
+  };
+  let out = src;
+  for (const tag of ["A", "B"]) {
+    const body = cut(tag);
+    const mark = new RegExp(`^/\\* ==SLA-MOVED-${tag}== [^\\n]*\\*/$`, "m");
+    if (body !== null && mark.test(out)) out = out.replace(mark, () => body);
+  }
+  return out;
+}
 // اسمٌ ثابتٌ لمصدر التطبيق — يُستعمل حيث يُظلَّل `HTML` داخل دالةٍ (tvWallGuards)
 const APP_SRC = HTML;
 const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.v2.js"), path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
@@ -758,7 +782,10 @@ function predelivery() {
        يشرح لِمَ سقط السقفُ 48 المخفيّ. والسطورُ الفعليةُ ثلاثةٌ داخل `renderKPIData`
        نفسِها (ثابتُ الهدف · الصيغة · بسطُ البطاقة) — منطقُ مؤشّرٍ قائمٍ يُصلَح في
        موضعه كما تُلزم CLAUDE.md، ونقلُه وحدَه يشقّ حسابَ المؤشّرات السبعة. */
-    const IDX_CEILING = 40079;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* **خُفِّض** من 40079 إلى 39885 — ‏١٩٤ سطراً خرجت إلى `sla-engine.js` (محرّكُ SLA
+       كلُّه). والخفضُ هو نصفُ الفائدة: مكسبُ الاستخراج يُثبَّت هنا فلا يُبتلَع لاحقاً
+       بإضافاتٍ تملأ الفراغَ الذي تركه. */
+    const IDX_CEILING = 39885;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -5460,6 +5487,37 @@ function auditRound2() {
       HTML.includes('["بلاغات مغلقة",closedTix.length]'));
   }
     T("★ زال قياس الالتزام بـ getSLA التقويمي", !HTML.includes("return h<=getSLA(t.priority);") && !HTML.includes("if(h <= getSLA(t.priority))"));
+  }
+
+  // ── محرّكُ SLA وحدةٌ مستقلّة — والحرّاسُ تراه في موضعه ───────────────────────
+  //  هذه الحرّاسُ تحمي **آليّةَ الفحص نفسَها**: لو انكسر الرقعُ (علامةٌ أُعيدت تسميتُها،
+  //  أو ملفٌّ لم يُقرأ) لعادت عشراتُ الحرّاس تُتخطّى بـ`if` صامتةً — نقصاناً في العدد
+  //  لا فشلاً يُرى. فالكسرُ يُصرّح به هنا بدل أن يختفي.
+  {
+    const _slaPath = path.resolve(path.dirname(IDX), "sla-engine.js");
+    T("★★ وحدةُ محرّك SLA موجودةٌ ومحقونةٌ مبكّراً (قبل السكربت المضمَّن — أسماؤها عالمية)",
+      fs.existsSync(_slaPath) &&
+      IDX_RAW.indexOf('<script src="sla-engine.js?v=') < IDX_RAW.indexOf("const APP_VERSION"));
+    if (fs.existsSync(_slaPath)) {
+      const _m = fs.readFileSync(_slaPath, "utf8");
+      T("★★ علامتا حدِّ النقل قائمتان في الوحدة (بهما تُعاد الكتلةُ ويُثبَت النقل)",
+        ["A", "B"].every(t => _m.includes(`/* ==SLA-MOVED-${t}-START== */`) &&
+                              _m.includes(`/* ==SLA-MOVED-${t}-END== */`)));
+      T("★★ والرقعُ نجح فعلاً — الكتلةُ حاضرةٌ في النصِّ الذي تفحصه الحرّاس",
+        HTML.includes("function slaStatus(tierName,createdAt,now,cfg,stops){") &&
+        HTML.includes("const SLA_CONFIG = {") && HTML.includes("const PRIORITIES = [") &&
+        !/^\/\* ==SLA-MOVED-[AB]== /m.test(HTML));
+      T("★ ولا نسخةَ ثانيةً من المحرّك في index.html (مصدرٌ واحدٌ لا اثنان)",
+        !/^const SLA_CONFIG = \{/m.test(IDX_RAW) && !/^function slaStatus\(/m.test(IDX_RAW));
+      T("★★ الوحدةُ تعرّض كلَّ اسمٍ كان عالمياً (اسمٌ يسقط = زرٌّ ميتٌ بصمت)",
+        ["slaOf","isOverdue","getSLA","slaStatus","clockStopMinutes","priorityLabel",
+         "priorityCanonical","prioritySame","slaBudgetLabel","_closeWorkH","_closedOnTime",
+         "responseH","workingMinutesBetween","_ymd","_ym","_parseLocalDate","PRIORITIES",
+         "SLA_CONFIG"].every(n => new RegExp("[{,]\\s*" + n + "\\s*[,}]").test(_m)));
+      // توجيهٌ فعليٌّ في أوّل سطرٍ تنفيذيّ — لا ذكرُ العبارة في ترويسةٍ تشرح لِمَ غابت
+      T("★ وبلا توجيه \"use strict\" — النقلُ الحرفيُّ لا يغيّر دلالةَ الكتلة",
+        !/^\s*["']use strict["'];/m.test(_m));
+    }
   }
 
   // ── v18.9zc — SLA: الإيقافُ الموثَّق يُخصَم فعلاً من الزمن المنقضي ──────────

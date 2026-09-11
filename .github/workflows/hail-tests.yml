@@ -24,6 +24,7 @@ on:
       - 'HailNotify.js'
       - 'photo-queue.js'
       - 'operations-wall.js'
+      - 'sla-engine.js'
       - 'ppm-schedule-repair.js'
       - 'staff-tasks.js'
       - 'project-hub.js'
