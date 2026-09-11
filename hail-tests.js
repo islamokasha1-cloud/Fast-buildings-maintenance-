@@ -17939,6 +17939,85 @@ function docVaultGuards() {
       /canManageSigns\(\) \? '<button[^']*docVault\.toggleSignPanel/.test(src));
   }
 
+
+  /* ── (١٧) ★★★ أوضاعُ شاشة الخطابات يُقصي بعضُها بعضاً ──
+     بلاغُ المالك: «وانا في هذه الصفحة زر نموذج جديد وزر خطاب صادر لا يعمل» —
+     ولوحةُ التواقيع مفتوحة.
+
+     الجذر: كلُّ وضعٍ علَمٌ مستقلٌّ يُرفَع ولا يُخفضه غيرُه، والرسمُ يفحصها
+     **بترتيب**، فاللوحةُ المفتوحةُ تعلو كلَّ ما بعدها. فالزرُّ يبني المسوّدةَ في
+     الحالة **ولا تظهر** — زرٌّ ميتٌ بلا خطأٍ في وحدة التحكّم.
+
+     **ولا يمسكه فحصُ نصّ**: الدالّةُ تُنادى وتُغيّر الحالةَ فعلاً، والعطبُ في
+     **ما يُرسَم**. فالحارسُ يُشغّل الشاشةَ في DOM حقيقيٍّ ويقرأ ما ظهر — ويجرّب
+     كلَّ انتقالٍ بين الأوضاع الأربعة، لا الحالةَ المُبلَّغ عنها وحدَها. */
+  {
+    const prevU2 = W.currentUser;
+    W.currentUser = { name:"المالك", user:"owner", role:"admin" };
+    const pgl = W.document.getElementById("page-vault-letters");
+    W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    pgl.classList.add("active");
+    V.__test_seed([], [
+      { id:"LTR-9001", kind:"issued", title:"خطابٌ قائم", party:"جهة", letterDate:"2026-09-01" },
+      { id:"TPL-9001", kind:"template", title:"نموذجٌ قائم" }
+    ], [{ id:"SG-1", name:"عادل", title:"المدير العام" }]);
+
+    const shown = () => ({
+      signs: !!pgl.querySelector(".dv-sg-row, #dv-s-name"),
+      form:  !!pgl.querySelector("#dv-l-title"),
+      open:  /class="dv-panel"/.test(pgl.innerHTML) && !!pgl.querySelector(".dv-panel-s.dv-num, .dv-panel-h"),
+      table: !!pgl.querySelector(".dv-tbl")
+    });
+
+    V.toggleSignPanel();
+    T("★ dv: لوحةُ التواقيع تُفتح وتظهر", shown().signs && !shown().form);
+
+    /* ★★★ البلاغُ نفسُه */
+    V.newLetter("issued");
+    T("★★★ dv: «خطاب صادر» يعمل واللوحةُ مفتوحة — تُغلَق ويظهر النموذج",
+      shown().form && !shown().signs, JSON.stringify(shown()));
+
+    V.toggleSignPanel();
+    V.newLetter("template");
+    T("★★★ dv: و«نموذج جديد» كذلك",
+      shown().form && !shown().signs, JSON.stringify(shown()));
+
+    /* وبقيّةُ الانتقالات — لا يكفي إصلاحُ البابين المُبلَّغ عنهما */
+    V.toggleSignPanel();
+    V.openLetter("LTR-9001");
+    T("★★ dv: وفتحُ خطابٍ من اللوحة يُغلقها", !shown().signs && /خطابٌ قائم/.test(pgl.innerHTML));
+
+    V.toggleSignPanel();
+    V.editLetter("LTR-9001");
+    T("★★ dv: والتعديلُ كذلك", shown().form && !shown().signs);
+
+    V.toggleSignPanel();
+    V.useTemplate("TPL-9001");
+    T("★★ dv: واستنساخُ نموذجٍ كذلك", shown().form && !shown().signs);
+
+    V.toggleSignPanel();
+    V.letterTab("template");
+    T("★★ dv: وتبديلُ التبويب يُغلقها ويعرض القائمة", !shown().signs && shown().table);
+
+    V.toggleSignPanel();
+    V.backToLetters();
+    T("★★ dv: والرجوعُ كذلك", !shown().signs && shown().table);
+
+    /* والعكسُ صحيح: لوحةٌ تُفتح ونموذجُ خطابٍ مفتوح ⇒ يُغلَق النموذجُ لا العكس */
+    V.newLetter("issued");
+    V.toggleSignPanel();
+    T("★★★ dv: والعكسُ محروسٌ أيضاً — فتحُ اللوحة ونموذجٌ مفتوحٌ يُغلقه",
+      shown().signs && !shown().form, JSON.stringify(shown()));
+    V.toggleSignPanel();
+
+    /* ولوحةُ التواقيع لا تُفتح لغير الأدمن ولو نُوديت مباشرةً */
+    W.currentUser = { role:"procurement_officer", user:"p", permissions:{ docVault:true } };
+    V.toggleSignPanel();
+    T("★★ dv: ولا تُفتح اللوحةُ لغير الأدمن ولو نُودي البابُ مباشرةً", !shown().signs);
+    W.currentUser = prevU2;
+    V.backToLetters();
+  }
+
   /* ── (١٣) المرفقُ يحفظ مسارَه، والمسارُ تحت البادئة القائمة `po/` ──
      مسارٌ جذريٌّ جديد قد تردّه قواعدُ Storage صامتاً (درسُ `hr-payments.js`). */
   /* ── ★★ الأرقامُ داخل جملةٍ عربية: `direction` وحدَها لا تكفي لصندوقٍ سطريّ ──
