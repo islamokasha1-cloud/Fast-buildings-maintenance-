@@ -18188,6 +18188,137 @@ function docVaultGuards() {
       /\.body\{[^}]*text-align:justify/.test(src));
   }
 
+
+  /* ── (٢٠) ★★ سجلُّ المعتمدات — ما قدّمناه للعميل ──
+     طلبُ المالك: «نافذة جديدة لارشيف الخطابات المعتمد… للخطابات المعتمدة
+     والمستخلصات او المطالبات المعتمدة».
+     والاتجاهُ معاكسٌ لمستخلصات `contracts.js` (تلك **من المقاول إلينا** — «لا سدادَ
+     قبل رفع نسخة المستخلص موقّعةً من المقاول»)، فلا تداخُلَ ولا مصدرَ حقيقةٍ مشقوق. */
+  {
+    const T0 = new Date("2026-09-11T09:00:00Z");
+    const A = [
+      { id:"APR-1", title:"المستخلص الثالث", docType:"extract", party:"وكالة", status:"submitted",
+        submittedAt:"2026-06-20", amountSubmitted:100000 },                       // ينتظر ٨٣ يوماً
+      { id:"APR-2", title:"مطالبة تعويض",    docType:"claim",   party:"وكالة", status:"submitted",
+        submittedAt:"2026-08-25", amountSubmitted:40000 },                        // ينتظر ١٧
+      { id:"APR-3", title:"المستخلص الثاني", docType:"extract", party:"وكالة", status:"approved",
+        submittedAt:"2026-05-01", approvedAt:"2026-05-20", amountSubmitted:80000, amountApproved:72000 },
+      { id:"APR-4", title:"محضر استلام",     docType:"handover", party:"وكالة", status:"approved",
+        submittedAt:"2026-04-01", approvedAt:"2026-04-10" },
+      { id:"APR-5", title:"المستخلص الأول",  docType:"extract", party:"وكالة", status:"paid",
+        submittedAt:"2026-03-01", approvedAt:"2026-03-15", amountSubmitted:50000, amountApproved:50000 },
+      { id:"APR-6", title:"مطالبة مرفوضة",   docType:"claim",   party:"وكالة", status:"rejected",
+        submittedAt:"2026-07-01", amountSubmitted:9000 },
+      { id:"APR-7", title:"مؤرشف",           docType:"extract", party:"وكالة", status:"submitted",
+        submittedAt:"2026-01-01", amountSubmitted:999999, archived:true }
+    ];
+
+    /* عمرُ الانتظار: للمقدَّم وحدَه. و`null` لغيره — صفرٌ كان يُقرأ «قُدِّم اليوم». */
+    T("★★ dv: عمرُ الانتظار للمقدَّم وحدَه، و`null` لما لا ينتظر",
+      V.aprDaysWaiting(A[0], T0) === 83 && V.aprDaysWaiting(A[1], T0) === 17 &&
+      V.aprDaysWaiting(A[2], T0) === null && V.aprDaysWaiting(A[4], T0) === null &&
+      V.aprDaysWaiting(A[5], T0) === null,
+      String(V.aprDaysWaiting(A[0], T0)));
+    T("★ dv: وشرائحُ العمر ثلاثٌ (دون الشهر · شهر · شهران فأكثر)",
+      V.aprAgeBand(0) === "ok" && V.aprAgeBand(29) === "ok" && V.aprAgeBand(30) === "warn" &&
+      V.aprAgeBand(59) === "warn" && V.aprAgeBand(60) === "crit" && V.aprAgeBand(null) === "none");
+
+    /* الفارقُ يُعرض ولا يُبدّل الحالة */
+    T("★★★ dv: الفارقُ رقمٌ يُقرأ — والحالةُ تبقى «معتمد» لا «جزئيّ»",
+      V.aprVariance(A[2]) === 8000 && A[2].status === "approved");
+    T("★★ dv: ولا فارقَ لغير الماليّ ولا لمن لم يُعتمد بعد (`null` لا صفرٌ يدّعي «لا خصم»)",
+      V.aprVariance(A[3]) === null && V.aprVariance(A[0]) === null &&
+      V.aprVariance({ docType:"extract", amountSubmitted:100 }) === null);
+    T("★ dv: والنوعُ المجهولُ يُعامَل غيرَ ماليّ",
+      V.aprIsFinancial("extract") === true && V.aprIsFinancial("claim") === true &&
+      V.aprIsFinancial("handover") === false && V.aprIsFinancial("zzz") === false);
+
+    /* الحصيلة */
+    {
+      const r = V.aprRollup(A, T0);
+      T("★★ dv: الحصيلةُ تتجاهل المؤرشف", r.total === 6 && !/999999/.test(String(r.sumSubmitted)));
+      /* ١٠٠٬٠٠٠ + ٤٠٬٠٠٠ — والمرفوضةُ (٩٬٠٠٠) لا تنتظر شيئاً فلا تدخل. */
+      T("★★★ dv: و«بانتظار الاعتماد» مالٌ واقفٌ خارج الشركة — وأقدمُه بالأيام",
+        r.sumWaiting === 140000 && r.submitted === 2 && r.oldest === 83 && r.oldestId === "APR-1",
+        JSON.stringify({ w:r.sumWaiting, n:r.submitted, o:r.oldest }));
+      T("★★ dv: والمرفوضُ خارج «الواقف» — لا ينتظر اعتماداً بل صدر فيه قرار",
+        V.aprRollup(A.filter(x => x.id !== "APR-6"), T0).sumWaiting === r.sumWaiting);
+      T("★★ dv: والمعتمَدُ يُجمَع من المعتمَد والمسدَّد معاً",
+        r.sumApproved === 122000 && r.approved === 2 && r.paid === 1, String(r.sumApproved));
+      /* الادّعاءُ هو أنّ محضر الاستلام لا يُغيّر رقماً — فيُقاس بحذفه لا برقمٍ
+         أحسبه بيدي فأُخطئ فيه (وقد أخطأتُ فيه فعلاً في أوّل كتابة). */
+      T("★★★ dv: وغيرُ الماليّ لا يدخل أيَّ إجماليٍّ ماليّ (محضرُ استلامٍ بلا مبلغ)",
+        (() => { const noHandover = V.aprRollup(A.filter(x => x.docType !== "handover"), T0);
+                 return noHandover.sumSubmitted === r.sumSubmitted &&
+                        noHandover.sumApproved === r.sumApproved &&
+                        noHandover.total === r.total - 1; })(),
+        String(r.sumSubmitted));
+      T("★★ dv: والفارقُ المخصومُ يُجمَع من المعتمَد وحدَه لا من المرفوض",
+        r.variance === 8000, String(r.variance));
+    }
+
+    /* الترتيب: ما ينتظر أوّلاً وأطولُه أعلاه — وهو سؤالُ الشاشة نفسُه */
+    T("★★★ dv: الترتيبُ يقدّم المنتظِرَ وأطولَه انتظاراً (وإلّا غرق في وسط قائمةٍ تطول)",
+      V.sortApprovals(A.filter(x => !x.archived), T0).map(x => x.id).slice(0, 2).join() === "APR-1,APR-2");
+    T("★ dv: والترشيحُ بالنوع والحالة والبحث، ويُسقط المؤرشفَ دائماً",
+      V.filterApprovals(A, { type:"claim" }, T0).length === 2 &&
+      V.filterApprovals(A, { status:"submitted" }, T0).length === 2 &&
+      V.filterApprovals(A, { q:"تعويض" }, T0).length === 1 &&
+      V.filterApprovals(A, {}, T0).length === 6);
+
+    /* ── الرسمُ الحقيقيّ ── */
+    {
+      const prevU4 = W.currentUser;
+      W.currentUser = { name:"المالك", user:"owner", role:"admin" };
+      W.document.body.insertAdjacentHTML("beforeend",
+        '<div class="page" id="page-' + V._PAGE_APPROVALS + '"></div>');
+      const pga = W.document.getElementById("page-" + V._PAGE_APPROVALS);
+      W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+      pga.classList.add("active");
+      V.__test_seed([], [], [], A);
+      V.renderApprovals();
+      T("★★ dv: شريطُ الحصيلة يُرسَم بأربعة أرقامٍ لا سبعة",
+        pga.querySelectorAll(".dv-ap-c").length === 4);
+      T("★★★ dv: و«الواقف» وحدَه يتلوّن بحسب أقدم انتظار (٨٣ يوماً ⇒ أحمر)",
+        !!pga.querySelector(".dv-ap-c.wait.b-crit"),
+        pga.querySelector(".dv-ap-c.wait") ? pga.querySelector(".dv-ap-c.wait").className : "—");
+      T("★★ dv: وصفوفُ السجلّ = غيرُ المؤرشف",
+        pga.querySelectorAll(".dv-ap-tbl tbody tr").length === 6);
+      T("★★ dv: ونقرُ الصفّ يفتح البطاقةَ بمرفقها ونسختها المعتمدة",
+        (V.openApr("APR-3"), /المستخلص الثاني/.test(pga.innerHTML) &&
+         /النسخة المعتمدة/.test(pga.innerHTML)));
+      V.backToApr();
+      /* الخاناتُ المالية تظهر للماليّ وحدَه */
+      V.newApr();
+      T("★★ dv: ونموذجُ المستخلص يعرض خانتَي المبلغ",
+        !!pga.querySelector("#dv-a-amt"));
+      V.setAprType("handover");
+      T("★★★ dv: ومحضرُ الاستلام لا يعرضهما (ولا يحمل مبلغاً عالقاً من نوعٍ سابق)",
+        !pga.querySelector("#dv-a-amt") && !pga.querySelector("#dv-a-apr"));
+      V.setAprType("extract");
+      T("★★★ dv: والمبلغُ المعتمَدُ محجوبٌ ما دام المستندُ مُقدَّماً",
+        !!pga.querySelector("#dv-a-apr") && pga.querySelector("#dv-a-apr").disabled === true &&
+        pga.querySelector("#dv-a-app").disabled === true);
+      V.setAprStatus("approved");
+      T("★★ dv: والاعتمادُ يفتحهما ويقترح تاريخَ اليوم",
+        pga.querySelector("#dv-a-apr").disabled === false &&
+        /^\d{4}-\d{2}-\d{2}$/.test(pga.querySelector("#dv-a-app").value));
+      pga.querySelector("#dv-a-apr").value = "90000";
+      V.setAprStatus("submitted");
+      T("★★★ dv: والعودةُ إلى «مُقدَّم» تُفرغ ما يخصّ الاعتماد — مستندٌ ينتظر ومعه مبلغٌ معتمَدٌ يكذب",
+        pga.querySelector("#dv-a-apr").value === "" && pga.querySelector("#dv-a-app").value === "");
+      V.cancelApr();
+      W.currentUser = prevU4;
+    }
+
+    /* التخزينُ والقواعد */
+    T("★★ dv: المجموعةُ مستثناةٌ من القاعدة العامة أوّلاً (وإلّا لم يقيّد بلوكُها شيئاً)",
+      /vaultColl\(coll\)[\s\S]{0,200}'global_approvals'/.test(RUL) &&
+      /match \/global_approvals\/\{id\}[\s\S]{0,140}allow delete:\s+if isAdmin\(\)/.test(RUL));
+    T("★ dv: وزرُّها في القائمة الجانبية ومرفقاتُها تحت `po/vault/`",
+      /nav-vault-apr-btn/.test(src) && /_upload\("apr"/.test(src));
+  }
+
   /* ── (١٣) المرفقُ يحفظ مسارَه، والمسارُ تحت البادئة القائمة `po/` ──
      مسارٌ جذريٌّ جديد قد تردّه قواعدُ Storage صامتاً (درسُ `hr-payments.js`). */
   /* ── ★★ الأرقامُ داخل جملةٍ عربية: `direction` وحدَها لا تكفي لصندوقٍ سطريّ ──

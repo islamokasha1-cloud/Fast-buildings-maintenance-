@@ -67,11 +67,11 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3135";
+var MODULE_BUILD = "v18.9.3137";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
-var PAGES        = [PAGE_DOCS, PAGE_LETTERS];
+var PAGES        = [PAGE_DOCS, PAGE_LETTERS, PAGE_APPROVALS];
 var PERM_KEY     = "docVault";
 
 var HORIZON_MONTHS = 12;     // مدى الأفق — سنةٌ تُغطّي كلَّ دوراتِ التجديد السنوية
@@ -537,6 +537,153 @@ function code128SVG(text, opt){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   المعتمدات — أرشيفُ ما قدّمناه للعميل واعتُمد (طلبُ المالك)
+
+   ── الفجوةُ التي يسدّها ──
+   المنصّةُ كلُّها تتبع **ما علينا**: طلبُ الشراء ندفعه، ومستخلصُ مقاول الباطن في
+   `contracts.js` **يأتي إلينا فنعتمده ونسدّده** («لا سدادَ قبل رفع نسخة المستخلص
+   موقّعةً من المقاول»). وليس فيها موضعٌ لِما **لنا**: خطابٌ رفعناه للمالك، أو
+   مستخلصٌ قدّمناه فاعتُمد بمبلغٍ أقلّ، أو مطالبةٌ مضى عليها شهران بلا ردّ.
+   فالاتجاهان متعاكسان ولا تداخُلَ بينهما — وهذا سجلُّ الاتجاه الآخر.
+
+   ── ولماذا سجلٌّ ثالثٌ لا تبويبٌ في الخطابات ──
+   الخطاباتُ تُسأل «أين الخطابُ رقم كذا؟»، وهذه تُسأل **«ما الذي قدّمناه ولم
+   يُعتمد بعد، ومنذ متى؟»** — سؤالُ مالٍ واقفٍ خارجَ الشركة لا سؤالُ أرشفة.
+   وشكلُه **سجلُّ أعمار** لا قائمةً مرقَّمة: ما طال انتظارُه يعلو.
+
+   ── والفارقُ يُعرض ولا يُبدّل الحالة ──
+   مستخلصٌ قُدِّم بمئةٍ واعتُمد بتسعين **معتمدٌ** لا «جزئيّ»: الحالةُ قرارُ الجهة،
+   والفارقُ رقمٌ يُقرأ بجانبها. ولو اشتُقّت الحالةُ من المبلغ لَتغيّرت تحت يد
+   المستخدم كلّما صحّح رقماً — وحالةٌ تتبدّل بلا قرارٍ تُفقد الثقةَ بالسجلّ كلِّه.
+
+   ── ولا تُحسَب هنا موازنةٌ ولا تكلفة ──
+   أرشيفٌ بمرفقاتٍ وأعمار، لا نظامَ مستحقّات. وربطُه بموازنة المشاريع قرارٌ مستقلٌّ
+   يُتَّخذ وحدَه إن أُريد (مذكورٌ في `NOTES` بنداً مؤجَّلاً).
+   ═══════════════════════════════════════════════════════════════════════════ */
+function APRS_COLL(){ return _dev() ? "global_approvals_dev" : "global_approvals"; }
+function APRS_CTR(){  return _dev() ? "meta/global_approvals_counter_dev" : "meta/global_approvals_counter"; }
+
+var PAGE_APPROVALS = "vault-approvals";
+
+/* أنواعُ المستند — `fin` تعني أنّ له مبلغاً يُقاس فارقُه. */
+var APR_TYPES = [
+  { key:"extract",  lbl:"مستخلص",         fin:true  },
+  { key:"claim",    lbl:"مطالبة مالية",   fin:true  },
+  { key:"change",   lbl:"أمر تغيير",      fin:true  },
+  { key:"letter",   lbl:"خطاب",           fin:false },
+  { key:"handover", lbl:"محضر استلام",    fin:false },
+  { key:"other",    lbl:"مستند آخر",      fin:false }
+];
+var APR_LBL = (function(){ var m={}; APR_TYPES.forEach(function(t){ m[t.key]=t.lbl; }); return m; })();
+var APR_FIN = (function(){ var m={}; APR_TYPES.forEach(function(t){ m[t.key]=!!t.fin; }); return m; })();
+
+var APR_STATUS = [
+  { key:"submitted", lbl:"مُقدَّم — بانتظار الاعتماد" },
+  { key:"approved",  lbl:"معتمد" },
+  { key:"rejected",  lbl:"مرفوض أو مُعاد للتصحيح" },
+  { key:"paid",      lbl:"معتمد ومسدَّد" }
+];
+var APR_ST_LBL = (function(){ var m={}; APR_STATUS.forEach(function(x){ m[x.key]=x.lbl; }); return m; })();
+
+var _aprs = [], _aprsUnsub = null, _aprsLoaded = false;
+var _aview = { q:"", type:"", status:"", open:null };
+var _aEdit = null;
+
+function approvals(){ return _aprs.slice(); }
+function approvalById(id){
+  for(var i=0;i<_aprs.length;i++) if(_aprs[i] && _aprs[i].id === id) return _aprs[i];
+  return null;
+}
+
+/* ════════ الدوالُّ النقيّة — يفحصها `hail-tests` بلا متصفّح ════════ */
+
+/* أهذا النوعُ ماليّ؟ نوعٌ مجهولٌ (بياناتٌ قديمةٌ أو مستوردة) يُعامَل غيرَ ماليّ:
+   إظهارُ خانتَي مبلغٍ فارغتين لمحضر استلامٍ أهونُ من إخفائهما عن مستخلص. */
+function aprIsFinancial(t){ return !!APR_FIN[String(t || "")]; }
+
+/* عمرُ الانتظار بالأيام — للمقدَّم وحدَه. المعتمَدُ والمرفوضُ والمسدَّدُ لا ينتظرون،
+   فيردّ `null`: صفرٌ هنا كان سيُقرأ «قُدِّم اليوم» وهو معنى آخرُ تماماً. */
+function aprDaysWaiting(a, today){
+  if(!a || String(a.status || "submitted") !== "submitted") return null;
+  var d = daysUntil(a.submittedAt, today);
+  return (d === null) ? null : -d;      // `daysUntil` تردّ سالباً لما مضى
+}
+
+/* الفارقُ بين المقدَّم والمعتمد — موجبٌ يعني **خصماً** من الجهة.
+   `null` لغير الماليّ أو حين لا رقمين يُقارنان: صفرٌ يُقرأ «لا خصم» وهو ادّعاء. */
+function aprVariance(a){
+  if(!a || !aprIsFinancial(a.docType)) return null;
+  var s = Number(a.amountSubmitted), p = Number(a.amountApproved);
+  if(!isFinite(s) || !isFinite(p) || !a.amountSubmitted || a.amountApproved === "" ||
+     a.amountApproved === null || a.amountApproved === undefined) return null;
+  return s - p;
+}
+
+/* الحصيلة: مبالغُ وأعدادٌ وأطولُ انتظار. المبالغُ **للماليّ وحدَه** — جمعُ محضر
+   استلامٍ في إجماليٍّ مالي يُفسد الرقم بلا أن يظهر ذلك في سطر. */
+function aprRollup(list, today){
+  var out = { total:0, submitted:0, approved:0, rejected:0, paid:0,
+              sumSubmitted:0, sumApproved:0, sumWaiting:0, variance:0, oldest:0, oldestId:"" };
+  (Array.isArray(list) ? list : []).forEach(function(a){
+    if(!a || a.archived) return;
+    out.total++;
+    var st = String(a.status || "submitted");
+    if(out[st] !== undefined) out[st]++;
+    if(!aprIsFinancial(a.docType)) return;
+    var s = Number(a.amountSubmitted) || 0, p = Number(a.amountApproved) || 0;
+    out.sumSubmitted += s;
+    if(st === "approved" || st === "paid") out.sumApproved += p;
+    if(st === "submitted"){
+      out.sumWaiting += s;
+      var w = aprDaysWaiting(a, today);
+      if(w !== null && w > out.oldest){ out.oldest = w; out.oldestId = a.id || ""; }
+    }
+    var v = aprVariance(a);
+    if(v !== null && (st === "approved" || st === "paid")) out.variance += v;
+  });
+  return out;
+}
+
+function filterApprovals(list, f, today){
+  var q = String((f && f.q) || "").trim().toLowerCase();
+  var ty = String((f && f.type) || ""), st = String((f && f.status) || "");
+  return (Array.isArray(list) ? list : []).filter(function(a){
+    if(!a || a.archived) return false;
+    if(ty && a.docType !== ty) return false;
+    if(st && String(a.status || "submitted") !== st) return false;
+    if(q){
+      var hay = [a.title, a.party, a.projectName, a.ourRef, a.theirRef, a.notes, a.id,
+                 APR_LBL[a.docType] || a.docType].join(" ").toLowerCase();
+      if(hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+}
+
+/* الترتيب: **ما ينتظر أوّلاً وأطولُه انتظاراً أعلاه** — وهو سؤالُ الشاشة نفسُه.
+   ثمّ الباقي بالأحدث تقديماً. ولولا تقديمُ المنتظِر لَغرق في وسط قائمةٍ تطول. */
+function sortApprovals(list, today){
+  var arr = (Array.isArray(list) ? list : []).slice();
+  arr.sort(function(a, b){
+    var wa = aprDaysWaiting(a, today), wb = aprDaysWaiting(b, today);
+    if(wa !== null && wb === null) return -1;
+    if(wa === null && wb !== null) return 1;
+    if(wa !== null && wb !== null && wa !== wb) return wb - wa;
+    return String(b.submittedAt || "").localeCompare(String(a.submittedAt || ""));
+  });
+  return arr;
+}
+
+/* شريحةُ عمر الانتظار — ثلاثُ مراتبَ تكفي: ما دون الشهر طبيعيّ، والشهران تذكير،
+   وما فوقهما يستحقّ مطالبةً رسمية. */
+function aprAgeBand(days){
+  if(days === null || days === undefined) return "none";
+  if(days >= 60) return "crit";
+  if(days >= 30) return "warn";
+  return "ok";
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    الحالةُ والمزامنة — `onSnapshot` مصدرُ الحقيقة اللحظيّ
    ═══════════════════════════════════════════════════════════════════════════ */
 var _docs = [], _ltrs = [];
@@ -559,6 +706,7 @@ function startSync(){
   var d = _db();
   if(!d || !canView()) return;
   startSignSync();
+  _aprSync();
   if(!_docsUnsub){
     _docsUnsub = d.collection(DOCS_COLL()).onSnapshot(function(snap){
       _docs = snap.docs.map(function(s){ var v = s.data() || {}; v.id = s.id; return v; });
@@ -576,6 +724,7 @@ function startSync(){
 }
 function stopSync(){
   stopSignSync();
+  _aprStopSync();
   try{ if(_docsUnsub) _docsUnsub(); }catch(e){}
   try{ if(_ltrsUnsub) _ltrsUnsub(); }catch(e){}
   _docsUnsub = _ltrsUnsub = null;
@@ -764,6 +913,19 @@ function injectCSS(){
 ".dv-file .rm{margin-right:auto;background:none;border:0;color:var(--muted);cursor:pointer;font-family:inherit;font-size:11px;font-weight:700}",
 ".dv-file .rm:hover{color:var(--danger)}",
 ".dv-none{font-size:11.5px;color:var(--zero);font-weight:700}",
+".dv-ap-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}",
+".dv-ap-c{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:12px 14px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:3px}",
+".dv-ap-c .l{font-size:11px;font-weight:700;color:var(--muted)}",
+".dv-ap-c .v{font-size:19px;font-weight:800;color:var(--text)}",
+".dv-ap-c .s{font-size:10.5px;color:var(--muted);font-weight:600}",
+/* الواقفُ وحدَه يتلوّن — وهو الرقمُ الذي يُتَّخذ عليه قرار */
+".dv-ap-c.wait{border-top:3px solid var(--rank5)}",
+".dv-ap-c.wait.b-warn{border-top-color:var(--warn)}",
+".dv-ap-c.wait.b-warn .v{color:var(--warn)}",
+".dv-ap-c.wait.b-crit{border-top-color:var(--danger)}",
+".dv-ap-c.wait.b-crit .v{color:var(--danger)}",
+".dv-ap-tbl{min-width:1040px}",
+".t-warn{color:var(--warn);font-weight:700}",
 ".dv-sg-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:11px 13px;border:1px solid var(--border);border-radius:11px;margin-bottom:8px;background:var(--surface2)}",
 ".dv-sg-t{font-size:13px;color:var(--text)}",
 ".dv-sg-im{display:flex;align-items:center;gap:12px;margin-right:auto}",
@@ -1991,8 +2153,221 @@ function renderLetters(){
   host.innerHTML = head + body;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   شاشةُ المعتمدات — سجلُّ أعمار
+   ═══════════════════════════════════════════════════════════════════════════ */
+function _money(n){
+  var v = Number(n);
+  if(!isFinite(v)) return "—";
+  return v.toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function _aprSync(){
+  var d = _db();
+  if(!d || _aprsUnsub || !canView()) return;
+  _aprsUnsub = d.collection(APRS_COLL()).onSnapshot(function(snap){
+    _aprs = snap.docs.map(function(x){ var v = x.data() || {}; v.id = x.id; return v; });
+    _aprsLoaded = true; _repaint(PAGE_APPROVALS);
+  }, function(e){ _aprsLoaded = true; _err = String((e && e.message) || e); _repaint(PAGE_APPROVALS); });
+}
+function _aprStopSync(){
+  try{ if(_aprsUnsub) _aprsUnsub(); }catch(e){}
+  _aprsUnsub = null; _aprs = []; _aprsLoaded = false;
+}
+
+/* ════════ شريطُ الحصيلة — أربعةُ أرقامٍ لا سبعة ════════
+   السؤالُ: كم قدّمنا · كم اعتُمد · كم خُصم · **وكم واقفٌ ومنذ متى**. والأخيرُ هو
+   الرقمُ الذي يُتَّخذ عليه قرار، فيأخذ حجمَه ولونَه بحسب أطول انتظار. */
+function _aprSummaryHTML(r){
+  var band = aprAgeBand(r.submitted ? r.oldest : null);
+  var cell = function(lbl, val, sub, cls){
+    return '<div class="dv-ap-c' + (cls ? " " + cls : "") + '">'
+      + '<span class="l">' + lbl + '</span>'
+      + '<span class="v dv-num">' + val + '</span>'
+      + (sub ? '<span class="s">' + sub + '</span>' : '') + '</div>';
+  };
+  return '<div class="dv-ap-sum">'
+    + cell("قُدِّم", _money(r.sumSubmitted), r.total + " مستنداً")
+    + cell("اعتُمد", _money(r.sumApproved), (r.approved + r.paid) + " معتمداً")
+    + cell("الفارق المخصوم", r.variance ? _money(r.variance) : "—",
+           r.variance ? "من المعتمَد" : "لا خصم")
+    + cell("بانتظار الاعتماد", _money(r.sumWaiting),
+           r.submitted ? (r.submitted + " مستنداً · أقدمُها " + r.oldest + " يوماً") : "لا شيء واقف",
+           "wait b-" + band)
+    + '</div>';
+}
+
+function _aprChip(a, today){
+  var st = String(a.status || "submitted");
+  if(st !== "submitted"){
+    return '<span class="dv-chip l-' + (st === "rejected" ? "urgent" : (st === "paid" ? "ok" : "soon")) + '">'
+      + _esc(APR_ST_LBL[st] || st) + '</span>';
+  }
+  var w = aprDaysWaiting(a, today), b = aprAgeBand(w);
+  return '<span class="dv-chip l-' + (b === "crit" ? "expired" : (b === "warn" ? "urgent" : "plan")) + '">'
+    + (w === null ? "مُقدَّم" : ("بانتظار " + w + " يوماً")) + '</span>';
+}
+
+function _aprTableHTML(list, today){
+  if(!list.length){
+    var any = _aprs.filter(function(x){ return !x.archived; }).length;
+    return '<div class="dv-wrap"><div class="dv-empty">'
+      + (any ? 'لا مستندَ يطابق الترشيح.<br><button type="button" class="dv-clear" onclick="docVault.clearAprFilters()">امسح الترشيح</button>'
+             : 'لا معتمداتٍ بعد.<br>سجّل هنا ما تُقدّمه للعميل — مستخلصاً أو مطالبةً أو خطاباً — بتاريخ تقديمه،<br>'
+               + 'فيُعرَف ما اعتُمد وما بقي واقفاً ومنذ متى، وتُحفَظ النسخةُ المعتمدة بجانبه.')
+      + '</div></div>';
+  }
+  var rows = list.map(function(a){
+    var fin = aprIsFinancial(a.docType), v = aprVariance(a);
+    return '<tr class="dv-row-act" onclick="docVault.openApr(\'' + _jq(a.id) + '\')">'
+      + '<td class="dv-num t-name">' + _esc(a.id) + '</td>'
+      + '<td class="t-name">' + _esc(a.title || "—")
+        + (a.projectName ? '<span class="t-dim"> · ' + _esc(a.projectName) + '</span>' : '') + '</td>'
+      + '<td class="t-dim">' + _esc(APR_LBL[a.docType] || "—") + '</td>'
+      + '<td class="t-dim">' + _esc(a.party || "—") + '</td>'
+      + '<td class="dv-num t-dim">' + _esc(a.submittedAt || "—") + '</td>'
+      + '<td class="dv-num">' + (fin ? _money(a.amountSubmitted) : '<span class="dv-none">—</span>') + '</td>'
+      + '<td class="dv-num">' + (fin && (a.status === "approved" || a.status === "paid")
+            ? _money(a.amountApproved) : '<span class="dv-none">—</span>') + '</td>'
+      + '<td class="dv-num">' + (v ? '<span class="t-warn">' + _money(v) + '</span>'
+            : '<span class="dv-none">—</span>') + '</td>'
+      + '<td>' + _aprChip(a, today) + '</td>'
+      + '<td class="t-dim">' + ((a.files || []).length ? _icon("paperclip", "ic-sm") : "—") + '</td>'
+      + '</tr>';
+  }).join("");
+  return '<div class="dv-wrap"><table class="dv-tbl dv-ap-tbl"><thead><tr>'
+    + '<th>الرقم</th><th>المستند</th><th>النوع</th><th>الجهة</th><th>التقديم</th>'
+    + '<th>المقدَّم</th><th>المعتمد</th><th>الفارق</th><th>الحالة</th><th>نسخة</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+function _aprFormHTML(){
+  var e = _aEdit, fin = aprIsFinancial(e.docType);
+  var types = APR_TYPES.map(function(t){
+    return '<option value="' + t.key + '"' + (e.docType === t.key ? " selected" : "") + '>' + _esc(t.lbl) + '</option>';
+  }).join("");
+  var sts = APR_STATUS.map(function(x){
+    return '<option value="' + x.key + '"' + (e.status === x.key ? " selected" : "") + '>' + _esc(x.lbl) + '</option>';
+  }).join("");
+  var done = (e.status === "approved" || e.status === "paid");
+  return '<div class="dv-panel">'
+    + '<div class="dv-panel-h">' + (e.id ? ("تعديل: " + _esc(e.title || e.id)) : "مستند مُقدَّم جديد") + '</div>'
+    + '<div class="dv-panel-s">سجّل ما قدّمتَه للعميل بتاريخ تقديمه — فيُحسَب عمرُ انتظاره تلقائياً. '
+      + 'والنسخةُ المعتمدةُ تُرفَع حين تعود.</div>'
+    + '<div class="dv-grid">'
+    + '<div class="dv-f wide"><label class="dv-l" for="dv-a-title">عنوان المستند <b>*</b></label>'
+      + '<input class="form-input" id="dv-a-title" value="' + _esc(e.title || "") + '" placeholder="المستخلص الثالث — أعمال الصيانة"></div>'
+    + '<div class="dv-f"><label class="dv-l" for="dv-a-type">النوع</label>'
+      + '<select class="form-input" id="dv-a-type" onchange="docVault.setAprType(this.value)">' + types + '</select></div>'
+    + '<div class="dv-f"><label class="dv-l" for="dv-a-party">الجهة <b>*</b></label>'
+      + '<input class="form-input" id="dv-a-party" value="' + _esc(e.party || "") + '" placeholder="وكالة الأنباء السعودية"></div>'
+    + '<div class="dv-f"><label class="dv-l" for="dv-a-proj">المشروع</label>'
+      + '<input class="form-input" id="dv-a-proj" value="' + _esc(e.projectName || "") + '" placeholder="اسم المشروع أو العقد"></div>'
+    + '<div class="dv-f"><label class="dv-l" for="dv-a-ourref">رقمنا المرجعي</label>'
+      + '<input class="form-input dv-num" id="dv-a-ourref" value="' + _esc(e.ourRef || "") + '" placeholder="LTR-2609-0004 أو رقمٌ يدويّ"></div>'
+    + '<div class="dv-f wide"><div class="dv-dates">'
+      + '<div class="dv-f"><label class="dv-l" for="dv-a-sub">تاريخ التقديم <b>*</b></label>'
+        + '<input class="form-input dv-num" type="date" id="dv-a-sub" value="' + _esc(e.submittedAt || "") + '"></div>'
+      + '<div class="dv-f"><label class="dv-l" for="dv-a-app">تاريخ الاعتماد</label>'
+        + '<input class="form-input dv-num" type="date" id="dv-a-app" value="' + _esc(e.approvedAt || "") + '"' + (done ? "" : " disabled") + '></div>'
+    + '</div></div>'
+    + '<div class="dv-f wide"><label class="dv-l" for="dv-a-status">الحالة</label>'
+      + '<select class="form-input" id="dv-a-status" onchange="docVault.setAprStatus(this.value)">' + sts + '</select></div>'
+    + (fin
+        ? '<div class="dv-f wide"><div class="dv-dates">'
+          + '<div class="dv-f"><label class="dv-l" for="dv-a-amt">المبلغ المقدَّم</label>'
+            + '<input class="form-input dv-num" type="number" step="0.01" min="0" id="dv-a-amt" value="' + _esc(e.amountSubmitted || "") + '" placeholder="0.00"></div>'
+          + '<div class="dv-f"><label class="dv-l" for="dv-a-apr">المبلغ المعتمد</label>'
+            + '<input class="form-input dv-num" type="number" step="0.01" min="0" id="dv-a-apr" value="' + _esc(e.amountApproved || "") + '"' + (done ? "" : " disabled") + ' placeholder="0.00"></div>'
+          + '</div><div class="dv-hint">الفارقُ بينهما يُعرض في السجلّ — ولا يُبدّل الحالة: الحالةُ قرارُ الجهة لا نتيجةُ طرح.</div></div>'
+        : '<div class="dv-f wide"><div class="dv-hint">' + _esc(APR_LBL[e.docType] || "هذا النوع") + ' بلا مبلغ — الخاناتُ المالية تظهر للمستخلص والمطالبة وأمر التغيير.</div></div>')
+    + '<div class="dv-f"><label class="dv-l" for="dv-a-theirref">رقمهم المرجعي</label>'
+      + '<input class="form-input" id="dv-a-theirref" value="' + _esc(e.theirRef || "") + '" placeholder="إن أعطوه رقماً"></div>'
+    + '<div class="dv-f wide"><label class="dv-l" for="dv-a-notes">ملاحظات</label>'
+      + '<textarea class="form-input" id="dv-a-notes" rows="2" placeholder="سببُ الخصم، أو ما ينتظره الاعتماد">' + _esc(e.notes || "") + '</textarea></div>'
+    + '<div class="dv-f wide"><label class="dv-l">النسخة المعتمدة والمرفقات</label>'
+      + _filesHTML(e.files, "docVault.delAprFile")
+      + '<div style="margin-top:7px"><button type="button" class="btn btn-ghost btn-sm" onclick="docVault.addAprFile()">'
+      + _icon("paperclip", "ic-sm") + ' إرفاق ملف</button></div></div>'
+    + '</div>'
+    + '<div class="dv-acts">'
+      + '<button type="button" class="btn btn-ghost" onclick="docVault.cancelApr()">إلغاء</button>'
+      + '<button type="button" class="btn btn-primary" onclick="docVault.saveApr()">' + _icon("save", "ic-sm") + ' حفظ</button>'
+    + '</div></div>';
+}
+
+function _aprCardHTML(a, today){
+  var fin = aprIsFinancial(a.docType), v = aprVariance(a);
+  var row = function(l, x){ return '<div class="dv-f"><span class="dv-l">' + l + '</span><span>' + x + '</span></div>'; };
+  return '<div class="dv-panel">'
+    + '<div class="dv-head" style="margin-bottom:10px"><div>'
+      + '<div class="dv-panel-h">' + _esc(a.title || a.id) + ' ' + _aprChip(a, today) + '</div>'
+      + '<div class="dv-panel-s dv-num" style="margin-bottom:0">' + _esc(a.id) + '</div>'
+    + '</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
+      + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.backToApr()">' + _icon("rotateCcw", "ic-sm") + ' رجوع</button>'
+      + (canEdit() ? '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.editApr(\'' + _jq(a.id) + '\')">' + _icon("edit", "ic-sm") + ' تعديل</button>' : "")
+      + (canDelete() ? '<button type="button" class="btn btn-delete btn-sm" onclick="docVault.delApr(\'' + _jq(a.id) + '\')">' + _icon("trash", "ic-sm") + '</button>' : "")
+    + '</div></div>'
+    + '<div class="dv-grid">'
+      + row("النوع", _esc(APR_LBL[a.docType] || "—"))
+      + row("الجهة", _esc(a.party || "—"))
+      + (a.projectName ? row("المشروع", _esc(a.projectName)) : "")
+      + (a.ourRef ? row("رقمنا المرجعي", '<span class="dv-num">' + _esc(a.ourRef) + '</span>') : "")
+      + (a.theirRef ? row("رقمهم المرجعي", _esc(a.theirRef)) : "")
+      + row("تاريخ التقديم", '<span class="dv-num">' + _esc(a.submittedAt || "—") + '</span>')
+      + row("تاريخ الاعتماد", '<span class="dv-num">' + _esc(a.approvedAt || "—") + '</span>')
+      + (fin ? row("المبلغ المقدَّم", '<span class="dv-num">' + _money(a.amountSubmitted) + '</span>') : "")
+      + (fin ? row("المبلغ المعتمد", '<span class="dv-num">'
+          + ((a.status === "approved" || a.status === "paid") ? _money(a.amountApproved) : "—") + '</span>') : "")
+      + (v !== null && v !== 0 ? row("الفارق المخصوم", '<span class="dv-num t-warn">' + _money(v) + '</span>') : "")
+      + (a.notes ? '<div class="dv-f wide"><span class="dv-l">ملاحظات</span><span>' + _esc(a.notes) + '</span></div>' : "")
+      + '<div class="dv-f wide"><span class="dv-l">النسخة المعتمدة والمرفقات</span>' + _filesHTML(a.files, null) + '</div>'
+    + '</div></div>';
+}
+
+function renderApprovals(){
+  var host = document.getElementById("page-" + PAGE_APPROVALS);
+  if(!host) return;
+  if(!canView()){ host.innerHTML = '<div class="dv-empty">🔒 خزانة الوثائق غير متاحة لحسابك.</div>'; return; }
+  var today = new Date();
+  var head = '<div class="dv-head"><div>'
+    + '<h2 class="dv-ttl">' + _icon("clipboardCheck") + ' خزانة الوثائق — المعتمدات</h2>'
+    + '<div class="dv-sub">ما قدّمناه للعميل: مستخلصاتٌ ومطالباتٌ وخطابات. يُرتَّب بأطول انتظارٍ أوّلاً، '
+      + 'وتُحفَظ النسخةُ المعتمدةُ بجانب كلٍّ منها.</div>'
+    + '</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + (canEdit() ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.newApr()">' + _icon("plus", "ic-sm") + ' مستند مُقدَّم</button>' : "")
+    + '</div></div>';
+
+  if(!_aprsLoaded){ host.innerHTML = head + '<div class="dv-empty">جارٍ التحميل…</div>'; return; }
+
+  var body;
+  if(_aEdit){ body = _aprFormHTML(); }
+  else if(_aview.open){
+    var a = approvalById(_aview.open);
+    body = a ? _aprCardHTML(a, today) : '<div class="dv-empty">لم يعد هذا المستند موجوداً.</div>';
+  } else {
+    var types = APR_TYPES.map(function(t){
+      return '<option value="' + t.key + '"' + (_aview.type === t.key ? " selected" : "") + '>' + _esc(t.lbl) + '</option>';
+    }).join("");
+    var sts = APR_STATUS.map(function(x){
+      return '<option value="' + x.key + '"' + (_aview.status === x.key ? " selected" : "") + '>' + _esc(x.lbl) + '</option>';
+    }).join("");
+    var dirty = _aview.q || _aview.type || _aview.status;
+    var bar = '<div class="dv-bar">'
+      + '<input class="form-input dv-search" type="search" placeholder="ابحث بالعنوان أو الجهة أو المشروع أو الرقم…"'
+      + ' value="' + _esc(_aview.q) + '" oninput="docVault.setAprFilter(\'q\',this.value)">'
+      + '<select class="form-input" onchange="docVault.setAprFilter(\'type\',this.value)"><option value="">كل الأنواع</option>' + types + '</select>'
+      + '<select class="form-input" onchange="docVault.setAprFilter(\'status\',this.value)"><option value="">كل الحالات</option>' + sts + '</select>'
+      + (dirty ? '<button type="button" class="dv-clear" onclick="docVault.clearAprFilters()">مسح الترشيح</button>' : "")
+      + '</div>';
+    var list = sortApprovals(filterApprovals(_aprs, _aview, today), today);
+    body = _aprSummaryHTML(aprRollup(_aprs, today)) + bar + _aprTableHTML(list, today);
+  }
+  host.innerHTML = head + body;
+}
+
 function _repaint(page){
-  if(page === PAGE_LETTERS){ if(_isActive(PAGE_LETTERS)) renderLetters(); return; }
+  if(page === PAGE_LETTERS){   if(_isActive(PAGE_LETTERS))   renderLetters();   return; }
+  if(page === PAGE_APPROVALS){ if(_isActive(PAGE_APPROVALS)) renderApprovals(); return; }
   if(_isActive(PAGE_DOCS)) render();
 }
 function _isActive(id){
@@ -2312,6 +2687,133 @@ function delLetter(id){
     }).catch(function(){});
 }
 
+/* ════════ أفعالُ المعتمدات ════════ */
+function setAprFilter(k, v){ _aview[k] = String(v == null ? "" : v); renderApprovals(); }
+function clearAprFilters(){ _aview.q = _aview.type = _aview.status = ""; renderApprovals(); }
+function openApr(id){ _aEdit = null; _aview.open = String(id); renderApprovals(); _top(); }
+function backToApr(){ _aEdit = null; _aview.open = null; renderApprovals(); _top(); }
+
+function newApr(){
+  if(!canEdit()){ _toast("🔒 لا صلاحية للإضافة","warn"); return; }
+  _aEdit = { title:"", docType:"extract", party:"", projectName:"", ourRef:"", theirRef:"",
+             submittedAt:new Date().toISOString().slice(0,10), approvedAt:"",
+             status:"submitted", amountSubmitted:"", amountApproved:"", notes:"", files:[] };
+  _aview.open = null; renderApprovals(); _top();
+}
+function editApr(id){
+  if(!canEdit()){ _toast("🔒 لا صلاحية للتعديل","warn"); return; }
+  var a = approvalById(id);
+  if(!a) return;
+  _aEdit = { id:a.id, title:a.title||"", docType:a.docType||"other", party:a.party||"",
+             projectName:a.projectName||"", ourRef:a.ourRef||"", theirRef:a.theirRef||"",
+             submittedAt:a.submittedAt||"", approvedAt:a.approvedAt||"",
+             status:a.status||"submitted",
+             amountSubmitted:(a.amountSubmitted === 0 || a.amountSubmitted) ? String(a.amountSubmitted) : "",
+             amountApproved:(a.amountApproved === 0 || a.amountApproved) ? String(a.amountApproved) : "",
+             notes:a.notes||"", files:Array.isArray(a.files) ? a.files.slice() : [] };
+  _aview.open = null; renderApprovals(); _top();
+}
+function cancelApr(){ _aEdit = null; renderApprovals(); }
+
+function _readAprForm(){
+  var g = function(id){ var el = document.getElementById(id); return el ? String(el.value || "").trim() : ""; };
+  _aEdit.title       = g("dv-a-title");
+  _aEdit.docType     = g("dv-a-type") || "other";
+  _aEdit.party       = g("dv-a-party");
+  _aEdit.projectName = g("dv-a-proj");
+  _aEdit.ourRef      = g("dv-a-ourref");
+  _aEdit.theirRef    = g("dv-a-theirref");
+  _aEdit.submittedAt = g("dv-a-sub");
+  _aEdit.status      = g("dv-a-status") || "submitted";
+  /* تاريخُ الاعتماد والمبلغُ المعتمَد محجوبان ما دام المستندُ مُقدَّماً — و`g` تردّ ""
+     للحقل المحجوب كما للفارغ، فلا يُقرآن إلا حين يكونان مفتوحين. وإلّا لَمُحي ما
+     كُتب فيهما بمجرّد إعادةِ الحالة إلى «مُقدَّم» لحظةً. */
+  var done = (_aEdit.status === "approved" || _aEdit.status === "paid");
+  if(done){
+    _aEdit.approvedAt     = g("dv-a-app");
+    _aEdit.amountApproved = g("dv-a-apr");
+  }
+  if(aprIsFinancial(_aEdit.docType)) _aEdit.amountSubmitted = g("dv-a-amt");
+  _aEdit.notes = g("dv-a-notes");
+}
+function setAprType(v){ if(!_aEdit) return; _readAprForm(); _aEdit.docType = String(v || "other"); renderApprovals(); }
+function setAprStatus(v){
+  if(!_aEdit) return;
+  _readAprForm();
+  _aEdit.status = String(v || "submitted");
+  /* العودةُ إلى «مُقدَّم» تُفرغ ما يخصّ الاعتماد — مستندٌ ينتظر ومعه تاريخُ اعتمادٍ
+     ومبلغٌ معتمَدٌ يكذب على قارئه. */
+  if(_aEdit.status === "submitted"){ _aEdit.approvedAt = ""; _aEdit.amountApproved = ""; }
+  else if(!_aEdit.approvedAt) _aEdit.approvedAt = new Date().toISOString().slice(0,10);
+  renderApprovals();
+}
+function addAprFile(){
+  if(!_aEdit) return;
+  _readAprForm();
+  _pickFile(function(f){
+    _toast("⏳ جارٍ الرفع…", "");
+    _upload("apr", _aEdit.id || ("new_" + Date.now()), f).then(function(rec){
+      _aEdit.files = (_aEdit.files || []).concat([rec]);
+      renderApprovals(); _toast("✅ أُرفق الملف", "success");
+    }).catch(function(e){ _toast("⚠ تعذّر الرفع: " + String((e && e.message) || e), "warn"); });
+  });
+}
+function delAprFile(i){ if(!_aEdit) return; _readAprForm(); (_aEdit.files || []).splice(i, 1); renderApprovals(); }
+
+function saveApr(){
+  if(!canEdit()){ _toast("🔒 لا صلاحية للحفظ","warn"); return; }
+  _readAprForm();
+  if(!_aEdit.title){ _toast("⚠ أدخل عنوان المستند","warn"); return; }
+  if(!_aEdit.party){ _toast("⚠ أدخل الجهة التي قُدِّم إليها","warn"); return; }
+  if(!_aEdit.submittedAt){ _toast("⚠ أدخل تاريخ التقديم — عليه يُحسب عمرُ الانتظار","warn"); return; }
+  if(_aEdit.approvedAt && _aEdit.submittedAt && _aEdit.approvedAt < _aEdit.submittedAt){
+    _toast("⚠ تاريخ الاعتماد قبل تاريخ التقديم","warn"); return;
+  }
+  var d = _db();
+  if(!d){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return; }
+  var fin = aprIsFinancial(_aEdit.docType);
+  var num = function(v){ var n = Number(v); return (v === "" || v === null || !isFinite(n)) ? "" : n; };
+  var now = new Date().toISOString(), me = _myName();
+  var body = {
+    title:_aEdit.title, docType:_aEdit.docType, party:_aEdit.party,
+    projectName:_aEdit.projectName, ourRef:_aEdit.ourRef, theirRef:_aEdit.theirRef,
+    submittedAt:_aEdit.submittedAt, approvedAt:_aEdit.approvedAt || "",
+    status:_aEdit.status,
+    /* غيرُ الماليّ لا يحمل مبلغاً أصلاً — ورقمٌ عالقٌ من نوعٍ سابقٍ يدخل الإجماليّ */
+    amountSubmitted: fin ? num(_aEdit.amountSubmitted) : "",
+    amountApproved:  fin ? num(_aEdit.amountApproved)  : "",
+    notes:_aEdit.notes, files:_aEdit.files || [], updatedAt:now, updatedBy:me
+  };
+  var was = _aEdit.id;
+  var p = was
+    ? d.collection(APRS_COLL()).doc(was).set(body, { merge:true }).then(function(){ return was; })
+    : _nextId("APR", APRS_CTR()).then(function(id){
+        body.createdAt = now; body.createdBy = me;
+        return d.collection(APRS_COLL()).doc(id).set(body).then(function(){ return id; });
+      });
+  p.then(function(id){
+    _audit(was ? "تعديل مستند معتمَد" : "تسجيل مستند مُقدَّم", id + " — " + body.title);
+    _aEdit = null; _aview.open = id; renderApprovals(); _top();
+    _toast(was ? "✅ حُفظ التعديل" : "✅ سُجّل برقم " + id, "success");
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+}
+
+function delApr(id){
+  if(!canDelete()){ _toast("🔒 الحذف من صلاحية مدير النظام","warn"); return; }
+  var a = approvalById(id);
+  if(!a) return;
+  _confirm({ title:"حذف مستند", icon:"🗑", okText:"حذف", okClass:"btn-danger",
+    msg:'سيُحذف "' + (a.title || id) + '" من سجلّ المعتمدات. المرفقاتُ المرفوعة لا تُحذف من التخزين.' })
+    .then(function(ok){
+      if(!ok) return;
+      var d = _db(); if(!d) return;
+      d.collection(APRS_COLL()).doc(id).delete().then(function(){
+        _audit("حذف مستند من المعتمدات", id + " — " + (a.title || ""));
+        _aview.open = null; renderApprovals(); _toast("✅ حُذف", "success");
+      }).catch(function(e){ _toast("⚠ تعذّر الحذف: " + String((e && e.message) || e), "warn"); });
+    }).catch(function(){});
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    التركيبُ الذاتيّ — صفحتان · مجموعةُ قائمةٍ جانبية · زرُّ البوّابة · لفُّ showPage
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -2355,7 +2857,8 @@ function injectSidebarGroup(){
   grp.style.maxHeight = "0";
 
   [{ id:"nav-vault-docs-btn",    page:PAGE_DOCS,    icon:"shield",     lbl:"السجلّات والشهادات" },
-   { id:"nav-vault-letters-btn", page:PAGE_LETTERS, icon:"scrollText", lbl:"الخطابات" }].forEach(function(b){
+   { id:"nav-vault-letters-btn", page:PAGE_LETTERS, icon:"scrollText", lbl:"الخطابات" },
+   { id:"nav-vault-apr-btn", page:PAGE_APPROVALS, icon:"clipboardCheck", lbl:"المعتمدات" }].forEach(function(b){
     var btn = document.createElement("button");
     btn.className = "sidebar-nav-btn sidebar-child";
     btn.id = b.id; btn.dataset.page = b.page;
@@ -2461,7 +2964,9 @@ function hookShowPage(){
     }catch(e){}
     document.querySelectorAll(".sidebar-nav-btn").forEach(function(b){ b.classList.toggle("active", b.dataset.page === id); });
     startSync();
-    if(id === PAGE_LETTERS) renderLetters(); else render();
+    if(id === PAGE_LETTERS) renderLetters();
+    else if(id === PAGE_APPROVALS) renderApprovals();
+    else render();
   };
   window._dvHooked = true;
 }
@@ -2504,6 +3009,15 @@ window.docVault = {
   printLetter:printLetter, letterPaperHTML:letterPaperHTML,
   openAI:openAI, closeAI:closeAI, runAI:runAI, aiPrompt:aiPrompt, aiReady:aiReady,
   setPick:setPick, pickState:pickState, _PICK_NONE:PICK_NONE, _PICK_OTHER:PICK_OTHER,
+  // المعتمدات
+  renderApprovals:renderApprovals, approvals:approvals, approvalById:approvalById,
+  setAprFilter:setAprFilter, clearAprFilters:clearAprFilters, openApr:openApr, backToApr:backToApr,
+  newApr:newApr, editApr:editApr, cancelApr:cancelApr, saveApr:saveApr, delApr:delApr,
+  setAprType:setAprType, setAprStatus:setAprStatus, addAprFile:addAprFile, delAprFile:delAprFile,
+  aprDaysWaiting:aprDaysWaiting, aprVariance:aprVariance, aprRollup:aprRollup,
+  aprIsFinancial:aprIsFinancial, aprAgeBand:aprAgeBand,
+  filterApprovals:filterApprovals, sortApprovals:sortApprovals,
+  _APR_TYPES:APR_TYPES, _APR_STATUS:APR_STATUS, _PAGE_APPROVALS:PAGE_APPROVALS,
   _PREFIX_OPTS:PREFIX_OPTS, _HONORIFIC_OPTS:HONORIFIC_OPTS,
   _DEF_PREFIX:DEF_PREFIX, _DEF_HONORIFIC:DEF_HONORIFIC, _DEF_CLOSING:DEF_CLOSING,
   // سجلُّ التواقيع
@@ -2528,10 +3042,12 @@ window.docVault = {
      والجدولُ في DOM حقيقيّ داخل `hail-tests.js`. لأنّ الحسابَ الصحيحَ الذي لا يُرسَم
      خطأٌ لا يُنذر، ولا سبيلَ لفحص الرسم بلا مصدرِ بياناتٍ سوى `onSnapshot`.
      لا يُنادى من الواجهة قطّ، ولا يكتب حرفاً في Firestore. */
-  __test_seed:function(d, l, sg){
+  __test_seed:function(d, l, sg, ap){
     _docs = Array.isArray(d) ? d.slice() : [];
     _ltrs = Array.isArray(l) ? l.slice() : [];
     if(Array.isArray(sg)){ _signs = sg.slice(); _signsLoaded = true; }
+    if(Array.isArray(ap)){ _aprs = ap.slice(); }
+    _aprsLoaded = true;
     _docsLoaded = _ltrsLoaded = true; _err = "";
   }
 };

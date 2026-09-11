@@ -728,7 +728,7 @@ const APP_COLLS = [
   "hail_assets", "hail_ppm_plans", "hail_rollups",
   "global_vendors", "global_contract_requests", "global_contracts",
   "global_contract_extracts", "global_contract_changes",
-  "global_docs", "global_letters"
+  "global_docs", "global_letters", "global_approvals"
 ];
 for (const c of APP_COLLS) {
   await check("★ يستعلم الأدمن مجموعةَ " + c,
@@ -1009,6 +1009,26 @@ await check("★ ويقرؤه كلُّ ذي دورٍ (الشاشةُ تعرض ا
 /* ولم يُكسَر ما كان: بقيّةُ مستندات meta تُكتب كما كانت */
 await check("★★ ولم تُقفَل بقيّةُ `meta` بالتبعية (الاستثناءُ على الوثيقة لا على المجموعة)",
   assertSucceeds(setDoc(doc(PROC, "meta/vault_unrelated_doc"), { x: 1 })));
+
+/* سجلُّ المعتمدات — القاعدةُ نفسُها، والاستثناءُ من العامّة يجب أن يشمله */
+const APR_C = "global_approvals";
+await seed(`${APR_C}/APR-2609-0001`, { title: "المستخلص الثالث", docType: "extract",
+  party: "وكالة الأنباء", submittedAt: "2026-08-01", status: "submitted", amountSubmitted: 100000 });
+await check("★ يُسجّل مسؤولُ المشتريات مستنداً مُقدَّماً",
+  assertSucceeds(setDoc(doc(PROC, `${APR_C}/APR-2609-0002`), {
+    title: "مطالبة", docType: "claim", party: "جهة", submittedAt: "2026-09-01", status: "submitted" })));
+await check("★ ويعتمده مديرُ المشاريع",
+  assertSucceeds(updateDoc(doc(PM, `${APR_C}/APR-2609-0001`), { status: "approved", amountApproved: 90000 })));
+await check("★★ والزائرُ والمراقبُ والمستودعُ لا يكتبون فيه",
+  assertFails(setDoc(doc(VIEWER, `${APR_C}/APR-X`), { title: "ت" })) &&
+  assertFails(setDoc(doc(OBS, `${APR_C}/APR-Y`), { title: "ت" })) &&
+  assertFails(setDoc(doc(WH, `${APR_C}/APR-Z`), { title: "ت" })));
+await check("★★★ والحذفُ للأدمن وحدَه", assertFails(deleteDoc(doc(PM, `${APR_C}/APR-2609-0001`))));
+await check("★★★ والأدمنُ يحذف", assertSucceeds(deleteDoc(doc(ADMIN, `${APR_C}/APR-2609-0001`))));
+await check("★★ ونسخةُ `_dev` محروسةٌ بالقاعدة نفسِها",
+  assertFails(setDoc(doc(VIEWER, "global_approvals_dev/APR-X"), { title: "ت" })));
+await check("★ ويُستعلَم السجلُّ لكلّ ذي دور",
+  assertSucceeds((async () => { for (const c of [ADMIN, PM, FIN, VIEWER]) await getDocs(collection(c, APR_C)); })()));
 
 /* القراءةُ واسعةٌ كبقيّة المنصّة — تُضيَّق في المرحلة ٣ مع أخواتها لا وحدَها */
 await check("★ ويقرأ كلُّ ذي دورٍ الخزانةَ (وتُستعلَم مجموعتاها فعلاً لا مستنداً مستنداً)",
