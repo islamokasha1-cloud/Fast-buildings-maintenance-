@@ -722,7 +722,20 @@ function predelivery() {
          وخريطةِ الصفحات ومربّعِ الشبكة الساكنة. ونسخُ مفتاحٍ إلى ملفٍّ ثانٍ يشقّ
          المصدرَ الواحد — وهو بالضبط ما يحرسه فحصُ «★★ pk» أدناه.
        • سطرٌ في `_permKeysForUser` يعرض الخانةَ لأدوار الوضع المركزيّ أيضاً. */
-    const IDX_CEILING = 39890;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 39890 إلى 39979 — ‏٨٩ سطراً لبابِ «المهامّ والملاحظات» من الصفحة
+       الرئيسية (v18.9ao)، **ولا سطرَ منها منطقُ الوحدة**: الوحدةُ كلُّها في
+       `staff-tasks.js` والبابُ نفسُه (زرُّه وشارتُه ومدخلُه) هناك. والأسطرُ هنا
+       ثلاثةُ مواضعَ **لا تعيش في وحدة**:
+       • `openStandaloneModule`/`exitStandaloneModule` — رابعُ أوضاع الدخول بجوار
+         `openGlobalPurchases` و`exitGlobalPurchases` و`switchProject`، تُقرأ معها
+         وتمسّ `CURRENT_PROJECT` و`currentUser` وقشرةَ التطبيق. شطرُها إلى ملفٍّ
+         يجعل أوضاعَ الدخول مصدرَين، وأكثرُ الزيادة تعليقٌ يقول لِمَ لم يُعَد استعمالُ
+         بابِ المشتريات المركزية (مقيَّدٌ بصلاحيتها ويشغّل مزاماتِها).
+       • حاويةُ `#pk-rows` في بوّابة المشاريع — الشبكةُ التي تدخلها أبوابُ الوحدات
+         المحقونة، وموضعُها المستند.
+       • سطرٌ في `showProjectPicker` ينادي `staffTasks.refreshLanding`، ومفتاحُ
+         `chevronLeft` في كتالوج `_ICON` (سهمُ الصفّ — مصدرٌ واحدٌ للأيقونات). */
+    const IDX_CEILING = 39979;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -18850,6 +18863,33 @@ function projectHubGuards() {
   const evil = PH.render([{ id: "x", name: '<img src=x onerror="alert(1)">' }, { id: "y", name: "ب" }], "").html;
   T("★★★ اسمُ المشروع مُهرَّبٌ في صفّ الاستئناف والرقاقات (اسمٌ كتبه الأدمن)",
     !/<img src=x/.test(evil) && /&lt;img/.test(evil));
+
+  /* ── (٨) تخطيطُ البوّابة: تملأ العرضَ لا عموداً واحداً (v18.9ao) ──────────
+     الشكوى: على الحاسوب والآيباد ثلثا الشاشة فارغان يميناً ويساراً، والأبوابُ
+     الأخيرةُ تنزل دون حافّتها. والحارسُ نصّيٌّ لأنّ العطبَ **غيابُ قاعدةٍ** لا خطأٌ
+     فيها: تُحذف قاعدةُ الشبكة فتعود الأبوابُ عموداً بلا خطأٍ واحدٍ في وحدة التحكّم. */
+  {
+    const cssP = path.resolve(path.dirname(IDX), "app.css");
+    const css  = fs.existsSync(cssP) ? fs.readFileSync(cssP, "utf8") : "";
+
+    T("★★ أبوابُ البوّابة شبكةٌ تتّسع أفقياً لا عمودٌ واحد",
+      /\.pk-rows\{display:grid;/.test(css) &&
+      /@media\(min-width:640px\)\{\.pk-rows\{grid-template-columns:repeat\(auto-fit,minmax\(300px,1fr\)\)\}\}/.test(css));
+
+    /* الأبوابُ المحقونة تحمل `margin:9px 0 0` في سماتها من زمن العمود — تُبطله
+       الشبكةُ بمصدرٍ واحدٍ للتباعد، والإبطالُ يشمل ما سيُحقن غداً. */
+    T("★★ والتباعدُ مصدرُه `gap` وحدَه — هوامشُ السمات المحقونة مُبطَلة",
+      /\.pk-rows > div\{margin:0!important;height:100%\}/.test(css));
+
+    T("★★ وحدُّ عرض البوّابة يتّسع على الحاسوب (٧٠٠ كان مقاسَ عمودٍ واحد)",
+      /@media\(min-width:1024px\)\{ \.project-picker-wrap\{max-width:1180px\} \}/.test(css) &&
+      /\.project-picker-wrap\{position:relative;z-index:1;width:100%;max-width:700px/.test(css));
+
+    /* الأبوابُ المحقونة تدخل الشبكةَ لأنّها تُدرَج بجوار `#global-purchases-btn-wrap`
+       وهو داخلها — فلو خرج الزرُّ الثابتُ من الحاوية خرجت معه كلُّ الأبواب. */
+    T("★★★ والزرُّ الثابتُ الذي تتعلّق به الوحداتُ داخل الشبكة (وإلا خرجت الأبوابُ المحقونةُ كلُّها)",
+      /<div class="pk-rows" id="pk-rows">[\s\S]*?id="global-purchases-btn-wrap"[\s\S]*?<\/div><!-- \/#pk-rows -->/.test(IDX_RAW));
+  }
 }
 
 function staffTasksGuards() {
@@ -19452,6 +19492,68 @@ function staffTasksGuards() {
       /^(?:(?!id="nav-staff-tasks-btn")[\s\S])*id="nav-staff-tasks-btn"(?:(?!id="nav-staff-tasks-btn")[\s\S])*$/]
   ];
   W.forEach(([n, re]) => T(n, re.test(IDX_RAW)));
+
+  /* ── (١٠) بابُ الصفحة الرئيسية (v18.9ao) ──────────────────────────────
+     المهامُّ لا تخصّ مشروعاً، وكان بابُها الوحيدُ **داخلَ** مشروع: من يدخل ليرى ما
+     كُلِّف به يختار مشروعاً لا حاجةَ له به، ولا يعلم قبلَ الاختيار أنّ ثمّةَ ما
+     ينتظره. والعطبُ هنا **غيابُ سطر** لا خطأٌ فيه: لو سقط نداءُ `refreshLanding`
+     من `showProjectPicker` لَما ظهر البابُ أصلاً — بلا خطأِ جافاسكربتٍ ينذر. */
+  {
+    const cssP = path.resolve(path.dirname(IDX), "app.css");
+    const css  = fs.existsSync(cssP) ? fs.readFileSync(cssP, "utf8") : "";
+
+    T("★★★ البابُ في البوّابة يُحقَن بنداءٍ صريحٍ من showProjectPicker (بدونه لا يظهر)",
+      /staffTasks\.refreshLanding\(\)/.test(IDX_RAW) &&
+      /refreshLanding:refreshLanding/.test(src));
+
+    T("★★ وطرازُه `.pk-row` القائم حرفاً بحرف — لا طرازَ ثانٍ يفترق",
+      /class="pk-row"/.test(src) && /class="pk-row-ic"/.test(src) &&
+      /class="pk-row-sub"/.test(src) && /class="pk-row-ch"/.test(src));
+
+    T("★★ ويسكن شبكةَ الأبواب `#pk-rows` لا جسمَ الصفحة (وإلا خرج عن الصفّ)",
+      /getElementById\("pk-rows"\)/.test(src) &&
+      /<div class="pk-rows" id="pk-rows">/.test(IDX_RAW));
+
+    /* الخروجُ لا يفكّ مستمعي الوحدات في هذه المنصّة، والشارةُ تُقرأ الآن **قبل**
+       دخول التطبيق: فلو خرج موظفٌ ودخل زميلُه في التبويب نفسِه بقيت لقطةُ الأوّل
+       حيّةً تحت اسم الثاني (`startSync` ترجع فوراً لأنّ `_unsub` موضوع). */
+    T("★★★ والمستمعُ يُعاد بناؤه إذا تبدّل المستخدمُ في التبويب نفسِه (لا عددُ غيري على شارتي)",
+      /if\(_syncFor === me\) return;/.test(src) &&
+      /if\(_unsub\) stopSync\(\);/.test(src) &&
+      /_unsub=null; _syncFor=""/.test(src));
+    /* والحارسُ `_syncFor` لا `_unsub`: أوّلُ لقطةٍ قد تصل **أثناء** `onSnapshot`
+       فتمرّ بـ`render` ⇐ `startSync` و`_unsub` لم يُسنَد بعد — فيشترك ثانيةً بلا
+       نهاية (أُمسكت فعلاً في `staff-tasks-check`: نفادُ المكدّس عند `innerHTML`). */
+    T("★★★ والاسمُ يُحجَز قبل الاشتراك لا بعده — وإلا عادت `render` تشترك بلا نهاية",
+      /_syncFor = me;\s*\n\s*var q;/.test(src));
+
+    /* الشارةُ تحتاج اشتراكاً، و`startSync` لا تُنادى إلا بعد دخول التطبيق. */
+    T("★★ والاشتراكُ يبدأ مع ظهور الباب — وإلا كانت الشارةُ صفراً دائماً",
+      /function refreshLanding\(\)\{[\s\S]*?startSync\(\);/.test(src));
+
+    /* بابُ المشتريات المركزية مقيَّدٌ بصلاحيتها؛ والمهامُّ لكلِّ ذي حساب. */
+    T("★★★ والدخولُ عبر قشرةٍ مستقلّةٍ لا عبر بابِ المشتريات المركزية (المقيَّد بصلاحيتها)",
+      /openStandaloneModule\("staff-tasks"/.test(src) &&
+      !/openGlobalPurchases/.test(src));
+
+    /* اسمُ الوحدة يُكتب في العنوان الفرعيّ بالـJS (الوضعُ عامٌّ لا يعرفه سلفاً)،
+       ولولا الاستعادةُ عند الخروج لبقي معلَّقاً في ترويسة كلِّ مشروعٍ يُفتح بعده. */
+    T("★★★ والعنوانُ الفرعيُّ في الترويسة يعود كما كان عند الخروج",
+      /subEl\.dataset\.base = subEl\.textContent;/.test(IDX_RAW) &&
+      /function exitStandaloneModule\(\)\{[\s\S]*?subEl\.textContent = subEl\.dataset\.base;/.test(IDX_RAW));
+
+    T("★★ وقشرةُ الوضع المستقلّ موجودةٌ في النواة بمدخلٍ ومخرج",
+      /function openStandaloneModule\(pageId, label\)\{/.test(IDX_RAW) &&
+      /function exitStandaloneModule\(\)\{/.test(IDX_RAW) &&
+      /classList\.add\("standalone-mode"\)/.test(IDX_RAW) &&
+      /classList\.remove\("standalone-mode"\)/.test(IDX_RAW));
+
+    /* الإخفاءُ بالأصل لا بلائحة أسماء: لائحةٌ تُنسى عند إضافة مجموعةٍ جديدة،
+       فتظهر شاشةُ مشروعٍ في وضعٍ لا مشروعَ فيه. */
+    T("★★★ والسايدبار في الوضع المستقلّ يُخفى بالأصل ويُستثنى بابُ المهامّ وحدَه",
+      /body\.standalone-mode \.sidebar-nav > \*\{display:none!important\}/.test(css) &&
+      /body\.standalone-mode #nav-staff-tasks-btn\{display:flex!important\}/.test(css));
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════
