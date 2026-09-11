@@ -745,7 +745,16 @@ function predelivery() {
        `_elapsedHByTier`. وأكثرُها تعليقٌ يقول لِمَ يُخصَم بتقويم الفئة لا بالتقويم.
        **وتوحيدُ المحرّك مع `tech-app.html` في `sla-engine.js` تغييرٌ مستقلٌّ لاحق** —
        نقلٌ حرفيٌّ بعُدّة `global-surface-check`، لا يُخلط بهذا الإصلاح. */
-    const IDX_CEILING = 40022;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 40022 إلى 40066 — ‏٤٤ سطراً لتوحيد الأولوية (v18.9zd)، و**إصلاحُ
+       فسادِ بياناتٍ** لا ميزة: نصُّ الأولوية هو القيمةُ المخزَّنة، ووُلد بإملاءين
+       (بإيموجي من PRIORITIES وبلا إيموجي من نموذج البلاغ وفلترِ التقرير المصوَّر)،
+       فكانت نافذةُ التعديل لا تجد للبلاغ القديم خياراً مطابقاً فتنتقي الأوّلَ (حرج)
+       ويُحفَظ بصمتٍ عند أيّ حفظ. والدوالُّ السبعُ الجديدة (`priorityHead`·
+       `priorityCanonical`·`prioritySame`·`slaBudgetLabel`·`priorityLabel`) **نقيّةٌ
+       يفحصها hail-tests بلا متصفّح**، وموضعُها بجوار `PRIORITIES` و`SLA_CONFIG`
+       اللذَين تشتقّ منهما — ونقلُها وحدَها يشقّ تعريفَ الأولوية مصدرَين. وأكثرُ
+       الزيادة تعليقٌ يقول لِمَ لا تُعاد خريطةُ `SLA` المحذوفة. */
+    const IDX_CEILING = 40066;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -5479,6 +5488,76 @@ function auditRound2() {
       HTML.includes("_elapsedHByTier(t.priority,new Date(t.createdAt),to,t.clockStops)"));
     T("★ zc: وعدُ الواجهة قائمٌ ومسنودٌ بالكود (تُستبعَد ⇐ خصمٌ فعليّ)",
       HTML.includes("تُستبعَد من") && HTML.includes("function clockStopMinutes(stops,from,to,useWork,cfg){"));
+  }
+
+  // ── v18.9zd — الأولوية: قيمةٌ واحدةٌ وتسميةٌ مشتقّة ────────────────────────
+  //  نصُّ الأولوية هو القيمةُ المخزَّنة، وقد وُلد بإملاءين (بإيموجي وبلا). كلُّ
+  //  مقارنةٍ حرفيةٍ بينهما كانت قُرعةً صامتة — أخطرُها أن نافذةَ التعديل تنتقي الخيارَ
+  //  الأوّلَ (حرج) لبلاغٍ لا يطابق، فيُرفَع بصمتٍ عند أيّ حفظ.
+  {
+    const _A = HTML.indexOf("const PRIORITIES = [");
+    const _B = HTML.indexOf("function responseH(t){", _A);
+    if (_A < 0 || _B < 0) { T("كتلةُ الأولوية قابلةٌ للاستخراج", false); }
+    else {
+      let P = null;
+      try {
+        P = new Function(HTML.slice(_A, _B)
+          .replace("const ALL_TECHS = Object.values(WORK_TYPES).flatMap(w=>w.techs);", "") +
+          "\nreturn {PRIORITIES,getSLA,priorityHead,priorityCanonical,prioritySame,slaBudgetLabel,priorityLabel};")();
+      } catch (e) { T("تُبنى دوالُّ الأولوية", false, String(e.message).slice(0, 120)); }
+      if (P) {
+        const OLD = { crit: "حرج (2 ساعة)", urg: "عاجل (8 ساعات)", norm: "عادي (48 ساعة)" };
+        const NEW = { crit: "حرج 🔴 (2 ساعة)", urg: "عاجل 🟡 (8 ساعات)", norm: "عادي 🟢 (48 ساعة)" };
+
+        //  الجذر: getSLA كانت خريطةً مفتاحُها النصُّ الكامل، فتسقط إلى 48 لكلّ إملاءٍ قديم
+        T("★★ zd: getSLA على «حرج» بلا إيموجي = ساعتان لا 48 (كان يسقط إلى الافتراضيّ)",
+          P.getSLA(OLD.crit) === 2 && P.getSLA(NEW.crit) === 2);
+        T("★ zd: getSLA يشتقّ من SLA_CONFIG — «عادي» 16 ساعةَ عملٍ لا 48 تقويمية",
+          P.getSLA(OLD.norm) === 16 && P.getSLA(NEW.norm) === 16);
+        T("zd: «عاجل» 8 و«روتيني» 168 بالإملاءين",
+          P.getSLA(OLD.urg) === 8 && P.getSLA(NEW.urg) === 8 && P.getSLA("روتيني 🔵 (صيانة دورية)") === 168);
+
+        //  القراءةُ المتسامحة: الإملاءان شيءٌ واحد
+        T("★★ zd: الإملاءان يُقرآن سواءً (prioritySame)",
+          P.prioritySame(OLD.norm, NEW.norm) && P.prioritySame(OLD.crit, NEW.crit) &&
+          !P.prioritySame(OLD.norm, NEW.crit));
+        T("★ zd: الكتابةُ معيارية — أيُّ إملاءٍ يُرَدُّ إلى قيمة PRIORITIES",
+          P.priorityCanonical(OLD.crit) === NEW.crit && P.priorityCanonical(OLD.norm) === NEW.norm &&
+          P.priorityCanonical(NEW.norm) === NEW.norm);
+        T("zd: قيمةٌ مجهولةٌ تُعاد كما هي بلا انهيار",
+          P.priorityCanonical("شيء غريب") === "شيء غريب" && P.priorityCanonical("") === "" &&
+          P.priorityCanonical(null) === "" && P.priorityHead(undefined) === "");
+
+        //  التسميةُ تقول ما يُقاس به فعلاً
+        T("★★ zd: تسميةُ «عادي» تقول 16 ساعةَ عملٍ لا 48 (التسميةُ لم تعد تكذب على الرقم)",
+          P.slaBudgetLabel(OLD.norm) === "16 ساعة عمل" && P.slaBudgetLabel(NEW.norm) === "16 ساعة عمل");
+        T("zd: «حرج» ساعتان و«عاجل» 8 ساعات (تثنيةٌ وجمعٌ عربيّان)",
+          P.slaBudgetLabel(NEW.crit) === "ساعتان" && P.slaBudgetLabel(NEW.urg) === "8 ساعات");
+        T("zd: «روتيني» يقول إنه مجدولٌ لا ذو مهلة (مُستبعَدٌ من قياس SLA عمداً)",
+          P.slaBudgetLabel("روتيني 🔵 (صيانة دورية)") === "صيانة دورية مجدولة");
+        T("★ zd: priorityLabel يركّب الرأسَ المعياريَّ مع المهلة الحقيقية",
+          P.priorityLabel(OLD.norm) === "عادي 🟢 (16 ساعة عمل)" &&
+          P.priorityLabel(OLD.crit) === "حرج 🔴 (ساعتان)");
+        T("zd: كلُّ قيم PRIORITIES تُنتج تسميةً بلا «—»",
+          P.PRIORITIES.every(x => P.priorityLabel(x) && !P.priorityLabel(x).includes("—")));
+      }
+    }
+    //  حرّاسُ المصدر: المواضعُ التي كانت تقارن حرفياً
+    T("★★ zd: نافذةُ التعديل تُطابق بالرأس لا بالنصّ (وإلا قُلبت الأولويةُ إلى حرجٍ بصمت)",
+      HTML.includes('prioritySame(p,t.priority)?"selected":""') &&
+      !/<option \$\{p===t\.priority\?"selected":""\}/.test(HTML));
+    T("★ zd: وخياراتُها تحمل value صريحةً (المعروضُ صار يخالف المخزَّن)",
+      /PRIORITIES\.map\(p=>`<option value="\$\{esc\(p\)\}"/.test(HTML));
+    T("★★ zd: فلترُ التقرير المصوَّر يقارن بالرأس (كان يُخرج صفراً للإملاء الآخر)",
+      HTML.includes("(!rp||prioritySame(t.priority,rp))") && !HTML.includes("(!rp||t.priority===rp)"));
+    T("★★ zd: قوائمُ الأولوية تحمل القيمةَ المعيارية — لا خيارَ بلا value",
+      !/<option>حرج \(2 ساعة\)<\/option>/.test(HTML) && !/<option>عادي \(48 ساعة\)<\/option>/.test(HTML) &&
+      (HTML.match(/<option value="عادي 🟢 \(48 ساعة\)">/g) || []).length >= 2);
+    T("★ zd: بطاقةُ التفاصيل تعرض المهلةَ من SLA_CONFIG لا رقمَ getSLA الخام",
+      HTML.includes("<bdi>${esc(slaBudgetLabel(t.priority))}</bdi>") &&
+      !HTML.includes("${getSLA(t.priority)} ساعة"));
+    T("★★ zd: زالت خريطةُ SLA المفاتيحُ فيها النصُّ الكامل (فخُّ العودة)",
+      !/^const SLA = \{/m.test(HTML) && !/\bSLA\[p\]\|\|48/.test(HTML));
   }
 
   // ── #3 Excel: التصدير يمرّ على المفلتر لا purchases كاملاً ──
