@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3144";
+var MODULE_BUILD = "v18.9.3148";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -188,6 +188,168 @@ function _userByLogin(login){
 /* أللمستخدم رقمُ واتساب مفعَّل؟ الشرطان معاً كما يقرؤهما الخادم حرفياً
    (`u.phone && u.waOptIn === true`) — فلا تَعِد الشاشةُ بوصولٍ يردّه الخادم. */
 function _hasWa(u){ return !!(u && u.phone && u.waOptIn === true); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   قائمةُ قرّاء الخزانة — تسطيحُ المنح ليقرأه الخادم  (طلبُ المالك: «ضيّق القراءة»)
+
+   ── المشكلة ──
+   قاعدةُ القراءة كانت `allow read: if hasRole()`: **أيُّ حسابٍ يعمل في المنصّة يقرأ
+   وثائقَ الشركة وخطاباتِها ومعتمداتِها من خارج التطبيق** ولو لم يُمنح المفتاح.
+   والواجهةُ تُخفي القسمَ ولا تمنع الاستعلام.
+
+   ── ولماذا لم يُضيَّق بالدور ──
+   خانةُ `docVault` تُعرض **لكلّ الأدوار** (طلبُ المالك: تُمنح لأشخاصٍ بعينهم في
+   الوضعين). فقائمةُ أدوارٍ إمّا تُدخل مديرَ مشاريعَ لم يُمنح، أو تُخرج مشرفاً أو
+   زائراً مُنح — وكلاهما خطأ. جُرِّب على المحاكي فسقط، والقياسُ محفوظٌ في
+   `rules-check.mjs §15`.
+
+   ── الحلّ: تسطيحُ المنح ──
+   الخادمُ لا يرى `permissions`؛ لا يصله من التوكِن إلا `role` و`u` (اسمُ الدخول).
+   والمستخدمون **عناصرُ مصفوفةٍ من خرائط** في `meta/users`، وقواعدُ Firestore لا
+   تبحث في مصفوفةٍ عن عنصرٍ حقلُه كذا. فتُسطَّح أسماءُ الممنوحين في مستندٍ واحدٍ
+   يقرؤه الخادم: `meta/vault_readers` = `{ users: [...] }` — على شكل
+   `meta/manual_projects` نفسِه، وكتابتُه للأدمن وحدَه بقاعدةٍ على الخادم (من يكتبها
+   يمنح نفسَه القراءة).
+
+   ── والمزامنةُ عند المنبع ──
+   `saveUsers()` في النواة هي **المسار الوحيد** الذي تُحفظ به المستخدمون. فتُنادى
+   المزامنةُ بعدها بسطرٍ واحد، وتُصحَّح **أسماءُ المحفوظين وحدَهم** — فحفظُ مستخدمي
+   مشروعٍ لا يمحو ممنوحي مشروعٍ آخر (لكلّ مشروعٍ مستندُ مستخدمين مستقلّ).
+
+   ── والغيابُ يعني «كما كان» لا «مقفول» ──
+   ما دام المستندُ غيرَ موجودٍ تبقى القاعدةُ تسمح لكلّ ذي دورٍ كما اليوم. فنشرُ
+   القواعد قبل بناء القائمة **لا يحجب الخزانةَ عن أصحابها** — وذاك عطلٌ أسوأُ من
+   الثغرة. ولئلّا يُظنَّ التضييقُ مفعَّلاً وهو ليس كذلك، تُعلن الشاشةُ للأدمن أنّه
+   **غيرُ مفعَّل** وتضع زرَّ تفعيله.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* مستندٌ واحدٌ للبيئتين: المنحُ للأشخاص أنفسِهم، والقاعدةُ تشير إليه بلا `_dev`. */
+function READERS_DOC(){ return "meta/vault_readers"; }
+
+var _readers = null;        // null = لم يُقرأ بعد · false = غيرُ موجود · مصفوفة = موجود
+
+/* أممنوحٌ هذا المستخدمُ الخزانةَ؟ **نفسُ قراءة `canView` حرفياً** — لكن لمستخدمٍ
+   يُمرَّر، لا للحاليّ. وقائمةٌ تُبنى بقاعدةٍ غيرِ قاعدة الشاشة تحجب مَن يراها. */
+function grantsVault(u){
+  if(!u || !u.user) return false;
+  if(u.role === "admin") return true;
+  try{ if(typeof _permOn === "function") return _permOn(u.permissions, PERM_KEY, u) === true; }catch(e){}
+  return !!(u.permissions && u.permissions[PERM_KEY] === true);
+}
+
+/* الدمجُ النقيّ — يُفحَص بلا متصفّح.
+   `touched` = أسماءُ الدخول التي شملها الحفظُ الآن، وهي وحدَها التي يجوز نزعُها؛
+   وما عداها يبقى كما هو، فلا يمحو حفظُ مشروعٍ ممنوحي مشروعٍ آخر. */
+function mergeReaders(current, saved){
+  var cur = Array.isArray(current) ? current.map(String) : [];
+  var arr = Array.isArray(saved) ? saved : [];
+  var touched = {}, granted = [];
+  arr.forEach(function(u){
+    if(!u || !u.user) return;
+    touched[String(u.user)] = 1;
+    if(grantsVault(u)) granted.push(String(u.user));
+  });
+  var out = cur.filter(function(n){ return !touched[n]; }).concat(granted);
+  var seen = {};
+  return out.filter(function(n){ if(!n || seen[n]) return false; seen[n] = 1; return true; })
+            .sort(function(a, b){ return a.localeCompare(b, "ar"); });
+}
+
+function _sameList(a, b){
+  if(!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  var x = a.slice().sort(), y = b.slice().sort();
+  for(var i = 0; i < x.length; i++) if(String(x[i]) !== String(y[i])) return false;
+  return true;
+}
+
+/* تُنادى من `saveUsers()` بعد كلّ حفظ. صامتةٌ لا تُعطّل الحفظَ إن تعذّرت: منعُ حفظِ
+   مستخدمٍ لأنّ قائمةً جانبيةً لم تُكتب عطلٌ أكبرُ من تأخّرِ مزامنة. */
+function syncReaders(saved){
+  var d = _db();
+  if(!d) return Promise.resolve(false);
+  var me = _me();
+  if(!me || me.role !== "admin") return Promise.resolve(false);   // الكتابةُ للأدمن بالقاعدة
+  var ref = d.doc(READERS_DOC());
+  return ref.get().then(function(snap){
+    var cur = (snap.exists && Array.isArray((snap.data() || {}).users))
+      ? snap.data().users.map(String) : [];
+    var next = mergeReaders(cur, Array.isArray(saved) ? saved : _users());
+    if(snap.exists && _sameList(cur, next)){ _readers = next; return false; }
+    return ref.set({ users:next, updatedAt:new Date().toISOString(), updatedBy:_myName() })
+      .then(function(){
+        _readers = next;
+        _audit("تحديث قائمة قرّاء الخزانة", next.length + " مستخدماً");
+        _repaint(PAGE_DOCS);
+        return true;
+      });
+  }).catch(function(){ return false; });
+}
+
+/* التفعيلُ الأوّل: تُجمَع أسماءُ الممنوحين من **كلّ** مستندات المستخدمين — المركزيِّ
+   ومستندِ كلّ مشروع — فالقائمةُ تُبنى كاملةً لا من سياق الشاشة وحدَه. (نمطُ
+   `_loadAllUsersForLogin` في النواة.) */
+function enableReaderLock(){
+  var d = _db(), me = _me();
+  if(!d) return Promise.resolve(false);
+  if(!me || me.role !== "admin"){ _toast("🔒 التفعيل من صلاحية مدير النظام", "warn"); return Promise.resolve(false); }
+  _toast("⏳ جارٍ جمع الممنوحين من كلّ المشاريع…", "");
+  var suffix = _dev() ? "_users_dev" : "_users";
+  return d.doc(_dev() ? "meta/projects_dev" : "meta/projects").get()
+    .then(function(ps){
+      var projs = (ps.exists && Array.isArray((ps.data() || {}).projects)) ? ps.data().projects : [];
+      var refs = projs.map(function(p){ return d.doc("meta/" + p.id + suffix).get().catch(function(){ return null; }); });
+      refs.push(d.doc(_dev() ? "meta/users_dev" : "meta/users").get().catch(function(){ return null; }));
+      return Promise.all(refs);
+    })
+    .then(function(snaps){
+      var all = [];
+      snaps.forEach(function(s){
+        if(!s || !s.exists) return;
+        var u = (s.data() || {}).users;
+        if(Array.isArray(u)) all = all.concat(u);
+      });
+      /* والمستخدمون الحاضرون في الذاكرة أيضاً — مشروعٌ لم يُدرَج في `meta/projects`
+         لا يُسقط ممنوحيه. */
+      all = all.concat(_users());
+      var next = mergeReaders([], all);
+      return d.doc(READERS_DOC()).set({ users:next, updatedAt:new Date().toISOString(), updatedBy:_myName() })
+        .then(function(){
+          _readers = next;
+          _audit("تفعيل قفل قراءة الخزانة", next.length + " مستخدماً ممنوحاً");
+          _toast("✅ فُعِّل التضييق — " + next.length + " مستخدماً في القائمة", "success");
+          _repaint(PAGE_DOCS); _repaint(PAGE_LETTERS); _repaint(PAGE_APPROVALS);
+          return true;
+        });
+    })
+    .catch(function(e){
+      _toast("⚠ تعذّر التفعيل: " + String((e && e.message) || e), "warn");
+      return false;
+    });
+}
+
+function _readReaders(){
+  var d = _db();
+  if(!d || _readers !== null) return;
+  d.doc(READERS_DOC()).get().then(function(s){
+    _readers = (s.exists && Array.isArray((s.data() || {}).users)) ? s.data().users.map(String) : false;
+    _repaint(PAGE_DOCS); _repaint(PAGE_LETTERS); _repaint(PAGE_APPROVALS);
+  }).catch(function(){ _readers = null; });
+}
+
+/* بلاغُ «التضييقُ غيرُ مفعَّل» — للأدمن وحدَه، وما دامت القائمةُ غيرَ موجودة.
+   وإعلانُه شرطٌ لا زينة: قاعدةٌ تُنشَر ولا تُفعَّل تُوهم بحمايةٍ لا وجودَ لها. */
+function _readerLockNoticeHTML(){
+  var me = _me();
+  if(!me || me.role !== "admin") return "";
+  if(_readers !== false) return "";
+  return '<div class="dv-note-link">' + _icon("shield", "ic-sm")
+    + '<span><b>قراءةُ الخزانة غيرُ مضيَّقة بعد.</b> اليومَ يستطيع أيُّ حسابٍ في المنصّة '
+    + 'قراءةَ بياناتها من خارج التطبيق ولو لم تمنحه المفتاح. والتفعيلُ يبني قائمةَ '
+    + 'الممنوحين على الخادم فيُردُّ مَن سواهم.</span>'
+    + '<button type="button" class="dv-clear" onclick="docVault.enableReaderLock()">فعّل التضييق الآن</button>'
+    + '</div>';
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    طبقةُ المشروع — تصنيفُ الخزانة، ومِلَفُّ كلّ مشروع  (طلبُ المالك)
@@ -1102,6 +1264,7 @@ function startSync(){
   if(!d || !canView()) return;
   startSignSync();
   _aprSync();
+  _readReaders();
   if(!_docsUnsub){
     _docsUnsub = d.collection(DOCS_COLL()).onSnapshot(function(snap){
       _docs = snap.docs.map(function(s){ var v = s.data() || {}; v.id = s.id; return v; });
@@ -1673,8 +1836,17 @@ function render(){
     + '</div></div>';
 
   if(_err){
-    host.innerHTML = head + '<div class="dv-err">تعذّر تحميل الخزانة: ' + _esc(_err)
-      + ' <button type="button" class="dv-clear" onclick="docVault.retry()">أعد المحاولة</button></div>';
+    /* المنعُ من الخادم ليس عطلاً يُعاد المحاولةُ فيه — هو جواب. وعرضُ نصِّ Firestore
+       الخام («Missing or insufficient permissions») يدفع المستخدمَ إلى تكرار
+       المحاولة بلا طائل، ويُخفي عن الأدمن أنّ السببَ قائمةٌ ينقصها اسم. */
+    var denied = /permission|insufficient|PERMISSION_DENIED/i.test(_err);
+    host.innerHTML = head + '<div class="dv-err">'
+      + (denied
+          ? '🔒 حسابُك غيرُ مُدرَجٍ في قرّاء الخزانة على الخادم. يضيفك مديرُ النظام '
+            + 'بمنحك صلاحية «خزانة الوثائق» ثمّ حفظ المستخدم.'
+          : 'تعذّر تحميل الخزانة: ' + _esc(_err)
+            + ' <button type="button" class="dv-clear" onclick="docVault.retry()">أعد المحاولة</button>')
+      + '</div>';
     return;
   }
   if(!_docsLoaded){ host.innerHTML = head + '<div class="dv-empty">جارٍ تحميل الخزانة…</div>'; return; }
@@ -1685,12 +1857,12 @@ function render(){
     var d = docById(_open);
     body = d ? _cardHTML(d, today) : '<div class="dv-empty">لم تعد هذه الوثيقة موجودة.</div>';
   } else {
-    _view.proj = _seedProj(_view.proj);
+    _view.proj = _seedProjDocs(_view.proj);
     /* الأفقُ يتبع المُرشِّحَ — سؤالُه «متى يتزاحم ما أنظر إليه؟» لا «كم في الخزانة».
        والتنبيهاتُ **لا تتبعه**: تلك تُحسَب في `scanAndAlert` على المرئيّ كلِّه. */
     var vis  = _visDocs();
     var list = sortDocs(filterDocs(vis, _view, today), today);
-    body = _unlinkedNoticeHTML(vis, "setFilterProj", _view.proj) + _horizonHTML(filterDocs(vis, { proj:_view.proj }, today), today)
+    body = _readerLockNoticeHTML() + _unlinkedNoticeHTML(vis, "setFilterProj", _view.proj) + _horizonHTML(filterDocs(vis, { proj:_view.proj }, today), today)
          + _filterBarHTML() + _tableHTML(list, today, _view.proj);
   }
   host.innerHTML = head + body;
@@ -2574,7 +2746,7 @@ function renderLetters(){
     var list = filterLetters(_lvis, _lview).sort(function(a, b){
       return String(b.letterDate || b.createdAt || "").localeCompare(String(a.letterDate || a.createdAt || ""));
     });
-    body = _unlinkedNoticeHTML(_lvis, "setLetterProj", _lview.proj) + tabs + bar + _letterTableHTML(list, _lview.proj);
+    body = _readerLockNoticeHTML() + _unlinkedNoticeHTML(_lvis, "setLetterProj", _lview.proj) + tabs + bar + _letterTableHTML(list, _lview.proj);
   }
   host.innerHTML = head + body;
 }
@@ -2790,7 +2962,7 @@ function renderApprovals(){
     var list = sortApprovals(filterApprovals(_avis, _aview, today), today);
     /* الحصيلةُ تتبع المُرشِّح: «كم مالٌ واقفٌ» سؤالٌ يُسأل عن مشروعٍ بعينه كما يُسأل
        عن الشركة كلِّها — ورقمُ الشركة فوق جدولِ مشروعٍ واحدٍ يُقرأ على أنّه رقمُه. */
-    body = _unlinkedNoticeHTML(_avis, "setAprProj", _aview.proj)
+    body = _readerLockNoticeHTML() + _unlinkedNoticeHTML(_avis, "setAprProj", _aview.proj)
          + _aprSummaryHTML(aprRollup(filterApprovals(_avis, { proj:_aview.proj }, today), today))
          + bar + _aprTableHTML(list, today, _aview.proj);
   }
@@ -2820,6 +2992,14 @@ function pickMonth(ym){ _view.ym = (_view.ym === ym) ? "" : String(ym); _view.le
 /* اشتقاقُ افتراضِ المُرشِّح من المشروع المفتوح — **مرّةً واحدةً لكلّ شاشة**.
    `null` وحدَها تُشتقّ؛ و`""` اختيارٌ صريحٌ من المستخدم («كل المشاريع») يُحترَم. */
 function _seedProj(v){ return (v === null || v === undefined) ? _curProjId() : String(v); }
+/* **وشاشةُ السجلّات والشهادات تُستثنى من هذا الافتراض.** أغلبُ ما فيها وثائقُ
+   شركةٍ نطاقُها `company` (سجلٌّ · زكاةٌ · تأمينات) — لا مشروعَ لها. فلو فُتحت على
+   المشروع المفتوح لَظهرت **فارغةً** لمن دخل من داخل مشروع: «لا وثيقة تطابق
+   الترشيح» فوق خزانةٍ مليئة. وشاشةٌ تبدو فارغةً وهي عامرةٌ أسوأُ من ترشيحٍ عريض.
+   (أُمسكت بالعين في لقطةٍ من متصفّحٍ حقيقيّ قبل الاعتماد.)
+   والخطاباتُ والمعتمداتُ عكسُها: تُكتب من داخل المشروع ولمشروع، فافتراضُها هو
+   المفتوح — كما هو افتراضُ نموذجِ إنشائها. */
+function _seedProjDocs(v){ return (v === null || v === undefined) ? FILTER_ALL : String(v); }
 
 /* افتراضُ **النموذج الجديد** يختلف عن افتراض المُرشِّح، لأنّ الواقعَ يختلف:
    وثائقُ الخزانة أغلبُها وثائقُ شركةٍ (سجلٌّ · زكاةٌ · تأمينات) فافتراضُها الشركة
@@ -2861,7 +3041,7 @@ function setLetterProj(v){ _lview.proj = String(v || ""); renderLetters(); }
 function clearLetterFilters(){ _lview.q = ""; _lview.proj = _curProjId(); renderLetters(); }
 function setAprProj(v){ _aview.proj = String(v || ""); renderApprovals(); }
 
-function clearFilters(){ _view = { q:"", type:"", level:"", ym:"", proj:_curProjId() }; render(); }
+function clearFilters(){ _view = { q:"", type:"", level:"", ym:"", proj:FILTER_ALL }; render(); }
 function open(id){ _open = String(id); _edit = null; _renew = null; render(); _top(); }
 function backToList(){ _open = null; _renew = null; render(); _top(); }
 function _top(){ try{ (window._scrollAppToTop || function(){ window.scrollTo(0, 0); })(); }catch(e){} }
@@ -3666,6 +3846,8 @@ window.docVault = {
   _PAGE_DOCS:PAGE_DOCS, _PAGE_LETTERS:PAGE_LETTERS, _PAGE_FILE:PAGE_FILE,
   _PAGES:PAGES, _HORIZON_MONTHS:HORIZON_MONTHS,
   /* ══ طبقةُ المشروع — نقيّةٌ تُفحَص بلا متصفّح ══ */
+  syncReaders:syncReaders, enableReaderLock:enableReaderLock,
+  mergeReaders:mergeReaders, grantsVault:grantsVault, _READERS_DOC:READERS_DOC,
   projRef:projRef, projLabel:projLabel, projKey:projKey, inProject:inProject,
   visibleTo:visibleTo, visibleList:visibleList, normalizeProjectPick:normalizeProjectPick,
   allowedProjectIds:allowedProjectIds,
@@ -3688,6 +3870,11 @@ window.docVault = {
     if(Array.isArray(ap)){ _aprs = ap.slice(); }
     _aprsLoaded = true;
     _docsLoaded = _ltrsLoaded = true; _err = "";
+    /* وتُعاد المُرشِّحاتُ إلى حالِ **ما قبل الاشتقاق** (`null`) لا إلى "" — فالفرقُ
+       بينهما هو بيتُ القصيد: `null` تُشتقّ من المشروع المفتوح (أو من «الكلّ» في
+       شاشة السجلّات)، و"" اختيارٌ صريحٌ من المستخدم. وفحصٌ يزرع بياناتٍ ثمّ يقيس
+       على مُرشِّحٍ خلّفه فحصٌ قبله لا يقيس الافتراضَ أصلاً. */
+    _view.proj = null; _lview.proj = null; _aview.proj = null; _fview.proj = null;
   }
 };
 

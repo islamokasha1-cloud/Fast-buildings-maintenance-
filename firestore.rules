@@ -342,8 +342,10 @@ service cloud.firestore {
          و`list` لاستعلام مجموعة. وفي الـ`list` لا مستندَ بعدُ، فمقاطعُ المسار
          غيرُ محسومة، وأيُّ شرطٍ عليها يسقط. الكتابةُ لا تُصاب بهذا (لا `list` فيها)
          ولذلك عملت `ctrLocked(document[0])` سنواتٍ بلا أثر.
-         ولإخراج مجموعةٍ من القراءة: بلوكٌ مستقلٌّ لها، لا شرطٌ في العامة. */
-      allow read:  if hasRole();
+         ولإخراج مجموعةٍ من القراءة: **تُنقَل القراءةُ إلى المطابقة ذاتِ المقطعين
+         أدناه** — `coll` فيها محسومٌ وقتَ الـ`list`، فالشرطُ عليها يعمل. ولا يبقى
+         هنا إلّا الكتابة. (مقاسٌ على المحاكي: `rules-check.mjs` يُجري `list` على
+         كلّ مجموعةٍ حيّةٍ في النظام بدورِ مشرفٍ بعد التضييق.) */
       allow write: if hasRole() && !isViewer() && !ctrLocked(document[0])
                       && !isUsersDoc(document[0], document[1])
                       && !isSubstDoc(document[0], document[1])
@@ -352,7 +354,23 @@ service cloud.firestore {
                       && !stColl(document[0])
                       && !isAuditColl(document[0])
                       && !vaultColl(document[0])
-                      && !isVaultSignDoc(document[0], document[1]);
+                      && !isVaultSignDoc(document[0], document[1])
+                      && !isVaultReadersDoc(document[0], document[1]);
+    }
+
+    /* ══ القراءةُ العامة — بمقطعين لا بوايلدكاردَ عوديّ ══
+       هنا وحدَه يجوز الشرطُ على اسم المجموعة: `{coll}` مقطعٌ **محسومٌ** حتى في
+       `list` (الاستعلامُ على `/global_docs` يحسم `coll` ويترك `docId` وحدَه
+       مفتوحاً)، بخلاف `{document=**}` الذي لا تُحسم مقاطعُه فيسقط أيُّ شرطٍ عليها
+       ومعه استعلامُ النظام كلِّه — وهي حادثةُ `v18.9.2635` حرفياً.
+       ⛔ ولا تُكتب `{rest=**}` لالتقاط المجموعات الفرعية: الوايلدكارد العوديُّ
+       يطابق **صفرَ مقاطعَ أيضاً**، فيلتقط مستندَ الجذر نفسَه ويُعيد فتحَ ما أُغلق
+       (وقعت في التجربة قبل الاعتماد). فالعمقُ يُكتب صريحاً. */
+    match /{coll}/{docId} {
+      allow read: if hasRole() && !vaultColl(coll);
+    }
+    match /{coll}/{docId}/{sub}/{subId} {
+      allow read: if hasRole();
     }
 
     // ═══════════ إضافات تطبيق الفنيين (مصادقة مجهولة، مرحلة اختبار) ═══════════
@@ -470,27 +488,70 @@ service cloud.firestore {
        مفردةً تفترق عن أخواتها فتنكسر شاشتُها وحدَها). والكتابةُ **مقصورةٌ بالدور**:
        الأدمنُ ومَن يمسك الشهاداتِ والخطاباتِ فعلاً. والزائرُ والمراقبُ والفنيّ مردودون
        — وهم مَن قد يُمنح المفتاحَ في الواجهة اطّلاعاً، فلا يفتح له المفتاحُ كتابةً. */
+    /* ═══════════ قراءةُ الخزانة — بقائمةِ أشخاصٍ لا بقائمةِ أدوار ═══════════
+       الواجهةُ تمنح `permissions.docVault` **لشخصٍ بعينه**، والخادمُ لا يرى
+       `permissions`: لا يصله من التوكِن إلا `role` و`u` (اسمُ الدخول). ومستخدمو
+       المنصّة **عناصرُ مصفوفةٍ من خرائط** داخل `meta/users`، وقواعدُ Firestore لا
+       تستطيع البحثَ في مصفوفةٍ عن العنصر الذي حقلُه كذا — فلا سبيلَ للخادم أن يقرأ
+       المنحَ من مكانه.
+       ولذلك تُسطَّح أسماءُ الممنوحين في مستندٍ واحدٍ يستطيع الخادمُ قراءتَه:
+       `meta/vault_readers` = `{ users: [أسماءُ الدخول] }` — على شكل
+       `meta/manual_projects` نفسِه. وتصونه الواجهةُ عند كلّ حفظِ مستخدم.
+
+       **والتضييقُ بالدور جُرِّب ورُفض** (مقاسٌ على المحاكي في `rules-check.mjs`):
+       خانةُ `docVault` تُعرض **لكلّ الأدوار**، فقائمةُ أدوارٍ إمّا تُدخل مديرَ
+       مشاريعَ لم يُمنح، أو تُخرج مشرفاً ممنوحاً — وكلاهما خطأ. والقائمةُ بالأشخاص
+       تطابق المنحَ حرفاً بحرف.
+
+       **والغيابُ يعني «كما كان»:** ما دام المستندُ غيرَ موجودٍ تبقى القراءةُ لكلّ
+       ذي دورٍ كما هي اليوم. فنشرُ القواعد قبل إنشاء القائمة **لا يقفل البابَ على
+       أحد** — وهو المقصود: قفلٌ يسبق قائمتَه يحجب الخزانةَ عن أصحابها. والوحدةُ
+       تُنبّه الأدمنَ في الشاشة ما دام التضييقُ غيرَ مفعَّل، فلا يُظنّ مفعَّلاً وهو
+       ليس كذلك. وحذفُ المستند للأدمن وحدَه — وهو يقرأ أصلاً. */
+    function vaultReadersDoc() {
+      return /databases/$(database)/documents/meta/vault_readers;
+    }
+    /* ⚠ اسمُ الدخول يُقرأ بـ`get('u','')` لا بالنقطة — **درسُ `v18.9.3144`**:
+       الوصولُ المباشرُ إلى ادّعاءٍ غائبٍ عن التوكِن خطأُ تقييمٍ لا `false`. وتوكِنٌ
+       قديمٌ بلا `u` موجودٌ فعلاً (سياقُ `SUP_AR` في `rules-check` مبنيٌّ عليه)،
+       فالنتيجةُ هي هي — يُردّ — لكن بخطأٍ يُسجَّل في `Rules metrics` ويسري تحت أيّ
+       نفيٍ يُضاف لاحقاً. و`vaultUser()` تردّ `''` فلا تطابق اسماً في القائمة. */
+    function vaultUser() {
+      return request.auth != null ? request.auth.token.get('u', '') : '';
+    }
+    function vaultReadOk() {
+      return isAdmin()
+        || (hasRole() && !exists(vaultReadersDoc()))
+        || (hasRole() && vaultUser() != '' && vaultUser() in get(vaultReadersDoc()).data.users);
+    }
+    function isVaultReadersDoc(coll, doc) {
+      return coll == 'meta' && doc == 'vault_readers';
+    }
+    match /meta/{doc} {
+      allow write: if isAdmin() && doc == 'vault_readers';
+    }
+
     function vaultWriteOk() {
       return anyRole(['admin', 'project_manager', 'ceo', 'finance',
                       'procurement_officer', 'hr_officer', 'hr_manager']);
     }
     match /global_docs/{id} {
-      allow read:         if hasRole();
+      allow read:         if vaultReadOk();
       allow create, update: if vaultWriteOk();
       allow delete:       if isAdmin();
     }
     match /global_docs_dev/{id} {
-      allow read:         if hasRole();
+      allow read:         if vaultReadOk();
       allow create, update: if vaultWriteOk();
       allow delete:       if isAdmin();
     }
     match /global_letters/{id} {
-      allow read:         if hasRole();
+      allow read:         if vaultReadOk();
       allow create, update: if vaultWriteOk();
       allow delete:       if isAdmin();
     }
     match /global_letters_dev/{id} {
-      allow read:         if hasRole();
+      allow read:         if vaultReadOk();
       allow create, update: if vaultWriteOk();
       allow delete:       if isAdmin();
     }
@@ -498,12 +559,12 @@ service cloud.firestore {
        لمستخلصات `global_contract_extracts` (تلك من المقاول إلينا)، فلا تداخُل.
        والقاعدةُ نفسُها: قراءةٌ لكلّ ذي دور، وكتابةٌ بالدور، وحذفٌ للأدمن وحدَه. */
     match /global_approvals/{id} {
-      allow read:         if hasRole();
+      allow read:         if vaultReadOk();
       allow create, update: if vaultWriteOk();
       allow delete:       if isAdmin();
     }
     match /global_approvals_dev/{id} {
-      allow read:         if hasRole();
+      allow read:         if vaultReadOk();
       allow create, update: if vaultWriteOk();
       allow delete:       if isAdmin();
     }
