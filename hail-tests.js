@@ -17725,6 +17725,122 @@ function docVaultGuards() {
     W.USERS = prevU;
   }
 
+
+  /* ── (١٥) ★★ الباركود والورقةُ الرسمية ──
+     طلبُ المالك: «احتاج يكون الخطاب او النموذج علي ورق الشركة مثل العقود
+     والمستخلصات والخطاب الصادر يكون له باركود مع رقم الخطاب».
+
+     وأقوى ما يُحرَس هنا **أن الباركودَ يُقرأ فعلاً**: جدولُ Code128 مئةٌ وسبعةُ
+     أنماط، وخطأُ رقمٍ واحدٍ فيه يُنتج أعمدةً تبدو سليمةً بالعين **ولا يقرؤها ماسحٌ
+     أبداً** — عطبٌ لا يظهر إلا يومَ يُمسَح خطابٌ في أرشيف جهةٍ حكومية. فالحارسُ
+     **يفكّ الترميزَ ويُعيده نصّاً** لا يكتفي بمطابقة سلسلة. */
+  {
+    /* متّجهُ اختبارٍ معياريّ منشور: Code128-B للحرف «A» */
+    T("★★ dv: ترميزُ Code128-B يطابق المتّجهَ المعياريَّ للحرف A",
+      V._code128Bits("A") === "11010010000" + "10100011000" + "10001011000" + "11000111010" + "11",
+      V._code128Bits("A"));
+
+    /* ★★★ فكُّ الترميز: البرهانُ الوحيدُ أنّ الماسحَ سيقرأ ما نكتب.
+       يقسم السلسلةَ إلى رموزٍ من ١١ وحدة، يبحث عن كلٍّ في الجدول، يتحقّق من خانة
+       التحقّق، ثمّ يعيد النصّ. أيُّ نمطٍ خطأٍ في الجدول يُسقط هذا فوراً. */
+    const TABLE = (() => {
+      const m = src.match(/var C128 = \[([\s\S]*?)\];/);
+      return m ? m[1].split(",").map(x => x.trim().replace(/^"|"$/g, "")).filter(Boolean) : [];
+    })();
+    T("★ dv: جدولُ Code128 مقروءٌ وكاملٌ (١٠٧ نمطاً من ١١ وحدة)",
+      TABLE.length === 107 && TABLE.every(p => /^[01]{11}$/.test(p)), String(TABLE.length));
+
+    const decode = bits => {
+      if (TABLE.length !== 107) return null;
+      if (!bits.endsWith("11")) return null;
+      const body = bits.slice(0, -2);
+      if (body.length % 11 !== 0) return null;
+      const vals = [];
+      for (let i = 0; i < body.length; i += 11) {
+        const v = TABLE.indexOf(body.slice(i, i + 11));
+        if (v < 0) return null;
+        vals.push(v);
+      }
+      if (vals[0] !== 104) return null;                     // بدءُ Code B
+      if (vals[vals.length - 1] !== 106) return null;       // وقوف
+      const check = vals[vals.length - 2];
+      const data = vals.slice(1, -2);
+      let sum = 104;
+      data.forEach((v, i) => { sum += v * (i + 1); });
+      if (sum % 103 !== check) return null;                 // خانةُ التحقّق
+      return data.map(v => String.fromCharCode(v + 32)).join("");
+    };
+
+    const IDS = ["LTR-2609-0004", "TPL-2607-0001", "LTR-3012-9999", "A", "LTR-2601-0001"];
+    const bad = IDS.filter(id => decode(V._code128Bits(id)) !== id);
+    T("★★★ dv: كلُّ رقمٍ يُرمَّز ثمّ يُفكُّ فيعود نفسَه — الماسحُ سيقرأ ما نطبع",
+      bad.length === 0, bad.join(" · "));
+    T("★ dv: وعددُ الوحدات هو المتوقَّع (بدء + بيانات + تحقّق + وقوف + عمودان)",
+      V._code128Bits("LTR-2609-0004").length === 11 * (1 + 13 + 1 + 1) + 2);
+    /* العربيةُ خارج Code128-B: تُسقَط بدل أن تُنتج أعمدةً لا تُقرأ */
+    T("★★ dv: ما خرج عن ASCII يُسقَط ولا يُنتج باركوداً معطوباً بصمت",
+      V._code128Bits("خطاب") === "" && V.code128SVG("خطاب") === "" &&
+      V._code128Sanitize("LTR-1 خطاب #2") === "LTR-1  #2");
+    T("★ dv: والفراغُ لا يُنتج وسماً", V.code128SVG("") === "" && V.code128SVG(null) === "");
+    T("★ dv: والوسمُ SVG بأعمادٍ مدموجةٍ وقياسٍ بالمليمتر (الطابعةُ تقيس بالورق)",
+      /<svg class="bc"[^>]*viewBox="0 0 178 34"/.test(V.code128SVG("LTR-2609-0004")) &&
+      /width="\d+mm"/.test(V.code128SVG("LTR-2609-0004")) &&
+      /shape-rendering="crispEdges"/.test(V.code128SVG("LTR-2609-0004")));
+
+    /* ── الورقةُ الرسمية: تُستعار من `contracts.js` ولا تُنسَخ ──
+       ورقتان للشركة تفترقان بمليمترٍ فضيحةٌ تُرى على مطبوعةٍ تخرج باسمها. */
+    T("★★ dv: خطُّ الورقة الرسمية يُنادى من `contracts` ولا يُنسَخ",
+      /ctr\._letterheadCSS\(\)/.test(src) && /ctr\._letterheadWrap\(inner, lh\)/.test(src) &&
+      /ctr\._letterheadAssets\(\)/.test(src) && /ctr\._docHeadHTML/.test(src) &&
+      !/@page\{size:A4/.test(src), "لا تُنسَخ أنماطُ @page");
+    /* والوحدةُ المصدرُ ما زالت تعرضها — لو أُلغي عرضُها لسقط النداءُ صامتاً */
+    {
+      const CS = CTR_PATH ? fs.readFileSync(CTR_PATH, "utf8") : "";
+      const need = ["_letterheadAssets", "_letterheadOn", "_letterheadCSS", "_letterheadWrap", "_docHeadHTML"];
+      const gone = need.filter(k => !new RegExp("\\b" + k + ":").test(CS));
+      T("★★ dv: و`contracts` ما زال يعرض ما نناديه (وإلّا خرجت الورقةُ بلا ترويسة)",
+        gone.length === 0, gone.join(" · "));
+    }
+
+    /* ── المطبوعة نفسُها: تُبنى فعلاً ويُقرأ ما فيها ── */
+    const ISSUED = { id:"LTR-2609-0004", kind:"issued", title:"خطاب ترشيح",
+                     party:"أمانة منطقة حائل", letterDate:"2026-09-08", ref:"أ ح/4471",
+                     subject:"ترشيح مقاول", body:"إشارةً إلى [العقد] المبرم بيننا." };
+    const TPL = { id:"TPL-2607-0001", kind:"template", title:"نموذج تمديد",
+                  subject:"تمديد", body:"سعادة / [الجهة]" };
+    const pi = V.letterPaperHTML(ISSUED), pt = V.letterPaperHTML(TPL);
+
+    T("★★★ dv: الباركودُ على الخطاب الصادر وحدَه — والنموذجُ ليس قيداً في سجلّ الصادر",
+      /<svg class="bc"/.test(pi) && !/<svg class="bc"/.test(pt));
+    T("★★ dv: والباركودُ يحمل رقمَ الخطاب نفسَه لا رقماً آخر",
+      decode(V._code128Bits(ISSUED.id)) === "LTR-2609-0004" &&
+      pi.indexOf(V.code128SVG(ISSUED.id)) !== -1);
+    T("★★ dv: والرقمُ مكتوبٌ تحت الأعمدة في الكتلة نفسِها (ماسحٌ يعطب ⇐ تبقى العين)",
+      /<div class="bcb">[\s\S]*<svg class="bc"[\s\S]*<div class="bcn">LTR-2609-0004<\/div>[\s\S]*<\/div>/.test(pi));
+    T("★★★ dv: والنموذجُ يخرج موسوماً «لا يُرسَل» — نظيفاً على ورق الشركة يُشبه الصادرَ تماماً",
+      /class="band"/.test(pt) && /يُستنسَخ ولا يُرسَل/.test(pt) && !/class="band"/.test(pi));
+    T("★★ dv: والعناصرُ النائبةُ تُبرَز — الفراغُ يُرى قبل الإرسال لا بعده",
+      /<span class="ph">\[الجهة\]<\/span>/.test(pt) &&
+      /<span class="ph">\[العقد\]<\/span>/.test(pi));
+    /* المطابقةُ على **وسمِ البنية** لا على نصِّها: متنُ نموذجٍ قد يحوي «سعادة /»
+       بنفسه (وهو الشائع)، فمطابقةُ العبارة تسأل عن محتوى المستخدم لا عن بنيتنا. */
+    T("★ dv: والصادرُ وحدَه يحمل بنيةَ الخطاب الرسميّ (مخاطَبٌ وتحيةٌ وخاتمة)",
+      /<div class="to">سعادة \//.test(pi) && /<div class="greet">السلام عليكم/.test(pi) &&
+      /<div class="close">وتفضلوا/.test(pi) && /<div class="subj">الموضوع:/.test(pi) &&
+      !/<div class="to">/.test(pt) && !/<div class="greet">/.test(pt) &&
+      !/<div class="close">/.test(pt) && /<div class="subj">الموضوع:/.test(pt));
+    /* رقمُ الجهة نصٌّ حرٌّ قد يكون عربياً — قلبُ اتّجاهه يبعثره («أ ح/4471») */
+    T("★★ dv: ورقمُ الجهة لا يُقلَب اتّجاهُه (نصٌّ حرٌّ قد يكون عربياً)",
+      /<span class="ml">الرقم لدى الجهة<\/span><span class="mv">/.test(pi) &&
+      !/الرقم لدى الجهة<\/span><span class="mv dv-num"/.test(pi));
+    T("★ dv: والرقمُ الداخليُّ وحدَه يُقلَب (لاتينيٌّ مضمون)",
+      /<span class="ml">الرقم<\/span><span class="mv dv-num">LTR-2609-0004/.test(pi));
+    T("★ dv: وزرُّ الطباعة في بطاقة الخطاب",
+      /docVault\.printLetter\(/.test(src) && /طباعة على ورق الشركة/.test(src));
+    T("★ dv: والطباعةُ تمرّ بنافذة المنصّة الواحدة (تعالج iOS وفشلَ الفتح)",
+      /typeof _openPrintWindow === "function"/.test(src) && /_audit\("طباعة خطاب/.test(src));
+  }
+
   /* ── (١٣) المرفقُ يحفظ مسارَه، والمسارُ تحت البادئة القائمة `po/` ──
      مسارٌ جذريٌّ جديد قد تردّه قواعدُ Storage صامتاً (درسُ `hr-payments.js`). */
   /* ── ★★ الأرقامُ داخل جملةٍ عربية: `direction` وحدَها لا تكفي لصندوقٍ سطريّ ──
