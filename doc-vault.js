@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3118";
+var MODULE_BUILD = "v18.9.3125";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -147,6 +147,52 @@ var DOC_TYPES = [
   { key:"other",          lbl:"وثيقة أخرى" }
 ];
 var DOC_LBL = (function(){ var m = {}; DOC_TYPES.forEach(function(d){ m[d.key] = d.lbl; }); return m; })();
+
+/* ════════ «وثيقة أخرى» تُسمّى بيدها ════════
+   قائمةُ الأنواع مغلقةٌ عمداً (حقلٌ حرٌّ يُنتج «سجل تجاري» و«س.ت» ثلاثةَ أنواعٍ لواحد)،
+   لكنّ بابَ «أخرى» بلا اسمٍ يعيد المشكلةَ من جهةٍ أخرى: عشرُ وثائقَ مختلفةٍ تُقرأ
+   كلُّها «وثيقة أخرى» فلا يُميَّز بينها في جدولٍ ولا ترشيح. فالاسمُ اليدويّ يُطلَب
+   عند اختيارها، ويحلّ محلَّ التسمية العامّة **في كلّ موضعٍ تُقرأ فيه**.
+   ولذلك تسميةٌ واحدةٌ تخدم الجدولَ والبطاقةَ والبحثَ والتنبيه — لو تفرّقت لقرأ
+   المستخدمُ «وثيقة أخرى» في الجدول واسمَها الحقيقيَّ في البطاقة. */
+function typeLabel(doc){
+  if(!doc) return "";
+  var k = String(doc.docType || "");
+  if(k === "other"){
+    var custom = String(doc.docTypeOther || "").trim();
+    if(custom) return custom;
+  }
+  return DOC_LBL[k] || k || "—";
+}
+
+/* ════════ المستخدمون — مصدرُ منتقي مسؤول التجديد ════════
+   `USERS` عالميّةٌ تحمل `{ user, name, role, phone?, waOptIn? }` (يقرؤها
+   `functions/lib/recipients.js` نفسُها لإيجاد أرقام واتساب). نقرؤها بالاسم المجرّد
+   وقتَ النداء كبقيّة خدمات النواة. */
+function _users(){
+  try{ return (typeof USERS !== "undefined" && Array.isArray(USERS)) ? USERS : []; }
+  catch(e){ return []; }
+}
+function _userByLogin(login){
+  var l = String(login || ""), arr = _users();
+  for(var i = 0; i < arr.length; i++) if(arr[i] && arr[i].user === l) return arr[i];
+  return null;
+}
+/* أللمستخدم رقمُ واتساب مفعَّل؟ الشرطان معاً كما يقرؤهما الخادم حرفياً
+   (`u.phone && u.waOptIn === true`) — فلا تَعِد الشاشةُ بوصولٍ يردّه الخادم. */
+function _hasWa(u){ return !!(u && u.phone && u.waOptIn === true); }
+
+/* ════════ اسمُ مسؤول التجديد كما يُعرض ════════
+   المصدرُ الأوّل `ownerUser` (اسمُ الدخول — المفتاحُ الثابت الذي يصل به التنبيهُ إلى
+   صاحبه)، فيُقرأ منه الاسمُ **الطازج** من `USERS`: مَن غيّر اسمَه المعروض لا يصير
+   شخصاً آخر في وثائقه. و`owner` نسخةٌ محفوظةٌ تحلّ محلَّه إن غاب المستخدمُ من
+   القائمة (حُذف حسابُه) — فلا يُفقَد مَن كان مسؤولاً. */
+function ownerLabel(doc){
+  if(!doc) return "";
+  var u = doc.ownerUser ? _userByLogin(doc.ownerUser) : null;
+  if(u) return String(u.name || u.user || "");
+  return String(doc.owner || "");
+}
 
 /* مراتبُ سلّم التنبيه — مرتّبةٌ من الأسوأ. `tone` صنفُ اللون، و`lbl` ما يُقرأ. */
 var LEVELS = [
@@ -309,8 +355,12 @@ function filterDocs(list, f, today){
       else if(String(doc.expiry || "").slice(0, 7) !== ym) return false;
     }
     if(q){
-      var hay = [doc.title, doc.number, doc.issuer, doc.owner, doc.notes,
-                 DOC_LBL[doc.docType] || doc.docType, doc.id].join(" ").toLowerCase();
+      /* الحصيرةُ تحمل **التسميةَ المعروضة** لا المفتاح: مَن يرى «شهادة اشتراك في
+         الهيئة» في الجدول يبحث عنها بنصّها، لا بـ`other`. ويُضاف اسمُ المسؤول
+         الطازجُ واسمُ دخوله معاً — يُبحَث بأيّهما. */
+      var hay = [doc.title, doc.number, doc.issuer, doc.notes, doc.id,
+                 typeLabel(doc), doc.docTypeOther,
+                 ownerLabel(doc), doc.owner, doc.ownerUser].join(" ").toLowerCase();
       if(hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -478,10 +528,11 @@ function scanAndAlert(today){
     if(seen[k] === day) return;                    // نُبِّه عليه اليومَ بهذه المرتبة
     fired++;
     var days = daysUntil(doc.expiry, t);
+    var _own = ownerLabel(doc);
     var body = (lvl === "expired")
-      ? "انتهت منذ " + Math.abs(days) + " يوماً — " + (doc.owner ? ("المسؤول: " + doc.owner) : "بلا مسؤول تجديد")
+      ? "انتهت منذ " + Math.abs(days) + " يوماً — " + (_own ? ("المسؤول: " + _own) : "بلا مسؤول تجديد")
       : "تنتهي بعد " + days + " يوماً (" + (doc.expiry || "") + ")"
-        + (doc.owner ? " — المسؤول: " + doc.owner : "");
+        + (_own ? " — المسؤول: " + _own : "");
     _notify("📁 " + (doc.title || doc.id), body, "doc_expiry");
   });
   _markAlerted(next);      // ما لم يعد يستحقّ تنبيهاً يسقط من الذاكرة فلا تنتفخ
@@ -574,6 +625,8 @@ function injectCSS(){
 ".dv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}",
 ".dv-f{display:flex;flex-direction:column;gap:5px}",
 ".dv-f.wide{grid-column:1/-1}",
+".dv-dates{display:grid;grid-template-columns:1fr 1fr;gap:12px}",
+"@media (max-width:760px){.dv-dates{grid-template-columns:1fr}}",
 ".dv-l{font-size:11px;font-weight:700;color:var(--muted)}",
 ".dv-l b{color:var(--danger)}",
 ".dv-hint{font-size:10.5px;color:var(--muted);line-height:1.7;margin-top:3px}",
@@ -696,7 +749,7 @@ function _tableHTML(list, today){
     return '<tr class="dv-row-act" onclick="docVault.open(\'' + _jq(d.id) + '\')">'
       + '<td class="t-name">' + _esc(d.title || "—")
         + (d.renewCount ? ' <span class="t-dim dv-num">(جُدِّدت ' + d.renewCount + ')</span>' : "") + '</td>'
-      + '<td class="t-dim">' + _esc(DOC_LBL[d.docType] || "—") + '</td>'
+      + '<td class="t-dim">' + _esc(typeLabel(d)) + '</td>'
       + '<td class="dv-num t-dim">' + _esc(d.number || "—") + '</td>'
       + '<td class="t-dim">' + _esc(d.issuer || "—") + '</td>'
       + '<td class="dv-num t-dim">' + _esc(d.start || "—") + '</td>'
@@ -705,7 +758,7 @@ function _tableHTML(list, today){
       + (d.noExpiry ? '<td class="t-dim">بلا انتهاء</td>'
                     : '<td class="dv-num">' + _esc(d.expiry || "—") + '</td>')
       + '<td>' + _chip(lvl, days) + '</td>'
-      + '<td class="t-dim">' + _esc(d.owner || "—") + '</td>'
+      + '<td class="t-dim">' + _esc(ownerLabel(d) || "—") + '</td>'
       + '<td class="t-dim">' + ((d.files || []).length ? _icon("paperclip", "ic-sm") + (d.files.length > 1 ? ' ' + d.files.length : "") : "—") + '</td>'
       + '</tr>';
   }).join("");
@@ -728,17 +781,32 @@ function _formHTML(){
     + '<div class="dv-f wide"><label class="dv-l" for="dv-title">عنوان الوثيقة <b>*</b></label>'
       + '<input class="form-input" id="dv-title" value="' + _esc(e.title || "") + '" placeholder="مثال: السجل التجاري — الفرع الرئيسي"></div>'
     + '<div class="dv-f"><label class="dv-l" for="dv-type">النوع</label>'
-      + '<select class="form-input" id="dv-type">' + types + '</select></div>'
+      + '<select class="form-input" id="dv-type" onchange="docVault.setType(this.value)">' + types + '</select></div>'
+    /* خانةُ الاسم اليدويّ تظهر مع «وثيقة أخرى» وحدَها، وتشغل الصفَّ كلَّه ليتّسع
+       لاسمٍ طويل. وهي **إلزامية**: «أخرى» بلا اسمٍ هي عينُ ما جاءت لتعالجه. */
+    + (e.docType === "other"
+        ? '<div class="dv-f wide"><label class="dv-l" for="dv-type-other">اسم نوع الوثيقة <b>*</b></label>'
+          + '<input class="form-input" id="dv-type-other" value="' + _esc(e.docTypeOther || "") + '"'
+          + ' placeholder="مثال: شهادة اشتراك في الهيئة السعودية للمهندسين">'
+          + '<div class="dv-hint">يحلّ محلَّ «وثيقة أخرى» في الجدول والبطاقة والبحث.</div></div>'
+        : "")
     + '<div class="dv-f"><label class="dv-l" for="dv-number">رقم الوثيقة</label>'
       + '<input class="form-input dv-num" id="dv-number" value="' + _esc(e.number || "") + '" placeholder="1010xxxxxx"></div>'
     + '<div class="dv-f"><label class="dv-l" for="dv-issuer">الجهة المُصدِرة</label>'
       + '<input class="form-input" id="dv-issuer" value="' + _esc(e.issuer || "") + '" placeholder="وزارة التجارة"></div>'
-    + '<div class="dv-f"><label class="dv-l" for="dv-owner">مسؤول التجديد</label>'
-      + '<input class="form-input" id="dv-owner" value="' + _esc(e.owner || "") + '" placeholder="اسم من يتابع التجديد"></div>'
-    + '<div class="dv-f"><label class="dv-l" for="dv-start">تاريخ البدء</label>'
-      + '<input class="form-input dv-num" type="date" id="dv-start" value="' + _esc(e.start || "") + '"></div>'
-    + '<div class="dv-f"><label class="dv-l" for="dv-expiry">تاريخ الانتهاء ' + (e.noExpiry ? "" : "<b>*</b>") + '</label>'
-      + '<input class="form-input dv-num" type="date" id="dv-expiry" value="' + _esc(e.expiry || "") + '"' + (e.noExpiry ? " disabled" : "") + '></div>'
+    + '<div class="dv-f wide"><label class="dv-l" for="dv-owner">مسؤول التجديد</label>'
+      + _ownerSelectHTML(e) + _ownerHintHTML(e) + '</div>'
+    /* ── مدّةُ الصلاحية كتلةٌ واحدةٌ لا حقلين متجاورَين بالمصادفة ──
+       التوزيعُ التلقائيُّ في الشبكة يملأ صفّاً صفّاً، فحقلٌ يظهر أو يختفي (خانةُ
+       «أخرى») يُزحزح كلَّ ما بعده **فينفصل التاريخان**: البدءُ في صفٍّ والانتهاءُ في
+       الذي يليه — وهما مدّةٌ واحدةٌ تُقرأ معاً أو لا تُقرأ. فالكتلةُ تحجز صفَّها
+       بنفسها وتقسمه على اثنين، فيثبت اقترانُهما مهما تغيّر ما فوقهما. */
+    + '<div class="dv-f wide"><div class="dv-dates">'
+      + '<div class="dv-f"><label class="dv-l" for="dv-start">تاريخ البدء</label>'
+        + '<input class="form-input dv-num" type="date" id="dv-start" value="' + _esc(e.start || "") + '"></div>'
+      + '<div class="dv-f"><label class="dv-l" for="dv-expiry">تاريخ الانتهاء ' + (e.noExpiry ? "" : "<b>*</b>") + '</label>'
+        + '<input class="form-input dv-num" type="date" id="dv-expiry" value="' + _esc(e.expiry || "") + '"' + (e.noExpiry ? " disabled" : "") + '></div>'
+      + '</div></div>'
     + '<div class="dv-f wide"><label class="dv-check"><input type="checkbox" id="dv-noexp"' + (e.noExpiry ? " checked" : "")
       + ' onchange="docVault.toggleNoExpiry(this.checked)"> وثيقة دائمة بلا تاريخ انتهاء</label>'
       + '<div class="dv-hint">تُحفظ في الخزانة ولا تدخل الأفق ولا يُنبَّه عليها — كعقد التأسيس.</div></div>'
@@ -753,6 +821,50 @@ function _formHTML(){
       + '<button type="button" class="btn btn-ghost" onclick="docVault.cancelEdit()">إلغاء</button>'
       + '<button type="button" class="btn btn-primary" onclick="docVault.saveEdit()">' + _icon("save", "ic-sm") + ' حفظ الوثيقة</button>'
     + '</div></div>';
+}
+
+/* ════════ منتقي مسؤول التجديد ════════
+   كان حقلَ كتابةٍ حرّاً، فكان الاسمُ نصّاً لا يصل إليه شيء: «محمد» و«محمد العتيبي»
+   و«م. العتيبي» ثلاثةُ أشخاصٍ عند أيّ آليّة. صار اختياراً من المستخدمين يُخزَّن
+   بـ**اسم الدخول** — وهو المفتاحُ الذي يجد به `functions/lib/recipients.js` رقمَ
+   الواتساب في `meta/users`. فالتنبيهُ يصل صاحبَه حين تُنشَر الدالّةُ المجدولة، بلا
+   مطابقةِ أسماءٍ تخمينية.
+
+   و`<select>` لا منتقياً باحثاً: قائمةُ الموظفين هنا تُختار **مرّةً لكلّ وثيقة**
+   لا عشراتِ المرّات في اليوم، والمنتقي الباحثُ في `staff-tasks.js` مربوطٌ بحالته
+   ومعرّفاتِ عناصره فنسخُه هنا يشقّه إلى مصدرين. وعلى الـiPad يفتح `<select>`
+   ورقةَ النظام — وهي مقروءةٌ بالإصبع كما في بقيّة نماذج المنصّة.
+
+   **والمسؤولُ الذي لم يعد في القائمة يبقى خياراً** (حُذف حسابُه أو تغيّر مشروعُه):
+   بلا هذا يُسقطه الحفظُ صامتاً فتصير الوثيقةُ بلا مسؤولٍ لأنّ أحداً فتح نموذجَها. */
+function _ownerSelectHTML(e){
+  var cur = String(e.ownerUser || "");
+  var arr = _users().slice().sort(function(a, b){
+    return String(a.name || a.user || "").localeCompare(String(b.name || b.user || ""), "ar");
+  });
+  var seen = false;
+  var opts = '<option value="">— بلا مسؤول تجديد —</option>';
+  arr.forEach(function(u){
+    if(!u || !u.user) return;
+    if(u.user === cur) seen = true;
+    opts += '<option value="' + _esc(u.user) + '"' + (u.user === cur ? " selected" : "") + '>'
+          + _esc(u.name || u.user) + (_hasWa(u) ? "" : " (بلا واتساب)") + '</option>';
+  });
+  if(cur && !seen){
+    opts += '<option value="' + _esc(cur) + '" selected>'
+          + _esc(e.owner || cur) + ' (خارج القائمة)</option>';
+  }
+  return '<select class="form-input" id="dv-owner">' + opts + '</select>';
+}
+/* ولا يُترك الغيابُ يُكتشَف يومَ يصمت التنبيه: يُقال الآن ومَن يُصلحه. */
+function _ownerHintHTML(e){
+  var cur = String(e.ownerUser || "");
+  if(!cur) return '<div class="dv-hint">اختره من المستخدمين ليصله تنبيهُ التجديد باسمه.</div>';
+  var u = _userByLogin(cur);
+  if(!u) return '<div class="dv-hint">هذا المسؤول لم يعد في قائمة المستخدمين — اختر بديلاً.</div>';
+  if(_hasWa(u)) return '<div class="dv-hint">يصله تنبيهُ التجديد على واتساب.</div>';
+  return '<div class="dv-hint">لا رقمَ واتساب مفعَّلاً لهذا المستخدم — يصله التنبيهُ داخل المنصّة فقط. '
+       + 'يُضاف الرقمُ ويُفعَّل من إدارة المستخدمين.</div>';
 }
 
 /* ════════ بطاقةُ الوثيقة — التفاصيل وسجلُّ التجديدات ════════ */
@@ -772,10 +884,16 @@ function _cardHTML(d, today){
       + (canDelete() ? '<button type="button" class="btn btn-delete btn-sm" onclick="docVault.delDoc(\'' + _jq(d.id) + '\')">' + _icon("trash", "ic-sm") + '</button>' : "")
     + '</div></div>'
     + '<div class="dv-grid">'
-      + row("النوع", _esc(DOC_LBL[d.docType] || "—"))
+      + row("النوع", _esc(typeLabel(d)))
       + row("رقم الوثيقة", '<span class="dv-num">' + _esc(d.number || "—") + '</span>')
       + row("الجهة المُصدِرة", _esc(d.issuer || "—"))
-      + row("مسؤول التجديد", _esc(d.owner || "—"))
+      + row("مسؤول التجديد", _esc(ownerLabel(d) || "—")
+          + (function(){
+              var u = d.ownerUser ? _userByLogin(d.ownerUser) : null;
+              if(!d.ownerUser) return "";
+              if(!u) return ' <span class="dv-chip l-none">خارج القائمة</span>';
+              return _hasWa(u) ? "" : ' <span class="dv-chip l-none">بلا واتساب</span>';
+            })())
       + row("تاريخ البدء", '<span class="dv-num">' + _esc(d.start || "—") + '</span>')
       + row("تاريخ الانتهاء", d.noExpiry ? '<span class="t-dim">بلا انتهاء</span>'
                                           : '<span class="dv-num">' + _esc(d.expiry || "—") + '</span>')
@@ -1013,7 +1131,8 @@ function _top(){ try{ (window._scrollAppToTop || function(){ window.scrollTo(0, 
 
 function newDoc(){
   if(!canEdit()){ _toast("🔒 لا صلاحية لإضافة وثيقة","warn"); return; }
-  _edit = { title:"", docType:"cr", number:"", issuer:"", owner:"", start:"", expiry:"",
+  _edit = { title:"", docType:"cr", docTypeOther:"", number:"", issuer:"",
+            owner:"", ownerUser:"", start:"", expiry:"",
             noExpiry:false, notes:"", files:[] };
   _open = null; _renew = null; render(); _top();
 }
@@ -1021,8 +1140,10 @@ function editDoc(id){
   if(!canEdit()){ _toast("🔒 لا صلاحية للتعديل","warn"); return; }
   var d = docById(id);
   if(!d) return;
-  _edit = { id:d.id, title:d.title||"", docType:d.docType||"other", number:d.number||"",
-            issuer:d.issuer||"", owner:d.owner||"", start:d.start||"", expiry:d.expiry||"",
+  _edit = { id:d.id, title:d.title||"", docType:d.docType||"other",
+            docTypeOther:d.docTypeOther||"", number:d.number||"",
+            issuer:d.issuer||"", owner:d.owner||"", ownerUser:d.ownerUser||"",
+            start:d.start||"", expiry:d.expiry||"",
             noExpiry:!!d.noExpiry, notes:d.notes||"",
             files:Array.isArray(d.files) ? d.files.slice() : [] };
   render(); _top();
@@ -1035,15 +1156,32 @@ function _readForm(){
   var c = function(id){ var el = document.getElementById(id); return !!(el && el.checked); };
   _edit.title   = g("dv-title");
   _edit.docType = g("dv-type") || "other";
+  /* الاسمُ اليدويُّ لا يُقرأ إلّا مع «أخرى»، ويُمحى عند الانصراف عنها — وإلّا بقي
+     اسمٌ قديمٌ معلَّقاً على نوعٍ مسمّى فظهر في الجدول بدل تسميته الصحيحة. */
+  _edit.docTypeOther = (_edit.docType === "other") ? g("dv-type-other") : "";
   _edit.number  = g("dv-number");
   _edit.issuer  = g("dv-issuer");
-  _edit.owner   = g("dv-owner");
+  /* المصدرُ اسمُ الدخول، والاسمُ المعروضُ يُشتقّ منه ويُحفَظ نسخةً احتياطيةً تُقرأ
+     يومَ يُحذف الحساب. وبلا مسؤولٍ: يُمحى الاثنان معاً فلا يبقى اسمٌ بلا صاحب. */
+  _edit.ownerUser = g("dv-owner");
+  var _ow = _edit.ownerUser ? _userByLogin(_edit.ownerUser) : null;
+  _edit.owner = _edit.ownerUser ? String((_ow && (_ow.name || _ow.user)) || _edit.owner || "") : "";
   _edit.start   = g("dv-start");
   _edit.noExpiry= c("dv-noexp");
   _edit.expiry  = _edit.noExpiry ? "" : g("dv-expiry");
   _edit.notes   = g("dv-notes");
 }
 function toggleNoExpiry(on){ _readForm(); _edit.noExpiry = !!on; if(on) _edit.expiry = ""; render(); }
+/* تبديلُ النوع يُعيد الرسمَ لتظهر خانةُ الاسم اليدويّ أو تختفي — و`_readForm` قبلَه
+   تحفظ ما كُتب في بقيّة الحقول، فهي في الـDOM لا في الحالة. */
+function setType(v){
+  if(!_edit) return;
+  _readForm();
+  _edit.docType = String(v || "other");
+  if(_edit.docType !== "other") _edit.docTypeOther = "";
+  render();
+  try{ var el = document.getElementById("dv-type-other"); if(el) el.focus(); }catch(e){}
+}
 
 function addDraftFile(){
   if(!_edit) return;
@@ -1063,6 +1201,9 @@ function saveEdit(){
   if(!canEdit()){ _toast("🔒 لا صلاحية للحفظ","warn"); return; }
   _readForm();
   if(!_edit.title){ _toast("⚠ أدخل عنوان الوثيقة","warn"); return; }
+  if(_edit.docType === "other" && !_edit.docTypeOther){
+    _toast("⚠ اكتب اسم نوع الوثيقة — «وثيقة أخرى» بلا اسمٍ لا تُميَّز عن غيرها","warn"); return;
+  }
   if(!_edit.noExpiry && !_edit.expiry){ _toast("⚠ أدخل تاريخ الانتهاء، أو علّم «وثيقة دائمة»","warn"); return; }
   if(_edit.start && _edit.expiry && _edit.start > _edit.expiry){
     _toast("⚠ تاريخ البدء بعد تاريخ الانتهاء","warn"); return;
@@ -1071,8 +1212,10 @@ function saveEdit(){
   if(!d){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return; }
   var now = new Date().toISOString(), me = _myName();
   var body = {
-    title:_edit.title, docType:_edit.docType, number:_edit.number, issuer:_edit.issuer,
-    owner:_edit.owner, start:_edit.start, expiry:_edit.expiry, noExpiry:!!_edit.noExpiry,
+    title:_edit.title, docType:_edit.docType, docTypeOther:_edit.docTypeOther || "",
+    number:_edit.number, issuer:_edit.issuer,
+    owner:_edit.owner, ownerUser:_edit.ownerUser || "",
+    start:_edit.start, expiry:_edit.expiry, noExpiry:!!_edit.noExpiry,
     notes:_edit.notes, files:_edit.files || [], updatedAt:now, updatedBy:me
   };
   var was = _edit.id;
@@ -1444,7 +1587,7 @@ window.docVault = {
   // الوثائق
   setFilter:setFilter, pickMonth:pickMonth, clearFilters:clearFilters,
   open:open, backToList:backToList, newDoc:newDoc, editDoc:editDoc, cancelEdit:cancelEdit,
-  saveEdit:saveEdit, delDoc:delDoc, toggleNoExpiry:toggleNoExpiry,
+  saveEdit:saveEdit, delDoc:delDoc, toggleNoExpiry:toggleNoExpiry, setType:setType,
   addDraftFile:addDraftFile, delDraftFile:delDraftFile,
   openRenew:openRenew, cancelRenew:cancelRenew, saveRenew:saveRenew,
   addRenewFile:addRenewFile, delRenewFile:delRenewFile,
@@ -1460,6 +1603,7 @@ window.docVault = {
   // الدوالُّ النقيّة — يفحصها `hail-tests.js` بلا متصفّح
   daysUntil:daysUntil, alertLevel:alertLevel, docLevel:docLevel, needsAction:needsAction,
   horizonBuckets:horizonBuckets, rollup:rollup, nextRef:nextRef, renewDoc:renewDoc,
+  typeLabel:typeLabel, ownerLabel:ownerLabel,
   filterDocs:filterDocs, sortDocs:sortDocs, cloneTemplate:cloneTemplate, filterLetters:filterLetters,
   _DOC_TYPES:DOC_TYPES, _LEVELS:LEVELS, _PERM_KEY:PERM_KEY,
   _PAGE_DOCS:PAGE_DOCS, _PAGE_LETTERS:PAGE_LETTERS, _HORIZON_MONTHS:HORIZON_MONTHS,
