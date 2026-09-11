@@ -984,6 +984,32 @@ await check("★★ ولا يكتب فيها الزائرُ ولا المستو�
 await check("★★★ وحذفُ الخطاب للأدمن وحدَه",
   assertFails(deleteDoc(doc(HR, `${LTRS_C}/LTR-2609-0001`))));
 
+/* ── سجلُّ التواقيع: صورةُ توقيع المدير العام وختمُ الشركة ──
+   كتابتُه ليست كتابةَ بياناتٍ بل **إسنادُ أداةِ إلزام**: من يكتب فيه يستبدل التوقيعَ
+   بصورةٍ من عنده أو يضيف موقّعاً باسم مسؤول، ثمّ يُخرج خطاباً على ورق الشركة يبدو
+   موقَّعاً ومختوماً. فالكتابةُ للأدمن لا غير — والفحصُ يجرّبها بكلّ دورٍ يملك الخزانة. */
+const SIGN_DOC = "meta/vault_signatories";
+await seed(SIGN_DOC, { list: [{ id: "SG-1", name: "عادل", title: "المدير العام" }] });
+await check("★ يكتب الأدمنُ في سجلّ التواقيع",
+  assertSucceeds(setDoc(doc(ADMIN, SIGN_DOC), {
+    list: [{ id: "SG-1", name: "عادل", title: "المدير العام", signUrl: "https://x/s.png" }] })));
+for (const [nm, ctx] of [["مدير المشاريع", PM], ["المشتريات", PROC], ["المالية", FIN],
+                         ["المستودعات", WH], ["الموارد البشرية", HR], ["المشرف", SUP_AR],
+                         ["المراقب", OBS], ["الزائر", VIEWER]]) {
+  await check("★★★ ولا يكتب فيه " + nm + " (استبدالُ التوقيع = تزويرُ خطابٍ رسميّ)",
+    assertFails(setDoc(doc(ctx, SIGN_DOC), { list: [{ id: "X", name: "مُنتحِل" }] })));
+}
+await check("★★★ ولا يُدسُّ موقّعٌ بالدمج (update) من دورٍ غير الأدمن",
+  assertFails(updateDoc(doc(PROC, SIGN_DOC), { list: [{ id: "X", name: "مُنتحِل" }] })));
+await check("★★ ولا تُمحى الوثيقةُ من غير الأدمن", assertFails(deleteDoc(doc(PM, SIGN_DOC))));
+await check("★★ ونسخةُ `_dev` محروسةٌ بالقاعدة نفسِها (لا بابَ يُفتح باسمٍ ثانٍ)",
+  assertFails(setDoc(doc(PROC, "meta/vault_signatories_dev"), { list: [] })));
+await check("★ ويقرؤه كلُّ ذي دورٍ (الشاشةُ تعرض القائمة، والمطبوعةُ ترسم الصورة)",
+  assertSucceeds((async () => { for (const c of [PM, PROC, FIN, VIEWER]) await getDoc(doc(c, SIGN_DOC)); })()));
+/* ولم يُكسَر ما كان: بقيّةُ مستندات meta تُكتب كما كانت */
+await check("★★ ولم تُقفَل بقيّةُ `meta` بالتبعية (الاستثناءُ على الوثيقة لا على المجموعة)",
+  assertSucceeds(setDoc(doc(PROC, "meta/vault_unrelated_doc"), { x: 1 })));
+
 /* القراءةُ واسعةٌ كبقيّة المنصّة — تُضيَّق في المرحلة ٣ مع أخواتها لا وحدَها */
 await check("★ ويقرأ كلُّ ذي دورٍ الخزانةَ (وتُستعلَم مجموعتاها فعلاً لا مستنداً مستنداً)",
   assertSucceeds((async () => {

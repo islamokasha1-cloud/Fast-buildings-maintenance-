@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3127";
+var MODULE_BUILD = "v18.9.3129";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -530,6 +530,7 @@ function letterById(id){ for(var i=0;i<_ltrs.length;i++) if(_ltrs[i].id === id) 
 function startSync(){
   var d = _db();
   if(!d || !canView()) return;
+  startSignSync();
   if(!_docsUnsub){
     _docsUnsub = d.collection(DOCS_COLL()).onSnapshot(function(snap){
       _docs = snap.docs.map(function(s){ var v = s.data() || {}; v.id = s.id; return v; });
@@ -546,6 +547,7 @@ function startSync(){
   }
 }
 function stopSync(){
+  stopSignSync();
   try{ if(_docsUnsub) _docsUnsub(); }catch(e){}
   try{ if(_ltrsUnsub) _ltrsUnsub(); }catch(e){}
   _docsUnsub = _ltrsUnsub = null;
@@ -734,6 +736,15 @@ function injectCSS(){
 ".dv-file .rm{margin-right:auto;background:none;border:0;color:var(--muted);cursor:pointer;font-family:inherit;font-size:11px;font-weight:700}",
 ".dv-file .rm:hover{color:var(--danger)}",
 ".dv-none{font-size:11.5px;color:var(--zero);font-weight:700}",
+".dv-sg-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:11px 13px;border:1px solid var(--border);border-radius:11px;margin-bottom:8px;background:var(--surface2)}",
+".dv-sg-t{font-size:13px;color:var(--text)}",
+".dv-sg-im{display:flex;align-items:center;gap:12px;margin-right:auto}",
+".dv-sg-im img{height:34px;max-width:110px;object-fit:contain;background:#fff;border:1px solid var(--border);border-radius:7px;padding:2px}",
+".dv-sg-a{display:flex;gap:7px}",
+".dv-sg-prev{display:inline-flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--border);border-radius:9px;padding:6px 10px}",
+".dv-sg-prev img{height:44px;max-width:150px;object-fit:contain}",
+".dv-sg-prev .rm{background:none;border:0;color:var(--muted);cursor:pointer;font-family:inherit;font-size:11px;font-weight:700}",
+".dv-sg-prev .rm:hover{color:var(--danger)}",
 
 /* ── سجلُّ التجديدات ── */
 ".dv-hist{margin-top:16px;border-top:1px solid var(--border);padding-top:14px}",
@@ -1096,7 +1107,11 @@ function _letterFormHTML(){
       + '<div class="dv-f"><label class="dv-l" for="dv-l-date">تاريخ الخطاب</label>'
         + '<input class="form-input dv-num" type="date" id="dv-l-date" value="' + _esc(e.letterDate || "") + '"></div>'
       + '<div class="dv-f"><label class="dv-l" for="dv-l-ref">الرقم المرجعي الخارجي</label>'
-        + '<input class="form-input dv-num" id="dv-l-ref" value="' + _esc(e.ref || "") + '" placeholder="إن كان للخطاب رقمٌ لدى الجهة"></div>')
+        + '<input class="form-input dv-num" id="dv-l-ref" value="' + _esc(e.ref || "") + '" placeholder="إن كان للخطاب رقمٌ لدى الجهة"></div>'
+      /* التوقيعُ خاصيّةُ الصادر وحدَه — نموذجٌ يخرج موقَّعاً ومختوماً خطابٌ جاهزٌ
+         للإرسال بعناصرَ نائبةٍ بين قوسين. فلا خيارَ له في نموذج النموذج أصلاً. */
+      + '<div class="dv-f wide"><label class="dv-l" for="dv-l-sign">التوقيع</label>'
+        + _signSelectHTML(e) + _signHintHTML(e) + '</div>')
     + '<div class="dv-f' + (isTpl ? " wide" : "") + '"><label class="dv-l" for="dv-l-subject">الموضوع</label>'
       + '<input class="form-input" id="dv-l-subject" value="' + _esc(e.subject || "") + '"></div>'
     + '<div class="dv-f wide"><label class="dv-l" for="dv-l-body">متن الخطاب</label>'
@@ -1109,6 +1124,95 @@ function _letterFormHTML(){
     + '<div class="dv-acts">'
       + '<button type="button" class="btn btn-ghost" onclick="docVault.cancelLetter()">إلغاء</button>'
       + '<button type="button" class="btn btn-primary" onclick="docVault.saveLetter()">' + _icon("save", "ic-sm") + ' حفظ</button>'
+    + '</div></div>';
+}
+
+/* ════════ منتقي الموقّع في نموذج الخطاب ════════
+   والموقّعُ الذي حُذف من السجلّ يبقى خياراً كما يبقى مسؤولُ التجديد — فلا يُسقطه
+   الحفظُ صامتاً لأنّ أحداً فتح النموذج. */
+function _signSelectHTML(e){
+  var cur = String(e.signId || ""), seen = false;
+  var opts = '<option value="">— بلا توقيع (يُوقَّع باليد) —</option>';
+  _signs.forEach(function(s){
+    if(!s || !s.id) return;
+    if(s.id === cur) seen = true;
+    var marks = [];
+    if(s.signUrl)  marks.push("توقيع");
+    if(s.stampUrl) marks.push("ختم");
+    opts += '<option value="' + _esc(s.id) + '"' + (s.id === cur ? " selected" : "") + '>'
+          + _esc(s.title + " — " + s.name)
+          + (marks.length ? " (" + marks.join(" و") + ")" : " (بلا صورة)") + '</option>';
+  });
+  if(cur && !seen){
+    opts += '<option value="' + _esc(cur) + '" selected>'
+          + _esc((e.signTitle ? e.signTitle + " — " : "") + (e.signName || cur)) + ' (حُذف من السجلّ)</option>';
+  }
+  return '<select class="form-input" id="dv-l-sign">' + opts + '</select>';
+}
+function _signHintHTML(e){
+  var cur = String(e.signId || "");
+  if(!cur) return '<div class="dv-hint">بلا توقيع: تُطبَع أسطرٌ فارغةٌ يُوقَّع عليها باليد.</div>';
+  var s = signatoryById(cur);
+  if(!s) return '<div class="dv-hint">هذا الموقّع حُذف من السجلّ — اسمُه وصفتُه محفوظان على الخطاب، ولا تُطبَع صورتاه.</div>';
+  if(s.signUrl || s.stampUrl) return '<div class="dv-hint">يُطبَع الاسمُ والصفةُ أسفل يسار الورقة، ومعهما ما رُفع من التوقيع والختم.</div>';
+  return '<div class="dv-hint">لا صورةَ توقيعٍ ولا ختمٍ لهذا الموقّع — يُطبَع الاسمُ والصفةُ فوق سطرِ توقيعٍ يدويّ. '
+       + (canManageSigns() ? 'تُرفَع الصورتان من «سجلّ التواقيع».' : 'يرفعهما مدير النظام.') + '</div>';
+}
+
+/* ════════ لوحةُ إدارة سجلّ التواقيع (للأدمن) ════════ */
+function _signPanelHTML(){
+  if(_sEdit) return _signFormHTML();
+  var rows = _signs.length
+    ? _signs.map(function(s){
+        return '<div class="dv-sg-row">'
+          + '<div class="dv-sg-t"><b>' + _esc(s.title || "—") + '</b> — ' + _esc(s.name || "—") + '</div>'
+          + '<div class="dv-sg-im">'
+            + (s.signUrl  ? '<img src="' + _esc(s.signUrl)  + '" alt="توقيع">' : '<span class="dv-none">بلا توقيع</span>')
+            + (s.stampUrl ? '<img src="' + _esc(s.stampUrl) + '" alt="ختم">'   : '<span class="dv-none">بلا ختم</span>')
+          + '</div>'
+          + '<div class="dv-sg-a">'
+            + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.editSignatory(\'' + _jq(s.id) + '\')">' + _icon("edit", "ic-sm") + ' تعديل</button>'
+            + '<button type="button" class="btn btn-delete btn-sm" onclick="docVault.delSignatory(\'' + _jq(s.id) + '\')">' + _icon("trash", "ic-sm") + '</button>'
+          + '</div></div>';
+      }).join("")
+    : '<div class="dv-empty" style="padding:26px">لا تواقيع بعد.<br>أضِف الموقّعَ باسمه وصفته، وارفع صورةَ توقيعه وختمَ الشركة — فتُختار في كلّ خطاب.</div>';
+  return '<div class="dv-panel">'
+    + '<div class="dv-head" style="margin-bottom:10px"><div>'
+      + '<div class="dv-panel-h">سجلّ التواقيع</div>'
+      + '<div class="dv-panel-s" style="margin-bottom:0">يُملأ مرّةً ويُختار منه في كلّ خطاب. '
+      + '<b>الإدارةُ لمدير النظام وحدَه</b> — صورةُ التوقيع والختم أداتا إلزامٍ لا بياناتُ عرض.</div>'
+    + '</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
+      + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.toggleSignPanel()">' + _icon("rotateCcw", "ic-sm") + ' إغلاق</button>'
+      + '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.newSignatory()">' + _icon("plus", "ic-sm") + ' موقّع جديد</button>'
+    + '</div></div>'
+    + rows + '</div>';
+}
+
+function _signImgBox(lbl, url, which, hint){
+  return '<div class="dv-f"><label class="dv-l">' + lbl + '</label>'
+    + (url ? '<div class="dv-sg-prev"><img src="' + _esc(url) + '" alt="">'
+             + '<button type="button" class="rm" onclick="docVault.delSignImage(\'' + which + '\')">حذف</button></div>'
+           : '<div class="dv-none" style="padding:8px 0">لا صورة</div>')
+    + '<div style="margin-top:7px"><button type="button" class="btn btn-ghost btn-sm" onclick="docVault.addSignImage(\'' + which + '\')">'
+      + _icon("paperclip", "ic-sm") + ' ' + (url ? "استبدال" : "رفع") + '</button></div>'
+    + '<div class="dv-hint">' + hint + '</div></div>';
+}
+function _signFormHTML(){
+  var e = _sEdit;
+  return '<div class="dv-panel">'
+    + '<div class="dv-panel-h">' + (e.id ? "تعديل موقّع" : "موقّع جديد") + '</div>'
+    + '<div class="dv-panel-s">الاسمُ والصفةُ يُطبَعان أسفل يسار الورقة بخطٍّ عريض، والصورتان فوقهما.</div>'
+    + '<div class="dv-grid">'
+    + '<div class="dv-f"><label class="dv-l" for="dv-s-title">الصفة <b>*</b></label>'
+      + '<input class="form-input" id="dv-s-title" value="' + _esc(e.title || "") + '" placeholder="المدير العام"></div>'
+    + '<div class="dv-f"><label class="dv-l" for="dv-s-name">الاسم <b>*</b></label>'
+      + '<input class="form-input" id="dv-s-name" value="' + _esc(e.name || "") + '" placeholder="عادل فهيد العارضي"></div>'
+    + _signImgBox("صورة التوقيع", e.signUrl, "sign", "يُفضَّل PNG بخلفيةٍ شفافة — الخلفيةُ البيضاء تُغطّي ما تحتها على الورق.")
+    + _signImgBox("ختم الشركة", e.stampUrl, "stamp", "PNG بخلفيةٍ شفافة كذلك، فالختمُ يُطبَع فوق التوقيع والنصّ.")
+    + '</div>'
+    + '<div class="dv-acts">'
+      + '<button type="button" class="btn btn-ghost" onclick="docVault.cancelSignatory()">إلغاء</button>'
+      + '<button type="button" class="btn btn-primary" onclick="docVault.saveSignatory()">' + _icon("save", "ic-sm") + ' حفظ الموقّع</button>'
     + '</div></div>';
 }
 
@@ -1156,11 +1260,179 @@ function _letterCardHTML(l){
                     + row("تاريخ الخطاب", '<span class="dv-num">' + _esc(l.letterDate || "—") + '</span>')
                     + (l.ref ? row("الرقم لدى الجهة", '<span class="dv-num">' + _esc(l.ref) + '</span>') : ""))
       + row("الموضوع", _esc(l.subject || "—"))
+      + (isTpl ? "" : row("التوقيع", (function(){
+          if(!l.signName && !l.signTitle) return '<span class="dv-none">بلا توقيع — يُوقَّع باليد</span>';
+          var sg = l.signId ? signatoryById(l.signId) : null;
+          var lbl = _esc((l.signTitle ? l.signTitle + ": " : "") + (l.signName || ""));
+          if(!sg) return lbl + ' <span class="dv-chip l-none">حُذف من السجلّ — بلا صورة</span>';
+          var m = [];
+          if(sg.signUrl)  m.push("توقيع");
+          if(sg.stampUrl) m.push("ختم");
+          return lbl + (m.length ? ' <span class="dv-chip l-ok">' + m.join(" و") + '</span>'
+                                 : ' <span class="dv-chip l-none">بلا صورة</span>');
+        })()))
       + (l.body ? '<div class="dv-f wide"><span class="dv-l">المتن</span>'
           + '<div style="white-space:pre-wrap;line-height:2;font-size:12.5px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:13px 15px">'
           + _esc(l.body) + '</div></div>' : "")
       + '<div class="dv-f wide"><span class="dv-l">المرفقات</span>' + _filesHTML(l.files, null) + '</div>'
     + '</div></div>';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   سجلُّ التواقيع — أسماءُ الموقّعين وصورُ توقيعِهم وختمِ الشركة
+   (طلبُ المالك: «اسم التوقيع مثلا محفوظ للاختيار في كل مره، واضافة توقيع وختم
+   الشركة، والتواقيع تكون محفوظة في قوائم للاختيار»)
+
+   ── لماذا سجلٌّ لا حقلُ كتابةٍ في كلّ خطاب ──
+   اسمُ الموقّع وصفتُه يتكرّران في كلّ خطابٍ تُصدره الشركة. وكتابتُهما في كلّ مرّة
+   تُنتج «المدير العام» و«مدير عام» و«م. عام» على ورقٍ يخرج باسم الشركة نفسِها —
+   والصورتان (التوقيع والختم) لا تُرفعان أصلاً في كلّ مرّة. فسجلٌّ يُملأ مرّةً
+   ويُختار منه.
+
+   ── الإدارةُ للأدمن وحدَه، **وهذا حارسٌ على الخادم لا في الشاشة** ──
+   صورةُ توقيعِ المدير العام وختمُ الشركة أداتا إلزامٍ لا بياناتُ عرض: من ملكهما
+   أخرج خطاباً يبدو موقَّعاً ومختوماً. ومستندُ `meta` مفتوحٌ بالقاعدة العامة لكلّ
+   دورٍ غيرِ الزائر، فاستُثني صراحةً في `firestore.rules` وأُفرد له بلوكُ
+   **`isAdmin()` وحدَه** — كما فُعل بمستند المستخدمين للسبب نفسِه.
+
+   ── والقراءةُ تبقى مفتوحةً لكلّ ذي دور ──
+   وهو **خطرٌ مُعلَنٌ لا مسكوتٌ عنه**: من يفتح الخزانة يرى الرابطَ ويطبع به. تضييقُه
+   يحتاج تضييقَ القراءة العامة كلِّها (المرحلة ٣ في `docs/deep-review-2026-08.md`)،
+   ومجموعةٌ واحدةٌ تُضيَّق قبل أخواتها تنكسر شاشتُها وحدَها.
+
+   ── والنموذجُ لا يُوقَّع إطلاقاً ──
+   نموذجٌ يخرج موقَّعاً ومختوماً هو **خطابٌ جاهزٌ للإرسال بعناصرَ نائبةٍ بين قوسين**.
+   فالتوقيعُ خاصيّةُ الصادر وحدَه، بلا خيارٍ في نموذج النموذج أصلاً.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function SIGNS_DOC(){ return _dev() ? "meta/vault_signatories_dev" : "meta/vault_signatories"; }
+
+var _signs = [], _signsUnsub = null, _signsLoaded = false;
+var _sEdit = null;        // مسوّدةُ الموقّع قيدَ التحرير
+var _sPanel = false;      // أمفتوحةٌ لوحةُ إدارة التواقيع؟
+
+function signatories(){ return _signs.slice(); }
+function signatoryById(id){
+  var l = String(id || "");
+  for(var i = 0; i < _signs.length; i++) if(_signs[i] && _signs[i].id === l) return _signs[i];
+  return null;
+}
+/* الإدارةُ للأدمن وحدَه — والخادمُ يردّ غيرَه، فهذا حارسٌ ثانٍ لا الوحيد. */
+function canManageSigns(){ var u = _me(); return !!(u && u.role === "admin"); }
+
+function startSignSync(){
+  var d = _db();
+  if(!d || _signsUnsub || !canView()) return;
+  _signsUnsub = d.doc(SIGNS_DOC()).onSnapshot(function(snap){
+    var v = (snap.exists && snap.data()) || {};
+    _signs = Array.isArray(v.list) ? v.list : [];
+    _signsLoaded = true;
+    _repaint(PAGE_LETTERS);
+  }, function(){ _signsLoaded = true; });
+}
+function stopSignSync(){
+  try{ if(_signsUnsub) _signsUnsub(); }catch(e){}
+  _signsUnsub = null; _signs = []; _signsLoaded = false;
+}
+/* الكتابةُ تُعيد المصفوفةَ كاملةً — والسجلُّ بضعةُ أسماءٍ يحرّرها الأدمن وحدَه،
+   فلا تصادمَ يُخشى، والقراءةُ الطازجةُ قبل الكتابة تكلفةٌ بلا مقابلٍ هنا. */
+function _saveSigns(list){
+  var d = _db();
+  if(!d) return Promise.reject(new Error("no-db"));
+  return d.doc(SIGNS_DOC()).set({ list:list, updatedAt:new Date().toISOString(),
+                                  updatedBy:_myName() }, { merge:true });
+}
+
+/* ════════ لوحةُ الإدارة ════════ */
+function toggleSignPanel(){
+  if(!canManageSigns()){ _toast("🔒 إدارة التواقيع لمدير النظام وحدَه","warn"); return; }
+  _sPanel = !_sPanel; _sEdit = null; renderLetters(); _top();
+}
+function newSignatory(){
+  if(!canManageSigns()) return;
+  _sEdit = { name:"", title:"", signUrl:"", signPath:"", stampUrl:"", stampPath:"" };
+  _sPanel = true; renderLetters(); _top();
+}
+function editSignatory(id){
+  if(!canManageSigns()) return;
+  var s = signatoryById(id);
+  if(!s) return;
+  _sEdit = { id:s.id, name:s.name||"", title:s.title||"",
+             signUrl:s.signUrl||"", signPath:s.signPath||"",
+             stampUrl:s.stampUrl||"", stampPath:s.stampPath||"" };
+  _sPanel = true; renderLetters(); _top();
+}
+function cancelSignatory(){ _sEdit = null; renderLetters(); }
+
+function _readSignForm(){
+  var g = function(id){ var el = document.getElementById(id); return el ? String(el.value || "").trim() : ""; };
+  _sEdit.name  = g("dv-s-name");
+  _sEdit.title = g("dv-s-title");
+}
+/* الصورتان تُرفعان تحت البادئة القائمة `po/vault/sign/` كبقيّة مرفقات الخزانة. */
+function addSignImage(which){
+  if(!_sEdit || !canManageSigns()) return;
+  _readSignForm();
+  _pickFile(function(f){
+    _toast("⏳ جارٍ الرفع…", "");
+    _upload("sign", _sEdit.id || ("new_" + Date.now()), f).then(function(rec){
+      if(which === "stamp"){ _sEdit.stampUrl = rec.url; _sEdit.stampPath = rec.storagePath; }
+      else { _sEdit.signUrl = rec.url; _sEdit.signPath = rec.storagePath; }
+      renderLetters(); _toast("✅ رُفعت الصورة", "success");
+    }).catch(function(e){ _toast("⚠ تعذّر الرفع: " + String((e && e.message) || e), "warn"); });
+  });
+}
+function delSignImage(which){
+  if(!_sEdit) return;
+  _readSignForm();
+  if(which === "stamp"){ _sEdit.stampUrl = ""; _sEdit.stampPath = ""; }
+  else { _sEdit.signUrl = ""; _sEdit.signPath = ""; }
+  renderLetters();
+}
+
+function saveSignatory(){
+  if(!canManageSigns()){ _toast("🔒 إدارة التواقيع لمدير النظام وحدَه","warn"); return; }
+  _readSignForm();
+  if(!_sEdit.name){ _toast("⚠ أدخل اسم الموقّع","warn"); return; }
+  if(!_sEdit.title){ _toast("⚠ أدخل صفة الموقّع (مثال: المدير العام)","warn"); return; }
+  var now = new Date().toISOString(), me = _myName();
+  var list = _signs.slice(), i;
+  if(_sEdit.id){
+    for(i = 0; i < list.length; i++){
+      if(list[i].id === _sEdit.id){
+        list[i] = { id:_sEdit.id, name:_sEdit.name, title:_sEdit.title,
+                    signUrl:_sEdit.signUrl, signPath:_sEdit.signPath,
+                    stampUrl:_sEdit.stampUrl, stampPath:_sEdit.stampPath,
+                    createdAt:list[i].createdAt || now, createdBy:list[i].createdBy || me,
+                    updatedAt:now, updatedBy:me };
+        break;
+      }
+    }
+  } else {
+    list.push({ id:"SG-" + Date.now().toString(36), name:_sEdit.name, title:_sEdit.title,
+                signUrl:_sEdit.signUrl, signPath:_sEdit.signPath,
+                stampUrl:_sEdit.stampUrl, stampPath:_sEdit.stampPath,
+                createdAt:now, createdBy:me, updatedAt:now, updatedBy:me });
+  }
+  _saveSigns(list).then(function(){
+    _audit(_sEdit.id ? "تعديل موقّع في الخزانة" : "إضافة موقّع إلى الخزانة", _sEdit.name + " — " + _sEdit.title);
+    _sEdit = null; renderLetters(); _toast("✅ حُفظ الموقّع", "success");
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+}
+
+function delSignatory(id){
+  if(!canManageSigns()){ _toast("🔒 إدارة التواقيع لمدير النظام وحدَه","warn"); return; }
+  var s = signatoryById(id);
+  if(!s) return;
+  _confirm({ title:"حذف موقّع", icon:"🗑", okText:"حذف", okClass:"btn-danger",
+    msg:'سيُحذف "' + (s.name || id) + '" من قائمة التواقيع. الخطاباتُ التي تحمله تبقى كما هي — '
+      + 'الاسمُ والصفةُ محفوظان في كلٍّ منها، والصورتان تختفيان من مطبوعاتها.' })
+    .then(function(ok){
+      if(!ok) return;
+      _saveSigns(_signs.filter(function(x){ return x.id !== id; })).then(function(){
+        _audit("حذف موقّع من الخزانة", id + " — " + (s.name || ""));
+        renderLetters(); _toast("✅ حُذف الموقّع", "success");
+      }).catch(function(e){ _toast("⚠ تعذّر الحذف: " + String((e && e.message) || e), "warn"); });
+    }).catch(function(){});
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1200,6 +1472,50 @@ function _bodyHTML(text){
   return t.replace(/\[([^\]\n]{1,60})\]/g, '<span class="ph">[$1]</span>');
 }
 
+/* ════════ كتلةُ التوقيع في المطبوعة — أسفل يسار الورقة ════════
+   طلبُ المالك: «اسم التوقيع اسفل يسار ورقة الشركة ويكون بخط bold وحجم مناسب،
+   واضافة توقيع وختم الشركة».
+
+   ── ثلاثُ حالاتٍ لا حالتان ──
+   (١) موقّعٌ بصورتِه ⇐ اسمٌ وصفةٌ بخطٍّ عريضٍ فوقهما التوقيعُ والختم.
+   (٢) موقّعٌ بلا صورةٍ (أو حُذف من السجلّ) ⇐ الاسمُ والصفةُ فوق **سطرِ توقيعٍ
+       يدويّ**: الورقةُ تقول مَن يوقّع، ويبقى موضعُ توقيعه فارغاً. ولو حُذف السطرُ
+       هنا لخرجت ورقةٌ تحمل اسمَ مسؤولٍ بلا موضعٍ يوقّع فيه.
+   (٣) بلا موقّعٍ ⇐ أسطرٌ فارغةٌ كما كانت.
+   **والنموذجُ يبقى على الأسطر الفارغة دائماً** مهما حُفظ فيه.
+
+   ── والاسمُ من الخطاب لا من السجلّ ──
+   `signName`/`signTitle` مثبَّتان على الوثيقة عند الحفظ. فخطابٌ خرج ثمّ تغيّرت
+   صفةُ موقّعه **لا تتغيّر ورقتُه**: المطبوعُ سجلٌّ لما وُقِّع لا مرآةٌ لحاضر
+   السجلّ. والصورتان وحدَهما تُقرآن حيّتين — فحذفُ الموقّع يُسقطهما ولا يُسقط اسمَه.
+
+   ── والختمُ فوق التوقيع بتراكبٍ مقصود ──
+   كما يُختَم الورقُ فعلاً: الختمُ يقع على التوقيع لا بجانبه. و`z-index` يضعه
+   فوقه، وشفافيةُ الـPNG هي ما يُبقي التوقيعَ مقروءاً تحته. */
+function _signBlockHTML(l, isTpl){
+  var blank = '<div class="sign"><div class="sg">'
+    + '<div class="sg-r"><span>الاسم</span><i></i></div>'
+    + '<div class="sg-r"><span>الصفة</span><i></i></div>'
+    + '<div class="sg-r"><span>التوقيع والختم</span><i></i></div>'
+    + '</div></div>';
+  if(isTpl) return blank;
+  var nm = String(l.signName || "").trim(), ti = String(l.signTitle || "").trim();
+  if(!nm && !ti) return blank;
+  var s = l.signId ? signatoryById(l.signId) : null;
+  var sig = (s && s.signUrl) ? s.signUrl : "";
+  var stp = (s && s.stampUrl) ? s.stampUrl : "";
+  return '<div class="sgn">'
+    + '<div class="sgn-co">شركة المباني السريعة للمقاولات</div>'
+    + '<div class="sgn-nm">' + _esc(ti ? (ti + ": ") : "") + _esc(nm) + '</div>'
+    + ((sig || stp)
+        ? '<div class="sgn-im">'
+          + (sig ? '<img class="sgn-sig" src="' + _esc(sig) + '" alt="">' : '')
+          + (stp ? '<img class="sgn-stp" src="' + _esc(stp) + '" alt="">' : '')
+          + '</div>'
+        : '<div class="sgn-line"></div>')
+    + '</div>';
+}
+
 function letterPaperHTML(l){
   var isTpl = (l.kind === "template");
   var ctr = _ctr();
@@ -1231,15 +1547,16 @@ function letterPaperHTML(l){
     + (l.subject ? '<div class="subj">الموضوع: <b>' + _esc(l.subject) + '</b></div>' : "")
     + '<div class="body">' + _bodyHTML(l.body || "") + '</div>'
     + (isTpl ? "" : '<div class="close">وتفضلوا بقبول فائق الاحترام والتقدير،</div>')
-    + '<div class="sign"><div class="sg">'
-      + '<div class="sg-r"><span>الاسم</span><i></i></div>'
-      + '<div class="sg-r"><span>الصفة</span><i></i></div>'
-      + '<div class="sg-r"><span>التوقيع والختم</span><i></i></div>'
-    + '</div></div>'
-    /* الباركودُ للصادر وحدَه — رقمُ قيدٍ في سجلّ المراسلات، والنموذجُ ليس قيداً. */
-    + (isTpl ? "" :
-        '<div class="bcw"><div class="bcb">' + code128SVG(l.id || "")
-        + '<div class="bcn">' + _esc(l.id || "") + '</div></div></div>');
+    /* ذيلُ الورقة صفٌّ واحد: الباركودُ في أوّله (يميناً) وكتلةُ التوقيع في آخره
+       (يساراً كما في ورق الشركة). ولو تُركا كتلتين متتاليتين لتزاحما على الحافّة
+       نفسِها أو تباعدا بفراغٍ لا معنى له. والباركودُ للصادر وحدَه. */
+    + '<div class="ftr">'
+      + (isTpl ? '<span></span>' :
+          '<div class="bcw"><div class="bcb">' + code128SVG(l.id || "")
+          + '<div class="bcn">' + _esc(l.id || "") + '</div></div></div>')
+      + _signBlockHTML(l, isTpl)
+    + '</div>'
+    ;
 
   return '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'
     + '<title>' + _esc((isTpl ? "نموذج — " : "خطاب — ") + (l.title || l.id || "")) + '</title><style>'
@@ -1275,7 +1592,25 @@ function letterPaperHTML(l){
     + '.sg-r i{flex:1;border-bottom:1px dotted #9ca3af;height:15px}'
     /* الباركودُ ورقمُه كتلةٌ واحدة: رقمٌ في طرفِ الورقة وأعمدةٌ في طرفها لا يُقرآن
        معاً، والرقمُ إنّما وُضع ليُنقذ الورقةَ حين يعجز الماسحُ عن الأعمدة فوقه. */
-    + '.bcw{margin-top:22px;break-inside:avoid;direction:ltr;display:flex;justify-content:flex-start}'
+    /* كتلةُ الموقّع أسفل **يسار** الورقة (طلبُ المالك) — و`flex-end` في صفحةٍ
+       عربيةٍ هو اليسار. والاسمُ عريضٌ بحجمٍ يزيد على المتن قليلاً: هو ما تبحث عنه
+       العينُ في ورقةٍ رسمية، لا المتن. */
+    + '.ftr{margin-top:24px;break-inside:avoid;display:flex;justify-content:space-between;'
+      + 'align-items:flex-end;gap:14px}'
+    /* الكتلةُ إلى **يسار** الورقة (طلبُ المالك). وفي صفحةٍ عربيةٍ اليسارُ هو نهايةُ
+       السطر، فالهامشُ التلقائيُّ يُوضع على **البداية** (`inline-start`) ليدفعها إليه. */
+    + '.sgn{width:76mm;text-align:center;margin-inline-start:auto}'
+    + '.sgn-co{font-size:13px;font-weight:700;color:#111827}'
+    /* الاسمُ عريضٌ بحجمٍ يزيد على المتن: هو ما تبحث عنه العينُ في ورقةٍ رسمية. */
+    + '.sgn-nm{font-size:14.5px;font-weight:800;color:#111827;margin-top:1mm}'
+    + '.sgn-line{border-bottom:1px solid #9ca3af;height:20mm;margin-top:2mm}'
+    /* التوقيعُ والختمُ يقعان **على** الاسم بتراكبٍ طفيفٍ لأعلى — كما يُختَم الورقُ
+       فعلاً، لا صورتين مرصوصتين تحته. والختمُ فوق التوقيع بـ`z-index`، وشفافيةُ
+       الـPNG هي ما يُبقي ما تحته مقروءاً. */
+    + '.sgn-im{position:relative;height:28mm;margin-top:-3mm}'
+    + '.sgn-sig{position:absolute;right:12%;top:0;height:16mm;object-fit:contain;z-index:1}'
+    + '.sgn-stp{position:absolute;left:6%;top:4mm;height:23mm;object-fit:contain;z-index:2}'
+    + '.bcw{direction:ltr;display:flex;justify-content:flex-start}'
     + '.bcb{display:inline-block;text-align:center}'
     + '.bc{display:block}'
     + '.bcn{font-size:11px;letter-spacing:1.6px;color:#374151;margin-top:2px;font-family:monospace}'
@@ -1318,6 +1653,7 @@ function renderLetters(){
     + '<h2 class="dv-ttl">' + _icon("scrollText") + ' خزانة الوثائق — الخطابات</h2>'
     + '<div class="dv-sub">نماذجُ الخطابات تُستنسَخ ولا تُكتب من جديد، والخطاباتُ الصادرةُ تُحفَظ برقمٍ مرجعيٍّ يُرجَع إليها به.</div>'
     + '</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + (canManageSigns() ? '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.toggleSignPanel()">' + _icon("edit", "ic-sm") + ' سجلّ التواقيع</button>' : "")
     + (canEdit() ? '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.newLetter(\'template\')">' + _icon("plus", "ic-sm") + ' نموذج جديد</button>'
       + '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.newLetter(\'issued\')">' + _icon("plus", "ic-sm") + ' خطاب صادر</button>' : "")
     + '</div></div>';
@@ -1325,7 +1661,8 @@ function renderLetters(){
   if(!_ltrsLoaded){ host.innerHTML = head + '<div class="dv-empty">جارٍ تحميل الخطابات…</div>'; return; }
 
   var body = "";
-  if(_ledit){ body = _letterFormHTML(); }
+  if(_sPanel && canManageSigns()){ body = _signPanelHTML(); }
+  else if(_ledit){ body = _letterFormHTML(); }
   else if(_lview.open){
     var l = letterById(_lview.open);
     body = l ? _letterCardHTML(l) : '<div class="dv-empty">لم يعد هذا الخطاب موجوداً.</div>';
@@ -1555,7 +1892,8 @@ function backToLetters(){ _lview.open = null; renderLetters(); _top(); }
 function newLetter(kind, seed){
   if(!canEdit()){ _toast("🔒 لا صلاحية لإضافة خطاب","warn"); return; }
   var base = { kind:(kind === "template" ? "template" : "issued"), title:"", subject:"",
-               party:"", letterDate:new Date().toISOString().slice(0, 10), ref:"", body:"", files:[] };
+               party:"", letterDate:new Date().toISOString().slice(0, 10), ref:"", body:"",
+               signId:"", signName:"", signTitle:"", files:[] };
   if(seed) Object.keys(seed).forEach(function(k){ base[k] = seed[k]; });
   _ledit = base; _lview.open = null;
   _lview.kind = base.kind;
@@ -1567,6 +1905,7 @@ function editLetter(id){
   if(!l) return;
   _ledit = { id:l.id, kind:l.kind || "issued", title:l.title||"", subject:l.subject||"",
              party:l.party||"", letterDate:l.letterDate||"", ref:l.ref||"", body:l.body||"",
+             signId:l.signId||"", signName:l.signName||"", signTitle:l.signTitle||"",
              files:Array.isArray(l.files) ? l.files.slice() : [] };
   renderLetters(); _top();
 }
@@ -1587,6 +1926,14 @@ function _readLetterForm(){
     _ledit.party      = g("dv-l-party");
     _ledit.letterDate = g("dv-l-date");
     _ledit.ref        = g("dv-l-ref");
+    /* الاسمُ والصفةُ يُثبَّتان على الخطاب عند الحفظ، ولا يُقرآن من السجلّ وقتَ
+       الطباعة: خطابٌ خرج باسمِ موقّعٍ ثمّ تغيّرت صفتُه في السجلّ **لا تتغيّر
+       ورقتُه** — المطبوعُ سجلٌّ لما وُقِّع، لا مرآةٌ لحاضر السجلّ. والصورتان
+       وحدَهما تُقرآن حيّتين (وتختفيان إن حُذف الموقّع). */
+    _ledit.signId = g("dv-l-sign");
+    var _sg = _ledit.signId ? signatoryById(_ledit.signId) : null;
+    _ledit.signName  = _sg ? String(_sg.name  || "") : "";
+    _ledit.signTitle = _sg ? String(_sg.title || "") : "";
   }
 }
 function addLetterFile(){
@@ -1612,6 +1959,7 @@ function saveLetter(){
   var now = new Date().toISOString(), me = _myName();
   var body = { kind:_ledit.kind, title:_ledit.title, subject:_ledit.subject, body:_ledit.body,
                party:_ledit.party || "", letterDate:_ledit.letterDate || "", ref:_ledit.ref || "",
+               signId:_ledit.signId || "", signName:_ledit.signName || "", signTitle:_ledit.signTitle || "",
                files:_ledit.files || [], updatedAt:now, updatedBy:me };
   if(_ledit.fromTemplate) body.fromTemplate = _ledit.fromTemplate;
   var was = _ledit.id;
@@ -1834,6 +2182,12 @@ window.docVault = {
   cancelLetter:cancelLetter, saveLetter:saveLetter, delLetter:delLetter,
   useTemplate:useTemplate, addLetterFile:addLetterFile, delLetterDraftFile:delLetterDraftFile,
   printLetter:printLetter, letterPaperHTML:letterPaperHTML,
+  // سجلُّ التواقيع
+  signatories:signatories, signatoryById:signatoryById, canManageSigns:canManageSigns,
+  toggleSignPanel:toggleSignPanel, newSignatory:newSignatory, editSignatory:editSignatory,
+  cancelSignatory:cancelSignatory, saveSignatory:saveSignatory, delSignatory:delSignatory,
+  addSignImage:addSignImage, delSignImage:delSignImage,
+  startSignSync:startSignSync, stopSignSync:stopSignSync,
   // القراءة
   docs:docs, letters:letters, docById:docById, letterById:letterById,
   canView:canView, canEdit:canEdit, canDelete:canDelete, roleEligible:roleEligible,
@@ -1850,9 +2204,10 @@ window.docVault = {
      والجدولُ في DOM حقيقيّ داخل `hail-tests.js`. لأنّ الحسابَ الصحيحَ الذي لا يُرسَم
      خطأٌ لا يُنذر، ولا سبيلَ لفحص الرسم بلا مصدرِ بياناتٍ سوى `onSnapshot`.
      لا يُنادى من الواجهة قطّ، ولا يكتب حرفاً في Firestore. */
-  __test_seed:function(d, l){
+  __test_seed:function(d, l, sg){
     _docs = Array.isArray(d) ? d.slice() : [];
     _ltrs = Array.isArray(l) ? l.slice() : [];
+    if(Array.isArray(sg)){ _signs = sg.slice(); _signsLoaded = true; }
     _docsLoaded = _ltrsLoaded = true; _err = "";
   }
 };
