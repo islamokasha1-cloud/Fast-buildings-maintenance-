@@ -41,8 +41,32 @@ const HTML = (() => {
   if (!fs.existsSync(cssPath)) return IDX_RAW;
   const css = fs.readFileSync(cssPath, "utf8")
     .replace(/^\/\* [\s\S]*?\*\/\n\n/, "");   // ترويسةُ الوحدة ليست قاعدةَ أنماط
-  return IDX_RAW.replace(m[0], "<style>\n" + css.replace(/\n$/, "") + "\n</style>");
+  return _spliceSlaEngine(IDX_RAW.replace(m[0], "<style>\n" + css.replace(/\n$/, "") + "\n</style>"));
 })();
+/* ــ محرّكُ SLA خرج إلى `sla-engine.js` ــ يُعاد إلى **موضعه الأصليّ بالضبط** ــــــــ
+   للسبب نفسِه الذي أُعيدت به ورقةُ الأنماط أعلاه، وأشدَّ: في هذا الملفّ عشراتُ
+   الحرّاس على محرّك SLA، وكثيرٌ منها كتلٌ تبدأ بـ`indexOf(...)` ثم `if (i < 0)`.
+   فلو قُرئ `index.html` وحدَه **لتخطّتها `if` صامتةً** — ٤٨ فحصاً اختفت فعلاً عند
+   أوّل تشغيلٍ بعد النقل، لا بفشلٍ بل بنقصانٍ في العدد. والتأكيداتُ السالبة أخطر:
+   «هذه الصيغةُ غائبة» تمرّ مجّاناً بعد أن انتقلت الصيغةُ لا زالت.
+   فالنصُّ الذي تراه الحرّاسُ يبقى **مطابقاً لما كان قبل النقل** حرفياً. */
+function _spliceSlaEngine(src) {
+  const modPath = path.resolve(path.dirname(IDX), "sla-engine.js");
+  if (!fs.existsSync(modPath)) return src;
+  const mod = fs.readFileSync(modPath, "utf8");
+  const cut = (tag) => {
+    const a = mod.indexOf(`/* ==SLA-MOVED-${tag}-START== */\n`);
+    const b = mod.indexOf(`\n/* ==SLA-MOVED-${tag}-END== */`);
+    return (a < 0 || b < 0) ? null : mod.slice(a + `/* ==SLA-MOVED-${tag}-START== */\n`.length, b);
+  };
+  let out = src;
+  for (const tag of ["A", "B"]) {
+    const body = cut(tag);
+    const mark = new RegExp(`^/\\* ==SLA-MOVED-${tag}== [^\\n]*\\*/$`, "m");
+    if (body !== null && mark.test(out)) out = out.replace(mark, () => body);
+  }
+  return out;
+}
 // اسمٌ ثابتٌ لمصدر التطبيق — يُستعمل حيث يُظلَّل `HTML` داخل دالةٍ (tvWallGuards)
 const APP_SRC = HTML;
 const KPI_PATH = [path.resolve(path.dirname(IDX), "purchase-kpi.v2.js"), path.resolve(path.dirname(IDX), "purchase-kpi.js")].find(p => fs.existsSync(p));
@@ -754,7 +778,14 @@ function predelivery() {
        يفحصها hail-tests بلا متصفّح**، وموضعُها بجوار `PRIORITIES` و`SLA_CONFIG`
        اللذَين تشتقّ منهما — ونقلُها وحدَها يشقّ تعريفَ الأولوية مصدرَين. وأكثرُ
        الزيادة تعليقٌ يقول لِمَ لا تُعاد خريطةُ `SLA` المحذوفة. */
-    const IDX_CEILING = 40066;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 40066 إلى 40079 — ‏١٣ سطراً لسُلَّم KPI-02 (v18.9ze)، وأكثرُها تعليقٌ
+       يشرح لِمَ سقط السقفُ 48 المخفيّ. والسطورُ الفعليةُ ثلاثةٌ داخل `renderKPIData`
+       نفسِها (ثابتُ الهدف · الصيغة · بسطُ البطاقة) — منطقُ مؤشّرٍ قائمٍ يُصلَح في
+       موضعه كما تُلزم CLAUDE.md، ونقلُه وحدَه يشقّ حسابَ المؤشّرات السبعة. */
+    /* **خُفِّض** من 40079 إلى 39885 — ‏١٩٤ سطراً خرجت إلى `sla-engine.js` (محرّكُ SLA
+       كلُّه). والخفضُ هو نصفُ الفائدة: مكسبُ الاستخراج يُثبَّت هنا فلا يُبتلَع لاحقاً
+       بإضافاتٍ تملأ الفراغَ الذي تركه. */
+    const IDX_CEILING = 39885;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -5412,7 +5443,111 @@ function auditRound2() {
       T("غير المغلق ليس «ملتزماً»", fn({ priority: 'عادي', status: 'مفتوح', _wh: 1 }) === false);
     }
     T("KPI-03 يستخدم _closedOnTime", HTML.includes("closedTix.filter(_closedOnTime)"));
+
+  // ── v18.9ze — KPI-02: سُلَّمٌ من الهدف المعلَن لا من سقفٍ مخفيّ ──────────────
+  //  كان يقيس على 48 ساعةً لا تظهر في البطاقة، فيُعطي فريقاً بلغ الهدفَ المعلَن
+  //  (8 ساعات) 83٪، و100٪ مستحيلةً (تتطلّب متوسطاً = صفر). وكان يعرض closedInSLA —
+  //  بسطَ KPI-03 لا بسطَه — فتُقرأ البطاقةُ متناقضةً مع نسبتها.
+  {
+    const _b = HTML.indexOf("const RESPONSE_TARGET_H = 8;");
+    if (_b < 0) { T("★ ze: هدفُ KPI-02 ثابتٌ مسمّى", false); }
+    else {
+      const _e = HTML.indexOf("const closedWithinTarget", _b);
+      let score = null;
+      try {
+        score = new Function("avgResponseH", HTML.slice(_b, _e) + "\nreturn responseScore;");
+      } catch (e) { T("تُبنى صيغةُ KPI-02", false, String(e.message).slice(0, 100)); }
+      if (score) {
+        T("★★ ze: بلوغُ الهدف المعلَن (8 ساعاتِ عمل) = 100٪ (كان 83٪)", score(8) === 100);
+        T("★ ze: و100٪ صارت بالغةً لا مستحيلة (كانت تتطلّب متوسطاً = صفر)",
+          score(4) === 100 && score(7.9) === 100);
+        T("★ ze: وما بعد الهدف يتدرّج بنسبته إلى المتوسط — 16 ساعةً ⇐ 50٪",
+          score(16) === 50 && score(32) === 25);
+        T("ze: بلا بلاغاتٍ مغلقة (متوسط 0) = 100٪ لا قسمةَ على صفر",
+          score(0) === 100 && Number.isFinite(score(0)));
+        T("ze: النسبةُ محصورةٌ في [0,100] مهما كان المتوسط",
+          score(1e9) >= 0 && score(0.001) === 100);
+        T("★ ze: زال السقفُ 48 المخفيّ من الصيغة",
+          !/Math\.min\(avgResponseH,48\)\/48/.test(HTML));
+      }
+    }
+    //  أرقامُ البطاقتين تشتقّ نسبتَهما — لا رقمَ من مؤشّرٍ آخر
+    T("★★ ze: KPI-02 يعرض «أُغلق خلال الهدف» لا بسطَ KPI-03 (538 المضلّل)",
+      HTML.includes('["أُغلق خلال الهدف",closedWithinTarget') &&
+      !HTML.includes('["مغلق في الوقت",closedInSLA'));
+    T("★ ze: وبسطُه من منطقه — _closeWorkH ضمن الهدف نفسِه",
+      HTML.includes("closedTix.filter(t=>_closeWorkH(t)<=RESPONSE_TARGET_H).length"));
+    T("★ ze: وتسميةُ الهدف تقول «ساعة عمل» (المقياسُ _closeWorkH لا ساعاتِ جدار)",
+      HTML.includes('"≤ "+RESPONSE_TARGET_H+" ساعة عمل"'));
+    T("★★ ze: مقامُ KPI-03 المعروضُ = المقامُ المحسوب (closedTix لا كلُّ المغلقة)",
+      HTML.includes('["إجمالي مغلقة",closedTix.length],["داخل SLA",closedInSLA') &&
+      HTML.includes("closedTix.length-closedInSLA") &&
+      !HTML.includes('["تجاوز SLA",closed-closedInSLA'));
+    T("★ ze: ومقامُ KPI-02 المعروضُ مثلُه (المتوسطُ يُحسب على closedTix)",
+      HTML.includes('["بلاغات مغلقة",closedTix.length]'));
+  }
     T("★ زال قياس الالتزام بـ getSLA التقويمي", !HTML.includes("return h<=getSLA(t.priority);") && !HTML.includes("if(h <= getSLA(t.priority))"));
+  }
+
+  // ── محرّكُ SLA وحدةٌ مستقلّة — والحرّاسُ تراه في موضعه ───────────────────────
+  //  هذه الحرّاسُ تحمي **آليّةَ الفحص نفسَها**: لو انكسر الرقعُ (علامةٌ أُعيدت تسميتُها،
+  //  أو ملفٌّ لم يُقرأ) لعادت عشراتُ الحرّاس تُتخطّى بـ`if` صامتةً — نقصاناً في العدد
+  //  لا فشلاً يُرى. فالكسرُ يُصرّح به هنا بدل أن يختفي.
+  {
+    const _slaPath = path.resolve(path.dirname(IDX), "sla-engine.js");
+    T("★★ وحدةُ محرّك SLA موجودةٌ ومحقونةٌ مبكّراً (قبل السكربت المضمَّن — أسماؤها عالمية)",
+      fs.existsSync(_slaPath) &&
+      IDX_RAW.indexOf('<script src="sla-engine.js?v=') < IDX_RAW.indexOf("const APP_VERSION"));
+    if (fs.existsSync(_slaPath)) {
+      const _m = fs.readFileSync(_slaPath, "utf8");
+      T("★★ علامتا حدِّ النقل قائمتان في الوحدة (بهما تُعاد الكتلةُ ويُثبَت النقل)",
+        ["A", "B"].every(t => _m.includes(`/* ==SLA-MOVED-${t}-START== */`) &&
+                              _m.includes(`/* ==SLA-MOVED-${t}-END== */`)));
+      T("★★ والرقعُ نجح فعلاً — الكتلةُ حاضرةٌ في النصِّ الذي تفحصه الحرّاس",
+        HTML.includes("function slaStatus(tierName,createdAt,now,cfg,stops){") &&
+        HTML.includes("const SLA_CONFIG = {") && HTML.includes("const PRIORITIES = [") &&
+        !/^\/\* ==SLA-MOVED-[AB]== /m.test(HTML));
+      T("★ ولا نسخةَ ثانيةً من المحرّك في index.html (مصدرٌ واحدٌ لا اثنان)",
+        !/^const SLA_CONFIG = \{/m.test(IDX_RAW) && !/^function slaStatus\(/m.test(IDX_RAW));
+      T("★★ الوحدةُ تعرّض كلَّ اسمٍ كان عالمياً (اسمٌ يسقط = زرٌّ ميتٌ بصمت)",
+        ["slaOf","isOverdue","getSLA","slaStatus","clockStopMinutes","priorityLabel",
+         "priorityCanonical","prioritySame","slaBudgetLabel","_closeWorkH","_closedOnTime",
+         "responseH","workingMinutesBetween","_ymd","_ym","_parseLocalDate","PRIORITIES",
+         "SLA_CONFIG"].every(n => new RegExp("[{,]\\s*" + n + "\\s*[,}]").test(_m)));
+      // توجيهٌ فعليٌّ في أوّل سطرٍ تنفيذيّ — لا ذكرُ العبارة في ترويسةٍ تشرح لِمَ غابت
+      T("★ وبلا توجيه \"use strict\" — النقلُ الحرفيُّ لا يغيّر دلالةَ الكتلة",
+        !/^\s*["']use strict["'];/m.test(_m));
+    }
+  }
+
+  // ── محرّكٌ واحدٌ للتطبيقين — لا نسخةَ ثانيةً في تطبيق الفنّيّ ────────────────
+  //  كان لـtech-app.html محرّكُه الخاصّ: ساعاتٌ تقويميةٌ بلا ساعاتِ عملٍ ولا إجازات
+  //  ولا clockStops ولا فئةِ «روتيني». فالبلاغُ الواحد ملتزمٌ في شاشةٍ ومتأخّرٌ في
+  //  أخرى — ولا خطأَ يُنذر. هذه الحرّاسُ تمنع عودةَ النسخة الثانية.
+  {
+    const _tp = path.resolve(path.dirname(IDX), "tech-app.html");
+    if (!fs.existsSync(_tp)) { T("tech-app.html موجود", false); }
+    else {
+      const TA = fs.readFileSync(_tp, "utf8");
+      T("★★ تطبيقُ الفنّيّ يقرأ محرّكَ SLA المشترك (لا نسخةً خاصّةً به)",
+        /<script src="sla-engine\.js\?v=[^"]+"><\/script>/.test(TA));
+      T("★★ والوسمُ قبل السكربت المضمَّن (أسماءُ المحرّك عالميةٌ يعتمد عليها)",
+        TA.indexOf('<script src="sla-engine.js?v=') < TA.indexOf("const PHOTO_MAX_PX"));
+      T("★★ زالت خريطةُ SLA المحلّية من تطبيق الفنّيّ (كانت بلا «روتيني» وتسقط إلى 48)",
+        !/^const SLA = \{/m.test(TA) && !/SLA\[p\]/.test(TA));
+      T("★★ وزالت isOverdue المحلّيةُ التي تقيس ساعاتٍ تقويمية",
+        !/function isOverdue\(t\)\{\s*return t\.status!=="مغلق" && elapsedH/.test(TA) &&
+        !/^function getSLA\(/m.test(TA) && !/^function elapsedH\(/m.test(TA));
+      T("★ وشريطُ المهلة يعرض تسميةَ المحرّك لا رقماً خاماً",
+        TA.includes("SLA — ${esc(slaLabel)}") && TA.includes("slaBudgetLabel(t.priority)"));
+      T("★★ و«روتيني» بلا شريطِ مهلةٍ عند الفنّيّ أيضاً (مُستبعَدٌ من القياس عمداً)",
+        TA.includes("const slaTier=tierOf(t.priority);") && TA.includes("slaPct===null"));
+      T("★ ونسبةُ الشريط من responseH (تقويمُ الفئة + خصمُ الإيقاف) لا من طرحِ تاريخين",
+        TA.includes("responseH(t)/getSLA(t.priority)") &&
+        !/usedH=\(t\.closedAt\?new Date\(t\.closedAt\)-new Date\(t\.createdAt\)/.test(TA));
+      T("fmtH تبقى محلّيةً في تطبيق الفنّيّ (صياغةٌ مختصرةٌ للجوّال: «س» لا «ساعة»)",
+        /function fmtH\(h\)\{[^}]*" س"/.test(TA));
+    }
   }
 
   // ── v18.9zc — SLA: الإيقافُ الموثَّق يُخصَم فعلاً من الزمن المنقضي ──────────

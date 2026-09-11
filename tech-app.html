@@ -13,7 +13,11 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js"></script>
 <!-- طابور الرفع المؤجَّل للصور (مشترك مع النظام الرئيسي) -->
-<script src="photo-queue.js?v=18.9.3159"></script>
+<script src="photo-queue.js?v=18.9.3162"></script>
+<!-- محرّكُ SLA — **المصدرُ نفسُه الذي يقرؤه النظام الرئيسي**. كانت لهذا الملفّ نسخةٌ
+     خاصّةٌ تقيس ساعاتٍ تقويميةً بلا ساعاتِ عملٍ ولا إجازات، فيظهر البلاغُ الواحد
+     ملتزماً هنا ومتأخّراً عند المدير. يُحمَّل قبل السكربت المضمَّن لأن أسماءه عالمية. -->
+<script src="sla-engine.js?v=18.9.3162"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -779,7 +783,8 @@ async function selectTechProject(id){
   const el=document.getElementById("login-tech-select"); if(el) el.value="";
   const psel=document.getElementById("login-project-select"); if(psel) psel.value=_activeProjectId;
 }
-const SLA = {"حرج 🔴 (2 ساعة)":2,"عاجل 🟡 (8 ساعات)":8,"عادي 🟢 (48 ساعة)":48};
+/* خريطةُ SLA المحلّيةُ زالت — المهلةُ من `sla-engine.js` (`SLA_CONFIG`). وكانت هنا
+   بلا فئةِ «روتيني» أصلاً، فتسقط كلُّ أولويةٍ لا تطابق مفتاحَها إلى 48. */
 
 const PHOTO_MAX_PX = 1280;
 const PHOTO_QUALITY = 0.78;
@@ -829,9 +834,11 @@ function initFirebase(){
 // ══════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════
-function getSLA(p){ return SLA[p]||48; }
-function elapsedH(d){ return (Date.now()-new Date(d))/3600000; }
-function isOverdue(t){ return t.status!=="مغلق" && elapsedH(t.createdAt)>getSLA(t.priority); }
+/* `getSLA` و`elapsedH` و`isOverdue` من `sla-engine.js` — لم تعد تُعرَّف هنا.
+   وكانت `isOverdue` المحلّيةُ تقارن ساعاتٍ **تقويمية** بمهلةٍ تقويمية: «عادي» متأخّرٌ
+   بعد 48 ساعةَ جدارٍ بينما مهلتُه 16 ساعةَ عمل، و«روتيني» يتأخّر وهو مُستبعَدٌ عمداً،
+   ولا تعرف `clockStops`. فصار الفنّيُّ يرى الحكمَ نفسَه الذي يراه المدير.
+   (و`fmtH` تبقى محلّيةً — صياغتُها مختصرةٌ للجوّال: «س» لا «ساعة».) */
 function fmtH(h){ if(h<1) return Math.round(h*60)+" د"; if(h<24) return Math.round(h)+" س"; return Math.round(h/24)+" يوم"; }
 function fmtDate(d){ return new Date(d).toLocaleString("ar-SA-u-ca-gregory",{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
 function fmtDateOnly(d){ return new Date(d).toLocaleDateString("ar-SA-u-ca-gregory",{year:"numeric",month:"long",day:"numeric"}); }
@@ -1565,11 +1572,11 @@ function openDetail(id){
     ...(t.workDone?[["العمل المنجز",t.workDone]]:[]),
   ];
 
-  // SLA
-  const slaH=getSLA(t.priority);
-  const usedH=(t.closedAt?new Date(t.closedAt)-new Date(t.createdAt):Date.now()-new Date(t.createdAt))/3600000;
-  const slaPct=Math.min(100,Math.round(usedH/slaH*100));
-  const slaClass=slaPct>=100?"sla-over":slaPct>=80?"sla-warn":"sla-ok";
+  // SLA — من المحرّك الموحَّد: ساعاتُ عملٍ وإجازاتٌ وخصمُ الإيقاف الموثَّق، وبتقويم
+  // الفئة (تقويميٌّ للحرج والعاجل). و«روتيني» بلا مهلةٍ — مخطَّطٌ في الوقائية لا مقيسٌ.
+  const slaTier=tierOf(t.priority);
+  const slaLabel=slaBudgetLabel(t.priority);
+  const slaPct=slaTier?Math.min(100,Math.round(responseH(t)/getSLA(t.priority)*100)):null;
 
   // Photos — صور البلاغ المتعددة (ticketPhotos) مع التوافق مع الحقل المفرد القديم
   const _tp=(Array.isArray(t.ticketPhotos)&&t.ticketPhotos.filter(Boolean).length)?t.ticketPhotos.filter(Boolean):(t.ticketPhoto?[t.ticketPhoto]:[]);
@@ -1587,11 +1594,12 @@ function openDetail(id){
       ).join("")}
     </div>
     <div class="divider"></div>
-    <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">SLA — ${slaH}س</div>
+    <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">SLA — ${esc(slaLabel)}</div>
+    ${slaPct===null?`<div style="font-size:11px;color:var(--muted);margin-bottom:14px">بلا مهلة — تُقاس بخطّة الصيانة الوقائية</div>`:`
     <div style="background:var(--border);border-radius:6px;height:8px;margin-bottom:4px">
       <div style="background:${slaPct>=100?"var(--danger)":slaPct>=80?"var(--warn)":"var(--accent)"};height:8px;border-radius:6px;width:${slaPct}%;transition:width .3s"></div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${slaPct}% من الوقت المتاح</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${slaPct}% من الوقت المتاح</div>`}
     ${allPhotos.length?`
     <div class="divider"></div>
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">📸 الصور (${allPhotos.length})</div>
