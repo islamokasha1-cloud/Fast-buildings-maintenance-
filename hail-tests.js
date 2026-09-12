@@ -798,7 +798,8 @@ function predelivery() {
     /* رُفع من 39922 إلى 39935 — ‏١٣ سطراً لـ`fmtWorkH` (v18.9zh) وتعليقِها: منسّقُ عرضٍ
        بجوار `fmtH` التي يُصلح خطأَها (÷24 على ساعات عمل)، ومكانُ منسّق العرض بجوار
        نظيره لا في وحدة. */
-    const IDX_CEILING = 39935;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 39935 إلى 39937 — سطرا تعليقٍ لعزل صيغة النسبة اتجاهياً (v18.9zj). */
+    const IDX_CEILING = 39937;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -5504,16 +5505,15 @@ function auditRound2() {
         { priority: N, status: "مفتوح", maintType: "تصحيحية", createdAt: "2026-09-04T08:00:00" },
       ];
       const m = K.kpiMonthStats(L, "2026-09");
-      T("★★ zi: الوقائيُّ المُغلقُ في موعده لا يدخل KPI-03 (كان «تجاوز SLA» لثلاثة أيامِ انتظارٍ لموعده)",
-        m.closedTix === 1 && m.closedInSLA === 1 && m.rates.k03 === 100);
-      T("★★ zi: ولا يدخل KPI-02 — 3 أيامٍ حتى موعده ليست بطءَ إغلاق",
-        m.rates.k02 === 100 && m.closedWithinTarget === 1);
+      // zj — قرارُ المالك: الوقائيُّ يبقى في مؤشّرات المهلة كما كان؛ المصنِّفُ للفصل وحسب
+      T("★★ zj: الوقائيُّ يدخل KPI-02/03 كما كان (المغلقتان كلتاهما في المقام)",
+        m.closedTix === 2 && m.closedWithinTarget === 1 && m.rates.k02 === 50);
       T("★★ zi: ويُحسب في KPI-05 حيث موضعُه — مستحقّان في سبتمبر، أُنجز واحدٌ في شهره",
         m.ppmDue === 2 && m.ppmOnTime === 1 && m.rates.k05 === 50);
       T("★ zi: «روتيني» وقائيٌّ في KPI-01 لا تصحيحيّ (تصحيحيان لا أربعة)",
         m.corrective === 2 && m.preventive === 2 && m.rates.k01 === 50);
-      T("★ zi: KPI-07 لا يعدّ الوقائيَّ المفتوحَ متأخّراً بمهلة SLA (يُقاس بجدوله)",
-        K.kpiLiveOverdue(L).open === 1);
+      T("zj: KPI-07 يعدّ كلَّ المفتوحة — الوقائيُّ فيها كما كان",
+        K.kpiLiveOverdue(L).open === 2);
     }
     // مصدرٌ واحدٌ للتصنيف في كلّ موضعِ قياس
     T("★★ zi: كلُّ مواضع القياس تقرأ isPreventiveTicket — لا مقارنةَ maintType محلّيةً في مؤشّر",
@@ -5522,8 +5522,9 @@ function auditRound2() {
       HTML.includes("return !isPreventiveTicket(t); }).length;") &&
       !HTML.includes('const corrective = _all.filter(t=>t.maintType!=="وقائية");') &&
       !HTML.includes('const isPrev = t.maintType==="وقائية";'));
-    T("★ zi: مؤشّرا المهلة التراكميّان على التصحيحيّ ذي المهلة (كالشهريّ)",
-      HTML.includes('t.status==="مغلق"&&t.closedAt&&t.createdAt&&!isPreventiveTicket(t)&&tierOf(t.priority)'));
+    T("★ zj: مؤشّرا المهلة التراكميّان على كلّ المغلقة (كالشهريّ) — لا استبعادَ للوقائيّ",
+      HTML.includes('_all.filter(t=>t.status==="مغلق"&&t.closedAt&&t.createdAt);') &&
+      !HTML.includes('!isPreventiveTicket(t)&&tierOf(t.priority)'));
     {
       const _pc = path.resolve(path.dirname(IDX), "performance-contract.js");
       if (fs.existsSync(_pc)) T("zi: بطاقةُ العقد تقرأ المصنِّفَ نفسَه",
@@ -5571,8 +5572,11 @@ function auditRound2() {
     T("★★ zh: لا موضعَ يعرض ساعاتِ عملٍ عبر fmtH — كلُّها fmtWorkH (fmtH لساعات الجدار وحدَها)",
       !/fmtH\(cur\.avgCloseH\)|fmtH\(avgH\)|fmtH\(fr\.avg\)|fmtH\(avgClose\)|fmtH\(firstResponseH|fmtH\(avgResponseH\)/.test(HTML) &&
       HTML.includes("fmtH(responseCalendarH(t))"));
-    T("★ zh: بطاقةُ KPI-02 تعرض المعادلةَ بأرقامها («35 ÷ 81 = 43%») — لا رقمَ يُقرأ ولا يُحسب",
-      HTML.includes('["النسبة",cur.closedTix?cur.closedWithinTarget+" ÷ "+cur.closedTix+" = "+P(cur.rates.k02):"—"'));
+    T("★ zh: بطاقةُ KPI-02 تعرض المعادلةَ بأرقامها («32 ÷ 40 = 80%») — لا رقمَ يُقرأ ولا يُحسب",
+      HTML.includes('cur.closedWithinTarget+" ÷ "+cur.closedTix+" = "+P(cur.rates.k02)'));
+    // zj: الصيغةُ معزولةٌ اتجاهياً — بلا عزلٍ تُقرأ في الصفحة العربية «80% = 40 ÷ 32» (بلاغُ المالك)
+    T("★★ zj: صيغةُ النسبة معزولةٌ بـLRI…PDI فلا يقلبها المتصفّح في السياق العربيّ",
+      HTML.includes('"\\u2066"+cur.closedWithinTarget+" ÷ "+cur.closedTix+" = "+P(cur.rates.k02)+"\\u2069"'));
     T("★ zh: والتراكميُّ بالمقياس نفسِه (عدٌّ لا 8÷المتوسط)",
       HTML.includes("const responseScore = closedTix.length?Math.round(closedWithinTargetAll/closedTix.length*100):null;") &&
       !HTML.includes("RESPONSE_TARGET_H/avgResponseH"));
@@ -5613,8 +5617,8 @@ function auditRound2() {
       T("★ zg: قائمةٌ فارغةٌ أو غيرُ مصفوفةٍ لا تُسقط الحساب",
         K.kpiMonthStats([], "2026-09").n === 0 && K.kpiMonthStats(null, "2026-09").rates.k06 === null);
       const lv = K.kpiLiveOverdue(L);
-      T("★★ zg: KPI-07 مقامُه المفتوحةُ الآن لا كلُّ التاريخ — والوقائيُّ المفتوحُ خارجَه (zi): مفتوحٌ تصحيحيٌّ متأخّر ⇐ 0٪",
-        lv.open === 1 && lv.overdue === 1 && lv.pct === 0);
+      T("★★ zg: KPI-07 مقامُه المفتوحةُ الآن لا كلُّ التاريخ — مفتوحان متأخّران ⇐ 0٪ (كان يبقى ≥96٪)",
+        lv.open === 2 && lv.overdue === 2 && lv.pct === 0);
       T("zg: ولا مفتوحَ ⇐ 100 (لا عملَ معلّقاً فلا متأخّر)", K.kpiLiveOverdue([L[0]]).pct === 100);
     }
     //  حرّاسُ المصدر
