@@ -795,7 +795,10 @@ function predelivery() {
        يفحصها hail-tests بلا متصفّح)؛ وما هنا وسمُ عرضٍ داخل دالّةِ رسمٍ قائمة: تعليقُ
        الشهر فوق الشبكة، وسهمُ الاتجاه، وصفوفُ «تراكمي» للسياق. إصلاحُ منطقٍ قائمٍ
        في موضعه كما تُلزم CLAUDE.md، وأكثرُ الزيادة تعليقٌ يقول لِمَ سقط سهمُ المسافة. */
-    const IDX_CEILING = 39922;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 39922 إلى 39935 — ‏١٣ سطراً لـ`fmtWorkH` (v18.9zh) وتعليقِها: منسّقُ عرضٍ
+       بجوار `fmtH` التي يُصلح خطأَها (÷24 على ساعات عمل)، ومكانُ منسّق العرض بجوار
+       نظيره لا في وحدة. */
+    const IDX_CEILING = 39935;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -5459,42 +5462,69 @@ function auditRound2() {
   //  (8 ساعات) 83٪، و100٪ مستحيلةً (تتطلّب متوسطاً = صفر). وكان يعرض closedInSLA —
   //  بسطَ KPI-03 لا بسطَه — فتُقرأ البطاقةُ متناقضةً مع نسبتها.
   {
-    const _b = HTML.indexOf("const RESPONSE_TARGET_H = 8;");
-    if (_b < 0) { T("★ ze: هدفُ KPI-02 ثابتٌ مسمّى", false); }
-    else {
-      const _e = HTML.indexOf("const closedWithinTarget", _b);
-      let score = null;
-      try {
-        score = new Function("avgResponseH", HTML.slice(_b, _e) + "\nreturn responseScore;");
-      } catch (e) { T("تُبنى صيغةُ KPI-02", false, String(e.message).slice(0, 100)); }
-      if (score) {
-        T("★★ ze: بلوغُ الهدف المعلَن (8 ساعاتِ عمل) = 100٪ (كان 83٪)", score(8) === 100);
-        T("★ ze: و100٪ صارت بالغةً لا مستحيلة (كانت تتطلّب متوسطاً = صفر)",
-          score(4) === 100 && score(7.9) === 100);
-        T("★ ze: وما بعد الهدف يتدرّج بنسبته إلى المتوسط — 16 ساعةً ⇐ 50٪",
-          score(16) === 50 && score(32) === 25);
-        T("ze: بلا بلاغاتٍ مغلقة (متوسط 0) = 100٪ لا قسمةَ على صفر",
-          score(0) === 100 && Number.isFinite(score(0)));
-        T("ze: النسبةُ محصورةٌ في [0,100] مهما كان المتوسط",
-          score(1e9) >= 0 && score(0.001) === 100);
-        T("★ ze: زال السقفُ 48 المخفيّ من الصيغة",
-          !/Math\.min\(avgResponseH,48\)\/48/.test(HTML));
-      }
-    }
+    T("★ ze: هدفُ KPI-02 ثابتٌ مسمّى (8 ساعاتِ عمل) لا رقمٌ مبثوثٌ في الصيغة",
+      HTML.includes("const RESPONSE_TARGET_H = 8;") && !/Math\.min\(avgResponseH,48\)\/48/.test(HTML));
     //  أرقامُ البطاقتين تشتقّ نسبتَهما — لا رقمَ من مؤشّرٍ آخر
     T("★★ ze: KPI-02 يعرض «أُغلق خلال الهدف» لا بسطَ KPI-03 (538 المضلّل)",
-      HTML.includes('["أُغلق خلال الهدف",cur.closedWithinTarget') &&
+      HTML.includes('["أُغلق خلال "+RESPONSE_TARGET_H+" ساعات عمل",cur.closedWithinTarget') &&
       !HTML.includes('["مغلق في الوقت",closedInSLA'));
     T("★ ze: وبسطُه من منطقه — _closeWorkH ضمن الهدف نفسِه",
       HTML.includes("closedTix.filter(t=>_closeWorkH(t)<=RESPONSE_TARGET_H).length"));
-    T("★ ze: وتسميةُ الهدف تقول «ساعة عمل» (المقياسُ _closeWorkH لا ساعاتِ جدار)",
-      HTML.includes('"≤ "+RESPONSE_TARGET_H+" ساعة عمل"'));
+    T("★ ze: وتسميةُ الهدف تقول «ساعات عمل» في اسم المؤشّر نفسِه (المقياسُ _closeWorkH لا ساعاتِ جدار)",
+      HTML.includes('name:"مؤشر سرعة الإغلاق (خلال "+RESPONSE_TARGET_H+" ساعات عمل)"'));
     T("★★ ze: مقامُ KPI-03 المعروضُ = المقامُ المحسوب (closedTix لا كلُّ المغلقة)",
       HTML.includes('["مغلقة هذا الشهر",cur.closedTix],["داخل SLA",cur.closedInSLA') &&
       HTML.includes("cur.closedTix-cur.closedInSLA") &&
       !HTML.includes('["تجاوز SLA",closed-closedInSLA'));
-    T("★ ze: ومقامُ KPI-02 المعروضُ مثلُه (المتوسطُ يُحسب على closedTix)",
-      HTML.includes('name:"مؤشر زمن الاستجابة للإغلاق",pct:cur.rates.k02') && HTML.includes('["مغلقة هذا الشهر",cur.closedTix]'));
+    T("★ ze: ومقامُ KPI-02 المعروضُ مثلُه (العدُّ على closedTix)",
+      HTML.includes('name:"مؤشر سرعة الإغلاق (خلال "+RESPONSE_TARGET_H+" ساعات عمل)",pct:cur.rates.k02') && HTML.includes('["مغلقة هذا الشهر",cur.closedTix]'));
+  }
+
+  // ── v18.9zh — KPI-02 عدٌّ لا متوسّط، وساعاتُ العمل بمنسّقها ─────────────────
+  //  35 و81 على البطاقة و24٪ تحتهما: النسبةُ كانت 8÷المتوسط، فبلاغٌ واحدٌ بثلاثمئة ساعةٍ
+  //  يسحب الشهرَ كلَّه. والمالكُ قسم 35÷81 فوجد 43٪ — وكان محقّاً. و«1 يوم» عن 33 ساعةَ
+  //  عملٍ لأن fmtH تقسم على 24.
+  {
+    const _S = HTML.indexOf("const SLA_CONFIG = {");
+    const _E = HTML.indexOf("function fmtH(h){", _S);
+    let K = null;
+    try { K = new Function(HTML.slice(_S, _E) + "\nreturn {kpiMonthStats,_median};")(); }
+    catch (e) { T("تُبنى دوالُّ zh", false, String(e.message).slice(0, 120)); }
+    if (K) {
+      const P = "عادي 🟢 (48 ساعة)";
+      const mk = (h) => ({ priority: P, status: "مغلق", maintType: "تصحيحية", createdAt: "2026-09-02T08:00:00",
+        closedAt: new Date(new Date("2026-09-02T08:00:00").getTime() + 0).toISOString(), _h: h });
+      // تسعةٌ في ساعةٍ وواحدٌ في 300 — بالعدّ 90٪، وبالمتوسط كان 26٪
+      const L = [];
+      for (let i = 0; i < 9; i++) L.push({ priority: P, status: "مغلق", maintType: "تصحيحية", createdAt: "2026-09-02T08:00:00", closedAt: "2026-09-02T09:00:00" });
+      L.push({ priority: P, status: "مغلق", maintType: "تصحيحية", createdAt: "2026-08-03T08:00:00", closedAt: "2026-09-30T16:00:00", archiveMonth: "2026-09" });
+      const m = K.kpiMonthStats(L, "2026-09");
+      T("★★ zh: KPI-02 عدٌّ — تسعةٌ من عشرةٍ خلال الهدف = 90٪ (كان المتوسطُ يهبط به إلى ~26٪)",
+        m.closedTix === 10 && m.closedWithinTarget === 9 && m.rates.k02 === 90);
+      T("★★ zh: وما يقرؤه الناظرُ هو ما يُحسب — النسبةُ = أُغلق خلال الهدف ÷ المغلقة حرفياً",
+        m.rates.k02 === Math.round(m.closedWithinTarget / m.closedTix * 100));
+      T("★ zh: الوسيطُ لا تسحبه الشاذّة (ساعةٌ واحدة) بينما المتوسطُ يُسحب",
+        m.medianCloseH === 1 && m.avgCloseH > 20);
+      T("zh: _median على قائمةٍ زوجيةٍ وفارغةٍ وغيرِ رقمية",
+        K._median([1, 3]) === 2 && K._median([]) === null && K._median([NaN, 5]) === 5);
+    }
+    // منسّقُ ساعات العمل
+    const _fw = HTML.indexOf("function fmtWorkH(h){");
+    if (_fw < 0) T("★★ zh: fmtWorkH موجودة", false);
+    else {
+      const F = new Function(HTML.slice(_fw, HTML.indexOf("\n}", _fw) + 2) + "\nreturn fmtWorkH;")();
+      T("★★ zh: 33 ساعةَ عملٍ = «4.1 يوم عمل» لا «1 يوم» (÷8 لا ÷24)", F(33) === "4.1 يوم عمل");
+      T("zh: تحت 8 ساعاتٍ تُعرض ساعاتِ عمل، وتحت الساعة دقائق، وnull شرطة",
+        F(4.44) === "4.4 ساعة عمل" && F(0.5) === "30 دقيقة" && F(null) === "—" && F(80) === "10 يوم عمل");
+    }
+    T("★★ zh: لا موضعَ يعرض ساعاتِ عملٍ عبر fmtH — كلُّها fmtWorkH (fmtH لساعات الجدار وحدَها)",
+      !/fmtH\(cur\.avgCloseH\)|fmtH\(avgH\)|fmtH\(fr\.avg\)|fmtH\(avgClose\)|fmtH\(firstResponseH|fmtH\(avgResponseH\)/.test(HTML) &&
+      HTML.includes("fmtH(responseCalendarH(t))"));
+    T("★ zh: بطاقةُ KPI-02 تعرض المعادلةَ بأرقامها («35 ÷ 81 = 43%») — لا رقمَ يُقرأ ولا يُحسب",
+      HTML.includes('["النسبة",cur.closedTix?cur.closedWithinTarget+" ÷ "+cur.closedTix+" = "+P(cur.rates.k02):"—"'));
+    T("★ zh: والتراكميُّ بالمقياس نفسِه (عدٌّ لا 8÷المتوسط)",
+      HTML.includes("const responseScore = closedTix.length?Math.round(closedWithinTargetAll/closedTix.length*100):null;") &&
+      !HTML.includes("RESPONSE_TARGET_H/avgResponseH"));
   }
 
   // ── v18.9zg — المؤشراتُ السبعة بنافذةٍ شهرية ───────────────────────────────
@@ -5525,8 +5555,8 @@ function auditRound2() {
         m.ppmDue === 3);
       T("★★ zg: والملتزمُ ما أُغلق قبل انقضاء شهر استحقاقه — المُغلقُ في أكتوبر لا يُحسب (بلا رقمٍ مخترَع)",
         m.ppmOnTime === 1 && K.ppmOnTimeInMonth(L[4], "2026-09") === false && K.ppmOnTimeInMonth(L[3], "2026-09") === true);
-      T("zg: النسبُ الشهرية من المقام الشهريّ (تصحيحية 2/3 · SLA 1/2 · إعادةُ فتح 1/2 · إنجاز 2/4)",
-        m.rates.k01 === 67 && m.rates.k03 === 50 && m.rates.k04 === 50 && m.rates.k06 === 50);
+      T("zg: النسبُ الشهرية من المقام الشهريّ (تصحيحية 2/3 · SLA 1/2 · إعادةُ فتح 1/2 · إنجاز 2/4 · سرعةٌ 1/2)",
+        m.rates.k01 === 67 && m.rates.k03 === 50 && m.rates.k04 === 50 && m.rates.k06 === 50 && m.rates.k02 === 50);
       T("★★ zg: شهرٌ بلا بلاغاتٍ ⇐ null في كلّ مؤشّر — لا صفرٌ يُقرأ كارثةً ولا 100 تُقرأ إنجازاً",
         Object.values(K.kpiMonthStats(L, "2026-07").rates).every(v => v === null));
       T("★ zg: قائمةٌ فارغةٌ أو غيرُ مصفوفةٍ لا تُسقط الحساب",
@@ -5605,7 +5635,7 @@ function auditRound2() {
       HTML.includes("fr.coverage") && HTML.includes("firstResponseStats(_all)") &&
       HTML.includes('fr.avg===null?"—"'));
     T("★ zf: وبطاقةُ التفاصيل تعرض المدّةَ لا الطابعَ وحدَه",
-      HTML.includes('firstResponseH(t)!==null?" · بعد "+fmtH(firstResponseH(t))'));
+      HTML.includes('firstResponseH(t)!==null?" · بعد "+fmtWorkH(firstResponseH(t))'));
     {
       const _pc = path.resolve(path.dirname(IDX), "performance-contract.js");
       if (fs.existsSync(_pc)) {
