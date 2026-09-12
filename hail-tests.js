@@ -799,7 +799,10 @@ function predelivery() {
        بجوار `fmtH` التي يُصلح خطأَها (÷24 على ساعات عمل)، ومكانُ منسّق العرض بجوار
        نظيره لا في وحدة. */
     /* رُفع من 39935 إلى 39937 — سطرا تعليقٍ لعزل صيغة النسبة اتجاهياً (v18.9zj). */
-    const IDX_CEILING = 39937;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 39937 إلى 39944 — ‏7 أسطر: حاويةُ رسم المقارنة الشهرية وسطرُ استدعائها
+       ووسمُ الوحدة (v18.9zl). الرسمُ كلُّه في `kpi-trend-chart.js` — وما هنا مواضعُ
+       لا تعيش في وحدة: وسمُ <script> وحاويةٌ في الصفحة وسطرٌ في `renderKPI`. */
+    const IDX_CEILING = 39944;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -5479,6 +5482,54 @@ function auditRound2() {
       !HTML.includes('["تجاوز SLA",closed-closedInSLA'));
     T("★ ze: ومقامُ KPI-02 المعروضُ مثلُه (العدُّ على closedTix)",
       HTML.includes('name:"مؤشر سرعة الإغلاق (خلال "+RESPONSE_TARGET_H+" ساعات عمل)",pct:cur.rates.k02') && HTML.includes('["مغلقة هذا الشهر",cur.closedTix]'));
+  }
+
+  // ── v18.9zl — المقارنةُ الشهريةُ للمؤشرات في رسمٍ واحد (وحدةُ kpi-trend-chart.js) ──
+  {
+    const _kp = path.resolve(path.dirname(IDX), "kpi-trend-chart.js");
+    if (!fs.existsSync(_kp)) { T("★★ zl: وحدةُ kpi-trend-chart.js موجودة", false); }
+    else {
+      const M = fs.readFileSync(_kp, "utf8");
+      let K = null;
+      try {
+        const _S = HTML.indexOf("const SLA_CONFIG = {"), _E = HTML.indexOf("function fmtH(h){", _S);
+        const w = {};
+        new Function("window", HTML.slice(_S, _E) +
+          "\nwindow.kpiMonthStats=kpiMonthStats;")(w);
+        new Function("window", "document", M)(w, undefined);
+        K = w.kpiTrendChart;
+      } catch (e) { T("تُبنى وحدةُ الرسم", false, String(e.message).slice(0, 120)); }
+      if (K) {
+        const P = "عادي 🟢 (48 ساعة)";
+        const L = [
+          { priority: P, status: "مغلق", maintType: "تصحيحية", createdAt: "2026-09-02T08:00:00", closedAt: "2026-09-02T12:00:00" },
+          { priority: P, status: "مغلق", maintType: "تصحيحية", createdAt: "2026-07-02T08:00:00", closedAt: "2026-07-05T12:00:00" },
+        ];
+        const d = K.series(L, { now: "2026-09-12" });
+        T("★★ zl: اثنا عشر شهراً تنتهي بشهر اليوم وبترتيبها الزمنيّ",
+          d.months.length === 12 && d.months[11].ym === "2026-09" && d.months[0].ym === "2025-10" && d.months[10].ym === "2026-08");
+        T("★★ zl: كلُّ نقطةٍ من kpiMonthStats نفسِها — سبتمبر 100 والفجوةُ null لا صفر",
+          d.series[0].values[11] === 100 && d.series[0].values[10] === null && d.series[5].values[8] === null);
+        T("★ zl: KPI-07 خارجَ الرسم (لحظيٌّ لا تاريخَ له) — ستُّ سلاسلَ بترتيبها",
+          d.series.length === 6 && d.series.map(s => s.code).join() === "KPI-01,KPI-02,KPI-03,KPI-04,KPI-05,KPI-06");
+        T("★★ zl: اللوحةُ بالترتيب المفحوص حرفياً (validate_palette على #fff و#1a2433) — لا يدور ولا يُعاد ترتيبُه",
+          K.SERIES.map(s => s.light).join() === "#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300" &&
+          K.SERIES.map(s => s.dark).join() === "#3987e5,#d95926,#199e70,#c98500,#d55181,#008300");
+        T("zl: قائمةٌ فارغةٌ ترسم اثني عشر شهراً بلا نقطة — لا انهيار",
+          K.series([], { now: "2026-09-12" }).series.every(s => s.values.every(v => v === null)));
+      }
+      T("★ zl: التفاعلُ كاملٌ — خطُّ تتبّعٍ وتلميحٌ ولوحةُ مفاتيح وجدولٌ بديل",
+        M.includes("data-ktc-cross") && M.includes("data-ktc-tip") && M.includes('ev.key==="ArrowLeft"') && M.includes("data-ktc-table"));
+      T("★ zl: النصُّ لا يلبس لونَ السلسلة — التسمياتُ بلون النصّ والمفتاحُ الملوَّنُ بجوارها",
+        /fill="var\(--ktc-text\)" text-anchor="end"/.test(M) && !/fill="var\(--ktc-s\$\{[^}]+\}\)"[^>]*>\$\{e\.v\}%/.test(M));
+      T("zl: أسماءُ السلاسل تدخل التلميحَ بـtextContent لا innerHTML",
+        M.includes("nm.textContent=s.code") && !/tip\.innerHTML/.test(M));
+    }
+    T("★★ zl: الوحدةُ محقونةٌ في index.html والحاويةُ موجودةٌ وrenderKPI يستدعيها",
+      /<script src="kpi-trend-chart\.js\?v=[^"]+"><\/script>/.test(IDX_RAW) &&
+      IDX_RAW.includes('id="kpi-trend-chart"') && HTML.includes('kpiTrendChart.render("kpi-trend-chart")'));
+    T("zl: مسارُ الوحدة في CI",
+      fs.readFileSync(path.resolve(path.dirname(IDX), ".github/workflows/hail-tests.yml"), "utf8").includes("kpi-trend-chart.js"));
   }
 
   // ── v18.9zk — ساعةُ الوقائيّ تبدأ من استحقاقه لا من توليده ─────────────────
