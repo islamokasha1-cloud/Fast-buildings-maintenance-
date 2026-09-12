@@ -36,7 +36,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 (function(){
 
-const MODULE_BUILD = "v18.9.3166";
+const MODULE_BUILD = "v18.9.3168";
 
 /* ==SLA-MOVED-A-START== */
 const PRIORITIES = ["حرج 🔴 (2 ساعة)","عاجل 🟡 (8 ساعات)","عادي 🟢 (48 ساعة)","روتيني 🔵 (صيانة دورية)"];
@@ -306,6 +306,7 @@ function kpiMonthStats(list, ym, opts){
   const closedTix=closed.filter(t=>t.closedAt);
   const hours=closedTix.map(_closeWorkH);
   const avgCloseH=hours.length?hours.reduce((a,b)=>a+b,0)/hours.length:null;
+  const medianCloseH=_median(hours);
   const closedInSLA=closedTix.filter(_closedOnTime).length;
   const closedWithinTarget=closedTix.filter(t=>_closeWorkH(t)<=targetH).length;
   const reopenedClosed=closed.filter(t=>t.reopenCount>0).length;
@@ -315,17 +316,26 @@ function kpiMonthStats(list, ym, opts){
   return {
     ym, n:inMonth.length, closed:closed.length,
     corrective:corrective.length, corrClosed, preventive:preventive.length, prevClosed,
-    closedTix:closedTix.length, avgCloseH, closedInSLA, closedWithinTarget, reopenedClosed,
+    closedTix:closedTix.length, avgCloseH, medianCloseH, closedInSLA, closedWithinTarget, reopenedClosed,
     ppmDue:due.length, ppmOnTime,
     rates:{
       k01: pct(corrClosed, corrective.length),
-      k02: avgCloseH===null ? null : (avgCloseH<=0 ? 100 : Math.max(0,Math.min(100,Math.round(targetH/avgCloseH*100)))),
+      /* v18.9zh: عدٌّ لا متوسّط. كان `8 ÷ المتوسط` — فبلاغٌ واحدٌ بثلاثمئة ساعةٍ يسحب
+         الشهرَ كلَّه من 90٪ إلى 26٪، والبطاقةُ تعرض 35 و81 ولا تحسب النسبةَ منهما.
+         الآن: أُغلق خلال الهدف ÷ المغلقة — ما يقرؤه الناظرُ هو ما يُحسب. */
+      k02: pct(closedWithinTarget, closedTix.length),
       k03: pct(closedInSLA, closedTix.length),
       k04: closed.length ? Math.round((1-reopenedClosed/closed.length)*100) : null,
       k05: pct(ppmOnTime, due.length),
       k06: pct(closed.length, inMonth.length)
     }
   };
+}
+/* الوسيط: الرقمُ الذي لا تسحبه ثلاثةُ بلاغاتٍ شاذّة — للسياق بجوار المتوسط. */
+function _median(arr){
+  const a=(arr||[]).filter(x=>Number.isFinite(x)).sort((x,y)=>x-y);
+  if(!a.length) return null;
+  const m=a.length>>1; return a.length%2 ? a[m] : (a[m-1]+a[m])/2;
 }
 function kpiLiveOverdue(list){
   const open=(Array.isArray(list)?list:[]).filter(t=>t&&t.status!=="مغلق");
