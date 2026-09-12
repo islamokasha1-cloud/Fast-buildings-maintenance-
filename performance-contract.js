@@ -56,7 +56,7 @@
 
 const PAGE_ID      = "performance";
 const VERSION      = "0.3";
-const MODULE_BUILD = "v18.9.3168";
+const MODULE_BUILD = "v18.9.3170";
 
 /* ════════════ خدمات النواة (قراءة بالاسم مع بدائل آمنة) ════════════ */
 function _esc(s){ try{ return (typeof esc==="function") ? esc(s) : String(s==null?"":s); }catch(e){ return String(s==null?"":s); } }
@@ -326,8 +326,9 @@ function coverage(){
   const n=new Date();
   const mStart=new Date(n.getFullYear(), n.getMonth(), 1);
   const all=_tickets().filter(t=>t && !_isOp(t) && t.createdAt && new Date(t.createdAt)>=mStart);
-  const corr=all.filter(t=>t.maintType!=="وقائية");
-  const prev=all.filter(t=>t.maintType==="وقائية");
+  const _isPrev=t=>(typeof isPreventiveTicket==="function")?isPreventiveTicket(t):(t.maintType==="وقائية");   // v18.9zi: روتيني = وقائي
+  const corr=all.filter(t=>!_isPrev(t));
+  const prev=all.filter(t=>_isPrev(t));
   const closed=all.filter(t=>t.status==="مغلق");
   const pct=(a,b)=> b? Math.round(a/b*100) : null;
   return {

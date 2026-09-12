@@ -36,7 +36,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 (function(){
 
-const MODULE_BUILD = "v18.9.3168";
+const MODULE_BUILD = "v18.9.3170";
 
 /* ==SLA-MOVED-A-START== */
 const PRIORITIES = ["حرج 🔴 (2 ساعة)","عاجل 🟡 (8 ساعات)","عادي 🟢 (48 ساعة)","روتيني 🔵 (صيانة دورية)"];
@@ -282,6 +282,18 @@ function firstResponseStats(list){
    • المتأخّرة (KPI-07) **حالةٌ لحظيةٌ لا شهرية**: المتأخّرةُ ÷ **المفتوحةُ الآن**.
      كان مقامُها كلَّ التاريخ فلا تهبط تحت 96٪ ولو تأخّر كلُّ مفتوح.
    • `null` حيث لا مقام — لا صفرٌ ولا 100 تُقرأ إنجازاً. */
+/* ═══════════ مصنِّفٌ واحدٌ للوقائي (v18.9zi — قرارُ المالك) ═══════════
+   «روتيني» = وقائيٌّ في كلّ المؤشرات. الأولويةُ «روتيني» تعني صيانةً دوريةً مخطَّطةً
+   وإن كُتب البلاغُ بلا `maintType`، فتُقاس بجدولها (KPI-05) لا بمهلة `SLA`.
+   وكان الوقائيُّ يدخل KPI-02 وKPI-03: بلاغٌ وُلّد قبل موعده بثلاثة أيامٍ وأُغلق في
+   موعده تماماً يُعدّ «تجاوز SLA» — وهو لم يتأخّر عن شيء. و`isOverdue` تقول عن
+   «روتيني» «لا مهلة له» بينما `_closedOnTime` تُسقطه إلى 48 ساعةً: حكمان لبلاغٍ
+   واحد. الآن: **الوقائيُّ له مؤشّرُه ولا يدخل مؤشّراتِ المهلة**، والمصنِّفُ واحدٌ
+   تقرؤه كلُّ المواضع (المحرّك · التجميعُ الشهريّ · المقارنةُ · بطاقةُ العقد). */
+function isPreventiveTicket(t){
+  if(!t) return false;
+  return t.maintType==="وقائية" || priorityHead(t.priority)==="روتيني";
+}
 function kpiMonthOf(t){
   if(!t) return null;
   if(t.archiveMonth) return t.archiveMonth;
@@ -299,18 +311,20 @@ function kpiMonthStats(list, ym, opts){
   const all=(Array.isArray(list)?list:[]).filter(t=>t&&t.createdAt);
   const inMonth=all.filter(t=>kpiMonthOf(t)===ym);
   const closed=inMonth.filter(t=>t.status==="مغلق");
-  const corrective=inMonth.filter(t=>t.maintType!=="وقائية");
-  const preventive=inMonth.filter(t=>t.maintType==="وقائية");
+  const corrective=inMonth.filter(t=>!isPreventiveTicket(t));
+  const preventive=inMonth.filter(t=>isPreventiveTicket(t));
   const corrClosed=corrective.filter(t=>t.status==="مغلق").length;
   const prevClosed=preventive.filter(t=>t.status==="مغلق").length;
-  const closedTix=closed.filter(t=>t.closedAt);
+  /* مؤشّرا المهلة (02 · 03) على التصحيحيّ ذي المهلة وحدَه — الوقائيُّ يُقاس بجدوله،
+     وما لا فئةَ له لا يُقاس (الحكمُ نفسُه الذي تعطيه isOverdue). */
+  const closedTix=closed.filter(t=>t.closedAt && !isPreventiveTicket(t) && tierOf(t.priority));
   const hours=closedTix.map(_closeWorkH);
   const avgCloseH=hours.length?hours.reduce((a,b)=>a+b,0)/hours.length:null;
   const medianCloseH=_median(hours);
   const closedInSLA=closedTix.filter(_closedOnTime).length;
   const closedWithinTarget=closedTix.filter(t=>_closeWorkH(t)<=targetH).length;
   const reopenedClosed=closed.filter(t=>t.reopenCount>0).length;
-  const due=all.filter(t=>t.maintType==="وقائية" && t.scheduledFor && isFinite(+new Date(t.scheduledFor)) && _ym(new Date(t.scheduledFor))===ym);
+  const due=all.filter(t=>isPreventiveTicket(t) && t.scheduledFor && isFinite(+new Date(t.scheduledFor)) && _ym(new Date(t.scheduledFor))===ym);
   const ppmOnTime=due.filter(t=>ppmOnTimeInMonth(t,ym)).length;
   const pct=(a,b)=> b?Math.round(a/b*100):null;
   return {
@@ -338,7 +352,8 @@ function _median(arr){
   const m=a.length>>1; return a.length%2 ? a[m] : (a[m-1]+a[m])/2;
 }
 function kpiLiveOverdue(list){
-  const open=(Array.isArray(list)?list:[]).filter(t=>t&&t.status!=="مغلق");
+  // الوقائيُّ خارجَه: تأخّرُه يُقاس بجدوله لا بمهلة SLA
+  const open=(Array.isArray(list)?list:[]).filter(t=>t&&t.status!=="مغلق"&&!isPreventiveTicket(t));
   const overdue=open.filter(t=>isOverdue(t)).length;
   return { open:open.length, overdue, pct: open.length ? Math.max(0,100-Math.round(overdue/open.length*100)) : 100 };
 }
@@ -351,6 +366,6 @@ function kpiLiveOverdue(list){
   for (var k in x) if (Object.prototype.hasOwnProperty.call(x,k)) window[k] = x[k];
   /* كائنُ الواجهة المسمّى — للقراءة المقصودة ولفحصِ البناء. */
   window.slaEngine = Object.assign({ build: MODULE_BUILD }, x);
-})({ PRIORITIES, getSLA, elapsedH, SLA_CONFIG, tierOf, priorityHead, priorityCanonical, prioritySame, slaBudgetLabel, priorityLabel, _ymd, _ym, _parseLocalDate, _isWorkingDay, workingMinutesBetween, calendarMinutesBetween, addWorkingMinutes, clockStopMinutes, slaStatus, slaOf, isOverdue, _elapsedHByTier, _closeWorkH, _closedOnTime, resolutionH, firstResponseH, firstResponseStats, kpiMonthOf, ppmOnTimeInMonth, kpiMonthStats, kpiLiveOverdue });
+})({ PRIORITIES, getSLA, elapsedH, SLA_CONFIG, tierOf, priorityHead, priorityCanonical, prioritySame, slaBudgetLabel, priorityLabel, _ymd, _ym, _parseLocalDate, _isWorkingDay, workingMinutesBetween, calendarMinutesBetween, addWorkingMinutes, clockStopMinutes, slaStatus, slaOf, isOverdue, _elapsedHByTier, _closeWorkH, _closedOnTime, resolutionH, firstResponseH, firstResponseStats, isPreventiveTicket, kpiMonthOf, ppmOnTimeInMonth, kpiMonthStats, kpiLiveOverdue });
 
 })();
