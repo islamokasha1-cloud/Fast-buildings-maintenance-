@@ -45,7 +45,8 @@ service cloud.firestore {
        والحذفُ للأدمن وحدَه: مَن يحذف وثيقةً يمحو دليلاً. */
     function vaultColl(coll) {
       return coll in ['global_docs', 'global_docs_dev', 'global_letters', 'global_letters_dev',
-                      'global_approvals', 'global_approvals_dev'];
+                      'global_approvals', 'global_approvals_dev',
+                      'vault_parties', 'vault_parties_dev'];
     }
     function ctrLocked(coll) {
       return coll in [
@@ -612,6 +613,20 @@ service cloud.firestore {
       allow delete:       if isAdmin();
     }
     match /global_approvals_dev/{id} {
+      allow read:         if vaultReadOk();
+      allow create, update: if vaultWriteOk();
+      allow delete:       if isAdmin();
+    }
+    /* سجلُّ الجهات ومسارات اعتمادها — لكلّ جهةٍ محطاتُها التي يمرّ بها المستخلص.
+       يُقرأ مع المعتمدات ويُعدَّل بمن يعدّلها (قرارُ المالك: «من يملك صلاحية
+       الخزانة»)، والحذفُ للأدمن: حذفُ جهةٍ لا يمسّ مستنداتِها (تحمل نسخةَ مسارها)
+       لكنّه يمحو مرجعاً. */
+    match /vault_parties/{id} {
+      allow read:         if vaultReadOk();
+      allow create, update: if vaultWriteOk();
+      allow delete:       if isAdmin();
+    }
+    match /vault_parties_dev/{id} {
       allow read:         if vaultReadOk();
       allow create, update: if vaultWriteOk();
       allow delete:       if isAdmin();

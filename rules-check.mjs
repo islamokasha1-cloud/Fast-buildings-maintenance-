@@ -728,7 +728,7 @@ const APP_COLLS = [
   "hail_assets", "hail_ppm_plans", "hail_rollups",
   "global_vendors", "global_contract_requests", "global_contracts",
   "global_contract_extracts", "global_contract_changes",
-  "global_docs", "global_letters", "global_approvals", "vault_signs"
+  "global_docs", "global_letters", "global_approvals", "vault_signs", "vault_parties"
 ];
 for (const c of APP_COLLS) {
   await check("★ يستعلم الأدمن مجموعةَ " + c,
@@ -1030,6 +1030,24 @@ await check("★★ ونسخةُ `_dev` محروسةٌ بالقاعدة نفسِ
 await check("★ ويُستعلَم السجلُّ لكلّ ذي دور",
   assertSucceeds((async () => { for (const c of [ADMIN, PM, FIN, VIEWER]) await getDocs(collection(c, APR_C)); })()));
 
+/* سجلُّ الجهات ومسارات اعتمادها — القاعدةُ نفسُها، والاستثناءُ من العامّة يجب أن يشمله */
+const PRT_C = "vault_parties";
+await seed(`${PRT_C}/PRT-2609-0001`, { name: "أمانة حائل", stages: [{ lbl: "المكتب الفني", days: 5 }, { lbl: "المالية", days: 5 }] });
+await check("★ يسجّل مديرُ المشاريع جهةً ومسارَها",
+  assertSucceeds(setDoc(doc(PM, `${PRT_C}/PRT-2609-0002`), { name: "جهة", stages: [{ lbl: "الاستلام", days: 3 }] })));
+await check("★ ويعدّل المساراتِ مسؤولُ المشتريات",
+  assertSucceeds(updateDoc(doc(PROC, `${PRT_C}/PRT-2609-0001`), { stages: [{ lbl: "المكتب الفني", days: 7 }] })));
+await check("★★ والزائرُ والمراقبُ والمستودعُ لا يكتبون في سجلّ الجهات",
+  assertFails(setDoc(doc(VIEWER, `${PRT_C}/PRT-X`), { name: "ت" })) &&
+  assertFails(setDoc(doc(OBS, `${PRT_C}/PRT-Y`), { name: "ت" })) &&
+  assertFails(setDoc(doc(WH, `${PRT_C}/PRT-Z`), { name: "ت" })));
+await check("★★★ وحذفُ الجهة للأدمن وحدَه", assertFails(deleteDoc(doc(PM, `${PRT_C}/PRT-2609-0001`))));
+await check("★★★ والأدمنُ يحذفها", assertSucceeds(deleteDoc(doc(ADMIN, `${PRT_C}/PRT-2609-0001`))));
+await check("★★ ونسخةُ `_dev` للجهات محروسةٌ بالقاعدة نفسِها",
+  assertFails(setDoc(doc(VIEWER, "vault_parties_dev/PRT-X"), { name: "ت" })));
+await check("★ ويُستعلَم سجلُّ الجهات لكلّ ذي دور",
+  assertSucceeds((async () => { for (const c of [ADMIN, PM, FIN, VIEWER]) await getDocs(collection(c, PRT_C)); })()));
+
 /* القراءةُ واسعةٌ كبقيّة المنصّة — تُضيَّق في المرحلة ٣ مع أخواتها لا وحدَها */
 await check("★ ويقرأ كلُّ ذي دورٍ الخزانةَ (وتُستعلَم مجموعتاها فعلاً لا مستنداً مستنداً)",
   assertSucceeds((async () => {
@@ -1059,8 +1077,10 @@ await seed("meta/vault_readers", { users: ["رغده", "المالية"] });
 
 await check("★★★ وبعد إنشائها: الممنوحُ يقرأ ولو كان دورُه مشرفاً",
   assertSucceeds((async () => {
-    for (const c of [DOCS_C, LTRS_C, APR_C]) await getDocs(collection(SUP_RGD, c));
+    for (const c of [DOCS_C, LTRS_C, APR_C, PRT_C]) await getDocs(collection(SUP_RGD, c));
   })()));
+await check("★★ وسجلُّ الجهات يُحجب عن غير الممنوح كأخواته (وإلّا قُرئت أسماءُ العملاء من خارج القفل)",
+  assertFails(getDocs(collection(SUP_OTHER, PRT_C))));
 await check("★★★ وغيرُ الممنوح يُردّ ولو كان دورُه مشرفاً (نفسُ الدور — والفرقُ هو المنح)",
   assertFails(getDocs(collection(SUP_OTHER, DOCS_C))));
 await check("★★★ ومديرُ المشاريع **غيرُ الممنوح** يُردّ — وهو ما يعجز عنه التضييقُ بالدور",
@@ -1092,7 +1112,7 @@ await check("★★★ ولم يُصَب استعلامُ مجموعةٍ واح�
   assertSucceeds((async () => {
     for (const c of APP_COLLS) {
       if (c === "global_docs" || c === "global_letters" || c === "global_approvals"
-          || c === "vault_signs") continue;
+          || c === "vault_signs" || c === "vault_parties") continue;
       await getDocs(collection(SUP_OTHER, c));
     }
   })()));
@@ -1151,7 +1171,7 @@ await check("★★★ ولم يُصَب استعلامُ `meta` ولا غيرُ
     await getDoc(doc(SUP_OTHER, "meta/settings"));
     await getDoc(doc(SUP_OTHER, "meta/projects"));
     for (const c of APP_COLLS) {
-      if (["global_docs", "global_letters", "global_approvals", "vault_signs"].indexOf(c) !== -1) continue;
+      if (["global_docs", "global_letters", "global_approvals", "vault_signs", "vault_parties"].indexOf(c) !== -1) continue;
       await getDocs(collection(SUP_OTHER, c));
     }
   })()));

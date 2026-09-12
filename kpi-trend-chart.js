@@ -32,7 +32,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.3176";
+const MODULE_BUILD = "v18.9.3178";
 const MONTHS = 12;
 
 /* الفتحاتُ الستُّ — ترتيبٌ ثابتٌ مفحوص (dataviz palette.md · validate_palette.js) */
