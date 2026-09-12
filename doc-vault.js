@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3179";
+var MODULE_BUILD = "v18.9.3184";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -76,9 +76,10 @@ var PAGE_LETTERS = "vault-letters";
    أحدِ المعرّفات بعد هذا السطر يدسّ `undefined` في المصفوفة، فتفشل `PAGES.indexOf`
    في لفّ `showPage` بصمتٍ تامّ: تُطفَأ كلُّ الصفحات ولا تُضاء واحدة، فيرى المستخدم
    شاشةً بيضاءَ بلا خطأٍ في وحدة التحكّم. */
-var PAGE_APPROVALS = "vault-approvals";
+var PAGE_EXTRACTS  = "vault-extracts";    // ما قُدِّم وما زال في مساره
+var PAGE_APPROVALS = "vault-approvals";   // ما اعتُمد فعلاً
 var PAGE_FILE      = "vault-project";
-var PAGES        = [PAGE_DOCS, PAGE_LETTERS, PAGE_APPROVALS, PAGE_FILE];
+var PAGES        = [PAGE_DOCS, PAGE_LETTERS, PAGE_EXTRACTS, PAGE_APPROVALS, PAGE_FILE];
 var PERM_KEY     = "docVault";
 
 var HORIZON_MONTHS = 12;     // مدى الأفق — سنةٌ تُغطّي كلَّ دوراتِ التجديد السنوية
@@ -1367,7 +1368,8 @@ function _partyStopSync(){
   try{ if(_partiesUnsub) _partiesUnsub(); }catch(e){}
   _partiesUnsub = null; _parties = []; _partiesLoaded = false;
 }
-var _aview = { q:"", type:"", status:"", open:null, proj:null };
+var _aview = { q:"", type:"", status:"", open:null, proj:null };   // «المعتمدات» — و`open` مشتركةٌ بين الشاشتين
+var _xview = { q:"", type:"", status:"", proj:null };              // «المستخلصات»
 var _aEdit = null;
 
 function approvals(){ return _aprs.slice(); }
@@ -1404,7 +1406,7 @@ function aprVariance(a){
    استلامٍ في إجماليٍّ مالي يُفسد الرقم بلا أن يظهر ذلك في سطر. */
 function aprRollup(list, today){
   var out = { total:0, submitted:0, approved:0, rejected:0, paid:0,
-              sumSubmitted:0, sumApproved:0, sumWaiting:0, variance:0, oldest:0, oldestId:"" };
+              sumSubmitted:0, sumApproved:0, sumWaiting:0, sumPaid:0, variance:0, oldest:0, oldestId:"" };
   (Array.isArray(list) ? list : []).forEach(function(a){
     if(!a || a.archived) return;
     out.total++;
@@ -1414,6 +1416,7 @@ function aprRollup(list, today){
     var s = Number(a.amountSubmitted) || 0, p = Number(a.amountApproved) || 0;
     out.sumSubmitted += s;
     if(st === "approved" || st === "paid") out.sumApproved += p;
+    if(st === "paid") out.sumPaid += p;
     if(st === "submitted"){
       out.sumWaiting += s;
       var w = aprDaysWaiting(a, today);
@@ -1463,6 +1466,38 @@ function aprAgeBand(days){
   if(days >= 60) return "crit";
   if(days >= 30) return "warn";
   return "ok";
+}
+
+/* ══ شاشتان لا شاشة (طلبُ المالك: «نقل المستخلصات ومساراتها خارج المعتمدات») ══
+   «المعتمدات» اسمُها حكمُها: **ما اعتُمد فعلاً** (معتمدٌ · مسدَّد). وما زال في مساره
+   — أو رُفض — شاشتُه «المستخلصات»: سجلُّ متابعةٍ لا أرشيف. فالاعتمادُ من هناك هو ما
+   **يُدخل** المستندَ هنا وفي ملفّ المشروع، لا نقلٌ بيد. */
+function aprIsDone(a){ var st = String((a && a.status) || "submitted"); return st === "approved" || st === "paid"; }
+function aprInFlow(a){ return !aprIsDone(a); }
+function filterFlow(list){ return (Array.isArray(list) ? list : []).filter(aprInFlow); }
+function filterDone(list){ return (Array.isArray(list) ? list : []).filter(aprIsDone); }
+
+/* حصيلةُ شاشة المتابعة: كم واقفٌ ومنذ متى · كم عند آخر محطةٍ (جاهزٌ للاعتماد) ·
+   كم تجاوز مدّةَ محطته · كم رُفض. أرقامُ قرارٍ لا أرقامُ أرشيف. */
+function aprFlowRollup(list, today){
+  var out = { waiting:0, sumWaiting:0, oldest:0, oldestId:"", atLast:0, overdue:0, rejected:0, sumRejected:0 };
+  (Array.isArray(list) ? list : []).forEach(function(a){
+    if(!a || a.archived) return;
+    var st = String(a.status || "submitted");
+    var amt = aprIsFinancial(a.docType) ? (Number(a.amountSubmitted) || 0) : 0;
+    if(st === "rejected"){ out.rejected++; out.sumRejected += amt; return; }
+    if(st !== "submitted") return;
+    out.waiting++; out.sumWaiting += amt;
+    var w = aprDaysWaiting(a, today);
+    if(w !== null && w > out.oldest){ out.oldest = w; out.oldestId = a.id || ""; }
+    if(aprHasPath(a)){
+      var i = aprStageAt(a);
+      if(i === a.stages.length - 1) out.atLast++;
+      var b = aprStageBand(aprStageDays(a, today), a.stages[i].days);
+      if(b === "warn" || b === "crit") out.overdue++;
+    } else if(aprAgeBand(w) !== "ok" && w !== null) out.overdue++;
+  });
+  return out;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1721,6 +1756,11 @@ function injectCSS(){
 ".dv-ap-c.wait.b-warn .v{color:var(--warn)}",
 ".dv-ap-c.wait.b-crit{border-top-color:var(--danger)}",
 ".dv-ap-c.wait.b-crit .v{color:var(--danger)}",
+".dv-ap-c.last{border-top:3px solid var(--primary)}",
+".dv-ap-c.over{border-top:3px solid var(--border)}",
+".dv-ap-c.over.b-warn{border-top-color:var(--warn)}",
+".dv-ap-c.over.b-warn .v{color:var(--warn)}",
+".dv-ap-c.done{border-top:3px solid var(--rank4)}",
 /* ── مسارُ الاعتماد: شريطُ محطات ── */
 ".dv-path{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:12px 14px;margin-bottom:12px}",
 ".dv-path.fin{opacity:.92}",
@@ -3255,6 +3295,39 @@ function _aprStopSync(){
 /* ════════ شريطُ الحصيلة — أربعةُ أرقامٍ لا سبعة ════════
    السؤالُ: كم قدّمنا · كم اعتُمد · كم خُصم · **وكم واقفٌ ومنذ متى**. والأخيرُ هو
    الرقمُ الذي يُتَّخذ عليه قرار، فيأخذ حجمَه ولونَه بحسب أطول انتظار. */
+/* حصيلةُ «المعتمدات» — أرقامُ ما اعتُمد: قُدِّم · اعتُمد · خُصم · سُدِّد. */
+function _doneSummaryHTML(r){
+  var cell = function(lbl, val, sub, cls){
+    return '<div class="dv-ap-c' + (cls ? " " + cls : "") + '">'
+      + '<span class="l">' + lbl + '</span>'
+      + '<span class="v dv-num">' + val + '</span>'
+      + (sub ? '<span class="s">' + sub + '</span>' : '') + '</div>';
+  };
+  return '<div class="dv-ap-sum">'
+    + cell("قُدِّم", _money(r.sumSubmitted), r.total + " مستنداً")
+    + cell("اعتُمد", _money(r.sumApproved), (r.approved + r.paid) + " معتمداً")
+    + cell("الفارق المخصوم", r.variance ? _money(r.variance) : "—", r.variance ? "من المعتمَد" : "لا خصم")
+    + cell("مسدَّد", _money(r.sumPaid), r.paid ? (r.paid + " مسدَّداً") : "لم يُسدَّد شيءٌ بعد", "done")
+    + '</div>';
+}
+/* حصيلةُ «المستخلصات» — أرقامُ المتابعة: الواقفُ ومنذ متى · عند آخر محطة · المتجاوز · المرفوض. */
+function _flowSummaryHTML(r){
+  var band = aprAgeBand(r.waiting ? r.oldest : null);
+  var cell = function(lbl, val, sub, cls){
+    return '<div class="dv-ap-c' + (cls ? " " + cls : "") + '">'
+      + '<span class="l">' + lbl + '</span>'
+      + '<span class="v dv-num">' + val + '</span>'
+      + (sub ? '<span class="s">' + sub + '</span>' : '') + '</div>';
+  };
+  return '<div class="dv-ap-sum">'
+    + cell("بانتظار الاعتماد", _money(r.sumWaiting),
+           r.waiting ? (r.waiting + " مستنداً · أقدمُها " + r.oldest + " يوماً") : "لا شيء واقف", "wait b-" + band)
+    + cell("عند آخر محطة", String(r.atLast), r.atLast ? "جاهزٌ للاعتماد" : "—", "last")
+    + cell("تجاوز مدّته", String(r.overdue), r.overdue ? "يحتاج متابعة" : "الكلّ في وقته", "over" + (r.overdue ? " b-warn" : ""))
+    + cell("مرفوض", String(r.rejected), r.rejected ? _money(r.sumRejected) : "—")
+    + '</div>';
+}
+
 function _aprSummaryHTML(r){
   var band = aprAgeBand(r.submitted ? r.oldest : null);
   var cell = function(lbl, val, sub, cls){
@@ -3293,36 +3366,45 @@ function _aprChip(a, today){
     + (w === null ? "مُقدَّم" : ("بانتظار " + w + " يوماً")) + '</span>';
 }
 
-function _aprTableHTML(list, today, curProj, emptyNote){
+/* `mode`: "flow" لشاشة المتابعة (المحطةُ ومنذ متى — لا أعمدةَ اعتمادٍ فارغة)،
+   و"done" للمعتمدات (تاريخُ الاعتماد والمبلغُ والفارق). */
+function _aprTableHTML(list, today, curProj, emptyNote, mode){
+  var flow = (mode === "flow");
   if(!list.length){
     if(emptyNote) return '<div class="dv-wrap"><div class="dv-empty">' + emptyNote + '</div></div>';
-    var any = _visAprs().filter(function(x){ return !x.archived; }).length;
+    var any = _visAprs().filter(function(x){ return !x.archived && (flow ? aprInFlow(x) : aprIsDone(x)); }).length;
     return '<div class="dv-wrap"><div class="dv-empty">'
       + (any ? 'لا مستندَ يطابق الترشيح.<br><button type="button" class="dv-clear" onclick="docVault.clearAprFilters()">امسح الترشيح</button>'
-             : 'لا معتمداتٍ بعد.<br>سجّل هنا ما تُقدّمه للعميل — مستخلصاً أو مطالبةً أو خطاباً — بتاريخ تقديمه،<br>'
-               + 'فيُعرَف ما اعتُمد وما بقي واقفاً ومنذ متى، وتُحفَظ النسخةُ المعتمدة بجانبه.')
+             : (flow
+                ? 'لا مستخلصاتٍ قيد الاعتماد.<br>سجّل هنا ما تُقدّمه للعميل — مستخلصاً أو مطالبةً — بتاريخ تقديمه،<br>'
+                  + 'فيتتبّع محطاتِ جهته حتى يُعتمَد، ويدخل حينها «المعتمدات» وملفَّ المشروع تلقائياً.'
+                : 'لا معتمداتٍ بعد.<br>ما يُعتمَد من شاشة «المستخلصات» يظهر هنا تلقائياً بمبلغه ونسخته المعتمدة.'))
       + '</div></div>';
   }
   var rows = list.map(function(a){
     var fin = aprIsFinancial(a.docType), v = aprVariance(a);
+    var sd = flow ? aprStageDays(a, today) : null;
     return '<tr class="dv-row-act" onclick="docVault.openApr(\'' + _jq(a.id) + '\')">'
       + '<td class="dv-num t-name">' + _esc(a.id) + '</td>'
       + '<td class="t-name">' + _esc(a.title || "—") + _projSubHTML(a, curProj) + '</td>'
       + '<td class="t-dim">' + _esc(APR_LBL[a.docType] || "—") + '</td>'
       + '<td class="t-dim">' + _esc(a.party || "—") + '</td>'
       + '<td class="dv-num t-dim">' + _esc(a.submittedAt || "—") + '</td>'
+      + (flow ? "" : '<td class="dv-num t-dim">' + _esc(a.approvedAt || "—") + '</td>')
       + '<td class="dv-num">' + (fin ? _money(a.amountSubmitted) : '<span class="dv-none">—</span>') + '</td>'
-      + '<td class="dv-num">' + (fin && (a.status === "approved" || a.status === "paid")
-            ? _money(a.amountApproved) : '<span class="dv-none">—</span>') + '</td>'
-      + '<td class="dv-num">' + (v ? '<span class="t-warn">' + _money(v) + '</span>'
-            : '<span class="dv-none">—</span>') + '</td>'
+      + (flow ? ""
+              : '<td class="dv-num">' + (fin ? _money(a.amountApproved) : '<span class="dv-none">—</span>') + '</td>'
+                + '<td class="dv-num">' + (v ? '<span class="t-warn">' + _money(v) + '</span>' : '<span class="dv-none">—</span>') + '</td>')
       + '<td>' + _aprChip(a, today) + '</td>'
+      + (flow ? '<td class="dv-num t-dim">' + (sd === null ? "—" : sd) + '</td>' : "")
       + '<td class="t-dim">' + ((a.files || []).length ? _icon("paperclip", "ic-sm") : "—") + '</td>'
       + '</tr>';
   }).join("");
-  return '<div class="dv-wrap"><table class="dv-tbl dv-ap-tbl"><thead><tr>'
+  return '<div class="dv-wrap"><table class="dv-tbl dv-ap-tbl' + (flow ? " dv-flow-tbl" : "") + '"><thead><tr>'
     + '<th>الرقم</th><th>المستند</th><th>النوع</th><th>الجهة</th><th>التقديم</th>'
-    + '<th>المقدَّم</th><th>المعتمد</th><th>الفارق</th><th>الحالة</th><th>نسخة</th>'
+    + (flow ? '<th>المقدَّم</th><th>المحطة</th><th>منذ</th>'
+            : '<th>الاعتماد</th><th>المقدَّم</th><th>المعتمد</th><th>الفارق</th><th>الحالة</th>')
+    + '<th>نسخة</th>'
     + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 
@@ -3804,23 +3886,38 @@ function delParty(id){
     }).catch(function(){});
 }
 
-function renderApprovals(){
-  var host = document.getElementById("page-" + PAGE_APPROVALS);
+/* الشاشتان تتشاركان النموذجَ والبطاقةَ والأفعال، وتختلفان في **ما يُعرض**:
+   «المستخلصات» = ما في مساره (ولوحةُ الجهات وزرُّ الإضافة معها، فهي بابُ الدخول)،
+   و«المعتمدات» = ما اعتُمد. والصفحةُ النشطةُ هي التي تُرسَم. */
+function _aprPageActive(){ return _isActive(PAGE_EXTRACTS) ? PAGE_EXTRACTS : PAGE_APPROVALS; }
+function _curAprView(){ return _isActive(PAGE_EXTRACTS) ? _xview : _aview; }
+function renderApprovals(){ _renderAprPage(_aprPageActive()); }
+
+function _renderAprPage(pid){
+  var host = document.getElementById("page-" + pid);
   if(!host) return;
   if(!canView()){ host.innerHTML = '<div class="dv-empty">🔒 خزانة الوثائق غير متاحة لحسابك.</div>'; return; }
+  var flow = (pid === PAGE_EXTRACTS), view = flow ? _xview : _aview;
   var today = new Date();
   var head = '<div class="dv-head"><div>'
-    + '<h2 class="dv-ttl">' + _icon("clipboardCheck") + ' خزانة الوثائق — المعتمدات</h2>'
-    + '<div class="dv-sub">ما قدّمناه للعميل: مستخلصاتٌ ومطالباتٌ وخطابات. يُرتَّب بأطول انتظارٍ أوّلاً، '
-      + 'وتُحفَظ النسخةُ المعتمدةُ بجانب كلٍّ منها.</div>'
+    + (flow
+        ? '<h2 class="dv-ttl">' + _icon("receipt") + ' خزانة الوثائق — المستخلصات</h2>'
+          + '<div class="dv-sub">ما قدّمناه للعميل وما زال في مساره: كلُّ مستخلصٍ ومطالبةٍ بمحطته الحالية ومنذ متى. '
+          + 'ما يُعتمَد من هنا يدخل «المعتمدات» وملفَّ المشروع تلقائياً.</div>'
+        : '<h2 class="dv-ttl">' + _icon("clipboardCheck") + ' خزانة الوثائق — المعتمدات</h2>'
+          + '<div class="dv-sub">ما اعتُمد فعلاً من مستخلصاتٍ ومطالباتٍ وخطابات، بمبلغه ونسخته المعتمدة. '
+          + 'ما زال في مساره تجده في «المستخلصات».</div>')
     + '</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
-    + '<button type="button" class="btn btn-ghost btn-sm' + (_pPanel ? " on" : "") + '" onclick="docVault.togglePartyPanel()">' + _icon("map", "ic-sm") + ' الجهات ومساراتها'
-      + (_parties.length ? ' <span class="dv-cnt">' + _parties.length + '</span>' : "") + '</button>'
-    + (canEdit() ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.newApr()">' + _icon("plus", "ic-sm") + ' مستند مُقدَّم</button>' : "")
+    + (flow
+        ? '<button type="button" class="btn btn-ghost btn-sm' + (_pPanel ? " on" : "") + '" onclick="docVault.togglePartyPanel()">' + _icon("map", "ic-sm") + ' الجهات ومساراتها'
+            + (_parties.length ? ' <span class="dv-cnt">' + _parties.length + '</span>' : "") + '</button>'
+          + (canEdit() ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.newApr()">' + _icon("plus", "ic-sm") + ' مستند مُقدَّم</button>' : "")
+        : '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.openExtracts()">' + _icon("receipt", "ic-sm") + ' المستخلصات قيد الاعتماد'
+            + (function(){ var n = filterFlow(_visAprs()).filter(function(x){ return !x.archived; }).length; return n ? ' <span class="dv-cnt">' + n + '</span>' : ""; })() + '</button>')
     + '</div></div>';
 
   if(!_aprsLoaded){ host.innerHTML = head + '<div class="dv-empty">جارٍ التحميل…</div>'; return; }
-  _aview.proj = _seedProj(_aview.proj);
+  view.proj = _seedProj(view.proj);
   var _avis = _visAprs();
 
   var body;
@@ -3831,29 +3928,32 @@ function renderApprovals(){
     body = a ? _aprCardHTML(a, today) : '<div class="dv-empty">لم يعد هذا المستند موجوداً.</div>';
   } else {
     var types = APR_TYPES.map(function(t){
-      return '<option value="' + t.key + '"' + (_aview.type === t.key ? " selected" : "") + '>' + _esc(t.lbl) + '</option>';
+      return '<option value="' + t.key + '"' + (view.type === t.key ? " selected" : "") + '>' + _esc(t.lbl) + '</option>';
     }).join("");
-    var sts = APR_STATUS.map(function(x){
-      return '<option value="' + x.key + '"' + (_aview.status === x.key ? " selected" : "") + '>' + _esc(x.lbl) + '</option>';
+    var sts = APR_STATUS.filter(function(x){ return flow ? (x.key === "submitted" || x.key === "rejected") : (x.key === "approved" || x.key === "paid"); }).map(function(x){
+      return '<option value="' + x.key + '"' + (view.status === x.key ? " selected" : "") + '>' + _esc(x.lbl) + '</option>';
     }).join("");
-    var dirty = _aview.q || _aview.type || _aview.status || _aview.proj;
+    var dirty = view.q || view.type || view.status || view.proj;
     var bar = '<div class="dv-bar">'
       + '<input class="form-input dv-search" type="search" placeholder="ابحث بالعنوان أو الجهة أو المشروع أو الرقم…"'
-      + ' value="' + _esc(_aview.q) + '" oninput="docVault.setAprFilter(\'q\',this.value)">'
-      + _projFilterHTML(_aview.proj, "setAprProj", _avis)
+      + ' value="' + _esc(view.q) + '" oninput="docVault.setAprFilter(\'q\',this.value)">'
+      + _projFilterHTML(view.proj, "setAprProj", _avis)
       + '<select class="form-input" onchange="docVault.setAprFilter(\'type\',this.value)"><option value="">كل الأنواع</option>' + types + '</select>'
       + '<select class="form-input" onchange="docVault.setAprFilter(\'status\',this.value)"><option value="">كل الحالات</option>' + sts + '</select>'
       + (dirty ? '<button type="button" class="dv-clear" onclick="docVault.clearAprFilters()">مسح الترشيح</button>' : "")
       + '</div>';
-    var list = sortApprovals(filterApprovals(_avis, _aview, today), today);
+    var scoped = flow ? filterFlow(_avis) : filterDone(_avis);
+    var list = sortApprovals(filterApprovals(scoped, view, today), today);
     /* الحصيلةُ تتبع المُرشِّح: «كم مالٌ واقفٌ» سؤالٌ يُسأل عن مشروعٍ بعينه كما يُسأل
        عن الشركة كلِّها — ورقمُ الشركة فوق جدولِ مشروعٍ واحدٍ يُقرأ على أنّه رقمُه. */
-    body = _readerLockNoticeHTML() + _unlinkedNoticeHTML(_avis, "setAprProj", _aview.proj)
-         + _aprSummaryHTML(aprRollup(filterApprovals(_avis, { proj:_aview.proj }, today), today))
-         + bar + _aprTableHTML(list, today, _aview.proj);
+    var scopedProj = filterApprovals(scoped, { proj:view.proj }, today);
+    body = _readerLockNoticeHTML() + _unlinkedNoticeHTML(_avis, "setAprProj", view.proj)
+         + (flow ? _flowSummaryHTML(aprFlowRollup(scopedProj, today)) : _doneSummaryHTML(aprRollup(scopedProj, today)))
+         + bar + _aprTableHTML(list, today, view.proj, "", flow ? "flow" : "done");
   }
   host.innerHTML = head + body;
 }
+function openExtracts(){ try{ showPage(PAGE_EXTRACTS); }catch(e){} }
 
 function _repaint(page){
   /* ملفُّ المشروع يقرأ السجلّاتِ الثلاثةَ كلَّها، فأيُّ تحديثٍ يصل من أيٍّ منها
@@ -3862,7 +3962,7 @@ function _repaint(page){
      بعده صحيح. */
   if(_isActive(PAGE_FILE)){ renderProjectFile(); return; }
   if(page === PAGE_LETTERS){   if(_isActive(PAGE_LETTERS))   renderLetters();   return; }
-  if(page === PAGE_APPROVALS){ if(_isActive(PAGE_APPROVALS)) renderApprovals(); return; }
+  if(page === PAGE_APPROVALS){ if(_isActive(PAGE_APPROVALS) || _isActive(PAGE_EXTRACTS)) renderApprovals(); return; }
   if(_isActive(PAGE_DOCS)) render();
 }
 function _isActive(id){
@@ -3925,7 +4025,7 @@ function setFilterProj(v){
 }
 function setLetterProj(v){ _lview.proj = String(v || ""); renderLetters(); }
 function clearLetterFilters(){ _lview.q = ""; _lview.proj = _curProjId(); renderLetters(); }
-function setAprProj(v){ _aview.proj = String(v || ""); renderApprovals(); }
+function setAprProj(v){ _curAprView().proj = String(v || ""); renderApprovals(); }
 
 function clearFilters(){ _view = { q:"", type:"", level:"", ym:"", proj:FILTER_ALL }; render(); }
 function open(id){ _open = String(id); _edit = null; _renew = null; render(); _top(); }
@@ -4249,8 +4349,8 @@ function delLetter(id){
 }
 
 /* ════════ أفعالُ المعتمدات ════════ */
-function setAprFilter(k, v){ _aview[k] = String(v == null ? "" : v); renderApprovals(); }
-function clearAprFilters(){ _aview.q = _aview.type = _aview.status = ""; renderApprovals(); }
+function setAprFilter(k, v){ _curAprView()[k] = String(v == null ? "" : v); renderApprovals(); }
+function clearAprFilters(){ var v = _curAprView(); v.q = v.type = v.status = ""; renderApprovals(); }
 function openApr(id){ _aEdit = null; _aview.open = String(id); renderApprovals(); _top(); }
 function backToApr(){ _aEdit = null; _aview.open = null; renderApprovals(); _top(); }
 
@@ -4504,7 +4604,9 @@ function renderProjectFile(){
   var lts = filterLetters(_visLtrs(), { proj:_fview.proj, kind:"issued" }).sort(function(a, b){
     return String(b.letterDate || b.createdAt || "").localeCompare(String(a.letterDate || a.createdAt || ""));
   });
-  var aps = sortApprovals(filterApprovals(_visAprs(), f, today), today);
+  var apsAll = filterApprovals(_visAprs(), f, today);
+  var aps = sortApprovals(filterDone(apsAll), today);      // المعتمدات — ما اعتُمد فعلاً
+  var flw = sortApprovals(filterFlow(apsAll), today);      // قيد الاعتماد — في مساره أو رُفض
   /* وثائقُ الشركة قسمٌ ثانٍ — وتُسقَط حين يكون المعروضُ **هو** نطاقَ الشركة، وإلّا
      ظهرت القائمةُ نفسُها مرّتين تحت عنوانين. */
   var comp = (String(_fview.proj) === FILTER_COMPANY) ? []
@@ -4522,9 +4624,11 @@ function renderProjectFile(){
         : "")
     + _fSec("الخطابات الصادرة", "scrollText", lts.length, "openLettersForFile", "newLetterHere", "خطاب صادر")
     + _letterTableHTML(lts, _fview.proj, 'لا خطاباتٍ صادرةً لهذا المشروع بعد.')
-    + _fSec("المعتمدات — ما قُدِّم للعميل", "clipboardCheck", aps.length, "openAprForFile", "newAprHere", "مستند مُقدَّم")
-    + _aprSummaryHTML(aprRollup(aps, today))
-    + _aprTableHTML(aps, today, _fview.proj, 'لم يُسجَّل بعدُ ما قُدِّم للعميل في هذا المشروع.');
+    + _fSec("المستخلصات قيد الاعتماد", "receipt", flw.length, "openExtractsForFile", "newAprHere", "مستند مُقدَّم")
+    + _aprTableHTML(flw, today, _fview.proj, 'لا مستخلصَ في مساره لهذا المشروع الآن.', "flow")
+    + _fSec("المعتمدات — ما اعتُمد للمشروع", "clipboardCheck", aps.length, "openAprForFile", null, "")
+    + _doneSummaryHTML(aprRollup(aps, today))
+    + _aprTableHTML(aps, today, _fview.proj, 'لم يُعتمَد بعدُ شيءٌ لهذا المشروع — ما يُعتمَد من «المستخلصات» يظهر هنا تلقائياً.', "done");
 
   host.innerHTML = head + body;
 }
@@ -4536,6 +4640,7 @@ function setFileProj(v){ _fview.proj = String(v || ""); renderProjectFile(); }
 function openDocsForFile(){    _view.proj  = _fview.proj; _view.ym = ""; try{ showPage(PAGE_DOCS); }catch(e){} }
 function openLettersForFile(){ _lview.proj = _fview.proj; _lview.kind = "issued"; try{ showPage(PAGE_LETTERS); }catch(e){} }
 function openAprForFile(){     _aview.proj = _fview.proj; try{ showPage(PAGE_APPROVALS); }catch(e){} }
+function openExtractsForFile(){ _xview.proj = _fview.proj; try{ showPage(PAGE_EXTRACTS); }catch(e){} }
 
 /* والإضافةُ تفتح النموذجَ **القائم** بالمشروع مضبوطاً — لا نموذجَ ثانياً هنا. */
 function _withProj(draft){
@@ -4545,7 +4650,7 @@ function _withProj(draft){
 }
 function newDocHere(){    openDocsForFile();    newDoc();    _withProj(_edit);  render(); }
 function newLetterHere(){ openLettersForFile(); newLetter("issued"); _withProj(_ledit); renderLetters(); }
-function newAprHere(){    openAprForFile();     newApr();    _withProj(_aEdit); renderApprovals(); }
+function newAprHere(){    openExtractsForFile(); newApr();   _withProj(_aEdit); renderApprovals(); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    التركيبُ الذاتيّ — صفحتان · مجموعةُ قائمةٍ جانبية · زرُّ البوّابة · لفُّ showPage
@@ -4591,6 +4696,7 @@ function injectSidebarGroup(){
 
   [{ id:"nav-vault-docs-btn",    page:PAGE_DOCS,    icon:"shield",     lbl:"السجلّات والشهادات" },
    { id:"nav-vault-letters-btn", page:PAGE_LETTERS, icon:"scrollText", lbl:"الخطابات" },
+   { id:"nav-vault-ext-btn", page:PAGE_EXTRACTS,  icon:"receipt",        lbl:"المستخلصات" },
    { id:"nav-vault-apr-btn", page:PAGE_APPROVALS, icon:"clipboardCheck", lbl:"المعتمدات" },
    { id:"nav-vault-file-btn", page:PAGE_FILE, icon:"briefcase", lbl:"ملفّ المشروع" }].forEach(function(b){
     var btn = document.createElement("button");
@@ -4699,7 +4805,7 @@ function hookShowPage(){
     document.querySelectorAll(".sidebar-nav-btn").forEach(function(b){ b.classList.toggle("active", b.dataset.page === id); });
     startSync();
     if(id === PAGE_LETTERS) renderLetters();
-    else if(id === PAGE_APPROVALS) renderApprovals();
+    else if(id === PAGE_APPROVALS || id === PAGE_EXTRACTS) renderApprovals();
     else if(id === PAGE_FILE) renderProjectFile();
     else render();
   };
@@ -4764,6 +4870,8 @@ window.docVault = {
   aprAttachPath:aprAttachPath, aprAdvance:aprAdvance, aprReturnTo:aprReturnTo, aprApprove:aprApprove,
   aprReject:aprReject, aprMarkPaid:aprMarkPaid, partyForProject:partyForProject, aprReturnCount:aprReturnCount,
   _PATH_TEMPLATE:PATH_TEMPLATE, _PATH_TEMPLATE_NAME:PATH_TEMPLATE_NAME, _STAGE_KINDS:STAGE_KINDS,
+  aprIsDone:aprIsDone, aprInFlow:aprInFlow, filterFlow:filterFlow, filterDone:filterDone, aprFlowRollup:aprFlowRollup,
+  openExtracts:openExtracts, openExtractsForFile:openExtractsForFile, _PAGE_EXTRACTS:PAGE_EXTRACTS,
   _PARTY_FREE:PARTY_FREE, _PARTIES_COLL:PARTIES_COLL,
   _PREFIX_OPTS:PREFIX_OPTS, _HONORIFIC_OPTS:HONORIFIC_OPTS,
   _DEF_PREFIX:DEF_PREFIX, _DEF_HONORIFIC:DEF_HONORIFIC, _DEF_CLOSING:DEF_CLOSING,
@@ -4820,7 +4928,7 @@ window.docVault = {
        بينهما هو بيتُ القصيد: `null` تُشتقّ من المشروع المفتوح (أو من «الكلّ» في
        شاشة السجلّات)، و"" اختيارٌ صريحٌ من المستخدم. وفحصٌ يزرع بياناتٍ ثمّ يقيس
        على مُرشِّحٍ خلّفه فحصٌ قبله لا يقيس الافتراضَ أصلاً. */
-    _view.proj = null; _lview.proj = null; _aview.proj = null; _fview.proj = null;
+    _view.proj = null; _lview.proj = null; _aview.proj = null; _xview.proj = null; _fview.proj = null;
   }
 };
 

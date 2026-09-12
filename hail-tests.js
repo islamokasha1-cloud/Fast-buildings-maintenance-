@@ -11215,7 +11215,7 @@ function hrPurchaseRequestGuards() {
        وهو **أثرُ المفتاح المانح لا حجبٌ أُقحم**: خزانةُ وثائق الشركة لا تنفتح لأحدٍ
        بأثرٍ رجعيّ. ولأنّ القوائم أدناه تُطابَق **حرفياً**، تُذكر الصفحتان صراحةً في
        كلّ توقّع — فلو انقلب المفتاحُ حاجباً يوماً لَسقطت هذه الفحوصُ فوراً. */
-    const VAULT = ["vault-docs","vault-letters","vault-approvals","vault-project"];
+    const VAULT = ["vault-docs","vault-letters","vault-extracts","vault-approvals","vault-project"];
     const sup = B({role:"supervisor",permissions:{assets:false}});
     T("★ hrpo: والمشرفُ يبقى بلا مسارِ شراءٍ أُقحم عليه (المحجوبُ: أصولُه وتعاقداتُه وخزانتُه)",
       JSON.stringify(sup) === JSON.stringify(["assets","vendors","contract-requests","contracts-list"].concat(VAULT)),
@@ -11239,7 +11239,7 @@ function hrPurchaseRequestGuards() {
   }
   T("★ hrpo: ومسؤولُ المشتريات لا يمسّه الحجبُ الجديد (والخزانةُ وحدَها تنتظر منحاً)",
     JSON.stringify(B({role:"procurement_officer",permissions:{}}))
-      === JSON.stringify(["vault-docs","vault-letters","vault-approvals","vault-project"]) &&
+      === JSON.stringify(["vault-docs","vault-letters","vault-extracts","vault-approvals","vault-project"]) &&
     B({role:"procurement_officer",permissions:{docVault:true}}).length === 0,
     B({role:"procurement_officer",permissions:{}}).join(","));
 
@@ -18984,17 +18984,41 @@ function docVaultGuards() {
       W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
       T("★★★ dv: ولفُّ showPage يُضيء صفحةَ المعتمدات (لا يُطفئ الكلَّ ثم يمضي)",
         (W.showPage("vault-approvals"), pga.classList.contains("active")));
+      /* ★★★ شاشتان لا شاشة (طلبُ المالك): «المستخلصات» لما في مساره — و«المعتمدات»
+         لما اعتُمد. فالمُقدَّمُ والمرفوضُ (٣) هناك، والمعتمَدُ والمسدَّدُ (٣) هنا. */
+      const pgx = W.document.getElementById("page-" + V._PAGE_EXTRACTS);
+      T("★★★ dv: صفحةُ «المستخلصات» تُركَّب في DOM وتقع قبل «المعتمدات» في القائمة",
+        !!pgx && !!W.document.getElementById("nav-vault-ext-btn") &&
+        V._PAGES.indexOf(V._PAGE_EXTRACTS) === V._PAGES.indexOf(V._PAGE_APPROVALS) - 1);
       W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
-      pga.classList.add("active");
+      pgx.classList.add("active");
       V.__test_seed([], [], [], A);
       V.renderApprovals();
-      T("★★ dv: شريطُ الحصيلة يُرسَم بأربعة أرقامٍ لا سبعة",
-        pga.querySelectorAll(".dv-ap-c").length === 4);
+      T("★★ dv: شريطُ حصيلة «المستخلصات» يُرسَم بأربعة أرقامٍ لا سبعة",
+        pgx.querySelectorAll(".dv-ap-c").length === 4);
       T("★★★ dv: و«الواقف» وحدَه يتلوّن بحسب أقدم انتظار (٨٣ يوماً ⇒ أحمر)",
-        !!pga.querySelector(".dv-ap-c.wait.b-crit"),
-        pga.querySelector(".dv-ap-c.wait") ? pga.querySelector(".dv-ap-c.wait").className : "—");
-      T("★★ dv: وصفوفُ السجلّ = غيرُ المؤرشف",
-        pga.querySelectorAll(".dv-ap-tbl tbody tr").length === 6);
+        !!pgx.querySelector(".dv-ap-c.wait.b-crit"),
+        pgx.querySelector(".dv-ap-c.wait") ? pgx.querySelector(".dv-ap-c.wait").className : "—");
+      T("★★★ dv: وصفوفُ «المستخلصات» = المُقدَّمُ والمرفوضُ غيرُ المؤرشف — ولا معتمَدَ بينها",
+        pgx.querySelectorAll(".dv-ap-tbl tbody tr").length === 3 && !/المستخلص الثاني/.test(pgx.innerHTML),
+        String(pgx.querySelectorAll(".dv-ap-tbl tbody tr").length));
+      T("★★ dv: وزرُّ «مستند مُقدَّم» في «المستخلصات» (بابُ الدخول) — ورأسُ «المعتمدات» يُحيل إليها",
+        /docVault\.newApr\(\)/.test(pgx.innerHTML));
+      W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+      pga.classList.add("active");
+      V.renderApprovals();
+      T("★★★ dv: وصفوفُ «المعتمدات» = المعتمَدُ والمسدَّدُ وحدَهما — والمُقدَّمُ لا يتسرّب إليها",
+        pga.querySelectorAll(".dv-ap-tbl tbody tr").length === 3 && !/المستخلص الثالث/.test(pga.innerHTML) &&
+        /المستخلص الثاني/.test(pga.innerHTML),
+        String(pga.querySelectorAll(".dv-ap-tbl tbody tr").length));
+      T("★★ dv: وحصيلتُها أرقامُ ما اعتُمد (قُدِّم · اعتُمد · خُصم · سُدِّد) لا «واقفٌ» صفريّ",
+        pga.querySelectorAll(".dv-ap-c").length === 4 && !pga.querySelector(".dv-ap-c.wait") &&
+        !!pga.querySelector(".dv-ap-c.done") && /50,000\.00/.test(pga.querySelector(".dv-ap-c.done").textContent) &&
+        !/docVault\.newApr\(\)/.test(pga.innerHTML) && /المستخلصات قيد الاعتماد/.test(pga.innerHTML));
+      T("★ dv: و«المعتمدات» تعرض تاريخَ الاعتماد عموداً، و«المستخلصات» تعرض المحطةَ ومنذ متى",
+        /<th>الاعتماد<\/th>/.test(pga.innerHTML) && (pgx.classList.add("active"), V.renderApprovals(),
+          /<th>المحطة<\/th><th>منذ<\/th>/.test(pgx.innerHTML) && !/<th>الاعتماد<\/th>/.test(pgx.innerHTML)));
+      pgx.classList.remove("active"); V.renderApprovals();
       T("★★ dv: ونقرُ الصفّ يفتح البطاقةَ بمرفقها ونسختها المعتمدة",
         (V.openApr("APR-3"), /المستخلص الثاني/.test(pga.innerHTML) &&
          /النسخة المعتمدة/.test(pga.innerHTML)));
@@ -19145,7 +19169,8 @@ function docVaultGuards() {
     {
       const prevU5 = W.currentUser;
       W.currentUser = { name:"المالك", user:"owner", role:"admin" };
-      const pga = W.document.getElementById("page-" + V._PAGE_APPROVALS);
+      /* شاشةُ المتابعة هي «المستخلصات» — فيها المسارُ والجهاتُ وزرُّ الإضافة */
+      const pga = W.document.getElementById("page-" + V._PAGE_EXTRACTS);
       W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
       pga.classList.add("active");
       const P3 = Object.assign({}, P2, { stageIdx:3, projectId:"hail", projectName:"حائل", scope:"project" });
@@ -19236,6 +19261,29 @@ function docVaultGuards() {
       V.togglePartyPanel();
       T("★ dv: وإغلاقُ اللوحة يعود إلى السجلّ",
         !pga.querySelector(".dv-party") && !!pga.querySelector(".dv-ap-tbl"));
+
+      /* ★★★ ملفُّ المشروع: قسمان — «قيد الاعتماد» و«المعتمدات» — والاعتمادُ ينقل
+         المستندَ من الأوّل إلى الثاني بلا يدٍ تنقله. */
+      {
+        const pgf = W.document.getElementById("page-" + V._PAGE_FILE);
+        W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+        pgf.classList.add("active");
+        const DONE = Object.assign({}, last, ap, { id:"APR-P9", title:"المستخلص المعتمَد", projectId:"hail", projectName:"حائل", scope:"project" });
+        V.__test_seed([], [], [], [P3, DONE], PARTIES);
+        V.setFileProj("hail");
+        const html = pgf.innerHTML;
+        const secFlow = html.indexOf("المستخلصات قيد الاعتماد"), secDone = html.indexOf("المعتمدات — ما اعتُمد للمشروع");
+        T("★★★ dv/file: ملفُّ المشروع يفصل «قيد الاعتماد» عن «المعتمدات» — وكلٌّ في قسمه",
+          secFlow > -1 && secDone > secFlow &&
+          html.slice(secFlow, secDone).indexOf("المستخلص الرابع") > -1 && html.slice(secFlow, secDone).indexOf("المستخلص المعتمَد") === -1 &&
+          html.slice(secDone).indexOf("المستخلص المعتمَد") > -1 && html.slice(secDone).indexOf("المستخلص الرابع") === -1);
+        T("★★ dv/file: وحصيلةُ المعتمدات في الملفّ تقول رقمَ ما اعتُمد (90,000) لا ما قُدِّم كلِّه",
+          /90,000\.00/.test(html.slice(secDone)) && !pgf.querySelector(".dv-ap-c.wait"));
+        T("★★ dv/file: وزرُّ الإضافة في الملفّ يفتح «المستخلصات» لا «المعتمدات» (بابُ الدخول واحد)",
+          /openExtractsForFile/.test(html.slice(secFlow, secDone)) && /newAprHere/.test(html.slice(secFlow, secDone)) &&
+          !/newAprHere/.test(html.slice(secDone)));
+        pgf.classList.remove("active");
+      }
       W.currentUser = prevU5;
     }
 
@@ -19525,7 +19573,7 @@ function docVaultGuards() {
 
         /* ── نداءُ ربطِ القديم: يُرى فوق الجدول، ولا يُنتظَر أن يُبحَث عنه ── */
         {
-          const pga2 = W.document.getElementById("page-" + V._PAGE_APPROVALS);
+          const pga2 = W.document.getElementById("page-" + V._PAGE_EXTRACTS);   // المزروعُ مُقدَّمٌ — شاشتُه المستخلصات
           W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
           pga2.classList.add("active");
           V.setAprProj("hail");
@@ -19573,7 +19621,7 @@ function docVaultGuards() {
 
         /* ── المشاريعُ المُدخَلةُ يدوياً: تُودَع **ويُعثَر عليها** ── */
         {
-          const pga3 = W.document.getElementById("page-" + V._PAGE_APPROVALS);
+          const pga3 = W.document.getElementById("page-" + V._PAGE_EXTRACTS);   // المزروعُ مُقدَّمٌ — شاشتُه المستخلصات
           W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
           pga3.classList.add("active");
           const prevMan = W._manualProjectNamesAll;
