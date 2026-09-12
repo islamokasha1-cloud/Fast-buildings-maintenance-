@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3185";
+var MODULE_BUILD = "v18.9.3188";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -970,6 +970,38 @@ function cloneTemplate(tpl, at){
     files:   [],
     fromTemplate: String(t.id || "")
   };
+}
+/* ── نسخُ خطابٍ قائمٍ إلى خطابٍ جديد (طلبُ المالك: «توليد خطاب جديد بنفس بيانات
+   خطاب ما») ──
+   عكسُ استنساخ النموذج تماماً: النموذجُ **يُفرِّغ** الجهةَ لأنّها مجهولة، والنسخُ
+   **يُبقيها** لأنّ الغالبَ خطابٌ آخر إلى الجهة نفسِها في المشروع نفسِه (شهادةُ
+   نظافةٍ لمستخلصٍ تالٍ · تذكيرٌ بخطابٍ سابق). فيُحمَل كلُّ ما يُكتب باليد — الجهةُ
+   والموضوعُ والمتنُ والموقّعُ والألقابُ والختامُ والمشروع — ويُترَك ما يخصّ
+   **الخطابَ الواحدَ بعينه**: رقمُه (يُصدره العدّاد)، وتاريخُه (اليوم)، ورقمُه لدى
+   الجهة، ومرفقاتُه — فمرفقُ خطابٍ سابقٍ على خطابٍ جديدٍ يُرسِل الوثيقةَ الخطأ.
+   ويُسجَّل الأصلُ في `copiedFrom` أثراً لا مرجعاً: النسخةُ خطابٌ مستقلٌّ لا يتبع
+   الأصلَ إن عُدِّل. */
+function cloneLetter(src, at){
+  var l = src || {};
+  var out = {
+    kind:    "issued",
+    title:   String(l.title || ""),
+    subject: String(l.subject || ""),
+    body:    String(l.body || ""),
+    party:   String(l.party || ""),
+    letterDate: String(at || "").slice(0, 10),
+    ref:     "",
+    signId:    String(l.signId || ""),
+    signName:  String(l.signName || ""),
+    signTitle: String(l.signTitle || ""),
+    prefix:    _orDef(l.prefix, DEF_PREFIX),
+    honorific: _orDef(l.honorific, DEF_HONORIFIC),
+    closing:   _orDef(l.closing, DEF_CLOSING),
+    files:   [],
+    copiedFrom: String(l.id || "")
+  };
+  if(l.fromTemplate) out.fromTemplate = String(l.fromTemplate);
+  return out;
 }
 function filterLetters(list, f){
   var q    = String((f && f.q) || "").trim().toLowerCase();
@@ -2580,6 +2612,7 @@ function _letterCardHTML(l){
       + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.backToLetters()">' + _icon("rotateCcw", "ic-sm") + ' رجوع</button>'
       + '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.printLetter(\'' + _jq(l.id) + '\')">' + _icon("printer", "ic-sm") + ' طباعة على ورق الشركة</button>'
       + (isTpl && canEdit() ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.useTemplate(\'' + _jq(l.id) + '\')">' + _icon("filePlus", "ic-sm") + ' استنسخ خطاباً منه</button>' : "")
+      + (!isTpl && canEdit() ? '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.copyLetter(\'' + _jq(l.id) + '\')" title="خطاب جديد بالبيانات نفسِها — برقمٍ وتاريخٍ جديدين">' + _icon("filePlus", "ic-sm") + ' نسخ كخطاب جديد</button>' : "")
       + (canEdit() ? '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.editLetter(\'' + _jq(l.id) + '\')">' + _icon("edit", "ic-sm") + ' تعديل</button>' : "")
       + (canDelete() ? '<button type="button" class="btn btn-delete btn-sm" onclick="docVault.delLetter(\'' + _jq(l.id) + '\')">' + _icon("trash", "ic-sm") + '</button>' : "")
     + '</div></div>'
@@ -2589,6 +2622,9 @@ function _letterCardHTML(l){
                     + (l.ref ? row("الرقم لدى الجهة", '<span class="dv-num">' + _esc(l.ref) + '</span>') : ""))
       + row("الموضوع", _esc(l.subject || "—"))
       + (isTpl ? "" : row("المشروع", _projChipHTML(l)))
+      + (!isTpl && l.copiedFrom ? row("نُسخ من", letterById(l.copiedFrom)
+            ? '<a href="#" class="dv-num" onclick="docVault.openLetter(\'' + _jq(l.copiedFrom) + '\');return false">' + _esc(l.copiedFrom) + '</a>'
+            : '<span class="dv-num t-dim">' + _esc(l.copiedFrom) + '</span> <span class="dv-none">(حُذف الأصل)</span>') : "")
       + (isTpl ? "" : row("التوقيع", (function(){
           if(!l.signName && !l.signTitle) return '<span class="dv-none">بلا توقيع — يُوقَّع باليد</span>';
           var sg = l.signId ? signatoryById(l.signId) : null;
@@ -4267,6 +4303,17 @@ function useTemplate(id){
   newLetter("issued", cloneTemplate(t, new Date().toISOString()));
   _toast("📄 استُنسخ النموذج — أكمل الجهة والتاريخ", "");
 }
+/* نسخُ خطابٍ صادرٍ: يفتح نموذجَ خطابٍ **جديدٍ** محمَّلاً ببيانات الأصل ومشروعِه،
+   ولا يمسّ الأصلَ — لا رقمَ له حتى يُحفَظ، فالإلغاءُ لا يترك أثراً. */
+function copyLetter(id){
+  if(!canEdit()){ _toast("🔒 لا صلاحية لإضافة خطاب","warn"); return; }
+  var l = letterById(id);
+  if(!l) return;
+  var seed = cloneLetter(l, new Date().toISOString());
+  var _pl = _projDraft(l); Object.keys(_pl).forEach(function(k){ seed[k] = _pl[k]; });
+  newLetter("issued", seed);
+  _toast("📄 نُسخ الخطاب " + String(l.id) + " — راجع التاريخ والمتن ثمّ احفظ", "");
+}
 
 function _readLetterForm(){
   var g = function(id){ var el = document.getElementById(id); return el ? String(el.value || "").trim() : ""; };
@@ -4325,6 +4372,7 @@ function saveLetter(){
   body.scope = _pb.scope; body.projectId = _pb.projectId;
   body.projectName = _pb.projectName; body.isCustomProject = _pb.isCustomProject;
   if(_ledit.fromTemplate) body.fromTemplate = _ledit.fromTemplate;
+  if(_ledit.copiedFrom)   body.copiedFrom   = _ledit.copiedFrom;
   var was = _ledit.id;
   var p = was
     ? d.collection(LTRS_COLL()).doc(was).set(body, { merge:true }).then(function(){ return was; })
@@ -4853,7 +4901,7 @@ window.docVault = {
   letterTab:letterTab, setLetterFilter:setLetterFilter, openLetter:openLetter,
   backToLetters:backToLetters, newLetter:newLetter, editLetter:editLetter,
   cancelLetter:cancelLetter, saveLetter:saveLetter, delLetter:delLetter,
-  useTemplate:useTemplate, addLetterFile:addLetterFile, delLetterDraftFile:delLetterDraftFile,
+  useTemplate:useTemplate, copyLetter:copyLetter, addLetterFile:addLetterFile, delLetterDraftFile:delLetterDraftFile,
   printLetter:printLetter, letterPaperHTML:letterPaperHTML,
   openAI:openAI, closeAI:closeAI, runAI:runAI, aiPrompt:aiPrompt, aiReady:aiReady,
   setPick:setPick, pickState:pickState, _PICK_NONE:PICK_NONE, _PICK_OTHER:PICK_OTHER,
@@ -4897,7 +4945,7 @@ window.docVault = {
   horizonBuckets:horizonBuckets, rollup:rollup, nextRef:nextRef, renewDoc:renewDoc,
   typeLabel:typeLabel, ownerLabel:ownerLabel,
   code128SVG:code128SVG, _code128Bits:code128Bits, _code128Sanitize:code128Sanitize,
-  filterDocs:filterDocs, sortDocs:sortDocs, cloneTemplate:cloneTemplate, filterLetters:filterLetters,
+  filterDocs:filterDocs, sortDocs:sortDocs, cloneTemplate:cloneTemplate, cloneLetter:cloneLetter, filterLetters:filterLetters,
   _DOC_TYPES:DOC_TYPES, _LEVELS:LEVELS, _PERM_KEY:PERM_KEY,
   _PAGE_DOCS:PAGE_DOCS, _PAGE_LETTERS:PAGE_LETTERS, _PAGE_FILE:PAGE_FILE,
   _PAGES:PAGES, _HORIZON_MONTHS:HORIZON_MONTHS,

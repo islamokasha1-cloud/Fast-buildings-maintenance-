@@ -18206,6 +18206,30 @@ function docVaultGuards() {
       cl.kind === "issued" && cl.party === "" && cl.files.length === 0 &&
       cl.body === "إلى [الجهة]" && cl.subject === "تمديد" &&
       cl.letterDate === "2026-09-10" && cl.fromTemplate === "TPL-1", JSON.stringify(cl));
+    /* ── نسخُ خطابٍ قائمٍ: عكسُ النموذج — الجهةُ والموقّعُ يُحمَلان، والرقمُ
+       والتاريخُ والمرفقُ ورقمُ الجهة لا (كلٌّ منها يخصّ الخطابَ الواحدَ بعينه). */
+    const src = { id: "LTR-2609-0009", kind: "issued", title: "طلب شهادة نظافة",
+                  subject: "بشأن طلب شهادة النظافة", body: "السلام عليكم",
+                  party: "مدير الإدارة العامة للنظافة", letterDate: "2026-09-08", ref: "77/م",
+                  signId: "SG-1", signName: "عادل", signTitle: "المدير العام",
+                  prefix: "سعادة", honorific: "المحترم", closing: "وتقبلوا تحياتي",
+                  files: [{ url: "x" }], fromTemplate: "TPL-1", copiedFrom: "LTR-0001" };
+    const cp = V.cloneLetter(src, "2026-09-12T10:00:00Z");
+    T("★★ dv: نسخُ الخطاب يحمل الجهةَ والموضوعَ والمتنَ والموقّعَ والألقاب",
+      cp.kind === "issued" && cp.party === src.party && cp.subject === src.subject &&
+      cp.body === src.body && cp.title === src.title && cp.signId === "SG-1" &&
+      cp.signName === "عادل" && cp.signTitle === "المدير العام" &&
+      cp.prefix === "سعادة" && cp.honorific === "المحترم" && cp.closing === "وتقبلوا تحياتي",
+      JSON.stringify(cp));
+    T("★★ dv: ولا يحمل الرقمَ ولا التاريخَ ولا المرفقَ ولا رقمَ الجهة",
+      cp.id === undefined && cp.letterDate === "2026-09-12" && cp.files.length === 0 && cp.ref === "",
+      JSON.stringify(cp));
+    T("★ dv: ويؤرّخ الأصلَ في copiedFrom (الأصلُ المباشرُ لا أصلُ الأصل) ويُبقي أثرَ النموذج",
+      cp.copiedFrom === "LTR-2609-0009" && cp.fromTemplate === "TPL-1");
+    T("★ dv: الألقابُ الفارغةُ عمداً تبقى فارغةً في النسخة (لا تعود إلى الافتراض)",
+      V.cloneLetter({ id: "L", prefix: "", honorific: "", closing: "" }, "2026-01-01").prefix === "" &&
+      V.cloneLetter({ id: "L", prefix: "", honorific: "", closing: "" }, "2026-01-01").closing === "" &&
+      V.cloneLetter({ id: "L" }, "2026-01-01").closing !== "");
     T("★ dv: تبويبا الخطابات يفصلان النماذجَ عن الصادرات",
       V.filterLetters([tpl, { id: "LTR-1", kind: "issued", title: "خطاب" }], { kind: "template" }).length === 1 &&
       V.filterLetters([tpl, { id: "LTR-1", kind: "issued", title: "خطاب" }], { kind: "issued" }).length === 1);
@@ -18693,6 +18717,24 @@ function docVaultGuards() {
     V.toggleSignPanel();
     V.useTemplate("TPL-9001");
     T("★★ dv: واستنساخُ نموذجٍ كذلك", shown().form && !shown().signs);
+
+    /* ── زرُّ «نسخ كخطاب جديد» على بطاقة الصادر وحدَه، ويفتح نموذجاً جديداً
+       بالجهة نفسِها بلا رقمٍ — فالإلغاءُ لا يترك أثراً. */
+    V.openLetter("LTR-9001");
+    T("★★ dv: بطاقةُ الصادر تحمل زرَّ «نسخ كخطاب جديد»",
+      /docVault\.copyLetter\('LTR-9001'\)/.test(pgl.innerHTML) && /نسخ كخطاب جديد/.test(pgl.innerHTML));
+    V.openLetter("TPL-9001");
+    T("★ dv: وبطاقةُ النموذج لا تحمله (لها «استنسخ خطاباً منه»)",
+      !/copyLetter/.test(pgl.innerHTML) && /useTemplate\('TPL-9001'\)/.test(pgl.innerHTML));
+    V.toggleSignPanel();
+    V.copyLetter("LTR-9001");
+    const cpParty = pgl.querySelector("#dv-l-party");
+    T("★★★ dv: النسخُ يفتح نموذجَ خطابٍ جديدٍ محمَّلاً بالجهة، ويُغلق لوحةَ التواقيع",
+      shown().form && !shown().signs && !!cpParty && cpParty.value === "جهة",
+      cpParty ? cpParty.value : "no party field");
+    T("★★ dv: والنموذجُ «خطاب جديد» لا «تعديل» — الأصلُ لا يُمسّ",
+      !/تعديل: خطابٌ قائم/.test(pgl.innerHTML) && pgl.querySelector("#dv-l-date").value !== "2026-09-01",
+      pgl.querySelector("#dv-l-date") ? pgl.querySelector("#dv-l-date").value : "no date");
 
     V.toggleSignPanel();
     V.letterTab("template");
