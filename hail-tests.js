@@ -5480,6 +5480,57 @@ function auditRound2() {
       HTML.includes('name:"مؤشر سرعة الإغلاق (خلال "+RESPONSE_TARGET_H+" ساعات عمل)",pct:cur.rates.k02') && HTML.includes('["مغلقة هذا الشهر",cur.closedTix]'));
   }
 
+  // ── v18.9zi — روتيني = وقائيٌّ في كلّ المؤشرات، والوقائيُّ خارج مؤشّرات المهلة ──
+  //  قرارُ المالك. بلاغٌ وقائيٌّ وُلّد قبل موعده بثلاثة أيامٍ وأُغلق في موعده كان
+  //  «تجاوز SLA» في KPI-03 و«أبطأ من الهدف» في KPI-02 — ولم يتأخّر عن شيء. و«روتيني»
+  //  بلا maintType كان تصحيحياً في KPI-01 وخارج KPI-05.
+  {
+    const _S = HTML.indexOf("const SLA_CONFIG = {");
+    const _E = HTML.indexOf("function fmtH(h){", _S);
+    let K = null;
+    try { K = new Function(HTML.slice(_S, _E) + "\nreturn {isPreventiveTicket,kpiMonthStats,kpiLiveOverdue};")(); }
+    catch (e) { T("تُبنى دوالُّ zi", false, String(e.message).slice(0, 120)); }
+    if (K) {
+      const R = "روتيني 🔵 (صيانة دورية)", N = "عادي 🟢 (48 ساعة)";
+      T("★★ zi: «روتيني» وقائيٌّ ولو بلا maintType — وبالإملاء القديم أيضاً",
+        K.isPreventiveTicket({ priority: R }) && K.isPreventiveTicket({ priority: "روتيني (صيانة دورية)" }) &&
+        K.isPreventiveTicket({ maintType: "وقائية", priority: N }) && !K.isPreventiveTicket({ priority: N, maintType: "تصحيحية" }) &&
+        !K.isPreventiveTicket(null));
+      // وقائيٌّ وُلّد قبل موعده بثلاثة أيامٍ (كما PPM-2026-0065) وأُغلق في موعده
+      const L = [
+        { priority: R, status: "مغلق", createdAt: "2026-09-09T08:48:00", closedAt: "2026-09-12T09:38:00", scheduledFor: "2026-09-12" },
+        { priority: N, status: "مغلق", maintType: "تصحيحية", createdAt: "2026-09-02T08:00:00", closedAt: "2026-09-02T12:00:00" },
+        { priority: R, status: "مفتوح", createdAt: "2026-09-01T08:00:00", scheduledFor: "2026-09-20" },
+        { priority: N, status: "مفتوح", maintType: "تصحيحية", createdAt: "2026-09-04T08:00:00" },
+      ];
+      const m = K.kpiMonthStats(L, "2026-09");
+      T("★★ zi: الوقائيُّ المُغلقُ في موعده لا يدخل KPI-03 (كان «تجاوز SLA» لثلاثة أيامِ انتظارٍ لموعده)",
+        m.closedTix === 1 && m.closedInSLA === 1 && m.rates.k03 === 100);
+      T("★★ zi: ولا يدخل KPI-02 — 3 أيامٍ حتى موعده ليست بطءَ إغلاق",
+        m.rates.k02 === 100 && m.closedWithinTarget === 1);
+      T("★★ zi: ويُحسب في KPI-05 حيث موضعُه — مستحقّان في سبتمبر، أُنجز واحدٌ في شهره",
+        m.ppmDue === 2 && m.ppmOnTime === 1 && m.rates.k05 === 50);
+      T("★ zi: «روتيني» وقائيٌّ في KPI-01 لا تصحيحيّ (تصحيحيان لا أربعة)",
+        m.corrective === 2 && m.preventive === 2 && m.rates.k01 === 50);
+      T("★ zi: KPI-07 لا يعدّ الوقائيَّ المفتوحَ متأخّراً بمهلة SLA (يُقاس بجدوله)",
+        K.kpiLiveOverdue(L).open === 1);
+    }
+    // مصدرٌ واحدٌ للتصنيف في كلّ موضعِ قياس
+    T("★★ zi: كلُّ مواضع القياس تقرأ isPreventiveTicket — لا مقارنةَ maintType محلّيةً في مؤشّر",
+      HTML.includes("const corrective = _all.filter(t=>!isPreventiveTicket(t));") &&
+      HTML.includes("const isPrev = isPreventiveTicket(t);") &&
+      HTML.includes("return !isPreventiveTicket(t); }).length;") &&
+      !HTML.includes('const corrective = _all.filter(t=>t.maintType!=="وقائية");') &&
+      !HTML.includes('const isPrev = t.maintType==="وقائية";'));
+    T("★ zi: مؤشّرا المهلة التراكميّان على التصحيحيّ ذي المهلة (كالشهريّ)",
+      HTML.includes('t.status==="مغلق"&&t.closedAt&&t.createdAt&&!isPreventiveTicket(t)&&tierOf(t.priority)'));
+    {
+      const _pc = path.resolve(path.dirname(IDX), "performance-contract.js");
+      if (fs.existsSync(_pc)) T("zi: بطاقةُ العقد تقرأ المصنِّفَ نفسَه",
+        fs.readFileSync(_pc, "utf8").includes("isPreventiveTicket(t)"));
+    }
+  }
+
   // ── v18.9zh — KPI-02 عدٌّ لا متوسّط، وساعاتُ العمل بمنسّقها ─────────────────
   //  35 و81 على البطاقة و24٪ تحتهما: النسبةُ كانت 8÷المتوسط، فبلاغٌ واحدٌ بثلاثمئة ساعةٍ
   //  يسحب الشهرَ كلَّه. والمالكُ قسم 35÷81 فوجد 43٪ — وكان محقّاً. و«1 يوم» عن 33 ساعةَ
@@ -5562,8 +5613,8 @@ function auditRound2() {
       T("★ zg: قائمةٌ فارغةٌ أو غيرُ مصفوفةٍ لا تُسقط الحساب",
         K.kpiMonthStats([], "2026-09").n === 0 && K.kpiMonthStats(null, "2026-09").rates.k06 === null);
       const lv = K.kpiLiveOverdue(L);
-      T("★★ zg: KPI-07 مقامُه المفتوحةُ الآن لا كلُّ التاريخ — مفتوحان متأخّران ⇐ 0٪ (كان يبقى ≥96٪)",
-        lv.open === 2 && lv.overdue === 2 && lv.pct === 0);
+      T("★★ zg: KPI-07 مقامُه المفتوحةُ الآن لا كلُّ التاريخ — والوقائيُّ المفتوحُ خارجَه (zi): مفتوحٌ تصحيحيٌّ متأخّر ⇐ 0٪",
+        lv.open === 1 && lv.overdue === 1 && lv.pct === 0);
       T("zg: ولا مفتوحَ ⇐ 100 (لا عملَ معلّقاً فلا متأخّر)", K.kpiLiveOverdue([L[0]]).pct === 100);
     }
     //  حرّاسُ المصدر
@@ -6137,10 +6188,11 @@ function rollupMonthIsolation() {
   try {
     // _emptyRollup يعتمد CURRENT_PROJECT/ROLLUP_FV، و_accumTicket يعتمد _closeWorkH/_closedOnTime
     // (حقول زمنية لا تؤثر على حقول العدّ الهيكلية موضع هذا الفحص).
-    R = new Function("CURRENT_PROJECT", "ROLLUP_FV", "_closeWorkH", "_closedOnTime",
+    // v18.9zi: _accumTicket تقرأ المصنِّفَ الموحَّد — يُحقن بالتعريف نفسِه (maintType أو رأسُ «روتيني»)
+    R = new Function("CURRENT_PROJECT", "ROLLUP_FV", "_closeWorkH", "_closedOnTime", "isPreventiveTicket",
       mkSrc + "\n" + rollupSrc +
       "\nreturn {monthKey,_emptyRollup,_accumTicket,_computeRollupForMonth};"
-    )({ id: "hail" }, 2, () => 5, () => true);
+    )({ id: "hail" }, 2, () => 5, () => true, t => !!t && (t.maintType === "وقائية" || String(t.priority || "").trim().split(/\s+/)[0] === "روتيني"));
   } catch (e) { T("تُبنى دوال الـ rollup", false, String(e.message).slice(0, 120)); return; }
 
   const { monthKey, _computeRollupForMonth } = R;
