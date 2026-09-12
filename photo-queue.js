@@ -29,7 +29,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.3170";
+const MODULE_BUILD = "v18.9.3172";
 const DB_NAME = "hailPhotoQueue";
 const STORE   = "pending";
 const DB_VER  = 1;

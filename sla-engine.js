@@ -36,7 +36,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 (function(){
 
-const MODULE_BUILD = "v18.9.3170";
+const MODULE_BUILD = "v18.9.3172";
 
 /* ==SLA-MOVED-A-START== */
 const PRIORITIES = ["حرج 🔴 (2 ساعة)","عاجل 🟡 (8 ساعات)","عادي 🟢 (48 ساعة)","روتيني 🔵 (صيانة دورية)"];
@@ -288,8 +288,9 @@ function firstResponseStats(list){
    وكان الوقائيُّ يدخل KPI-02 وKPI-03: بلاغٌ وُلّد قبل موعده بثلاثة أيامٍ وأُغلق في
    موعده تماماً يُعدّ «تجاوز SLA» — وهو لم يتأخّر عن شيء. و`isOverdue` تقول عن
    «روتيني» «لا مهلة له» بينما `_closedOnTime` تُسقطه إلى 48 ساعةً: حكمان لبلاغٍ
-   واحد. الآن: **الوقائيُّ له مؤشّرُه ولا يدخل مؤشّراتِ المهلة**، والمصنِّفُ واحدٌ
-   تقرؤه كلُّ المواضع (المحرّك · التجميعُ الشهريّ · المقارنةُ · بطاقةُ العقد). */
+   واحد. المصنِّفُ واحدٌ تقرؤه كلُّ المواضع (المحرّك · التجميعُ الشهريّ · المقارنةُ ·
+   بطاقةُ العقد) **لفصل التصحيحيّ عن الوقائيّ وحسب** — وبقرار المالك (v18.9zj) يبقى
+   الوقائيُّ داخلَ مؤشّرات المهلة كما كان. */
 function isPreventiveTicket(t){
   if(!t) return false;
   return t.maintType==="وقائية" || priorityHead(t.priority)==="روتيني";
@@ -315,9 +316,10 @@ function kpiMonthStats(list, ym, opts){
   const preventive=inMonth.filter(t=>isPreventiveTicket(t));
   const corrClosed=corrective.filter(t=>t.status==="مغلق").length;
   const prevClosed=preventive.filter(t=>t.status==="مغلق").length;
-  /* مؤشّرا المهلة (02 · 03) على التصحيحيّ ذي المهلة وحدَه — الوقائيُّ يُقاس بجدوله،
-     وما لا فئةَ له لا يُقاس (الحكمُ نفسُه الذي تعطيه isOverdue). */
-  const closedTix=closed.filter(t=>t.closedAt && !isPreventiveTicket(t) && tierOf(t.priority));
+  /* v18.9zj: مؤشّرا المهلة (02 · 03) على **كلّ المغلقة** — الوقائيُّ فيها كما كان.
+     قرارُ المالك: المصنِّفُ يفرّق التصحيحيَّ عن الوقائيّ (KPI-01 · KPI-05) ولا يُخرج
+     الوقائيَّ من مؤشّرات المهلة. */
+  const closedTix=closed.filter(t=>t.closedAt);
   const hours=closedTix.map(_closeWorkH);
   const avgCloseH=hours.length?hours.reduce((a,b)=>a+b,0)/hours.length:null;
   const medianCloseH=_median(hours);
@@ -352,8 +354,7 @@ function _median(arr){
   const m=a.length>>1; return a.length%2 ? a[m] : (a[m-1]+a[m])/2;
 }
 function kpiLiveOverdue(list){
-  // الوقائيُّ خارجَه: تأخّرُه يُقاس بجدوله لا بمهلة SLA
-  const open=(Array.isArray(list)?list:[]).filter(t=>t&&t.status!=="مغلق"&&!isPreventiveTicket(t));
+  const open=(Array.isArray(list)?list:[]).filter(t=>t&&t.status!=="مغلق");
   const overdue=open.filter(t=>isOverdue(t)).length;
   return { open:open.length, overdue, pct: open.length ? Math.max(0,100-Math.round(overdue/open.length*100)) : 100 };
 }
