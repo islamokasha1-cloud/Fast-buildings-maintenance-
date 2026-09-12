@@ -82,7 +82,8 @@ firebase deploy --only functions
 ```
 سيُنشَر: مشغّلات البلاغات (`ticketAssignUpdate_*`, `ticketAssignCreate_*`) +
 مشغّلا الشراء (`poRouteUpdate`, `poRouteCreate`) +
-**مشغّلا سداد الموارد البشرية (`hrpRouteUpdate`, `hrpRouteCreate`)** + `waSender` + `waRetry`.
+**مشغّلا سداد الموارد البشرية (`hrpRouteUpdate`, `hrpRouteCreate`)** + مشغّلاتُ التعاقدات +
+**`exsRemind` (مجدولةٌ يومياً — تذكيرُ المستخلصات الدورية)** + `waSender` + `waRetry`.
 
 > **سداد الموارد البشرية** (`global_hr_payments`) لا يحتاج متغيّرَ بيئةٍ جديداً: القالبان
 > الافتراضيان هما قالبا الشراء المعتمَدان نفسُهما (`po_approval_needed` / `po_status_update`)،
@@ -91,6 +92,15 @@ firebase deploy --only functions
 > `meta/users`). ولتخصيص قالبين لاحقاً:
 > `WA_HRP_APPROVAL_TEMPLATE` · `WA_HRP_STATUS_TEMPLATE` · `WA_HRP_TEMPLATE_LANG`.
 > التفاصيل الكاملة في `docs/whatsapp-notifications-STATUS.md §المرحلة ٥`.
+
+> **تذكيرُ المستخلصات الدورية (`exsRemind`)** — دالّةٌ **مجدولة** (لا مشغّلُ مستند) تدور
+> كلَّ يومٍ في `08:00` بتوقيت الرياض: تقرأ `vault_extract_schedules` الفعّالة، ولمن حلّ
+> موعدُ تذكيره (من «الموعد − المهلة» حتى الموعد) تُدرج رسالةً لكلّ مسؤولٍ في `wa_outbox`
+> على قالب `po_status_update` المعتمَد — فلا تحتاج قالباً جديداً ولا متغيّرَ بيئة. النشرُ
+> يُنشئ **وظيفةَ Cloud Scheduler** تلقائياً (يلزم تفعيل Cloud Scheduler API في المشروع —
+> مفعَّلٌ أصلاً لـ`waRetry`). للتخصيص: `WA_EXS_TEMPLATE` (قالبٌ بأربع خانات) ·
+> `WA_EXS_TEMPLATE_LANG` · `WA_EXS_SCHEDULE` · `WA_EXS_TZ`. والتجربةُ الفورية بلا انتظار
+> الصباح: `gcloud scheduler jobs run firebase-schedule-exsRemind-us-central1 --location=us-central1`.
 
 ---
 

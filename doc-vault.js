@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3193";
+var MODULE_BUILD = "v18.9.3194";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1624,6 +1624,7 @@ function startSync(){
   startSignSync();
   _aprSync();
   _partySync();
+  _exsSync();
   _readReaders();
   if(!_docsUnsub){
     _docsUnsub = d.collection(DOCS_COLL()).onSnapshot(function(snap){
@@ -1644,6 +1645,7 @@ function stopSync(){
   stopSignSync();
   _aprStopSync();
   _partyStopSync();
+  _exsStopSync();
   try{ if(_docsUnsub) _docsUnsub(); }catch(e){}
   try{ if(_ltrsUnsub) _ltrsUnsub(); }catch(e){}
   _docsUnsub = _ltrsUnsub = null;
@@ -1727,6 +1729,7 @@ function scanAndAlert(today){
         + (_own ? " — المسؤول: " + _own : "");
     _notify("📁 " + (doc.title || doc.id), body, "doc_expiry");
   });
+  fired += _scanSchedules(t, day, seen, next);   // مواعيدُ المستخلصات الدورية — الخريطةُ نفسُها
   _markAlerted(next);      // ما لم يعد يستحقّ تنبيهاً يسقط من الذاكرة فلا تنتفخ
   return fired;
 }
@@ -1889,6 +1892,19 @@ function injectCSS(){
 ".dv-stg{display:flex;align-items:center;gap:6px;margin-bottom:6px}",
 ".dv-stg .form-input{margin:0}",
 ".dv-stg-n{width:22px;text-align:center;flex:none}",
+/* ── المستخلصاتُ الدورية — شريطُ المواعيد ولوحةُ الجداول ── */
+".dv-exs-strip{padding:14px 16px}",
+".dv-exs-rows{display:flex;flex-direction:column;gap:6px;margin-top:8px}",
+".dv-exs-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;padding:7px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface2)}",
+".dv-exs-left{font-size:11px;font-weight:800;color:var(--muted);white-space:nowrap}",
+".dv-exs-left.b-urgent{color:var(--warn)}",
+".dv-exs-left.b-critical{color:var(--danger)}",
+".dv-exs-ttl{flex:1;min-width:160px}",
+".dv-exs-who{display:flex;gap:4px;flex-wrap:wrap}",
+".dv-exs-off{opacity:.62}",
+".dv-exs-users{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;margin-top:4px}",
+".dv-exs-u{padding:7px 10px;font-size:11.5px}",
+".dv-exs-u.on{border-color:var(--primary)}",
 ".dv-stg-d{width:74px;flex:none}",
 ".dv-stg-b{flex:none;width:28px;height:30px;border:1px solid var(--border);border-radius:7px;background:var(--surface2);color:var(--text);cursor:pointer;font-family:inherit;font-size:13px}",
 ".dv-stg-b:disabled{opacity:.35;cursor:default}",
@@ -3964,7 +3980,7 @@ function _partyFormHTML(){
 function togglePartyPanel(){
   if(!canView()) return;
   _pPanel = !_pPanel; _pEdit = null;
-  if(_pPanel){ _aEdit = null; _aview.open = null; }
+  if(_pPanel){ _aEdit = null; _aview.open = null; _sPanel = false; _sEdit = null; }
   renderApprovals(); _top();
 }
 function newParty(){
@@ -4060,6 +4076,456 @@ function delParty(id){
     }).catch(function(){});
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   المستخلصاتُ الدورية — جدولُ مواعيدَ ثابتةٍ وتذكيرٌ قبلها  (طلبُ المالك 12/09:
+   «يوجد مستخلصات دورية شهرية بتواريخ ثابتة … احتاج تذكير قبل موعد كل مستخلص بمدة
+   ٥ أيام وتكون مربوطة بمستخدمين من النظام حتى يرسل لهم رسائل واتساب للتذكير»)
+
+   ── المشكلة ──
+   سجلُّ «المستخلصات» يعرف المستخلصَ **بعد** تقديمه — يتتبّع محطاتِه ويقيس وقوفَه.
+   لكنّ موعدَ تقديمه لا يعرفه أحدٌ إلا من يحفظه: «مستخلصُ أمانة حائل يومَ ٢٥ من
+   كلّ شهر» يعيش في ذاكرة شخصٍ واحد، فيُنسى فيتأخّر التقديمُ شهراً كاملاً.
+
+   ── المبدأ ──
+   • **الجدولُ كيانٌ مستقلٌّ عن المستند**: يومُ الشهر · مهلةُ التذكير (٥ أيام
+     افتراضاً) · المسؤولون · المشروعُ والجهة. لا يُنشئ مستنداً ولا يغيّر حالةً —
+     يذكّر فحسب، والتقديمُ فعلُ إنسان.
+   • **المسؤولون بأسماء الدخول** لا بنصٍّ حرّ — نمطُ «مسؤول التجديد» نفسُه: هو
+     المفتاحُ الذي يجد به الخادمُ رقمَ الواتساب، وبلا رقمٍ مفعَّلٍ يُقال ذلك **الآن**
+     في النموذج لا يومَ يصمت التذكير.
+   • **الحسابُ هنا نسخةٌ نقيّةٌ من حساب الخادم** (`functions/lib/extract-reminders.js`)
+     ولا يستورد أحدُهما الآخر — والانحرافُ يمسكه حارسٌ في `hail-tests.js` يطابق
+     الاثنين على جدول تواريخ (نمطُ `daysUntil` ↔ محرّك التعاقدات).
+   • **يومُ الشهر يُقصّ إلى آخر يوم فيه**: «٣٠» في فبراير هو ٢٨ أو ٢٩ — وإلّا اختفى
+     موعدُ فبراير بصمت.
+   • **قناتان**: الخادمُ يُرسل واتساب صباحاً بتوقيت الرياض (`exsRemind`)، والشاشةُ
+     تُطلق تنبيهَ الجرس لمن فتح المنصّة داخل نافذة التذكير — بكتم (جدول · موعد · يوم)
+     في `localStorage` كتنبيه انتهاء الوثائق حرفياً. وأثرُ الخادم (`reminded[موعد]`)
+     يُقرأ هنا: «ذُكِّر فلانٌ وفلان في …» فيُعرَف ما وصل وما لم يصل.
+
+   ── التخزين ──
+   `vault_extract_schedules` (+`_dev`) بالقاعدة نفسِها كأخواتها في الخزانة،
+   وعدّادُها `meta/vault_extract_schedules_counter`، والمعرّفُ `EXS-…` (بادئةٌ يوجّهها
+   الرابطُ العميقُ في `index.html` إلى هذه الشاشة).
+   ═══════════════════════════════════════════════════════════════════════════ */
+function EXS_COLL(){ return _dev() ? "vault_extract_schedules_dev" : "vault_extract_schedules"; }
+function EXS_CTR(){  return _dev() ? "meta/vault_extract_schedules_counter_dev" : "meta/vault_extract_schedules_counter"; }
+
+var EXS_DEFAULT_LEAD = 5;        // مهلةُ التذكير الافتراضية بالأيام (طلبُ المالك: ٥)
+var EXS_UPCOMING_DAYS = 45;      // أفقُ شريط «المواعيد القادمة» في شاشة المستخلصات
+
+var _exs = [], _exsUnsub = null, _exsLoaded = false;
+var _sPanel = false;             // أمفتوحةٌ لوحةُ الجداول الدورية؟
+var _sEdit  = null;              // مسوّدةُ الجدول قيدَ التحرير
+
+function schedules(){ return _exs.slice(); }
+function scheduleById(id){
+  for(var i = 0; i < _exs.length; i++) if(_exs[i] && _exs[i].id === id) return _exs[i];
+  return null;
+}
+function _visExs(){ return visibleList(_exs, allowedProjectIds()); }
+
+/* ════════ الدوالُّ النقيّة — يفحصها `hail-tests` ويطابقها بنسخة الخادم ════════ */
+function _exsPad(n){ return (n < 10 ? "0" : "") + n; }
+function _exsDaysInMonth(y, m){ return new Date(Date.UTC(y, m, 0)).getUTCDate(); }   // m: 1..12
+function _exsParse(s){
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ""));
+  if(!m) return null;
+  var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return isNaN(d.getTime()) ? null : d;
+}
+/* بالسلوك لا بـ`instanceof`: كائنُ `Date` من نطاقٍ آخر (نافذةُ فحصٍ · إطار) يسقط في
+   `instanceof` فيُقرأ نصّاً «Thu Sep…» ويضيع الموعدُ بصمت — وهو ما أمسكه الفحص. */
+function _exsIso(t){
+  if(t && typeof t.toISOString === "function") return t.toISOString().slice(0, 10);
+  return String(t || "").slice(0, 10);
+}
+
+/* يومُ الشهر المضبوط: ١..٣١، وغيرُ الصالح ⇒ ٠ (لا موعد). */
+function exsDueDay(s){
+  var d = Math.floor(Number(s && s.dueDay));
+  return (isFinite(d) && d >= 1 && d <= 31) ? d : 0;
+}
+/* مهلةُ التذكير: ٠..٦٠، والافتراضُ ٥. */
+function exsLeadDays(s){
+  var v = s && s.leadDays;
+  if(v === "" || v === null || v === undefined) return EXS_DEFAULT_LEAD;
+  var n = Math.floor(Number(v));
+  return (isFinite(n) && n >= 0 && n <= 60) ? n : EXS_DEFAULT_LEAD;
+}
+/* موعدُ الاستحقاق في شهرٍ بعينه — اليومُ يُقصّ إلى آخر يوم في الشهر. */
+function exsDueInMonth(day, y, m){
+  var d = Math.floor(Number(day));
+  if(!isFinite(d) || d < 1) return "";
+  return y + "-" + _exsPad(m) + "-" + _exsPad(Math.min(d, _exsDaysInMonth(y, m)));
+}
+/* أوّلُ موعدٍ لا يسبق اليومَ (اليومُ نفسُه يُحسَب)، و`""` لجدولٍ بلا يومٍ صالح. */
+function exsNextDue(s, today){
+  var day = exsDueDay(s), t = _exsParse(_exsIso(today || new Date()));
+  if(!day || !t) return "";
+  var td = t.toISOString().slice(0, 10);
+  var y = t.getUTCFullYear(), m = t.getUTCMonth() + 1;
+  for(var i = 0; i < 3; i++){
+    var due = exsDueInMonth(day, y, m);
+    if(due >= td) return due;
+    m++; if(m > 12){ m = 1; y++; }
+  }
+  return "";
+}
+/* الموعدُ الذي تذكيرُه مستحقٌّ اليوم: `due` حيث `due − lead ≤ today ≤ due`، وإلّا `""`. */
+function exsReminderDue(s, today){
+  if(!s || s.active === false) return "";
+  var due = exsNextDue(s, today);
+  if(!due) return "";
+  var d = daysUntil(due, today || new Date());
+  if(d === null) return "";
+  return (d >= 0 && d <= exsLeadDays(s)) ? due : "";
+}
+/* قائمةُ المسؤولين مضبوطةً `{ user, name }` بلا فارغٍ ولا مكرَّر. */
+function exsUsers(s){
+  var arr = Array.isArray(s && s.users) ? s.users : [];
+  var seen = {}, out = [];
+  arr.forEach(function(u){
+    var user = String((u && (u.user || (typeof u === "string" ? u : ""))) || "").trim();
+    var name = String((u && u.name) || "").trim();
+    var key = user || name;
+    if(!key || seen[key]) return;
+    seen[key] = true;
+    out.push({ user:user, name:name });
+  });
+  return out;
+}
+/* تنظيفُ الجدول للحفظ — الشكلُ الذي يقرؤه الخادمُ حرفياً. */
+function exsNormalize(s){
+  s = s || {};
+  return {
+    title:String(s.title || "").trim(),
+    party:String(s.party || "").trim(),
+    partyId:String(s.partyId || ""),
+    dueDay:exsDueDay(s),
+    leadDays:exsLeadDays(s),
+    users:exsUsers(s),
+    active:(s.active !== false),
+    notes:String(s.notes || "").trim()
+  };
+}
+/* المواعيدُ القادمة ضمن أفقٍ بالأيام — للفعّال وحدَه، الأقربُ أوّلاً. */
+function exsUpcoming(list, today, horizon){
+  var t = today || new Date(), h = (horizon === undefined) ? EXS_UPCOMING_DAYS : Number(horizon);
+  var out = [];
+  (Array.isArray(list) ? list : []).forEach(function(s){
+    if(!s || s.active === false) return;
+    var due = exsNextDue(s, t); if(!due) return;
+    var d = daysUntil(due, t);
+    if(d === null || d > h) return;
+    out.push({ s:s, due:due, days:d, remind:(d <= exsLeadDays(s)),
+               reminded:!!(s.reminded && s.reminded[due]) });
+  });
+  return out.sort(function(a, b){ return a.days - b.days || String(a.s.title || "").localeCompare(String(b.s.title || ""), "ar"); });
+}
+/* شريحةُ اللون: اليومُ خطر، وداخلُ نافذة التذكير تحذير، وما بعدها هادئ. */
+function exsBand(days, lead){
+  if(days === null || days === undefined) return "none";
+  if(days <= 0) return "critical";
+  if(days <= Number(lead)) return "urgent";
+  return "ok";
+}
+/* «بعد ٥ أيام» — صيغةُ العدّ العربية نفسُها في الخادم. */
+function exsLeftLabel(days){
+  if(days === 0) return "اليوم";
+  if(days < 0) return "فات منذ " + Math.abs(days) + (Math.abs(days) === 1 ? " يوم" : Math.abs(days) === 2 ? " يومين" : Math.abs(days) <= 10 ? " أيام" : " يوماً");
+  return "بعد " + days + (days === 1 ? " يوم" : days === 2 ? " يومين" : days <= 10 ? " أيام" : " يوماً");
+}
+
+/* ════════ المزامنة ════════ */
+function _exsSync(){
+  var d = _db();
+  if(!d || _exsUnsub || !canView()) return;
+  _exsUnsub = d.collection(EXS_COLL()).onSnapshot(function(snap){
+    _exs = snap.docs.map(function(x){ var v = x.data() || {}; v.id = x.id; return v; })
+      .sort(function(a, b){ return exsDueDay(a) - exsDueDay(b) || String(a.title || "").localeCompare(String(b.title || ""), "ar"); });
+    _exsLoaded = true; _repaint(PAGE_EXTRACTS); scanAndAlert();
+  }, function(e){ _exsLoaded = true; _err = String((e && e.message) || e); _repaint(PAGE_EXTRACTS); });
+}
+function _exsStopSync(){
+  try{ if(_exsUnsub) _exsUnsub(); }catch(e){}
+  _exsUnsub = null; _exs = []; _exsLoaded = false;
+}
+
+/* ════════ العرض — شريطُ المواعيد القادمة فوق سجلّ المستخلصات ════════ */
+function _exsUserChipsHTML(s){
+  var us = exsUsers(s);
+  if(!us.length) return '<span class="dv-chip l-none">بلا مسؤول</span>';
+  return us.map(function(u){
+    var full = u.user ? _userByLogin(u.user) : null;
+    var nm = (full && (full.name || full.user)) || u.name || u.user;
+    var wa = full ? _hasWa(full) : false;
+    return '<span class="dv-chip ' + (wa ? "l-ok" : "l-none") + '" title="' + (wa ? "يصله التذكير على واتساب" : (full ? "بلا رقم واتساب مفعَّل" : "لم يعد في قائمة المستخدمين")) + '">'
+      + _esc(nm) + (wa ? "" : (full ? " · بلا واتساب" : " · خارج القائمة")) + '</span>';
+  }).join(" ");
+}
+function _exsRemindedHTML(s, due){
+  var r = s && s.reminded && s.reminded[due];
+  if(!r) return "";
+  var sent = Array.isArray(r.sent) ? r.sent : [], miss = Array.isArray(r.missing) ? r.missing : [];
+  var h = '<span class="dv-chip l-ok" title="أُدرج التذكيرُ في طابور واتساب">✓ ذُكِّر' + (sent.length ? ": " + _esc(sent.join("، ")) : "") + '</span>';
+  if(miss.length) h += ' <span class="dv-chip l-none" title="لا رقمَ واتساب مفعَّلاً">لم يصل: ' + _esc(miss.join("، ")) + '</span>';
+  return h;
+}
+function _exsUpcomingHTML(today){
+  var vis = _visExs();
+  if(!vis.length) return "";
+  var up = exsUpcoming(vis, today, EXS_UPCOMING_DAYS);
+  var h = '<div class="dv-panel dv-exs-strip">'
+    + '<div class="dv-head" style="margin-bottom:6px"><div>'
+    + '<div class="dv-panel-h">' + _icon("calendar", "ic-sm") + ' مواعيدُ المستخلصات الدورية القادمة</div>'
+    + '<div class="dv-panel-s" style="margin-bottom:0">خلال ' + EXS_UPCOMING_DAYS + ' يوماً — يُذكَّر المسؤولون على واتساب قبل كلّ موعدٍ بمهلته.</div>'
+    + '</div><button type="button" class="btn btn-ghost btn-sm" onclick="docVault.toggleSchedulePanel()">' + _icon("settings", "ic-sm") + ' الجداول (' + vis.length + ')</button></div>';
+  if(!up.length){
+    h += '<div class="dv-hint">لا موعدَ خلال هذا الأفق — الجداولُ الفعّالة ' + vis.filter(function(s){ return s.active !== false; }).length + '.</div>';
+    return h + '</div>';
+  }
+  h += '<div class="dv-exs-rows">' + up.map(function(u){
+    var band = exsBand(u.days, exsLeadDays(u.s));
+    return '<div class="dv-exs-row">'
+      + '<span class="dv-chip l-' + band + ' dv-num">' + _esc(u.due) + '</span>'
+      + '<span class="dv-exs-left b-' + band + '">' + _esc(exsLeftLabel(u.days)) + '</span>'
+      + '<span class="dv-exs-ttl"><b>' + _esc(u.s.title || u.s.id) + '</b>'
+        + (u.s.projectName ? ' <span class="t-dim">· ' + _esc(u.s.projectName) + '</span>' : "")
+        + (u.s.party ? ' <span class="t-dim">· ' + _esc(u.s.party) + '</span>' : "") + '</span>'
+      + '<span class="dv-exs-who">' + _exsUserChipsHTML(u.s) + ' ' + _exsRemindedHTML(u.s, u.due) + '</span>'
+      + '</div>';
+  }).join("") + '</div>';
+  return h + '</div>';
+}
+
+/* ════════ لوحةُ الجداول ════════ */
+function _schedulesPanelHTML(){
+  var today = new Date();
+  var h = '<div class="dv-panel" style="margin-top:14px">'
+    + '<div class="dv-head" style="margin-bottom:6px"><div>'
+    + '<div class="dv-panel-h">' + _icon("calendar", "ic-sm") + ' المستخلصات الدورية — مواعيدُها ومسؤولوها</div>'
+    + '<div class="dv-panel-s">لكلّ مستخلصٍ شهريٍّ يومُه الثابت ومَن يُذكَّر به. الخادمُ يُرسل تذكيرَ واتساب '
+      + 'صباحاً قبل الموعد بالمهلة المحدَّدة (' + EXS_DEFAULT_LEAD + ' أيام افتراضاً) ويعيده كلَّ يومٍ حتى الموعد — '
+      + 'رسالةً واحدةً لكلّ مسؤولٍ عن كلّ موعد. والجدولُ يذكّر ولا يُنشئ مستنداً: التقديمُ يُسجَّل من «مستند مُقدَّم».</div>'
+    + '</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.toggleSchedulePanel()">' + _icon("rotateCcw", "ic-sm") + ' رجوع</button>'
+    + (canEdit() && !_sEdit ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.newSchedule()">' + _icon("plus", "ic-sm") + ' مستخلص دوريّ</button>' : "")
+    + '</div></div>';
+  if(_sEdit) h += _scheduleFormHTML();
+  else if(!_exsLoaded) h += '<div class="dv-empty">جارٍ التحميل…</div>';
+  else {
+    var vis = _visExs();
+    if(!vis.length){
+      h += '<div class="dv-empty">لا مستخلصاتٍ دوريةً بعد.<br>سجّل مستخلصَك الشهريَّ بيومه الثابت واختر مَن يُذكَّر به قبل موعده.</div>';
+    } else {
+      h += '<div class="dv-party-grid">' + vis.map(function(s){
+        var due = exsNextDue(s, today), days = due ? daysUntil(due, today) : null;
+        var band = exsBand(days, exsLeadDays(s));
+        var off = (s.active === false);
+        return '<div class="dv-party' + (off ? " dv-exs-off" : "") + '">'
+          + '<div class="dv-party-h"><b>' + _esc(s.title || s.id) + '</b>'
+          + '<span class="dv-num t-dim">' + _esc(s.id) + '</span>'
+          + (off ? '<span class="dv-chip l-none">موقوف</span>'
+                 : '<span class="dv-chip l-' + band + ' dv-num">' + _esc(due) + '</span><span class="t-dim">' + _esc(exsLeftLabel(days)) + '</span>')
+          + '<span style="margin-inline-start:auto;display:flex;gap:6px">'
+          + (canEdit() ? '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.editSchedule(\'' + _jq(s.id) + '\')">' + _icon("edit", "ic-sm") + ' تعديل</button>' : "")
+          + (canDelete() ? '<button type="button" class="btn btn-delete btn-sm" onclick="docVault.delSchedule(\'' + _jq(s.id) + '\')">' + _icon("trash", "ic-sm") + '</button>' : "")
+          + '</span></div>'
+          + '<div class="dv-party-path">'
+            + '<span class="dv-party-st">يوم <span class="dv-num">' + exsDueDay(s) + '</span> من كلّ شهر</span>'
+            + '<span class="dv-party-st">تذكيرٌ قبله بـ<span class="dv-num">' + exsLeadDays(s) + '</span> أيام</span>'
+            + (s.projectName ? '<span class="dv-party-st">' + _esc(s.projectName) + '</span>' : '<span class="dv-party-st t-dim">بلا مشروع</span>')
+            + (s.party ? '<span class="dv-party-st">' + _esc(s.party) + '</span>' : "")
+          + '</div>'
+          + '<div class="dv-party-path" style="margin-top:6px">' + _exsUserChipsHTML(s) + (due ? ' ' + _exsRemindedHTML(s, due) : "") + '</div>'
+          + (s.notes ? '<div class="dv-hint">' + _esc(s.notes) + '</div>' : "")
+          + '</div>';
+      }).join("") + '</div>';
+    }
+  }
+  return h + '</div>';
+}
+
+function _scheduleFormHTML(){
+  var e = _sEdit;
+  var chosen = {}; exsUsers(e).forEach(function(u){ chosen[u.user || u.name] = u; });
+  var arr = _users().slice().sort(function(a, b){
+    return String(a.name || a.user || "").localeCompare(String(b.name || b.user || ""), "ar");
+  });
+  var seen = {};
+  var boxes = arr.map(function(u){
+    if(!u || !u.user) return "";
+    seen[u.user] = true;
+    var on = !!chosen[u.user];
+    return '<label class="dv-check dv-exs-u' + (on ? " on" : "") + '"><input type="checkbox" data-exs-user="' + _esc(u.user) + '"' + (on ? " checked" : "") + ' onchange="docVault.toggleScheduleUser(this.dataset.exsUser,this.checked)">'
+      + _esc(u.name || u.user) + (_hasWa(u) ? "" : ' <span class="t-dim">(بلا واتساب)</span>') + '</label>';
+  }).join("");
+  /* المسؤولُ الذي لم يعد في القائمة يبقى ظاهراً — وإلّا أسقطه الحفظُ صامتاً. */
+  Object.keys(chosen).forEach(function(k){
+    if(seen[k]) return;
+    boxes += '<label class="dv-check dv-exs-u on"><input type="checkbox" data-exs-user="' + _esc(k) + '" checked onchange="docVault.toggleScheduleUser(this.dataset.exsUser,this.checked)">'
+      + _esc(chosen[k].name || k) + ' <span class="t-dim">(خارج القائمة)</span></label>';
+  });
+  var noWa = exsUsers(e).filter(function(u){ var f = _userByLogin(u.user); return !f || !_hasWa(f); });
+  var pOpts = '<option value="">— بلا جهة —</option>' + _parties.map(function(p){
+    return '<option value="' + _esc(p.id) + '"' + (e.partyId === p.id ? " selected" : "") + '>' + _esc(p.name || p.id) + '</option>';
+  }).join("");
+  return '<div class="dv-grid">'
+    + '<div class="dv-f wide"><label class="dv-l" for="dv-s-title">عنوان المستخلص <b>*</b></label>'
+      + '<input class="form-input" id="dv-s-title" value="' + _esc(e.title || "") + '" placeholder="مستخلص أعمال الصيانة الشهري"></div>'
+    + '<div class="dv-f"><label class="dv-l">المشروع</label>' + _projFieldHTML(e, "setScheduleProj", _exs) + '</div>'
+    + '<div class="dv-f"><label class="dv-l" for="dv-s-party">الجهة</label>'
+      + (_parties.length
+          ? '<select class="form-input" id="dv-s-party">' + pOpts + '</select>'
+          : '<input class="form-input" id="dv-s-party" value="' + _esc(e.party || "") + '" placeholder="أمانة حائل">') + '</div>'
+    + '<div class="dv-f"><label class="dv-l" for="dv-s-day">يوم التقديم من كلّ شهر <b>*</b></label>'
+      + '<input class="form-input dv-num" type="number" min="1" max="31" step="1" id="dv-s-day" value="' + _esc(e.dueDay || "") + '" placeholder="25">'
+      + '<div class="dv-hint">يومٌ لا يقع في شهرٍ (٣٠ في فبراير) يُحسَب آخرَ يومٍ فيه.</div></div>'
+    + '<div class="dv-f"><label class="dv-l" for="dv-s-lead">التذكير قبل الموعد بـ(أيام)</label>'
+      + '<input class="form-input dv-num" type="number" min="0" max="60" step="1" id="dv-s-lead" value="' + _esc(e.leadDays === "" || e.leadDays === undefined ? EXS_DEFAULT_LEAD : e.leadDays) + '">'
+      + '<div class="dv-hint">يُرسَل التذكيرُ من هذا اليوم حتى الموعد — رسالةً واحدةً لكلّ مسؤول.</div></div>'
+    + '<div class="dv-f wide"><label class="dv-l">مَن يُذكَّر <b>*</b></label>'
+      + '<div class="dv-exs-users">' + (boxes || '<div class="dv-hint">لا مستخدمين محمَّلين بعد.</div>') + '</div>'
+      + (noWa.length
+          ? '<div class="dv-hint">⚠ بلا رقم واتساب مفعَّل: ' + _esc(noWa.map(function(u){ var f = _userByLogin(u.user); return (f && (f.name || f.user)) || u.name || u.user; }).join("، ")) + ' — يصله التنبيهُ داخل المنصّة فقط. يُضاف الرقمُ ويُفعَّل من إدارة المستخدمين.</div>'
+          : '<div class="dv-hint">اختر من المستخدمين — يُخزَّن اسمُ الدخول، وهو مفتاحُ رقم الواتساب على الخادم.</div>') + '</div>'
+    + '<div class="dv-f wide"><label class="dv-check"><input type="checkbox" id="dv-s-active"' + (e.active !== false ? " checked" : "") + '> فعّال — يُذكَّر به كلَّ شهر</label></div>'
+    + '<div class="dv-f wide"><label class="dv-l" for="dv-s-notes">ملاحظات</label>'
+      + '<textarea class="form-input" id="dv-s-notes" rows="2" placeholder="ما يلزم إرفاقه مع المستخلص">' + _esc(e.notes || "") + '</textarea></div>'
+    + '</div>'
+    + '<div class="dv-acts">'
+      + '<button type="button" class="btn btn-ghost" onclick="docVault.cancelSchedule()">إلغاء</button>'
+      + '<button type="button" class="btn btn-primary" onclick="docVault.saveSchedule()">' + _icon("save", "ic-sm") + ' حفظ الجدول</button>'
+    + '</div>';
+}
+
+/* ════════ الأفعال ════════ */
+function toggleSchedulePanel(){
+  if(!canView()) return;
+  _sPanel = !_sPanel; _sEdit = null;
+  if(_sPanel){ _pPanel = false; _pEdit = null; _aEdit = null; _aview.open = null; }
+  renderApprovals(); _top();
+}
+/* بابُ الرابط العميق (`?po=EXS-…`) — يفتح الشاشةَ واللوحةَ معاً. */
+function openSchedules(){
+  try{ showPage(PAGE_EXTRACTS); }catch(e){}
+  if(!_sPanel){ _sPanel = true; _pPanel = false; _pEdit = null; _aEdit = null; _aview.open = null; }
+  _sEdit = null; renderApprovals(); _top();
+}
+function newSchedule(){
+  if(!canEdit()){ _toast("🔒 لا صلاحية","warn"); return; }
+  _sPanel = true; _pPanel = false;
+  _sEdit = { id:"", title:"", party:"", partyId:"", dueDay:"", leadDays:EXS_DEFAULT_LEAD, users:[], active:true, notes:"" };
+  var _pa = _projDraft(null, _newProjSelWork()); Object.keys(_pa).forEach(function(k){ _sEdit[k] = _pa[k]; });
+  renderApprovals();
+}
+function editSchedule(id){
+  if(!canEdit()){ _toast("🔒 لا صلاحية","warn"); return; }
+  var s = scheduleById(id); if(!s) return;
+  _sPanel = true; _pPanel = false;
+  _sEdit = { id:s.id, title:String(s.title || ""), party:String(s.party || ""), partyId:String(s.partyId || ""),
+             dueDay:exsDueDay(s) || "", leadDays:exsLeadDays(s), users:exsUsers(s),
+             active:(s.active !== false), notes:String(s.notes || "") };
+  var _pa = _projDraft(s); Object.keys(_pa).forEach(function(k){ _sEdit[k] = _pa[k]; });
+  renderApprovals();
+}
+function cancelSchedule(){ _sEdit = null; renderApprovals(); }
+function _readScheduleForm(){
+  if(!_sEdit) return;
+  var g = function(id){ var el = document.getElementById(id); return el ? String(el.value || "").trim() : null; };
+  var v;
+  if((v = g("dv-s-title")) !== null) _sEdit.title = v;
+  if((v = g("dv-s-day")) !== null) _sEdit.dueDay = v;
+  if((v = g("dv-s-lead")) !== null) _sEdit.leadDays = v;
+  if((v = g("dv-s-notes")) !== null) _sEdit.notes = v;
+  var pel = document.getElementById("dv-s-party");
+  if(pel){
+    if(pel.tagName === "SELECT"){
+      _sEdit.partyId = String(pel.value || "");
+      var pp = _sEdit.partyId ? partyById(_sEdit.partyId) : null;
+      _sEdit.party = pp ? String(pp.name || "") : "";
+    } else { _sEdit.partyId = ""; _sEdit.party = String(pel.value || "").trim(); }
+  }
+  var ael = document.getElementById("dv-s-active"); if(ael) _sEdit.active = !!ael.checked;
+  if(_sEdit.projSel === MANUAL_ID) _sEdit.projManual = g("dv-proj-manual") || "";
+}
+function setScheduleProj(v){ _setProjOn(_sEdit, v, _readScheduleForm, renderApprovals); }
+function toggleScheduleUser(login, on){
+  if(!_sEdit) return;
+  _readScheduleForm();
+  var l = String(login || ""); if(!l) return;
+  var us = exsUsers(_sEdit).filter(function(u){ return u.user !== l; });
+  if(on){ var f = _userByLogin(l); us.push({ user:l, name:String((f && (f.name || f.user)) || l) }); }
+  _sEdit.users = us;
+  renderApprovals();
+}
+function _saveScheduleDoc(body, id){
+  var d = _db(); if(!d) return Promise.reject(new Error("no-db"));
+  var now = new Date().toISOString(), me = _myName();
+  body.updatedAt = now; body.updatedBy = me;
+  /* `merge` يُبقي أثرَ الخادم (`reminded`) — الشاشةُ لا تكتبه ولا تمحوه. */
+  if(id) return d.collection(EXS_COLL()).doc(id).set(body, { merge:true }).then(function(){ return id; });
+  return _nextId("EXS", EXS_CTR()).then(function(nid){
+    body.createdAt = now; body.createdBy = me;
+    return d.collection(EXS_COLL()).doc(nid).set(body).then(function(){ return nid; });
+  });
+}
+function saveSchedule(){
+  if(!canEdit()){ _toast("🔒 لا صلاحية","warn"); return; }
+  if(!_sEdit) return;
+  _readScheduleForm();
+  var n = exsNormalize(_sEdit);
+  if(!n.title){ _toast("⚠ أدخل عنوان المستخلص","warn"); return; }
+  if(!n.dueDay){ _toast("⚠ يومُ التقديم بين 1 و31","warn"); return; }
+  if(!n.users.length){ _toast("⚠ اختر مسؤولاً واحداً على الأقلّ ليُذكَّر","warn"); return; }
+  /* الاسمُ المعروضُ يُنسخ عند الحفظ (يُقرأ يومَ يُحذف الحساب) ويُشتقّ من اسم الدخول عند العرض. */
+  n.users = n.users.map(function(u){ var f = _userByLogin(u.user); return { user:u.user, name:String((f && (f.name || f.user)) || u.name || u.user) }; });
+  var pb = _projBody(_sEdit);
+  n.scope = pb.scope; n.projectId = pb.projectId; n.projectName = pb.projectName; n.isCustomProject = pb.isCustomProject;
+  var was = _sEdit.id;
+  _saveScheduleDoc(n, was).then(function(id){
+    _audit(was ? "تعديل جدول مستخلص دوريّ" : "تسجيل مستخلص دوريّ", id + " — " + n.title + " (يوم " + n.dueDay + " · تذكير قبل " + n.leadDays + " أيام · " + n.users.length + " مسؤول)");
+    _sEdit = null; renderApprovals();
+    _toast(was ? "✅ حُفظ الجدول" : "✅ سُجّل المستخلصُ الدوريّ برقم " + id, "success");
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+}
+function delSchedule(id){
+  if(!canDelete()){ _toast("🔒 الحذف من صلاحية مدير النظام","warn"); return; }
+  var s = scheduleById(id); if(!s) return;
+  _confirm({ title:"حذف مستخلص دوريّ", icon:"🗑", okText:"حذف", okClass:"btn-danger",
+    msg:'ستُحذف "' + (s.title || id) + '" من جدول المستخلصات الدورية ويتوقّف تذكيرُها. المستنداتُ المقدَّمة لا تتأثّر.' })
+    .then(function(ok){
+      if(!ok) return;
+      var d = _db(); if(!d) return;
+      d.collection(EXS_COLL()).doc(id).delete().then(function(){
+        _audit("حذف مستخلص دوريّ", id + " — " + (s.title || ""));
+        _toast("✅ حُذف", "success");
+      }).catch(function(e){ _toast("⚠ تعذّر الحذف: " + String((e && e.message) || e), "warn"); });
+    }).catch(function(){});
+}
+
+/* ════════ تنبيهُ الجرس — داخل نافذة التذكير، مرّةً لكلّ (جدول · موعد · يوم) ════════
+   تُنادى من `scanAndAlert` بخريطة الكتم نفسِها، فتشترك مع تنبيه الوثائق في قاعدةٍ
+   واحدة: ما لم يعد يستحقّ يسقط من الذاكرة، وما نُبِّه عليه اليومَ لا يتكرّر. */
+function _scanSchedules(t, day, seen, next){
+  var fired = 0;
+  _visExs().forEach(function(s){
+    if(!s || s.active === false) return;
+    var due = exsReminderDue(s, t);
+    if(!due) return;
+    var k = "exs:" + s.id + "|" + due;
+    next[k] = day;
+    if(seen[k] === day) return;
+    fired++;
+    var days = daysUntil(due, t);
+    var who = exsUsers(s).map(function(u){ var f = _userByLogin(u.user); return (f && (f.name || f.user)) || u.name || u.user; });
+    _notify("📅 " + (s.title || s.id), "موعد تقديم المستخلص " + exsLeftLabel(days) + " (" + due + ")"
+      + (s.projectName ? " — " + s.projectName : "") + (who.length ? " — المسؤولون: " + who.join("، ") : ""), "extract_due");
+  });
+  return fired;
+}
+
 /* الشاشتان تتشاركان النموذجَ والبطاقةَ والأفعال، وتختلفان في **ما يُعرض**:
    «المستخلصات» = ما في مساره (ولوحةُ الجهات وزرُّ الإضافة معها، فهي بابُ الدخول)،
    و«المعتمدات» = ما اعتُمد. والصفحةُ النشطةُ هي التي تُرسَم. */
@@ -4085,6 +4551,8 @@ function _renderAprPage(pid){
     + (flow
         ? '<button type="button" class="btn btn-ghost btn-sm' + (_pPanel ? " on" : "") + '" onclick="docVault.togglePartyPanel()">' + _icon("map", "ic-sm") + ' الجهات ومساراتها'
             + (_parties.length ? ' <span class="dv-cnt">' + _parties.length + '</span>' : "") + '</button>'
+          + '<button type="button" class="btn btn-ghost btn-sm' + (_sPanel ? " on" : "") + '" onclick="docVault.toggleSchedulePanel()">' + _icon("calendar", "ic-sm") + ' المستخلصات الدورية'
+            + (function(){ var n = _visExs().length; return n ? ' <span class="dv-cnt">' + n + '</span>' : ""; })() + '</button>'
           + (canEdit() ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.newApr()">' + _icon("plus", "ic-sm") + ' مستند مُقدَّم</button>' : "")
         : '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.openExtracts()">' + _icon("receipt", "ic-sm") + ' المستخلصات قيد الاعتماد'
             + (function(){ var n = filterFlow(_visAprs()).filter(function(x){ return !x.archived; }).length; return n ? ' <span class="dv-cnt">' + n + '</span>' : ""; })() + '</button>')
@@ -4096,6 +4564,7 @@ function _renderAprPage(pid){
 
   var body;
   if(_pPanel){ body = _partiesPanelHTML(); }
+  else if(_sPanel && flow){ body = _schedulesPanelHTML(); }
   else if(_aEdit){ body = _aprFormHTML(); }
   else if(_aview.open){
     var a = approvalById(_aview.open);
@@ -4122,6 +4591,7 @@ function _renderAprPage(pid){
        عن الشركة كلِّها — ورقمُ الشركة فوق جدولِ مشروعٍ واحدٍ يُقرأ على أنّه رقمُه. */
     var scopedProj = filterApprovals(scoped, { proj:view.proj }, today);
     body = _readerLockNoticeHTML() + _unlinkedNoticeHTML(_avis, "setAprProj", view.proj)
+         + (flow ? _exsUpcomingHTML(today) : "")
          + (flow ? _flowSummaryHTML(aprFlowRollup(scopedProj, today)) : _doneSummaryHTML(aprRollup(scopedProj, today)))
          + bar + _aprTableHTML(list, today, view.proj, "", flow ? "flow" : "done");
   }
@@ -5066,6 +5536,14 @@ window.docVault = {
   _PATH_TEMPLATE:PATH_TEMPLATE, _PATH_TEMPLATE_NAME:PATH_TEMPLATE_NAME, _STAGE_KINDS:STAGE_KINDS,
   aprIsDone:aprIsDone, aprInFlow:aprInFlow, filterFlow:filterFlow, filterDone:filterDone, aprFlowRollup:aprFlowRollup,
   openExtracts:openExtracts, openExtractsForFile:openExtractsForFile, _PAGE_EXTRACTS:PAGE_EXTRACTS,
+  // المستخلصاتُ الدورية — الجدولُ والتذكير
+  schedules:schedules, scheduleById:scheduleById, toggleSchedulePanel:toggleSchedulePanel, openSchedules:openSchedules,
+  newSchedule:newSchedule, editSchedule:editSchedule, cancelSchedule:cancelSchedule, saveSchedule:saveSchedule,
+  delSchedule:delSchedule, setScheduleProj:setScheduleProj, toggleScheduleUser:toggleScheduleUser,
+  exsDueDay:exsDueDay, exsLeadDays:exsLeadDays, exsDueInMonth:exsDueInMonth, exsNextDue:exsNextDue,
+  exsReminderDue:exsReminderDue, exsUsers:exsUsers, exsNormalize:exsNormalize, exsUpcoming:exsUpcoming,
+  exsBand:exsBand, exsLeftLabel:exsLeftLabel, _EXS_COLL:EXS_COLL, _EXS_DEFAULT_LEAD:EXS_DEFAULT_LEAD,
+  _EXS_UPCOMING_DAYS:EXS_UPCOMING_DAYS,
   _PARTY_FREE:PARTY_FREE, _PARTIES_COLL:PARTIES_COLL,
   _PREFIX_OPTS:PREFIX_OPTS, _HONORIFIC_OPTS:HONORIFIC_OPTS,
   _DEF_PREFIX:DEF_PREFIX, _DEF_HONORIFIC:DEF_HONORIFIC, _DEF_CLOSING:DEF_CLOSING,
@@ -5111,9 +5589,10 @@ window.docVault = {
      والجدولُ في DOM حقيقيّ داخل `hail-tests.js`. لأنّ الحسابَ الصحيحَ الذي لا يُرسَم
      خطأٌ لا يُنذر، ولا سبيلَ لفحص الرسم بلا مصدرِ بياناتٍ سوى `onSnapshot`.
      لا يُنادى من الواجهة قطّ، ولا يكتب حرفاً في Firestore. */
-  __test_seed:function(d, l, sg, ap, pt){
+  __test_seed:function(d, l, sg, ap, pt, ex){
     if(Array.isArray(pt)){ _parties = pt.slice(); _partiesLoaded = true; }
-    _pPanel = false; _pEdit = null; _pAct = null;
+    if(Array.isArray(ex)){ _exs = ex.slice(); _exsLoaded = true; }
+    _pPanel = false; _pEdit = null; _pAct = null; _sPanel = false; _sEdit = null;
     _docs = Array.isArray(d) ? d.slice() : [];
     _ltrs = Array.isArray(l) ? l.slice() : [];
     if(Array.isArray(sg)){ _signs = sg.slice(); _signsLoaded = true; }

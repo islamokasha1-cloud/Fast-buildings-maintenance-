@@ -804,7 +804,7 @@ function predelivery() {
        لا تعيش في وحدة: وسمُ <script> وحاويةٌ في الصفحة وسطرٌ في `renderKPI`. */
     /* رُفع من 39944 إلى 39946 — سطران لا يعيشان في وحدة: وسمُ `qr-code.js` وسطرُ
        تسجيلها في كاشف الوحدات القديمة. المُرمِّزُ كلُّه في ملفّه. */
-    const IDX_CEILING = 39946;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    const IDX_CEILING = 39957;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -19898,6 +19898,300 @@ function docVaultGuards() {
         /_visibleProjectsFor/.test(HTML));
       T("★★★ dv/proj: والترويسةُ تقول صراحةً إنّ الحصرَ **حجبُ عرضٍ لا حدُّ أمان** (وإلّا وُعد بخصوصيةٍ لا يفرضها الخادم)",
         /حجبُ عرضٍ ولا يُسمّى خصوصية/.test(src));
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+     ★★ المستخلصاتُ الدورية — جدولُ مواعيدَ ثابتةٍ وتذكيرُ واتساب قبلها (طلبُ المالك 12/09)
+     ═══════════════════════════════════════════════════════════════════════════ */
+  {
+    const EX_NEED = ["exsDueDay", "exsLeadDays", "exsDueInMonth", "exsNextDue", "exsReminderDue",
+      "exsUsers", "exsNormalize", "exsUpcoming", "exsBand", "exsLeftLabel", "schedules",
+      "toggleSchedulePanel", "openSchedules", "newSchedule", "editSchedule", "saveSchedule",
+      "delSchedule", "toggleScheduleUser", "setScheduleProj"];
+    const exMiss = EX_NEED.filter(k => typeof V[k] !== "function");
+    T("★ exs: واجهةُ الجداول الدورية كلُّها مكشوفة", exMiss.length === 0, exMiss.join(" · "));
+    if (!exMiss.length) {
+      /* ── (١) يومُ الشهر يُقصّ إلى آخر يومٍ فيه — وإلّا اختفى موعدُ فبراير بصمت ── */
+      T("★★ exs: يوم ٣٠/٣١ في فبراير وأبريل يُقصّ إلى آخر يومٍ في الشهر (والكبيسةُ ٢٩)",
+        V.exsDueInMonth(30, 2026, 2) === "2026-02-28" && V.exsDueInMonth(31, 2028, 2) === "2028-02-29" &&
+        V.exsDueInMonth(31, 2026, 4) === "2026-04-30" && V.exsDueInMonth(25, 2026, 9) === "2026-09-25",
+        [V.exsDueInMonth(30, 2026, 2), V.exsDueInMonth(31, 2028, 2), V.exsDueInMonth(31, 2026, 4)].join(" · "));
+      T("★ exs: يومٌ خارج ١..٣١ أو غيرُ رقمٍ ⇒ لا موعد (لا يومٌ صفريٌّ يُخترَع)",
+        V.exsDueDay({ dueDay: 0 }) === 0 && V.exsDueDay({ dueDay: 32 }) === 0 && V.exsDueDay({ dueDay: "x" }) === 0 &&
+        V.exsDueDay({ dueDay: "25" }) === 25 && V.exsDueDay({ dueDay: 7.9 }) === 7 && V.exsDueInMonth(0, 2026, 1) === "");
+      T("★ exs: مهلةُ التذكير ٥ افتراضاً (طلبُ المالك) وتُضبط ٠..٦٠ وغيرُ الصالح يعود للافتراض",
+        V.exsLeadDays({}) === 5 && V.exsLeadDays({ leadDays: "" }) === 5 && V.exsLeadDays({ leadDays: 0 }) === 0 &&
+        V.exsLeadDays({ leadDays: "10" }) === 10 && V.exsLeadDays({ leadDays: 99 }) === 5 && V.exsLeadDays({ leadDays: -1 }) === 5 &&
+        V._EXS_DEFAULT_LEAD === 5);
+
+      /* ── (٢) الموعدُ التالي: اليومُ نفسُه يُحسَب، وما مضى يقفز للشهر التالي وعبر السنة ── */
+      const S25 = { dueDay: 25, leadDays: 5, active: true };
+      T("★★ exs: الموعدُ التالي — قبلَه في الشهر نفسِه · يومَه · بعدَه ⇒ الشهرُ التالي · وعبر رأس السنة",
+        V.exsNextDue(S25, "2026-09-10") === "2026-09-25" && V.exsNextDue(S25, "2026-09-25") === "2026-09-25" &&
+        V.exsNextDue(S25, "2026-09-26") === "2026-10-25" && V.exsNextDue(S25, "2026-12-26") === "2027-01-25" &&
+        V.exsNextDue({ dueDay: 31 }, "2026-11-30") === "2026-11-30" && V.exsNextDue({ dueDay: 31 }, "2026-12-01") === "2026-12-31",
+        [V.exsNextDue(S25, "2026-09-10"), V.exsNextDue(S25, "2026-09-26"), V.exsNextDue(S25, "2026-12-26"), V.exsNextDue({ dueDay: 31 }, "2026-11-30")].join(" · "));
+      T("★ exs: ويقبل `Date` كما يقبل النصّ، وجدولٌ بلا يومٍ صالح ⇒ لا موعد",
+        V.exsNextDue(S25, new Date("2026-09-10T09:00:00Z")) === "2026-09-25" && V.exsNextDue({ dueDay: 0 }, "2026-09-10") === "" &&
+        V.exsNextDue(S25, "ليس تاريخاً") === "");
+
+      /* ── (٣) ★★★ نافذةُ التذكير: من (الموعد − المهلة) حتى الموعد — مغلقةٌ من الطرفين ── */
+      T("★★★ exs: التذكيرُ مستحقٌّ من ٥ أيامٍ قبل الموعد حتى الموعد نفسِه، ولا قبلَ النافذة ولا بعدَ الموعد",
+        V.exsReminderDue(S25, "2026-09-19") === "" && V.exsReminderDue(S25, "2026-09-20") === "2026-09-25" &&
+        V.exsReminderDue(S25, "2026-09-23") === "2026-09-25" && V.exsReminderDue(S25, "2026-09-25") === "2026-09-25" &&
+        V.exsReminderDue(S25, "2026-09-26") === "",
+        ["19", "20", "23", "25", "26"].map(d => V.exsReminderDue(S25, "2026-09-" + d) || "—").join(" · "));
+      T("★★ exs: الجدولُ الموقوف لا يُذكَّر به، ومهلةُ ٠ تعني يومَ الموعد وحدَه",
+        V.exsReminderDue({ dueDay: 25, active: false }, "2026-09-22") === "" &&
+        V.exsReminderDue({ dueDay: 25, leadDays: 0 }, "2026-09-24") === "" && V.exsReminderDue({ dueDay: 25, leadDays: 0 }, "2026-09-25") === "2026-09-25");
+      T("★★ exs: والنافذةُ تعبر حدودَ الشهر — موعدُ ١ أكتوبر يُذكَّر به من ٢٦ سبتمبر",
+        V.exsReminderDue({ dueDay: 1 }, "2026-09-26") === "2026-10-01" && V.exsReminderDue({ dueDay: 1 }, "2026-09-25") === "");
+
+      /* ── (٤) المسؤولون والتطبيع ── */
+      const nu = V.exsUsers({ users: [{ user: "a", name: "أحمد" }, { user: "a", name: "مكرّر" }, "b", { name: "" }, null, { user: " ", name: "" }] });
+      T("★ exs: قائمةُ المسؤولين تُسقط الفارغَ والمكرَّر وتقبل النصَّ المجرّد اسمَ دخول",
+        nu.length === 2 && nu[0].user === "a" && nu[0].name === "أحمد" && nu[1].user === "b", JSON.stringify(nu));
+      const nn = V.exsNormalize({ title: "  مستخلص  ", dueDay: "25", leadDays: "", users: [{ user: "a", name: "أحمد" }], notes: " n " });
+      T("★ exs: التطبيعُ يُنتج الشكلَ الذي يقرؤه الخادمُ حرفياً (يومٌ رقميّ · مهلةٌ ٥ · فعّالٌ افتراضاً)",
+        nn.title === "مستخلص" && nn.dueDay === 25 && nn.leadDays === 5 && nn.active === true && nn.notes === "n" &&
+        nn.users.length === 1 && V.exsNormalize({ active: false }).active === false, JSON.stringify(nn));
+      T("★ exs: صيغةُ العدّ العربية: اليوم · يوم · يومين · أيام · يوماً",
+        V.exsLeftLabel(0) === "اليوم" && V.exsLeftLabel(1) === "بعد 1 يوم" && V.exsLeftLabel(2) === "بعد 2 يومين" &&
+        V.exsLeftLabel(5) === "بعد 5 أيام" && V.exsLeftLabel(11) === "بعد 11 يوماً" && /فات منذ 3 أيام/.test(V.exsLeftLabel(-3)));
+      T("★ exs: الشريحة — اليومُ خطر، وداخلُ المهلة تحذير، وما بعدها هادئ",
+        V.exsBand(0, 5) === "critical" && V.exsBand(5, 5) === "urgent" && V.exsBand(6, 5) === "ok" && V.exsBand(null, 5) === "none");
+      const up = V.exsUpcoming([
+        { id: "EXS-1", title: "ب", dueDay: 25, leadDays: 5, active: true },
+        { id: "EXS-2", title: "أ", dueDay: 12, leadDays: 5, active: true },
+        { id: "EXS-3", title: "موقوف", dueDay: 11, active: false },
+        { id: "EXS-4", title: "بعيد", dueDay: 9, leadDays: 5, active: true, reminded: { "2026-10-09": { at: "x" } } }
+      ], "2026-09-10", 45);
+      T("★★ exs: «القادمة» الأقربُ أوّلاً، والموقوفُ خارجَها، وما بعد الأفق خارجَها، وأثرُ الخادم يُقرأ",
+        up.length === 3 && up[0].s.id === "EXS-2" && up[0].days === 2 && up[0].remind === true &&
+        up[1].s.id === "EXS-1" && up[1].days === 15 && up[1].remind === false &&
+        up[2].s.id === "EXS-4" && up[2].due === "2026-10-09" && up[2].reminded === true,
+        up.map(u => u.s.id + ":" + u.days).join(" · "));
+    }
+
+    /* ── (٥) ★★★ حسابُ الواجهة يطابق حسابَ الخادم على جدول تواريخ — الرباطُ الوحيد بينهما ── */
+    let EXR = null;
+    try { EXR = require(path.resolve(path.dirname(IDX), "functions/lib/extract-reminders.js")); }
+    catch (e) { T("exs: تُحمَّل وحدةُ الخادم extract-reminders.js", false, String(e.message).slice(0, 140)); }
+    if (EXR && !exMiss.length) {
+      const SCHED = [{ dueDay: 25, leadDays: 5 }, { dueDay: 1, leadDays: 5 }, { dueDay: 31, leadDays: 3 }, { dueDay: 30 },
+        { dueDay: 15, leadDays: 0 }, { dueDay: 10, leadDays: 60 }, { dueDay: 0 }, { dueDay: 25, active: false }];
+      const DAYS = ["2026-09-10", "2026-09-19", "2026-09-20", "2026-09-25", "2026-09-26", "2026-09-30", "2026-10-01",
+        "2026-02-26", "2026-02-28", "2028-02-29", "2026-11-30", "2026-12-26", "2026-12-31", "2027-01-01"];
+      const drift = [];
+      SCHED.forEach((s, i) => DAYS.forEach(d => {
+        if (V.exsNextDue(s, d) !== EXR.nextDue(s, d)) drift.push("next[" + i + "]@" + d);
+        if (V.exsReminderDue(s, d) !== EXR.reminderDue(s, d)) drift.push("rem[" + i + "]@" + d);
+      }));
+      T("★★★ exs: `exsNextDue`/`exsReminderDue` تطابقان `nextDue`/`reminderDue` على الخادم — " + (SCHED.length * DAYS.length * 2) + " مقارنة",
+        drift.length === 0, drift.slice(0, 6).join(" · "));
+      T("★★ exs: وقصُّ يوم الشهر والافتراضاتُ واحدةٌ في الجهتين",
+        EXR.dueInMonth(30, 2026, 2) === V.exsDueInMonth(30, 2026, 2) && EXR.DEFAULT_LEAD === V._EXS_DEFAULT_LEAD &&
+        EXR.leadDaysOf({}) === V.exsLeadDays({}) && EXR.dueDayOf({ dueDay: "31" }) === V.exsDueDay({ dueDay: "31" }) &&
+        JSON.stringify(EXR.usersOf({ users: ["a", { user: "a" }, { user: "b", name: "ب" }] })) === JSON.stringify(V.exsUsers({ users: ["a", { user: "a" }, { user: "b", name: "ب" }] })));
+      T("★★ exs: سنتينلُ المشروع اليدويّ على الخادم هو سنتينلُ المنصّة (`__OTHER__`) — وإلّا بُحث عن مستند مستخدمين لمشروعٍ لا وجودَ له",
+        EXR.MANUAL_ID === V._MANUAL_ID, EXR.MANUAL_ID + " ≠ " + V._MANUAL_ID);
+      const lbl = [0, 1, 2, 5, 11].filter(n => !EXR.params({ id: "EXS-1", title: "ت" }, "2026-09-25", n)[2].includes("(" + V.exsLeftLabel(n) + ")"));
+      T("★ exs: وصيغةُ «بعد ن أيام» في رسالة الخادم هي صيغةُ الشاشة", lbl.length === 0, lbl.join(","));
+
+      /* القالبُ المستعار: ثلاثُ خاناتٍ بلا مبالغ، والزرُّ يحمل `EXS-…` ليوجّهه العميل */
+      const pr = EXR.params({ id: "EXS-7", title: "مستخلص الصيانة", projectName: "برج هيل", party: "أمانة حائل" }, "2026-09-25", 5);
+      T("★★ exs: خاناتُ قالب الحالة المستعار ثلاثٌ: الرقمُ والعنوان · المشروعُ والجهة · نصُّ التذكير بالموعد",
+        pr.length === 3 && pr[0] === "EXS-7 — مستخلص الصيانة" && pr[1] === "برج هيل — أمانة حائل" &&
+        /تذكير: موعد تقديم المستخلص 2026-09-25 \(بعد 5 أيام\)/.test(pr[2]), JSON.stringify(pr));
+      T("★ exs: وبلا مشروعٍ ولا جهةٍ يُكتب «خزانة الوثائق» لا خانةٌ فارغة (Meta ترفض الخانةَ الفارغة)",
+        EXR.contextOf({}) === "خزانة الوثائق" && EXR.contextOf({ projectName: "ب" }) === "ب");
+
+      /* ── (٦) ★★★ التشغيلُ على قاعدةٍ وهمية: مَن يُدرَج ومَن يُسقَط وأثرُ الجدول ── */
+      const mkDb = () => {
+        const store = {};
+        const merge = (a, b) => { const o = Object.assign({}, a || {}); Object.keys(b).forEach(k => {
+          o[k] = (b[k] && typeof b[k] === "object" && !Array.isArray(b[k]) && o[k] && typeof o[k] === "object" && !Array.isArray(o[k])) ? merge(o[k], b[k]) : b[k]; }); return o; };
+        const docRef = (p) => ({
+          path: p,
+          get: async () => ({ exists: p in store, data: () => store[p] }),
+          set: async (d, o) => { store[p] = (o && o.merge) ? merge(store[p], d) : Object.assign({}, d); },
+          create: async (d) => { if (p in store) { const e = new Error("already exists"); e.code = 6; throw e; } store[p] = Object.assign({}, d); },
+          update: async (d) => { store[p] = Object.assign({}, store[p], d); },
+        });
+        const db = {
+          store,
+          doc: docRef,
+          collection: (name) => ({
+            doc: (id) => docRef(name + "/" + id),
+            where: (f, op, v) => ({ get: async () => ({
+              docs: Object.keys(store).filter(k => k.startsWith(name + "/") && k.split("/").length === 2 && store[k][f] === v)
+                .map(k => ({ id: k.split("/")[1], data: () => Object.assign({}, store[k]), ref: docRef(k) })) }) }),
+          }),
+        };
+        return db;
+      };
+      const logs = [];
+      const logger = { info: m => logs.push("I " + m), warn: m => logs.push("W " + m), error: m => logs.push("E " + m) };
+      const db = mkDb();
+      db.store["meta/users"] = { users: [
+        { user: "fin", name: "المالية", role: "finance", phone: "966500000001", waOptIn: true },
+        { user: "noura", name: "نورة", role: "hr_officer" },
+        { user: "pm", name: "مدير المشروع", role: "project_manager", phone: "966500000002", waOptIn: true },
+      ] };
+      db.store["meta/projects"] = { projects: [] };
+      db.store["vault_extract_schedules/EXS-1"] = { title: "مستخلص الصيانة", projectId: "hail", projectName: "برج هيل", dueDay: 25, leadDays: 5, active: true,
+        users: [{ user: "fin", name: "المالية" }, { user: "noura", name: "نورة" }] };
+      db.store["vault_extract_schedules/EXS-2"] = { title: "مستخلصٌ بعيد", dueDay: 10, leadDays: 5, active: true, users: [{ user: "pm", name: "" }] };
+      db.store["vault_extract_schedules/EXS-3"] = { title: "موقوف", dueDay: 25, leadDays: 5, active: false, users: [{ user: "pm", name: "" }] };
+      const outbox = () => Object.keys(db.store).filter(k => k.startsWith("wa_outbox/")).map(k => db.store[k]);
+      _deferred.push((async () => {
+        const r1 = await EXR.runExtractReminders({ db, logger, isEnabled: async () => true, today: "2026-09-20" });
+        const ob = outbox();
+        T("★★★ exs/run: في أوّل يومٍ من النافذة يُدرَج تذكيرٌ لمن له رقمٌ مفعَّل وحدَه — والبعيدُ والموقوفُ لا يُمسّان",
+          r1.checked === 2 && r1.due === 1 && r1.queued === 1 && r1.missing === 1 && ob.length === 1 && ob[0].to === "966500000001",
+          JSON.stringify(r1));
+        T("★★ exs/run: الرسالةُ على قالب حالة الشراء المعتمَد بثلاث خاناتٍ وزرٍّ يحمل `EXS-1` وحدثٍ يميّز الموعد",
+          ob.length === 1 && ob[0].template === "po_status_update" && ob[0].params.length === 3 && ob[0].buttonParam === "EXS-1" &&
+          ob[0].event.type === "extract_due_reminder" && ob[0].event.entityId === "EXS-1" && ob[0].event.transition === "2026-09-25" &&
+          ob[0].status === "queued" && !/966|ر\.س|SAR/.test(ob[0].params.join(" ")),
+          ob.length ? JSON.stringify(ob[0].params) : "—");
+        const mark = db.store["vault_extract_schedules/EXS-1"].reminded;
+        T("★★ exs/run: وأثرُ التذكير يُكتب على الجدول باسم مَن وصله ومَن لم يصله (تقرؤه الشاشة)",
+          !!mark && !!mark["2026-09-25"] && mark["2026-09-25"].sent.join() === "المالية" && mark["2026-09-25"].missing.join() === "نورة" &&
+          db.store["vault_extract_schedules/EXS-1"].title === "مستخلص الصيانة", JSON.stringify(mark));
+        /* اليومُ التالي داخل النافذة: لا رسالةَ ثانية — المعرّفُ الحتميُّ يُسقطها */
+        const r2 = await EXR.runExtractReminders({ db, logger, isEnabled: async () => true, today: "2026-09-22" });
+        T("★★★ exs/run: الدورانُ في يومٍ آخرَ من النافذة نفسِها لا يُرسل ثانيةً (رسالةٌ واحدةٌ لكلّ جدول · موعد · مستلم)",
+          r2.due === 1 && r2.queued === 0 && outbox().length === 1, JSON.stringify(r2));
+        /* الشهرُ التالي موعدٌ جديد ⇒ رسالةٌ جديدة */
+        const r3 = await EXR.runExtractReminders({ db, logger, isEnabled: async () => true, today: "2026-10-21" });
+        T("★★ exs/run: وموعدُ الشهر التالي حدثٌ جديدٌ يُرسَل — والأثرُ يتراكم على الجدول لا يُمحى",
+          r3.queued === 1 && outbox().length === 2 && outbox().some(o => o.event.transition === "2026-10-25") &&
+          !!db.store["vault_extract_schedules/EXS-1"].reminded["2026-09-25"] && !!db.store["vault_extract_schedules/EXS-1"].reminded["2026-10-25"]);
+        /* بعد الموعد لا لَحاق */
+        const r4 = await EXR.runExtractReminders({ db, logger, isEnabled: async () => true, today: "2026-11-26" });
+        T("★ exs/run: وبعد فوات الموعد لا تذكيرَ متأخّر", r4.due === 0 && outbox().length === 2);
+        /* مفتاحُ القتل */
+        const db2 = mkDb(); db2.store["vault_extract_schedules/EXS-9"] = { dueDay: 25, active: true, users: [{ user: "fin" }] };
+        db2.store["meta/users"] = db.store["meta/users"];
+        const r5 = await EXR.runExtractReminders({ db: db2, logger, isEnabled: async () => false, today: "2026-09-22" });
+        T("★★ exs/run: مفتاحُ القتل العامّ (`meta/wa_settings.enabled=false`) يوقف التذكير كبقيّة الطبقة",
+          r5.checked === 0 && Object.keys(db2.store).every(k => !k.startsWith("wa_outbox/")));
+        /* الرقمُ في مستند مشروعٍ آخر — `Anywhere` */
+        const db3 = mkDb();
+        db3.store["meta/users"] = { users: [] };
+        db3.store["meta/projects"] = { projects: [{ id: "villa" }] };
+        db3.store["meta/villa_users"] = { users: [{ user: "sv", name: "المشرف", role: "مشرف", phone: "966500000009", waOptIn: true }] };
+        db3.store["vault_extract_schedules/EXS-5"] = { title: "ت", dueDay: 25, active: true, users: [{ user: "sv", name: "المشرف" }] };
+        const r6 = await EXR.runExtractReminders({ db: db3, logger, isEnabled: async () => true, today: "2026-09-25" });
+        T("★★ exs/run: والمسؤولُ يُوجَد أينما سُجِّل رقمُه (مستندُ مشروعٍ آخر) — درسُ بلاغ ٣١/٠٨",
+          r6.queued === 1 && Object.keys(db3.store).some(k => k.startsWith("wa_outbox/")), JSON.stringify(r6));
+      })().catch(e => T("exs/run: التشغيلُ على القاعدة الوهمية لا يرمي", false, String(e && e.stack || e).slice(0, 200))));
+    }
+
+    /* ── (٧) الوصلُ الساكن: الدالّةُ المجدولة · القواعد · الرابطُ العميق · الجرس ── */
+    const rdx = f => { try { return fs.readFileSync(path.resolve(path.dirname(IDX), f), "utf8"); } catch { return ""; } };
+    const FN_IDX = rdx("functions/index.js"), FN_CFG = rdx("functions/lib/config.js"), FN_HEALTH = rdx("functions/wa-health.js");
+    const RCHK = rdx("rules-check.mjs");
+    T("★★★ exs: `exsRemind` مصدَّرةٌ بـ`onSchedule` بتوقيت الرياض وتنادي `runExtractReminders` بمفتاح القتل",
+      /exports\.exsRemind = onSchedule\(\s*\{ schedule: cfg\.EXS\.schedule, timeZone: cfg\.EXS\.timeZone \}/.test(FN_IDX) &&
+      /runExtractReminders\(\{ db, logger, isEnabled \}\)/.test(FN_IDX) && /timeZone: process\.env\.WA_EXS_TZ \|\| "Asia\/Riyadh"/.test(FN_CFG) &&
+      /template: process\.env\.WA_EXS_TEMPLATE \|\| PO\.statusTemplate/.test(FN_CFG));
+    T("★ exs: ولا سرَّ على الدالّة المجدولة — الإدراجُ وحدَه، والتوكنُ عند المُرسِل",
+      !/exports\.exsRemind = onSchedule\(\s*\{[^}]*secrets/.test(FN_IDX));
+    T("★★ exs: `vault_extract_schedules` (+`_dev`) في استثناء الخزانة وبقاعدتها: قراءةٌ بالقائمة · كتابةٌ بالدور · حذفٌ للأدمن",
+      /vaultColl\(coll\)[\s\S]{0,400}'vault_extract_schedules', 'vault_extract_schedules_dev'/.test(RUL) &&
+      /match \/vault_extract_schedules\/\{id\}[\s\S]{0,60}allow read:\s+if vaultReadOk\(\);[\s\S]{0,80}allow create, update: if vaultWriteOk\(\);[\s\S]{0,60}allow delete:\s+if isAdmin\(\)/.test(RUL) &&
+      /match \/vault_extract_schedules_dev\/\{id\}/.test(RUL));
+    T("★ exs: والمجموعةُ في قائمة `rules-check` (فحصُ المحاكي يعرفها ولا يُسقطها من الاستثناءات)",
+      /"vault_extract_schedules", "letter_verify"/.test(RCHK) && /const EXS_C = "vault_extract_schedules"/.test(RCHK) &&
+      (RCHK.match(/vault_extract_schedules/g) || []).length >= 5);
+    T("★★ exs: الرابطُ العميقُ `?po=EXS-…` يُوجَّه إلى الخزانة قبل البحث في المشتريات — وبفحص الصلاحية",
+      /function _isExsId\(id\)\{ return \/\^EXS-\/i/.test(HTML) && /if\(_isExsId\(poId\)\) return _openPendingEXS\(\);/.test(HTML) &&
+      HTML.indexOf("if(_isExsId(poId)) return _openPendingEXS();") < HTML.indexOf("const found = (typeof purchases!==\"undefined\")") &&
+      /dv\.openSchedules\(\)/.test(HTML) && /dv\.canView\(\)/.test(HTML.slice(HTML.indexOf("function _openPendingEXS"), HTML.indexOf("function _openPendingEXS") + 900)));
+    T("★ exs: `wa-health` يعدّ `exsRemind` من الدوالّ الواجب نشرُها", /\["exsRemind"\]/.test(FN_HEALTH));
+    T("★★ exs: المزامنةُ تبدأ وتتوقّف مع الخزانة، والجرسُ يمسح الجداولَ بخريطة الكتم نفسِها",
+      /_partySync\(\);\n  _exsSync\(\);/.test(src) && /_partyStopSync\(\);\n  _exsStopSync\(\);/.test(src) &&
+      /fired \+= _scanSchedules\(t, day, seen, next\);/.test(src) && /"extract_due"\)/.test(src));
+    T("★ exs: النموذجُ يحفظ بـ`merge` فلا يمحو أثرَ الخادم (`reminded`)",
+      /doc\(id\)\.set\(body, \{ merge:true \}\)/.test(src.slice(src.indexOf("function _saveScheduleDoc"), src.indexOf("function _saveScheduleDoc") + 600)));
+
+    /* ── (٨) الرسمُ في DOM حقيقيّ: الشريطُ واللوحةُ والنموذجُ والجرس ── */
+    if (!exMiss.length) {
+      const pgx = W.document.getElementById("page-" + V._PAGE_EXTRACTS);
+      if (pgx) {
+        const prevU = W.USERS, prevCU = W.currentUser;
+        W.USERS = [
+          { user: "fin", name: "المالية", role: "finance", phone: "966500000001", waOptIn: true },
+          { user: "noura", name: "نورة الشمري", role: "hr_officer" },
+        ];
+        W.currentUser = { name: "المالك", user: "owner", role: "admin" };
+        W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+        pgx.classList.add("active");
+        /* الرسمُ يقرأ تاريخَ اليوم الحقيقيَّ (لا يُحقَن)، فالموعدُ المتوقَّع يُحسَب منه:
+           أيُّ يومِ شهرٍ يقع موعدُه التالي خلال ٣١ يوماً — داخل الأفق دائماً. */
+        const NOW = new Date(), EXP_DUE = V.exsNextDue({ dueDay: 25 }, NOW), EXP_LEFT = V.exsLeftLabel(V.daysUntil(EXP_DUE, NOW));
+        const EX = [
+          { id: "EXS-1", title: "مستخلص الصيانة الشهري", projectName: "برج هيل", dueDay: 25, leadDays: 5, active: true,
+            users: [{ user: "fin", name: "المالية" }, { user: "noura", name: "نورة الشمري" }], reminded: {} },
+          { id: "EXS-2", title: "مستخلصٌ موقوف", dueDay: 3, active: false, users: [] },
+        ];
+        EX[0].reminded[EXP_DUE] = { at: "x", sent: ["المالية"], missing: ["نورة الشمري"] };
+        V.__test_seed([], [], [], [], [], EX);
+        V.renderApprovals();
+        T("★★★ exs/dom: شريطُ «المواعيد القادمة» يُرسَم فوق سجلّ المستخلصات بالموعد والعدّ والمسؤولين وأثرِ الخادم",
+          !!pgx.querySelector(".dv-exs-strip") && pgx.innerHTML.includes(EXP_DUE) && pgx.innerHTML.includes(EXP_LEFT) &&
+          /المالية/.test(pgx.querySelector(".dv-exs-who").innerHTML) && /نورة الشمري · بلا واتساب/.test(pgx.innerHTML) &&
+          /✓ ذُكِّر: المالية/.test(pgx.innerHTML) && /لم يصل: نورة الشمري/.test(pgx.innerHTML) &&
+          !/مستخلصٌ موقوف/.test(pgx.querySelector(".dv-exs-strip").innerHTML),
+          (pgx.querySelector(".dv-exs-strip") || { textContent: "—" }).textContent.slice(0, 160));
+        T("★ exs/dom: وزرُّ «المستخلصات الدورية» في رأس الشاشة بعدّاد الجداول",
+          /docVault\.toggleSchedulePanel\(\)/.test(pgx.innerHTML) && /المستخلصات الدورية\s*<span class="dv-cnt">2<\/span>/.test(pgx.innerHTML));
+        V.toggleSchedulePanel();
+        T("★★ exs/dom: اللوحةُ تعرض الجداولَ ببطاقاتها — الفعّالُ بموعده والموقوفُ موسوماً",
+          /مواعيدُها ومسؤولوها/.test(pgx.innerHTML) && /يوم <span class="dv-num">25<\/span> من كلّ شهر/.test(pgx.innerHTML) &&
+          /موقوف/.test(pgx.innerHTML) && !!pgx.querySelector(".dv-party.dv-exs-off") && !pgx.querySelector(".dv-exs-strip"));
+        V.newSchedule();
+        const form = () => ({ title: !!pgx.querySelector("#dv-s-title"), day: !!pgx.querySelector("#dv-s-day"),
+          lead: pgx.querySelector("#dv-s-lead") ? pgx.querySelector("#dv-s-lead").value : "—",
+          boxes: pgx.querySelectorAll("[data-exs-user]").length, on: pgx.querySelectorAll(".dv-exs-u.on").length });
+        const f0 = form();
+        T("★★ exs/dom: النموذجُ — عنوانٌ ويومٌ ومهلةٌ افتراضُها ٥ ومربّعٌ لكلّ مستخدمٍ مع «بلا واتساب» لمن لا رقمَ له",
+          f0.title && f0.day && f0.lead === "5" && f0.boxes === 2 && f0.on === 0 && /نورة الشمري <span class="t-dim">\(بلا واتساب\)/.test(pgx.innerHTML),
+          JSON.stringify(f0));
+        V.toggleScheduleUser("noura", true);
+        T("★★ exs/dom: اختيارُ مسؤولٍ بلا رقمٍ يُقال الآن في النموذج لا يومَ يصمت التذكير",
+          form().on === 1 && /⚠ بلا رقم واتساب مفعَّل: نورة الشمري/.test(pgx.innerHTML));
+        V.toggleScheduleUser("fin", true); V.toggleScheduleUser("noura", false);
+        T("★ exs/dom: ويُلغى الاختيارُ كما يُختار", form().on === 1 && !/⚠ بلا رقم واتساب مفعَّل/.test(pgx.innerHTML));
+        V.cancelSchedule();
+        V.editSchedule("EXS-1");
+        T("★ exs/dom: تعديلُ جدولٍ قائمٍ يفتح النموذجَ بقيمه ومسؤوليه",
+          pgx.querySelector("#dv-s-title") && pgx.querySelector("#dv-s-title").value === "مستخلص الصيانة الشهري" &&
+          pgx.querySelector("#dv-s-day").value === "25" && form().on === 2);
+        V.cancelSchedule(); V.toggleSchedulePanel();
+
+        /* الجرس: داخل النافذة يُطلَق مرّةً لكلّ (جدول · موعد · يوم)، وخارجَها لا شيء */
+        try { W.localStorage.removeItem("hail_vault_alerted"); } catch (e) {}
+        NOTIFS.length = 0;
+        V.__test_seed([], [], [], [], [], EX);
+        const f1 = V.scanAndAlert(new Date("2026-09-21T09:00:00Z"));
+        const f2 = V.scanAndAlert(new Date("2026-09-21T12:00:00Z"));
+        T("★★★ exs/dom: الجرسُ داخل نافذة التذكير مرّةً في اليوم — بالموعد والعدّ والمسؤولين — ولا يتكرّر بتحديث الصفحة",
+          f1 === 1 && f2 === 0 && NOTIFS.length === 1 && NOTIFS[0].k === "extract_due" &&
+          /موعد تقديم المستخلص بعد 4 أيام \(2026-09-25\)/.test(NOTIFS[0].b) && /برج هيل/.test(NOTIFS[0].b) && /المالية، نورة الشمري/.test(NOTIFS[0].b),
+          f1 + "/" + f2 + " " + JSON.stringify(NOTIFS[0] || null));
+        NOTIFS.length = 0;
+        T("★★ exs/dom: وخارجَ النافذة (قبلها بيوم · بعد الموعد) لا تنبيه",
+          V.scanAndAlert(new Date("2026-09-19T09:00:00Z")) === 0 && V.scanAndAlert(new Date("2026-09-26T09:00:00Z")) === 0 && NOTIFS.length === 0);
+        T("★ exs/dom: ويومٌ جديدٌ في النافذة يُطلقه ثانيةً (تذكيرٌ يوميٌّ لا مرّةً واحدة)",
+          V.scanAndAlert(new Date("2026-09-22T09:00:00Z")) === 1);
+        try { W.localStorage.removeItem("hail_vault_alerted"); } catch (e) {}
+        V.__test_seed([], [], [], [], [], []);
+        W.USERS = prevU; W.currentUser = prevCU;
+      } else T("exs/dom: صفحةُ المستخلصات موجودة", false);
     }
   }
 }

@@ -47,6 +47,7 @@ service cloud.firestore {
       return coll in ['global_docs', 'global_docs_dev', 'global_letters', 'global_letters_dev',
                       'global_approvals', 'global_approvals_dev',
                       'vault_parties', 'vault_parties_dev',
+                      'vault_extract_schedules', 'vault_extract_schedules_dev',
                       'letter_verify', 'letter_verify_dev'];
     }
     function ctrLocked(coll) {
@@ -647,6 +648,18 @@ service cloud.firestore {
       allow delete:       if isAdmin();
     }
     match /vault_parties_dev/{id} {
+      allow read:         if vaultReadOk();
+      allow create, update: if vaultWriteOk();
+      allow delete:       if isAdmin();
+    }
+    /* جدولُ المستخلصات الدورية — القاعدةُ نفسُها. وأثرُ التذكير (`reminded`) يكتبه
+       الخادمُ بـAdmin SDK فلا تمرّ كتابتُه بهذه القواعد أصلاً. */
+    match /vault_extract_schedules/{id} {
+      allow read:         if vaultReadOk();
+      allow create, update: if vaultWriteOk();
+      allow delete:       if isAdmin();
+    }
+    match /vault_extract_schedules_dev/{id} {
       allow read:         if vaultReadOk();
       allow create, update: if vaultWriteOk();
       allow delete:       if isAdmin();

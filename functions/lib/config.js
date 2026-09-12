@@ -336,8 +336,25 @@ const CTR_CONTEXT_SHORT = {
   change: "أمر تغيير",
 };
 
+/* ═════════ تذكيرُ المستخلصات الدورية (vault_extract_schedules) ═════════
+   خزانةُ الوثائق تحمل جدولاً لمستخلصاتٍ شهريةٍ بيومٍ ثابتٍ ومسؤولين بأسماء الدخول،
+   ودالّةٌ مجدولةٌ (`exsRemind`) تُدرج لهم تذكيراً قبل الموعد بمهلة الجدول (٥ أيام
+   افتراضاً). **الافتراض = قالبُ حالة الشراء المعتمَد** (`po_status_update`) بخاناته
+   الثلاث — فتصل الرسائلُ لحظةَ النشر بلا انتظار Meta؛ ولتخصيص قالبٍ لاحقاً يُضبط
+   `WA_EXS_TEMPLATE` بأربع خانات ({{1}}العنوان {{2}}السياق {{3}}الموعد {{4}}المتبقّي)
+   — والفرزُ بمطابقة اسم القالب لا بعَلَمٍ منفصل، درسُ الموارد البشرية نفسُه. */
+const EXS = {
+  collection: process.env.WA_EXTRACT_SCHEDULES_COLLECTION || "vault_extract_schedules",
+  template: process.env.WA_EXS_TEMPLATE || PO.statusTemplate,
+  lang: process.env.WA_EXS_TEMPLATE_LANG || PO.lang,
+  // موعدُ الدوران اليوميّ — صباحاً بتوقيت الرياض (يتطابق فيه تاريخُ UTC مع المحلّيّ).
+  schedule: process.env.WA_EXS_SCHEDULE || "every day 08:00",
+  timeZone: process.env.WA_EXS_TZ || "Asia/Riyadh",
+};
+
 module.exports = {
   ROLE_FALLBACK,
+  EXS,
   TICKET_COLLECTIONS,
   TECHNICIANS_COLLECTION,
   OUTBOX_COLLECTION,

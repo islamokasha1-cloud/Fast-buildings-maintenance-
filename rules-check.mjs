@@ -729,7 +729,7 @@ const APP_COLLS = [
   "global_vendors", "global_contract_requests", "global_contracts",
   "global_contract_extracts", "global_contract_changes",
   "global_docs", "global_letters", "global_approvals", "vault_signs", "vault_parties",
-  "letter_verify"
+  "vault_extract_schedules", "letter_verify"
 ];
 /* المجموعاتُ التي **لا `list` عليها لأحدٍ عمداً** — تُفحص في بلوكها لا هنا:
    `letter_verify` تُقرأ بالرمز وحدَه، واستعلامُها هو عينُ ما يحرسه بلوكُها. */
@@ -1084,6 +1084,25 @@ await check("★★ ونسخةُ `_dev` للجهات محروسةٌ بالقاع
 await check("★ ويُستعلَم سجلُّ الجهات لكلّ ذي دور",
   assertSucceeds((async () => { for (const c of [ADMIN, PM, FIN, VIEWER]) await getDocs(collection(c, PRT_C)); })()));
 
+/* جدولُ المستخلصات الدورية — القاعدةُ نفسُها، والاستثناءُ من العامّة يجب أن يشمله */
+const EXS_C = "vault_extract_schedules";
+await seed(`${EXS_C}/EXS-2609-0001`, { title: "مستخلص الصيانة الشهري", dueDay: 25, leadDays: 5, active: true,
+  users: [{ user: "fin", name: "المالية" }] });
+await check("★ يسجّل مديرُ المشاريع مستخلصاً دورياً",
+  assertSucceeds(setDoc(doc(PM, `${EXS_C}/EXS-2609-0002`), { title: "مستخلص", dueDay: 1, leadDays: 5, active: true, users: [] })));
+await check("★ وتعدّله المالية",
+  assertSucceeds(updateDoc(doc(FIN, `${EXS_C}/EXS-2609-0001`), { leadDays: 7 })));
+await check("★★ والزائرُ والمراقبُ والمستودعُ لا يكتبون في جدول المستخلصات الدورية",
+  assertFails(setDoc(doc(VIEWER, `${EXS_C}/EXS-X`), { title: "ت" })) &&
+  assertFails(setDoc(doc(OBS, `${EXS_C}/EXS-Y`), { title: "ت" })) &&
+  assertFails(setDoc(doc(WH, `${EXS_C}/EXS-Z`), { title: "ت" })));
+await check("★★★ وحذفُ الجدول للأدمن وحدَه", assertFails(deleteDoc(doc(PM, `${EXS_C}/EXS-2609-0001`))));
+await check("★★★ والأدمنُ يحذفه", assertSucceeds(deleteDoc(doc(ADMIN, `${EXS_C}/EXS-2609-0001`))));
+await check("★★ ونسخةُ `_dev` للجدول محروسةٌ بالقاعدة نفسِها",
+  assertFails(setDoc(doc(VIEWER, "vault_extract_schedules_dev/EXS-X"), { title: "ت" })));
+await check("★ ويُستعلَم الجدولُ لكلّ ذي دور",
+  assertSucceeds((async () => { for (const c of [ADMIN, PM, FIN, VIEWER]) await getDocs(collection(c, EXS_C)); })()));
+
 /* القراءةُ واسعةٌ كبقيّة المنصّة — تُضيَّق في المرحلة ٣ مع أخواتها لا وحدَها */
 await check("★ ويقرأ كلُّ ذي دورٍ الخزانةَ (وتُستعلَم مجموعتاها فعلاً لا مستنداً مستنداً)",
   assertSucceeds((async () => {
@@ -1148,7 +1167,7 @@ await check("★★★ ولم يُصَب استعلامُ مجموعةٍ واح�
   assertSucceeds((async () => {
     for (const c of APP_COLLS) {
       if (c === "global_docs" || c === "global_letters" || c === "global_approvals"
-          || c === "vault_signs" || c === "vault_parties" || c === "letter_verify") continue;
+          || c === "vault_signs" || c === "vault_parties" || c === "vault_extract_schedules" || c === "letter_verify") continue;
       await getDocs(collection(SUP_OTHER, c));
     }
   })()));
@@ -1207,7 +1226,7 @@ await check("★★★ ولم يُصَب استعلامُ `meta` ولا غيرُ
     await getDoc(doc(SUP_OTHER, "meta/settings"));
     await getDoc(doc(SUP_OTHER, "meta/projects"));
     for (const c of APP_COLLS) {
-      if (["global_docs", "global_letters", "global_approvals", "vault_signs", "vault_parties", "letter_verify"].indexOf(c) !== -1) continue;
+      if (["global_docs", "global_letters", "global_approvals", "vault_signs", "vault_parties", "vault_extract_schedules", "letter_verify"].indexOf(c) !== -1) continue;
       await getDocs(collection(SUP_OTHER, c));
     }
   })()));
