@@ -19015,9 +19015,20 @@ function docVaultGuards() {
         pga.querySelectorAll(".dv-ap-c").length === 4 && !pga.querySelector(".dv-ap-c.wait") &&
         !!pga.querySelector(".dv-ap-c.done") && /50,000\.00/.test(pga.querySelector(".dv-ap-c.done").textContent) &&
         !/docVault\.newApr\(\)/.test(pga.innerHTML) && /المستخلصات قيد الاعتماد/.test(pga.innerHTML));
-      T("★ dv: و«المعتمدات» تعرض تاريخَ الاعتماد عموداً، و«المستخلصات» تعرض المحطةَ ومنذ متى",
+      T("★ dv: و«المعتمدات» تعرض تاريخَ الاعتماد عموداً، و«المستخلصات» تعرض المحطةَ وزمنَيها",
         /<th>الاعتماد<\/th>/.test(pga.innerHTML) && (pgx.classList.add("active"), V.renderApprovals(),
-          /<th>المحطة<\/th><th>منذ<\/th>/.test(pgx.innerHTML) && !/<th>الاعتماد<\/th>/.test(pgx.innerHTML)));
+          /<th>المحطة<\/th><th[^>]*>في المحطة<\/th><th[^>]*>منذ التقديم<\/th>/.test(pgx.innerHTML) && !/<th>الاعتماد<\/th>/.test(pgx.innerHTML)));
+      /* ★★ عمودُ «منذ التقديم» (طلبُ المالك): العمرُ الكاملُ لا زمنُ المحطة — ويتلوّن
+         بسلّم الانتظار. APR-1 قُدِّم قبل ٨٣ يوماً من T0 — واليومُ الحقيقيّ أبعد،
+         فيُقاس أنّ الخليّةَ تحمل رقماً ≥ ٨٣ وصنفَ الخطر، لا رقماً بعينه. */
+      T("★★ dv: وعمودُ «منذ التقديم» يحمل عمرَ المستند الكامل ملوَّناً بسلّم ٣٠/٦٠",
+        (() => { const cells = [...pgx.querySelectorAll(".dv-ap-tbl tbody td.dv-age")];
+                 const c1 = cells.find(c => Number(c.textContent) >= 83);
+                 /* والمرفوضُ لا ينتظر شيئاً فخليّتُه «—» لا صفرٌ يدّعي «قُدِّم اليوم» */
+                 return cells.length === 3 && !!c1 && c1.classList.contains("t-crit") &&
+                        cells.filter(c => /^\d+$/.test(c.textContent.trim())).length === 2 &&
+                        cells.filter(c => c.textContent.trim() === "—").length === 1; })(),
+        [...pgx.querySelectorAll(".dv-ap-tbl tbody td.dv-age")].map(c => c.textContent + "/" + c.className).join(" · "));
       pgx.classList.remove("active"); V.renderApprovals();
       T("★★ dv: ونقرُ الصفّ يفتح البطاقةَ بمرفقها ونسختها المعتمدة",
         (V.openApr("APR-3"), /المستخلص الثاني/.test(pga.innerHTML) &&
