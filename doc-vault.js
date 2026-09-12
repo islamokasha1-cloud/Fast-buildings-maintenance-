@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3191";
+var MODULE_BUILD = "v18.9.3193";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -3144,8 +3144,12 @@ function _qrBlockHTML(l){
 /* كتلةُ هوية الخطاب الصادر: الرمزان في صفّ (QR ثمّ الباركود ورقمُه تحته) والتاريخُ
    تحتهما — كتلةٌ واحدةٌ يقرؤها الماسحُ والعينُ معاً في موضعٍ واحد. */
 function _idBlockHTML(l){
+  /* أصغرُ ممّا كان في الذيل (طلبُ المالك: «أعلى الصفحة فاضٍ بزيادة»): الباركودُ
+     ٤٠مم عرضاً ⇒ ٠٫٢مم للوحدة وهو حدُّ الطابعة المكتبية، وارتفاعُه ~٨مم يكفي
+     ماسحَ وارد الجهة. والـQR ١٦مم ⇒ ٠٫٣٧مم للوحدة في الإصدار ٦، تقرؤه كاميرا
+     الجوّال من ورقٍ عاديّ. أصغرُ من هذين يُقرأ بصعوبة على طابعةٍ عادية. */
   return '<div class="idb">'
-    + '<div class="bcw">' + _qrBlockHTML(l) + '<div class="bcb">' + code128SVG(l.id || "")
+    + '<div class="bcw">' + _qrBlockHTML(l) + '<div class="bcb">' + code128SVG(l.id || "", { widthMM:40, height:18 })
     + '<div class="bcn">' + _esc(l.id || "") + '</div></div></div>'
     + '<div class="idb-date"><span class="ml">التاريخ</span><span class="mv dv-num">' + _esc(l.letterDate || "—") + '</span></div>'
     + '</div>';
@@ -3262,7 +3266,7 @@ function letterPaperHTML(l){
        وعناصرُها تلتصق بالحافّة نفسِها (`align-items:flex-end` في عمودٍ RTL = اليسار). */
     + '.tophead{display:flex;align-items:flex-start}'
     + '.idb{margin-inline-start:auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px}'
-    + '.idb-date{font-size:12.5px;white-space:nowrap}'
+    + '.idb-date{font-size:11.5px;white-space:nowrap;line-height:1.5}'
     + '.ml{color:#64748b;font-weight:700;margin-left:7px}'
     + '.mv{font-weight:800}'
     + '.dv-num{font-family:monospace;direction:ltr;unicode-bidi:isolate}'
@@ -3308,15 +3312,15 @@ function letterPaperHTML(l){
     + '.sgn-im{position:relative;height:28mm;margin-top:-3mm}'
     + '.sgn-sig{position:absolute;right:12%;top:0;height:16mm;object-fit:contain;z-index:1}'
     + '.sgn-stp{position:absolute;left:6%;top:4mm;height:23mm;object-fit:contain;z-index:2}'
-    + '.bcw{direction:ltr;display:flex;justify-content:flex-start;align-items:flex-end;gap:10px}'
+    + '.bcw{direction:ltr;display:flex;justify-content:flex-start;align-items:flex-end;gap:6px}'
     + '.bcb{display:inline-block;text-align:center}'
     + '.bc{display:block}'
-    + '.bcn{font-size:11px;letter-spacing:1.6px;color:#374151;margin-top:2px;font-family:monospace}'
+    + '.bcn{font-size:10px;letter-spacing:1.4px;color:#374151;margin-top:1px;font-family:monospace;line-height:1.3}'
     /* رمزُ التحقّق: ٢٢مم كافيةٌ لكاميرا الجوّال على ورقٍ عاديّ (إصدارٌ ٦ ≈ ٤١
        وحدة ⇒ ٠٫٥مم للوحدة)، وأصغرُ من ذلك يفشل على طابعةٍ مكتبيةٍ عادية. */
     + '.qrb{display:flex;flex-direction:column;align-items:center;gap:2px}'
-    + '.qrb svg{width:22mm;height:22mm;display:block}'
-    + '.qrn{font-size:9.5px;color:#374151;direction:rtl;white-space:nowrap}'
+    + '.qrb svg{width:16mm;height:16mm;display:block}'
+    + '.qrn{font-size:8.5px;color:#374151;direction:rtl;white-space:nowrap;line-height:1.3}'
     + '@media print{body{padding:14px}@page{margin:14mm}}'
     + (on && ctr._letterheadCSS ? ctr._letterheadCSS() : "")
     + '</style></head><body>'
