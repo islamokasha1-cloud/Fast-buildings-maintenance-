@@ -50,7 +50,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.3162";
+  const MODULE_BUILD = "v18.9.3164";
 
   const HOST_ID   = "page-inventory-reports";
   const READ_CAP  = 5000;    // سقف الحركات المقروءة لكل توليد — يُعلَن عند بلوغه

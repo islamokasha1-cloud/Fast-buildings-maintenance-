@@ -785,7 +785,12 @@ function predelivery() {
     /* **خُفِّض** من 40079 إلى 39885 — ‏١٩٤ سطراً خرجت إلى `sla-engine.js` (محرّكُ SLA
        كلُّه). والخفضُ هو نصفُ الفائدة: مكسبُ الاستخراج يُثبَّت هنا فلا يُبتلَع لاحقاً
        بإضافاتٍ تملأ الفراغَ الذي تركه. */
-    const IDX_CEILING = 39885;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 39885 إلى 39895 — ‏١٠ أسطرٍ لفصلِ زمن الاستجابة عن زمن الإصلاح
+       (v18.9zf)، وأكثرُها تعليق. والأسطرُ الفعليةُ في **موضعَي عرضٍ قائمَين**:
+       بطاقتا لوحةِ المؤشرات وسطرُ بطاقةِ التفاصيل — والحسابُ كلُّه في `sla-engine.js`
+       (`firstResponseH` · `firstResponseStats`) دوالَّ نقيّةً يفحصها hail-tests بلا
+       متصفّح. فالمنطقُ في الوحدة، وما هنا وسمُ عرضٍ لا يعيش في وحدة. */
+    const IDX_CEILING = 39895;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -5486,6 +5491,71 @@ function auditRound2() {
     T("★ ze: ومقامُ KPI-02 المعروضُ مثلُه (المتوسطُ يُحسب على closedTix)",
       HTML.includes('["بلاغات مغلقة",closedTix.length]'));
   }
+
+  // ── v18.9zf — فصلُ زمن الاستجابة عن زمن الإصلاح ─────────────────────────────
+  //  العقدُ يقيسهما مؤشّرين مستقلّين، وكان في المنصّة رقمٌ واحدٌ اسمُه responseH
+  //  ومعناه زمنُ الإقفال. الطابعُ `respondedAt` كان يُلتقط ويُعرَض ولا يُقاس منه شيء.
+  {
+    const _A = HTML.indexOf("function resolutionH(t){");
+    if (_A < 0) { T("★ zf: resolutionH — الاسمُ الصادقُ لزمن الإقفال", false); }
+    else {
+      let E = null;
+      try {
+        // نهايةُ الكتلة = أوّلُ دالّةٍ بعدها في المصدر المرقوع (fmtH بقيت في index.html)
+        const _S = HTML.indexOf("const SLA_CONFIG = {");
+        const _E = HTML.indexOf("function fmtH(h){", _S);
+        E = new Function(HTML.slice(_S, _E) +
+            "\nreturn {firstResponseH,firstResponseStats,resolutionH};")();
+      } catch (e) { T("تُبنى دوالُّ الفصل", false, String(e.message).slice(0, 120)); }
+      if (E) {
+        const P = "عادي 🟢 (48 ساعة)";
+        const mk = (c, r) => ({ priority: P, status: "مغلق", createdAt: c, respondedAt: r, closedAt: "2026-03-04T12:00:00" });
+
+        T("★★ zf: بلا طابعِ وصولٍ ⇐ null لا صفر (الصفرُ يُقرأ «استُجيب فوراً» فيجمّل المتوسّط)",
+          E.firstResponseH(mk("2026-03-02T08:00:00", null)) === null &&
+          E.firstResponseH(mk("2026-03-02T08:00:00", undefined)) === null);
+        T("★ zf: وصولٌ بعد ساعتين داخل الدوام = ساعتان",
+          E.firstResponseH(mk("2026-03-02T08:00:00", "2026-03-02T10:00:00")) === 2);
+        T("★★ zf: ويُقاس بساعاتِ العمل — بلاغُ 16:00 وصلَه فنّيٌّ 09:00 غداً = ساعتان لا 17",
+          E.firstResponseH(mk("2026-03-02T16:00:00", "2026-03-03T09:00:00")) === 2);
+        T("★ zf: طابعٌ سابقٌ للبلاغ أو فاسدٌ يُرفَض (لا مدّةً سالبة)",
+          E.firstResponseH(mk("2026-03-02T10:00:00", "2026-03-02T08:00:00")) === null &&
+          E.firstResponseH(mk("2026-03-02T10:00:00", "ليس تاريخاً")) === null);
+
+        const L = [mk("2026-03-02T08:00:00", "2026-03-02T10:00:00"),
+                   mk("2026-03-02T08:00:00", "2026-03-02T12:00:00"),
+                   mk("2026-03-02T08:00:00", null)];
+        const st = E.firstResponseStats(L);
+        T("★★ zf: المتوسّطُ على المسجَّل وحدَه، والتغطيةُ معه (2 و4 ⇐ 3، لا 2 بقسمةٍ على 3)",
+          st.avg === 3 && st.n === 2 && st.d === 3 && st.coverage === 67);
+        T("★★ zf: بلا أيّ طابعٍ ⇐ avg null لا صفر (فلا يُعرَض صفرٌ كإنجاز)",
+          E.firstResponseStats([mk("2026-03-02T08:00:00", null)]).avg === null);
+        T("zf: قائمةٌ فارغةٌ أو غيرُ مصفوفةٍ لا تُسقط الحساب",
+          E.firstResponseStats([]).avg === null && E.firstResponseStats(null).d === 0);
+        T("★ zf: وزمنُ الإقفال باقٍ كما كان تحت اسمه الصادق",
+          E.resolutionH(mk("2026-03-02T08:00:00", null)) === 20);
+      }
+    }
+    //  حرّاسُ المصدر
+    T("★★ zf: زال الاسمُ المضلِّل responseH (كان يَعِد بالاستجابة ويقيس الإقفال)",
+      !/function responseH\(/.test(HTML) && !/\bresponseH\(/.test(HTML));
+    T("★★ zf: لوحةُ المؤشرات تعرض المؤشّرين منفصلَين لا واحداً باسم الآخر",
+      HTML.includes('title:"متوسط زمن الاستجابة"') && HTML.includes('title:"متوسط زمن الإغلاق"') &&
+      !HTML.includes('val:avgRes+"h",sub:"للإغلاق"'));
+    T("★★ zf: ومتوسّطُ الاستجابة لا يُعرَض بلا تغطيتِه (رقمٌ بلا مقامِه يُقرأ خطأً)",
+      HTML.includes("fr.coverage") && HTML.includes("firstResponseStats(_all)") &&
+      HTML.includes('fr.avg===null?"—"'));
+    T("★ zf: وبطاقةُ التفاصيل تعرض المدّةَ لا الطابعَ وحدَه",
+      HTML.includes('firstResponseH(t)!==null?" · بعد "+fmtH(firstResponseH(t))'));
+    {
+      const _pc = path.resolve(path.dirname(IDX), "performance-contract.js");
+      if (fs.existsSync(_pc)) {
+        const PC = fs.readFileSync(_pc, "utf8");
+        T("★ zf: بطاقةُ العقد تعرض المتوسّطَ المقيسَ بجوار التغطية لا التغطيةَ وحدَها",
+          PC.includes("respondedAvgH") && PC.includes("firstResponseStats(all).avg"));
+      }
+    }
+  }
     T("★ زال قياس الالتزام بـ getSLA التقويمي", !HTML.includes("return h<=getSLA(t.priority);") && !HTML.includes("if(h <= getSLA(t.priority))"));
   }
 
@@ -5512,7 +5582,7 @@ function auditRound2() {
       T("★★ الوحدةُ تعرّض كلَّ اسمٍ كان عالمياً (اسمٌ يسقط = زرٌّ ميتٌ بصمت)",
         ["slaOf","isOverdue","getSLA","slaStatus","clockStopMinutes","priorityLabel",
          "priorityCanonical","prioritySame","slaBudgetLabel","_closeWorkH","_closedOnTime",
-         "responseH","workingMinutesBetween","_ymd","_ym","_parseLocalDate","PRIORITIES",
+         "resolutionH","firstResponseH","firstResponseStats","workingMinutesBetween","_ymd","_ym","_parseLocalDate","PRIORITIES",
          "SLA_CONFIG"].every(n => new RegExp("[{,]\\s*" + n + "\\s*[,}]").test(_m)));
       // توجيهٌ فعليٌّ في أوّل سطرٍ تنفيذيّ — لا ذكرُ العبارة في ترويسةٍ تشرح لِمَ غابت
       T("★ وبلا توجيه \"use strict\" — النقلُ الحرفيُّ لا يغيّر دلالةَ الكتلة",
@@ -5542,8 +5612,8 @@ function auditRound2() {
         TA.includes("SLA — ${esc(slaLabel)}") && TA.includes("slaBudgetLabel(t.priority)"));
       T("★★ و«روتيني» بلا شريطِ مهلةٍ عند الفنّيّ أيضاً (مُستبعَدٌ من القياس عمداً)",
         TA.includes("const slaTier=tierOf(t.priority);") && TA.includes("slaPct===null"));
-      T("★ ونسبةُ الشريط من responseH (تقويمُ الفئة + خصمُ الإيقاف) لا من طرحِ تاريخين",
-        TA.includes("responseH(t)/getSLA(t.priority)") &&
+      T("★ ونسبةُ الشريط من resolutionH (تقويمُ الفئة + خصمُ الإيقاف) لا من طرحِ تاريخين",
+        TA.includes("resolutionH(t)/getSLA(t.priority)") &&
         !/usedH=\(t\.closedAt\?new Date\(t\.closedAt\)-new Date\(t\.createdAt\)/.test(TA));
       T("fmtH تبقى محلّيةً في تطبيق الفنّيّ (صياغةٌ مختصرةٌ للجوّال: «س» لا «ساعة»)",
         /function fmtH\(h\)\{[^}]*" س"/.test(TA));
@@ -5556,7 +5626,7 @@ function auditRound2() {
   //  عودةَ الوعدِ بلا وفاء: تُشغّل المحرّكَ الحقيقيَّ من index.html بلا متصفّح.
   {
     const _A = HTML.indexOf("const SLA_CONFIG = {");
-    const _B = HTML.indexOf("function responseH(t){", _A);
+    const _B = HTML.indexOf("function resolutionH(t){", _A);
     if (_A < 0 || _B < 0) { T("كتلةُ محرّك SLA قابلةٌ للاستخراج", false); }
     else {
       let E = null;
@@ -5618,7 +5688,7 @@ function auditRound2() {
     // حرّاسُ المصدر: المسارات الثلاثة تمرّر clockStops — لا يكفي أن تقبلها الدالّة
     T("★ zc: slaOf تمرّر clockStops إلى slaStatus",
       /function slaOf\(t\)\{[^}]*slaStatus\(tierOf\(t\.priority\),\s*new Date\(t\.createdAt\),\s*null,\s*null,\s*t\.clockStops\)/.test(HTML));
-    T("★ zc: _closeWorkH و responseH تمرّران clockStops",
+    T("★ zc: _closeWorkH و resolutionH تمرّران clockStops",
       HTML.includes("_elapsedHByTier(t.priority,new Date(t.createdAt),new Date(t.closedAt),t.clockStops)") &&
       HTML.includes("_elapsedHByTier(t.priority,new Date(t.createdAt),to,t.clockStops)"));
     T("★ zc: وعدُ الواجهة قائمٌ ومسنودٌ بالكود (تُستبعَد ⇐ خصمٌ فعليّ)",
@@ -5631,7 +5701,7 @@ function auditRound2() {
   //  الأوّلَ (حرج) لبلاغٍ لا يطابق، فيُرفَع بصمتٍ عند أيّ حفظ.
   {
     const _A = HTML.indexOf("const PRIORITIES = [");
-    const _B = HTML.indexOf("function responseH(t){", _A);
+    const _B = HTML.indexOf("function resolutionH(t){", _A);
     if (_A < 0 || _B < 0) { T("كتلةُ الأولوية قابلةٌ للاستخراج", false); }
     else {
       let P = null;
