@@ -18703,10 +18703,11 @@ function docVaultGuards() {
     T("★★ dv: ورقمُ الجهة لا يُقلَب اتّجاهُه (نصٌّ حرٌّ قد يكون عربياً)",
       /<span class="ml">الرقم لدى الجهة<\/span><span class="mv">/.test(pi) &&
       !/الرقم لدى الجهة<\/span><span class="mv dv-num"/.test(pi));
-    /* الرقمُ انتقل إلى الترويسة وحدَه (طلبُ المالك) — وهناك يُعزَل اتّجاهُه */
-    T("★ dv: والرقمُ الداخليُّ يُعزَل اتّجاهُه في الترويسة (لاتينيٌّ مضمون)",
-      /<div class="doc-no">LTR-2609-0004<\/div>/.test(pi) &&
-      /\.doc-no\{[^}]*direction:ltr[^}]*unicode-bidi:isolate/.test(src));
+    /* الرقمُ تحت الباركود في كتلة الهوية — وهناك يُعزَل اتّجاهُه (`.bcw{direction:ltr}`) */
+    T("★ dv: والرقمُ الداخليُّ يُعزَل اتّجاهُه في كتلة الهوية (لاتينيٌّ مضمون)",
+      !/<div class="doc-no">LTR-2609-0004<\/div>/.test(pi) &&
+      /<div class="bcw">[\s\S]*<div class="bcn">LTR-2609-0004<\/div>/.test(pi) &&
+      /\.bcw\{[^}]*direction:ltr/.test(src));
     T("★ dv: وزرُّ الطباعة في بطاقة الخطاب",
       /docVault\.printLetter\(/.test(src) && /طباعة على ورق الشركة/.test(src));
     T("★ dv: والطباعةُ تمرّ بنافذة المنصّة الواحدة (تعالج iOS وفشلَ الفتح)",
@@ -18794,9 +18795,11 @@ function docVaultGuards() {
         return /المدير العام: عادل فهيد العارضي/.test(out) && !/اسمٌ جديدٌ تماماً/.test(out);
       })());
 
-    /* ── والباركودُ وكتلةُ التوقيع لا يتزاحمان على حافّةٍ واحدة ── */
-    T("★★ dv: وذيلُ الورقة صفٌّ واحد — الباركودُ يميناً والتوقيعُ يساراً",
-      /<div class="ftr">[\s\S]*class="bcw"[\s\S]*class="sgn"[\s\S]*<\/div>/.test(P(withSig)) &&
+    /* ── الذيلُ للتوقيع وحدَه (الرمزان صعدا إلى الرأس) — وعنصرٌ فارغٌ يُبقي
+       `space-between` يدفع الكتلةَ إلى حافّتها اليسرى ── */
+    T("★★ dv: وذيلُ الورقة كتلةُ التوقيع يساراً — بلا باركود فيه",
+      /<div class="ftr"><span><\/span>[\s\S]*class="sgn"[\s\S]*<\/div>/.test(P(withSig)) &&
+      !/<div class="ftr">[\s\S]*class="bcw"/.test(P(withSig)) &&
       /\.ftr\{[^}]*justify-content:space-between/.test(src));
 
     /* ── والسجلُّ يُخزَّن حيث تحرسه القاعدة ── */
@@ -18917,16 +18920,26 @@ function docVaultGuards() {
                  letterDate:"2026-09-11", subject:"موضوع", body:"متن" };
     const P = o => V.letterPaperHTML(o);
 
-    /* (١) «خطاب صادر» تُلغى ويبقى الرقم — والنموذجُ يبقى موسوماً (وسمُه تحذيرٌ لا عنوان) */
-    T("★★ dv: الترويسةُ رقمُ الخطاب وحدَه — لا «خطاب صادر»",
-      !/خطاب صادر/.test(P(L0)) && /<div class="doc-no">LTR-7001<\/div>/.test(P(L0)) &&
-      /class="dochead only-no"/.test(P(L0)));
+    /* (١) «خطاب صادر» تُلغى — والرقمُ صار في كتلة الهوية أعلى يسار الورقة مع
+       التاريخ والرمزين (طلبُ المالك v18.9.3191)، فلا حبّةَ رقمٍ في الترويسة. */
+    T("★★ dv: لا «خطاب صادر» — والصادرُ يحمل كتلةَ هويةٍ في الرأس: QR وباركودٌ ورقمٌ وتاريخ",
+      !/خطاب صادر/.test(P(L0)) && !/<div class="doc-no">/.test(P(L0)) &&
+      /<div class="tophead"><div class="idb"><div class="bcw">/.test(P(L0)) &&
+      /<div class="bcn">LTR-7001<\/div>/.test(P(L0)) &&
+      /<div class="idb-date"><span class="ml">التاريخ<\/span><span class="mv dv-num">2026-09-11<\/span>/.test(P(L0)));
+    T("★★ dv: والكتلةُ على الحافّة اليسرى فوق المتن — لا في الذيل",
+      P(L0).indexOf('class="tophead"') < P(L0).indexOf('class="to">') &&
+      /\.idb\{[^}]*margin-inline-start:auto[^}]*flex-direction:column[^}]*align-items:flex-end/.test(src) &&
+      !/<div class="ftr">[\s\S]*class="bcw"/.test(P(L0)));
+    T("★ dv: والنموذجُ يبقى برقمه في الترويسة (لا رمزَ له ولا تاريخ)",
+      /<div class="doc-no">TPL-1<\/div>/.test(P({ id:"TPL-1", kind:"template", title:"ن", body:"ن" })) &&
+      !/class="idb"/.test(P({ id:"TPL-1", kind:"template", title:"ن", body:"ن" })));
     T("★★ dv: والنموذجُ يبقى موسوماً «لا يُرسَل» (الوسمُ تحذيرٌ لا عنوانُ نوع)",
       /يُستنسَخ ولا يُرسَل/.test(P({ id:"TPL-1", kind:"template", title:"ن", body:"ن" })));
-    /* المرئيُّ مرّتان: الترويسةُ وسطرُ الباركود. والثالثةُ `aria-label` على الوسم —
+    /* المرئيُّ مرّةٌ واحدة: تحت الباركود في كتلة الهوية. و`aria-label` على الوسم
        وصفٌ للقارئ الآليّ لا حبرٌ على الورق، فلا تُعدّ تكراراً. */
-    T("★★ dv: ولا يُذكر الرقمُ إلا في الترويسة وتحت الباركود (لا ثالثةَ على الورق)",
-      (P(L0).match(/>LTR-7001</g) || []).length === 2,
+    T("★★ dv: ولا يُذكر الرقمُ على الورق إلا تحت الباركود (لا ثانيةَ تُقرأ إهمالاً)",
+      (P(L0).match(/>LTR-7001</g) || []).length === 1,
       String((P(L0).match(/>LTR-7001</g) || []).length));
 
     /* (٢) لقبا المخاطَبة والتشريف: افتراضٌ للقديم، واختيارٌ حرٌّ، وحذفٌ بالإفراغ */

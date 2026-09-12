@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3189";
+var MODULE_BUILD = "v18.9.3191";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -3141,6 +3141,15 @@ function _qrBlockHTML(l){
       + '<div class="qrn">امسح للتحقّق من الخطاب</div></div>';
   }catch(e){ return ""; }
 }
+/* كتلةُ هوية الخطاب الصادر: الرمزان في صفّ (QR ثمّ الباركود ورقمُه تحته) والتاريخُ
+   تحتهما — كتلةٌ واحدةٌ يقرؤها الماسحُ والعينُ معاً في موضعٍ واحد. */
+function _idBlockHTML(l){
+  return '<div class="idb">'
+    + '<div class="bcw">' + _qrBlockHTML(l) + '<div class="bcb">' + code128SVG(l.id || "")
+    + '<div class="bcn">' + _esc(l.id || "") + '</div></div></div>'
+    + '<div class="idb-date"><span class="ml">التاريخ</span><span class="mv dv-num">' + _esc(l.letterDate || "—") + '</span></div>'
+    + '</div>';
+}
 function _signBlockHTML(l, isTpl){
   var blank = '<div class="sign"><div class="sg">'
     + '<div class="sg-r"><span>الاسم</span><i></i></div>'
@@ -3179,25 +3188,34 @@ function letterPaperHTML(l){
      ولا نُنادي `_docHeadHTML` هنا حين تحضر الورقةُ الرسمية — دالّتُها تبني شريطاً
      بعنوانٍ ورقم، ونحن نريد الرقمَ وحدَه. وتبقى نداءً عند غياب الورقة، فترويستُها
      النصّيةُ تحمل الشعارَ واسمَ الشركة وهما لازمان حينها. */
-  var head = on
-    ? '<div class="dochead only-no"><div class="doc-no">' + _esc(l.id || "") + '</div></div>'
-    : ((ctr && ctr._docHeadHTML)
-        ? ctr._docHeadHTML({ on:false, logo:_printLogo(), docNo:l.id || "",
-                             subtitle:(isTpl ? "نموذج خطاب" : "") })
-        : '<div class="dochead only-no"><div class="doc-no">' + _esc(l.id || "") + '</div></div>');
+  /* طلبُ المالك (v18.9.3191): «الـQR والباركود ورقم الخطاب وتاريخ الخطاب مجتمعين
+     أعلى يسار الصفحة». فالصادرُ يحمل **كتلةَ هويةٍ** واحدةً في رأس الورقة على
+     حافّتها اليسرى: الرمزان في صفّ، والرقمُ تحت الباركود (عُرفُ المطبوعة المرقَّمة —
+     ماسحٌ يعطب ⇐ تبقى العين)، والتاريخُ تحتهما. ولا رقمَ في مكانٍ آخر من الورقة.
+     والنموذجُ يبقى برقمه في الترويسة كما كان — لا رمزَ له ولا تاريخ. */
+  var head;
+  if(isTpl){
+    head = on
+      ? '<div class="dochead only-no"><div class="doc-no">' + _esc(l.id || "") + '</div></div>'
+      : ((ctr && ctr._docHeadHTML)
+          ? ctr._docHeadHTML({ on:false, logo:_printLogo(), docNo:l.id || "", subtitle:"نموذج خطاب" })
+          : '<div class="dochead only-no"><div class="doc-no">' + _esc(l.id || "") + '</div></div>');
+  } else {
+    head = (!on && ctr && ctr._docHeadHTML
+              ? ctr._docHeadHTML({ on:false, logo:_printLogo(), docNo:"", subtitle:"" }) : "")
+         + '<div class="tophead">' + _idBlockHTML(l) + '</div>';
+  }
 
   var inner =
     head
     + (isTpl
         ? '<div class="band">نموذج — يُستنسَخ ولا يُرسَل. ما بين قوسين مربّعين يُملأ عند الاستعمال.</div>'
         : '')
-    /* الرقمُ لم يعد هنا — صار وحدَه في الترويسة، وذِكرُه مرّتين على ورقةٍ واحدة
-       تكرارٌ يُقرأ إهمالاً. */
-    + (isTpl ? '' : '<div class="meta">'
-          + '<div><span class="ml">التاريخ</span><span class="mv dv-num">' + _esc(l.letterDate || "—") + '</span></div>'
-            /* بلا `dv-num`: رقمُ الجهة نصٌّ حرٌّ قد يكون عربياً («أ ح/4471»)، وقلبُ
-               اتّجاهه يبعثر مقاطعَه. والرقمُ الداخليُّ وحدَه لاتينيٌّ مضمون. */
-          + (l.ref ? '<div><span class="ml">الرقم لدى الجهة</span><span class="mv">' + _esc(l.ref) + '</span></div>' : "")
+    /* الرقمُ والتاريخُ صارا في كتلة الهوية أعلى يسار الورقة؛ ولا يبقى هنا إلا
+       رقمُ الجهة إن وُجد. بلا `dv-num`: رقمُ الجهة نصٌّ حرٌّ قد يكون عربياً
+       («أ ح/4471»)، وقلبُ اتّجاهه يبعثر مقاطعَه. */
+    + ((isTpl || !l.ref) ? '' : '<div class="meta">'
+          + '<div><span class="ml">الرقم لدى الجهة</span><span class="mv">' + _esc(l.ref) + '</span></div>'
         + '</div>')
     + (isTpl ? "" : (function(){
         var pf = _orDef(l.prefix, DEF_PREFIX).trim();
@@ -3220,15 +3238,10 @@ function letterPaperHTML(l){
         var cl = _orDef(l.closing, DEF_CLOSING).trim();
         return cl ? '<div class="close">' + _esc(cl) + '</div>' : "";
       })()
-    /* ذيلُ الورقة صفٌّ واحد: الباركودُ في أوّله (يميناً) وكتلةُ التوقيع في آخره
-       (يساراً كما في ورق الشركة). ولو تُركا كتلتين متتاليتين لتزاحما على الحافّة
-       نفسِها أو تباعدا بفراغٍ لا معنى له. والباركودُ للصادر وحدَه. */
-    + '<div class="ftr">'
-      + (isTpl ? '<span></span>' :
-          '<div class="bcw">' + _qrBlockHTML(l) + '<div class="bcb">' + code128SVG(l.id || "")
-          + '<div class="bcn">' + _esc(l.id || "") + '</div></div></div>')
-      + _signBlockHTML(l, isTpl)
-    + '</div>'
+    /* ذيلُ الورقة: كتلةُ التوقيع في آخره (يساراً كما في ورق الشركة)، والعنصرُ
+       الفارغُ في أوّله يُبقي `space-between` يدفعها إلى حافّتها. والرمزان صعدا
+       إلى كتلة الهوية في الرأس (طلبُ المالك). */
+    + '<div class="ftr"><span></span>' + _signBlockHTML(l, isTpl) + '</div>'
     ;
 
   return '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'
@@ -3244,7 +3257,12 @@ function letterPaperHTML(l){
     + '.doc-no{background:#eef2f7;color:#1b3a6b;border-radius:8px;padding:8px 14px;font-weight:800;font-family:monospace;direction:ltr;unicode-bidi:isolate}'
     + '.band{margin-top:14px;border-radius:8px;padding:9px 13px;font-weight:800;font-size:12.5px;'
       + 'background:#fffbeb;border:2px solid #d97706;color:#92400e}'
-    + '.meta{display:flex;gap:26px;flex-wrap:wrap;margin-top:16px;font-size:12.5px}'
+    + '.meta{display:flex;gap:26px;flex-wrap:wrap;margin-top:10px;font-size:12.5px}'
+    /* كتلةُ الهوية: على الحافّة اليسرى (`margin-inline-start:auto` في صفحةٍ عربية)،
+       وعناصرُها تلتصق بالحافّة نفسِها (`align-items:flex-end` في عمودٍ RTL = اليسار). */
+    + '.tophead{display:flex;align-items:flex-start}'
+    + '.idb{margin-inline-start:auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px}'
+    + '.idb-date{font-size:12.5px;white-space:nowrap}'
     + '.ml{color:#64748b;font-weight:700;margin-left:7px}'
     + '.mv{font-weight:800}'
     + '.dv-num{font-family:monospace;direction:ltr;unicode-bidi:isolate}'
