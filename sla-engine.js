@@ -36,7 +36,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 (function(){
 
-const MODULE_BUILD = "v18.9.3164";
+const MODULE_BUILD = "v18.9.3166";
 
 /* ==SLA-MOVED-A-START== */
 const PRIORITIES = ["حرج 🔴 (2 ساعة)","عاجل 🟡 (8 ساعات)","عادي 🟢 (48 ساعة)","روتيني 🔵 (صيانة دورية)"];
@@ -268,6 +268,70 @@ function firstResponseStats(list){
            n: vals.length, d: all.length,
            coverage: all.length?Math.round(vals.length/all.length*100):null };
 }
+
+/* ═══════════ المؤشراتُ السبعة بنافذةٍ شهرية (v18.9zg) ═══════════
+   كانت تُحسب على كلّ البلاغات منذ أوّل يومٍ في العقد: 648 في المقام، والشهرُ يضيف
+   ~20 — **فأسوأُ شهرٍ في التاريخ يحرّك المؤشرَ أقلَّ من نقطة**، وبند 62 يخصم على
+   درجة **الشهر**. القاعدةُ من `docs/performance-kpi-model.md`: «ما استُحقّ في
+   الشهر مقابل ما أُنجز منه في الشهر».
+   • شهرُ البلاغ = شهرُ إنشائه (`archiveMonth` للمؤرشَف) — **التعريفُ نفسُه** الذي
+     تستعمله «المقارنةُ الشهرية» و`_accumTicket`، فلا يظهر رقمان لشهرٍ واحد.
+   • الوقائيُّ (KPI-05) بشهر **استحقاقه** `scheduledFor` لا إنشائه، ويُعدّ ملتزماً
+     إن أُغلق **قبل انقضاء شهر استحقاقه** — قاعدةٌ بلا رقمٍ مخترَع: لا «±7 أيام» لا
+     سندَ له في الكراسة. وما لا يحمل `scheduledFor` (ما قبل v18.9af) لا يدخل.
+   • المتأخّرة (KPI-07) **حالةٌ لحظيةٌ لا شهرية**: المتأخّرةُ ÷ **المفتوحةُ الآن**.
+     كان مقامُها كلَّ التاريخ فلا تهبط تحت 96٪ ولو تأخّر كلُّ مفتوح.
+   • `null` حيث لا مقام — لا صفرٌ ولا 100 تُقرأ إنجازاً. */
+function kpiMonthOf(t){
+  if(!t) return null;
+  if(t.archiveMonth) return t.archiveMonth;
+  if(!t.createdAt) return null;
+  const d=new Date(t.createdAt); return isFinite(+d)?_ym(d):null;
+}
+function ppmOnTimeInMonth(t, ym){
+  if(!t || t.status!=="مغلق" || !t.closedAt || !t.scheduledFor) return false;
+  const due=new Date(t.scheduledFor), done=new Date(t.closedAt);
+  if(!isFinite(+due)||!isFinite(+done)||_ym(due)!==ym) return false;
+  return done < new Date(due.getFullYear(), due.getMonth()+1, 1);   // قبل أوّل الشهر التالي
+}
+function kpiMonthStats(list, ym, opts){
+  opts=opts||{}; const targetH=opts.responseTargetH||8;
+  const all=(Array.isArray(list)?list:[]).filter(t=>t&&t.createdAt);
+  const inMonth=all.filter(t=>kpiMonthOf(t)===ym);
+  const closed=inMonth.filter(t=>t.status==="مغلق");
+  const corrective=inMonth.filter(t=>t.maintType!=="وقائية");
+  const preventive=inMonth.filter(t=>t.maintType==="وقائية");
+  const corrClosed=corrective.filter(t=>t.status==="مغلق").length;
+  const prevClosed=preventive.filter(t=>t.status==="مغلق").length;
+  const closedTix=closed.filter(t=>t.closedAt);
+  const hours=closedTix.map(_closeWorkH);
+  const avgCloseH=hours.length?hours.reduce((a,b)=>a+b,0)/hours.length:null;
+  const closedInSLA=closedTix.filter(_closedOnTime).length;
+  const closedWithinTarget=closedTix.filter(t=>_closeWorkH(t)<=targetH).length;
+  const reopenedClosed=closed.filter(t=>t.reopenCount>0).length;
+  const due=all.filter(t=>t.maintType==="وقائية" && t.scheduledFor && isFinite(+new Date(t.scheduledFor)) && _ym(new Date(t.scheduledFor))===ym);
+  const ppmOnTime=due.filter(t=>ppmOnTimeInMonth(t,ym)).length;
+  const pct=(a,b)=> b?Math.round(a/b*100):null;
+  return {
+    ym, n:inMonth.length, closed:closed.length,
+    corrective:corrective.length, corrClosed, preventive:preventive.length, prevClosed,
+    closedTix:closedTix.length, avgCloseH, closedInSLA, closedWithinTarget, reopenedClosed,
+    ppmDue:due.length, ppmOnTime,
+    rates:{
+      k01: pct(corrClosed, corrective.length),
+      k02: avgCloseH===null ? null : (avgCloseH<=0 ? 100 : Math.max(0,Math.min(100,Math.round(targetH/avgCloseH*100)))),
+      k03: pct(closedInSLA, closedTix.length),
+      k04: closed.length ? Math.round((1-reopenedClosed/closed.length)*100) : null,
+      k05: pct(ppmOnTime, due.length),
+      k06: pct(closed.length, inMonth.length)
+    }
+  };
+}
+function kpiLiveOverdue(list){
+  const open=(Array.isArray(list)?list:[]).filter(t=>t&&t.status!=="مغلق");
+  const overdue=open.filter(t=>isOverdue(t)).length;
+  return { open:open.length, overdue, pct: open.length ? Math.max(0,100-Math.round(overdue/open.length*100)) : 100 };
+}
 /* ==SLA-MOVED-B-END== */
 
 /* ــ عرضُ السطح العام ــ كلُّ اسمٍ كان عالمياً قبل النقل يبقى عالمياً بعده.
@@ -277,6 +341,6 @@ function firstResponseStats(list){
   for (var k in x) if (Object.prototype.hasOwnProperty.call(x,k)) window[k] = x[k];
   /* كائنُ الواجهة المسمّى — للقراءة المقصودة ولفحصِ البناء. */
   window.slaEngine = Object.assign({ build: MODULE_BUILD }, x);
-})({ PRIORITIES, getSLA, elapsedH, SLA_CONFIG, tierOf, priorityHead, priorityCanonical, prioritySame, slaBudgetLabel, priorityLabel, _ymd, _ym, _parseLocalDate, _isWorkingDay, workingMinutesBetween, calendarMinutesBetween, addWorkingMinutes, clockStopMinutes, slaStatus, slaOf, isOverdue, _elapsedHByTier, _closeWorkH, _closedOnTime, resolutionH, firstResponseH, firstResponseStats });
+})({ PRIORITIES, getSLA, elapsedH, SLA_CONFIG, tierOf, priorityHead, priorityCanonical, prioritySame, slaBudgetLabel, priorityLabel, _ymd, _ym, _parseLocalDate, _isWorkingDay, workingMinutesBetween, calendarMinutesBetween, addWorkingMinutes, clockStopMinutes, slaStatus, slaOf, isOverdue, _elapsedHByTier, _closeWorkH, _closedOnTime, resolutionH, firstResponseH, firstResponseStats, kpiMonthOf, ppmOnTimeInMonth, kpiMonthStats, kpiLiveOverdue });
 
 })();

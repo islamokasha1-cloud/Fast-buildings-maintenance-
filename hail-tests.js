@@ -790,7 +790,12 @@ function predelivery() {
        بطاقتا لوحةِ المؤشرات وسطرُ بطاقةِ التفاصيل — والحسابُ كلُّه في `sla-engine.js`
        (`firstResponseH` · `firstResponseStats`) دوالَّ نقيّةً يفحصها hail-tests بلا
        متصفّح. فالمنطقُ في الوحدة، وما هنا وسمُ عرضٍ لا يعيش في وحدة. */
-    const IDX_CEILING = 39895;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 39895 إلى 39922 — ‏٢٧ سطراً للنافذة الشهرية في `renderKPIData` (v18.9zg).
+       الحسابُ كلُّه في `sla-engine.js` (`kpiMonthStats` · `kpiLiveOverdue` — نقيّةٌ
+       يفحصها hail-tests بلا متصفّح)؛ وما هنا وسمُ عرضٍ داخل دالّةِ رسمٍ قائمة: تعليقُ
+       الشهر فوق الشبكة، وسهمُ الاتجاه، وصفوفُ «تراكمي» للسياق. إصلاحُ منطقٍ قائمٍ
+       في موضعه كما تُلزم CLAUDE.md، وأكثرُ الزيادة تعليقٌ يقول لِمَ سقط سهمُ المسافة. */
+    const IDX_CEILING = 39922;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -5478,18 +5483,72 @@ function auditRound2() {
     }
     //  أرقامُ البطاقتين تشتقّ نسبتَهما — لا رقمَ من مؤشّرٍ آخر
     T("★★ ze: KPI-02 يعرض «أُغلق خلال الهدف» لا بسطَ KPI-03 (538 المضلّل)",
-      HTML.includes('["أُغلق خلال الهدف",closedWithinTarget') &&
+      HTML.includes('["أُغلق خلال الهدف",cur.closedWithinTarget') &&
       !HTML.includes('["مغلق في الوقت",closedInSLA'));
     T("★ ze: وبسطُه من منطقه — _closeWorkH ضمن الهدف نفسِه",
       HTML.includes("closedTix.filter(t=>_closeWorkH(t)<=RESPONSE_TARGET_H).length"));
     T("★ ze: وتسميةُ الهدف تقول «ساعة عمل» (المقياسُ _closeWorkH لا ساعاتِ جدار)",
       HTML.includes('"≤ "+RESPONSE_TARGET_H+" ساعة عمل"'));
     T("★★ ze: مقامُ KPI-03 المعروضُ = المقامُ المحسوب (closedTix لا كلُّ المغلقة)",
-      HTML.includes('["إجمالي مغلقة",closedTix.length],["داخل SLA",closedInSLA') &&
-      HTML.includes("closedTix.length-closedInSLA") &&
+      HTML.includes('["مغلقة هذا الشهر",cur.closedTix],["داخل SLA",cur.closedInSLA') &&
+      HTML.includes("cur.closedTix-cur.closedInSLA") &&
       !HTML.includes('["تجاوز SLA",closed-closedInSLA'));
     T("★ ze: ومقامُ KPI-02 المعروضُ مثلُه (المتوسطُ يُحسب على closedTix)",
-      HTML.includes('["بلاغات مغلقة",closedTix.length]'));
+      HTML.includes('name:"مؤشر زمن الاستجابة للإغلاق",pct:cur.rates.k02') && HTML.includes('["مغلقة هذا الشهر",cur.closedTix]'));
+  }
+
+  // ── v18.9zg — المؤشراتُ السبعة بنافذةٍ شهرية ───────────────────────────────
+  //  كانت تراكميةً منذ أوّل بلاغ (648 في المقام، والشهرُ يضيف ~20) — فأسوأُ شهرٍ يحرّك
+  //  المؤشرَ أقلَّ من نقطة، وبند 62 يخصم على الشهر. وسهمُ ▲/▼ كان `pct−target` — مسافةً
+  //  عن الهدف تلبس زيَّ الاتجاه. وKPI-07 مقامُه كلُّ التاريخ فلا يهبط تحت 96٪ أبداً.
+  {
+    const _S = HTML.indexOf("const SLA_CONFIG = {");
+    const _E = HTML.indexOf("function fmtH(h){", _S);
+    let K = null;
+    try { K = new Function(HTML.slice(_S, _E) + "\nreturn {kpiMonthStats,kpiLiveOverdue,ppmOnTimeInMonth,kpiMonthOf};")(); }
+    catch (e) { T("تُبنى دوالُّ النافذة الشهرية", false, String(e.message).slice(0, 120)); }
+    if (K) {
+      const P = "عادي 🟢 (48 ساعة)";
+      const L = [
+        { priority: P, status: "مغلق", createdAt: "2026-09-02T08:00:00", closedAt: "2026-09-02T12:00:00", maintType: "تصحيحية" },
+        { priority: P, status: "مغلق", createdAt: "2026-09-03T08:00:00", closedAt: "2026-09-09T12:00:00", maintType: "تصحيحية", reopenCount: 1 },
+        { priority: P, status: "مفتوح", createdAt: "2026-09-04T08:00:00", maintType: "تصحيحية" },
+        { priority: P, status: "مغلق", createdAt: "2026-08-20T08:00:00", closedAt: "2026-09-05T12:00:00", maintType: "وقائية", scheduledFor: "2026-09-01" },
+        { priority: P, status: "مغلق", createdAt: "2026-08-25T08:00:00", closedAt: "2026-10-02T12:00:00", maintType: "وقائية", scheduledFor: "2026-09-15" },
+        { priority: P, status: "مفتوح", createdAt: "2026-09-06T08:00:00", maintType: "وقائية", scheduledFor: "2026-09-20" },
+        { priority: P, status: "مغلق", createdAt: "2026-09-07T08:00:00", closedAt: "2026-09-07T09:00:00", maintType: "تصحيحية", archiveMonth: "2024-01" },
+      ];
+      const m = K.kpiMonthStats(L, "2026-09");
+      T("★★ zg: النافذةُ بشهر الإنشاء — المؤرشَفُ يتبع archiveMonth لا createdAt (تعريفُ المقارنة الشهرية نفسُه)",
+        m.n === 4 && K.kpiMonthOf(L[6]) === "2024-01");
+      T("★★ zg: KPI-05 بشهر الاستحقاق (scheduledFor) لا الإنشاء — 3 مستحقّةٌ في سبتمبر وإن أُنشئت في أغسطس",
+        m.ppmDue === 3);
+      T("★★ zg: والملتزمُ ما أُغلق قبل انقضاء شهر استحقاقه — المُغلقُ في أكتوبر لا يُحسب (بلا رقمٍ مخترَع)",
+        m.ppmOnTime === 1 && K.ppmOnTimeInMonth(L[4], "2026-09") === false && K.ppmOnTimeInMonth(L[3], "2026-09") === true);
+      T("zg: النسبُ الشهرية من المقام الشهريّ (تصحيحية 2/3 · SLA 1/2 · إعادةُ فتح 1/2 · إنجاز 2/4)",
+        m.rates.k01 === 67 && m.rates.k03 === 50 && m.rates.k04 === 50 && m.rates.k06 === 50);
+      T("★★ zg: شهرٌ بلا بلاغاتٍ ⇐ null في كلّ مؤشّر — لا صفرٌ يُقرأ كارثةً ولا 100 تُقرأ إنجازاً",
+        Object.values(K.kpiMonthStats(L, "2026-07").rates).every(v => v === null));
+      T("★ zg: قائمةٌ فارغةٌ أو غيرُ مصفوفةٍ لا تُسقط الحساب",
+        K.kpiMonthStats([], "2026-09").n === 0 && K.kpiMonthStats(null, "2026-09").rates.k06 === null);
+      const lv = K.kpiLiveOverdue(L);
+      T("★★ zg: KPI-07 مقامُه المفتوحةُ الآن لا كلُّ التاريخ — مفتوحان متأخّران ⇐ 0٪ (كان يبقى ≥96٪)",
+        lv.open === 2 && lv.overdue === 2 && lv.pct === 0);
+      T("zg: ولا مفتوحَ ⇐ 100 (لا عملَ معلّقاً فلا متأخّر)", K.kpiLiveOverdue([L[0]]).pct === 100);
+    }
+    //  حرّاسُ المصدر
+    T("★★ zg: السهمُ اتجاهٌ حقيقيٌّ (هذا الشهر − الماضي) لا مسافةً عن الهدف",
+      HTML.includes("const d=(k.pct==null||k.prev==null)?null:k.pct-k.prev;") && !HTML.includes("const gap=k.pct-k.target;"));
+    T("★★ zg: KPI-07 من kpiLiveOverdue — وزال مقامُ كلِّ التاريخ",
+      HTML.includes("pct:live.pct,prev:null,live:true") && !HTML.includes("overdue/Math.max(total,1)"));
+    T("★ zg: KPI-05 صار «الالتزامَ بخطة الوقائية» على المستحقّ لا الإغلاقَ التراكميّ",
+      HTML.includes('name:"مؤشر الالتزام بخطة الوقائية",pct:cur.rates.k05') && HTML.includes('["مستحقّة هذا الشهر",cur.ppmDue]'));
+    T("★ zg: التراكميُّ بقي للسياق صفّاً أخيراً في البطاقة لا رقماً كبيراً",
+      /const cum=\(v\)=>\["تراكمي منذ البداية"/.test(HTML) && (HTML.match(/cum\((corrRate|responseScore|slaRate|qualRate|closeRate)\)/g) || []).length === 5);
+    T("★ zg: تعليقُ الشهر فوق الشبكة يُسمّي شهرَ القياس وشهرَ المقارنة",
+      HTML.includes("شهرُ القياس:") && HTML.includes("السهمُ مقارنةً بـ"));
+    T("zg: «لا بيانات» تُرسَم رماديةً و«—» لا حمراءَ ولا 0%",
+      HTML.includes('if(pct==null) return "#94a3b8";') && HTML.includes('const P=v=>v==null?"—":v+"%";') && HTML.includes("لا بياناتٍ هذا الشهر"));
   }
 
   // ── v18.9zf — فصلُ زمن الاستجابة عن زمن الإصلاح ─────────────────────────────
