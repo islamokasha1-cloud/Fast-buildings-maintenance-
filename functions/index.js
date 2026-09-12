@@ -23,6 +23,7 @@ const { sendTemplate } = require("./lib/whatsapp");
 const { routePurchase } = require("./lib/purchases");
 const { routeHrPayment } = require("./lib/hr-payments");
 const { routeContractDoc } = require("./lib/contracts");
+const { runExtractReminders } = require("./lib/extract-reminders");
 const { makeHandler: makeExternalApiHandler } = require("./lib/external-api");
 
 admin.initializeApp();
@@ -232,6 +233,19 @@ exports.externalApi = onRequest(
       getApiKey: () => EXTERNAL_API_KEY.value(),
       purchasesCollection: cfg.PURCHASES_COLLECTION,
     })(req, res)
+);
+
+/* ═══════════ تذكيرُ المستخلصات الدورية — خزانةُ الوثائق (exsRemind) ═══════════
+   الزمنُ هو الحدث هنا لا كتابةٌ في مستند، فالمصدرُ `onSchedule` يدور كلَّ صباحٍ
+   بتوقيت الرياض ويسأل الجداولَ الفعّالة «أيُّ موعدٍ تذكيرُه مستحقٌّ اليوم؟» ثمّ
+   يُدرج لمسؤوليه رسالةً في `wa_outbox` يلتقطها `waSender`. **بلا سرٍّ هنا**: الإدراجُ
+   وحدَه، والتوكنُ عند المُرسِل. المنطقُ كلُّه في `lib/extract-reminders.js` (دوالُّ نقيّةٌ
+   يفحصها hail-tests ويطابقها بحساب الواجهة)، وهنا الحقنُ وحده. */
+exports.exsRemind = onSchedule(
+  { schedule: cfg.EXS.schedule, timeZone: cfg.EXS.timeZone },
+  async () => {
+    await runExtractReminders({ db, logger, isEnabled });
+  }
 );
 
 /* ═══════════════════════ المُرسِل (waSender) ═══════════════════════ */

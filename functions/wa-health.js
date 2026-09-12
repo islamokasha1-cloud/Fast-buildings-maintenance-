@@ -118,6 +118,7 @@ function checkFunctions(env) {
     ["سداد الموارد البشرية", ["hrpRouteCreate", "hrpRouteUpdate"]],
     ["التعاقدات", ["crqRouteCreate", "crqRouteUpdate", "extRouteCreate", "extRouteUpdate",
                    "chgRouteCreate", "chgRouteUpdate", "ctrRouteCreate", "ctrRouteUpdate"]],
+    ["تذكير المستخلصات الدورية", ["exsRemind"]],
   ];
   for (const [group, fns] of need) {
     const missing = fns.filter((f) => !state.has(f));
