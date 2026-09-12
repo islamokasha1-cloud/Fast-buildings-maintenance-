@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3184";
+var MODULE_BUILD = "v18.9.3185";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1788,6 +1788,8 @@ function injectCSS(){
 ".dv-act{background:var(--surface2);border:1px solid var(--primary);border-radius:12px;padding:12px 14px;margin-bottom:12px}",
 ".dv-act-h{font-size:13px;font-weight:800;margin-bottom:8px}",
 ".dv-log-tbl td,.dv-log-tbl th{font-size:11.5px}",
+".dv-age{font-weight:800}",
+".dv-age.t-crit{color:var(--danger)}",
 ".dv-log-back td{background:rgba(160,96,16,.06)}",
 ".dv-log-rej td{background:rgba(185,44,44,.06)}",
 /* ── لوحةُ الجهات ── */
@@ -3384,6 +3386,10 @@ function _aprTableHTML(list, today, curProj, emptyNote, mode){
   var rows = list.map(function(a){
     var fin = aprIsFinancial(a.docType), v = aprVariance(a);
     var sd = flow ? aprStageDays(a, today) : null;
+    /* عمودان لزمنين مختلفين (طلبُ المالك): «في المحطة» = منذ دخل محطتَه الحالية،
+       و«منذ التقديم» = العمرُ الكامل منذ قُدِّم — وهو ما يُسأل عنه في اجتماع
+       المتابعة، ويتلوّن بسلّم الانتظار (٣٠ تذكيرٌ · ٦٠ مطالبة). */
+    var dw = flow ? aprDaysWaiting(a, today) : null, dwb = aprAgeBand(dw);
     return '<tr class="dv-row-act" onclick="docVault.openApr(\'' + _jq(a.id) + '\')">'
       + '<td class="dv-num t-name">' + _esc(a.id) + '</td>'
       + '<td class="t-name">' + _esc(a.title || "—") + _projSubHTML(a, curProj) + '</td>'
@@ -3396,13 +3402,14 @@ function _aprTableHTML(list, today, curProj, emptyNote, mode){
               : '<td class="dv-num">' + (fin ? _money(a.amountApproved) : '<span class="dv-none">—</span>') + '</td>'
                 + '<td class="dv-num">' + (v ? '<span class="t-warn">' + _money(v) + '</span>' : '<span class="dv-none">—</span>') + '</td>')
       + '<td>' + _aprChip(a, today) + '</td>'
-      + (flow ? '<td class="dv-num t-dim">' + (sd === null ? "—" : sd) + '</td>' : "")
+      + (flow ? '<td class="dv-num t-dim">' + (sd === null ? "—" : sd) + '</td>'
+              + '<td class="dv-num dv-age' + (dwb === "crit" ? " t-crit" : (dwb === "warn" ? " t-warn" : "")) + '">' + (dw === null ? "—" : dw) + '</td>' : "")
       + '<td class="t-dim">' + ((a.files || []).length ? _icon("paperclip", "ic-sm") : "—") + '</td>'
       + '</tr>';
   }).join("");
   return '<div class="dv-wrap"><table class="dv-tbl dv-ap-tbl' + (flow ? " dv-flow-tbl" : "") + '"><thead><tr>'
     + '<th>الرقم</th><th>المستند</th><th>النوع</th><th>الجهة</th><th>التقديم</th>'
-    + (flow ? '<th>المقدَّم</th><th>المحطة</th><th>منذ</th>'
+    + (flow ? '<th>المقدَّم</th><th>المحطة</th><th title="أيامٌ منذ دخل محطتَه الحالية">في المحطة</th><th title="أيامٌ منذ تاريخ التقديم">منذ التقديم</th>'
             : '<th>الاعتماد</th><th>المقدَّم</th><th>المعتمد</th><th>الفارق</th><th>الحالة</th>')
     + '<th>نسخة</th>'
     + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
