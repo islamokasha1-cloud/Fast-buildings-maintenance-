@@ -36,7 +36,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 (function(){
 
-const MODULE_BUILD = "v18.9.3172";
+const MODULE_BUILD = "v18.9.3174";
 
 /* ==SLA-MOVED-A-START== */
 const PRIORITIES = ["حرج 🔴 (2 ساعة)","عاجل 🟡 (8 ساعات)","عادي 🟢 (48 ساعة)","روتيني 🔵 (صيانة دورية)"];
@@ -206,7 +206,7 @@ function slaStatus(tierName,createdAt,now,cfg,stops){ cfg=cfg||SLA_CONFIG; now=n
     remainingMin:Math.round(remaining), pct:Math.min(100,Math.round(elapsed/budget*100)), dueAt,
     stoppedMin:Math.round(stopped), paused:Array.isArray(stops)&&stops.some(s=>s&&s.from&&!s.to) }; }
 /* الحالة الكاملة لبلاغ (أو null لو مُستبعَد كـروتيني) */
-function slaOf(t){ if(!t||!t.createdAt) return null; return slaStatus(tierOf(t.priority), new Date(t.createdAt), null, null, t.clockStops); }
+function slaOf(t){ if(!t||!t.createdAt) return null; return slaStatus(tierOf(t.priority), kpiClockStart(t), null, null, t.clockStops); }
 
 function isOverdue(t){ if(t.status==="مغلق") return false; const st=slaOf(t); return st?st.state==="تجاوز":false; }
 // حساب زمن الاستجابة: للبلاغات المغلقة = الفرق بين وقت الإغلاق ووقت الفتح، للمفتوحة = الوقت حتى الآن
@@ -223,7 +223,7 @@ function _elapsedHByTier(priority,from,to,stops){
 // مدة إغلاق بلاغ مغلق حسب تقويم مستواه (تُستخدم في متوسطات التقارير)
 function _closeWorkH(t){
   if(!t||!t.createdAt||!t.closedAt) return 0;
-  return _elapsedHByTier(t.priority,new Date(t.createdAt),new Date(t.closedAt),t.clockStops);
+  return _elapsedHByTier(t.priority,kpiClockStart(t),new Date(t.closedAt),t.clockStops);
 }
 // أُغلق ضمن مهلته؟ — ساعات العمل للإغلاق (_closeWorkH) ضمن ميزانية فئته
 // (SLA_CONFIG.budgetMin)، وهو نفس أساس isOverdue. مواضع الالتزام كانت تقارن ساعات
@@ -251,13 +251,14 @@ function _closedOnTime(t){
 function resolutionH(t){
   if(!t||!t.createdAt) return 0;
   const to=(t.status==="مغلق" && t.closedAt)?new Date(t.closedAt):new Date();
-  return _elapsedHByTier(t.priority,new Date(t.createdAt),to,t.clockStops);
+  return _elapsedHByTier(t.priority,kpiClockStart(t),to,t.clockStops);
 }
 function firstResponseH(t){
   if(!t||!t.createdAt||!t.respondedAt) return null;
-  const from=new Date(t.createdAt), to=new Date(t.respondedAt);
-  if(!isFinite(+from)||!isFinite(+to)||to<from) return null;   // طابعٌ فاسدٌ لا يُقاس
-  return _elapsedHByTier(t.priority,from,to,t.clockStops);
+  const c=new Date(t.createdAt), to=new Date(t.respondedAt);
+  if(!isFinite(+c)||!isFinite(+to)||to<c) return null;   // طابعٌ فاسدٌ (قبل التسجيل) لا يُقاس
+  // وصولٌ قبل الاستحقاق = صفر لا null: الفنّيُّ سبق موعدَه، والقياسُ يبدأ منه
+  return _elapsedHByTier(t.priority,kpiClockStart(t),to,t.clockStops);
 }
 /* متوسّطُ زمن الاستجابة مع تغطيتِه — لا يُفصلان: الرقمُ بلا مقامِه يُقرأ خطأً.
    `avg` = null متى لم يُسجَّل وصولٌ واحد، فلا يُعرَض صفرٌ كإنجاز. */
@@ -294,6 +295,22 @@ function firstResponseStats(list){
 function isPreventiveTicket(t){
   if(!t) return false;
   return t.maintType==="وقائية" || priorityHead(t.priority)==="روتيني";
+}
+/* ═══════════ بدايةُ الساعة (v18.9zk — قرارُ المالك) ═══════════
+   الوقائيُّ لا يكون «متأخّراً» قبل أن يحلّ موعدُه. كانت ساعتُه تبدأ من **توليد** بلاغه —
+   وقبل 09/09 كان التوليدُ يسبق الاستحقاقَ بثلاثة أيام — فبلاغٌ أُغلق في يومه (مثل
+   `PPM-2026-0032`: وُلّد 2 سبتمبر، استحقاقُه 5، أُغلق 5) يُقرأ **80 ساعةً** فيتجاوز
+   الـ48 في KPI-03 والـ8 في KPI-02 ويرفع المتوسط. الآن: بدايةُ الساعة = **الأحدثُ من
+   (التوليد، الاستحقاقِ عند بدء الدوام)**. والتصحيحيُّ بلا `scheduledFor` لا يُمسّ.
+   وكلُّ ما يقيس زمناً يقرأ من هنا: `slaOf` · `_closeWorkH` · `resolutionH` ·
+   `firstResponseH` — فلا يبقى بلاغٌ يُقاس من نقطتين. والاستحقاقُ تاريخٌ بلا ساعة
+   (`YYYY-MM-DD`) فيُحلَّل محلياً (`_parseLocalDate`) لا UTC. */
+function kpiClockStart(t){
+  const c=new Date(t&&t.createdAt);
+  if(!t||!isPreventiveTicket(t)||!t.scheduledFor||!isFinite(+c)) return c;
+  const d=_parseLocalDate(t.scheduledFor); if(!isFinite(+d)) return c;
+  const due=new Date(d.getFullYear(),d.getMonth(),d.getDate(),Math.floor(SLA_CONFIG.workStartMin/60),SLA_CONFIG.workStartMin%60,0);
+  return due>c?due:c;
 }
 function kpiMonthOf(t){
   if(!t) return null;
@@ -367,6 +384,6 @@ function kpiLiveOverdue(list){
   for (var k in x) if (Object.prototype.hasOwnProperty.call(x,k)) window[k] = x[k];
   /* كائنُ الواجهة المسمّى — للقراءة المقصودة ولفحصِ البناء. */
   window.slaEngine = Object.assign({ build: MODULE_BUILD }, x);
-})({ PRIORITIES, getSLA, elapsedH, SLA_CONFIG, tierOf, priorityHead, priorityCanonical, prioritySame, slaBudgetLabel, priorityLabel, _ymd, _ym, _parseLocalDate, _isWorkingDay, workingMinutesBetween, calendarMinutesBetween, addWorkingMinutes, clockStopMinutes, slaStatus, slaOf, isOverdue, _elapsedHByTier, _closeWorkH, _closedOnTime, resolutionH, firstResponseH, firstResponseStats, isPreventiveTicket, kpiMonthOf, ppmOnTimeInMonth, kpiMonthStats, kpiLiveOverdue });
+})({ PRIORITIES, getSLA, elapsedH, SLA_CONFIG, tierOf, priorityHead, priorityCanonical, prioritySame, slaBudgetLabel, priorityLabel, _ymd, _ym, _parseLocalDate, _isWorkingDay, workingMinutesBetween, calendarMinutesBetween, addWorkingMinutes, clockStopMinutes, slaStatus, slaOf, isOverdue, _elapsedHByTier, _closeWorkH, _closedOnTime, resolutionH, firstResponseH, firstResponseStats, isPreventiveTicket, kpiClockStart, kpiMonthOf, ppmOnTimeInMonth, kpiMonthStats, kpiLiveOverdue });
 
 })();

@@ -5481,6 +5481,48 @@ function auditRound2() {
       HTML.includes('name:"مؤشر سرعة الإغلاق (خلال "+RESPONSE_TARGET_H+" ساعات عمل)",pct:cur.rates.k02') && HTML.includes('["مغلقة هذا الشهر",cur.closedTix]'));
   }
 
+  // ── v18.9zk — ساعةُ الوقائيّ تبدأ من استحقاقه لا من توليده ─────────────────
+  //  قرارُ المالك. PPM-2026-0032: وُلّد 2 سبتمبر 07:19، استحقاقُه 5، أُغلق 5 الساعة
+  //  14:59 — في يومه — وكان يُقرأ ~80 ساعةً (روتيني بلا فئة ⇐ تقويميّ) فيتجاوز 48 و8.
+  {
+    const _S = HTML.indexOf("const SLA_CONFIG = {");
+    const _E = HTML.indexOf("function fmtH(h){", _S);
+    let K = null;
+    try { K = new Function(HTML.slice(_S, _E) + "\nreturn {kpiClockStart,_closeWorkH,_closedOnTime,firstResponseH,slaOf,kpiMonthStats};")(); }
+    catch (e) { T("تُبنى دوالُّ zk", false, String(e.message).slice(0, 120)); }
+    if (K) {
+      const R = "روتيني 🔵 (صيانة دورية)", N = "عادي 🟢 (48 ساعة)";
+      const ppm32 = { priority: R, status: "مغلق", createdAt: "2026-09-02T07:19:00", scheduledFor: "2026-09-05", closedAt: "2026-09-05T14:59:00" };
+      const cs = K.kpiClockStart(ppm32);
+      T("★★ zk: بدايةُ ساعة الوقائيّ = استحقاقُه عند بدء الدوام (5 سبتمبر 08:00) لا توليدُه",
+        cs.getDate() === 5 && cs.getMonth() === 8 && cs.getHours() === 8 && cs.getMinutes() === 0);
+      T("★★ zk: PPM-2026-0032 يُقرأ ~7 ساعاتٍ لا ~80 — داخل الـ8 والـ48",
+        Math.abs(K._closeWorkH(ppm32) - 6.98) < 0.05 && K._closedOnTime(ppm32) === true);
+      T("★ zk: التصحيحيُّ لا يُمسّ — بدايتُه توليدُه",
+        +K.kpiClockStart({ priority: N, maintType: "تصحيحية", createdAt: "2026-09-02T07:19:00", scheduledFor: "2026-09-05" }) === +new Date("2026-09-02T07:19:00"));
+      T("zk: وقائيٌّ بلا scheduledFor — بدايتُه توليدُه (ما قبل v18.9af)",
+        +K.kpiClockStart({ priority: R, createdAt: "2026-09-02T07:19:00" }) === +new Date("2026-09-02T07:19:00"));
+      T("zk: وقائيٌّ وُلّد بعد استحقاقه (متأخّرُ التوليد) — بدايتُه توليدُه لا الماضي",
+        +K.kpiClockStart({ priority: R, createdAt: "2026-09-07T10:00:00", scheduledFor: "2026-09-05" }) === +new Date("2026-09-07T10:00:00"));
+      T("★ zk: الإنجازُ قبل الموعد = صفرُ ساعةٍ (لا سالب) ⇐ ملتزم",
+        K._closeWorkH({ priority: R, status: "مغلق", createdAt: "2026-09-02T07:19:00", scheduledFor: "2026-09-05", closedAt: "2026-09-03T10:00:00" }) === 0);
+      T("★ zk: وصولُ الفنّيّ قبل الاستحقاق = صفر لا null؛ وقبل التسجيل = null (فاسد)",
+        K.firstResponseH({ priority: R, createdAt: "2026-09-02T07:19:00", scheduledFor: "2026-09-05", respondedAt: "2026-09-04T09:00:00" }) === 0 &&
+        K.firstResponseH({ priority: R, createdAt: "2026-09-02T07:19:00", scheduledFor: "2026-09-05", respondedAt: "2026-09-01T09:00:00" }) === null);
+      T("★ zk: وقائيٌّ «عادي» مفتوحٌ قبل موعده لا يُقرأ متأخّراً (slaOf من الاستحقاق)",
+        (() => { const far = new Date(Date.now() + 10 * 86400e3); const ymd = far.getFullYear() + "-" + String(far.getMonth() + 1).padStart(2, "0") + "-" + String(far.getDate()).padStart(2, "0");
+                 const st = K.slaOf({ priority: N, maintType: "وقائية", status: "مفتوح", createdAt: new Date(Date.now() - 5 * 86400e3).toISOString(), scheduledFor: ymd });
+                 return st && st.state === "داخل الوقت" && st.elapsedMin === 0; })());
+      T("zk: الاستحقاقُ تاريخاً فقط يُحلَّل محلياً — لا ينزلق يوماً بالمنطقة الزمنية",
+        K.kpiClockStart({ priority: R, createdAt: "2026-09-01T00:00:00", scheduledFor: "2026-09-05" }).getDate() === 5);
+    }
+    T("★★ zk: الدوالُّ الأربعُ تقرأ بدايةَ الساعة من مصدرٍ واحد",
+      (HTML.match(/kpiClockStart\(t\)/g) || []).length >= 4 &&
+      !/_elapsedHByTier\(t\.priority,new Date\(t\.createdAt\)/.test(HTML));
+    T("★★ zk: التجميعُ المحفوظُ يُعاد بالصيغة الجديدة (ROLLUP_FV = 3) — وإلا ظهر أغسطسُ بالقديمة بجوار سبتمبر بالجديدة",
+      HTML.includes("const ROLLUP_FV=3;"));
+  }
+
   // ── v18.9zi — روتيني = وقائيٌّ في كلّ المؤشرات، والوقائيُّ خارج مؤشّرات المهلة ──
   //  قرارُ المالك. بلاغٌ وقائيٌّ وُلّد قبل موعده بثلاثة أيامٍ وأُغلق في موعده كان
   //  «تجاوز SLA» في KPI-03 و«أبطأ من الهدف» في KPI-02 — ولم يتأخّر عن شيء. و«روتيني»
@@ -5506,8 +5548,8 @@ function auditRound2() {
       ];
       const m = K.kpiMonthStats(L, "2026-09");
       // zj — قرارُ المالك: الوقائيُّ يبقى في مؤشّرات المهلة كما كان؛ المصنِّفُ للفصل وحسب
-      T("★★ zj: الوقائيُّ يدخل KPI-02/03 كما كان (المغلقتان كلتاهما في المقام)",
-        m.closedTix === 2 && m.closedWithinTarget === 1 && m.rates.k02 === 50);
+      T("★★ zj: الوقائيُّ يدخل KPI-02/03 كما كان (المغلقتان كلتاهما في المقام) — ومن استحقاقه (zk) فكلتاهما داخل الهدف",
+        m.closedTix === 2 && m.closedWithinTarget === 2 && m.rates.k02 === 100);
       T("★★ zi: ويُحسب في KPI-05 حيث موضعُه — مستحقّان في سبتمبر، أُنجز واحدٌ في شهره",
         m.ppmDue === 2 && m.ppmOnTime === 1 && m.rates.k05 === 50);
       T("★ zi: «روتيني» وقائيٌّ في KPI-01 لا تصحيحيّ (تصحيحيان لا أربعة)",
@@ -5617,8 +5659,8 @@ function auditRound2() {
       T("★ zg: قائمةٌ فارغةٌ أو غيرُ مصفوفةٍ لا تُسقط الحساب",
         K.kpiMonthStats([], "2026-09").n === 0 && K.kpiMonthStats(null, "2026-09").rates.k06 === null);
       const lv = K.kpiLiveOverdue(L);
-      T("★★ zg: KPI-07 مقامُه المفتوحةُ الآن لا كلُّ التاريخ — مفتوحان متأخّران ⇐ 0٪ (كان يبقى ≥96٪)",
-        lv.open === 2 && lv.overdue === 2 && lv.pct === 0);
+      T("★★ zg: KPI-07 مقامُه المفتوحةُ الآن لا كلُّ التاريخ — مفتوحان، المتأخّرُ التصحيحيُّ وحدَه (الوقائيُّ قبل استحقاقه ليس متأخّراً — zk) ⇐ 50٪",
+        lv.open === 2 && lv.overdue === 1 && lv.pct === 50);
       T("zg: ولا مفتوحَ ⇐ 100 (لا عملَ معلّقاً فلا متأخّر)", K.kpiLiveOverdue([L[0]]).pct === 100);
     }
     //  حرّاسُ المصدر
@@ -5770,7 +5812,7 @@ function auditRound2() {
   //  عودةَ الوعدِ بلا وفاء: تُشغّل المحرّكَ الحقيقيَّ من index.html بلا متصفّح.
   {
     const _A = HTML.indexOf("const SLA_CONFIG = {");
-    const _B = HTML.indexOf("function resolutionH(t){", _A);
+    const _B = HTML.indexOf("function fmtH(h){", _A);   // الكتلةُ كاملةً — kpiClockStart بعد resolutionH (zk)
     if (_A < 0 || _B < 0) { T("كتلةُ محرّك SLA قابلةٌ للاستخراج", false); }
     else {
       let E = null;
@@ -5830,11 +5872,11 @@ function auditRound2() {
       }
     }
     // حرّاسُ المصدر: المسارات الثلاثة تمرّر clockStops — لا يكفي أن تقبلها الدالّة
-    T("★ zc: slaOf تمرّر clockStops إلى slaStatus",
-      /function slaOf\(t\)\{[^}]*slaStatus\(tierOf\(t\.priority\),\s*new Date\(t\.createdAt\),\s*null,\s*null,\s*t\.clockStops\)/.test(HTML));
-    T("★ zc: _closeWorkH و resolutionH تمرّران clockStops",
-      HTML.includes("_elapsedHByTier(t.priority,new Date(t.createdAt),new Date(t.closedAt),t.clockStops)") &&
-      HTML.includes("_elapsedHByTier(t.priority,new Date(t.createdAt),to,t.clockStops)"));
+    T("★ zc: slaOf تمرّر clockStops إلى slaStatus (ومن بداية الساعة الموحَّدة — zk)",
+      /function slaOf\(t\)\{[^}]*slaStatus\(tierOf\(t\.priority\),\s*kpiClockStart\(t\),\s*null,\s*null,\s*t\.clockStops\)/.test(HTML));
+    T("★ zc: _closeWorkH و resolutionH تمرّران clockStops (ومن بداية الساعة الموحَّدة — zk)",
+      HTML.includes("_elapsedHByTier(t.priority,kpiClockStart(t),new Date(t.closedAt),t.clockStops)") &&
+      HTML.includes("_elapsedHByTier(t.priority,kpiClockStart(t),to,t.clockStops)"));
     T("★ zc: وعدُ الواجهة قائمٌ ومسنودٌ بالكود (تُستبعَد ⇐ خصمٌ فعليّ)",
       HTML.includes("تُستبعَد من") && HTML.includes("function clockStopMinutes(stops,from,to,useWork,cfg){"));
   }
@@ -5845,7 +5887,7 @@ function auditRound2() {
   //  الأوّلَ (حرج) لبلاغٍ لا يطابق، فيُرفَع بصمتٍ عند أيّ حفظ.
   {
     const _A = HTML.indexOf("const PRIORITIES = [");
-    const _B = HTML.indexOf("function resolutionH(t){", _A);
+    const _B = HTML.indexOf("function fmtH(h){", _A);   // الكتلةُ كاملةً — kpiClockStart بعد resolutionH (zk)
     if (_A < 0 || _B < 0) { T("كتلةُ الأولوية قابلةٌ للاستخراج", false); }
     else {
       let P = null;
