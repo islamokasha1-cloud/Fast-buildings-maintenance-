@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3188";
+var MODULE_BUILD = "v18.9.3191";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -92,6 +92,7 @@ function DOCS_COLL(){ return _dev() ? "global_docs_dev"   : "global_docs"; }
 function LTRS_COLL(){ return _dev() ? "global_letters_dev" : "global_letters"; }
 function DOCS_CTR(){  return _dev() ? "meta/global_docs_counter_dev"    : "meta/global_docs_counter"; }
 function LTRS_CTR(){  return _dev() ? "meta/global_letters_counter_dev" : "meta/global_letters_counter"; }
+function VERIFY_COLL(){ return _dev() ? "letter_verify_dev" : "letter_verify"; }
 
 function _esc(v){ try{ return (typeof esc === "function") ? esc(v) : String(v == null ? "" : v); }
                   catch(e){ return String(v == null ? "" : v); } }
@@ -1002,6 +1003,60 @@ function cloneLetter(src, at){
   };
   if(l.fromTemplate) out.fromTemplate = String(l.fromTemplate);
   return out;
+}
+
+/* ════════ التحقّقُ من الخطاب الصادر — رمزُ QR يحمل رابطاً ════════
+   طلبُ المالك بعد سؤاله «ما الفائدة من الباركود؟»: الباركودُ يحمل الرقمَ والرقمُ
+   لا يُثبت شيئاً. فالصادرُ يحمل إلى جانبه رمزَ QR برابطِ صفحةِ تحقّقٍ عامة
+   (`verify.html`) تقول: صادرٌ فعلاً برقم كذا بتاريخ كذا إلى جهة كذا وموقّعُه فلان.
+
+   ── لماذا رمزٌ عشوائيٌّ لا رقمُ الخطاب ──
+   رقمُ الخطاب **تسلسليّ** (`LTR-2609-0009`): مَن يعرف واحداً يعدّ ما قبلَه وما
+   بعدَه ويسحب سجلَّ مراسلات الشركة كلَّه من صفحةٍ عامة. فالرابطُ يحمل **رمزاً
+   عشوائياً** (٢٠ محرفاً من أبجدية ٣٢ ≈ ١٠٠ بت) لا يُخمَّن ولا يُعَدّ، والصفحةُ
+   تقرأ **بالرمز وحدَه** (`get`)، ولا `list` على المجموعة لأحد.
+
+   ── ولماذا مجموعةٌ عامةٌ منفصلة (`letter_verify`) لا قراءةٌ من `global_letters` ──
+   فتحُ `global_letters` للعموم يكشف المتنَ والمرفقاتِ ورقمَ الجهة — وهي ما قرّرنا
+   في `v18.9.3148` تضييقَ قراءته على قائمة مأذونين. فالمجموعةُ العامة **نسخةٌ
+   مقتضبةٌ** بخمسة حقولٍ لا تكشف شيئاً لا يقرؤه مستلمُ الورقة أصلاً: الرقمُ
+   والتاريخُ والجهةُ والموضوعُ والموقّع. تُكتب مع كلّ حفظٍ للصادر وتُحذف مع حذفه.
+   والرمزُ يُصدَر **مرّةً** ويبقى: طباعةُ الخطاب ثانيةً بعد عامٍ تحمل الرابطَ نفسَه. */
+var VERIFY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";   // بلا I·O·0·1 المتشابهة
+function newVerifyToken(){
+  var n = 20, out = "", buf = null;
+  try{ if(typeof crypto !== "undefined" && crypto.getRandomValues){ buf = new Uint8Array(n); crypto.getRandomValues(buf); } }catch(e){ buf = null; }
+  for(var i = 0; i < n; i++){
+    var r = buf ? buf[i] % 32 : Math.floor(Math.random() * 32);
+    out += VERIFY_ALPHABET.charAt(r);
+  }
+  return out;
+}
+function isVerifyToken(t){ return /^[A-HJ-NP-Z2-9]{20}$/.test(String(t || "")); }
+/* الأساسُ من موضع الصفحة نفسِها: `verify.html` يجاور `index.html` على المضيف
+   نفسِه (GitHub Pages) — فلا نطاقَ يُكتب بيدٍ ويُنسى عند نقل الاستضافة. */
+function verifyBase(){
+  try{
+    var h = String(location.href || "").split("#")[0].split("?")[0];
+    return h.replace(/[^\/]*$/, "") + "verify.html";
+  }catch(e){ return "verify.html"; }
+}
+function verifyUrl(base, token, dev){
+  return String(base || "") + "?t=" + encodeURIComponent(String(token || "")) + (dev ? "&d=1" : "");
+}
+/* النسخةُ العامة المقتضبة — **بلا متنٍ ولا مرفقاتٍ ولا رقمِ الجهة ولا مشروع**.
+   حقولُها هي ما يقرؤه حاملُ الورقة بعينه، فلا تكشف الصفحةُ العامةُ شيئاً جديداً. */
+function verifyRecord(l, at){
+  var x = l || {};
+  return {
+    letterId:   String(x.id || ""),
+    letterDate: String(x.letterDate || ""),
+    party:      String(x.party || ""),
+    subject:    String(x.subject || ""),
+    signName:   String(x.signName || ""),
+    signTitle:  String(x.signTitle || ""),
+    updatedAt:  String(at || "")
+  };
 }
 function filterLetters(list, f){
   var q    = String((f && f.q) || "").trim().toLowerCase();
@@ -2622,6 +2677,11 @@ function _letterCardHTML(l){
                     + (l.ref ? row("الرقم لدى الجهة", '<span class="dv-num">' + _esc(l.ref) + '</span>') : ""))
       + row("الموضوع", _esc(l.subject || "—"))
       + (isTpl ? "" : row("المشروع", _projChipHTML(l)))
+      + (!isTpl && isVerifyToken(l.verifyToken) ? row("رابط التحقّق", (function(){
+            var u = verifyUrl(verifyBase(), l.verifyToken, _dev());
+            return '<a href="' + _esc(u) + '" target="_blank" rel="noopener" class="dv-num" style="font-size:12px;word-break:break-all">' + _esc(u) + '</a>'
+              + ' <span class="dv-none">— يحمله رمزُ QR على المطبوعة</span>';
+          })()) : "")
       + (!isTpl && l.copiedFrom ? row("نُسخ من", letterById(l.copiedFrom)
             ? '<a href="#" class="dv-num" onclick="docVault.openLetter(\'' + _jq(l.copiedFrom) + '\');return false">' + _esc(l.copiedFrom) + '</a>'
             : '<span class="dv-num t-dim">' + _esc(l.copiedFrom) + '</span> <span class="dv-none">(حُذف الأصل)</span>') : "")
@@ -3068,6 +3128,28 @@ function _bodyHTML(text){
    ── والختمُ فوق التوقيع بتراكبٍ مقصود ──
    كما يُختَم الورقُ فعلاً: الختمُ يقع على التوقيع لا بجانبه. و`z-index` يضعه
    فوقه، وشفافيةُ الـPNG هي ما يُبقي التوقيعَ مقروءاً تحته. */
+/* رمزُ QR للصادر الذي له رمزُ تحقّق. يُرسَم بـ`window.qrCode` إن حضر، ويغيب بصمتٍ
+   إن لم يحضر أو لم يكن للخطاب رمز — ويبقى الباركودُ والرقمُ كما كانا. */
+function _qrBlockHTML(l){
+  if(!l || !isVerifyToken(l.verifyToken)) return "";
+  var qr = null;
+  try{ qr = (typeof window !== "undefined" && window.qrCode) ? window.qrCode : null; }catch(e){ qr = null; }
+  if(!qr || typeof qr.svg !== "function") return "";
+  var url = verifyUrl(verifyBase(), l.verifyToken, _dev());
+  try{
+    return '<div class="qrb">' + qr.svg(url, { ecl:"M", quiet:1 })
+      + '<div class="qrn">امسح للتحقّق من الخطاب</div></div>';
+  }catch(e){ return ""; }
+}
+/* كتلةُ هوية الخطاب الصادر: الرمزان في صفّ (QR ثمّ الباركود ورقمُه تحته) والتاريخُ
+   تحتهما — كتلةٌ واحدةٌ يقرؤها الماسحُ والعينُ معاً في موضعٍ واحد. */
+function _idBlockHTML(l){
+  return '<div class="idb">'
+    + '<div class="bcw">' + _qrBlockHTML(l) + '<div class="bcb">' + code128SVG(l.id || "")
+    + '<div class="bcn">' + _esc(l.id || "") + '</div></div></div>'
+    + '<div class="idb-date"><span class="ml">التاريخ</span><span class="mv dv-num">' + _esc(l.letterDate || "—") + '</span></div>'
+    + '</div>';
+}
 function _signBlockHTML(l, isTpl){
   var blank = '<div class="sign"><div class="sg">'
     + '<div class="sg-r"><span>الاسم</span><i></i></div>'
@@ -3106,25 +3188,34 @@ function letterPaperHTML(l){
      ولا نُنادي `_docHeadHTML` هنا حين تحضر الورقةُ الرسمية — دالّتُها تبني شريطاً
      بعنوانٍ ورقم، ونحن نريد الرقمَ وحدَه. وتبقى نداءً عند غياب الورقة، فترويستُها
      النصّيةُ تحمل الشعارَ واسمَ الشركة وهما لازمان حينها. */
-  var head = on
-    ? '<div class="dochead only-no"><div class="doc-no">' + _esc(l.id || "") + '</div></div>'
-    : ((ctr && ctr._docHeadHTML)
-        ? ctr._docHeadHTML({ on:false, logo:_printLogo(), docNo:l.id || "",
-                             subtitle:(isTpl ? "نموذج خطاب" : "") })
-        : '<div class="dochead only-no"><div class="doc-no">' + _esc(l.id || "") + '</div></div>');
+  /* طلبُ المالك (v18.9.3191): «الـQR والباركود ورقم الخطاب وتاريخ الخطاب مجتمعين
+     أعلى يسار الصفحة». فالصادرُ يحمل **كتلةَ هويةٍ** واحدةً في رأس الورقة على
+     حافّتها اليسرى: الرمزان في صفّ، والرقمُ تحت الباركود (عُرفُ المطبوعة المرقَّمة —
+     ماسحٌ يعطب ⇐ تبقى العين)، والتاريخُ تحتهما. ولا رقمَ في مكانٍ آخر من الورقة.
+     والنموذجُ يبقى برقمه في الترويسة كما كان — لا رمزَ له ولا تاريخ. */
+  var head;
+  if(isTpl){
+    head = on
+      ? '<div class="dochead only-no"><div class="doc-no">' + _esc(l.id || "") + '</div></div>'
+      : ((ctr && ctr._docHeadHTML)
+          ? ctr._docHeadHTML({ on:false, logo:_printLogo(), docNo:l.id || "", subtitle:"نموذج خطاب" })
+          : '<div class="dochead only-no"><div class="doc-no">' + _esc(l.id || "") + '</div></div>');
+  } else {
+    head = (!on && ctr && ctr._docHeadHTML
+              ? ctr._docHeadHTML({ on:false, logo:_printLogo(), docNo:"", subtitle:"" }) : "")
+         + '<div class="tophead">' + _idBlockHTML(l) + '</div>';
+  }
 
   var inner =
     head
     + (isTpl
         ? '<div class="band">نموذج — يُستنسَخ ولا يُرسَل. ما بين قوسين مربّعين يُملأ عند الاستعمال.</div>'
         : '')
-    /* الرقمُ لم يعد هنا — صار وحدَه في الترويسة، وذِكرُه مرّتين على ورقةٍ واحدة
-       تكرارٌ يُقرأ إهمالاً. */
-    + (isTpl ? '' : '<div class="meta">'
-          + '<div><span class="ml">التاريخ</span><span class="mv dv-num">' + _esc(l.letterDate || "—") + '</span></div>'
-            /* بلا `dv-num`: رقمُ الجهة نصٌّ حرٌّ قد يكون عربياً («أ ح/4471»)، وقلبُ
-               اتّجاهه يبعثر مقاطعَه. والرقمُ الداخليُّ وحدَه لاتينيٌّ مضمون. */
-          + (l.ref ? '<div><span class="ml">الرقم لدى الجهة</span><span class="mv">' + _esc(l.ref) + '</span></div>' : "")
+    /* الرقمُ والتاريخُ صارا في كتلة الهوية أعلى يسار الورقة؛ ولا يبقى هنا إلا
+       رقمُ الجهة إن وُجد. بلا `dv-num`: رقمُ الجهة نصٌّ حرٌّ قد يكون عربياً
+       («أ ح/4471»)، وقلبُ اتّجاهه يبعثر مقاطعَه. */
+    + ((isTpl || !l.ref) ? '' : '<div class="meta">'
+          + '<div><span class="ml">الرقم لدى الجهة</span><span class="mv">' + _esc(l.ref) + '</span></div>'
         + '</div>')
     + (isTpl ? "" : (function(){
         var pf = _orDef(l.prefix, DEF_PREFIX).trim();
@@ -3147,15 +3238,10 @@ function letterPaperHTML(l){
         var cl = _orDef(l.closing, DEF_CLOSING).trim();
         return cl ? '<div class="close">' + _esc(cl) + '</div>' : "";
       })()
-    /* ذيلُ الورقة صفٌّ واحد: الباركودُ في أوّله (يميناً) وكتلةُ التوقيع في آخره
-       (يساراً كما في ورق الشركة). ولو تُركا كتلتين متتاليتين لتزاحما على الحافّة
-       نفسِها أو تباعدا بفراغٍ لا معنى له. والباركودُ للصادر وحدَه. */
-    + '<div class="ftr">'
-      + (isTpl ? '<span></span>' :
-          '<div class="bcw"><div class="bcb">' + code128SVG(l.id || "")
-          + '<div class="bcn">' + _esc(l.id || "") + '</div></div></div>')
-      + _signBlockHTML(l, isTpl)
-    + '</div>'
+    /* ذيلُ الورقة: كتلةُ التوقيع في آخره (يساراً كما في ورق الشركة)، والعنصرُ
+       الفارغُ في أوّله يُبقي `space-between` يدفعها إلى حافّتها. والرمزان صعدا
+       إلى كتلة الهوية في الرأس (طلبُ المالك). */
+    + '<div class="ftr"><span></span>' + _signBlockHTML(l, isTpl) + '</div>'
     ;
 
   return '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'
@@ -3171,7 +3257,12 @@ function letterPaperHTML(l){
     + '.doc-no{background:#eef2f7;color:#1b3a6b;border-radius:8px;padding:8px 14px;font-weight:800;font-family:monospace;direction:ltr;unicode-bidi:isolate}'
     + '.band{margin-top:14px;border-radius:8px;padding:9px 13px;font-weight:800;font-size:12.5px;'
       + 'background:#fffbeb;border:2px solid #d97706;color:#92400e}'
-    + '.meta{display:flex;gap:26px;flex-wrap:wrap;margin-top:16px;font-size:12.5px}'
+    + '.meta{display:flex;gap:26px;flex-wrap:wrap;margin-top:10px;font-size:12.5px}'
+    /* كتلةُ الهوية: على الحافّة اليسرى (`margin-inline-start:auto` في صفحةٍ عربية)،
+       وعناصرُها تلتصق بالحافّة نفسِها (`align-items:flex-end` في عمودٍ RTL = اليسار). */
+    + '.tophead{display:flex;align-items:flex-start}'
+    + '.idb{margin-inline-start:auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px}'
+    + '.idb-date{font-size:12.5px;white-space:nowrap}'
     + '.ml{color:#64748b;font-weight:700;margin-left:7px}'
     + '.mv{font-weight:800}'
     + '.dv-num{font-family:monospace;direction:ltr;unicode-bidi:isolate}'
@@ -3217,10 +3308,15 @@ function letterPaperHTML(l){
     + '.sgn-im{position:relative;height:28mm;margin-top:-3mm}'
     + '.sgn-sig{position:absolute;right:12%;top:0;height:16mm;object-fit:contain;z-index:1}'
     + '.sgn-stp{position:absolute;left:6%;top:4mm;height:23mm;object-fit:contain;z-index:2}'
-    + '.bcw{direction:ltr;display:flex;justify-content:flex-start}'
+    + '.bcw{direction:ltr;display:flex;justify-content:flex-start;align-items:flex-end;gap:10px}'
     + '.bcb{display:inline-block;text-align:center}'
     + '.bc{display:block}'
     + '.bcn{font-size:11px;letter-spacing:1.6px;color:#374151;margin-top:2px;font-family:monospace}'
+    /* رمزُ التحقّق: ٢٢مم كافيةٌ لكاميرا الجوّال على ورقٍ عاديّ (إصدارٌ ٦ ≈ ٤١
+       وحدة ⇒ ٠٫٥مم للوحدة)، وأصغرُ من ذلك يفشل على طابعةٍ مكتبيةٍ عادية. */
+    + '.qrb{display:flex;flex-direction:column;align-items:center;gap:2px}'
+    + '.qrb svg{width:22mm;height:22mm;display:block}'
+    + '.qrn{font-size:9.5px;color:#374151;direction:rtl;white-space:nowrap}'
     + '@media print{body{padding:14px}@page{margin:14mm}}'
     + (on && ctr._letterheadCSS ? ctr._letterheadCSS() : "")
     + '</style></head><body>'
@@ -3241,9 +3337,40 @@ function letterPaperHTML(l){
     + '</body></html>';
 }
 
+/* كتابةُ النسخة العامة للصادر (تُنادَى بعد كلّ حفظٍ وعند إصدار الرمز لخطابٍ قديم).
+   حذفُ الحقول الحسّاسة ليس هنا بل في `verifyRecord` — فهي التي تُفحص. */
+function _syncVerify(l, at){
+  var d = _db();
+  if(!d || !l || l.kind === "template" || !isVerifyToken(l.verifyToken)) return Promise.resolve(false);
+  return d.collection(VERIFY_COLL()).doc(l.verifyToken).set(verifyRecord(l, at || new Date().toISOString()))
+    .then(function(){ return true; });
+}
+/* خطابٌ صادرٌ حُفظ قبل هذا الإصدار بلا رمز: يُصدَر له رمزٌ **عند أوّل طباعة**
+   ويُثبَّت على الخطاب فلا يتبدّل. ومَن لا يملك الكتابةَ يطبع بلا QR (بالباركود)
+   بدل أن تُمنع الطباعة. */
+function _ensureVerifyToken(l){
+  if(!l || l.kind === "template" || isVerifyToken(l.verifyToken)) return Promise.resolve(l);
+  var d = _db();
+  if(!d || !canEdit()) return Promise.resolve(l);
+  var token = newVerifyToken(), now = new Date().toISOString();
+  var withTok = {}; Object.keys(l).forEach(function(k){ withTok[k] = l[k]; }); withTok.verifyToken = token;
+  return d.collection(LTRS_COLL()).doc(l.id).set({ verifyToken:token, updatedAt:now }, { merge:true })
+    .then(function(){ return _syncVerify(withTok, now); })
+    .then(function(){ return withTok; })
+    .catch(function(e){ _toast("⚠ تعذّر إصدار رمز التحقّق — طُبع بالباركود وحدَه", "warn"); return l; });
+}
 function printLetter(id){
   var l = letterById(id);
   if(!l){ _toast("⚠ لم يعد هذا الخطاب موجوداً","warn"); return false; }
+  if(l.kind !== "template" && !isVerifyToken(l.verifyToken)){
+    /* أوّلُ طباعةٍ لخطابٍ قديم: النافذةُ تُفتح بعد وعد — فتُفتح من نداء المستخدم
+       المباشر قدر الإمكان: نُصدر الرمزَ ثمّ نعاود النداء نفسَه بالنسخة الموسومة. */
+    _ensureVerifyToken(l).then(function(l2){ _printLetterNow(l2); });
+    return true;
+  }
+  return _printLetterNow(l);
+}
+function _printLetterNow(l){
   var html = letterPaperHTML(l);
   try{
     if(typeof _openPrintWindow === "function") _openPrintWindow(html);
@@ -4292,6 +4419,7 @@ function editLetter(id){
              signId:l.signId||"", signName:l.signName||"", signTitle:l.signTitle||"",
              prefix:_orDef(l.prefix, DEF_PREFIX), honorific:_orDef(l.honorific, DEF_HONORIFIC),
              closing:_orDef(l.closing, DEF_CLOSING),
+             verifyToken:String(l.verifyToken || ""),
              files:Array.isArray(l.files) ? l.files.slice() : [] };
   var _pl2 = _projDraft(l); Object.keys(_pl2).forEach(function(k){ _ledit[k] = _pl2[k]; });
   renderLetters(); _top();
@@ -4373,6 +4501,9 @@ function saveLetter(){
   body.projectName = _pb.projectName; body.isCustomProject = _pb.isCustomProject;
   if(_ledit.fromTemplate) body.fromTemplate = _ledit.fromTemplate;
   if(_ledit.copiedFrom)   body.copiedFrom   = _ledit.copiedFrom;
+  /* الصادرُ يحمل رمزَ تحقّقٍ منذ حفظه الأوّل ويحتفظ به عبر التعديلات. والنموذجُ
+     لا رمزَ له — لا يُرسَل ولا يُتحقَّق منه. */
+  if(body.kind !== "template") body.verifyToken = isVerifyToken(_ledit.verifyToken) ? _ledit.verifyToken : newVerifyToken();
   var was = _ledit.id;
   var p = was
     ? d.collection(LTRS_COLL()).doc(was).set(body, { merge:true }).then(function(){ return was; })
@@ -4381,6 +4512,8 @@ function saveLetter(){
         return d.collection(LTRS_COLL()).doc(id).set(body).then(function(){ return id; });
       });
   p.then(function(id){
+    var pub = {}; Object.keys(body).forEach(function(k){ pub[k] = body[k]; }); pub.id = id;
+    _syncVerify(pub, now).catch(function(e){ _toast("⚠ حُفظ الخطاب لكن تعذّر تحديث صفحة التحقّق: " + String((e && e.message) || e), "warn"); });
     _audit(was ? "تعديل خطاب في الخزانة" : "إضافة خطاب إلى الخزانة", id + " — " + body.title);
     _letterMode("open"); _lview.open = id; renderLetters(); _top();
     _toast(was ? "✅ حُفظ التعديل" : "✅ حُفظ في الخزانة برقم " + id, "success");
@@ -4397,6 +4530,8 @@ function delLetter(id){
       if(!ok) return;
       var d = _db(); if(!d) return;
       d.collection(LTRS_COLL()).doc(id).delete().then(function(){
+        /* صفحةُ التحقّق لا تُبقي «صادرٌ فعلاً» لخطابٍ حُذف. */
+        if(isVerifyToken(l.verifyToken)) d.collection(VERIFY_COLL()).doc(l.verifyToken).delete().catch(function(){});
         _audit("حذف خطاب من الخزانة", id + " — " + (l.title || ""));
         _letterMode("list"); renderLetters(); _toast("✅ حُذف الخطاب", "success");
       }).catch(function(e){ _toast("⚠ تعذّر الحذف: " + String((e && e.message) || e), "warn"); });
@@ -4946,6 +5081,8 @@ window.docVault = {
   typeLabel:typeLabel, ownerLabel:ownerLabel,
   code128SVG:code128SVG, _code128Bits:code128Bits, _code128Sanitize:code128Sanitize,
   filterDocs:filterDocs, sortDocs:sortDocs, cloneTemplate:cloneTemplate, cloneLetter:cloneLetter, filterLetters:filterLetters,
+  newVerifyToken:newVerifyToken, isVerifyToken:isVerifyToken, verifyUrl:verifyUrl, verifyBase:verifyBase,
+  verifyRecord:verifyRecord, VERIFY_COLL:VERIFY_COLL,
   _DOC_TYPES:DOC_TYPES, _LEVELS:LEVELS, _PERM_KEY:PERM_KEY,
   _PAGE_DOCS:PAGE_DOCS, _PAGE_LETTERS:PAGE_LETTERS, _PAGE_FILE:PAGE_FILE,
   _PAGES:PAGES, _HORIZON_MONTHS:HORIZON_MONTHS,

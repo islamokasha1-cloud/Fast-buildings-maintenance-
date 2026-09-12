@@ -46,7 +46,8 @@ service cloud.firestore {
     function vaultColl(coll) {
       return coll in ['global_docs', 'global_docs_dev', 'global_letters', 'global_letters_dev',
                       'global_approvals', 'global_approvals_dev',
-                      'vault_parties', 'vault_parties_dev'];
+                      'vault_parties', 'vault_parties_dev',
+                      'letter_verify', 'letter_verify_dev'];
     }
     function ctrLocked(coll) {
       return coll in [
@@ -603,6 +604,25 @@ service cloud.firestore {
       allow read:         if vaultReadOk();
       allow create, update: if vaultWriteOk();
       allow delete:       if isAdmin();
+    }
+    /* ═══════════ صفحةُ التحقّق من الخطاب الصادر (`verify.html`) ═══════════
+       نسخةٌ عامةٌ **مقتضبة** لكلّ خطابٍ صادر (رقمٌ · تاريخٌ · جهةٌ · موضوعٌ · موقّع)
+       معرّفُها رمزٌ عشوائيٌّ من ٢٠ محرفاً يحمله QR المطبوعة. تُقرأ **بالرمز وحدَه**:
+       `get` لكلّ مُصادَق — والصفحةُ تدخل مجهولةً كتطبيق الفنيين — **ولا `list`
+       لأحد**: مَن لا يملك الرمزَ لا يرى شيئاً، ومَن يملكه يرى ما بيده ورقاً.
+       والكتابةُ بدور الخزانة نفسِه، والحذفُ للأدمن كالخطاب. **ولا يُفتح `list`
+       للأدمن حتى**: لا شاشةَ تحتاجه، وبابٌ لا يُستعمل بابٌ يُنسى. */
+    match /letter_verify/{token} {
+      allow get:            if isSignedIn() && token.matches('[A-HJ-NP-Z2-9]{20}');
+      allow list:           if false;
+      allow create, update: if vaultWriteOk() && token.matches('[A-HJ-NP-Z2-9]{20}');
+      allow delete:         if isAdmin();
+    }
+    match /letter_verify_dev/{token} {
+      allow get:            if isSignedIn() && token.matches('[A-HJ-NP-Z2-9]{20}');
+      allow list:           if false;
+      allow create, update: if vaultWriteOk() && token.matches('[A-HJ-NP-Z2-9]{20}');
+      allow delete:         if isAdmin();
     }
     /* سجلُّ المعتمدات — ما قدّمناه للعميل: مستخلصاتٌ ومطالبات. اتجاهٌ معاكسٌ
        لمستخلصات `global_contract_extracts` (تلك من المقاول إلينا)، فلا تداخُل.

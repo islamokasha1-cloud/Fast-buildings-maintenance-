@@ -31,6 +31,8 @@ on:
       - 'staff-tasks.js'
       - 'project-hub.js'
       - 'doc-vault.js'
+      - 'qr-code.js'
+      - 'verify.html'
       - 'hail-tests.js'
       - 'global-surface-check.mjs'
       - 'css-surface-check.mjs'

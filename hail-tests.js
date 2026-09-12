@@ -802,7 +802,9 @@ function predelivery() {
     /* رُفع من 39937 إلى 39944 — ‏7 أسطر: حاويةُ رسم المقارنة الشهرية وسطرُ استدعائها
        ووسمُ الوحدة (v18.9zl). الرسمُ كلُّه في `kpi-trend-chart.js` — وما هنا مواضعُ
        لا تعيش في وحدة: وسمُ <script> وحاويةٌ في الصفحة وسطرٌ في `renderKPI`. */
-    const IDX_CEILING = 39944;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 39944 إلى 39946 — سطران لا يعيشان في وحدة: وسمُ `qr-code.js` وسطرُ
+       تسجيلها في كاشف الوحدات القديمة. المُرمِّزُ كلُّه في ملفّه. */
+    const IDX_CEILING = 39946;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -18027,6 +18029,90 @@ function poCountGuards() {
    (٣) **المفتاحُ المانح**: `docVault` لو قُرئ باصطلاح الحاجب لانفتحت خزانةُ وثائق
        الشركة لكلّ مستخدمٍ قائمٍ بأثرٍ رجعيّ.
    ════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════
+   ★★ مُرمِّزُ QR (`qr-code.js`) — الصحّةُ تُثبَت بفكّ الترميز
+   جداولُ التصحيح (١٦٠ صفّاً) لا تُراجَع بالعين: يُرمَّز نصٌّ بكلّ مستوىً على
+   عيّنةٍ من الإصدارات ثمّ **يُفكّ بقارئٍ مستقلّ** (`jsqr`). وحارسٌ ثانٍ يطابق
+   مجموعَ الجدول بعدد الوحدات الحرّة في الهندسة — مصدران مستقلّان للرقم نفسِه.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function qrCodeGuards() {
+  H("مُرمِّز QR");
+  const QP = path.resolve(path.dirname(IDX), "qr-code.js");
+  if (!fs.existsSync(QP)) { T("qr-code.js موجود", false, QP); return; }
+  const src = fs.readFileSync(QP, "utf8");
+  const vm = require("vm");
+  try { new vm.Script(src); T("صياغة qr-code.js سليمة", true); }
+  catch (e) { T("صياغة qr-code.js سليمة", false, String(e.message).slice(0, 120)); return; }
+  const sb = { window: {}, console }; vm.createContext(sb);
+  try { vm.runInContext(src, sb); } catch (e) { T("تُحمَّل qrCode", false, String(e.message).slice(0, 120)); return; }
+  const Q = sb.window.qrCode;
+  T("★ qrCode تُحمَّل بلا DOM وتعرّض encode/svg", !!Q && typeof Q.encode === "function" && typeof Q.svg === "function");
+  if (!Q) return;
+  T("★ الوسمُ في index.html يسبق doc-vault.js (يحضر عند أوّل طباعة)",
+    HTML.indexOf('<script src="qr-code.js?v=') > 0 && HTML.indexOf('<script src="qr-code.js?v=') < HTML.indexOf('<script src="doc-vault.js?v='));
+
+  /* (١) الجدولُ والهندسةُ يتّفقان على عدد الرموز في كلّ إصدارٍ ومستوى */
+  const bad = [];
+  for (let v = 1; v <= 40; v++) { const free = Math.floor(Q.freeModules(v) / 8);
+    for (let e = 0; e < 4; e++) if (Q.totalCodewords(v, e) !== free) bad.push(`v${v}/${e}: ${Q.totalCodewords(v, e)}≠${free}`); }
+  T("★★★ جدولُ التصحيح يطابق هندسةَ المصفوفة في الإصدارات الأربعين × المستويات الأربعة", bad.length === 0, bad.slice(0, 5).join(" · "));
+  T("★ مراكزُ المحاذاة متساويةُ الخطوة في كلّ إصدار (v23: 30·54·78·102 — وجدولُ jsqr يخطئ فيه بـ74)",
+    (() => { for (let v = 2; v <= 40; v++) { const m = Q.encode("x", { minVersion: v }); if (m.version !== v) return false; } return true; })());
+
+  /* (٢) فكُّ الترميز بقارئٍ مستقلّ — عيّنةٌ تغطّي الأحجامَ الثلاثةَ لعدّاد الطول (١–٩ · ١٠–٢٦ · ٢٧–٤٠) */
+  let jsQR = null; try { jsQR = require("jsqr"); } catch (e) {}
+  T("jsqr متاحٌ لفكّ الترميز (npm install)", !!jsQR);
+  if (jsQR) {
+    const img = (q, sc, qz) => { const n = q.size, full = (n + 2 * qz) * sc; const data = new Uint8ClampedArray(full * full * 4).fill(255);
+      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.get(r, c)) for (let y = 0; y < sc; y++) for (let x = 0; x < sc; x++) {
+        const px = ((r + qz) * sc + y) * full + ((c + qz) * sc + x); data[px * 4] = data[px * 4 + 1] = data[px * 4 + 2] = 0; }
+      return { data, width: full, height: full }; };
+    const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_/?=:.";
+    const VERS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 17, 20, 26, 27, 30, 34, 40];
+    const fails = [];
+    for (const v of VERS) for (const e of ["L", "M", "Q", "H"]) {
+      if (v === 23 && e === "L") continue;   // جدولُ محاذاة jsqr خاطئٌ في v23 — لا يُقرأ عندها بمستوى L
+      const cap = Q.dataCapacity(v, { L: 0, M: 1, Q: 2, H: 3 }[e]) - (v <= 9 ? 2 : 3);
+      let s = ""; for (let i = 0; i < cap; i++) s += alpha[(i * 7 + v + e.charCodeAt(0)) % alpha.length];
+      const q = Q.encode(s, { ecl: e });
+      if (q.version !== v) { fails.push(`v${v}${e}: اختير v${q.version}`); continue; }
+      const im = img(q, 3, 4); const d = jsQR(im.data, im.width, im.height);
+      if (!d || d.data !== s) fails.push(`v${v}${e}: ${d ? "نصٌّ مختلف" : "لم يُقرأ"}`);
+    }
+    T(`★★★ ${VERS.length * 4} رمزاً بأقصى سعتها تُقرأ كلُّها بقارئٍ مستقلّ وتُعيد النصَّ حرفياً`, fails.length === 0, fails.slice(0, 6).join(" · "));
+    const ar = Q.encode("خطاب رقم LTR-2609-0009 — للتحقّق", { ecl: "M" }); const ia = img(ar, 4, 4);
+    const da = jsQR(ia.data, ia.width, ia.height);
+    T("★★ والعربيةُ تُرمَّز UTF-8 وتُقرأ حرفياً", !!da && da.data === "خطاب رقم LTR-2609-0009 — للتحقّق", da ? da.data : "null");
+    const url = "https://islamokasha1-cloud.github.io/Fast-buildings-maintenance-/verify.html?t=ABCDEFGHJKLMNPQRSTUV";
+    const qu = Q.encode(url, { ecl: "M" });
+    T("★ رابطُ التحقّق الحقيقيّ يسع إصداراً صغيراً (≤ 7 ⇒ ≤ 45 وحدة — يُقرأ من ٢٢مم)", qu.version <= 7, "v" + qu.version);
+  }
+  const sv = Q.svg("LTR-1", { ecl: "M", quiet: 2 });
+  T("★ svg: عنصرٌ واحدٌ بمسارٍ واحدٍ وviewBox يشمل الهامشَ الهادئ", /^<svg xmlns=/.test(sv) && /viewBox="0 0 25 25"/.test(sv) && (sv.match(/<path /g) || []).length === 1);
+  let threw = false; try { Q.encode("x".repeat(3000)); } catch (e) { threw = true; }
+  T("★ نصٌّ فوق سعة الإصدار 40 يرمي خطأً صريحاً لا رمزاً صامتاً", threw);
+
+  /* (٣) صفحةُ التحقّق العامة */
+  const VP = path.resolve(path.dirname(IDX), "verify.html");
+  T("★ verify.html موجودة تجاور index.html", fs.existsSync(VP));
+  if (fs.existsSync(VP)) {
+    const vh = fs.readFileSync(VP, "utf8");
+    const pid = (HTML.match(/projectId:\s*"([^"]+)"/) || [])[1];
+    T("★★ تقرأ من letter_verify بالرمز وحدَه (get لمستندٍ واحد — لا استعلامَ مجموعة)",
+      /doc\(token\)\.get\(\)/.test(vh) && !/\.where\(|\.limit\(|\.orderBy\(|collection\([^)]*\)\.get\(/.test(vh));
+    T("★★ وتتحقّق من شكل الرمز قبل أيّ نداء", /TOKEN_RE = \/\^\[A-HJ-NP-Z2-9\]\{20\}\$\//.test(vh));
+    T("★ ومشروعُ Firebase نفسُه ومفتاحُ App Check نفسُه (لا نسختان تتباعدان)",
+      !!pid && vh.includes('projectId: "' + pid + '"') && vh.includes(HTML.match(/RECAPTCHA_SITE_KEY = "([^"]+)"/)[1]));
+    T("★ وتدخل مجهولةً — لا حسابَ ولا كلمةَ سرّ", /signInAnonymously/.test(vh) && !/signInWithEmailAndPassword|signInWithCustomToken/.test(vh));
+    T("★★ ولا تعرض متناً ولا مرفقاً ولا رقمَ الجهة (لا حقولَ غيرَ الخمسة)",
+      !/d\.body|d\.files|d\.ref\b|d\.projectName|getDownloadURL/.test(vh) && /d\.letterId/.test(vh) && /d\.signName/.test(vh));
+    T("★ وموسومةٌ noindex (صفحةُ تحقّقٍ لا صفحةُ تسويق)", /name="robots" content="noindex/.test(vh));
+  }
+  const RUL = (() => { const p = path.resolve(path.dirname(IDX), "firestore.rules"); return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""; })();
+  T("★★ letter_verify مستثناةٌ من القاعدة العامة (وإلّا لم تقيّد قاعدتُها شيئاً — تُقيَّم بـ«أو»)",
+    /vaultColl[\s\S]{0,400}'letter_verify', 'letter_verify_dev'/.test(RUL) && /match \/letter_verify\/\{token\}[\s\S]{0,200}allow list:\s*if false/.test(RUL));
+}
+
 function docVaultGuards() {
   H("خزانة الوثائق");
 
@@ -18056,6 +18142,8 @@ function docVaultGuards() {
   W.showPage = () => {}; W.toggleSidebarGroup = () => {};
   W.currentUser = { name: "المالك", user: "owner", role: "admin" };
 
+  /* مُرمِّزُ QR يُحمَّل قبل الخزانة كما في `index.html` — فتُختبر المطبوعةُ برمزها. */
+  try { const qp = path.resolve(path.dirname(IDX), "qr-code.js"); if (fs.existsSync(qp)) W.eval(fs.readFileSync(qp, "utf8")); } catch (e) {}
   let V = null;
   try { W.eval(src); V = W.docVault; }
   catch (e) { T("تُحمَّل docVault", false, String(e.message).slice(0, 160)); return; }
@@ -18230,6 +18318,36 @@ function docVaultGuards() {
       V.cloneLetter({ id: "L", prefix: "", honorific: "", closing: "" }, "2026-01-01").prefix === "" &&
       V.cloneLetter({ id: "L", prefix: "", honorific: "", closing: "" }, "2026-01-01").closing === "" &&
       V.cloneLetter({ id: "L" }, "2026-01-01").closing !== "");
+    T("★ dv: ونسخُ الخطاب لا يحمل رمزَ التحقّق — للنسخة رمزُها الخاصّ عند الحفظ",
+      !("verifyToken" in V.cloneLetter({ id: "L", verifyToken: "ABCDEFGHJKLMNPQRSTUV" }, "2026-01-01")));
+
+    /* ── التحقّق من الخطاب: رمزٌ عشوائيٌّ · رابطٌ · نسخةٌ عامةٌ مقتضبة ── */
+    {
+      const toks = new Set(); for (let i = 0; i < 200; i++) toks.add(V.newVerifyToken());
+      const all = [...toks];
+      T("★★ dv: رمزُ التحقّق ٢٠ محرفاً من أبجديةٍ بلا I·O·0·1، ولا يتكرّر",
+        all.every(t => V.isVerifyToken(t)) && toks.size === 200, all.slice(0, 3).join(" "));
+      T("★★ dv: ورمزٌ قصيرٌ أو بحرفٍ ملتبسٍ أو صغيرٍ مرفوض",
+        !V.isVerifyToken("ABCDEFGHJKLMNPQRSTU") && !V.isVerifyToken("ABCDEFGHJKLMNPQRSTU0")
+        && !V.isVerifyToken("abcdefghjklmnpqrstuv") && !V.isVerifyToken("") && !V.isVerifyToken(null));
+      T("★ dv: الرابطُ يحمل الرمزَ وعلَمَ البيئة التجريبية عند الحاجة فقط",
+        V.verifyUrl("https://x.test/app/verify.html", "ABCDEFGHJKLMNPQRSTUV") === "https://x.test/app/verify.html?t=ABCDEFGHJKLMNPQRSTUV"
+        && V.verifyUrl("https://x.test/app/verify.html", "ABCDEFGHJKLMNPQRSTUV", true).endsWith("&d=1"));
+      T("★ dv: وأساسُ الرابط يُشتقّ من موضع الصفحة نفسِها (verify.html تجاور index.html)",
+        V.verifyBase() === "https://hail.test/verify.html", V.verifyBase());
+      const full = { id: "LTR-2609-0009", kind: "issued", letterDate: "2026-09-08", party: "الأمانة",
+                     subject: "شهادة نظافة", signName: "عادل", signTitle: "المدير العام",
+                     body: "سرّيّ", ref: "77/م", files: [{ url: "https://s/x.pdf" }], projectName: "برج",
+                     projectId: "p1", verifyToken: "ABCDEFGHJKLMNPQRSTUV", createdBy: "islam" };
+      const rec = V.verifyRecord(full, "2026-09-12T10:00:00Z");
+      T("★★★ dv: النسخةُ العامة تحمل ما على الورقة فقط: الرقمُ والتاريخُ والجهةُ والموضوعُ والموقّع",
+        rec.letterId === "LTR-2609-0009" && rec.letterDate === "2026-09-08" && rec.party === "الأمانة"
+        && rec.subject === "شهادة نظافة" && rec.signName === "عادل" && rec.signTitle === "المدير العام"
+        && rec.updatedAt === "2026-09-12T10:00:00Z", JSON.stringify(rec));
+      const LEAK = ["body", "files", "ref", "projectName", "projectId", "verifyToken", "createdBy", "copiedFrom", "fromTemplate"];
+      T("★★★ dv: ولا تسرّب المتنَ ولا المرفقاتِ ولا رقمَ الجهة ولا المشروعَ ولا الرمزَ ولا الأسماء",
+        LEAK.every(k => !(k in rec)) && Object.keys(rec).length === 7, Object.keys(rec).join(","));
+    }
     T("★ dv: تبويبا الخطابات يفصلان النماذجَ عن الصادرات",
       V.filterLetters([tpl, { id: "LTR-1", kind: "issued", title: "خطاب" }], { kind: "template" }).length === 1 &&
       V.filterLetters([tpl, { id: "LTR-1", kind: "issued", title: "خطاب" }], { kind: "issued" }).length === 1);
@@ -18532,6 +18650,35 @@ function docVaultGuards() {
     const TPL = { id:"TPL-2607-0001", kind:"template", title:"نموذج تمديد",
                   subject:"تمديد", body:"سعادة / [الجهة]" };
     const pi = V.letterPaperHTML(ISSUED), pt = V.letterPaperHTML(TPL);
+    /* ── رمزُ التحقّق على المطبوعة: للصادر ذي الرمز وحدَه، وبجانب الباركود لا بدلَه ── */
+    {
+      const TOK = "ABCDEFGHJKLMNPQRSTUV";
+      const withTok = Object.assign({}, ISSUED, { verifyToken: TOK });
+      const pq = V.letterPaperHTML(withTok);
+      T("★★★ dv: الصادرُ ذو الرمز يحمل QR (SVG مرسوماً داخل الصفحة) بجانب الباركود",
+        /class="qrb"><svg /.test(pq) && /verify\.html\?t=/.test(V.verifyUrl(V.verifyBase(), TOK))
+        && /class="bcb">/.test(pq) && /امسح للتحقّق/.test(pq), pq.slice(pq.indexOf('class="bcw"'), pq.indexOf('class="bcw"') + 120));
+      T("★★ dv: والصادرُ بلا رمزٍ يُطبع بالباركود وحدَه — لا QR ولا خطأ",
+        !/class="qrb"/.test(pi) && /class="bcb">/.test(pi));
+      T("★★ dv: والنموذجُ لا يحمل QR ولو حمل رمزاً (لا يُرسَل ولا يُتحقَّق منه)",
+        !/class="qrb"/.test(V.letterPaperHTML(Object.assign({}, TPL, { verifyToken: TOK }))));
+      T("★ dv: ورمزٌ مشوَّهٌ على الخطاب لا يُرسَم (لا رابطَ مكسوراً على ورقةٍ رسمية)",
+        !/class="qrb"/.test(V.letterPaperHTML(Object.assign({}, ISSUED, { verifyToken: "bad-token" }))));
+      /* الرمزُ المرسوم يُفكّ بقارئٍ مستقلّ ويُعيد رابطَ التحقّق حرفياً */
+      let jsQR = null; try { jsQR = require("jsqr"); } catch (e) {}
+      if (jsQR && W.qrCode) {
+        const url = V.verifyUrl(V.verifyBase(), TOK);
+        const qr = W.qrCode.encode(url, { ecl: "M" });
+        const sc = 4, qz = 4, n = qr.size, full = (n + 2 * qz) * sc;
+        const data = new Uint8ClampedArray(full * full * 4).fill(255);
+        for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.get(r, c))
+          for (let y = 0; y < sc; y++) for (let x = 0; x < sc; x++) {
+            const px = ((r + qz) * sc + y) * full + ((c + qz) * sc + x); data[px * 4] = data[px * 4 + 1] = data[px * 4 + 2] = 0; }
+        const d = jsQR(data, full, full);
+        T("★★★ dv: رمزُ المطبوعة يُقرأ بقارئٍ مستقلّ ويُعيد رابطَ التحقّق حرفياً",
+          !!d && d.data === url, d ? d.data : "null");
+      }
+    }
 
     T("★★★ dv: الباركودُ على الخطاب الصادر وحدَه — والنموذجُ ليس قيداً في سجلّ الصادر",
       /<svg class="bc"/.test(pi) && !/<svg class="bc"/.test(pt));
@@ -18556,10 +18703,11 @@ function docVaultGuards() {
     T("★★ dv: ورقمُ الجهة لا يُقلَب اتّجاهُه (نصٌّ حرٌّ قد يكون عربياً)",
       /<span class="ml">الرقم لدى الجهة<\/span><span class="mv">/.test(pi) &&
       !/الرقم لدى الجهة<\/span><span class="mv dv-num"/.test(pi));
-    /* الرقمُ انتقل إلى الترويسة وحدَه (طلبُ المالك) — وهناك يُعزَل اتّجاهُه */
-    T("★ dv: والرقمُ الداخليُّ يُعزَل اتّجاهُه في الترويسة (لاتينيٌّ مضمون)",
-      /<div class="doc-no">LTR-2609-0004<\/div>/.test(pi) &&
-      /\.doc-no\{[^}]*direction:ltr[^}]*unicode-bidi:isolate/.test(src));
+    /* الرقمُ تحت الباركود في كتلة الهوية — وهناك يُعزَل اتّجاهُه (`.bcw{direction:ltr}`) */
+    T("★ dv: والرقمُ الداخليُّ يُعزَل اتّجاهُه في كتلة الهوية (لاتينيٌّ مضمون)",
+      !/<div class="doc-no">LTR-2609-0004<\/div>/.test(pi) &&
+      /<div class="bcw">[\s\S]*<div class="bcn">LTR-2609-0004<\/div>/.test(pi) &&
+      /\.bcw\{[^}]*direction:ltr/.test(src));
     T("★ dv: وزرُّ الطباعة في بطاقة الخطاب",
       /docVault\.printLetter\(/.test(src) && /طباعة على ورق الشركة/.test(src));
     T("★ dv: والطباعةُ تمرّ بنافذة المنصّة الواحدة (تعالج iOS وفشلَ الفتح)",
@@ -18647,9 +18795,11 @@ function docVaultGuards() {
         return /المدير العام: عادل فهيد العارضي/.test(out) && !/اسمٌ جديدٌ تماماً/.test(out);
       })());
 
-    /* ── والباركودُ وكتلةُ التوقيع لا يتزاحمان على حافّةٍ واحدة ── */
-    T("★★ dv: وذيلُ الورقة صفٌّ واحد — الباركودُ يميناً والتوقيعُ يساراً",
-      /<div class="ftr">[\s\S]*class="bcw"[\s\S]*class="sgn"[\s\S]*<\/div>/.test(P(withSig)) &&
+    /* ── الذيلُ للتوقيع وحدَه (الرمزان صعدا إلى الرأس) — وعنصرٌ فارغٌ يُبقي
+       `space-between` يدفع الكتلةَ إلى حافّتها اليسرى ── */
+    T("★★ dv: وذيلُ الورقة كتلةُ التوقيع يساراً — بلا باركود فيه",
+      /<div class="ftr"><span><\/span>[\s\S]*class="sgn"[\s\S]*<\/div>/.test(P(withSig)) &&
+      !/<div class="ftr">[\s\S]*class="bcw"/.test(P(withSig)) &&
       /\.ftr\{[^}]*justify-content:space-between/.test(src));
 
     /* ── والسجلُّ يُخزَّن حيث تحرسه القاعدة ── */
@@ -18735,6 +18885,9 @@ function docVaultGuards() {
     T("★★ dv: والنموذجُ «خطاب جديد» لا «تعديل» — الأصلُ لا يُمسّ",
       !/تعديل: خطابٌ قائم/.test(pgl.innerHTML) && pgl.querySelector("#dv-l-date").value !== "2026-09-01",
       pgl.querySelector("#dv-l-date") ? pgl.querySelector("#dv-l-date").value : "no date");
+    /* خطابٌ قديمٌ بلا رمزِ تحقّق: بطاقتُه بلا صفّ «رابط التحقّق» (يُصدَر عند أوّل طباعة) */
+    V.openLetter("LTR-9001");
+    T("★ dv: بطاقةُ خطابٍ بلا رمزٍ لا تعرض رابطَ تحقّقٍ فارغاً", !/رابط التحقّق/.test(pgl.innerHTML));
 
     V.toggleSignPanel();
     V.letterTab("template");
@@ -18767,16 +18920,26 @@ function docVaultGuards() {
                  letterDate:"2026-09-11", subject:"موضوع", body:"متن" };
     const P = o => V.letterPaperHTML(o);
 
-    /* (١) «خطاب صادر» تُلغى ويبقى الرقم — والنموذجُ يبقى موسوماً (وسمُه تحذيرٌ لا عنوان) */
-    T("★★ dv: الترويسةُ رقمُ الخطاب وحدَه — لا «خطاب صادر»",
-      !/خطاب صادر/.test(P(L0)) && /<div class="doc-no">LTR-7001<\/div>/.test(P(L0)) &&
-      /class="dochead only-no"/.test(P(L0)));
+    /* (١) «خطاب صادر» تُلغى — والرقمُ صار في كتلة الهوية أعلى يسار الورقة مع
+       التاريخ والرمزين (طلبُ المالك v18.9.3191)، فلا حبّةَ رقمٍ في الترويسة. */
+    T("★★ dv: لا «خطاب صادر» — والصادرُ يحمل كتلةَ هويةٍ في الرأس: QR وباركودٌ ورقمٌ وتاريخ",
+      !/خطاب صادر/.test(P(L0)) && !/<div class="doc-no">/.test(P(L0)) &&
+      /<div class="tophead"><div class="idb"><div class="bcw">/.test(P(L0)) &&
+      /<div class="bcn">LTR-7001<\/div>/.test(P(L0)) &&
+      /<div class="idb-date"><span class="ml">التاريخ<\/span><span class="mv dv-num">2026-09-11<\/span>/.test(P(L0)));
+    T("★★ dv: والكتلةُ على الحافّة اليسرى فوق المتن — لا في الذيل",
+      P(L0).indexOf('class="tophead"') < P(L0).indexOf('class="to">') &&
+      /\.idb\{[^}]*margin-inline-start:auto[^}]*flex-direction:column[^}]*align-items:flex-end/.test(src) &&
+      !/<div class="ftr">[\s\S]*class="bcw"/.test(P(L0)));
+    T("★ dv: والنموذجُ يبقى برقمه في الترويسة (لا رمزَ له ولا تاريخ)",
+      /<div class="doc-no">TPL-1<\/div>/.test(P({ id:"TPL-1", kind:"template", title:"ن", body:"ن" })) &&
+      !/class="idb"/.test(P({ id:"TPL-1", kind:"template", title:"ن", body:"ن" })));
     T("★★ dv: والنموذجُ يبقى موسوماً «لا يُرسَل» (الوسمُ تحذيرٌ لا عنوانُ نوع)",
       /يُستنسَخ ولا يُرسَل/.test(P({ id:"TPL-1", kind:"template", title:"ن", body:"ن" })));
-    /* المرئيُّ مرّتان: الترويسةُ وسطرُ الباركود. والثالثةُ `aria-label` على الوسم —
+    /* المرئيُّ مرّةٌ واحدة: تحت الباركود في كتلة الهوية. و`aria-label` على الوسم
        وصفٌ للقارئ الآليّ لا حبرٌ على الورق، فلا تُعدّ تكراراً. */
-    T("★★ dv: ولا يُذكر الرقمُ إلا في الترويسة وتحت الباركود (لا ثالثةَ على الورق)",
-      (P(L0).match(/>LTR-7001</g) || []).length === 2,
+    T("★★ dv: ولا يُذكر الرقمُ على الورق إلا تحت الباركود (لا ثانيةَ تُقرأ إهمالاً)",
+      (P(L0).match(/>LTR-7001</g) || []).length === 1,
       String((P(L0).match(/>LTR-7001</g) || []).length));
 
     /* (٢) لقبا المخاطَبة والتشريف: افتراضٌ للقديم، واختيارٌ حرٌّ، وحذفٌ بالإفراغ */
@@ -20668,6 +20831,7 @@ function pageScrollResetGuards() {
   staffTasksGuards();
   projectHubGuards();
   docVaultGuards();
+  qrCodeGuards();
   poCountGuards();
   rulesCoverageGuards();
   pageScrollResetGuards();

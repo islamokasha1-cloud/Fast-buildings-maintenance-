@@ -728,9 +728,14 @@ const APP_COLLS = [
   "hail_assets", "hail_ppm_plans", "hail_rollups",
   "global_vendors", "global_contract_requests", "global_contracts",
   "global_contract_extracts", "global_contract_changes",
-  "global_docs", "global_letters", "global_approvals", "vault_signs", "vault_parties"
+  "global_docs", "global_letters", "global_approvals", "vault_signs", "vault_parties",
+  "letter_verify"
 ];
+/* المجموعاتُ التي **لا `list` عليها لأحدٍ عمداً** — تُفحص في بلوكها لا هنا:
+   `letter_verify` تُقرأ بالرمز وحدَه، واستعلامُها هو عينُ ما يحرسه بلوكُها. */
+const NO_LIST = ["letter_verify"];
 for (const c of APP_COLLS) {
+  if (NO_LIST.indexOf(c) !== -1) continue;
   await check("★ يستعلم الأدمن مجموعةَ " + c,
     assertSucceeds(getDocs(collection(ADMIN, c))));
 }
@@ -984,6 +989,37 @@ await check("★★ ولا يكتب فيها الزائرُ ولا المستو�
 await check("★★★ وحذفُ الخطاب للأدمن وحدَه",
   assertFails(deleteDoc(doc(HR, `${LTRS_C}/LTR-2609-0001`))));
 
+/* ── صفحةُ التحقّق من الخطاب (`letter_verify`) ──
+   الرمزُ هو المفتاحُ الوحيد: `get` به لكلّ مُصادَقٍ ولو مجهولاً (الصفحةُ العامة تدخل
+   كتطبيق الفنيين)، ولا `list` لأحدٍ — وإلّا صار سجلُّ مراسلات الشركة عامّاً. */
+const VF_C = "letter_verify", TOK = "ABCDEFGHJKLMNPQRSTUV", TOK2 = "WXYZ23456789ABCDEFGH";
+await seed(`${VF_C}/${TOK}`, { letterId: "LTR-2609-0001", letterDate: "2026-09-08", party: "الأمانة" });
+await check("★★★ صفحةُ التحقّق تقرأ بالرمز مُصادَقةً مجهولةً (كتطبيق الفنيين)",
+  assertSucceeds(getDoc(doc(TECH, `${VF_C}/${TOK}`))));
+await check("★★ ولا تقرأ بلا مصادقةٍ إطلاقاً (App Check + مجهول شرطٌ للوصول)",
+  assertFails(getDoc(doc(ANON, `${VF_C}/${TOK}`))));
+await check("★★★ ولا `list` على المجموعة لأحد — ولا للأدمن (لا شاشةَ تحتاجه)",
+  assertFails(getDocs(collection(TECH, VF_C))) &&
+  assertFails(getDocs(collection(PM, VF_C))) &&
+  assertFails(getDocs(collection(ADMIN, VF_C))));
+await check("★★ ورمزٌ بغير الشكل القياسيّ لا يُقرأ ولا يُكتب (لا مساحةَ لتخمينٍ قصير)",
+  assertFails(getDoc(doc(TECH, `${VF_C}/short`))) &&
+  assertFails(setDoc(doc(PROC, `${VF_C}/short`), { letterId: "LTR-1" })));
+await check("★ ويكتبها دورُ الخزانة (المشتريات · الموارد البشرية · مدير المشاريع)",
+  assertSucceeds(setDoc(doc(PROC, `${VF_C}/${TOK2}`), { letterId: "LTR-2609-0002", letterDate: "2026-09-09" })) &&
+  assertSucceeds(updateDoc(doc(HR, `${VF_C}/${TOK}`), { subject: "تحديث" })) &&
+  assertSucceeds(setDoc(doc(PM, `${VF_C}/${TOK}`), { letterId: "LTR-2609-0001" })));
+await check("★★ ولا يكتبها الزائرُ ولا المستودعُ ولا تطبيقُ الفنيين (القراءةُ لا تفتح الكتابة)",
+  assertFails(setDoc(doc(VIEWER, `${VF_C}/${TOK}`), { letterId: "مزوَّر" })) &&
+  assertFails(setDoc(doc(WH, `${VF_C}/${TOK}`), { letterId: "مزوَّر" })) &&
+  assertFails(setDoc(doc(TECH, `${VF_C}/${TOK}`), { letterId: "مزوَّر" })));
+await check("★★★ وحذفُها للأدمن وحدَه (مَن يحذفها يُظهر خطاباً صحيحاً مزوَّراً)",
+  assertFails(deleteDoc(doc(PROC, `${VF_C}/${TOK2}`))) &&
+  assertSucceeds(deleteDoc(doc(ADMIN, `${VF_C}/${TOK2}`))));
+await check("★★ ونسخةُ `_dev` محكومةٌ بالحكم نفسِه",
+  assertFails(getDocs(collection(ADMIN, "letter_verify_dev"))) &&
+  assertFails(setDoc(doc(VIEWER, `letter_verify_dev/${TOK}`), { letterId: "x" })));
+
 /* ── سجلُّ التواقيع: صورةُ توقيع المدير العام وختمُ الشركة ──
    كتابتُه ليست كتابةَ بياناتٍ بل **إسنادُ أداةِ إلزام**: من يكتب فيه يستبدل التوقيعَ
    بصورةٍ من عنده أو يضيف موقّعاً باسم مسؤول، ثمّ يُخرج خطاباً على ورق الشركة يبدو
@@ -1112,7 +1148,7 @@ await check("★★★ ولم يُصَب استعلامُ مجموعةٍ واح�
   assertSucceeds((async () => {
     for (const c of APP_COLLS) {
       if (c === "global_docs" || c === "global_letters" || c === "global_approvals"
-          || c === "vault_signs" || c === "vault_parties") continue;
+          || c === "vault_signs" || c === "vault_parties" || c === "letter_verify") continue;
       await getDocs(collection(SUP_OTHER, c));
     }
   })()));
@@ -1171,7 +1207,7 @@ await check("★★★ ولم يُصَب استعلامُ `meta` ولا غيرُ
     await getDoc(doc(SUP_OTHER, "meta/settings"));
     await getDoc(doc(SUP_OTHER, "meta/projects"));
     for (const c of APP_COLLS) {
-      if (["global_docs", "global_letters", "global_approvals", "vault_signs", "vault_parties"].indexOf(c) !== -1) continue;
+      if (["global_docs", "global_letters", "global_approvals", "vault_signs", "vault_parties", "letter_verify"].indexOf(c) !== -1) continue;
       await getDocs(collection(SUP_OTHER, c));
     }
   })()));
