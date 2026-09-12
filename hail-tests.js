@@ -19030,6 +19030,232 @@ function docVaultGuards() {
       /nav-vault-apr-btn/.test(src) && /_upload\("apr"/.test(src));
   }
 
+  /* ── (٢١) ★★★ مسارُ الاعتماد — لكلّ جهةٍ محطاتُها ──
+     طلبُ المالك: «لكل مستخلص مسار من أول تقديمه حتى اعتماده — لكل جهة مسار
+     مختلف — الإعادة للتصحيح لمحطة أختارها مع وجود السجل — وعند الاعتماد يدخل
+     تلقائياً في معتمدات المشروع وملفّه».
+     المبدأُ المحروس: المسارُ **نسخةٌ على المستند** لا مرجع، والحالةُ **تُشتقّ من
+     المسار** لا تُكتب بيد، والإعادةُ قيدٌ في سجلٍّ لا يُمحى. */
+  {
+    const T0 = new Date("2026-09-12T09:00:00Z");
+    const TPL = V._PATH_TEMPLATE;
+    T("★★ dv: المسارُ النموذجيّ = جدولُ المالك (11 محطة من المكتب الفني إلى الرفع إلى المالية)",
+      Array.isArray(TPL) && TPL.length === 11 && TPL[0].lbl === "المكتب الفني" &&
+      TPL[10].lbl === "الرفع إلى المالية" && /PMO/.test(TPL[8].lbl) && V._PATH_TEMPLATE_NAME === "أمانة حائل",
+      String(TPL && TPL.length));
+    T("★ dv: `pathNormalize` يُسقط الفارغَ ويضبط الأيامَ رقماً غيرَ سالبٍ وينسخ",
+      (() => { const inp = [{ lbl:" المالية ", days:"7.4" }, { lbl:"", days:3 }, { lbl:"المدقق", days:-2 }, null];
+               const out = V.pathNormalize(inp);
+               return out.length === 2 && out[0].lbl === "المالية" && out[0].days === 7 && out[1].days === 0 && out !== inp; })());
+    T("★★ dv: المسارُ للماليّ وحدَه — الخطابُ ومحضرُ الاستلام بلا محطات (قرارُ المالك)",
+      V.aprTypeHasPath("extract") && V.aprTypeHasPath("claim") && V.aprTypeHasPath("change") &&
+      !V.aprTypeHasPath("letter") && !V.aprTypeHasPath("handover") && !V.aprTypeHasPath("zzz"));
+
+    /* التثبيت: نسخةٌ لا مرجع */
+    const base = { id:"APR-P1", title:"المستخلص الرابع", docType:"extract", party:"أمانة حائل", partyId:"PRT-1",
+                   status:"submitted", submittedAt:"2026-08-01", amountSubmitted:100000 };
+    const att = V.aprAttachPath(base, TPL, { at:"2026-08-01", by:"المالك" });
+    T("★★★ dv: التثبيتُ ينسخ المحطاتِ (لا يُشير إلى مسار الجهة) ويبدأ من الأولى بقيد «بدء»",
+      !!att && att.stages.length === 11 && att.stages !== TPL && att.stages[0] !== TPL[0] &&
+      att.stageIdx === 0 && att.stageLog.length === 1 && att.stageLog[0].kind === "start" &&
+      att.stageLog[0].to === 0 && att.stageLog[0].toLbl === "المكتب الفني");
+    T("★★ dv: ولا يُثبَّت على محضر استلامٍ ولا على معتمَدٍ ولا بمسارٍ فارغ",
+      V.aprAttachPath({ docType:"handover", status:"submitted" }, TPL, {}) === null &&
+      V.aprAttachPath({ docType:"extract", status:"approved" }, TPL, {}) === null &&
+      V.aprAttachPath(base, [], {}) === null && V.aprAttachPath(base, [{ lbl:"" }], {}) === null);
+
+    const P1 = Object.assign({}, base, att);                                   // في المحطة ١
+    T("★ dv: `aprStageAt` محصورٌ في حدود المسار، و`-1` لما لا مسارَ له",
+      V.aprStageAt(P1) === 0 && V.aprStageAt(Object.assign({}, P1, { stageIdx:99 })) === 10 &&
+      V.aprStageAt(Object.assign({}, P1, { stageIdx:-5 })) === 0 && V.aprStageAt(base) === -1 &&
+      !V.aprHasPath(base) && V.aprHasPath(P1));
+
+    /* الانتقال */
+    const s2 = V.aprAdvance(P1, { at:"2026-08-06", by:"رغده", note:"سُلّم للمالية" });
+    T("★★★ dv: «انتقل» يتقدّم محطةً ويقيّد من أين وإلى أين وبيد مَن — ولا يمسّ الأصل",
+      !!s2 && s2.stageIdx === 1 && s2.stageLog.length === 2 && s2.stageLog[1].kind === "forward" &&
+      s2.stageLog[1].from === 0 && s2.stageLog[1].to === 1 && s2.stageLog[1].fromLbl === "المكتب الفني" &&
+      s2.stageLog[1].toLbl === "المالية" && s2.stageLog[1].by === "رغده" && P1.stageIdx === 0 && P1.stageLog.length === 1);
+    const P2 = Object.assign({}, P1, s2);                                      // في المحطة ٢ منذ 06/08
+    T("★★★ dv: تاريخُ دخول المحطة من السجلّ — وأيامُ الوقوف تُحسب منه لا من التقديم",
+      V.aprStageEnteredAt(P2) === "2026-08-06" && V.aprStageDays(P2, T0) === 37 &&
+      V.aprStageEnteredAt(P1) === "2026-08-01" && V.aprDaysWaiting(P2, T0) === 42,
+      String(V.aprStageDays(P2, T0)));
+    T("★★ dv: وأيامُ الوقوف `null` لما لا ينتظر ولما لا مسارَ له (صفرٌ يُقرأ «دخلها اليوم»)",
+      V.aprStageDays(Object.assign({}, P2, { status:"approved" }), T0) === null && V.aprStageDays(base, T0) === null);
+    T("★★ dv: شريحةُ اللون على المدّة المتوقّعة: ضمنها عاديّ · تجاوزُها تحذير · ضعفُها خطر — وبلا مدّةٍ سلّمُ ٣٠/٦٠",
+      V.aprStageBand(3, 5) === "ok" && V.aprStageBand(5, 5) === "ok" && V.aprStageBand(6, 5) === "warn" &&
+      V.aprStageBand(11, 5) === "crit" && V.aprStageBand(20, 0) === "ok" && V.aprStageBand(31, "") === "warn" &&
+      V.aprStageBand(null, 5) === "none");
+    const last = Object.assign({}, P2, { stageIdx:10 });
+    T("★★★ dv: عند آخر محطةٍ لا «تالٍ» — الاعتمادُ من هناك",
+      V.aprAdvance(last, { at:"2026-09-01" }) === null &&
+      V.aprAdvance(Object.assign({}, P2, { status:"approved" }), { at:"2026-09-01" }) === null);
+
+    /* الإعادةُ للتصحيح: إلى محطةٍ تُختار، والسببُ إلزاميّ */
+    const P5 = Object.assign({}, P2, { stageIdx:5 });
+    const back = V.aprReturnTo(P5, 1, { at:"2026-09-01", by:"رغده", note:"نقصُ شهادة النظافة" });
+    T("★★★ dv: «أُعيد للتصحيح» يرجع إلى المحطة المختارة (لا إلى البداية حتماً) بقيدٍ يحمل السبب",
+      !!back && back.stageIdx === 1 && back.stageLog[back.stageLog.length - 1].kind === "back" &&
+      back.stageLog[back.stageLog.length - 1].from === 5 && back.stageLog[back.stageLog.length - 1].to === 1 &&
+      /النظافة/.test(back.stageLog[back.stageLog.length - 1].note));
+    T("★★★ dv: وبلا سببٍ لا إعادة، ولا إلى المحطة نفسِها، ولا خارجَ المسار",
+      V.aprReturnTo(P5, 1, { at:"2026-09-01", note:"  " }) === null &&
+      V.aprReturnTo(P5, 5, { at:"2026-09-01", note:"س" }) === null &&
+      V.aprReturnTo(P5, 11, { at:"2026-09-01", note:"س" }) === null &&
+      V.aprReturnTo(P5, -1, { at:"2026-09-01", note:"س" }) === null);
+    T("★ dv: وعدُّ الإعادات يُقرأ من السجلّ",
+      V.aprReturnCount(Object.assign({}, P5, back)) === 1 && V.aprReturnCount(P5) === 0);
+
+    /* الاعتماد: من آخر محطةٍ وحدَها — وهو ما يقلب الحالة */
+    T("★★★ dv: لا اعتمادَ من وسط المسار",
+      V.aprApprove(P5, { at:"2026-09-10", amountApproved:"90000" }) === null);
+    const ap = V.aprApprove(last, { at:"2026-09-10", by:"المالك", amountApproved:"90000", note:"خُصم بندُ المكيّفات" });
+    T("★★★ dv: ومن آخر محطةٍ يصير «معتمداً» بتاريخه ومبلغه وقيدِ اعتمادٍ في السجلّ",
+      !!ap && ap.status === "approved" && ap.approvedAt === "2026-09-10" && ap.amountApproved === 90000 &&
+      ap.stageLog[ap.stageLog.length - 1].kind === "approve" && V.aprVariance(Object.assign({}, last, ap)) === 10000);
+    T("★★ dv: والماليُّ بلا مبلغٍ معتمَدٍ لا يُعتمَد، ولا بتاريخٍ يسبق التقديم",
+      V.aprApprove(last, { at:"2026-09-10", amountApproved:"" }) === null &&
+      V.aprApprove(last, { at:"2026-09-10", amountApproved:"abc" }) === null &&
+      V.aprApprove(last, { at:"2026-07-01", amountApproved:"1" }) === null);
+    T("★★ dv: وما لا مسارَ له يُعتمَد مباشرةً (السجلّاتُ القديمة لا تنكسر)، وغيرُ الماليّ بلا مبلغ",
+      (() => { const r = V.aprApprove(base, { at:"2026-09-10", amountApproved:"5" });
+               const h = V.aprApprove({ docType:"handover", status:"submitted", submittedAt:"2026-08-01" }, { at:"2026-09-10" });
+               return !!r && r.status === "approved" && r.amountApproved === 5 && !r.stageLog &&
+                      !!h && h.amountApproved === ""; })());
+    T("★★ dv: الرفضُ النهائيّ يحتاج سبباً ويُفرغ ما يخصّ الاعتماد — والسدادُ للمعتمَد وحدَه",
+      V.aprReject(P5, { at:"2026-09-10", note:"" }) === null &&
+      (() => { const r = V.aprReject(P5, { at:"2026-09-10", note:"خارج نطاق العقد" });
+               return !!r && r.status === "rejected" && r.approvedAt === "" && r.stageLog[r.stageLog.length - 1].kind === "reject"; })() &&
+      V.aprMarkPaid(P5, { at:"2026-09-10" }) === null &&
+      V.aprMarkPaid(Object.assign({}, last, ap), { at:"2026-09-20" }).status === "paid");
+
+    /* الجهةُ المقترَحةُ من عميل المشروع */
+    const PARTIES = [{ id:"PRT-1", name:"أمانة حائل", stages:TPL }, { id:"PRT-2", name:"وكالة الأنباء", stages:[] }];
+    T("★★ dv: الجهةُ تُقترَح من عميل المشروع بمطابقةٍ لا تعبأ بالمسافات وحالة الحرف — ولا تُخمَّن",
+      V.partyForProject(PARTIES, { client:" أمانة حائل " }).id === "PRT-1" &&
+      V.partyForProject(PARTIES, { client:"بلدية حائل" }) === null &&
+      V.partyForProject(PARTIES, { client:"" }) === null && V.partyForProject(PARTIES, null) === null);
+    T("★★ dv: والحصيلةُ لا تتغيّر بالمسار — ذو المسار مالٌ واقفٌ كغيره حتى يُعتمَد",
+      (() => { const a = [P2, Object.assign({}, last, ap)];
+               const r = V.aprRollup(a, T0);
+               return r.sumWaiting === 100000 && r.submitted === 1 && r.sumApproved === 90000 && r.variance === 10000; })());
+
+    /* ── الرسمُ الحقيقيّ ── */
+    {
+      const prevU5 = W.currentUser;
+      W.currentUser = { name:"المالك", user:"owner", role:"admin" };
+      const pga = W.document.getElementById("page-" + V._PAGE_APPROVALS);
+      W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+      pga.classList.add("active");
+      const P3 = Object.assign({}, P2, { stageIdx:3, projectId:"hail", projectName:"حائل", scope:"project" });
+      const PL = Object.assign({}, last, { id:"APR-P2", title:"المستخلص الخامس", projectId:"hail", projectName:"حائل", scope:"project" });
+      V.__test_seed([], [], [], [P3, PL, base], PARTIES);
+      V.renderApprovals();
+      T("★★★ dv: رقاقةُ السجلّ لذي المسار تقول **أين** هو: المحطة 4/11 واسمُها وأيامُه",
+        /4\/11/.test(pga.innerHTML) && /اعتماد مدير الإدارة/.test(pga.innerHTML),
+        (pga.querySelector(".dv-ap-tbl .dv-chip") || {}).textContent);
+      T("★ dv: وزرُّ «الجهات ومساراتها» في رأس الشاشة بعددها",
+        /الجهات ومساراتها/.test(pga.innerHTML) && /dv-cnt">2</.test(pga.innerHTML));
+      V.openApr("APR-P1");
+      T("★★★ dv: بطاقةُ المستند ترسم شريطَ المحطات كاملاً: ٣ منجزةٌ · الحاليةُ مميّزةٌ · الباقي بعدها",
+        pga.querySelectorAll(".dv-path-track .dv-path-s").length === 11 &&
+        pga.querySelectorAll(".dv-path-s.done").length === 3 &&
+        pga.querySelectorAll(".dv-path-s.cur").length === 1 &&
+        /منذ/.test(pga.querySelector(".dv-path-s.cur").textContent));
+      T("★★★ dv: وأزرارُها ما يجوز الآن وحدَه: «انتقل إلى: شهادة النظافة» و«أُعيد للتصحيح» — ولا «اعتماد» من الوسط",
+        /انتقل إلى: شهادة النظافة/.test(pga.innerHTML) && /أُعيد للتصحيح/.test(pga.innerHTML) &&
+        !/'approve'\)/.test(pga.innerHTML));
+      T("★★ dv: وسجلُّ الحركة يُرسَم بقيوده (بدء ثمّ انتقال) والأحدثُ أعلاه",
+        (() => { const rows = [...pga.querySelectorAll(".dv-log-tbl tbody tr")];
+                 return rows.length === 2 && /انتقال/.test(rows[0].textContent) && /بدء المسار/.test(rows[1].textContent); })());
+      V.startAct("APR-P1", "back");
+      T("★★★ dv: نموذجُ الإعادة يعرض المحطاتِ كلَّها عدا الحالية، والسببَ إلزامياً — ولا يحفظ قبل «تأكيد»",
+        !!pga.querySelector("#dv-act-to") && pga.querySelectorAll("#dv-act-to option").length === 10 &&
+        ![...pga.querySelectorAll("#dv-act-to option")].some(o => o.value === "3") &&
+        !!pga.querySelector("#dv-act-note") && /السبب <b>\*<\/b>/.test(pga.innerHTML));
+      V.cancelAct();
+      T("★ dv: و«إلغاء» يطوي النموذج ويُعيد الأزرار",
+        !pga.querySelector(".dv-act") && /أُعيد للتصحيح/.test(pga.innerHTML));
+      V.openApr("APR-P2");
+      T("★★★ dv: وعند آخر محطةٍ الزرُّ «اعتماد» لا «انتقل»",
+        /'approve'\)/.test(pga.innerHTML) && !/انتقل إلى:/.test(pga.innerHTML));
+      V.startAct("APR-P2", "approve");
+      T("★★ dv: ونموذجُ الاعتماد يطلب المبلغَ المعتمَد ويعرض زرَّ إرفاق النسخة المعتمدة",
+        !!pga.querySelector("#dv-act-amt") && /إرفاق النسخة المعتمدة/.test(pga.innerHTML));
+      V.cancelAct();
+      V.openApr("APR-P1x");   // غيرُ موجود — لا كسر
+      V.backToApr();
+
+      /* النموذج: الجهةُ منتقًى من السجلّ، والحالةُ تختفي لمن سيرث مساراً */
+      V.newApr();
+      T("★★ dv: نموذجُ المستند يعرض منتقي الجهة من السجلّ مع خيار «جهة أخرى»",
+        !!pga.querySelector("#dv-a-party-sel") &&
+        [...pga.querySelectorAll("#dv-a-party-sel option")].map(o => o.value).join() === "PRT-1,PRT-2," + V._PARTY_FREE);
+      V.setAprParty("PRT-1");
+      T("★★★ dv: واختيارُ جهةٍ ذاتِ مسارٍ يُخفي منتقي الحالة (تُشتقّ من المسار) ويقول ما سيُثبَّت",
+        !pga.querySelector("#dv-a-status") && /سيُثبَّت عليه مسارُ «أمانة حائل» \(11 محطات\)/.test(pga.innerHTML));
+      V.setAprType("letter");
+      T("★★ dv: والخطابُ مع الجهة نفسِها يُبقي منتقي الحالة — لا مسارَ للخطاب",
+        !!pga.querySelector("#dv-a-status") && /بلا مسارِ اعتماد/.test(pga.innerHTML));
+      V.setAprType("extract");
+      V.setAprParty("PRT-2");
+      T("★★ dv: وجهةٌ بلا مسارٍ تُبقي الحالةَ بيد المستخدم وتدعوه إلى تعريف مسارها",
+        !!pga.querySelector("#dv-a-status") && /عرّف مسارَها/.test(pga.innerHTML));
+      V.setAprParty(V._PARTY_FREE);
+      T("★ dv: و«جهة أخرى» تكشف خانةَ كتابةٍ حرّة",
+        !!pga.querySelector("#dv-a-party") && !!pga.querySelector("#dv-a-status"));
+      V.cancelApr();
+
+      /* تحريرُ مستندٍ له مسار: الحالةُ لا تُقرأ من منتقٍ غائب */
+      V.editApr("APR-P2");
+      T("★★★ dv: تحريرُ ذي المسار لا يعرض منتقي الحالة، ويقول إنّ المسارَ يُحرَّك من البطاقة",
+        !pga.querySelector("#dv-a-status") && /المسارُ مثبَّتٌ على المستند/.test(pga.innerHTML) && /المحطة <span class="dv-num">11\/11/.test(pga.innerHTML));
+      V.cancelApr();
+
+      /* لوحةُ الجهات */
+      V.togglePartyPanel();
+      T("★★ dv: لوحةُ الجهات ترسم كلَّ جهةٍ بمحطاتها مرقّمةً ومدّتها",
+        pga.querySelectorAll(".dv-party").length === 2 &&
+        pga.querySelectorAll(".dv-party-st").length === 11 && /بلا مسار/.test(pga.innerHTML));
+      V.newParty();
+      T("★ dv: و«جهة جديدة» تفتح نموذجاً فارغاً بزرّ «ابدأ من المسار النموذجيّ»",
+        !!pga.querySelector("#dv-p-name") && !pga.querySelector("#dv-p-lbl-0") && /المسار النموذجيّ/.test(pga.innerHTML));
+      V.partyUseTemplate();
+      T("★★ dv: والنموذجيُّ يملأ 11 صفّاً قابلةً للتحرير ويقترح الاسم",
+        !!pga.querySelector("#dv-p-lbl-10") && !pga.querySelector("#dv-p-lbl-11") &&
+        pga.querySelector("#dv-p-name").value === "أمانة حائل" && pga.querySelector("#dv-p-lbl-0").value === "المكتب الفني");
+      pga.querySelector("#dv-p-lbl-0").value = "الاستلام والتسجيل";
+      V.partyMoveStage(0, 1);
+      T("★★★ dv: وترتيبُ المحطات يُبدَّل بالأسهم — وما كُتب في الحقول لا يضيع عند إعادة الرسم",
+        pga.querySelector("#dv-p-lbl-1").value === "الاستلام والتسجيل" && pga.querySelector("#dv-p-lbl-0").value === "المالية");
+      V.partyDelStage(1);
+      T("★ dv: والحذفُ يُسقط صفّاً واحداً",
+        !!pga.querySelector("#dv-p-lbl-9") && !pga.querySelector("#dv-p-lbl-10") && pga.querySelector("#dv-p-lbl-1").value === "اعتماد الاستشاري");
+      V.cancelParty();
+      V.togglePartyPanel();
+      T("★ dv: وإغلاقُ اللوحة يعود إلى السجلّ",
+        !pga.querySelector(".dv-party") && !!pga.querySelector(".dv-ap-tbl"));
+      W.currentUser = prevU5;
+    }
+
+    /* الشيفرةُ والقواعد */
+    T("★★★ dv: مستمعُ الجهات يبدأ ويتوقّف مع أخويه (وإلّا بقي حيّاً بعد الخروج)",
+      /_aprSync\(\);\n\s*_partySync\(\);/.test(src) && /_aprStopSync\(\);\n\s*_partyStopSync\(\);/.test(src));
+    T("★★★ dv: قارئُ النموذج لا يقرأ الحالةَ من منتقٍ غائب — وإلّا عاد المعتمَدُ «مُقدَّماً» بحفظة",
+      /if\(document\.getElementById\("dv-a-status"\)\) _aEdit\.status = /.test(src));
+    T("★★★ dv: المستخلصُ والمطالبةُ يُربطان بمشروعٍ حتماً عند الحفظ — به يدخلان معتمداتِ المشروع وملفَّه",
+      /aprTypeHasPath\(_aEdit\.docType\) && _projBody\(_aEdit\)\.scope !== SCOPE_PROJECT/.test(src));
+    T("★★ dv: والاعتمادُ من البطاقة يكتب `status:approved` بمبلغه — فيقع في مُرشِّح المشروع كأيّ معتمَدٍ آخر",
+      /d\.collection\(APRS_COLL\(\)\)\.doc\(a\.id\)\.set\(patch, \{ merge:true \}\)/.test(src));
+    T("★★ dv: سجلُّ الجهات مستثنًى من القاعدة العامة وله بلوكُه: قراءةٌ بقفل الخزانة · كتابةٌ بالدور · حذفٌ للأدمن",
+      /vaultColl\(coll\)[\s\S]{0,300}'vault_parties', 'vault_parties_dev'/.test(RUL) &&
+      /match \/vault_parties\/\{id\}[\s\S]{0,60}allow read:\s+if vaultReadOk\(\);[\s\S]{0,80}allow create, update: if vaultWriteOk\(\);[\s\S]{0,60}allow delete:\s+if isAdmin\(\)/.test(RUL) &&
+      /match \/vault_parties_dev\/\{id\}/.test(RUL));
+    T("★ dv: و«مرفوض» صار نهائياً — الإعادةُ للتصحيح حركةٌ في المسار لا حالة",
+      V._APR_STATUS.some(x => x.key === "rejected" && x.lbl === "مرفوض نهائياً"));
+  }
+
   /* ── (١٣) المرفقُ يحفظ مسارَه، والمسارُ تحت البادئة القائمة `po/` ──
      مسارٌ جذريٌّ جديد قد تردّه قواعدُ Storage صامتاً (درسُ `hr-payments.js`). */
   /* ── ★★ الأرقامُ داخل جملةٍ عربية: `direction` وحدَها لا تكفي لصندوقٍ سطريّ ──

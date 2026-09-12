@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3178";
+var MODULE_BUILD = "v18.9.3179";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1124,12 +1124,249 @@ var APR_FIN = (function(){ var m={}; APR_TYPES.forEach(function(t){ m[t.key]=!!t
 var APR_STATUS = [
   { key:"submitted", lbl:"مُقدَّم — بانتظار الاعتماد" },
   { key:"approved",  lbl:"معتمد" },
-  { key:"rejected",  lbl:"مرفوض أو مُعاد للتصحيح" },
+  { key:"rejected",  lbl:"مرفوض نهائياً" },
   { key:"paid",      lbl:"معتمد ومسدَّد" }
 ];
 var APR_ST_LBL = (function(){ var m={}; APR_STATUS.forEach(function(x){ m[x.key]=x.lbl; }); return m; })();
 
 var _aprs = [], _aprsUnsub = null, _aprsLoaded = false;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   مسارُ الاعتماد — لكلّ جهةٍ محطاتُها  (طلبُ المالك: «لكل مستخلص مسار من أول
+   تقديمه حتى اعتماده — لكل جهة مسار مختلف»)
+
+   ── المشكلة ──
+   المستخلصُ عند الجهة يمرّ بمحطاتٍ (مكتبٌ فنيّ · ماليّة · استشاريّ · مدقّق · PMO …)
+   والسجلُّ كان يعرف حالتين فقط: «مُقدَّم» و«معتمد». فسؤالُ «أين هو الآن ومنذ
+   متى؟» لا جوابَ له إلّا في ذاكرة من يتابعه. وجدولُ «موقف المستخلصات» الذي يُعدّه
+   المالكُ بيده كلَّ شهرٍ هو عينُ هذا السؤال.
+
+   ── المبدأ ──
+   • **المسارُ يُعرَّف على الجهة** (`vault_parties`) قائمةَ محطاتٍ مرتّبةً لكلٍّ منها
+     اسمٌ ومدّةٌ متوقّعةٌ بالأيام — ويُعدَّل بحرّية.
+   • **والمستندُ يرث نسخةً منه عند إنشائه** (`stages[]`) لا مرجعاً: تعديلُ مسار
+     الجهة بعد سنةٍ لا يُعيد كتابةَ تاريخِ مستخلصاتٍ مضت. فالمسارُ على المستند
+     **أثرٌ** لا إعداد.
+   • **الحالةُ تُشتقّ من المسار لا تُكتب بيد**: الوصولُ إلى آخر محطةٍ ثمّ «اعتماد»
+     هو ما يقلب الحالةَ إلى «معتمد» — بمبلغه وتاريخه — فيدخل تلقائياً معتمداتِ
+     المشروع وملفَّه. ولذلك **المشروعُ إلزاميٌّ** لكلّ نوعٍ له مسار.
+   • **الإعادةُ للتصحيح إلى محطةٍ تُختار** لا إلى البداية حتماً، والسببُ إلزاميّ،
+     وكلُّ حركةٍ قيدٌ في `stageLog[]` لا يُمحى: من أين · إلى أين · متى · بيد مَن.
+   • **ما لا مسارَ له يبقى كما كان**: الخطابُ ومحضرُ الاستلام (لا مسار)، والسجلّاتُ
+     القديمةُ بلا `stages` — تُحرَّك حالتُها بيدٍ كما قبل. فلا هجرةَ ولا كسر.
+   • **المدّةُ المتوقّعةُ تُلوّن ولا تُنبّه** (قرارُ المالك: «نكتفي لون مبدئياً»).
+
+   ── التخزين ──
+   `vault_parties` (+`_dev`) بالقاعدة نفسِها كأخواتها في الخزانة، وعدّادُها في
+   `meta/vault_parties_counter`. وعلى المستند: `partyId` · `stages[]` · `stageIdx`
+   · `stageLog[]`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function PARTIES_COLL(){ return _dev() ? "vault_parties_dev" : "vault_parties"; }
+function PARTIES_CTR(){  return _dev() ? "meta/vault_parties_counter_dev" : "meta/vault_parties_counter"; }
+
+/* الأنواعُ التي تسلك مساراً: الماليُّ وحدَه (مستخلصٌ · مطالبةٌ · أمرُ تغيير) —
+   الخطابُ ومحضرُ الاستلام لا يُعتمَدان عبر محطات (قرارُ المالك). */
+function aprTypeHasPath(t){ return !!APR_FIN[String(t || "")]; }
+
+/* المسارُ النموذجيّ — مسارُ مستخلصات أمانة حائل كما في جدول المالك، من اليسار إلى
+   اليمين. يُزرَع كبدايةٍ لجهةٍ جديدة ويُعدَّل بحرّية؛ والمددُ تقديرٌ ابتدائيّ. */
+var PATH_TEMPLATE_NAME = "أمانة حائل";
+var PATH_TEMPLATE = [
+  { lbl:"المكتب الفني",                            days:5 },
+  { lbl:"المالية",                                 days:5 },
+  { lbl:"اعتماد الاستشاري",                        days:7 },
+  { lbl:"اعتماد مدير الإدارة",                     days:5 },
+  { lbl:"شهادة النظافة",                           days:3 },
+  { lbl:"المدقق",                                  days:7 },
+  { lbl:"الرفع إلى PMO من إدارة المباني",          days:5 },
+  { lbl:"الرفع إلى PMO من المكتب الفني بالشركة",   days:5 },
+  { lbl:"PMO",                                     days:7 },
+  { lbl:"المكتب التنفيذي",                         days:7 },
+  { lbl:"الرفع إلى المالية",                       days:10 }
+];
+
+/* أنواعُ الحركات في سجلّ المسار */
+var STAGE_KINDS = { start:"بدء المسار", forward:"انتقال", back:"إعادة للتصحيح",
+                    approve:"اعتماد", reject:"رفض نهائيّ", paid:"سداد" };
+
+/* ════════ الدوالُّ النقيّة — يفحصها `hail-tests` بلا متصفّح ════════ */
+
+/* تنظيفُ قائمةِ محطات: يُسقط الفارغَ ويضبط الأيامَ رقماً غيرَ سالب — وينسخ. */
+function pathNormalize(stages){
+  return (Array.isArray(stages) ? stages : []).map(function(s){
+    var lbl = String((s && s.lbl) || "").trim();
+    var d = Number(s && s.days);
+    return { lbl:lbl, days:(isFinite(d) && d > 0) ? Math.round(d) : 0 };
+  }).filter(function(s){ return !!s.lbl; });
+}
+
+/* أللمستند مسارٌ؟ نسخةٌ مثبَّتةٌ عليه بمحطةٍ واحدةٍ على الأقلّ. */
+function aprHasPath(a){ return !!(a && Array.isArray(a.stages) && a.stages.length > 0); }
+
+/* المحطةُ الحالية — رقمٌ محصورٌ في حدود المسار، و`-1` لما لا مسارَ له. */
+function aprStageAt(a){
+  if(!aprHasPath(a)) return -1;
+  var i = Number(a.stageIdx);
+  if(!isFinite(i)) i = 0;
+  return Math.max(0, Math.min(a.stages.length - 1, Math.floor(i)));
+}
+
+/* تاريخُ دخول المحطة الحالية: آخرُ قيدٍ في السجلّ وصل إليها، وإلّا تاريخُ التقديم
+   (المحطةُ الأولى تبدأ بالتقديم نفسِه). */
+function aprStageEnteredAt(a){
+  if(!aprHasPath(a)) return "";
+  var idx = aprStageAt(a), log = Array.isArray(a.stageLog) ? a.stageLog : [];
+  for(var i = log.length - 1; i >= 0; i--){
+    var e = log[i];
+    if(e && Number(e.to) === idx && e.at) return String(e.at).slice(0, 10);
+  }
+  return String(a.submittedAt || "").slice(0, 10);
+}
+
+/* أيامُ الوقوف في المحطة الحالية — للمقدَّم ذي المسار وحدَه، و`null` لغيره
+   (صفرٌ يُقرأ «دخلها اليوم» وهو معنى آخر). */
+function aprStageDays(a, today){
+  if(!aprHasPath(a) || String(a.status || "submitted") !== "submitted") return null;
+  var d = daysUntil(aprStageEnteredAt(a), today);
+  return (d === null) ? null : Math.max(0, -d);
+}
+
+/* شريحةُ اللون: على المدّة المتوقّعة للمحطة إن وُجدت (تجاوزُها تحذيرٌ، وضعفُها
+   خطر)، وإلّا سلّمُ الانتظار العامّ (٣٠ · ٦٠). */
+function aprStageBand(days, expected){
+  if(days === null || days === undefined) return "none";
+  var x = Number(expected);
+  if(isFinite(x) && x > 0){
+    if(days > 2 * x) return "crit";
+    if(days > x) return "warn";
+    return "ok";
+  }
+  return aprAgeBand(days);
+}
+
+/* قيدٌ في سجلّ المسار — الاسمان منسوخان لأنّ السجلَّ يُقرأ بعد أن تتبدّل المحطات. */
+function _stageEntry(a, kind, from, to, o){
+  var st = (a && Array.isArray(a.stages)) ? a.stages : [];
+  var lblOf = function(i){ return (i >= 0 && st[i]) ? String(st[i].lbl || "") : ""; };
+  return { kind:String(kind || ""), at:String((o && o.at) || "").slice(0, 10),
+           from:from, to:to, fromLbl:lblOf(from), toLbl:lblOf(to),
+           by:String((o && o.by) || ""), note:String((o && o.note) || "").trim() };
+}
+function _withLog(a, entry){
+  return (Array.isArray(a && a.stageLog) ? a.stageLog : []).concat([entry]);
+}
+
+/* تثبيتُ مسارٍ على مستندٍ مُقدَّم — نسخةٌ لا مرجع. `null` إن لم يكن يقبله:
+   لا مسارَ للجهة، أو نوعٌ بلا مسار، أو مستندٌ صدر فيه قرارٌ أصلاً. */
+function aprAttachPath(a, stages, o){
+  if(!a || !aprTypeHasPath(a.docType)) return null;
+  if(String(a.status || "submitted") !== "submitted") return null;
+  var st = pathNormalize(stages);
+  if(!st.length) return null;
+  var base = { stages:st, stageIdx:0, stageLog:[] };
+  var e = _stageEntry(base, "start", -1, 0, o);
+  return { stages:st, stageIdx:0, stageLog:[e] };
+}
+
+/* الانتقالُ إلى المحطة التالية. `null` عند آخر محطة — هناك «اعتماد» لا «تالٍ». */
+function aprAdvance(a, o){
+  if(!aprHasPath(a) || String(a.status || "submitted") !== "submitted") return null;
+  var i = aprStageAt(a);
+  if(i >= a.stages.length - 1) return null;
+  return { stageIdx:i + 1, stageLog:_withLog(a, _stageEntry(a, "forward", i, i + 1, o)) };
+}
+
+/* الإعادةُ للتصحيح إلى محطةٍ تُختار — أيُّ محطةٍ غيرِ الحالية، والسببُ إلزاميّ:
+   إعادةٌ بلا سببٍ في السجلّ لا تُفيد من يقرأه بعد شهر. */
+function aprReturnTo(a, to, o){
+  if(!aprHasPath(a) || String(a.status || "submitted") !== "submitted") return null;
+  var i = aprStageAt(a), t = Number(to);
+  if(!isFinite(t) || t < 0 || t >= a.stages.length || Math.floor(t) === i) return null;
+  if(!String((o && o.note) || "").trim()) return null;
+  t = Math.floor(t);
+  return { stageIdx:t, stageLog:_withLog(a, _stageEntry(a, "back", i, t, o)) };
+}
+
+/* الاعتمادُ — من آخر محطةٍ وحدَها (لِما له مسار). يقلب الحالةَ ويثبّت التاريخَ
+   والمبلغَ المعتمَد؛ وغيرُ الماليّ بلا مبلغ. */
+function aprApprove(a, o){
+  if(!a || String(a.status || "submitted") !== "submitted") return null;
+  if(aprHasPath(a) && aprStageAt(a) !== a.stages.length - 1) return null;
+  var at = String((o && o.at) || "").slice(0, 10);
+  if(!at) return null;
+  if(a.submittedAt && at < String(a.submittedAt).slice(0, 10)) return null;
+  var out = { status:"approved", approvedAt:at };
+  if(aprIsFinancial(a.docType)){
+    var n = Number(o && o.amountApproved);
+    if(o && (o.amountApproved === "" || o.amountApproved === null || o.amountApproved === undefined) || !isFinite(n) || n < 0) return null;
+    out.amountApproved = n;
+  } else out.amountApproved = "";
+  if(aprHasPath(a)){
+    var i = aprStageAt(a);
+    out.stageLog = _withLog(a, _stageEntry(a, "approve", i, i, o));
+  }
+  return out;
+}
+
+/* الرفضُ النهائيّ — من أيّ محطة، والسببُ إلزاميّ. */
+function aprReject(a, o){
+  if(!a || String(a.status || "submitted") !== "submitted") return null;
+  if(!String((o && o.note) || "").trim()) return null;
+  var out = { status:"rejected", approvedAt:"", amountApproved:"" };
+  if(aprHasPath(a)){ var i = aprStageAt(a); out.stageLog = _withLog(a, _stageEntry(a, "reject", i, i, o)); }
+  return out;
+}
+
+/* السدادُ — للمعتمَد وحدَه. */
+function aprMarkPaid(a, o){
+  if(!a || String(a.status || "") !== "approved") return null;
+  var out = { status:"paid" };
+  if(aprHasPath(a)){ var i = aprStageAt(a); out.stageLog = _withLog(a, _stageEntry(a, "paid", i, i, o)); }
+  return out;
+}
+
+/* الجهةُ المقترَحةُ لمشروع: عميلُ المشروع (`client`) يطابق اسمَ جهةٍ في السجلّ —
+   اقتراحٌ يُعرض في النموذج ويُبدَّل بنقرة، لا ربطٌ صامت. */
+function partyForProject(parties, project){
+  var c = String((project && project.client) || "").trim().toLowerCase();
+  if(!c) return null;
+  var arr = Array.isArray(parties) ? parties : [];
+  for(var i = 0; i < arr.length; i++){
+    var p = arr[i];
+    if(p && String(p.name || "").trim().toLowerCase() === c) return p;
+  }
+  return null;
+}
+
+/* عددُ الإعادات في سجلّ المستند — يُعرض بجانب المحطة. */
+function aprReturnCount(a){
+  return (Array.isArray(a && a.stageLog) ? a.stageLog : []).filter(function(e){ return e && e.kind === "back"; }).length;
+}
+
+/* ════════ الحالة والمزامنة — سجلُّ الجهات ════════ */
+var _parties = [], _partiesUnsub = null, _partiesLoaded = false;
+var _pPanel = false;      // أمفتوحةٌ لوحةُ الجهات؟
+var _pEdit  = null;       // مسوّدةُ الجهة قيدَ التحرير
+var _pAct   = null;       // فعلٌ جارٍ على بطاقة مستند: { kind, to, note, amt, at, files }
+
+function parties(){ return _parties.slice(); }
+function partyById(id){
+  for(var i = 0; i < _parties.length; i++) if(_parties[i] && _parties[i].id === id) return _parties[i];
+  return null;
+}
+function _partySync(){
+  var d = _db();
+  if(!d || _partiesUnsub || !canView()) return;
+  _partiesUnsub = d.collection(PARTIES_COLL()).onSnapshot(function(snap){
+    _parties = snap.docs.map(function(x){ var v = x.data() || {}; v.id = x.id; return v; })
+      .sort(function(a, b){ return String(a.name || "").localeCompare(String(b.name || ""), "ar"); });
+    _partiesLoaded = true; _repaint(PAGE_APPROVALS);
+  }, function(e){ _partiesLoaded = true; _err = String((e && e.message) || e); _repaint(PAGE_APPROVALS); });
+}
+function _partyStopSync(){
+  try{ if(_partiesUnsub) _partiesUnsub(); }catch(e){}
+  _partiesUnsub = null; _parties = []; _partiesLoaded = false;
+}
 var _aview = { q:"", type:"", status:"", open:null, proj:null };
 var _aEdit = null;
 
@@ -1264,6 +1501,7 @@ function startSync(){
   if(!d || !canView()) return;
   startSignSync();
   _aprSync();
+  _partySync();
   _readReaders();
   if(!_docsUnsub){
     _docsUnsub = d.collection(DOCS_COLL()).onSnapshot(function(snap){
@@ -1283,6 +1521,7 @@ function startSync(){
 function stopSync(){
   stopSignSync();
   _aprStopSync();
+  _partyStopSync();
   try{ if(_docsUnsub) _docsUnsub(); }catch(e){}
   try{ if(_ltrsUnsub) _ltrsUnsub(); }catch(e){}
   _docsUnsub = _ltrsUnsub = null;
@@ -1482,6 +1721,50 @@ function injectCSS(){
 ".dv-ap-c.wait.b-warn .v{color:var(--warn)}",
 ".dv-ap-c.wait.b-crit{border-top-color:var(--danger)}",
 ".dv-ap-c.wait.b-crit .v{color:var(--danger)}",
+/* ── مسارُ الاعتماد: شريطُ محطات ── */
+".dv-path{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:12px 14px;margin-bottom:12px}",
+".dv-path.fin{opacity:.92}",
+".dv-path-h{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12.5px;font-weight:800;margin-bottom:10px}",
+".dv-path-cur{margin-inline-start:auto;font-weight:600;font-size:11.5px;color:var(--muted)}",
+".dv-path-track{display:flex;gap:4px;list-style:none;margin:0;padding:2px 0;min-width:560px;align-items:flex-start}",
+".dv-path-s{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;padding:6px 3px 7px;border-radius:9px;border:1px solid transparent;position:relative}",
+".dv-path-s .n{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:800;background:var(--surface2);color:var(--muted);border:1px solid var(--border)}",
+".dv-path-s .lbl{font-size:10.5px;font-weight:700;color:var(--muted);line-height:1.35}",
+".dv-path-s .d{font-size:9.5px;color:var(--muted);opacity:.85}",
+".dv-path-s.done .n{background:var(--primary);color:#fff;border-color:var(--primary)}",
+".dv-path-s.done .lbl{color:var(--text)}",
+".dv-path-s.cur{background:var(--surface2);border-color:var(--border)}",
+".dv-path-s.cur .n{background:var(--rank5);color:#fff;border-color:var(--rank5)}",
+".dv-path-s.cur .lbl{color:var(--text)}",
+".dv-path-s.cur .d{font-weight:700}",
+".dv-path-s.cur.b-warn{border-color:var(--warn)}",
+".dv-path-s.cur.b-warn .n,.dv-path-s.cur.b-warn .d{background:var(--warn);color:#fff;border-color:var(--warn)}",
+".dv-path-s.cur.b-warn .d{background:none;color:var(--warn)}",
+".dv-path-s.cur.b-crit{border-color:var(--danger)}",
+".dv-path-s.cur.b-crit .n{background:var(--danger);border-color:var(--danger)}",
+".dv-path-s.cur.b-crit .d{color:var(--danger)}",
+".dv-path-s.rej .n{background:var(--danger);color:#fff;border-color:var(--danger)}",
+".dv-path-acts{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}",
+".dv-act{background:var(--surface2);border:1px solid var(--primary);border-radius:12px;padding:12px 14px;margin-bottom:12px}",
+".dv-act-h{font-size:13px;font-weight:800;margin-bottom:8px}",
+".dv-log-tbl td,.dv-log-tbl th{font-size:11.5px}",
+".dv-log-back td{background:rgba(160,96,16,.06)}",
+".dv-log-rej td{background:rgba(185,44,44,.06)}",
+/* ── لوحةُ الجهات ── */
+".dv-party-grid{display:flex;flex-direction:column;gap:10px;margin-top:10px}",
+".dv-party{border:1px solid var(--border);border-radius:11px;padding:10px 12px;background:var(--surface)}",
+".dv-party-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;margin-bottom:6px}",
+".dv-party-path{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:11px}",
+".dv-party-st{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);white-space:nowrap}",
+".dv-party-arr{color:var(--muted);font-size:10px}",
+".dv-stg{display:flex;align-items:center;gap:6px;margin-bottom:6px}",
+".dv-stg .form-input{margin:0}",
+".dv-stg-n{width:22px;text-align:center;flex:none}",
+".dv-stg-d{width:74px;flex:none}",
+".dv-stg-b{flex:none;width:28px;height:30px;border:1px solid var(--border);border-radius:7px;background:var(--surface2);color:var(--text);cursor:pointer;font-family:inherit;font-size:13px}",
+".dv-stg-b:disabled{opacity:.35;cursor:default}",
+".dv-stg-b.del{color:var(--danger)}",
+".btn.on{box-shadow:inset 0 0 0 1px var(--primary)}",
 ".dv-ap-tbl{min-width:1040px}",
 ".t-warn{color:var(--warn);font-weight:700}",
 ".dv-sg-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:11px 13px;border:1px solid var(--border);border-radius:11px;margin-bottom:8px;background:var(--surface2)}",
@@ -1526,7 +1809,7 @@ function injectCSS(){
 ".dv-ai-h{font-size:13px;font-weight:800;color:var(--ai-ink);display:flex;align-items:center;gap:7px;margin-bottom:4px}",
 ".dv-ai-s{font-size:11.5px;color:var(--muted);line-height:1.8;margin-bottom:10px}",
 
-"@media (max-width:760px){.dv-grid{grid-template-columns:1fr}.dv-horizon{padding:10px}.dv-hz-track{min-width:460px}.dv-head{gap:10px}.dv-bar .dv-search{min-width:100%}}",
+"@media (max-width:760px){.dv-grid{grid-template-columns:1fr}.dv-horizon{padding:10px}.dv-hz-track{min-width:460px}.dv-head{gap:10px}.dv-bar .dv-search{min-width:100%}.dv-path-track{min-width:640px}}",
 "@media (prefers-reduced-motion:reduce){.dv-hz-m,.dv-tbl tbody tr{transition:none}}"
 ].join("\n");
   document.head.appendChild(st);
@@ -2997,6 +3280,14 @@ function _aprChip(a, today){
     return '<span class="dv-chip l-' + (st === "rejected" ? "urgent" : (st === "paid" ? "ok" : "soon")) + '">'
       + _esc(APR_ST_LBL[st] || st) + '</span>';
   }
+  /* ذو المسار يقول **أين** هو ومنذ متى — لا كم مضى على تقديمه فقط. */
+  if(aprHasPath(a)){
+    var i = aprStageAt(a), sd = aprStageDays(a, today), sb = aprStageBand(sd, a.stages[i].days);
+    return '<span class="dv-chip l-' + (sb === "crit" ? "expired" : (sb === "warn" ? "urgent" : "plan")) + '" title="المحطة '
+      + (i + 1) + ' من ' + a.stages.length + '">'
+      + '<span class="dv-num">' + (i + 1) + '/' + a.stages.length + '</span> ' + _esc(a.stages[i].lbl)
+      + (sd === null ? "" : (' · ' + sd + ' يوماً')) + '</span>';
+  }
   var w = aprDaysWaiting(a, today), b = aprAgeBand(w);
   return '<span class="dv-chip l-' + (b === "crit" ? "expired" : (b === "warn" ? "urgent" : "plan")) + '">'
     + (w === null ? "مُقدَّم" : ("بانتظار " + w + " يوماً")) + '</span>';
@@ -3044,6 +3335,9 @@ function _aprFormHTML(){
     return '<option value="' + x.key + '"' + (e.status === x.key ? " selected" : "") + '>' + _esc(x.lbl) + '</option>';
   }).join("");
   var done = (e.status === "approved" || e.status === "paid");
+  /* مستندٌ له مسارٌ (أو سيرثه عند الحفظ) لا تُكتب حالتُه بيد */
+  var _pp = e.partyId ? partyById(e.partyId) : null;
+  var pathed = aprHasPath(e) || (aprTypeHasPath(e.docType) && e.status === "submitted" && !!(_pp && pathNormalize(_pp.stages).length));
   return '<div class="dv-panel">'
     + '<div class="dv-panel-h">' + (e.id ? ("تعديل: " + _esc(e.title || e.id)) : "مستند مُقدَّم جديد") + '</div>'
     + '<div class="dv-panel-s">سجّل ما قدّمتَه للعميل بتاريخ تقديمه — فيُحسَب عمرُ انتظاره تلقائياً. '
@@ -3053,8 +3347,7 @@ function _aprFormHTML(){
       + '<input class="form-input" id="dv-a-title" value="' + _esc(e.title || "") + '" placeholder="المستخلص الثالث — أعمال الصيانة"></div>'
     + '<div class="dv-f"><label class="dv-l" for="dv-a-type">النوع</label>'
       + '<select class="form-input" id="dv-a-type" onchange="docVault.setAprType(this.value)">' + types + '</select></div>'
-    + '<div class="dv-f"><label class="dv-l" for="dv-a-party">الجهة <b>*</b></label>'
-      + '<input class="form-input" id="dv-a-party" value="' + _esc(e.party || "") + '" placeholder="وكالة الأنباء السعودية"></div>'
+    + '<div class="dv-f"><label class="dv-l" for="dv-a-party-sel">الجهة <b>*</b></label>' + _partyFieldHTML(e) + '</div>'
     + '<div class="dv-f"><label class="dv-l">المشروع</label>' + _projFieldHTML(e, "setAprFormProj", _aprs) + '</div>'
     + '<div class="dv-f"><label class="dv-l" for="dv-a-ourref">رقمنا المرجعي</label>'
       + '<input class="form-input dv-num" id="dv-a-ourref" value="' + _esc(e.ourRef || "") + '" placeholder="LTR-2609-0004 أو رقمٌ يدويّ"></div>'
@@ -3064,8 +3357,12 @@ function _aprFormHTML(){
       + '<div class="dv-f"><label class="dv-l" for="dv-a-app">تاريخ الاعتماد</label>'
         + '<input class="form-input dv-num" type="date" id="dv-a-app" value="' + _esc(e.approvedAt || "") + '"' + (done ? "" : " disabled") + '></div>'
     + '</div></div>'
-    + '<div class="dv-f wide"><label class="dv-l" for="dv-a-status">الحالة</label>'
-      + '<select class="form-input" id="dv-a-status" onchange="docVault.setAprStatus(this.value)">' + sts + '</select></div>'
+    + (pathed
+        ? '<div class="dv-f wide"><span class="dv-l">الحالة</span><span>' + _esc(APR_ST_LBL[e.status] || e.status)
+          + (aprHasPath(e) && e.status === "submitted" ? ' — المحطة <span class="dv-num">' + (aprStageAt(e) + 1) + '/' + e.stages.length + '</span>: ' + _esc(e.stages[aprStageAt(e)].lbl) : "")
+          + '</span><div class="dv-hint">الحالةُ تُشتقّ من المسار: تُحرَّك المحطاتُ ويُعتمَد من <b>بطاقة المستند</b>، لا من هنا.</div></div>'
+        : '<div class="dv-f wide"><label class="dv-l" for="dv-a-status">الحالة</label>'
+          + '<select class="form-input" id="dv-a-status" onchange="docVault.setAprStatus(this.value)">' + sts + '</select></div>')
     + (fin
         ? '<div class="dv-f wide"><div class="dv-dates">'
           + '<div class="dv-f"><label class="dv-l" for="dv-a-amt">المبلغ المقدَّم</label>'
@@ -3101,6 +3398,8 @@ function _aprCardHTML(a, today){
       + (canEdit() ? '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.editApr(\'' + _jq(a.id) + '\')">' + _icon("edit", "ic-sm") + ' تعديل</button>' : "")
       + (canDelete() ? '<button type="button" class="btn btn-delete btn-sm" onclick="docVault.delApr(\'' + _jq(a.id) + '\')">' + _icon("trash", "ic-sm") + '</button>' : "")
     + '</div></div>'
+    + _pathStepperHTML(a, today)
+    + (_pAct && _pAct.id === a.id ? _pathActFormHTML(a) : _pathActionsHTML(a))
     + '<div class="dv-grid">'
       + row("النوع", _esc(APR_LBL[a.docType] || "—"))
       + row("الجهة", _esc(a.party || "—"))
@@ -3114,8 +3413,395 @@ function _aprCardHTML(a, today){
           + ((a.status === "approved" || a.status === "paid") ? _money(a.amountApproved) : "—") + '</span>') : "")
       + (v !== null && v !== 0 ? row("الفارق المخصوم", '<span class="dv-num t-warn">' + _money(v) + '</span>') : "")
       + (a.notes ? '<div class="dv-f wide"><span class="dv-l">ملاحظات</span><span>' + _esc(a.notes) + '</span></div>' : "")
-      + '<div class="dv-f wide"><span class="dv-l">النسخة المعتمدة والمرفقات</span>' + _filesHTML(a.files, null) + '</div>'
+      + '<div class="dv-f wide"><span class="dv-l">النسخة المعتمدة والمرفقات</span>' + _filesHTML(a.files, null)
+      + ((a.status === "approved" || a.status === "paid") && !(a.files || []).length
+          ? '<div class="dv-hint t-warn">⚠ معتمدٌ بلا نسخةٍ معتمدةٍ مرفقة — أرفقها من «تعديل».</div>' : "")
+      + '</div>'
+      + _pathLogHTML(a)
     + '</div></div>';
+}
+
+/* ════════ المسارُ على البطاقة — شريطُ محطات · أفعالٌ · سجلّ ════════ */
+var PARTY_FREE = "__free";     // خيارُ «جهة أخرى» في منتقي الجهة
+
+function _dayWord(n){ n = Number(n) || 0; return n === 1 ? "يوم" : (n === 2 ? "يومان" : (n <= 10 ? n + " أيام" : n + " يوماً")); }
+
+function _pathStepperHTML(a, today){
+  if(!aprHasPath(a)) return "";
+  var cur = aprStageAt(a), st = String(a.status || "submitted");
+  var sd = aprStageDays(a, today), band = aprStageBand(sd, a.stages[cur].days);
+  var items = a.stages.map(function(s, i){
+    var cls = "todo";
+    if(st === "approved" || st === "paid") cls = "done";
+    else if(i < cur) cls = "done";
+    else if(i === cur) cls = (st === "rejected") ? "rej" : ("cur b-" + band);
+    var sub = "";
+    if(cls.indexOf("cur") === 0){
+      sub = (sd === null ? "" : ("منذ " + _dayWord(sd)))
+          + (s.days ? (" · المتوقّع " + _dayWord(s.days)) : "");
+    } else if(s.days) sub = _dayWord(s.days);
+    return '<li class="dv-path-s ' + cls + '" title="' + _esc(s.lbl) + '">'
+      + '<span class="n dv-num">' + (cls === "done" ? "✓" : (i + 1)) + '</span>'
+      + '<span class="lbl">' + _esc(s.lbl) + '</span>'
+      + (sub ? '<span class="d">' + sub + '</span>' : "")
+      + '</li>';
+  }).join("");
+  var rc = aprReturnCount(a);
+  var head = (st === "submitted")
+    ? ('المحطة <b class="dv-num">' + (cur + 1) + '</b> من <b class="dv-num">' + a.stages.length + '</b> — ' + _esc(a.stages[cur].lbl)
+       + (rc ? ' · <span class="t-warn">أُعيد للتصحيح ' + (rc === 1 ? "مرّة" : (rc === 2 ? "مرّتين" : rc + " مرّات")) + '</span>' : ""))
+    : ('اكتمل المسار — ' + _esc(APR_ST_LBL[st] || st));
+  return '<div class="dv-path' + (st === "submitted" ? "" : " fin") + '">'
+    + '<div class="dv-path-h">' + _icon("map", "ic-sm") + ' مسار الاعتماد' + (a.party ? ' — ' + _esc(a.party) : "") + '<span class="dv-path-cur">' + head + '</span></div>'
+    + '<div class="dv-wrap"><ol class="dv-path-track">' + items + '</ol></div>'
+    + '</div>';
+}
+
+function _pathLogHTML(a){
+  var log = Array.isArray(a && a.stageLog) ? a.stageLog.slice().reverse() : [];
+  if(!log.length) return "";
+  var rows = log.map(function(e){
+    var mv = "";
+    if(e.kind === "forward" || e.kind === "back") mv = _esc(e.fromLbl || "—") + ' ← ' + _esc(e.toLbl || "—");
+    else if(e.kind === "start") mv = _esc(e.toLbl || "—");
+    else mv = _esc(e.toLbl || e.fromLbl || "—");
+    return '<tr' + (e.kind === "back" ? ' class="dv-log-back"' : (e.kind === "reject" ? ' class="dv-log-rej"' : "")) + '>'
+      + '<td class="dv-num t-dim">' + _esc(e.at || "—") + '</td>'
+      + '<td class="t-name">' + _esc(STAGE_KINDS[e.kind] || e.kind || "—") + '</td>'
+      + '<td>' + mv + '</td>'
+      + '<td class="t-dim">' + _esc(e.by || "—") + '</td>'
+      + '<td>' + (e.note ? _esc(e.note) : '<span class="dv-none">—</span>') + '</td></tr>';
+  }).join("");
+  return '<div class="dv-f wide"><span class="dv-l">سجلّ الحركة</span>'
+    + '<div class="dv-wrap"><table class="dv-tbl dv-log-tbl"><thead><tr>'
+    + '<th>التاريخ</th><th>الحركة</th><th>المحطة</th><th>بواسطة</th><th>ملاحظة</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+}
+
+/* أزرارُ الحركة — ما يجوز الآن وحدَه يُعرض: عند آخر محطةٍ «اعتماد» لا «التالية». */
+function _pathActionsHTML(a){
+  if(!canEdit()) return "";
+  var st = String(a.status || "submitted"), b = [];
+  var btn = function(kind, lbl, cls, ic){
+    return '<button type="button" class="btn ' + cls + ' btn-sm" onclick="docVault.startAct(\'' + _jq(a.id) + '\',\'' + kind + '\')">'
+      + (ic ? _icon(ic, "ic-sm") + ' ' : "") + lbl + '</button>';
+  };
+  if(st === "submitted"){
+    if(aprHasPath(a)){
+      var i = aprStageAt(a), last = (i === a.stages.length - 1);
+      if(!last) b.push(btn("forward", "انتقل إلى: " + _esc(a.stages[i + 1].lbl), "btn-primary", "send"));
+      else b.push(btn("approve", "اعتماد", "btn-primary", "checkCircle"));
+      if(a.stages.length > 1) b.push(btn("back", "أُعيد للتصحيح", "btn-ghost", "rotateCcw"));
+    } else {
+      b.push(btn("approve", "اعتماد", "btn-primary", "checkCircle"));
+    }
+    b.push(btn("reject", "رفض نهائيّ", "btn-ghost", "xCircle"));
+  } else if(st === "approved"){
+    b.push(btn("paid", "تسجيل السداد", "btn-primary", "banknote"));
+  }
+  return b.length ? '<div class="dv-path-acts">' + b.join("") + '</div>' : "";
+}
+
+/* نموذجُ الفعل الجاري — حقولُه بحسب نوعه، ولا شيءَ يُحفَظ قبل «تأكيد». */
+function _pathActFormHTML(a){
+  var x = _pAct; if(!x || x.id !== a.id) return "";
+  var fin = aprIsFinancial(a.docType), cur = aprStageAt(a);
+  var ttl = { forward:"الانتقال إلى المحطة التالية", back:"إعادةٌ للتصحيح", approve:"اعتمادُ المستند",
+              reject:"رفضٌ نهائيّ", paid:"تسجيلُ السداد" }[x.kind] || "";
+  var h = '<div class="dv-act"><div class="dv-act-h">' + ttl + '</div><div class="dv-grid">';
+  if(x.kind === "back"){
+    var opts = a.stages.map(function(s, i){
+      return i === cur ? "" : '<option value="' + i + '"' + (Number(x.to) === i ? " selected" : "") + '>' + (i + 1) + ' — ' + _esc(s.lbl) + '</option>';
+    }).join("");
+    h += '<div class="dv-f"><label class="dv-l" for="dv-act-to">إلى المحطة <b>*</b></label>'
+       + '<select class="form-input" id="dv-act-to">' + opts + '</select></div>';
+  }
+  h += '<div class="dv-f"><label class="dv-l" for="dv-act-at">التاريخ <b>*</b></label>'
+     + '<input class="form-input dv-num" type="date" id="dv-act-at" value="' + _esc(x.at || "") + '"></div>';
+  if(x.kind === "approve" && fin){
+    h += '<div class="dv-f"><label class="dv-l" for="dv-act-amt">المبلغ المعتمد <b>*</b></label>'
+       + '<input class="form-input dv-num" type="number" step="0.01" min="0" id="dv-act-amt" value="' + _esc(x.amt || "") + '" placeholder="0.00">'
+       + '<div class="dv-hint">المقدَّم <span class="dv-num">' + _money(a.amountSubmitted) + '</span> — والفارقُ يُعرض في السجلّ ولا يُبدّل الحالة.</div></div>';
+  }
+  var noteReq = (x.kind === "back" || x.kind === "reject");
+  h += '<div class="dv-f wide"><label class="dv-l" for="dv-act-note">' + (noteReq ? "السبب <b>*</b>" : "ملاحظة") + '</label>'
+     + '<textarea class="form-input" id="dv-act-note" rows="2" placeholder="' + (noteReq ? "ما الذي طُلب تصحيحه؟" : "اختياريّ") + '">' + _esc(x.note || "") + '</textarea></div>';
+  if(x.kind === "approve"){
+    h += '<div class="dv-f wide"><label class="dv-l">النسخة المعتمدة</label>'
+       + _filesHTML(x.files, "docVault.delActFile")
+       + '<div style="margin-top:7px"><button type="button" class="btn btn-ghost btn-sm" onclick="docVault.addActFile()">'
+       + _icon("paperclip", "ic-sm") + ' إرفاق النسخة المعتمدة</button></div>'
+       + (x.files.length ? "" : '<div class="dv-hint">يُستحسن رفعُها الآن — يمكن إرفاقُها لاحقاً من «تعديل».</div>') + '</div>';
+  }
+  h += '</div><div class="dv-acts">'
+     + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.cancelAct()">إلغاء</button>'
+     + '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.commitAct()">' + _icon("checkCircle", "ic-sm") + ' تأكيد</button>'
+     + '</div></div>';
+  return h;
+}
+
+function startAct(id, kind){
+  if(!canEdit()){ _toast("🔒 لا صلاحية","warn"); return; }
+  var a = approvalById(id); if(!a) return;
+  var cur = aprStageAt(a);
+  _pAct = { id:id, kind:String(kind || ""), to:(cur > 0 ? cur - 1 : ""), note:"",
+            amt:"", at:new Date().toISOString().slice(0,10), files:[] };
+  renderApprovals();
+  try{ var el = document.querySelector(".dv-act"); if(el && el.scrollIntoView) el.scrollIntoView({ block:"center" }); }catch(e){}
+}
+function cancelAct(){ _pAct = null; renderApprovals(); }
+function _readActForm(){
+  if(!_pAct) return;
+  var g = function(id){ var el = document.getElementById(id); return el ? String(el.value || "").trim() : null; };
+  var v;
+  if((v = g("dv-act-to"))   !== null) _pAct.to = v;
+  if((v = g("dv-act-at"))   !== null) _pAct.at = v;
+  if((v = g("dv-act-amt"))  !== null) _pAct.amt = v;
+  if((v = g("dv-act-note")) !== null) _pAct.note = v;
+}
+function addActFile(){
+  if(!_pAct) return;
+  _readActForm();
+  var id = _pAct.id;
+  _pickFile(function(f){
+    _toast("⏳ جارٍ الرفع…", "");
+    _upload("apr", id, f).then(function(rec){
+      if(_pAct && _pAct.id === id){ _pAct.files = (_pAct.files || []).concat([rec]); renderApprovals(); }
+      _toast("✅ أُرفق الملف", "success");
+    }).catch(function(e){ _toast("⚠ تعذّر الرفع: " + String((e && e.message) || e), "warn"); });
+  });
+}
+function delActFile(i){ if(!_pAct) return; _readActForm(); (_pAct.files || []).splice(i, 1); renderApprovals(); }
+
+function commitAct(){
+  if(!_pAct) return;
+  if(!canEdit()){ _toast("🔒 لا صلاحية","warn"); return; }
+  _readActForm();
+  var a = approvalById(_pAct.id);
+  if(!a){ _pAct = null; renderApprovals(); return; }
+  var o = { at:_pAct.at, by:_myName(), note:_pAct.note, amountApproved:_pAct.amt };
+  if(!o.at){ _toast("⚠ أدخل التاريخ","warn"); return; }
+  var patch = null, k = _pAct.kind, why = "";
+  if(k === "forward"){ patch = aprAdvance(a, o); why = "لا محطةَ بعد هذه — الاعتمادُ من هنا"; }
+  else if(k === "back"){ patch = aprReturnTo(a, _pAct.to, o); why = "اخترِ المحطةَ واكتب السبب"; }
+  else if(k === "approve"){ patch = aprApprove(a, o); why = aprIsFinancial(a.docType) ? "أدخل المبلغَ المعتمد — والتاريخُ لا يسبق التقديم" : "الاعتمادُ من آخر محطةٍ وحدَها"; }
+  else if(k === "reject"){ patch = aprReject(a, o); why = "اكتب سببَ الرفض"; }
+  else if(k === "paid"){ patch = aprMarkPaid(a, o); why = "السدادُ للمعتمَد وحدَه"; }
+  if(!patch){ _toast("⚠ " + why, "warn"); return; }
+  var d = _db(); if(!d){ _toast("⚠ لا اتصال بقاعدة البيانات","warn"); return; }
+  patch.updatedAt = new Date().toISOString(); patch.updatedBy = _myName();
+  if(k === "approve" && _pAct.files.length) patch.files = (a.files || []).concat(_pAct.files);
+  var lbl = STAGE_KINDS[k] || k;
+  d.collection(APRS_COLL()).doc(a.id).set(patch, { merge:true }).then(function(){
+    _audit("مسار الاعتماد: " + lbl, a.id + " — " + (a.title || "") + (o.note ? " — " + o.note : ""));
+    _pAct = null; renderApprovals();
+    _toast(k === "approve" ? "✅ اعتُمد — ودخل معتمداتِ المشروع" : "✅ " + lbl, "success");
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+}
+
+/* ════════ منتقي الجهة في النموذج ════════ */
+function _partyFieldHTML(e){
+  var html = '';
+  if(_parties.length){
+    var sel = e.partyId && partyById(e.partyId) ? e.partyId : PARTY_FREE;
+    var opts = _parties.map(function(p){
+      var n = pathNormalize(p.stages).length;
+      return '<option value="' + _esc(p.id) + '"' + (sel === p.id ? " selected" : "") + '>' + _esc(p.name || p.id)
+        + (n ? ' — ' + n + ' محطات' : ' — بلا مسار') + '</option>';
+    }).join("");
+    opts += '<option value="' + PARTY_FREE + '"' + (sel === PARTY_FREE ? " selected" : "") + '>— جهة أخرى (اكتب اسمها) —</option>';
+    html += '<select class="form-input" id="dv-a-party-sel" onchange="docVault.setAprParty(this.value)">' + opts + '</select>';
+    if(sel === PARTY_FREE){
+      html += '<input class="form-input" id="dv-a-party" style="margin-top:6px" value="' + _esc(e.party || "") + '" placeholder="اسم الجهة">';
+    }
+  } else {
+    html += '<input class="form-input" id="dv-a-party" value="' + _esc(e.party || "") + '" placeholder="وكالة الأنباء السعودية">';
+  }
+  /* تلميحُ المسار — ما سيحدث عند الحفظ، قبل أن يحدث */
+  var p = e.partyId ? partyById(e.partyId) : null, n = p ? pathNormalize(p.stages).length : 0;
+  if(aprHasPath(e)){
+    html += '<div class="dv-hint">المسارُ مثبَّتٌ على المستند (' + e.stages.length + ' محطات) — يُحرَّك من بطاقته لا من هنا.</div>';
+  } else if(!aprTypeHasPath(e.docType)){
+    html += '<div class="dv-hint">' + _esc(APR_LBL[e.docType] || "هذا النوع") + ' بلا مسارِ اعتماد — الحالةُ تُكتب بيدك.</div>';
+  } else if(p && n){
+    html += '<div class="dv-hint">سيُثبَّت عليه مسارُ «' + _esc(p.name) + '» (' + n + ' محطات) عند الحفظ — والاعتمادُ من آخر محطةٍ في بطاقته.</div>';
+  } else if(p){
+    html += '<div class="dv-hint">هذه الجهةُ بلا مسارٍ محدَّد — <a href="#" onclick="docVault.togglePartyPanel();return false">عرّف مسارَها</a> أو تُكتب الحالةُ بيدك.</div>';
+  } else if(!_parties.length){
+    html += '<div class="dv-hint">لا جهاتٍ مسجَّلةً بعد — <a href="#" onclick="docVault.togglePartyPanel();return false">سجّل الجهاتِ ومساراتها</a> ليتتبّع المستخلصُ محطاتِه.</div>';
+  }
+  return html;
+}
+function setAprParty(v){
+  if(!_aEdit) return;
+  _readAprForm();
+  _aEdit.partyId = (String(v || "") === PARTY_FREE) ? "" : String(v || "");
+  var p = _aEdit.partyId ? partyById(_aEdit.partyId) : null;
+  if(p) _aEdit.party = String(p.name || "");
+  renderApprovals();
+}
+
+/* ════════ لوحةُ الجهات ومساراتها ════════ */
+function _partiesPanelHTML(){
+  var h = '<div class="dv-panel" style="margin-top:14px">'
+    + '<div class="dv-head" style="margin-bottom:6px"><div>'
+    + '<div class="dv-panel-h">' + _icon("map", "ic-sm") + ' الجهات ومسارات اعتمادها</div>'
+    + '<div class="dv-panel-s">لكلّ جهةٍ محطاتُها بترتيبها ومدّةٍ متوقّعةٍ لكلّ محطة. '
+      + 'المستندُ الجديدُ يرث <b>نسخةً</b> من مسار جهته عند حفظه، فتعديلُ المسار هنا يسري على ما يُسجَّل بعده لا على ما مضى.</div>'
+    + '</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.togglePartyPanel()">' + _icon("rotateCcw", "ic-sm") + ' رجوع</button>'
+    + (canEdit() && !_pEdit ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.newParty()">' + _icon("plus", "ic-sm") + ' جهة جديدة</button>' : "")
+    + '</div></div>';
+  if(_pEdit) h += _partyFormHTML();
+  else if(!_parties.length){
+    h += '<div class="dv-empty">لا جهاتٍ بعد.'
+      + (canEdit() ? '<br><button type="button" class="dv-clear" onclick="docVault.seedTemplateParty()">أضِف «' + _esc(PATH_TEMPLATE_NAME) + '» بمسارها النموذجيّ (' + PATH_TEMPLATE.length + ' محطة)</button>' : "")
+      + '</div>';
+  } else {
+    h += '<div class="dv-party-grid">' + _parties.map(function(p){
+      var st = pathNormalize(p.stages);
+      var chips = st.map(function(s, i){ return '<span class="dv-party-st"><span class="dv-num">' + (i + 1) + '</span> ' + _esc(s.lbl) + (s.days ? ' <span class="t-dim dv-num">' + s.days + 'ي</span>' : "") + '</span>'; }).join('<span class="dv-party-arr">←</span>');
+      var used = _visAprs().filter(function(a){ return !a.archived && a.partyId === p.id; }).length;
+      return '<div class="dv-party">'
+        + '<div class="dv-party-h"><b>' + _esc(p.name || p.id) + '</b>'
+        + '<span class="t-dim">' + (st.length ? st.length + ' محطات' : 'بلا مسار') + (used ? ' · ' + used + ' مستنداً' : "") + '</span>'
+        + '<span style="margin-inline-start:auto;display:flex;gap:6px">'
+        + (canEdit() ? '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.editParty(\'' + _jq(p.id) + '\')">' + _icon("edit", "ic-sm") + ' تعديل</button>' : "")
+        + (canDelete() ? '<button type="button" class="btn btn-delete btn-sm" onclick="docVault.delParty(\'' + _jq(p.id) + '\')">' + _icon("trash", "ic-sm") + '</button>' : "")
+        + '</span></div>'
+        + (chips ? '<div class="dv-party-path">' + chips + '</div>' : '<div class="dv-hint">بلا محطات — الحالةُ لمستنداتها تُكتب بيدك.</div>')
+        + '</div>';
+    }).join("") + '</div>';
+  }
+  return h + '</div>';
+}
+
+function _partyFormHTML(){
+  var e = _pEdit;
+  var rows = e.stages.map(function(s, i){
+    return '<div class="dv-stg">'
+      + '<span class="dv-num t-dim dv-stg-n">' + (i + 1) + '</span>'
+      + '<input class="form-input" id="dv-p-lbl-' + i + '" value="' + _esc(s.lbl || "") + '" placeholder="اسم المحطة">'
+      + '<input class="form-input dv-num dv-stg-d" type="number" min="0" step="1" id="dv-p-days-' + i + '" value="' + _esc(s.days || "") + '" placeholder="أيام" title="المدّة المتوقّعة بالأيام">'
+      + '<button type="button" class="dv-stg-b" title="أعلى" onclick="docVault.partyMoveStage(' + i + ',-1)"' + (i === 0 ? " disabled" : "") + '>↑</button>'
+      + '<button type="button" class="dv-stg-b" title="أسفل" onclick="docVault.partyMoveStage(' + i + ',1)"' + (i === e.stages.length - 1 ? " disabled" : "") + '>↓</button>'
+      + '<button type="button" class="dv-stg-b del" title="حذف" onclick="docVault.partyDelStage(' + i + ')">×</button>'
+      + '</div>';
+  }).join("");
+  return '<div class="dv-grid">'
+    + '<div class="dv-f wide"><label class="dv-l" for="dv-p-name">اسم الجهة <b>*</b></label>'
+      + '<input class="form-input" id="dv-p-name" value="' + _esc(e.name || "") + '" placeholder="أمانة حائل"></div>'
+    + '<div class="dv-f wide"><label class="dv-l">محطات المسار — بترتيبها من التقديم إلى الاعتماد</label>'
+      + (rows || '<div class="dv-hint">لا محطات بعد — أضِف الأولى، أو ابدأ من المسار النموذجيّ.</div>')
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'
+      + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.partyAddStage()">' + _icon("plus", "ic-sm") + ' محطة</button>'
+      + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.partyUseTemplate()">' + _icon("repeat", "ic-sm") + ' ابدأ من المسار النموذجيّ (' + _esc(PATH_TEMPLATE_NAME) + ')</button>'
+      + '</div>'
+      + '<div class="dv-hint">المدّةُ المتوقّعة تُلوّن المحطةَ حين تُتجاوَز ولا تُنبّه أحداً. اتركها فارغةً إن لم تُعرف.</div></div>'
+    + '</div>'
+    + '<div class="dv-acts">'
+      + '<button type="button" class="btn btn-ghost" onclick="docVault.cancelParty()">إلغاء</button>'
+      + '<button type="button" class="btn btn-primary" onclick="docVault.saveParty()">' + _icon("save", "ic-sm") + ' حفظ الجهة</button>'
+    + '</div>';
+}
+
+function togglePartyPanel(){
+  if(!canView()) return;
+  _pPanel = !_pPanel; _pEdit = null;
+  if(_pPanel){ _aEdit = null; _aview.open = null; }
+  renderApprovals(); _top();
+}
+function newParty(){
+  if(!canEdit()){ _toast("🔒 لا صلاحية","warn"); return; }
+  _pPanel = true; _pEdit = { id:"", name:"", stages:[] }; renderApprovals();
+}
+function editParty(id){
+  if(!canEdit()){ _toast("🔒 لا صلاحية","warn"); return; }
+  var p = partyById(id); if(!p) return;
+  _pPanel = true;
+  _pEdit = { id:p.id, name:String(p.name || ""), stages:pathNormalize(p.stages).map(function(s){ return { lbl:s.lbl, days:s.days || "" }; }) };
+  renderApprovals();
+}
+function cancelParty(){ _pEdit = null; renderApprovals(); }
+function _readPartyForm(){
+  if(!_pEdit) return;
+  var g = function(id){ var el = document.getElementById(id); return el ? String(el.value || "").trim() : null; };
+  var v = g("dv-p-name"); if(v !== null) _pEdit.name = v;
+  _pEdit.stages.forEach(function(s, i){
+    var l = g("dv-p-lbl-" + i), d = g("dv-p-days-" + i);
+    if(l !== null) s.lbl = l;
+    if(d !== null) s.days = d;
+  });
+}
+function partyAddStage(){ if(!_pEdit) return; _readPartyForm(); _pEdit.stages.push({ lbl:"", days:"" }); renderApprovals();
+  try{ var el = document.getElementById("dv-p-lbl-" + (_pEdit.stages.length - 1)); if(el) el.focus(); }catch(e){} }
+function partyDelStage(i){ if(!_pEdit) return; _readPartyForm(); _pEdit.stages.splice(i, 1); renderApprovals(); }
+function partyMoveStage(i, dir){
+  if(!_pEdit) return; _readPartyForm();
+  var j = i + dir; if(j < 0 || j >= _pEdit.stages.length) return;
+  var t = _pEdit.stages[i]; _pEdit.stages[i] = _pEdit.stages[j]; _pEdit.stages[j] = t;
+  renderApprovals();
+}
+function partyUseTemplate(){
+  if(!_pEdit) return; _readPartyForm();
+  var go = function(){
+    _pEdit.stages = PATH_TEMPLATE.map(function(s){ return { lbl:s.lbl, days:s.days }; });
+    if(!_pEdit.name) _pEdit.name = PATH_TEMPLATE_NAME;
+    renderApprovals();
+  };
+  if(!_pEdit.stages.length){ go(); return; }
+  _confirm({ title:"استبدال المحطات", icon:"↺", okText:"استبدل", okClass:"btn-primary",
+    msg:"ستُستبدَل المحطاتُ الحالية (" + _pEdit.stages.length + ") بالمسار النموذجيّ (" + PATH_TEMPLATE.length + " محطة)." })
+    .then(function(ok){ if(ok) go(); }).catch(function(){});
+}
+function _savePartyDoc(body, id){
+  var d = _db(); if(!d) return Promise.reject(new Error("no-db"));
+  var now = new Date().toISOString(), me = _myName();
+  body.updatedAt = now; body.updatedBy = me;
+  if(id) return d.collection(PARTIES_COLL()).doc(id).set(body, { merge:true }).then(function(){ return id; });
+  return _nextId("PRT", PARTIES_CTR()).then(function(nid){
+    body.createdAt = now; body.createdBy = me;
+    return d.collection(PARTIES_COLL()).doc(nid).set(body).then(function(){ return nid; });
+  });
+}
+function saveParty(){
+  if(!canEdit()){ _toast("🔒 لا صلاحية","warn"); return; }
+  if(!_pEdit) return;
+  _readPartyForm();
+  var name = String(_pEdit.name || "").trim();
+  if(!name){ _toast("⚠ أدخل اسم الجهة","warn"); return; }
+  var st = pathNormalize(_pEdit.stages);
+  var dup = _parties.some(function(p){ return p.id !== _pEdit.id && String(p.name || "").trim().toLowerCase() === name.toLowerCase(); });
+  if(dup){ _toast("⚠ جهةٌ بهذا الاسم مسجَّلةٌ فعلاً","warn"); return; }
+  var was = _pEdit.id;
+  _savePartyDoc({ name:name, stages:st }, was).then(function(id){
+    _audit(was ? "تعديل مسار جهة" : "تسجيل جهة ومسارها", id + " — " + name + " (" + st.length + " محطات)");
+    _pEdit = null; renderApprovals();
+    _toast(was ? "✅ حُفظ المسار — يسري على ما يُسجَّل بعده" : "✅ سُجّلت الجهة برقم " + id, "success");
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+}
+function seedTemplateParty(){
+  if(!canEdit()){ _toast("🔒 لا صلاحية","warn"); return; }
+  if(_parties.length){ _toast("⚠ السجلُّ ليس فارغاً — أضِف الجهةَ من «جهة جديدة»","warn"); return; }
+  _savePartyDoc({ name:PATH_TEMPLATE_NAME, stages:pathNormalize(PATH_TEMPLATE) }, "").then(function(id){
+    _audit("تسجيل جهة ومسارها", id + " — " + PATH_TEMPLATE_NAME + " (نموذجيّ)");
+    _toast("✅ أُضيفت «" + PATH_TEMPLATE_NAME + "» بمسارها — عدّله كما تشاء", "success");
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+}
+function delParty(id){
+  if(!canDelete()){ _toast("🔒 الحذف من صلاحية مدير النظام","warn"); return; }
+  var p = partyById(id); if(!p) return;
+  var used = _aprs.filter(function(a){ return !a.archived && a.partyId === id; }).length;
+  _confirm({ title:"حذف جهة", icon:"🗑", okText:"حذف", okClass:"btn-danger",
+    msg:'ستُحذف "' + (p.name || id) + '" من سجلّ الجهات.' + (used ? ' المستنداتُ المربوطةُ بها (' + used + ') تحتفظ بنسخة مسارها ولا تتأثّر.' : "") })
+    .then(function(ok){
+      if(!ok) return;
+      var d = _db(); if(!d) return;
+      d.collection(PARTIES_COLL()).doc(id).delete().then(function(){
+        _audit("حذف جهة من سجلّ المسارات", id + " — " + (p.name || ""));
+        _toast("✅ حُذفت", "success");
+      }).catch(function(e){ _toast("⚠ تعذّر الحذف: " + String((e && e.message) || e), "warn"); });
+    }).catch(function(){});
 }
 
 function renderApprovals(){
@@ -3128,6 +3814,8 @@ function renderApprovals(){
     + '<div class="dv-sub">ما قدّمناه للعميل: مستخلصاتٌ ومطالباتٌ وخطابات. يُرتَّب بأطول انتظارٍ أوّلاً، '
       + 'وتُحفَظ النسخةُ المعتمدةُ بجانب كلٍّ منها.</div>'
     + '</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<button type="button" class="btn btn-ghost btn-sm' + (_pPanel ? " on" : "") + '" onclick="docVault.togglePartyPanel()">' + _icon("map", "ic-sm") + ' الجهات ومساراتها'
+      + (_parties.length ? ' <span class="dv-cnt">' + _parties.length + '</span>' : "") + '</button>'
     + (canEdit() ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.newApr()">' + _icon("plus", "ic-sm") + ' مستند مُقدَّم</button>' : "")
     + '</div></div>';
 
@@ -3136,7 +3824,8 @@ function renderApprovals(){
   var _avis = _visAprs();
 
   var body;
-  if(_aEdit){ body = _aprFormHTML(); }
+  if(_pPanel){ body = _partiesPanelHTML(); }
+  else if(_aEdit){ body = _aprFormHTML(); }
   else if(_aview.open){
     var a = approvalById(_aview.open);
     body = a ? _aprCardHTML(a, today) : '<div class="dv-empty">لم يعد هذا المستند موجوداً.</div>';
@@ -3569,9 +4258,12 @@ function newApr(){
   if(!canEdit()){ _toast("🔒 لا صلاحية للإضافة","warn"); return; }
   _aEdit = { title:"", docType:"extract", party:"", ourRef:"", theirRef:"",
              submittedAt:new Date().toISOString().slice(0,10), approvedAt:"",
-             status:"submitted", amountSubmitted:"", amountApproved:"", notes:"", files:[] };
+             status:"submitted", amountSubmitted:"", amountApproved:"", notes:"", files:[],
+             partyId:"", stages:[], stageIdx:0, stageLog:[] };
   var _pa0 = _projDraft(null, _newProjSelWork());
   Object.keys(_pa0).forEach(function(k){ _aEdit[k] = _pa0[k]; });
+  _suggestParty();
+  _pPanel = false; _pAct = null;
   _aview.open = null; renderApprovals(); _top();
 }
 function editApr(id){
@@ -3584,8 +4276,11 @@ function editApr(id){
              status:a.status||"submitted",
              amountSubmitted:(a.amountSubmitted === 0 || a.amountSubmitted) ? String(a.amountSubmitted) : "",
              amountApproved:(a.amountApproved === 0 || a.amountApproved) ? String(a.amountApproved) : "",
-             notes:a.notes||"", files:Array.isArray(a.files) ? a.files.slice() : [] };
+             notes:a.notes||"", files:Array.isArray(a.files) ? a.files.slice() : [],
+             partyId:String(a.partyId || ""), stages:pathNormalize(a.stages),
+             stageIdx:aprStageAt(a), stageLog:Array.isArray(a.stageLog) ? a.stageLog.slice() : [] };
   var _pa = _projDraft(a); Object.keys(_pa).forEach(function(k){ _aEdit[k] = _pa[k]; });
+  _pPanel = false; _pAct = null;
   _aview.open = null; renderApprovals(); _top();
 }
 function cancelApr(){ _aEdit = null; renderApprovals(); }
@@ -3594,12 +4289,22 @@ function _readAprForm(){
   var g = function(id){ var el = document.getElementById(id); return el ? String(el.value || "").trim() : ""; };
   _aEdit.title       = g("dv-a-title");
   _aEdit.docType     = g("dv-a-type") || "other";
-  _aEdit.party       = g("dv-a-party");
+  /* الجهةُ من المنتقي إن وُجد (اسمُها يُنسخ من السجلّ)، وإلّا من الخانة الحرّة */
+  var psel = document.getElementById("dv-a-party-sel");
+  if(psel && String(psel.value) !== PARTY_FREE){
+    _aEdit.partyId = String(psel.value || "");
+    var _pp = partyById(_aEdit.partyId);
+    if(_pp) _aEdit.party = String(_pp.name || "");
+  } else {
+    _aEdit.partyId = "";
+    if(document.getElementById("dv-a-party")) _aEdit.party = g("dv-a-party");
+  }
   if(_aEdit.projSel === MANUAL_ID) _aEdit.projManual = g("dv-proj-manual");
   _aEdit.ourRef      = g("dv-a-ourref");
   _aEdit.theirRef    = g("dv-a-theirref");
   _aEdit.submittedAt = g("dv-a-sub");
-  _aEdit.status      = g("dv-a-status") || "submitted";
+  /* منتقي الحالة غائبٌ لذي المسار — فتبقى حالتُه كما هي، ولا تُقرأ "" فتصير «مُقدَّم» */
+  if(document.getElementById("dv-a-status")) _aEdit.status = g("dv-a-status") || "submitted";
   /* تاريخُ الاعتماد والمبلغُ المعتمَد محجوبان ما دام المستندُ مُقدَّماً — و`g` تردّ ""
      للحقل المحجوب كما للفارغ، فلا يُقرآن إلا حين يكونان مفتوحين. وإلّا لَمُحي ما
      كُتب فيهما بمجرّد إعادةِ الحالة إلى «مُقدَّم» لحظةً. */
@@ -3614,7 +4319,18 @@ function _readAprForm(){
 function setAprType(v){ if(!_aEdit) return; _readAprForm(); _aEdit.docType = String(v || "other"); renderApprovals(); }
 function setDocProj(v){    _setProjOn(_edit,  v, _readForm,       render); }
 function setLetterFormProj(v){ _setProjOn(_ledit, v, _readLetterForm, renderLetters); }
-function setAprFormProj(v){ _setProjOn(_aEdit, v, _readAprForm,    renderApprovals); }
+function setAprFormProj(v){
+  _setProjOn(_aEdit, v, _readAprForm, function(){ _suggestParty(); renderApprovals(); });
+}
+/* اقتراحُ الجهة من عميل المشروع — حين لا جهةَ مختارةً بعد وحدَه، ولا يُبدَّل اختيارٌ قائم. */
+function _suggestParty(){
+  if(!_aEdit || _aEdit.partyId || (_aEdit.party && !_parties.length)) return;
+  var pid = String(_aEdit.projSel || "");
+  var proj = null;
+  _projList().forEach(function(p){ if(p && String(p.id) === pid) proj = p; });
+  var hit = partyForProject(_parties, proj);
+  if(hit){ _aEdit.partyId = hit.id; _aEdit.party = String(hit.name || ""); }
+}
 function setAprStatus(v){
   if(!_aEdit) return;
   _readAprForm();
@@ -3643,6 +4359,10 @@ function saveApr(){
   _readAprForm();
   if(!_aEdit.title){ _toast("⚠ أدخل عنوان المستند","warn"); return; }
   if(!_aEdit.party){ _toast("⚠ أدخل الجهة التي قُدِّم إليها","warn"); return; }
+  /* المستخلصُ والمطالبةُ لمشروعٍ حتماً — بالمشروع يدخل معتمداتِه وملفَّه عند اعتماده */
+  if(aprTypeHasPath(_aEdit.docType) && _projBody(_aEdit).scope !== SCOPE_PROJECT){
+    _toast("⚠ " + (APR_LBL[_aEdit.docType] || "هذا المستند") + " يُربَط بمشروع — به يدخل معتمداتِ المشروع وملفَّه","warn"); return;
+  }
   if(!_aEdit.submittedAt){ _toast("⚠ أدخل تاريخ التقديم — عليه يُحسب عمرُ الانتظار","warn"); return; }
   if(_aEdit.approvedAt && _aEdit.submittedAt && _aEdit.approvedAt < _aEdit.submittedAt){
     _toast("⚠ تاريخ الاعتماد قبل تاريخ التقديم","warn"); return;
@@ -3665,6 +4385,18 @@ function saveApr(){
   var _pb = _projBody(_aEdit);
   body.scope = _pb.scope; body.projectId = _pb.projectId;
   body.projectName = _pb.projectName; body.isCustomProject = _pb.isCustomProject;
+  body.partyId = String(_aEdit.partyId || "");
+  /* المسار: المثبَّتُ يبقى كما هو؛ وما لا مسارَ له يرث نسخةً من مسار جهته إن كان
+     نوعُه يقبله وما زال مُقدَّماً. ونوعٌ لا مسارَ له يُسقط المسارَ ويُبقي السجلّ. */
+  if(aprHasPath(_aEdit) && aprTypeHasPath(body.docType)){
+    body.stages = _aEdit.stages; body.stageIdx = _aEdit.stageIdx; body.stageLog = _aEdit.stageLog;
+  } else if(aprTypeHasPath(body.docType) && body.status === "submitted" && body.partyId){
+    var _pp2 = partyById(body.partyId);
+    var att = aprAttachPath(body, _pp2 && _pp2.stages, { at:body.submittedAt, by:me });
+    if(att){ body.stages = att.stages; body.stageIdx = att.stageIdx; body.stageLog = (_aEdit.stageLog || []).concat(att.stageLog); }
+  } else if(!aprTypeHasPath(body.docType) && aprHasPath(_aEdit)){
+    body.stages = []; body.stageIdx = 0; body.stageLog = _aEdit.stageLog;
+  }
   var was = _aEdit.id;
   var p = was
     ? d.collection(APRS_COLL()).doc(was).set(body, { merge:true }).then(function(){ return was; })
@@ -4021,6 +4753,18 @@ window.docVault = {
   aprIsFinancial:aprIsFinancial, aprAgeBand:aprAgeBand,
   filterApprovals:filterApprovals, sortApprovals:sortApprovals,
   _APR_TYPES:APR_TYPES, _APR_STATUS:APR_STATUS, _PAGE_APPROVALS:PAGE_APPROVALS,
+  // مسارُ الاعتماد — الجهاتُ ومحطاتُها
+  parties:parties, partyById:partyById, togglePartyPanel:togglePartyPanel,
+  newParty:newParty, editParty:editParty, cancelParty:cancelParty, saveParty:saveParty, delParty:delParty,
+  partyAddStage:partyAddStage, partyDelStage:partyDelStage, partyMoveStage:partyMoveStage,
+  partyUseTemplate:partyUseTemplate, seedTemplateParty:seedTemplateParty, setAprParty:setAprParty,
+  startAct:startAct, cancelAct:cancelAct, commitAct:commitAct, addActFile:addActFile, delActFile:delActFile,
+  pathNormalize:pathNormalize, aprHasPath:aprHasPath, aprTypeHasPath:aprTypeHasPath, aprStageAt:aprStageAt,
+  aprStageEnteredAt:aprStageEnteredAt, aprStageDays:aprStageDays, aprStageBand:aprStageBand,
+  aprAttachPath:aprAttachPath, aprAdvance:aprAdvance, aprReturnTo:aprReturnTo, aprApprove:aprApprove,
+  aprReject:aprReject, aprMarkPaid:aprMarkPaid, partyForProject:partyForProject, aprReturnCount:aprReturnCount,
+  _PATH_TEMPLATE:PATH_TEMPLATE, _PATH_TEMPLATE_NAME:PATH_TEMPLATE_NAME, _STAGE_KINDS:STAGE_KINDS,
+  _PARTY_FREE:PARTY_FREE, _PARTIES_COLL:PARTIES_COLL,
   _PREFIX_OPTS:PREFIX_OPTS, _HONORIFIC_OPTS:HONORIFIC_OPTS,
   _DEF_PREFIX:DEF_PREFIX, _DEF_HONORIFIC:DEF_HONORIFIC, _DEF_CLOSING:DEF_CLOSING,
   // سجلُّ التواقيع
@@ -4063,7 +4807,9 @@ window.docVault = {
      والجدولُ في DOM حقيقيّ داخل `hail-tests.js`. لأنّ الحسابَ الصحيحَ الذي لا يُرسَم
      خطأٌ لا يُنذر، ولا سبيلَ لفحص الرسم بلا مصدرِ بياناتٍ سوى `onSnapshot`.
      لا يُنادى من الواجهة قطّ، ولا يكتب حرفاً في Firestore. */
-  __test_seed:function(d, l, sg, ap){
+  __test_seed:function(d, l, sg, ap, pt){
+    if(Array.isArray(pt)){ _parties = pt.slice(); _partiesLoaded = true; }
+    _pPanel = false; _pEdit = null; _pAct = null;
     _docs = Array.isArray(d) ? d.slice() : [];
     _ltrs = Array.isArray(l) ? l.slice() : [];
     if(Array.isArray(sg)){ _signs = sg.slice(); _signsLoaded = true; }
