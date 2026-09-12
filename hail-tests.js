@@ -5484,7 +5484,7 @@ function auditRound2() {
       HTML.includes('name:"مؤشر سرعة الإغلاق (خلال "+RESPONSE_TARGET_H+" ساعات عمل)",pct:cur.rates.k02') && HTML.includes('["مغلقة هذا الشهر",cur.closedTix]'));
   }
 
-  // ── v18.9zl — المقارنةُ الشهريةُ للمؤشرات في رسمٍ واحد (وحدةُ kpi-trend-chart.js) ──
+  // ── v18.9zl/zm — المؤشراتُ شهراً بشهر مقابلَ الهدف (وحدةُ kpi-trend-chart.js) ──
   {
     const _kp = path.resolve(path.dirname(IDX), "kpi-trend-chart.js");
     if (!fs.existsSync(_kp)) { T("★★ zl: وحدةُ kpi-trend-chart.js موجودة", false); }
@@ -5506,24 +5506,36 @@ function auditRound2() {
           { priority: P, status: "مغلق", maintType: "تصحيحية", createdAt: "2026-07-02T08:00:00", closedAt: "2026-07-05T12:00:00" },
         ];
         const d = K.series(L, { now: "2026-09-12" });
-        T("★★ zl: اثنا عشر شهراً تنتهي بشهر اليوم وبترتيبها الزمنيّ",
-          d.months.length === 12 && d.months[11].ym === "2026-09" && d.months[0].ym === "2025-10" && d.months[10].ym === "2026-08");
+        // zm: النافذةُ من أوّل شهرٍ فيه بيانات (يوليو) — لا اثنا عشر شهراً ثلثاها فراغ — وأربعةٌ على الأقلّ
+        T("★★ zm: النافذةُ تبدأ من أوّل شهرٍ فيه مقام، وأربعةُ أشهرٍ على الأقلّ، وتنتهي بشهر اليوم",
+          d.months.length === 4 && d.months[0].ym === "2026-06" && d.months[3].ym === "2026-09");
+        T("★★ zm: اثنا عشر شهراً على الأكثر مهما قدُمت البيانات",
+          K.series([{ priority: P, status: "مغلق", maintType: "تصحيحية", createdAt: "2025-10-05T08:00:00", closedAt: "2025-10-05T12:00:00" }], { now: "2026-09-12" }).months.length === 12 &&
+          K.series([{ priority: P, status: "مغلق", maintType: "تصحيحية", createdAt: "2024-01-05T08:00:00", closedAt: "2024-01-05T12:00:00" }], { now: "2026-09-12" }).months.length === 4);
         T("★★ zl: كلُّ نقطةٍ من kpiMonthStats نفسِها — سبتمبر 100 والفجوةُ null لا صفر",
-          d.series[0].values[11] === 100 && d.series[0].values[10] === null && d.series[5].values[8] === null);
-        T("★ zl: KPI-07 خارجَ الرسم (لحظيٌّ لا تاريخَ له) — ستُّ سلاسلَ بترتيبها",
+          d.series[0].values[3] === 100 && d.series[0].values[2] === null && d.series[5].values[0] === null);
+        T("★★ zm: البسطُ والمقامُ يرافقان النسبة (التلميحُ يقول «1 من 1») — وشهرٌ بلا مقامٍ counts null",
+          d.series[0].counts[3] && d.series[0].counts[3].num === 1 && d.series[0].counts[3].den === 1 && d.series[0].counts[2] === null);
+        T("★ zl: KPI-07 خارجَ الرسم (لحظيٌّ لا تاريخَ له) — ستُّ لوحاتٍ بترتيبها",
           d.series.length === 6 && d.series.map(s => s.code).join() === "KPI-01,KPI-02,KPI-03,KPI-04,KPI-05,KPI-06");
-        T("★★ zl: اللوحةُ بالترتيب المفحوص حرفياً (validate_palette على #fff و#1a2433) — لا يدور ولا يُعاد ترتيبُه",
-          K.SERIES.map(s => s.light).join() === "#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300" &&
-          K.SERIES.map(s => s.dark).join() === "#3987e5,#d95926,#199e70,#c98500,#d55181,#008300");
-        T("zl: قائمةٌ فارغةٌ ترسم اثني عشر شهراً بلا نقطة — لا انهيار",
-          K.series([], { now: "2026-09-12" }).series.every(s => s.values.every(v => v === null)));
+        // zm: الأهدافُ هي أهدافُ البطاقات حرفياً — لا رقمان لهدفٍ واحد
+        const _cardTargets = K.KPIS.map(k => { const m = new RegExp('code:"' + k.code + '"[^\\n]*?target:(\\d+)').exec(HTML); return m ? +m[1] : NaN; });
+        T("★★ zm: هدفُ كلّ لوحةٍ = هدفُ بطاقتها في index.html حرفياً",
+          _cardTargets.every((t, i) => t === K.KPIS[i].target), JSON.stringify(_cardTargets));
+        T("★★ zm: الحكمُ ثلاثيٌّ حول الهدف: ≥ الهدف ok · دونه بأقلّ من 10 warn · وإلا crit · null none",
+          K.status(90, 90) === "ok" && K.status(81, 90) === "warn" && K.status(80, 90) === "warn" && K.status(79, 90) === "crit" && K.status(null, 90) === "none");
+        T("zl: قائمةٌ فارغةٌ ترسم أربعةَ أشهرٍ بلا نقطة — لا انهيار",
+          (() => { const e = K.series([], { now: "2026-09-12" }); return e.months.length === 4 && e.series.every(s => s.values.every(v => v === null)); })());
       }
-      T("★ zl: التفاعلُ كاملٌ — خطُّ تتبّعٍ وتلميحٌ ولوحةُ مفاتيح وجدولٌ بديل",
-        M.includes("data-ktc-cross") && M.includes("data-ktc-tip") && M.includes('ev.key==="ArrowLeft"') && M.includes("data-ktc-table"));
-      T("★ zl: النصُّ لا يلبس لونَ السلسلة — التسمياتُ بلون النصّ والمفتاحُ الملوَّنُ بجوارها",
-        /fill="var\(--ktc-text\)" text-anchor="end"/.test(M) && !/fill="var\(--ktc-s\$\{[^}]+\}\)"[^>]*>\$\{e\.v\}%/.test(M));
-      T("zl: أسماءُ السلاسل تدخل التلميحَ بـtextContent لا innerHTML",
-        M.includes("nm.textContent=s.code") && !/tip\.innerHTML/.test(M));
+      T("★ zm: اللونُ للحكم لا للهويّة — ثلاثيّةُ حالة المنصّة (--sla-ok/--sla-warn/--sla-crit) ولا لوحةَ ألوانٍ للسلاسل",
+        M.includes("var(--sla-ok,") && M.includes("var(--sla-warn,") && M.includes("var(--sla-crit,") && !/light:"#/.test(M));
+      T("★ zm: خطُّ الهدف في كلّ لوحة، والنقصُ عنه قطعةٌ مظلّلةٌ فوق العمود القصير",
+        M.includes('class="ktc-target" style="bottom:${s.target}%"') && M.includes('class="ktc-gap st-${cs}"'));
+      T("★ zl: التفاعلُ كاملٌ — تلميحٌ لكلّ عمودٍ بالمؤشّر ولوحة المفاتيح، وجدولٌ بديل",
+        M.includes("data-ktc-tip") && M.includes("data-ktc-bar") && M.includes('tabindex="0"') && M.includes('addEventListener("focus"') && M.includes("data-ktc-table"));
+      T("zl: نصُّ التلميح بـtextContent لا innerHTML",
+        M.includes("nm.textContent=") && !/tip\.innerHTML/.test(M));
+      T("zm: الحركةُ تسكن مع prefers-reduced-motion", M.includes("prefers-reduced-motion:reduce"));
     }
     T("★★ zl: الوحدةُ محقونةٌ في index.html والحاويةُ موجودةٌ وrenderKPI يستدعيها",
       /<script src="kpi-trend-chart\.js\?v=[^"]+"><\/script>/.test(IDX_RAW) &&
