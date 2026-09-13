@@ -19503,6 +19503,54 @@ function docVaultGuards() {
         T("★★ dv/file: وزرُّ الإضافة في الملفّ يفتح «المستخلصات» لا «المعتمدات» (بابُ الدخول واحد)",
           /openExtractsForFile/.test(html.slice(secFlow, secDone)) && /newAprHere/.test(html.slice(secFlow, secDone)) &&
           !/newAprHere/.test(html.slice(secDone)));
+
+        /* ★★★ فهرسُ الملفّات (طلبُ المالك 13/09): «كلُّ المشاريع» بطاقاتٌ لمن له شيءٌ
+           فقط، بعدد ما فيه، والنقرُ يفتح الملفّ. */
+        {
+          const T0 = new Date("2026-09-13");
+          const FD = [
+            { id:"D1", title:"رخصة", projectId:"hail", projectName:"حائل", scope:"project", expiry:"2027-01-01", files:[{url:"a"},{url:"b"}] },
+            { id:"D2", title:"مؤرشف", projectId:"hail", scope:"project", expiry:"2027-01-01", archived:true },
+            { id:"D3", title:"سجل تجاري", scope:"company", expiry:"2027-01-01", files:[{url:"c"}] },
+            { id:"D4", title:"قديم", projectName:"برج قديم", scope:"project", expiry:"2027-01-01" },
+            { id:"D5", title:"يدوي", projectId:"__OTHER__", isCustomProject:true, projectName:"مشروع يدوي", scope:"project", expiry:"2027-01-01" }
+          ];
+          const FL = [
+            { id:"L1", kind:"issued", title:"خطاب", projectId:"hail", scope:"project", files:[{url:"d"}] },
+            { id:"L2", kind:"template", title:"نموذج", projectId:"hail", scope:"project" },
+            { id:"L3", kind:"issued", title:"خطاب ٢", projectId:"riyadh", projectName:"الرياض", scope:"project" }
+          ];
+          const FA = [ P3, DONE ];
+          const cards = V.projectCards(FD, FL, FA, T0, [{ id:"hail", name:"حائل" }, { id:"riyadh", name:"الرياض" }, { id:"empty", name:"مشروع فارغ" }]);
+          const byKey = {}; cards.forEach(c => { byKey[c.key] = c; });
+          T("★★★ dv/cards: بطاقةٌ لكلّ مشروعٍ له سجلّ — ولا بطاقةَ لمشروعٍ فارغٍ ولا لمؤرشفٍ ولا لنموذج",
+            cards.length === 5 && !byKey["empty"] &&
+            byKey["hail"] && byKey["hail"].docs === 1 && byKey["hail"].letters === 1 && byKey["hail"].flow === 1 && byKey["hail"].done === 1 && byKey["hail"].total === 4);
+          T("★★★ dv/cards: وعدُّ المرفقات مجتمعٌ من السجلّات الثلاثة (2 + 1 = 3 لحائل)",
+            byKey["hail"].files === 3 && byKey["__COMPANY__"].files === 1);
+          T("★★ dv/cards: والترتيبُ: مشاريعُ العمل بالأكثر محتوًى ثمّ الشركة ثمّ غيرُ المربوط آخراً — بأسمائها لا معرّفاتها",
+            cards[0].key === "hail" && cards[0].label === "حائل" &&
+            cards[cards.length - 2].key === "__COMPANY__" && cards[cards.length - 1].key === "__UNLINKED__" &&
+            byKey["__CUSTOM__:مشروع يدوي"] && byKey["__CUSTOM__:مشروع يدوي"].manual === true && byKey["riyadh"].label === "الرياض");
+          V.__test_seed(FD, FL, [], FA, PARTIES);
+          V.setFileProj("");
+          const h2 = pgf.innerHTML;
+          T("★★★ dv/cards: وشاشةُ «كلّ المشاريع» ترسم البطاقاتِ — والنقرُ يفتح ملفَّ المشروع بمفتاحه",
+            pgf.querySelectorAll(".dv-pcard").length === 5 &&
+            /docVault\.setFileProj\(&quot;hail&quot;\)/.test(h2) && /docVault\.setFileProj\(&quot;__COMPANY__&quot;\)/.test(h2) &&
+            !/اختَرْ مشروعاً من القائمة أعلاه/.test(h2));
+          T("★★ dv/cards: وبطاقةُ حائل تقول أرقامَها (وثيقة · خطاب · قيد الاعتماد · معتمَد · مرفق)",
+            /<b>1<\/b> وثيقة/.test(h2) && /<b>1<\/b> خطاب/.test(h2) && /<b>1<\/b> قيد الاعتماد/.test(h2) && /<b>1<\/b> معتمَد/.test(h2) && /<b>3<\/b> مرفق/.test(h2));
+          V.setFileProj("hail");
+          T("★★ dv/cards: والنقرُ يفتح الملفَّ كاملاً بأقسامه",
+            /وثائق المشروع/.test(pgf.innerHTML) && !pgf.querySelector(".dv-pcard"));
+          V.__test_seed([], [], [], [], PARTIES);
+          V.setFileProj("");
+          T("★ dv/cards: وبلا سجلٍّ لأيّ مشروعٍ تقول الشاشةُ ذلك — لا بطاقةَ فارغة",
+            !pgf.querySelector(".dv-pcard") && /لا مشروعَ له ملفٌّ في الخزانة بعد/.test(pgf.innerHTML));
+          T("★ dv/cards: والدالّةُ نقيّةٌ ومكشوفة",
+            typeof V.projectCards === "function" && /function projectCards\(docs, ltrs, aprs, today, projects\)/.test(src));
+        }
         pgf.classList.remove("active");
       }
       W.currentUser = prevU5;
@@ -19808,8 +19856,8 @@ function docVaultGuards() {
                projectName:"برج هيل" }]);
 
           V.setFileProj("");
-          T("★★★ dv/proj: و«كلُّ المشاريع» ليست ملفَّ مشروع — تُطلب تسميةُ واحدٍ بدل كومةٍ لا تقول شيئاً",
-            /اختَرْ مشروعاً/.test(pgf.innerHTML) && !/المستخلص الأول/.test(pgf.innerHTML));
+          T("★★★ dv/proj: و«كلُّ المشاريع» ليست ملفَّ مشروع — فهرسُ بطاقاتٍ يُنقَر لا كومةٌ لا تقول شيئاً",
+            !!pgf.querySelector(".dv-pcard") && !/المستخلص الأول/.test(pgf.innerHTML) && !/وثائق المشروع/.test(pgf.innerHTML));
 
           V.setFileProj("hail");
           const html = pgf.innerHTML;

@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3202";
+var MODULE_BUILD = "v18.9.3204";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1827,6 +1827,18 @@ function injectCSS(){
 ".dv-panel-h{font-size:14px;font-weight:800;font-family:'Cairo',sans-serif;color:var(--primary);margin-bottom:4px}",
 ".dv-panel-s{font-size:11.5px;color:var(--muted);margin-bottom:14px;line-height:1.7}",
 ".dv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}",
+/* ── فهرسُ ملفّات المشاريع (بطاقات) ── */
+".dv-pcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-bottom:14px}",
+".dv-pcard{display:flex;flex-direction:column;gap:8px;text-align:right;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:14px 16px;cursor:pointer;font-family:inherit;color:var(--text);transition:border-color .15s,transform .15s}",
+".dv-pcard:hover{border-color:var(--primary);transform:translateY(-1px)}",
+".dv-pcard.company{background:var(--surface2)}",
+".dv-pcard.unlinked{border-color:var(--warn)}",
+".dv-pc-h{display:flex;align-items:center;gap:8px}",
+".dv-pc-t{flex:1;min-width:0;font-family:'Cairo',sans-serif;font-weight:800;font-size:14px;color:var(--primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+".dv-pc-s{font-size:11px;color:var(--muted)}",
+".dv-pc-g{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11.5px;color:var(--text)}",
+".dv-pc-n b{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;font-weight:700}",
+".dv-pc-n.zero{color:var(--zero)}",
 ".dv-f{display:flex;flex-direction:column;gap:5px}",
 ".dv-f.wide{grid-column:1/-1}",
 ".dv-dates{display:grid;grid-template-columns:1fr 1fr;gap:12px}",
@@ -5327,16 +5339,21 @@ function renderProjectFile(){
   var picker = '<div class="dv-bar"><label class="dv-l" style="align-self:center;margin:0">المشروع</label>'
     + _projFilterHTML(_fview.proj, "setFileProj", _visDocs().concat(_visLtrs(), _visAprs())) + '</div>';
 
-  /* «كلُّ المشاريع» ليست ملفَّ مشروع: الشاشةُ تسأل عن واحدٍ بعينه، فتُطلب تسميتُه
-     بدل أن تُعرض عليه كومةٌ لا تقول شيئاً. */
-  if(String(_fview.proj || "") === FILTER_ALL){
-    host.innerHTML = head + picker
-      + '<div class="dv-empty">اختَرْ مشروعاً من القائمة أعلاه ليُعرَض ملفُّه كاملاً — '
-      + 'أو اخترْ «' + _esc(SCOPE_LBL) + '» لوثائق الشركة وخطاباتها.</div>';
-    return;
-  }
   if(!_docsLoaded || !_ltrsLoaded || !_aprsLoaded){
     host.innerHTML = head + picker + '<div class="dv-empty">جارٍ التحميل…</div>';
+    return;
+  }
+  /* «كلُّ المشاريع» ليست ملفَّ مشروع — لكنّها **فهرسُ الملفّات**: بطاقةٌ لكلّ
+     مشروعٍ له شيءٌ في الخزانة (طلبُ المالك 13/09)، بعدد ما فيه، والنقرُ يفتح ملفَّه.
+     ومشروعٌ بلا سجلٍّ لا بطاقةَ له: بطاقةٌ فارغةٌ تقول «لا شيء» وتُخفي ما له شيء. */
+  if(String(_fview.proj || "") === FILTER_ALL){
+    var cards = projectCards(_visDocs(), _visLtrs(), _visAprs(), today);
+    host.innerHTML = head + picker
+      + (cards.length
+          ? '<div class="dv-sub" style="margin:4px 0 12px">مشاريعُ لها ملفٌّ في الخزانة — ' + cards.length
+            + '. انقرْ بطاقةً لعرض ملفّها كاملاً.</div>' + _projCardsHTML(cards)
+          : '<div class="dv-empty">لا مشروعَ له ملفٌّ في الخزانة بعد — أضِف وثيقةً أو خطاباً أو مستخلصاً '
+            + 'لمشروعٍ فتظهر بطاقتُه هنا. أو اخترْ «' + _esc(SCOPE_LBL) + '» لوثائق الشركة وخطاباتها.</div>');
     return;
   }
 
@@ -5372,6 +5389,50 @@ function renderProjectFile(){
     + _aprTableHTML(aps, today, _fview.proj, 'لم يُعتمَد بعدُ شيءٌ لهذا المشروع — ما يُعتمَد من «المستخلصات» يظهر هنا تلقائياً.', "done");
 
   host.innerHTML = head + body;
+}
+
+/* ══ فهرسُ الملفّات — دالّةٌ نقيّةٌ يفحصها `hail-tests.js` ══
+   تجمع السجلّاتِ الثلاثةَ بمفتاح المشروع (`projKey`: معرّفٌ · يدويٌّ · الشركة ·
+   غيرُ مربوط) وتُسقط ما لا سجلَّ له. فتُخرج لكلّ مفتاحٍ عدَّ الوثائق والخطابات
+   الصادرة (النماذجُ ليست لمشروع) وما في مساره وما اعتُمد وعدَّ المرفقات مجتمعةً.
+   الترتيب: مشاريعُ العمل أوّلاً بالأكثر محتوًى، ثمّ الشركة، ثمّ غيرُ المربوط آخراً
+   — فهو نداءُ عملٍ لا ملفّ. */
+function projectCards(docs, ltrs, aprs, today, projects){
+  var by = {};
+  function bucket(rec){
+    var k = projKey(rec);
+    if(!by[k]) by[k] = { key:k, label:projLabel(rec, projects), docs:0, letters:0, flow:0, done:0, files:0, total:0,
+                         company:(k === FILTER_COMPANY), unlinked:(k === FILTER_UNLINKED), manual:_isManualKey(k) };
+    var b = by[k];
+    b.files += (Array.isArray(rec.files) ? rec.files.length : 0);
+    b.total += 1;
+    return b;
+  }
+  (Array.isArray(docs) ? docs : []).forEach(function(d){ if(!d || d.archived) return; bucket(d).docs += 1; });
+  (Array.isArray(ltrs) ? ltrs : []).forEach(function(l){ if(!l || l.kind !== "issued") return; bucket(l).letters += 1; });
+  (Array.isArray(aprs) ? aprs : []).forEach(function(a){ if(!a) return; var b = bucket(a); if(aprIsDone(a)) b.done += 1; else b.flow += 1; });
+  var out = Object.keys(by).map(function(k){ return by[k]; });
+  out.sort(function(a, b){
+    var ra = a.unlinked ? 2 : (a.company ? 1 : 0), rb = b.unlinked ? 2 : (b.company ? 1 : 0);
+    if(ra !== rb) return ra - rb;
+    if(b.total !== a.total) return b.total - a.total;
+    return String(a.label).localeCompare(String(b.label), "ar");
+  });
+  return out;
+}
+function _projCardsHTML(cards){
+  var n = function(v, lbl){ return '<span class="dv-pc-n' + (v ? "" : " zero") + '"><b>' + v + '</b> ' + lbl + '</span>'; };
+  return '<div class="dv-pcards">' + cards.map(function(c){
+    var cls = "dv-pcard" + (c.company ? " company" : "") + (c.unlinked ? " unlinked" : "");
+    var icon = c.company ? "shield" : (c.unlinked ? "alertTriangle" : "briefcase");
+    return '<button type="button" class="' + cls + '" onclick="docVault.setFileProj(' + JSON.stringify(String(c.key)).replace(/"/g, "&quot;") + ')">'
+      + '<div class="dv-pc-h">' + _icon(icon, "ic-sm") + '<span class="dv-pc-t">' + _esc(c.label) + '</span>'
+      + '<span class="dv-cnt">' + c.total + '</span></div>'
+      + '<div class="dv-pc-s">' + (c.company ? 'تُطلَب مع كلّ تقديم' : (c.unlinked ? 'سجلّاتٌ باسم مشروعٍ بلا معرّف — تحتاج ربطاً' : (c.manual ? 'مشروع يدويّ' : 'ملفّ المشروع')))
+      + '</div>'
+      + '<div class="dv-pc-g">' + n(c.docs, "وثيقة") + n(c.letters, "خطاب") + n(c.flow, "قيد الاعتماد") + n(c.done, "معتمَد") + n(c.files, "مرفق") + '</div>'
+      + '</button>';
+  }).join("") + '</div>';
 }
 
 function setFileProj(v){ _fview.proj = String(v || ""); renderProjectFile(); }
@@ -5596,7 +5657,7 @@ window.docVault = {
   setAprFilter:setAprFilter, clearAprFilters:clearAprFilters, openApr:openApr, backToApr:backToApr,
   newApr:newApr, editApr:editApr, cancelApr:cancelApr, saveApr:saveApr, delApr:delApr,
   setAprType:setAprType, setAprStatus:setAprStatus, addAprFile:addAprFile, delAprFile:delAprFile,
-  aprDaysWaiting:aprDaysWaiting, aprVariance:aprVariance, aprRollup:aprRollup,
+  aprDaysWaiting:aprDaysWaiting, aprVariance:aprVariance, aprRollup:aprRollup, projectCards:projectCards,
   aprIsFinancial:aprIsFinancial, aprAgeBand:aprAgeBand,
   filterApprovals:filterApprovals, sortApprovals:sortApprovals,
   _APR_TYPES:APR_TYPES, _APR_STATUS:APR_STATUS, _PAGE_APPROVALS:PAGE_APPROVALS,
