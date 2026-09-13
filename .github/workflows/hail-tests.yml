@@ -37,6 +37,7 @@ on:
       - 'global-surface-check.mjs'
       - 'css-surface-check.mjs'
       - 'sync-version.mjs'
+      - 'perf-probe.mjs'
       - 'firestore.rules'
       - 'rules-check.mjs'
       - 'wa-routing-check.mjs'
@@ -76,6 +77,32 @@ jobs:
       # أو خانةٌ زائدة — لا يظهر منها شيءٌ في النظام، والرسالةُ لا تصل فحسب.
       - name: WhatsApp routing check
         run: node wa-routing-check.mjs
+
+  # ══ ميزانيةُ الدخول — حارسٌ كان مكتوباً ولا يُشغَّل ══
+  # `perf-probe.mjs` يسقط (exit 1) إن تجاوز الدخولُ ميزانيتَه، وكُتب لذلك تحديداً.
+  # لكنه لم يكن في أيّ workflow: فبقي **أحمرَ على main أياماً ولم يوقف أحداً**
+  # (‏١٨ ⇐ ٢٣ مستمعاً مع خزانة الوثائق). وحارسٌ لا يُشغَّل أسوأُ من غيابه — يمنح
+  # طمأنينةً بلا حراسة. فمن الآن: كلُّ PR يمرّ عليه.
+  # ولا يمسّ إنتاجاً: يشغّل نسخةً محلّيةً في متصفّحٍ مع Firestore مُحاكًى في الذاكرة.
+  perf:
+    name: Login budget (browser probe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright and Chromium
+        run: |
+          npm install playwright-core playwright --silent --no-save
+          npx playwright install --with-deps chromium
+
+      # المسبارُ يشتقّ مسارَ المتصفّح: بلا CHROMIUM_PATH يجده Playwright بنفسه.
+      - name: Login budget probe
+        run: node perf-probe.mjs
 
   rules:
     name: Firestore security rules (emulator)

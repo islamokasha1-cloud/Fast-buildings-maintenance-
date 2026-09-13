@@ -30,7 +30,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3208";
+var MODULE_BUILD = "v18.9.3209";
 
 /* ════════ حقلُ غالوا GF(256) — كثيرُ الحدود 0x11D ════════ */
 var EXP = new Array(512), LOG = new Array(256);

@@ -35,7 +35,14 @@ import path from 'path';
    (١٣٢٠ ⇐ ٧٢٠ مستنداً · ٢١ ⇐ ١٨ مستمعاً). وقبلها v18.9.3052: ١٦٢٠ ⇐ ١٣٢٠ و١٠ ⇐ ٩
    جلبات. خفِّضها بعد كل تحسين. ورفعُها يحتاج سطراً في §6 يقول ما الذي زاد ولماذا. */
 const BUDGET_DOCS      = 720;    // مستنداتٌ تُنزَّل عند الدخول
-const BUDGET_LISTENERS = 18;     // مستمعون أحياءُ بعد الاستقرار
+/* ⚠ **٢٣ لا ١٨ — رفعٌ موثَّقٌ لا تساهل (13/09).** أُضيفت خمسةُ مستمعين أحياءَ مع
+   خزانة الوثائق والاعتمادات: `global_approvals` · `vault_parties` ·
+   `vault_extract_schedules` · `global_docs` · `global_letters`. ورُفع السقفُ
+   **ليعمل الحارسُ من جديد**، لا لتُقبَل الزيادة: **دَينٌ مسجَّلٌ في §6** يُسدَّد
+   بتأجيلها كما أُجّل المخزون، ويُخفَّض السقفُ حينها. والمستمعُ الحيُّ يكلّف مرّتين:
+   تنزيلَه عند الدخول، ثمّ نصيبَه من كلّ كتابةٍ بعده — وهو المضاعِفُ نفسُه الذي
+   شُخّص في الأرشفة (v18.9.3110). */
+const BUDGET_LISTENERS = 23;     // مستمعون أحياءُ بعد الاستقرار
 const BUDGET_GETS      = 9;      // جلباتٌ لمرّةٍ واحدة (العدُّ على الخادم لا يُحسب — لا يُنزِّل شيئاً)
 
 const REPORT_ONLY = process.argv.includes('--report');
@@ -56,7 +63,13 @@ const CDN_STUBS = `
 `;
 
 const L = (...a) => console.log(...a);
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] });
+/* مسارُ المتصفّح **مشتقٌّ لا مثبَّت**: كان `/opt/pw-browsers/chromium` حرفياً، وهو
+   مسارُ هذه البيئة وحدَها — فالفحصُ لا يعمل في CI ولا على جهازٍ آخر. والآن: المسارُ
+   المُعلَن إن وُجد، وإلا تُرك لـPlaywright يجد نسختَه (وهو ما يفعله في CI). */
+const _CHROME = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium';
+const _launch = { args: ['--no-sandbox'] };
+if (fs.existsSync(_CHROME)) _launch.executablePath = _CHROME;
+const browser = await chromium.launch(_launch);
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await page.addInitScript(MOCK_FIREBASE);
 await page.addInitScript(CDN_STUBS);
