@@ -196,6 +196,27 @@ check('★ وزرُّ المسح يُعيد البطاقاتِ كلَّها',
   await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-card').length === 4 &&
     document.getElementById('st-search-q').value === ''));
 
+/* فلترُ الموظف: المهامُّ الأربع كلُّها على خالد — القائمةُ تعرضه بعدده، واختيارُ
+   اسمٍ آخر يُفرغ، و«كل الموظفين» يُعيد. */
+check('★★ قائمةُ فلتر الموظف تعرض مَن في المهامّ فعلاً بعدد مهامّه — خالد (4) وحدَه',
+  await page.evaluate(() => { const s = document.getElementById('st-who-sel'); if (!s) return false;
+    const o = [...s.options].map(x => [x.value, x.textContent]); return o.length === 2 && o[0][0] === '' && o[1][0] === 'khaled' && o[1][1].includes('(4)'); }),
+  await page.evaluate(() => { const s = document.getElementById('st-who-sel'); return s ? [...s.options].map(x => x.textContent).join(' | ') : 'لا قائمة'; }));
+await page.selectOption('#st-who-sel', 'khaled');
+await page.waitForTimeout(200);
+check('★★ واختيارُ خالد يُبقي مهامَّه الأربع',
+  await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-card').length === 4 &&
+    (document.getElementById('st-search-n') || {}).textContent === '4 نتيجة'));
+await page.evaluate(() => staffTasks.filterUser('saeed'));
+await page.waitForTimeout(200);
+check('★ وموظفٌ ليس طرفاً في شيء ⇐ فراغٌ صريح بزرّ «كل الموظفين»',
+  await page.evaluate(() => { const e = document.querySelector('#page-staff-tasks .st-empty'); return !!e && e.textContent.includes('لا مهمّةَ لـ') && !!e.querySelector('button'); }));
+await page.click('#page-staff-tasks .st-empty button');
+await page.waitForTimeout(200);
+check('★ وزرُّ «كل الموظفين» يُعيد الكلَّ ويُصفّر القائمة',
+  await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-card').length === 4 &&
+    document.getElementById('st-who-sel').value === ''));
+
 /* المكلَّفُ نفسُه: تظهر في «مهامّي» وفي شارة الشريط */
 await page.evaluate(() => {
   currentUser = { user: 'khaled', name: 'خالد', role: 'مشرف' };
