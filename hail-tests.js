@@ -19594,6 +19594,23 @@ function docVaultGuards() {
         /غيرُ مضيَّقة بعد/.test(src) && /enableReaderLock/.test(src));
       T("★★ dv/read: والمنعُ من الخادم يُقال بلغةٍ تُفهَم لا بنصِّ Firestore الخام",
         /PERMISSION_DENIED/.test(src) && /غيرُ مُدرَجٍ في قرّاء الخزانة/.test(src));
+      /* ── تشخيصُ الردّ بالتوكِن الحيّ (لقطةُ المالك 13/09: أدمن يرى «غير مدرج في القرّاء») ──
+         الأدمنُ لا يُدرَج في قائمةٍ أصلاً (`vaultReadOk` تبدأ بـ`isAdmin()`)، فرسالةُ
+         القائمة له كذبٌ بالبناء. الرسالةُ تُشتقّ من دور التوكِن: بلا دورٍ ⇐ إعادةُ
+         تركيبٍ تلقائيةٌ حين يظهر؛ admin ⇐ المنشورُ ليس ملفَّ المستودع؛ غيرُه ⇐ القائمة. */
+      T("★★★ dv/read: الرسالةُ تُشتقّ من دور التوكِن الحيّ لا تُفترَض (getIdTokenResult قبل الحكم)",
+        /function _probeToken\(\)\{[\s\S]{0,1400}getIdTokenResult\(\)/.test(src) &&
+        /function _deniedHTML\(\)\{[\s\S]{0,200}role = _tok \? _tok\.role : null/.test(src) &&
+        /if\(denied\) _probeToken\(\);/.test(src));
+      T("★★★ dv/read: والأدمنُ المردودُ يُقال له إنّ المنشورَ ليس ملفَّ المستودع — لا إنّه غيرُ مُدرَج",
+        /if\(role === "admin"\)[\s\S]{0,300}firestore\.rules/.test(src) &&
+        /if\(role === "admin"\)[\s\S]{0,400}ولا علاقةَ لقائمة الممنوحين/.test(src));
+      T("★★★ dv/read: وبلا دورٍ في التوكِن يُعاد تركيبُ المستمع تلقائياً حين يظهر (المستمعُ المردودُ يموت ولا يعود)",
+        /if\(!_tok\.role\) _rearmWhenRole\(\);/.test(src) &&
+        /function _rearmWhenRole\(\)\{[\s\S]{0,800}onAuthStateChanged[\s\S]{0,400}retry\(\);/.test(src) &&
+        /function retry\(\)\{ _tok = null; stopSync\(\); startSync\(\); \}/.test(src));
+      T("★★ dv/read: ولكلّ ردٍّ زرُّ إعادة محاولة (لا رسالةَ مغلقةً بلا مخرج)",
+        (function(){ var m = src.match(/function _deniedHTML\(\)\{[\s\S]{0,2500}?\n\}/); return !!m && /var btn = .*docVault\.retry\(\)/.test(m[0]) && (m[0].match(/\+ btn/g) || []).length >= 3; })());
 
       /* ── الكتابةُ بالحكم نفسِه (لقطةُ المالك 13/09) ──
          مشرفةٌ ممنوحةٌ قرأت الخزانةَ وملأت نموذجَ وثيقةٍ ثمّ رُدّت عند الحفظ:

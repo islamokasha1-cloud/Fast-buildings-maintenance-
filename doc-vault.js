@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3200";
+var MODULE_BUILD = "v18.9.3202";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1660,7 +1660,7 @@ function stopSync(){
   _docsUnsub = _ltrsUnsub = null;
   _docs = []; _ltrs = []; _docsLoaded = _ltrsLoaded = false;
 }
-function retry(){ stopSync(); startSync(); }
+function retry(){ _tok = null; stopSync(); startSync(); }
 
 /* العدّادُ: معاملةٌ تقرأ الوثيقةَ الطازجةَ ثمّ تزيد — فلا يأخذ مُنشئان متزامنان
    الرقمَ نفسَه. ونمطُها نمطُ `hr-payments` و`contracts` حرفياً. */
@@ -2260,6 +2260,74 @@ function _renewHTML(d){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   تشخيصُ الردّ من الخادم — بالتوكِن الحيّ لا بالتخمين
+   «Missing or insufficient permissions» جوابٌ واحدٌ لثلاثة أسبابٍ مختلفة، وعلاجُ
+   كلٍّ منها في يدِ شخصٍ آخر:
+   • التوكِن **بلا دور** (مستمعٌ انطلق قبل أن تستعيد Firebase جلسةَ الدخول، أو
+     جلسةٌ مجهولة) ⇐ يُعاد التركيبُ تلقائياً حين يظهر الدور — فالمستمعُ الذي رُدّ
+     مرّةً **يموت** ولا يعود وحدَه، ويبقى `_docsUnsub` محجوزاً فلا يُعاد.
+   • الدورُ **admin** ومردود ⇐ القاعدةُ المنشورةُ على الخادم ليست قاعدةَ المستودع
+     (`vaultReadOk` تبدأ بـ`isAdmin()` — قِيست على المحاكي بادّعاءات الـWorker
+     نفسِها) ⇐ النشرُ هو العلاج، لا المنحُ ولا إعادةُ المحاولة.
+   • دورٌ آخر ⇐ اسمُ الدخول ليس في `meta/vault_readers` ⇐ يمنحه الأدمن ويحفظه.
+   لقطةُ المالك 13/09: أدمن يرى «حسابك غير مدرج في قرّاء الخزانة» — رسالةٌ خاطئةٌ
+   بالبناء لأنّ الأدمن لا يُدرَج في قائمةٍ أصلاً. */
+var _tok = null;             // null = لم يُفحَص · {role:"", uid:""} = فُحص
+var _tokProbing = false;
+function _probeToken(){
+  if(_tokProbing) return;
+  _tokProbing = true;
+  var done = function(role, uid){
+    _tokProbing = false;
+    _tok = { role:String(role || ""), uid:String(uid || "") };
+    _repaint(PAGE_DOCS); _repaint(PAGE_LETTERS); _repaint(PAGE_APPROVALS); _repaint(PAGE_EXTRACTS);
+    /* بلا دورٍ في التوكِن: المستمعُ رُدّ قبل اكتمال الدخول. نرصد ظهورَ الدور ثمّ نُعيد
+       التركيبَ مرّةً — لا حلقةَ إعادةٍ على ردٍّ حقيقيّ. */
+    if(!_tok.role) _rearmWhenRole();
+  };
+  try{
+    var a = (typeof firebase !== "undefined" && firebase.auth) ? firebase.auth() : null;
+    var u = a && a.currentUser;
+    if(!u){ done("", ""); return; }
+    u.getIdTokenResult().then(function(t){ done(((t && t.claims) || {}).role, u.uid); })
+      .catch(function(){ done("", u.uid); });
+  }catch(e){ done("", ""); }
+}
+var _rearmUnsub = null;
+function _rearmWhenRole(){
+  if(_rearmUnsub) return;
+  try{
+    var a = firebase.auth();
+    _rearmUnsub = a.onAuthStateChanged(function(u){
+      if(!u) return;
+      u.getIdTokenResult().then(function(t){
+        if(((t && t.claims) || {}).role){
+          try{ _rearmUnsub(); }catch(e){} _rearmUnsub = null;
+          _tok = null; _err = "";
+          retry();
+        }
+      }).catch(function(){});
+    });
+  }catch(e){ _rearmUnsub = null; }
+}
+function _deniedHTML(){
+  var me = _me(), role = _tok ? _tok.role : null;
+  var btn = ' <button type="button" class="dv-clear" onclick="docVault.retry()">أعد المحاولة</button>';
+  if(role === null)
+    return '🔒 ردّ الخادمُ الطلبَ — جارٍ فحصُ توكِن الجلسة…';
+  if(!role)
+    return '🔒 ردّ الخادمُ الطلبَ لأنّ جلسةَ Firebase بلا دور (لم تكتمل استعادةُ الدخول بعد، أو انتهت). '
+      + 'يُعاد التحميلُ تلقائياً حين يكتمل الدخول — وإن بقيت الرسالةُ فاخرج وادخل من جديد.' + btn;
+  if(role === "admin")
+    return '⚠ ردّ الخادمُ حسابَ مدير النظام نفسَه — وقاعدةُ الخزانة في المستودع (' + _esc(MODULE_BUILD)
+      + ') تسمح للأدمن دائماً. فالمنشورُ على الخادم **ليس** ملفَّ <code>firestore.rules</code> الحاليّ: '
+      + 'انشره من Firebase Console ⇐ Firestore ⇐ Rules (مشروع <code>fast-buildings</code>)، ثمّ أعد المحاولة. '
+      + 'ولا علاقةَ لقائمة الممنوحين بهذا.' + btn;
+  return '🔒 حسابُك (' + _esc((me && me.user) || _tok.uid) + ' · ' + _esc(role) + ') غيرُ مُدرَجٍ في قرّاء الخزانة على الخادم. '
+    + 'يضيفك مديرُ النظام بمنحك صلاحية «خزانة الوثائق» ثمّ حفظ المستخدم.' + btn;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    الرسمُ الرئيسُ لشاشة السجلّات
    ═══════════════════════════════════════════════════════════════════════════ */
 function render(){
@@ -2284,11 +2352,11 @@ function render(){
     var denied = /permission|insufficient|PERMISSION_DENIED/i.test(_err);
     host.innerHTML = head + '<div class="dv-err">'
       + (denied
-          ? '🔒 حسابُك غيرُ مُدرَجٍ في قرّاء الخزانة على الخادم. يضيفك مديرُ النظام '
-            + 'بمنحك صلاحية «خزانة الوثائق» ثمّ حفظ المستخدم.'
+          ? _deniedHTML()
           : 'تعذّر تحميل الخزانة: ' + _esc(_err)
             + ' <button type="button" class="dv-clear" onclick="docVault.retry()">أعد المحاولة</button>')
       + '</div>';
+    if(denied) _probeToken();
     return;
   }
   if(!_docsLoaded){ host.innerHTML = head + '<div class="dv-empty">جارٍ تحميل الخزانة…</div>'; return; }
