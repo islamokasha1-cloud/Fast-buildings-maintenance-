@@ -41,7 +41,8 @@ service cloud.firestore {
        الرسمية. **مفتاحُ `docVault` مانحٌ في الواجهة، والخادمُ لا يقرأ `permissions`** —
        لا يصل إليه من التوكِن إلا الدورُ واسمُ الدخول. فالطبقتان تحرسان شيئين مختلفين
        وهذا مقصود: الواجهةُ تقرّر **مَن يرى القسمَ** بالمفتاح، والخادمُ يقرّر **مَن
-       يكتب فيه** بالدور — والزائرُ والمراقبُ مردودان هنا مهما مُنحا هناك.
+       يقرأ ويكتب** بقائمة الممنوحين المسطَّحة في `meta/vault_readers` (`vaultReadOk`)
+       — والزائرُ والمراقبُ مردودان عن الكتابة مهما مُنحا هناك.
        والحذفُ للأدمن وحدَه: مَن يحذف وثيقةً يمحو دليلاً. */
     function vaultColl(coll) {
       return coll in ['global_docs', 'global_docs_dev', 'global_letters', 'global_letters_dev',
@@ -582,9 +583,15 @@ service cloud.firestore {
       allow write: if isAdmin() && doc == 'vault_readers';
     }
 
+    /* الكتابةُ **بالمنح لا بالدور** — كالقراءة سواءً. كانت قائمةَ أدوارٍ سبعةٍ تُسقط
+       المشرفَ («مشرف») ومسؤولَ المستودعات، بينما الواجهةُ تمنح المفتاحَ **لكلّ
+       الأدوار** و`canEdit` تُجيز كلَّ ممنوحٍ غيرِ الزائر والمراقب — فكان الممنوحُ
+       المشرفُ يملأ النموذجَ كاملاً ثمّ يُردّ بـ«Missing or insufficient permissions»
+       (لقطةُ المالك 13/09). والقائمةُ بالأدوار هي عينُ ما جُرِّب للقراءة ورُفض بالقياس
+       (`v18.9.3148`). فالحكمُ واحدٌ للطبقتين: مَن يقرأ الخزانةَ ممنوحاً يكتب فيها،
+       **إلا الزائرَ والمراقب** — يريان ولا يكتبان وإن مُنحا. والحذفُ للأدمن كما كان. */
     function vaultWriteOk() {
-      return anyRole(['admin', 'project_manager', 'ceo', 'finance',
-                      'procurement_officer', 'hr_officer', 'hr_manager']);
+      return vaultReadOk() && !isViewer() && role() != 'observer';
     }
     match /global_docs/{id} {
       allow read:         if vaultReadOk();

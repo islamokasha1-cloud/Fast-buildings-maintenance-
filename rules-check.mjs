@@ -974,8 +974,14 @@ await check("★★ والزائرُ لا يكتب وإن مُنح المفتا�
   assertFails(setDoc(doc(VIEWER, `${DOCS_C}/DOC-2609-0009`), { title: "من الزائر" })));
 await check("★★ والمراقبُ كذلك",
   assertFails(setDoc(doc(OBS, `${DOCS_C}/DOC-2609-0010`), { title: "من المراقب" })));
-await check("★★ ومسؤولُ المستودعات لا يكتب في خزانة الوثائق (ليست من عمله)",
-  assertFails(setDoc(doc(WH, `${DOCS_C}/DOC-2609-0011`), { title: "من المستودع" })));
+/* الكتابةُ بالمنح لا بالدور (لقطةُ المالك 13/09: مشرفةٌ ممنوحةٌ ملأت النموذجَ ثمّ
+   رُدّت). فما دامت قائمةُ الممنوحين غيرَ موجودةٍ يكتب كلُّ ذي دورٍ غيرِ الزائر
+   والمراقب — المشرفُ بصيغتيه ومسؤولُ المستودعات معهم — وبعد إنشائها (§١٥) يكتب
+   الممنوحُ وحدَه. */
+await check("★★★ والمشرفُ («مشرف» بلا `u`) يكتب ما دامت قائمةُ الممنوحين غيرَ موجودة — كالقراءة سواءً",
+  assertSucceeds(setDoc(doc(SUP_AR, `${DOCS_C}/DOC-2609-0011`), { title: "من المشرف" })));
+await check("★★ ومسؤولُ المستودعات كذلك (البابُ هو المنحُ لا الدور)",
+  assertSucceeds(setDoc(doc(WH, `${DOCS_C}/DOC-2609-0013`), { title: "من المستودع" })));
 await check("★★ وتطبيقُ الفنيين مردودٌ عن الخزانة كلِّها",
   assertFails(setDoc(doc(TECH, `${DOCS_C}/DOC-2609-0012`), { title: "من الفني" })));
 await check("★★★ والحذفُ للأدمن وحدَه — مَن يحذف وثيقةً يمحو دليلاً",
@@ -1009,10 +1015,11 @@ await check("★ ويكتبها دورُ الخزانة (المشتريات · �
   assertSucceeds(setDoc(doc(PROC, `${VF_C}/${TOK2}`), { letterId: "LTR-2609-0002", letterDate: "2026-09-09" })) &&
   assertSucceeds(updateDoc(doc(HR, `${VF_C}/${TOK}`), { subject: "تحديث" })) &&
   assertSucceeds(setDoc(doc(PM, `${VF_C}/${TOK}`), { letterId: "LTR-2609-0001" })));
-await check("★★ ولا يكتبها الزائرُ ولا المستودعُ ولا تطبيقُ الفنيين (القراءةُ لا تفتح الكتابة)",
-  assertFails(setDoc(doc(VIEWER, `${VF_C}/${TOK}`), { letterId: "مزوَّر" })) &&
-  assertFails(setDoc(doc(WH, `${VF_C}/${TOK}`), { letterId: "مزوَّر" })) &&
-  assertFails(setDoc(doc(TECH, `${VF_C}/${TOK}`), { letterId: "مزوَّر" })));
+await check("★★ ولا يكتبها الزائرُ ولا المراقبُ ولا تطبيقُ الفنيين (القراءةُ لا تفتح الكتابة)",
+  Promise.all([
+  assertFails(setDoc(doc(VIEWER, `${VF_C}/${TOK}`), { letterId: "مزوَّر" })),
+  assertFails(setDoc(doc(OBS, `${VF_C}/${TOK}`), { letterId: "مزوَّر" })),
+  assertFails(setDoc(doc(TECH, `${VF_C}/${TOK}`), { letterId: "مزوَّر" }))]));
 await check("★★★ وحذفُها للأدمن وحدَه (مَن يحذفها يُظهر خطاباً صحيحاً مزوَّراً)",
   assertFails(deleteDoc(doc(PROC, `${VF_C}/${TOK2}`))) &&
   assertSucceeds(deleteDoc(doc(ADMIN, `${VF_C}/${TOK2}`))));
@@ -1055,10 +1062,11 @@ await check("★ يُسجّل مسؤولُ المشتريات مستنداً م�
     title: "مطالبة", docType: "claim", party: "جهة", submittedAt: "2026-09-01", status: "submitted" })));
 await check("★ ويعتمده مديرُ المشاريع",
   assertSucceeds(updateDoc(doc(PM, `${APR_C}/APR-2609-0001`), { status: "approved", amountApproved: 90000 })));
-await check("★★ والزائرُ والمراقبُ والمستودعُ لا يكتبون فيه",
-  assertFails(setDoc(doc(VIEWER, `${APR_C}/APR-X`), { title: "ت" })) &&
-  assertFails(setDoc(doc(OBS, `${APR_C}/APR-Y`), { title: "ت" })) &&
-  assertFails(setDoc(doc(WH, `${APR_C}/APR-Z`), { title: "ت" })));
+await check("★★ والزائرُ والمراقبُ لا يكتبان فيه (والمستودعُ يكتب ما دام البابُ المنحَ لا الدور — §١٥)",
+  Promise.all([
+  assertFails(setDoc(doc(VIEWER, `${APR_C}/APR-X`), { title: "ت" })),
+  assertFails(setDoc(doc(OBS, `${APR_C}/APR-Y`), { title: "ت" })),
+  assertSucceeds(setDoc(doc(WH, `${APR_C}/APR-Z`), { title: "ت" }))]));
 await check("★★★ والحذفُ للأدمن وحدَه", assertFails(deleteDoc(doc(PM, `${APR_C}/APR-2609-0001`))));
 await check("★★★ والأدمنُ يحذف", assertSucceeds(deleteDoc(doc(ADMIN, `${APR_C}/APR-2609-0001`))));
 await check("★★ ونسخةُ `_dev` محروسةٌ بالقاعدة نفسِها",
@@ -1073,10 +1081,10 @@ await check("★ يسجّل مديرُ المشاريع جهةً ومسارَه�
   assertSucceeds(setDoc(doc(PM, `${PRT_C}/PRT-2609-0002`), { name: "جهة", stages: [{ lbl: "الاستلام", days: 3 }] })));
 await check("★ ويعدّل المساراتِ مسؤولُ المشتريات",
   assertSucceeds(updateDoc(doc(PROC, `${PRT_C}/PRT-2609-0001`), { stages: [{ lbl: "المكتب الفني", days: 7 }] })));
-await check("★★ والزائرُ والمراقبُ والمستودعُ لا يكتبون في سجلّ الجهات",
-  assertFails(setDoc(doc(VIEWER, `${PRT_C}/PRT-X`), { name: "ت" })) &&
-  assertFails(setDoc(doc(OBS, `${PRT_C}/PRT-Y`), { name: "ت" })) &&
-  assertFails(setDoc(doc(WH, `${PRT_C}/PRT-Z`), { name: "ت" })));
+await check("★★ والزائرُ والمراقبُ لا يكتبان في سجلّ الجهات",
+  Promise.all([
+  assertFails(setDoc(doc(VIEWER, `${PRT_C}/PRT-X`), { name: "ت" })),
+  assertFails(setDoc(doc(OBS, `${PRT_C}/PRT-Y`), { name: "ت" }))]));
 await check("★★★ وحذفُ الجهة للأدمن وحدَه", assertFails(deleteDoc(doc(PM, `${PRT_C}/PRT-2609-0001`))));
 await check("★★★ والأدمنُ يحذفها", assertSucceeds(deleteDoc(doc(ADMIN, `${PRT_C}/PRT-2609-0001`))));
 await check("★★ ونسخةُ `_dev` للجهات محروسةٌ بالقاعدة نفسِها",
@@ -1092,10 +1100,10 @@ await check("★ يسجّل مديرُ المشاريع مستخلصاً دور�
   assertSucceeds(setDoc(doc(PM, `${EXS_C}/EXS-2609-0002`), { title: "مستخلص", dueDay: 1, leadDays: 5, active: true, users: [] })));
 await check("★ وتعدّله المالية",
   assertSucceeds(updateDoc(doc(FIN, `${EXS_C}/EXS-2609-0001`), { leadDays: 7 })));
-await check("★★ والزائرُ والمراقبُ والمستودعُ لا يكتبون في جدول المستخلصات الدورية",
-  assertFails(setDoc(doc(VIEWER, `${EXS_C}/EXS-X`), { title: "ت" })) &&
-  assertFails(setDoc(doc(OBS, `${EXS_C}/EXS-Y`), { title: "ت" })) &&
-  assertFails(setDoc(doc(WH, `${EXS_C}/EXS-Z`), { title: "ت" })));
+await check("★★ والزائرُ والمراقبُ لا يكتبان في جدول المستخلصات الدورية",
+  Promise.all([
+  assertFails(setDoc(doc(VIEWER, `${EXS_C}/EXS-X`), { title: "ت" })),
+  assertFails(setDoc(doc(OBS, `${EXS_C}/EXS-Y`), { title: "ت" }))]));
 await check("★★★ وحذفُ الجدول للأدمن وحدَه", assertFails(deleteDoc(doc(PM, `${EXS_C}/EXS-2609-0001`))));
 await check("★★★ والأدمنُ يحذفه", assertSucceeds(deleteDoc(doc(ADMIN, `${EXS_C}/EXS-2609-0001`))));
 await check("★★ ونسخةُ `_dev` للجدول محروسةٌ بالقاعدة نفسِها",
@@ -1146,6 +1154,41 @@ await check("★★ والمستودعُ والمشترياتُ والمراقب
   assertFails(getDocs(collection(OBS, DOCS_C))));
 await check("★★★ والأدمنُ يقرأ دائماً — ولو لم يكن في القائمة (وإلّا أُقفلت الخزانةُ على مالكها)",
   assertSucceeds(getDocs(collection(ADMIN, DOCS_C))));
+
+/* ── والكتابةُ بالحكم نفسِه (لقطةُ المالك 13/09) ──
+   الممنوحُ المشرفُ كان يقرأ الخزانةَ ويفتح نموذجَ الوثيقة ويملؤه، ثمّ يُردّ عند
+   الحفظ: `vaultWriteOk` كانت قائمةَ أدوارٍ لا تعرف «مشرف». صارت = القراءةُ
+   ممنوحاً **إلا الزائرَ والمراقب** — فلا يفترق ما يراه المستخدمُ عمّا يقبله الخادم. */
+const VIEWER_ML = env.authenticatedContext("uid_viewer_ml", { role: "viewer", u: "المالية" }).firestore();
+const OBS_ML    = env.authenticatedContext("uid_obs_ml",    { role: "observer", u: "المالية" }).firestore();
+await check("★★★ وبعد إنشائها: الممنوحُ **يكتب** ولو كان دورُه مشرفاً (ما يراه يقبله الخادم)",
+  Promise.all([
+  assertSucceeds(setDoc(doc(SUP_RGD, `${DOCS_C}/DOC-2609-0020`), { title: "شهادة التأمينات — رغده", docType: "gosi", expiry: "2027-10-15" })),
+  assertSucceeds(updateDoc(doc(SUP_RGD, `${DOCS_C}/DOC-2609-0020`), { notes: "تجديد" })),
+  assertSucceeds(setDoc(doc(SUP_RGD, `${LTRS_C}/LTR-2609-0020`), { kind: "issued", title: "من رغده" })),
+  assertSucceeds(setDoc(doc(SUP_RGD, `${PRT_C}/PRT-2609-0020`), { name: "جهة" })),
+  assertSucceeds(setDoc(doc(SUP_RGD, `${EXS_C}/EXS-2609-0020`), { title: "دوري" })),
+  assertSucceeds(setDoc(doc(SUP_RGD, `${APR_C}/APR-2609-0020`), { title: "مستخلص" })),
+  assertSucceeds(setDoc(doc(SUP_RGD, `${VF_C}/${TOK2}`), { letterId: "LTR-2609-0020" }))]));
+await check("★★★ وغيرُ الممنوح لا يكتب ولو كان دورُه مشرفاً أو مديرَ مشاريع (الفرقُ هو المنح)",
+  Promise.all([
+  assertFails(setDoc(doc(SUP_OTHER, `${DOCS_C}/DOC-2609-0021`), { title: "من خالد" })),
+  assertFails(setDoc(doc(PM, `${DOCS_C}/DOC-2609-0022`), { title: "من مدير المشاريع" })),
+  assertFails(setDoc(doc(PROC, `${LTRS_C}/LTR-2609-0022`), { kind: "issued", title: "من المشتريات" })),
+  assertFails(setDoc(doc(WH, `${DOCS_C}/DOC-2609-0023`), { title: "من المستودع" })),
+  assertFails(setDoc(doc(SUP_OTHER, `${VF_C}/${TOK2}`), { letterId: "x" }))]));
+await check("★★★ والزائرُ والمراقبُ الممنوحان يقرآن ولا يكتبان (يريان ولا يكتبان وإن مُنحا)",
+  Promise.all([
+  assertSucceeds(getDocs(collection(VIEWER_ML, DOCS_C))),
+  assertSucceeds(getDocs(collection(OBS_ML, LTRS_C))),
+  assertFails(setDoc(doc(VIEWER_ML, `${DOCS_C}/DOC-2609-0024`), { title: "من الزائر الممنوح" })),
+  assertFails(updateDoc(doc(OBS_ML, `${DOCS_C}/DOC-2609-0020`), { notes: "من المراقب" }))]));
+await check("★★★ والحذفُ يبقى للأدمن وحدَه — الممنوحُ المشرفُ لا يحذف ما كتب",
+  Promise.all([
+  assertFails(deleteDoc(doc(SUP_RGD, `${DOCS_C}/DOC-2609-0020`))),
+  assertSucceeds(deleteDoc(doc(ADMIN, `${DOCS_C}/DOC-2609-0020`)))]));
+await check("★★ والأدمنُ يكتب دائماً ولو لم يكن في القائمة",
+  assertSucceeds(setDoc(doc(ADMIN, `${DOCS_C}/DOC-2609-0025`), { title: "من الأدمن" })));
 await check("★★ و`get` مستندٍ بعينه محكومٌ بالحكم نفسِه (لا بابٌ خلفيٌّ بالمعرّف)",
   assertFails(getDoc(doc(PM, `${DOCS_C}/DOC-1`))));
 await check("★★ ونسخُ `_dev` الثلاثُ محكومةٌ بها كذلك (لا بابَ يُفتح باسمٍ ثانٍ)",

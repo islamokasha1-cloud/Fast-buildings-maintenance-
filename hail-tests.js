@@ -19594,6 +19594,31 @@ function docVaultGuards() {
         /غيرُ مضيَّقة بعد/.test(src) && /enableReaderLock/.test(src));
       T("★★ dv/read: والمنعُ من الخادم يُقال بلغةٍ تُفهَم لا بنصِّ Firestore الخام",
         /PERMISSION_DENIED/.test(src) && /غيرُ مُدرَجٍ في قرّاء الخزانة/.test(src));
+
+      /* ── الكتابةُ بالحكم نفسِه (لقطةُ المالك 13/09) ──
+         مشرفةٌ ممنوحةٌ قرأت الخزانةَ وملأت نموذجَ وثيقةٍ ثمّ رُدّت عند الحفظ:
+         `vaultWriteOk` كانت قائمةَ أدوارٍ سبعةٍ لا تعرف «مشرف» ولا المستودعات،
+         بينما `canEdit` في الواجهة تُجيز كلَّ ممنوحٍ غيرِ الزائر والمراقب. فما يراه
+         المستخدمُ يجب أن يقبله الخادم — والقائمةُ بالأدوار لا تعود. */
+      T("★★★ dv/write: الكتابةُ على الخادم = القراءةُ ممنوحاً إلا الزائرَ والمراقب — لا قائمةَ أدوار",
+        /function vaultWriteOk\(\) \{\s*\n\s*return vaultReadOk\(\) && !isViewer\(\) && role\(\) != 'observer';\s*\n\s*\}/.test(RUL) &&
+        !/function vaultWriteOk\(\) \{[\s\S]{0,200}anyRole\(/.test(RUL));
+      T("★★★ dv/write: والواجهةُ تقول الشيءَ نفسَه (`canEdit`: ممنوحٌ وليس زائراً ولا مراقباً)",
+        /function canEdit\(\)\{[\s\S]{0,200}if\(!u \|\| !canView\(\)\) return false;\s*\n\s*return u\.role !== "viewer" && u\.role !== "observer";/.test(src));
+      T("★★ dv/write: وردُّ الخادم عند الحفظ يُقال بلغةٍ تُفهَم وبما يُفعَل (لا «Missing or insufficient permissions»)",
+        /function _writeErr\(e\)\{[\s\S]{0,400}permission-denied[\s\S]{0,400}الخادم رفض الكتابة/.test(src) &&
+        !/تعذّر الحفظ: " \+ String\(\(e && e\.message\) \|\| e\)/.test(src) &&
+        !/تعذّر التجديد: " \+ String\(\(e && e\.message\) \|\| e\)/.test(src) &&
+        /تعذّر الحفظ: " \+ _writeErr\(e\)/.test(src) && /تعذّر التجديد: " \+ _writeErr\(e\)/.test(src));
+      T("★★★ dv/write: والمحاكي يقيس الممنوحَ المشرفَ يكتب وغيرَ الممنوح يُردّ (لا قياسَ بقراءة السطر)",
+        (function(){
+          try{
+            var rc = fs.readFileSync(path.resolve(path.dirname(IDX), "rules-check.mjs"), "utf8");
+            return /setDoc\(doc\(SUP_RGD, `\$\{DOCS_C\}\/DOC-2609-0020`\)/.test(rc)
+              && /assertFails\(setDoc\(doc\(SUP_OTHER, `\$\{DOCS_C\}\/DOC-2609-0021`\)/.test(rc)
+              && /assertFails\(setDoc\(doc\(VIEWER_ML, `\$\{DOCS_C\}\/DOC-2609-0024`\)/.test(rc);
+          }catch(e){ return false; }
+        })());
     }
   }
 

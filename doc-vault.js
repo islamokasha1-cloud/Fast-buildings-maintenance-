@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3198";
+var MODULE_BUILD = "v18.9.3200";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -111,6 +111,15 @@ function _audit(a, d){ try{ if(typeof logAudit === "function") logAudit(a, d); }
 function _notify(t, b, k){ try{ if(typeof addNotification === "function") addNotification(t, b, null, k); }catch(e){} }
 function _confirm(o){ try{ return (typeof showConfirm === "function") ? showConfirm(o) : Promise.resolve(true); }
                       catch(e){ return Promise.resolve(false); } }
+/* خطأُ الكتابة يُقال بلغةٍ تُفهَم: «Missing or insufficient permissions» الخامُ لا يقول
+   للمستخدم ما العمل. والردُّ من الخادم يعني أنّ اسمَ دخوله ليس في قرّاء الخزانة أو
+   أنّ دورَه زائرٌ أو مراقب — وكلاهما يحلّه مديرُ النظام لا هو. */
+function _writeErr(e){
+  var m = String((e && e.message) || e);
+  if((e && e.code === "permission-denied") || /permission|insufficient|PERMISSION_DENIED/i.test(m))
+    return "الخادم رفض الكتابة — حسابُك ليس من قرّاء الخزانة على الخادم أو دورُه للعرض فقط. يمنحك مديرُ النظام صلاحية «خزانة الوثائق» ثمّ يحفظ المستخدم.";
+  return m;
+}
 
 /* ════════ الصلاحية ════════
    مفتاحٌ **مانح**: يُقرأ بعلامةٍ صريحة `=== true` لا باصطلاح الحاجب. ونقرؤه من
@@ -2841,7 +2850,7 @@ function migrateSigns(){
         return true;
       });
   }).catch(function(e){
-    _toast("⚠ تعذّر النقل: " + String((e && e.message) || e), "warn");
+    _toast("⚠ تعذّر النقل: " + _writeErr(e), "warn");
     return false;
   });
 }
@@ -2870,7 +2879,7 @@ function saveSigners(){
       renderLetters();
       return true;
     })
-    .catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); return false; });
+    .catch(function(e){ _toast("⚠ تعذّر الحفظ: " + _writeErr(e), "warn"); return false; });
 }
 
 /* ══ لوحةُ المأذونين داخل سجلّ التواقيع ══ */
@@ -3068,7 +3077,7 @@ function saveSignatory(){
   _saveSigns(list).then(function(){
     _audit(_sEdit.id ? "تعديل موقّع في الخزانة" : "إضافة موقّع إلى الخزانة", _sEdit.name + " — " + _sEdit.title);
     _sEdit = null; renderLetters(); _toast("✅ حُفظ الموقّع", "success");
-  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + _writeErr(e), "warn"); });
 }
 
 function delSignatory(id){
@@ -3868,7 +3877,7 @@ function commitAct(){
     _audit("مسار الاعتماد: " + lbl, a.id + " — " + (a.title || "") + (o.note ? " — " + o.note : ""));
     _pAct = null; renderApprovals();
     _toast(k === "approve" ? "✅ اعتُمد — ودخل معتمداتِ المشروع" : "✅ " + lbl, "success");
-  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + _writeErr(e), "warn"); });
 }
 
 /* ════════ منتقي الجهة في النموذج ════════ */
@@ -4050,7 +4059,7 @@ function saveParty(){
     _audit(was ? "تعديل مسار جهة" : "تسجيل جهة ومسارها", id + " — " + name + " (" + st.length + " محطات)");
     _pEdit = null; renderApprovals();
     _toast(was ? "✅ حُفظ المسار — يسري على ما يُسجَّل بعده" : "✅ سُجّلت الجهة برقم " + id, "success");
-  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + _writeErr(e), "warn"); });
 }
 function seedTemplateParty(){
   if(!canEdit()){ _toast("🔒 لا صلاحية","warn"); return; }
@@ -4058,7 +4067,7 @@ function seedTemplateParty(){
   _savePartyDoc({ name:PATH_TEMPLATE_NAME, stages:pathNormalize(PATH_TEMPLATE) }, "").then(function(id){
     _audit("تسجيل جهة ومسارها", id + " — " + PATH_TEMPLATE_NAME + " (نموذجيّ)");
     _toast("✅ أُضيفت «" + PATH_TEMPLATE_NAME + "» بمسارها — عدّله كما تشاء", "success");
-  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + _writeErr(e), "warn"); });
 }
 function delParty(id){
   if(!canDelete()){ _toast("🔒 الحذف من صلاحية مدير النظام","warn"); return; }
@@ -4488,7 +4497,7 @@ function saveSchedule(){
     _audit(was ? "تعديل جدول مستخلص دوريّ" : "تسجيل مستخلص دوريّ", id + " — " + n.title + " (يوم " + n.dueDay + " · تذكير قبل " + n.leadDays + " أيام · " + n.users.length + " مسؤول)");
     _sEdit = null; renderApprovals();
     _toast(was ? "✅ حُفظ الجدول" : "✅ سُجّل المستخلصُ الدوريّ برقم " + id, "success");
-  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + _writeErr(e), "warn"); });
 }
 function delSchedule(id){
   if(!canDelete()){ _toast("🔒 الحذف من صلاحية مدير النظام","warn"); return; }
@@ -4783,7 +4792,7 @@ function saveEdit(){
     _audit(was ? "تعديل وثيقة في الخزانة" : "إضافة وثيقة إلى الخزانة", id + " — " + body.title);
     _edit = null; _open = id; render(); _top();
     _toast(was ? "✅ حُفظ التعديل" : "✅ أُضيفت الوثيقة", "success");
-  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + _writeErr(e), "warn"); });
 }
 
 function delDoc(id){
@@ -4858,7 +4867,7 @@ function saveRenew(){
     try{ var m = _alertedKey(); Object.keys(m).forEach(function(k){ if(k.indexOf(cur.id + "|") === 0) delete m[k]; }); _markAlerted(m); }catch(e){}
     _renew = null; render(); refreshBadges();
     _toast("✅ جُدِّدت الوثيقة حتى " + next.expiry, "success");
-  }).catch(function(e){ _toast("⚠ تعذّر التجديد: " + String((e && e.message) || e), "warn"); });
+  }).catch(function(e){ _toast("⚠ تعذّر التجديد: " + _writeErr(e), "warn"); });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -4991,7 +5000,7 @@ function saveLetter(){
     _audit(was ? "تعديل خطاب في الخزانة" : "إضافة خطاب إلى الخزانة", id + " — " + body.title);
     _letterMode("open"); _lview.open = id; renderLetters(); _top();
     _toast(was ? "✅ حُفظ التعديل" : "✅ حُفظ في الخزانة برقم " + id, "success");
-  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + _writeErr(e), "warn"); });
 }
 
 function delLetter(id){
@@ -5172,7 +5181,7 @@ function saveApr(){
     _audit(was ? "تعديل مستند معتمَد" : "تسجيل مستند مُقدَّم", id + " — " + body.title);
     _aEdit = null; _aview.open = id; renderApprovals(); _top();
     _toast(was ? "✅ حُفظ التعديل" : "✅ سُجّل برقم " + id, "success");
-  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + String((e && e.message) || e), "warn"); });
+  }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + _writeErr(e), "warn"); });
 }
 
 function delApr(id){
