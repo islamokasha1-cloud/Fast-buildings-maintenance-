@@ -88,7 +88,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3196";
+  var MODULE_BUILD = "v18.9.3198";
 
   function COLL(){
     var dev=false;
@@ -108,6 +108,7 @@
   var _lastTry = 0;       // آخرُ محاولةِ اشتراكٍ — تمنع حلقةَ إعادةٍ عند كل رسم
   var _tab     = "mine";  // mine | sent | shared | notes | done | all
   var _srch    = "";      // نصُّ البحث في القائمة — يُصفّي الخانةَ المفتوحة وحدَها
+  var _who     = "";      // فلترُ الموظف: اسمُ دخولٍ — يُظهر ما هو طرفٌ فيه (مكلَّفاً أو مشاركاً)
   var _openId  = null;    // المهمّة المفتوحة تفصيلاً
   var _draft   = [];      // مسوّدةُ التكليف السريع
   var _draftTo = "";      // اسمُ دخول المكلَّف في المسوّدة
@@ -218,6 +219,36 @@
   function _searchTasks(rows, q, nameOf){
     if(!_normAr(q)) return rows;
     return rows.filter(function(t){ return _taskMatches(t, q, nameOf); });
+  }
+
+  /* ── فلترُ الموظف (طلبُ المالك 13/09) ──
+     البحثُ النصّيّ يجيب «أين مهمّةُ المكيّف؟»، وهذا يجيب «ما الذي على خالد؟»:
+     اسمُ دخولٍ واحد، وتبقى المهامُّ التي هو **طرفٌ فيها** — مكلَّفاً أو مشاركاً أو
+     مُنشئاً — بتعريف الغرفة نفسِه (`_participantsOf`)، فلا يفترق الفلترُ عمّا يحمله
+     المستندُ في `participants`. والقائمةُ تُبنى ممّن يظهر في مهامّ الخانة المفتوحة
+     فعلاً لا من كشف الموظفين كلِّه: اسمٌ بلا مهمّةٍ خيارٌ ميت، والعددُ بجانب كلّ اسمٍ
+     يقول ما ينتظره قبل الاختيار. */
+  function _taskHasUser(t, login){
+    var u=String(login==null?"":login);
+    if(!u) return true;
+    return _participantsOf(t).indexOf(u)!==-1;
+  }
+  function _filterByUser(rows, login){
+    if(!login) return rows;
+    return rows.filter(function(t){ return _taskHasUser(t, login); });
+  }
+  function _userOptions(rows, nameOf, exclude){
+    var nm = typeof nameOf==="function" ? nameOf : function(x){ return x; };
+    var cnt={}, out=[];
+    (rows||[]).forEach(function(t){
+      _participantsOf(t).forEach(function(u){
+        if(!u || u===exclude) return;
+        if(!cnt[u]){ cnt[u]=0; out.push(u); }
+        cnt[u]++;
+      });
+    });
+    return out.map(function(u){ return { user:u, name:String(nm(u)||u), n:cnt[u] }; })
+              .sort(function(a,b){ return a.name.localeCompare(b.name, "ar"); });
   }
 
   /* المشاركون: المُنشئ + المكلَّف + المضافون — بلا تكرارٍ وبلا فراغ.
@@ -1330,8 +1361,12 @@
       '#page-staff-tasks .st-tab.on .n{background:rgba(255,255,255,.22);color:#fff}'+
       /* خانةُ البحث: في صفّ الخانات نفسِه — على يسارها (نهايةِ السطر في RTL)، وتنزل
          سطراً وحدَها على الشاشة الضيّقة. الحقلُ `.form-input` من المنصّة. */
-      '#page-staff-tasks .st-search-wrap{display:flex;align-items:center;gap:8px;flex:1 1 240px;max-width:380px;'+
-        'margin-inline-start:auto}'+
+      '#page-staff-tasks .st-search-wrap{display:flex;align-items:center;gap:8px;flex:1 1 320px;max-width:560px;'+
+        'margin-inline-start:auto;flex-wrap:wrap}'+
+      /* فلترُ الموظف: `<select>` من المنصّة بارتفاع خانة البحث نفسِه. */
+      '#page-staff-tasks .st-who-sel{height:33px;font-size:12.5px;width:auto;max-width:210px;padding:0 10px;'+
+        'flex:0 1 auto;min-width:0}'+
+      '#page-staff-tasks .st-who-sel.has{border-color:var(--primary);color:var(--primary);font-weight:700}'+
       '#page-staff-tasks .st-search{position:relative;flex:1 1 200px;min-width:0}'+
       '#page-staff-tasks .st-search .form-input{width:100%;padding-inline-start:36px;padding-inline-end:32px;'+
         'font-size:12.5px;height:33px}'+
@@ -1552,6 +1587,19 @@
      الخانة «تطرده» بعد كلّ حرف. والعدّادُ بجانبها يُحدَّث في مكانه كذلك. */
   function search(v){
     _srch=String(v==null?"":v);
+    _refreshList();
+  }
+  /* فلترُ الموظف يمرّ بالمسار نفسِه: القائمةُ والعدّاد في مكانهما، لا الشاشةُ كلُّها. */
+  function filterUser(v){
+    _who=String(v==null?"":v);
+    var sel=document.getElementById("st-who-sel");
+    if(sel){
+      if(sel.value!==_who) sel.value=_who;
+      if(_who) sel.classList.add("has"); else sel.classList.remove("has");
+    }
+    _refreshList();
+  }
+  function _refreshList(){
     var list=document.getElementById("st-list");
     if(!list){ _rerender(); return; }
     list.innerHTML=_listHtml();
@@ -1568,7 +1616,7 @@
     }catch(e){}
   }
   function _searchCount(){
-    if(!_normAr(_srch)) return "";
+    if(!_normAr(_srch) && !_who) return "";
     var n=_currentRows().length;
     return n ? (n+" نتيجة") : "لا نتائج";
   }
@@ -1597,6 +1645,7 @@
       /* `type="text"` لا `search`: المتصفّحُ يرسم لنوع البحث زرَّ مسحٍ من عنده يزاحم زرَّنا. */
       '<div class="st-search-wrap">'+
       '<span class="st-search-n" id="st-search-n">'+_e(_searchCount())+'</span>'+
+      _whoSelHtml()+
       '<div class="st-search'+(_normAr(_srch)?" has":"")+'" id="st-search">'+
         _icn("search","st-search-ic")+
         '<input type="text" class="form-input" id="st-search-q" value="'+_e(_srch)+'" '+
@@ -1606,6 +1655,24 @@
       '</div>'+
       '</div>'+
     '</div>';
+  }
+
+  /* قائمةُ فلتر الموظف: مَن يظهر في مهامّ الخانة المفتوحة، بعدد مهامّه. أنا مستثنى
+     في خاناتي (كلُّ مهمّةٍ فيها أنا طرفُها، فاسمي خيارٌ لا يُصفّي شيئاً) لا في خانة
+     الإدارة. واختيارٌ لم يعد في القائمة (تبدّلت الخانة) يبقى ظاهراً حتى لا يُصفّي
+     الفلترُ بصمتٍ باسمٍ لا يراه أحد. */
+  function _whoSelHtml(){
+    var opts=_userOptions(_tabRows(), _nameOf, _tab==="all" ? "" : _me());
+    var found=opts.some(function(o){ return o.user===_who; });
+    if(_who && !found) opts.unshift({ user:_who, name:_nameOf(_who), n:0 });
+    return '<select class="form-select st-who-sel'+(_who?" has":"")+'" id="st-who-sel" '+
+        'onchange="staffTasks.filterUser(this.value)" title="عرضُ مهامّ موظفٍ بعينه (مكلَّفاً أو مشاركاً)">'+
+      '<option value="">كل الموظفين</option>'+
+      opts.map(function(o){
+        return '<option value="'+_e(o.user)+'"'+(o.user===_who?" selected":"")+'>'+
+          _e(o.name)+(o.n?' ('+o.n+')':'')+'</option>';
+      }).join("")+
+    '</select>';
   }
 
   /* ════════════════════════════════════════════════════════════════════
@@ -1816,8 +1883,8 @@
     '</div>';
   }
 
-  /* صفوفُ الخانة المفتوحة بعد الفرز **والبحث** — مصدرٌ واحدٌ للقائمة وللعدّاد. */
-  function _currentRows(){
+  /* صفوفُ الخانة المفتوحة بعد الفرز — قبل فلتر الموظف والبحث (منها تُبنى قائمةُ الأسماء). */
+  function _tabRows(){
     var me=_me(), today=_todayISO(), rows;
     if(_tab==="all" && _isAdmin()){
       rows=_sortTasks(_allTasks.filter(function(t){ return t.status!=="done"; }), today);
@@ -1825,7 +1892,10 @@
       var s=_splitTabs(_visible(), me);
       rows=_sortTasks(s[_tab]||[], today);
     }
-    return _searchTasks(rows, _srch, _nameOf);
+    return rows;
+  }
+  function _currentRows(){
+    return _searchTasks(_filterByUser(_tabRows(), _who), _srch, _nameOf);
   }
 
   function _listHtml(){
@@ -1846,6 +1916,8 @@
        تُخيف — المهامُّ موجودةٌ وإنما لم يطابقها المكتوب. */
     if(_normAr(_srch)) return '<div class="st-empty">'+_icn("search")+'لا مهمّةَ تطابق «'+_e(_srch)+'» في هذه الخانة.'+
       '<br><br><button class="btn btn-ghost" onclick="staffTasks.searchClear()">مسح البحث</button></div>';
+    if(_who) return '<div class="st-empty">'+_icn("user")+'لا مهمّةَ لـ«'+_e(_nameOf(_who))+'» في هذه الخانة.'+
+      '<br><br><button class="btn btn-ghost" onclick="staffTasks.filterUser(\'\')">كل الموظفين</button></div>';
     var m = _tab==="mine"  ? ["checkCircle","لا مهامَّ عليك الآن."]
           : _tab==="sent"  ? ["send","لم تُكلّف أحداً بشيءٍ بعد.<br>اكتب مهمّةً في الأعلى واختر الموظف."]
           : _tab==="shared"? ["users","لم يُشركك أحدٌ في مهمّةٍ بعد.<br>ما تُكلَّف به يظهر في «مهامّي»."]
@@ -2065,7 +2137,7 @@
     loadAll:_loadAll,
     refreshNav:refreshNav, canView:_canView,
     refreshLanding:refreshLanding, openFromLanding:openFromLanding,
-    tab:tab, open:open, back:back, byId:byId, search:search, searchClear:searchClear,
+    tab:tab, open:open, back:back, byId:byId, search:search, searchClear:searchClear, filterUser:filterUser,
     markDone:markDone, reopen:reopen, returnTask:returnTask, acceptBack:acceptBack,
     startEdit:startEdit, cancelEdit:cancelEdit, saveEdit:saveEdit,
     addComment:addComment, cmtKey:cmtKey, shareTask:shareTask, unshareTask:unshareTask,
@@ -2081,6 +2153,7 @@
     _parseBulk:_parseBulk, _participantsOf:_participantsOf, _canSee:_canSee,
     _normAr:_normAr, _userMatches:_userMatches,
     _taskText:_taskText, _taskMatches:_taskMatches, _searchTasks:_searchTasks,
+    _taskHasUser:_taskHasUser, _filterByUser:_filterByUser, _userOptions:_userOptions,
     _msVal:_msVal, _lastActivity:_lastActivity, _seenMs:_seenMs, _isUnread:_isUnread,
     _unreadLabel:_unreadLabel,
     _canEditParticipants:_canEditParticipants, _canShare:_canShare,

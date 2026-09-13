@@ -21009,9 +21009,44 @@ function staffTasksGuards() {
       /onclick="staffTasks\.searchClear\(\)"/.test(src) &&
       typeof ST.search === "function" && typeof ST.searchClear === "function");
     T("★ والبحثُ يعيد رسمَ القائمة وحدَها (`#st-list`) لا الشاشةَ كلَّها",
-      /id="st-list"/.test(src) && /function search\(v\)\{[\s\S]{0,400}getElementById\("st-list"\)[\s\S]{0,200}list\.innerHTML=_listHtml\(\)/.test(src));
+      /id="st-list"/.test(src) && /function search\(v\)\{[\s\S]{0,120}_refreshList\(\)/.test(src) &&
+      /function _refreshList\(\)\{[\s\S]{0,200}getElementById\("st-list"\)[\s\S]{0,200}list\.innerHTML=_listHtml\(\)/.test(src));
     T("والفراغُ بسبب البحث يقول «لا مهمّةَ تطابق» لا «لا مهامَّ عليك» — مع زرّ مسح",
       /لا مهمّةَ تطابق «'\+_e\(_srch\)\+'» في هذه الخانة/.test(src));
+  }
+
+  /* ── (١٧) فلترُ الموظف (طلبُ المالك 13/09) ──
+     «ما الذي على خالد؟»: تبقى المهامُّ التي هو طرفٌ فيها بتعريف الغرفة نفسِه
+     (`_participantsOf`)، والقائمةُ ممّن يظهر في مهامّ الخانة فعلاً بعدد مهامّه. */
+  {
+    const NEEDW = ["_taskHasUser", "_filterByUser", "_userOptions"].filter(k => typeof ST[k] !== "function");
+    T("★ دوالُّ فلتر الموظف مكشوفةٌ للفحص بلا متصفّح", NEEDW.length === 0, NEEDW.join(" · "));
+    if (NEEDW.length === 0) {
+      const nm = l => ({ khaled: "خالد", ashraf: "أشرف عشري", admin: "المسؤول" }[l] || l);
+      const rows = [
+        { title: "a", createdByUser: "admin", assignedToUser: "khaled", shared: [] },
+        { title: "b", createdByUser: "admin", assignedToUser: "ashraf", shared: ["khaled"] },
+        { title: "c", createdByUser: "khaled", assignedToUser: "", shared: [] },
+        { title: "d", createdByUser: "admin", assignedToUser: "", shared: [] } ];
+      T("★★ الفلترُ يُبقي ما الموظفُ طرفٌ فيه: مكلَّفاً **أو** مشاركاً **أو** مُنشئاً — خالد في 3 من 4",
+        ST._filterByUser(rows, "khaled").length === 3 && ST._filterByUser(rows, "ashraf").length === 1);
+      T("★ وبلا اختيارٍ يمرّ الكلُّ، واسمٌ لا يظهر ⇐ لا شيء (لا خطأ)",
+        ST._filterByUser(rows, "").length === 4 && ST._filterByUser(rows, "nobody").length === 0);
+      const opts = ST._userOptions(rows, nm, "admin");
+      T("★★ قائمةُ الأسماء ممّن في المهامّ فعلاً بعدد مهامّه، مرتّبةً بالاسم، والمستثنى لا يظهر",
+        opts.length === 2 && opts[0].user === "ashraf" && opts[0].n === 1 && opts[1].user === "khaled" && opts[1].n === 3 &&
+        !opts.some(o => o.user === "admin"), JSON.stringify(opts));
+      T("والفلترُ يُطبَّق **قبل** البحث ومنه تُبنى الخانةُ لا العكس (`_tabRows` ⇐ `_filterByUser` ⇐ `_searchTasks`)",
+        /_searchTasks\(_filterByUser\(_tabRows\(\), _who\), _srch, _nameOf\)/.test(src));
+      T("★ وأنا مستثنى من القائمة في خاناتي لا في خانة الإدارة (اسمي فيها لا يُصفّي شيئاً)",
+        /_userOptions\(_tabRows\(\), _nameOf, _tab==="all" \? "" : _me\(\)\)/.test(src));
+    }
+    T("★★ `<select>` الفلتر في صفّ الخانات ينادي `staffTasks.filterUser` ويُحدَّث القائمةُ وحدَها",
+      /id="st-who-sel"[^>]*onchange="staffTasks\.filterUser\(this\.value\)"/.test(src) &&
+      typeof ST.filterUser === "function" &&
+      /function filterUser\(v\)\{[\s\S]{0,400}_refreshList\(\)/.test(src));
+    T("والفراغُ بسبب الفلتر يقول «لا مهمّةَ لـ…» مع زرّ «كل الموظفين»",
+      /لا مهمّةَ لـ«'\+_e\(_nameOf\(_who\)\)\+'» في هذه الخانة/.test(src) && /filterUser\(\\'\\'\)">كل الموظفين/.test(src));
   }
 }
 
