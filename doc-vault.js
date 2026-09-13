@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3204";
+var MODULE_BUILD = "v18.9.3206";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1828,16 +1828,17 @@ function injectCSS(){
 ".dv-panel-s{font-size:11.5px;color:var(--muted);margin-bottom:14px;line-height:1.7}",
 ".dv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}",
 /* ── فهرسُ ملفّات المشاريع (بطاقات) ── */
-".dv-pcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-bottom:14px}",
-".dv-pcard{display:flex;flex-direction:column;gap:8px;text-align:right;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:14px 16px;cursor:pointer;font-family:inherit;color:var(--text);transition:border-color .15s,transform .15s}",
+".dv-pcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:16px;margin-bottom:14px}",
+"@media (max-width:560px){.dv-pcards{grid-template-columns:1fr}}",
+".dv-pcard{display:flex;flex-direction:column;gap:14px;text-align:right;background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:24px 26px;min-height:180px;cursor:pointer;font-family:inherit;color:var(--text);transition:border-color .15s,transform .15s}",
 ".dv-pcard:hover{border-color:var(--primary);transform:translateY(-1px)}",
 ".dv-pcard.company{background:var(--surface2)}",
 ".dv-pcard.unlinked{border-color:var(--warn)}",
-".dv-pc-h{display:flex;align-items:center;gap:8px}",
-".dv-pc-t{flex:1;min-width:0;font-family:'Cairo',sans-serif;font-weight:800;font-size:14px;color:var(--primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-".dv-pc-s{font-size:11px;color:var(--muted)}",
-".dv-pc-g{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11.5px;color:var(--text)}",
-".dv-pc-n b{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;font-weight:700}",
+".dv-pc-h{display:flex;align-items:flex-start;gap:10px}",
+".dv-pc-t{flex:1;min-width:0;font-family:'Cairo',sans-serif;font-weight:800;font-size:18px;line-height:1.5;color:var(--primary);overflow-wrap:anywhere;white-space:normal}",
+".dv-pc-s{font-size:13px;color:var(--muted)}",
+".dv-pc-g{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:14px;color:var(--text);margin-top:auto}",
+".dv-pc-n b{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;font-weight:700;font-size:17px}",
 ".dv-pc-n.zero{color:var(--zero)}",
 ".dv-f{display:flex;flex-direction:column;gap:5px}",
 ".dv-f.wide{grid-column:1/-1}",
@@ -5336,7 +5337,12 @@ function renderProjectFile(){
   var head = _fileHead();
   /* قائمةُ الاختيار تُجمع من السجلّات الثلاثة: مشروعٌ يدويٌّ لا يُعرَف إلا من خطابٍ
      واحدٍ يجب أن يكون له خيارٌ يُفتَح به ملفُّه. */
-  var picker = '<div class="dv-bar"><label class="dv-l" style="align-self:center;margin:0">المشروع</label>'
+  /* زرُّ الرجوع (طلبُ المالك 13/09): مَن دخل من بطاقةٍ يعود إلى الفهرس بنقرةٍ لا
+     بالبحث عن «كل المشاريع» في القائمة. يظهر حين يكون ملفٌّ مفتوحاً وحدَه. */
+  var backBtn = (String(_fview.proj || "") === FILTER_ALL) ? ""
+    : '<button type="button" class="btn btn-ghost btn-sm dv-back" onclick="docVault.setFileProj(\'\')">'
+      + _icon("chevronLeft", "ic-sm") + ' العودة إلى المشاريع</button>';
+  var picker = '<div class="dv-bar">' + backBtn + '<label class="dv-l" style="align-self:center;margin:0">المشروع</label>'
     + _projFilterHTML(_fview.proj, "setFileProj", _visDocs().concat(_visLtrs(), _visAprs())) + '</div>';
 
   if(!_docsLoaded || !_ltrsLoaded || !_aprsLoaded){

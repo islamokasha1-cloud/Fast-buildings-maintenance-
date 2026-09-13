@@ -19544,6 +19544,13 @@ function docVaultGuards() {
           V.setFileProj("hail");
           T("★★ dv/cards: والنقرُ يفتح الملفَّ كاملاً بأقسامه",
             /وثائق المشروع/.test(pgf.innerHTML) && !pgf.querySelector(".dv-pcard"));
+          /* زرُّ الرجوع (13/09): يظهر مع ملفٍّ مفتوحٍ وحدَه ويعيد إلى الفهرس. */
+          T("★★★ dv/cards: وزرُّ «العودة إلى المشاريع» يظهر مع الملفّ المفتوح ويعيد إلى الفهرس",
+            !!pgf.querySelector(".dv-back") && /setFileProj\(''\)/.test(pgf.querySelector(".dv-back").getAttribute("onclick")) &&
+            (function(){ V.setFileProj(""); return !pgf.querySelector(".dv-back") && !!pgf.querySelector(".dv-pcard"); })());
+          T("★★ dv/cards: والاسمُ على البطاقة يُكتب كاملاً — يلتفّ ولا يُقصّ بنقاط",
+            /\.dv-pc-t\{[^}]*white-space:normal/.test(src) && !/\.dv-pc-t\{[^}]*text-overflow:ellipsis/.test(src) &&
+            /\.dv-pcards\{[^}]*minmax\(420px,1fr\)/.test(src) && /\.dv-pcard\{[^}]*min-height:180px/.test(src));
           V.__test_seed([], [], [], [], PARTIES);
           V.setFileProj("");
           T("★ dv/cards: وبلا سجلٍّ لأيّ مشروعٍ تقول الشاشةُ ذلك — لا بطاقةَ فارغة",
