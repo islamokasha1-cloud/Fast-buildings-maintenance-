@@ -18771,6 +18771,13 @@ function docVaultGuards() {
       /<img class="sgn-sig" src="https:\/\/x\.test\/sig\.png"/.test(P(withSig)) &&
       /<img class="sgn-stp" src="https:\/\/x\.test\/stamp\.png"/.test(P(withSig)) &&
       /\.sgn-stp\{[^}]*z-index:2/.test(src) && /\.sgn-sig\{[^}]*z-index:1/.test(src));
+    /* التراكبُ يثبت بصفٍّ مرنٍ لا بإحداثياتٍ مطلقة: الإحداثياتُ المطلقةُ على حافّتي
+       الكتلة أخرجت التوقيعَ يميناً والختمَ أسفلَ اليسار **بلا تراكب** (ملاحظةُ المالك
+       13/09). فالصفُّ متمركزٌ، والختمُ يُسحب على التوقيع بهامشٍ سالبٍ من جهة البداية. */
+    T("★★ dv: والصورتان صفٌّ متمركزٌ تحت الاسم، والختمُ يُسحب فوق التوقيع بهامشٍ سالب — لا إحداثياتٌ مطلقةٌ تُباعدهما",
+      /\.sgn-im\{[^}]*display:flex[^}]*justify-content:center/.test(src) &&
+      /\.sgn-stp\{[^}]*margin-inline-start:-\d+mm/.test(src) &&
+      !/\.sgn-sig\{[^}]*position:absolute/.test(src) && !/\.sgn-stp\{[^}]*position:absolute/.test(src));
     /* النفيُ يطابق **الترميزَ** لا المستندَ كلَّه: ورقةُ الطباعة تحمل أنماطَها
        في `<style>` داخلها، فـ`sgn-sig` موجودةٌ فيها دائماً كقاعدةِ نمط. ومطابقةُ
        الاسم المجرّد كانت تسأل عن الأنماط لا عن الصورة. (أُمسك في أوّل تشغيل.) */

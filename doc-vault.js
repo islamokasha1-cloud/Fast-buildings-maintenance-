@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3208";
+var MODULE_BUILD = "v18.9.3209";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -3233,7 +3233,9 @@ function _bodyHTML(text){
 
    ── والختمُ فوق التوقيع بتراكبٍ مقصود ──
    كما يُختَم الورقُ فعلاً: الختمُ يقع على التوقيع لا بجانبه. و`z-index` يضعه
-   فوقه، وشفافيةُ الـPNG هي ما يُبقي التوقيعَ مقروءاً تحته. */
+   فوقه، وشفافيةُ الـPNG هي ما يُبقي التوقيعَ مقروءاً تحته. والصورتان صفٌّ مرنٌ
+   متمركزٌ تحت الاسم (أنماطُ `.sgn-im` أدناه) لا إحداثياتٌ مطلقة — فالتراكبُ
+   يثبت مهما اختلف عرضُ صورةِ التوقيع أو الختم المرفوعة. */
 /* رمزُ QR للصادر الذي له رمزُ تحقّق. يُرسَم بـ`window.qrCode` إن حضر، ويغيب بصمتٍ
    إن لم يحضر أو لم يكن للخطاب رمز — ويبقى الباركودُ والرقمُ كما كانا. */
 function _qrBlockHTML(l){
@@ -3412,12 +3414,16 @@ function letterPaperHTML(l){
     /* الاسمُ عريضٌ بحجمٍ يزيد على المتن: هو ما تبحث عنه العينُ في ورقةٍ رسمية. */
     + '.sgn-nm{font-size:14.5px;font-weight:800;color:#111827;margin-top:1mm}'
     + '.sgn-line{border-bottom:1px solid #9ca3af;height:20mm;margin-top:2mm}'
-    /* التوقيعُ والختمُ يقعان **على** الاسم بتراكبٍ طفيفٍ لأعلى — كما يُختَم الورقُ
-       فعلاً، لا صورتين مرصوصتين تحته. والختمُ فوق التوقيع بـ`z-index`، وشفافيةُ
-       الـPNG هي ما يُبقي ما تحته مقروءاً. */
-    + '.sgn-im{position:relative;height:28mm;margin-top:-3mm}'
-    + '.sgn-sig{position:absolute;right:12%;top:0;height:16mm;object-fit:contain;z-index:1}'
-    + '.sgn-stp{position:absolute;left:6%;top:4mm;height:23mm;object-fit:contain;z-index:2}'
+    /* التوقيعُ والختمُ صفٌّ واحدٌ **متمركزٌ تحت الاسم**، والختمُ يركب طرفَ التوقيع
+       الأيسر بثلثه — كما يُختَم الورقُ فعلاً. كانا مثبَّتين بإحداثياتٍ مطلقةٍ على
+       حافّتي الكتلة (التوقيعُ يميناً والختمُ أسفلَ اليسار) فخرجا **متباعدين بلا
+       تراكب** كأنّهما عنصران لا علاقةَ بينهما (ملاحظةُ المالك 13/09). والصفُّ
+       المرن يُلصقهما مهما اختلف عرضُ الصورتين: في صفحةٍ عربيةٍ أوّلُ ابنٍ على
+       اليمين (التوقيع)، و`margin-inline-start` السالبُ على الختم يسحبه يميناً
+       فوقه. والختمُ فوق التوقيع بـ`z-index`، وشفافيةُ الـPNG تُبقي ما تحته مقروءاً. */
+    + '.sgn-im{position:relative;display:flex;justify-content:center;align-items:center;height:26mm;margin-top:1mm}'
+    + '.sgn-sig{position:relative;height:16mm;max-width:42mm;object-fit:contain;z-index:1}'
+    + '.sgn-stp{position:relative;height:24mm;max-width:34mm;object-fit:contain;z-index:2;margin-inline-start:-9mm;margin-top:-3mm}'
     + '.bcw{direction:ltr;display:flex;justify-content:flex-start;align-items:flex-end;gap:6px}'
     + '.bcb{display:inline-block;text-align:center}'
     + '.bc{display:block}'
