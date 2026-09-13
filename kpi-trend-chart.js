@@ -35,7 +35,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.3194";
+const MODULE_BUILD = "v18.9.3196";
 const MAX_MONTHS = 12, MIN_MONTHS = 4;
 const RESPONSE_TARGET_H = 8;   // كما في بطاقة KPI-02
 const NEAR_PTS = 10;           // «دون الهدف بقليل» = أقلّ من عشر نقاط

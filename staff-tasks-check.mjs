@@ -173,6 +173,29 @@ check('★★ المهامُّ تظهر في «كلّفتُ بها»',
   await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-card').length === 4),
   await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-card').length + ' بطاقة'));
 
+/* البحثُ: يكتب كما يكتب الموظف (لا `fill` دفعةً — حرفاً حرفاً حتى يُقاس التركيز)
+   ويُصفّي القائمةَ وحدَها فلا يفقد المؤشّر. */
+await page.click('#st-search-q');
+await page.type('#st-search-q', 'قطع الغيار', { delay: 20 });
+await page.waitForTimeout(200);
+check('★★ خانةُ البحث تُصفّي القائمةَ إلى ما يطابق — «قطع الغيار» بطاقةٌ واحدة',
+  await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-card').length === 1 &&
+    document.querySelector('#page-staff-tasks .st-card .st-ttl').textContent.includes('قطع الغيار')),
+  await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-card').length + ' بطاقة'));
+check('★★ والتركيزُ يبقى في الخانة بعد كلّ حرف (القائمةُ وحدَها تُرسم لا الشاشة)',
+  await page.evaluate(() => { const e = document.getElementById('st-search-q'); return !!e && document.activeElement === e && e.value === 'قطع الغيار'; }));
+check('★ وعدّادُ النتائج بجانبها',
+  await page.evaluate(() => (document.getElementById('st-search-n') || {}).textContent === '1 نتيجة'));
+await page.type('#st-search-q', ' مكيّف');
+await page.waitForTimeout(150);
+check('★ ولا مطابقةَ ⇐ فراغُ بحثٍ صريح بزرّ مسح لا «لم تُكلّف أحداً»',
+  await page.evaluate(() => { const e = document.querySelector('#page-staff-tasks .st-empty'); return !!e && e.textContent.includes('لا مهمّةَ تطابق') && !e.textContent.includes('لم تُكلّف'); }));
+await page.click('#page-staff-tasks .st-search-x');
+await page.waitForTimeout(150);
+check('★ وزرُّ المسح يُعيد البطاقاتِ كلَّها',
+  await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-card').length === 4 &&
+    document.getElementById('st-search-q').value === ''));
+
 /* المكلَّفُ نفسُه: تظهر في «مهامّي» وفي شارة الشريط */
 await page.evaluate(() => {
   currentUser = { user: 'khaled', name: 'خالد', role: 'مشرف' };
