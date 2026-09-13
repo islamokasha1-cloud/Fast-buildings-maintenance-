@@ -20977,6 +20977,42 @@ function staffTasksGuards() {
       /body\.standalone-mode \.sidebar-nav > \*\{display:none!important\}/.test(css) &&
       /body\.standalone-mode #nav-staff-tasks-btn\{display:flex!important\}/.test(css));
   }
+
+  /* ── (١٦) البحثُ في المهامّ (طلبُ المالك 13/09) ──
+     خانةٌ حرّةٌ تُصفّي الخانةَ المفتوحة: تطبيعٌ عربيٌّ كمنتقي الموظف، وكلُّ كلمةٍ
+     يجب أن تُوجد، ويشمل العنوانَ والأطرافَ والملاحظاتِ وأسماءَ المرفقات. */
+  {
+    const NEEDQ = ["_taskText", "_taskMatches", "_searchTasks"].filter(k => typeof ST[k] !== "function");
+    T("★ دوالُّ البحث في المهامّ مكشوفةٌ للفحص بلا متصفّح", NEEDQ.length === 0, NEEDQ.join(" · "));
+    if (NEEDQ.length === 0) {
+      const nm = l => ({ khaled: "خالد عشري", raghda: "رغده" }[l] || l);
+      const tq = { title: "صيانة المكيّف في الدور الثاني", assignedToUser: "khaled", createdByUser: "raghda",
+                   comments: [{ text: "اتصلت بالمورّد أحمد", user: "khaled" }],
+                   attachments: [{ name: "عطل-المكيف.jpg", url: "https://x/y" }] };
+      T("★★ البحثُ بالعنوان يتجاوز التشكيلَ والهمزات — «مكيف» تجد «المكيّف»",
+        ST._taskMatches(tq, "مكيف") && ST._taskMatches(tq, "المكيّف"));
+      T("★ وكلُّ كلمةٍ يجب أن تُوجد بلا شرطِ ترتيب — «الثاني صيانة» تجد و«صيانة نظافة» لا",
+        ST._taskMatches(tq, "الثاني صيانة") && !ST._taskMatches(tq, "صيانة نظافة"));
+      T("★★ والبحثُ باسم المكلَّف المعروض عبر `nameOf` لا باسم الدخول وحدَه — «خالد عش» تجد المهمّة",
+        ST._taskMatches(tq, "خالد عش", nm) && ST._taskMatches(tq, "khaled") && !ST._taskMatches(tq, "خالد", () => ""));
+      T("★ ويشمل نصَّ الملاحظات واسمَ المرفق — «احمد» و«عطل-المكيف» تجدانها",
+        ST._taskMatches(tq, "احمد") && ST._taskMatches(tq, "عطل-المكيف"));
+      T("والفراغُ يُطابق الكلَّ، ومُدخلٌ غيرُ نصّيٍّ لا يُسقط الشاشة",
+        ST._taskMatches(tq, "") && ST._taskMatches(tq, null) && ST._taskMatches(null, "x") === false &&
+        ST._searchTasks([tq, { title: "غير ذلك" }], "  ").length === 2 &&
+        ST._searchTasks([tq, { title: "غير ذلك" }], "مكيف").length === 1);
+    }
+    /* الخانةُ في الواجهة: تُحدَّث القائمةُ وحدَها لا الشاشةُ كلُّها — وإلا طردت الخانةُ
+       المؤشّرَ بعد كلّ حرف (الدرسُ نفسُه في منتقي الموظف). */
+    T("★★ خانةُ البحث في صفّ الخانات وتنادي `staffTasks.search` عند الكتابة و`searchClear` للمسح",
+      /id="st-search-q"[^>]*oninput="staffTasks\.search\(this\.value\)"/.test(src) &&
+      /onclick="staffTasks\.searchClear\(\)"/.test(src) &&
+      typeof ST.search === "function" && typeof ST.searchClear === "function");
+    T("★ والبحثُ يعيد رسمَ القائمة وحدَها (`#st-list`) لا الشاشةَ كلَّها",
+      /id="st-list"/.test(src) && /function search\(v\)\{[\s\S]{0,400}getElementById\("st-list"\)[\s\S]{0,200}list\.innerHTML=_listHtml\(\)/.test(src));
+    T("والفراغُ بسبب البحث يقول «لا مهمّةَ تطابق» لا «لا مهامَّ عليك» — مع زرّ مسح",
+      /لا مهمّةَ تطابق «'\+_e\(_srch\)\+'» في هذه الخانة/.test(src));
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════

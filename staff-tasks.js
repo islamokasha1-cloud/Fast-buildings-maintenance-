@@ -88,7 +88,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3194";
+  var MODULE_BUILD = "v18.9.3196";
 
   function COLL(){
     var dev=false;
@@ -107,6 +107,7 @@
   var _allState = "";     // "" | "loading" | "ok" | "err"
   var _lastTry = 0;       // آخرُ محاولةِ اشتراكٍ — تمنع حلقةَ إعادةٍ عند كل رسم
   var _tab     = "mine";  // mine | sent | shared | notes | done | all
+  var _srch    = "";      // نصُّ البحث في القائمة — يُصفّي الخانةَ المفتوحة وحدَها
   var _openId  = null;    // المهمّة المفتوحة تفصيلاً
   var _draft   = [];      // مسوّدةُ التكليف السريع
   var _draftTo = "";      // اسمُ دخول المكلَّف في المسوّدة
@@ -183,6 +184,40 @@
     if(!needle) return true;
     var hay=_normAr(((u&&u.name)||"")+" "+((u&&u.user)||"")+" "+((u&&u.role)||""));
     return needle.split(" ").every(function(w){ return !w || hay.indexOf(w)!==-1; });
+  }
+
+  /* ── بحثٌ في المهامّ (طلبُ المالك 13/09) ──
+     مع تراكم المهامّ لا يكفي التصنيفُ بالخانة: مَن يعرف أنّ مهمّةً عن «المكيّف»
+     مفتوحةٌ لا يريد أن يقرأ ثلاثين بطاقةً ليصلَ إليها. فالبحثُ **نصٌّ حرّ** يُطبَّع
+     عربياً بالقواعد نفسِها التي يُبحث بها عن الموظف (`_normAr`)، وكلُّ كلمةٍ فيه
+     يجب أن تُوجد ولا يشترط ترتيبُها.
+     ويشمل ما يُرى على البطاقة وما خلفها: العنوانَ، واسمَ المكلَّف والمُنشئ (عرضاً
+     ودخولاً)، ونصوصَ الملاحظات، وأسماءَ المرفقات — فمَن يذكر أنّ الصورة اسمُها
+     «عطل-المكيّف» يجدها من هنا. والقيدُ الحاكم: **البحثُ يُصفّي الخانةَ المفتوحة
+     ولا يقفز عبر الخانات** — «مهامّي» تبقى مهامّي وإن كُتب فيها اسمُ زميل. */
+  function _taskText(t, nameOf){
+    var nm = typeof nameOf==="function" ? nameOf : function(x){ return x; };
+    var parts=[ (t&&t.title)||"",
+                (t&&t.assignedToUser)||"", (t&&t.assignedToName)||"",
+                (t&&t.assignedToUser) ? nm(t.assignedToUser) : "",
+                (t&&t.createdByUser)||"", (t&&t.createdByUser) ? nm(t.createdByUser) : "" ];
+    (Array.isArray(t&&t.comments) ? t.comments : []).forEach(function(c){
+      if(c && c.text) parts.push(String(c.text));
+    });
+    (Array.isArray(t&&t.attachments) ? t.attachments : []).forEach(function(a){
+      if(a && a.name) parts.push(String(a.name));
+    });
+    return parts.join(" ");
+  }
+  function _taskMatches(t, q, nameOf){
+    var needle=_normAr(q);
+    if(!needle) return true;
+    var hay=_normAr(_taskText(t, nameOf));
+    return needle.split(" ").every(function(w){ return !w || hay.indexOf(w)!==-1; });
+  }
+  function _searchTasks(rows, q, nameOf){
+    if(!_normAr(q)) return rows;
+    return rows.filter(function(t){ return _taskMatches(t, q, nameOf); });
   }
 
   /* المشاركون: المُنشئ + المكلَّف + المضافون — بلا تكرارٍ وبلا فراغ.
@@ -1293,6 +1328,25 @@
       '#page-staff-tasks .st-tab .n{min-width:17px;padding:0 5px;border-radius:9px;'+
         'background:color-mix(in srgb,var(--primary) 14%,var(--surface));color:var(--primary);font-size:10px}'+
       '#page-staff-tasks .st-tab.on .n{background:rgba(255,255,255,.22);color:#fff}'+
+      /* خانةُ البحث: في صفّ الخانات نفسِه — على يسارها (نهايةِ السطر في RTL)، وتنزل
+         سطراً وحدَها على الشاشة الضيّقة. الحقلُ `.form-input` من المنصّة. */
+      '#page-staff-tasks .st-search-wrap{display:flex;align-items:center;gap:8px;flex:1 1 240px;max-width:380px;'+
+        'margin-inline-start:auto}'+
+      '#page-staff-tasks .st-search{position:relative;flex:1 1 200px;min-width:0}'+
+      '#page-staff-tasks .st-search .form-input{width:100%;padding-inline-start:36px;padding-inline-end:32px;'+
+        'font-size:12.5px;height:33px}'+
+      /* الأيقونةُ وزرُّ المسح مطلقان بأبعادٍ صريحة: عنصرٌ مطلقٌ بلا عرضٍ في RTL يفيض
+         بمحتواه إلى اليسار فتظهر الأيقونةُ خارجَ الحقل. */
+      '#page-staff-tasks .st-search-ic{position:absolute;inset-inline-start:11px;top:50%;margin-top:-7px;'+
+        'width:14px;height:14px;color:var(--muted);pointer-events:none}'+
+      '#page-staff-tasks .st-search-ic svg{width:14px;height:14px;display:block}'+
+      '#page-staff-tasks .st-search-x{position:absolute;inset-inline-end:8px;top:50%;margin-top:-9px;'+
+        'width:18px;height:18px;align-items:center;justify-content:center;'+
+        'background:none;border:0;padding:0;cursor:pointer;color:var(--muted);display:none;opacity:.7}'+
+      '#page-staff-tasks .st-search-x .ic svg{width:14px;height:14px;display:block}'+
+      '#page-staff-tasks .st-search-x:hover{opacity:1;color:var(--danger)}'+
+      '#page-staff-tasks .st-search.has .st-search-x{display:inline-flex}'+
+      '#page-staff-tasks .st-search-n{font-size:11px;color:var(--muted);font-weight:700;white-space:nowrap}'+
       /* التكليف السريع */
       '#page-staff-tasks .st-quick{background:var(--surface);border:1px solid var(--border);'+
         'border-radius:12px;padding:14px;margin-bottom:14px;box-shadow:var(--shadow)}'+
@@ -1490,7 +1544,33 @@
       _markSeen(t);
       return;
     }
-    host.innerHTML=_hero()+_quickHtml()+_tabsHtml()+'<div class="card">'+_listHtml()+'</div>';
+    host.innerHTML=_hero()+_quickHtml()+_tabsHtml()+'<div class="card" id="st-list">'+_listHtml()+'</div>';
+  }
+
+  /* البحثُ يُعيد رسمَ **القائمة وحدَها**: إعادةُ رسم الشاشة كلِّها مع كلّ حرفٍ تُفقد
+     خانةَ البحث المؤشّرَ والتركيز (الدرسُ نفسُه في منتقي الموظف)، فيبدو للكاتب أنّ
+     الخانة «تطرده» بعد كلّ حرف. والعدّادُ بجانبها يُحدَّث في مكانه كذلك. */
+  function search(v){
+    _srch=String(v==null?"":v);
+    var list=document.getElementById("st-list");
+    if(!list){ _rerender(); return; }
+    list.innerHTML=_listHtml();
+    var w=document.getElementById("st-search");
+    if(w){ if(_normAr(_srch)) w.classList.add("has"); else w.classList.remove("has"); }
+    var n=document.getElementById("st-search-n");
+    if(n) n.textContent=_searchCount();
+  }
+  function searchClear(){
+    search("");
+    try{
+      var i=document.getElementById("st-search-q");
+      if(i){ i.value=""; i.focus(); }
+    }catch(e){}
+  }
+  function _searchCount(){
+    if(!_normAr(_srch)) return "";
+    var n=_currentRows().length;
+    return n ? (n+" نتيجة") : "لا نتائج";
   }
 
   function _hero(){
@@ -1514,6 +1594,17 @@
       tb("notes","ملاحظاتي",s.notes.length)+
       tb("done","المنجَزة",0)+
       (_isAdmin()? tb("all","كل المهامّ (إدارة)",0) : "")+
+      /* `type="text"` لا `search`: المتصفّحُ يرسم لنوع البحث زرَّ مسحٍ من عنده يزاحم زرَّنا. */
+      '<div class="st-search-wrap">'+
+      '<span class="st-search-n" id="st-search-n">'+_e(_searchCount())+'</span>'+
+      '<div class="st-search'+(_normAr(_srch)?" has":"")+'" id="st-search">'+
+        _icn("search","st-search-ic")+
+        '<input type="text" class="form-input" id="st-search-q" value="'+_e(_srch)+'" '+
+          'placeholder="ابحث في المهامّ…" autocomplete="off" '+
+          'oninput="staffTasks.search(this.value)" onkeydown="if(event.key===\'Escape\')staffTasks.searchClear()">'+
+        '<button type="button" class="st-search-x" onclick="staffTasks.searchClear()" title="مسح البحث">'+_icn("xCircle")+'</button>'+
+      '</div>'+
+      '</div>'+
     '</div>';
   }
 
@@ -1725,23 +1816,36 @@
     '</div>';
   }
 
-  function _listHtml(){
+  /* صفوفُ الخانة المفتوحة بعد الفرز **والبحث** — مصدرٌ واحدٌ للقائمة وللعدّاد. */
+  function _currentRows(){
     var me=_me(), today=_todayISO(), rows;
     if(_tab==="all" && _isAdmin()){
-      if(_allState==="loading") return '<div class="st-empty"><div class="st-spin"></div>جارٍ تحميل كل المهامّ…</div>';
-      if(_allState==="err")     return '<div class="st-empty">'+_icn("alertTriangle")+
-        'تعذّر جلبُ كل المهامّ.<br><br><button class="btn btn-ghost" onclick="staffTasks.loadAll()">إعادة المحاولة</button></div>';
       rows=_sortTasks(_allTasks.filter(function(t){ return t.status!=="done"; }), today);
     } else {
       var s=_splitTabs(_visible(), me);
       rows=_sortTasks(s[_tab]||[], today);
     }
+    return _searchTasks(rows, _srch, _nameOf);
+  }
+
+  function _listHtml(){
+    var today=_todayISO();
+    if(_tab==="all" && _isAdmin()){
+      if(_allState==="loading") return '<div class="st-empty"><div class="st-spin"></div>جارٍ تحميل كل المهامّ…</div>';
+      if(_allState==="err")     return '<div class="st-empty">'+_icn("alertTriangle")+
+        'تعذّر جلبُ كل المهامّ.<br><br><button class="btn btn-ghost" onclick="staffTasks.loadAll()">إعادة المحاولة</button></div>';
+    }
+    var rows=_currentRows();
     if(!rows.length) return _emptyHtml();
     return rows.map(function(t){ return _cardHtml(t, today); }).join("");
   }
 
   /* الفراغُ دعوةٌ إلى فعل: أيقونةٌ خافتةٌ وسطرٌ يقول ما التالي — لا احتفالَ ولا مزاج. */
   function _emptyHtml(){
+    /* فراغٌ بسبب البحث غيرُ فراغِ الخانة: «لا مهامَّ عليك» مع بحثٍ مكتوبٍ كذبةٌ
+       تُخيف — المهامُّ موجودةٌ وإنما لم يطابقها المكتوب. */
+    if(_normAr(_srch)) return '<div class="st-empty">'+_icn("search")+'لا مهمّةَ تطابق «'+_e(_srch)+'» في هذه الخانة.'+
+      '<br><br><button class="btn btn-ghost" onclick="staffTasks.searchClear()">مسح البحث</button></div>';
     var m = _tab==="mine"  ? ["checkCircle","لا مهامَّ عليك الآن."]
           : _tab==="sent"  ? ["send","لم تُكلّف أحداً بشيءٍ بعد.<br>اكتب مهمّةً في الأعلى واختر الموظف."]
           : _tab==="shared"? ["users","لم يُشركك أحدٌ في مهمّةٍ بعد.<br>ما تُكلَّف به يظهر في «مهامّي»."]
@@ -1961,7 +2065,7 @@
     loadAll:_loadAll,
     refreshNav:refreshNav, canView:_canView,
     refreshLanding:refreshLanding, openFromLanding:openFromLanding,
-    tab:tab, open:open, back:back, byId:byId,
+    tab:tab, open:open, back:back, byId:byId, search:search, searchClear:searchClear,
     markDone:markDone, reopen:reopen, returnTask:returnTask, acceptBack:acceptBack,
     startEdit:startEdit, cancelEdit:cancelEdit, saveEdit:saveEdit,
     addComment:addComment, cmtKey:cmtKey, shareTask:shareTask, unshareTask:unshareTask,
@@ -1976,6 +2080,7 @@
     // دوالٌّ نقيّة مكشوفةٌ لفحوص hail-tests (بلا متصفّح)
     _parseBulk:_parseBulk, _participantsOf:_participantsOf, _canSee:_canSee,
     _normAr:_normAr, _userMatches:_userMatches,
+    _taskText:_taskText, _taskMatches:_taskMatches, _searchTasks:_searchTasks,
     _msVal:_msVal, _lastActivity:_lastActivity, _seenMs:_seenMs, _isUnread:_isUnread,
     _unreadLabel:_unreadLabel,
     _canEditParticipants:_canEditParticipants, _canShare:_canShare,
