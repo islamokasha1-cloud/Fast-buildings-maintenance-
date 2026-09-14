@@ -3335,7 +3335,24 @@ function financialInvariants() {
     // الطلب غير المُدقَّق لا يُمسّ (التقدير يبقى)
     const est = { items: [{ qty: 10, rcvQty: 5, unitCost: 5, itemCost: 57.5, vat: 7.5 }] };
     M._poHealItems(est);
-    T("التطبيع لا يمسّ الطلب غير المُدقَّق", est.items[0].itemCost === 57.5);
+    T("التطبيع لا يمسّ الطلب غير المُدقَّق (يبقى على المطلوب 57.5 لا المستلَم)", est.items[0].itemCost === 57.5);
+    // ★★ v18.9.3217: الطلب غير المُدقَّق المحفوظ باصطلاح ضريبة الوحدة القديم يُشفى على المطلوب
+    const legacy = { items: [
+      { qty: 256, unitCost: 3.5, itemCost: 1031.68, vat: 135.68, lineTotal: 896 },   // الحادثة الأصل (بعد الدمج ولا تزال)
+      { qty: 3, unitCost: 13.04, itemCost: 45, vat: 5.88, lineTotal: 39.12 },        // فارقُ قرشٍ — يبقى
+      { qty: 4, unitCost: 0, itemCost: 100, vat: 13.04, lineTotal: 86.96 }           // مقطوع بلا سعر وحدة — يبقى
+    ] };
+    M._poHealItems(legacy);
+    T("★★ غير المُدقَّق المحفوظ على 135.68/1031.68 يُشفى عند التحميل إلى 134.40/1030.40",
+      legacy.items[0].vat === 134.4 && legacy.items[0].itemCost === 1030.4 && legacy.items[0].lineTotal === 896,
+      JSON.stringify(legacy.items[0]));
+    T("★ فارقُ قرشٍ في غير المُدقَّق لا يُعاد كتابته (45.00 يبقى)", legacy.items[1].itemCost === 45 && legacy.items[1].vat === 5.88);
+    T("★ البندُ المقطوع (unitCost=0) لا يُمَسّ", legacy.items[2].itemCost === 100 && legacy.items[2].vat === 13.04);
+    const lineU = M._poItemLine({ qty: 256, unitCost: 3.5, itemCost: 1031.68, vat: 135.68 }, false);
+    T("★★ _poItemLine لغير المُدقَّق يعيد الحساب على المطلوب (3.5×256 ⇒ 134.40/1030.40)",
+      lineU.net === 896 && lineU.vat === 134.4 && lineU.total === 1030.4, JSON.stringify(lineU));
+    T("★ وبلا كمية ولا سعر يبقى المخزَّن كما هو",
+      M._poItemLine({ itemCost: 50, vat: 6.52 }, false).total === 50);
   }
   // حارس: مسارا تحميل الطلبات يستدعيان التطبيع
   T("★ تحميل الطلبات يطبّع البنود (_poHealItems) — المسار الأولي والحيّ",

@@ -214,13 +214,20 @@ const s7 = await page.evaluate(() => {
   _poHealItems(good);
   const notAudited = { status: 'wh_receiving', items: [{ itemId: 'C', unitCost: 5, qty: 10, itemCost: 57.5, vat: 7.5, rcvQty: 5 }] };
   _poHealItems(notAudited);
-  return { before, after: bad.items[0].itemCost, afterVat: bad.items[0].vat, good: good.items[0].itemCost, untouched: notAudited.items[0].itemCost };
+  // v18.9.3217: غير المُدقَّق المحفوظ باصطلاح ضريبة الوحدة القديم يُشفى على المطلوب
+  const legacy = { status: 'pending_pm', items: [{ itemId: 'D', unitCost: 3.5, qty: 256, itemCost: 1031.68, vat: 135.68, lineTotal: 896 }] };
+  _poHealItems(legacy);
+  return { before, after: bad.items[0].itemCost, afterVat: bad.items[0].vat, good: good.items[0].itemCost, untouched: notAudited.items[0].itemCost,
+    legacyVat: legacy.items[0].vat, legacyTotal: legacy.items[0].itemCost, legacyPO: getPOTotal(legacy) };
 });
 check('٧أ) ★ البند المبنيّ على المطلوب يُشفى إلى المستلَم (٥٧٫٥ ⇒ ٢٨٫٧٥)',
   near(s7.before, 57.5) && near(s7.after, 28.75), 'قبل=' + s7.before + ' بعد=' + s7.after);
 check('٧ب) وضريبته معه (٣٫٧٥)', near(s7.afterVat, 3.75), 'vat=' + s7.afterVat);
 check('٧ج) ★ البند السليم لا يُمَسّ (لا تذبذبَ تقريب)', near(s7.good, 28.75), 'itemCost=' + s7.good);
-check('٧د) ★ الطلب غير المُدقَّق لا يُمَسّ (التقدير يبقى ٥٧٫٥)', near(s7.untouched, 57.5), 'itemCost=' + s7.untouched);
+check('٧د) ★ الطلب غير المُدقَّق يبقى على المطلوب (٥٧٫٥ لا المستلَم)', near(s7.untouched, 57.5), 'itemCost=' + s7.untouched);
+check('٧هـ) ★★ غير المُدقَّق المحفوظ على ١٣٥٫٦٨/١٠٣١٫٦٨ يُشفى عند التحميل إلى ١٣٤٫٤٠/١٠٣٠٫٤٠',
+  near(s7.legacyVat, 134.4) && near(s7.legacyTotal, 1030.4), 'vat=' + s7.legacyVat + ' itemCost=' + s7.legacyTotal);
+check('٧و) ★ وإجمالي الطلب (getPOTotal) يتبعه (١٠٣٠٫٤٠)', near(s7.legacyPO, 1030.4), 'total=' + s7.legacyPO);
 
 /* ═══ ٨) اصطفافُ صفوف التدقيق — بندان لنفس الصنف ═══ */
 L('\n=== ٨) اصطفاف صفوف التدقيق على البنود ═══');
