@@ -18702,6 +18702,68 @@ function docVaultGuards() {
     W.USERS = prevU;
   }
 
+  /* ── (بلاغُ المالك 14/09) الكتابةُ في خانة البحث كانت تُخرج المؤشّرَ منها ──
+     الشاشةُ تُعاد كتابتُها كاملةً مع كلّ حرف، فتُبنى خانةٌ جديدةٌ بلا تركيز. الحارسُ
+     يكتب حرفاً حرفاً كما يفعل المستخدم ويتأكّد أنّ التركيزَ والمؤشّرَ يعودان إلى
+     الخانة المبنيّة — في الشاشات الثلاث. */
+  {
+    const focusSearch = (pg) => { const el = pg.querySelector(".dv-search"); el.focus(); return el; };
+    const typeInto = (pg, setter, text) => {
+      let el = focusSearch(pg);
+      for (const ch of text) {
+        el.value += ch; el.setSelectionRange(el.value.length, el.value.length);
+        setter(el.value);
+        el = pg.querySelector(".dv-search");
+        if (W.document.activeElement !== el) return { ok:false, at: [...text].indexOf(ch) };
+      }
+      return { ok:true, el };
+    };
+    /* (١) السجلّات */
+    const pgd = W.document.getElementById("page-vault-docs");
+    W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    pgd.classList.add("active");
+    V.__test_seed(DOCS, []);
+    V.clearFilters(); V.render();
+    let r = typeInto(pgd, v => V.setFilter("q", v), "السجل");
+    T("★★★ dv: الكتابةُ حرفاً حرفاً في بحث السجلّات لا تُخرج المؤشّرَ من الخانة",
+      r.ok && r.el.value === "السجل" && r.el.selectionStart === 5, r.ok ? "" : "خرج عند الحرف " + r.at);
+    { const tb = pgd.querySelector("table") ? pgd.querySelector("table").innerHTML : pgd.innerHTML;
+      T("★★ dv: والجدولُ مرشَّحٌ فعلاً بما كُتب", /السجل التجاري/.test(tb) && !/التأمينات/.test(tb)); }
+    /* والموضعُ الوسطُ للمؤشّر يُحفَظ — لا يُرمى إلى آخر النصّ */
+    { const el = pgd.querySelector(".dv-search"); el.focus(); el.setSelectionRange(2, 2); V.setFilter("q", "السجل");
+      const nx = pgd.querySelector(".dv-search");
+      T("★ dv: وموضعُ المؤشّر داخل النصّ يُحفَظ بعد إعادة الرسم", W.document.activeElement === nx && nx.selectionStart === 2 && nx.selectionEnd === 2,
+        String(nx.selectionStart)); }
+    /* والتركيزُ لا يُسرَق حين لا يكون في خانة البحث (تغييرُ النوع من القائمة المنسدلة) */
+    W.document.body.focus(); if (W.document.activeElement && W.document.activeElement.blur) W.document.activeElement.blur();
+    V.setFilter("type", "cr");
+    T("★ dv: ولا يُسرَق التركيزُ إلى خانة البحث حين يأتي التغييرُ من مرشِّحٍ آخر",
+      W.document.activeElement !== pgd.querySelector(".dv-search"));
+    V.clearFilters();
+    /* (٢) الخطابات */
+    const pgl3 = W.document.getElementById("page-vault-letters");
+    W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    pgl3.classList.add("active");
+    V.__test_seed([], [{ id:"LTR-7001", kind:"issued", title:"خطابُ تعميد", party:"جهة", letterDate:"2026-09-01" },
+                       { id:"LTR-7002", kind:"issued", title:"خطابُ اعتذار", party:"جهة", letterDate:"2026-09-02" }]);
+    V.letterTab("issued"); V.renderLetters();
+    r = typeInto(pgl3, v => V.setLetterFilter(v), "تعميد");
+    T("★★★ dv: وفي بحث الخطابات كذلك", r.ok && r.el.value === "تعميد", r.ok ? "" : "خرج عند الحرف " + r.at);
+    V.setLetterFilter("");
+    /* (٣) المعتمدات */
+    const pga3 = W.document.getElementById("page-vault-approvals");
+    W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    pga3.classList.add("active");
+    V.__test_seed([], [], [], []);
+    V.renderApprovals();
+    r = typeInto(pga3, v => V.setAprFilter("q", v), "مستخلص");
+    T("★★★ dv: وفي بحث المعتمدات كذلك", r.ok && r.el.value === "مستخلص", r.ok ? "" : "خرج عند الحرف " + r.at);
+    V.setAprFilter("q", "");
+    W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    pgd.classList.add("active");
+    V.__test_seed(DOCS, []);
+  }
+
 
   /* ── (١٥) ★★ الباركود والورقةُ الرسمية ──
      طلبُ المالك: «احتاج يكون الخطاب او النموذج علي ورق الشركة مثل العقود
