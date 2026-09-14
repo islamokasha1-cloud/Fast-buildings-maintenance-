@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3217";
+var MODULE_BUILD = "v18.9.3219";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1847,6 +1847,8 @@ function injectCSS(){
 ".dv-l{font-size:11px;font-weight:700;color:var(--muted)}",
 ".dv-l b{color:var(--danger)}",
 ".dv-hint{font-size:10.5px;color:var(--muted);line-height:1.7;margin-top:3px}",
+".dv-owner-q{margin-bottom:2px}",
+".dv-owner-n:empty{display:none}",
 ".dv-check{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--text);cursor:pointer;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--surface2)}",
 ".dv-check input{width:16px;height:16px;cursor:pointer}",
 ".dv-acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:16px}",
@@ -2162,24 +2164,82 @@ function _formHTML(){
 
    **والمسؤولُ الذي لم يعد في القائمة يبقى خياراً** (حُذف حسابُه أو تغيّر مشروعُه):
    بلا هذا يُسقطه الحفظُ صامتاً فتصير الوثيقةُ بلا مسؤولٍ لأنّ أحداً فتح نموذجَها. */
-function _ownerSelectHTML(e){
-  var cur = String(e.ownerUser || "");
-  var arr = _users().slice().sort(function(a, b){
+/* ── والبحثُ بالاسم فوق القائمة (طلبُ المالك 14/09) ──
+   القائمةُ صارت عشراتِ الأسماء، ولَفُّ `<select>` بالإصبع على iPad حتى يظهر «محمد
+   العتيبي» ليس اختياراً. فخانةُ بحثٍ **فوق** القائمة تُصفّي خياراتِها في مكانها
+   بلا إعادة رسم النموذج (إعادةُ الرسم مع كلّ حرفٍ تُفقد الخانةَ المؤشّرَ — درسُ
+   `staff-tasks.js`). والمطابقةُ **بالتطبيع العربيّ نفسِه** الذي يبحث به منتقي
+   التكليف هناك (همزاتٌ · تاءٌ مربوطة · ألفٌ مقصورة · كلُّ كلمةٍ تُوجد بأيّ ترتيب)
+   — والدالّتان نسختان نقيّتان يربطهما حارسٌ في `hail-tests.js` يطابقهما على جدولٍ
+   واحد، لا استيرادٌ من وحدةٍ أخرى قد لا تكون محمّلة.
+
+   **والمختارُ لا يسقط بالتصفية أبداً**: يبقى خياراً ولو لم يطابق ما كُتب — وإلا
+   محا حرفٌ في خانة البحث مسؤولاً محفوظاً بلا أن يقصد أحد. */
+function _normAr(s){
+  return String(s == null ? "" : s)
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, "")   // تشكيلٌ وتطويل
+    .replace(/[\u0623\u0625\u0622\u0671]/g, "\u0627")   // أ إ آ ٱ ⇐ ا
+    .replace(/\u0649/g, "\u064A")                       // ى ⇐ ي
+    .replace(/\u0629/g, "\u0647")                       // ة ⇐ ه
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+function ownerMatches(u, q){
+  var needle = _normAr(q);
+  if(!needle) return true;
+  var hay = _normAr(((u && u.name) || "") + " " + ((u && u.user) || "") + " " + ((u && u.role) || ""));
+  return needle.split(" ").every(function(w){ return !w || hay.indexOf(w) !== -1; });
+}
+/* خياراتُ المنتقي — نقيّةٌ: (المستخدمون · المختارُ الحاليّ · نصُّ البحث · الاسمُ
+   المحفوظ للغائب) ⇐ HTML. تُنادى عند الرسم وعند كلّ حرفٍ في خانة البحث. */
+function ownerOptionsHTML(users, cur, q, savedName){
+  cur = String(cur || "");
+  var arr = (Array.isArray(users) ? users : []).slice().sort(function(a, b){
     return String(a.name || a.user || "").localeCompare(String(b.name || b.user || ""), "ar");
   });
-  var seen = false;
+  var seen = false, n = 0;
   var opts = '<option value="">— بلا مسؤول تجديد —</option>';
   arr.forEach(function(u){
     if(!u || !u.user) return;
-    if(u.user === cur) seen = true;
-    opts += '<option value="' + _esc(u.user) + '"' + (u.user === cur ? " selected" : "") + '>'
+    var isCur = u.user === cur, hit = ownerMatches(u, q);
+    if(isCur) seen = true;
+    if(!isCur && !hit) return;
+    if(hit) n++;   // العدُّ للمطابِقين وحدَهم — والمختارُ الباقي بلا مطابقةٍ لا يُعدّ
+    opts += '<option value="' + _esc(u.user) + '"' + (isCur ? " selected" : "") + '>'
           + _esc(u.name || u.user) + (_hasWa(u) ? "" : " (بلا واتساب)") + '</option>';
   });
   if(cur && !seen){
     opts += '<option value="' + _esc(cur) + '" selected>'
-          + _esc(e.owner || cur) + ' (خارج القائمة)</option>';
+          + _esc(savedName || cur) + ' (خارج القائمة)</option>';
   }
-  return '<select class="form-input" id="dv-owner">' + opts + '</select>';
+  return { html: opts, count: n };
+}
+function _ownerCountText(q, count){
+  if(!_normAr(q)) return "";
+  if(!count) return "لا أحدَ يطابق — عدّل البحث";
+  if(count === 1) return "يطابق مستخدمٌ واحد";
+  if(count === 2) return "يطابق مستخدمان";
+  return "يطابق " + count + (count <= 10 ? " مستخدمين" : " مستخدماً");
+}
+function _ownerSelectHTML(e){
+  var q = String(e.ownerQ || "");
+  var r = ownerOptionsHTML(_users(), e.ownerUser, q, e.owner);
+  return '<input class="form-input dv-owner-q" id="dv-owner-q" type="search" value="' + _esc(q) + '"'
+       + ' placeholder="ابحث بالاسم…" autocomplete="off" oninput="docVault.searchOwner(this.value)">'
+       + '<select class="form-input" id="dv-owner">' + r.html + '</select>'
+       + '<div class="dv-hint dv-owner-n" id="dv-owner-n">' + _esc(_ownerCountText(q, r.count)) + '</div>';
+}
+/* يُعيد بناءَ خيارات القائمة وحدَها — لا النموذجَ — فتبقى الخانةُ بمؤشّرها. */
+function searchOwner(q){
+  var sel = document.getElementById("dv-owner");
+  if(!sel) return;
+  var cur = String(sel.value || "");
+  var r = ownerOptionsHTML(_users(), cur, q, _edit ? _edit.owner : "");
+  sel.innerHTML = r.html;
+  sel.value = cur;
+  var n = document.getElementById("dv-owner-n");
+  if(n) n.textContent = _ownerCountText(q, r.count);
 }
 /* ولا يُترك الغيابُ يُكتشَف يومَ يصمت التنبيه: يُقال الآن ومَن يُصلحه. */
 function _ownerHintHTML(e){
@@ -4839,6 +4899,7 @@ function _readForm(){
   /* المصدرُ اسمُ الدخول، والاسمُ المعروضُ يُشتقّ منه ويُحفَظ نسخةً احتياطيةً تُقرأ
      يومَ يُحذف الحساب. وبلا مسؤولٍ: يُمحى الاثنان معاً فلا يبقى اسمٌ بلا صاحب. */
   _edit.ownerUser = g("dv-owner");
+  _edit.ownerQ    = g("dv-owner-q");   // نصُّ البحث يبقى بعد إعادة الرسم — ولا يُحفَظ مع الوثيقة
   var _ow = _edit.ownerUser ? _userByLogin(_edit.ownerUser) : null;
   _edit.owner = _edit.ownerUser ? String((_ow && (_ow.name || _ow.user)) || _edit.owner || "") : "";
   _edit.start   = g("dv-start");
@@ -5740,6 +5801,7 @@ window.docVault = {
   daysUntil:daysUntil, alertLevel:alertLevel, docLevel:docLevel, needsAction:needsAction,
   horizonBuckets:horizonBuckets, rollup:rollup, nextRef:nextRef, renewDoc:renewDoc,
   typeLabel:typeLabel, ownerLabel:ownerLabel,
+  ownerMatches:ownerMatches, ownerOptionsHTML:ownerOptionsHTML, searchOwner:searchOwner, _normAr:_normAr,
   code128SVG:code128SVG, _code128Bits:code128Bits, _code128Sanitize:code128Sanitize,
   filterDocs:filterDocs, sortDocs:sortDocs, cloneTemplate:cloneTemplate, cloneLetter:cloneLetter, filterLetters:filterLetters,
   newVerifyToken:newVerifyToken, isVerifyToken:isVerifyToken, verifyUrl:verifyUrl, verifyBase:verifyBase,
