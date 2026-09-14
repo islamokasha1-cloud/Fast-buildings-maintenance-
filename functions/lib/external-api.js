@@ -58,17 +58,17 @@ const _r2 = (n) => Math.round(n * 100) / 100;
 
 /**
  * حساب أرقام البند — نسخة معادلات `addPurchaseItem` (index.html) حرفياً:
- * vat = ض.ق.م البند كله اشتقاقاً طرحياً، فيُضمن lineTotal + vat === itemCost.
+ * vat = round(lineTotal×0.15) على صافي البند، وitemCost = lineTotal + vat جمعاً.
  * @param {{qty:number, unitCost:number}} it
  */
 function computeItem(it) {
   const qty = Number(it.qty);
   const unitCost = Number(it.unitCost);
   const vatUnit = _r2(unitCost * 0.15);              // ض.ق.م الوحدة — عرض فقط
-  const unitTotal = _r2(unitCost + vatUnit);         // سعر الوحدة شامل الضريبة
-  const itemTotal = _r2(unitTotal * qty);            // إجمالي البند شامل الضريبة
+  const unitTotal = _r2(unitCost + vatUnit);         // سعر الوحدة شامل الضريبة — عرض فقط
   const lineTotal = _r2(unitCost * qty);             // صافي البند (بدون ضريبة)
-  const vat = _r2(itemTotal - lineTotal);            // ض.ق.م البند
+  const vat = _r2(lineTotal * 0.15);                 // ض.ق.م البند على الصافي (v18.9.3215)
+  const itemTotal = _r2(lineTotal + vat);            // إجمالي البند شامل الضريبة
   return { vatUnit, unitTotal, itemCost: itemTotal, lineTotal, vat };
 }
 

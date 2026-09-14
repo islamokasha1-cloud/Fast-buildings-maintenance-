@@ -46,7 +46,7 @@
 (function(){
 "use strict";
 
-const MODULE_BUILD = "v18.9.3213";
+const MODULE_BUILD = "v18.9.3215";
 
 /* ════════ الثوابت ════════ */
 // الأدوار التي تُصدر — المشتريات والأدمن (قرار المالك)
@@ -95,14 +95,14 @@ function _fmtD(d){ return d ? new Date(d).toLocaleDateString("en-GB",{year:"nume
 
 /* ════════ الدوال النقية (يفحصها hail-tests.js بلا متصفح) ════════ */
 
-/* حساب السطر — ض.ق.م على الوحدة (اصطلاح v18.9nd، مطابق لمنهج _poItemLine) */
+/* حساب السطر — ض.ق.م على صافي السطر (v18.9.3215، مطابق _poItemLine والإنشاء):
+   net = round(unit×qty) · vat = round(net×0.15) · total = net + vat.
+   تقريبُ ضريبة الوحدة ثم ضربُها في الكمية كان يضاعف خطأ نصف قرش (3.5×256 ⇒ +1.28). */
 function lineCalc(unitCost, qty){
   var unit = Number(unitCost)||0, q = Number(qty)||0;
-  var vatUnit   = Math.round(unit*0.15*100)/100;
-  var unitTotal = Math.round((unit+vatUnit)*100)/100;
-  var total     = Math.round(unitTotal*q*100)/100;
-  var net       = Math.round(unit*q*100)/100;
-  var vat       = Math.round((total-net)*100)/100;
+  var net   = Math.round(unit*q*100)/100;
+  var vat   = Math.round(net*0.15*100)/100;
+  var total = Math.round((net+vat)*100)/100;
   return { net:net, vat:vat, total:total };
 }
 function totalsOf(items){
