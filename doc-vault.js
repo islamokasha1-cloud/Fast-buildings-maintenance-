@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3209";
+var MODULE_BUILD = "v18.9.3213";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -3262,6 +3262,33 @@ function _idBlockHTML(l){
     + '<div class="idb-date"><span class="ml">التاريخ</span><span class="mv dv-num">' + _esc(l.letterDate || "—") + '</span></div>'
     + '</div>';
 }
+/* ════════ موضعُ الختم والتوقيع يختلف من خطابٍ إلى خطاب ════════
+   طلبُ المالك: «كل مرة ننشئ فيها خطاباً يكون وضع الختم والتوقيع مختلفاً، بحيث يكون
+   الأمر واقعياً أكثر وليس متكرّراً كل مرة في نفس المكان».
+
+   ── مشتقٌّ من رقم الخطاب لا من العشوائية ──
+   عشوائيةٌ وقتَ الطباعة تُخرج للخطاب الواحد ورقتين مختلفتين إن طُبع مرّتين — والمطبوعُ
+   سجلٌّ لما أُرسل، ونسخةُ الأرشيف يجب أن تطابق ما وصل الجهة. فالانحرافُ يُشتقّ من
+   `id` بدالّةٍ نقيّة: يختلف بين الخطابات، ويثبت للخطاب مهما أُعيدت طباعته.
+
+   ── والمدى ضيّقٌ عمداً ──
+   الختمُ يميل ±9° وينزاح ±4مم/±3مم، والتوقيعُ ±3° و±3مم/±2مم — قدرُ ما تختلف به يدٌ
+   تختم ورقاً حقيقياً. أوسعُ من ذلك يُخرج الختمَ عن التوقيع أو عن الكتلة. */
+function signPlacement(id){
+  var str = String(id || ""), h = 2166136261;
+  for(var i = 0; i < str.length; i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  function u(){
+    h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0;
+    h = Math.imul(h ^ (h >>> 13), 3266489917) >>> 0;
+    h = (h ^ (h >>> 16)) >>> 0;
+    return h / 4294967296;
+  }
+  function r(lo, hi){ return Math.round((lo + u() * (hi - lo)) * 10) / 10 || 0; }
+  return { stampX:r(-4, 4), stampY:r(-3, 3), stampRot:r(-9, 9), sigX:r(-3, 3), sigY:r(-2, 2), sigRot:r(-3, 3) };
+}
+function _placeStyle(x, y, rot){
+  return ' style="transform:translate(' + x + 'mm,' + y + 'mm) rotate(' + rot + 'deg)"';
+}
 function _signBlockHTML(l, isTpl){
   var blank = '<div class="sign"><div class="sg">'
     + '<div class="sg-r"><span>الاسم</span><i></i></div>'
@@ -3277,13 +3304,14 @@ function _signBlockHTML(l, isTpl){
   var s = (l.signId && canUseSigns()) ? signatoryById(l.signId) : null;
   var sig = (s && s.signUrl) ? s.signUrl : "";
   var stp = (s && s.stampUrl) ? s.stampUrl : "";
+  var p = signPlacement(l.id);
   return '<div class="sgn">'
     + '<div class="sgn-co">شركة المباني السريعة للمقاولات</div>'
     + '<div class="sgn-nm">' + _esc(ti ? (ti + ": ") : "") + _esc(nm) + '</div>'
     + ((sig || stp)
         ? '<div class="sgn-im">'
-          + (sig ? '<img class="sgn-sig" src="' + _esc(sig) + '" alt="">' : '')
-          + (stp ? '<img class="sgn-stp" src="' + _esc(stp) + '" alt="">' : '')
+          + (sig ? '<img class="sgn-sig" src="' + _esc(sig) + '" alt=""' + _placeStyle(p.sigX, p.sigY, p.sigRot) + '>' : '')
+          + (stp ? '<img class="sgn-stp" src="' + _esc(stp) + '" alt=""' + _placeStyle(p.stampX, p.stampY, p.stampRot) + '>' : '')
           + '</div>'
         : '<div class="sgn-line"></div>')
     + '</div>';
@@ -3423,7 +3451,8 @@ function letterPaperHTML(l){
        فوقه. والختمُ فوق التوقيع بـ`z-index`، وشفافيةُ الـPNG تُبقي ما تحته مقروءاً. */
     + '.sgn-im{position:relative;display:flex;justify-content:center;align-items:center;height:26mm;margin-top:1mm}'
     + '.sgn-sig{position:relative;height:16mm;max-width:42mm;object-fit:contain;z-index:1}'
-    + '.sgn-stp{position:relative;height:24mm;max-width:34mm;object-fit:contain;z-index:2;margin-inline-start:-9mm;margin-top:-3mm}'
+    /* الختمُ يغطّي **نحو نصف** التوقيع (طلبُ المالك بعد أوّل لقطة: كان يركب ثلثه). */
+    + '.sgn-stp{position:relative;height:24mm;max-width:34mm;object-fit:contain;z-index:2;margin-inline-start:-18mm;margin-top:-3mm}'
     + '.bcw{direction:ltr;display:flex;justify-content:flex-start;align-items:flex-end;gap:6px}'
     + '.bcb{display:inline-block;text-align:center}'
     + '.bc{display:block}'
@@ -5661,7 +5690,7 @@ window.docVault = {
   backToLetters:backToLetters, newLetter:newLetter, editLetter:editLetter,
   cancelLetter:cancelLetter, saveLetter:saveLetter, delLetter:delLetter,
   useTemplate:useTemplate, copyLetter:copyLetter, addLetterFile:addLetterFile, delLetterDraftFile:delLetterDraftFile,
-  printLetter:printLetter, letterPaperHTML:letterPaperHTML,
+  printLetter:printLetter, letterPaperHTML:letterPaperHTML, signPlacement:signPlacement,
   openAI:openAI, closeAI:closeAI, runAI:runAI, aiPrompt:aiPrompt, aiReady:aiReady,
   setPick:setPick, pickState:pickState, _PICK_NONE:PICK_NONE, _PICK_OTHER:PICK_OTHER,
   // المعتمدات
