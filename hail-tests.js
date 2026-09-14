@@ -12045,6 +12045,15 @@ function contractsPhase1() {
     /id="ct-r-overth"/.test(src));
   T("★ الإقرارُ يظهر على بطاقة الطلب لكلّ معتمِد (فوق عتبة أمر الدفع)",
     /overThresholdAck\?infoCell\("فوق عتبة أمر الدفع"/.test(src));
+  /* بلاغُ المالك 14/09: اختار «أمر دفع» والبنودُ صفر، ثمّ كتب السعرَ فلم يظهر
+     المربّعُ — الشرطُ كان يُحسب مرّةً عند الرسم، و`recalc` يحدّث الإجماليَّ وحدَه.
+     الحارس: الصندوقُ مغلَّفٌ دائماً و`recalc` يعيد بناءه مع كلّ ضغطة. */
+  T("★ مربّعُ الإقرار يظهر لحظةَ تجاوز العتبة أثناء الكتابة (recalc يحدّث #ct-r-overth-wrap)",
+    /id="ct-r-overth-wrap">'\+overThBoxHTML\(d, tot\)/.test(src) &&
+    /function recalc\(full\)\{[\s\S]{0,900}getElementById\("ct-r-overth-wrap"\);\s*if\(wrap\) wrap\.innerHTML = overThBoxHTML\(d, tot\)/.test(src));
+  T("★ recalc يحدّث إجماليَّ كلّ بندٍ (data-lt) لا خانةَ الإجمالي وحدَها",
+    /function recalc\(full\)\{[\s\S]{0,600}querySelectorAll\("\[data-lt\]"\)/.test(src) &&
+    /<td class="num" data-lt="'\+i\+'">/.test(src));
 
   /* ════ سدادُ أمر الدفع على دفعات (طلبُ المالك) ════ */
   T("★★ crqPaidTotal: مجموعُ الدفعات هو المصدر",

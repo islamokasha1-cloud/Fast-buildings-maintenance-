@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3223";
+var MODULE_BUILD = "v18.9.3225";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -5652,11 +5652,9 @@ function reqFormHTML(){
       '<input type="radio" name="ct-eng" '+(d.engagement===k?"checked":"")+
         ' onchange="contracts.setEngagement(\''+k+'\')">'+
       '<span class="ct-pick-t">'+_icn(e.icon,"ic-sm")+' '+_esc(e.lbl)+'</span>'+
-      '<span class="ct-pick-s">'+_esc(over ? ("فوق "+money0(payTh)+" ر.س — يلزمه إقرارٌ صريح") : e.hint)+'</span>'+
+      '<span class="ct-pick-s" id="ct-eng-hint-'+k+'">'+_esc(over ? payOverHint(payTh) : e.hint)+'</span>'+
     '</label>';
   }).join("");
-  /* مربّعُ الإقرار — لا يظهر إلا حين يلزم، ونصُّه يسمّي ما يُتنازل عنه بالاسم:
-     لا بنودَ عقدٍ ولا محتجزَ ضمانٍ ولا مستخلصات — والاعتماداتُ كلُّها باقية. */
   /* خطةُ صرف الدفعات — **منشئُ الطلب هو من يحدّدها** (طلبُ المالك): نسبٌ مجموعُها
      ١٠٠٪، يوقّع عليها المعتمِدون مع القيمة، والماليةُ تنفّذها دفعةً دفعةً حرفياً. */
   var planRows = (d.payPlan||[]).map(function(p,i){
@@ -5682,17 +5680,11 @@ function reqFormHTML(){
         'المجموع: <span class="num">'+planSum+'</span>٪'+(planOk?' ✓':' — يجب أن يبلغ ١٠٠٪')+'</div>'+
     '</div>';
 
-  var overThBox = overTh
-    ? '<div class="ct-note '+(d.overThreshold?'':'warn')+'" style="display:block">'+
-        '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-weight:700">'+
-          '<input type="checkbox" id="ct-r-overth" '+(d.overThreshold?'checked':'')+
-            ' onchange="contracts.setOverTh(this.checked)" style="margin-top:3px">'+
-          '<span>'+_icn("alertTriangle","ic-sm")+' أُقرّ بإنشاء أمر دفعٍ بقيمة '+money0(tot.total)+
-            ' ر.س رغم تجاوزه عتبةَ '+money0(payTh)+' ر.س — بلا بنود عقدٍ ولا محتجز ضمانٍ ولا مستخلصات، '+
-            'ويمرّ على بوّابات الاعتماد كلِّها (والتنفيذيِّ فوق سقفه)، ويُختم الإقرارُ باسمي على الطلب.</span>'+
-        '</label>'+
-      '</div>'
-    : '';
+  /* الصندوقُ يُغلَّف دائماً بـ`#ct-r-overth-wrap` — فارغاً أو ممتلئاً — ليحدّثه
+     `recalc()` مع كلّ ضغطة في السعر أو الكمية بلا إعادة رسم النموذج (بلاغُ المالك
+     14/09: اختار «أمر دفع» والبنودُ صفرٌ، ثمّ كتب ٣٠٬٠٠٠ فلم يظهر المربّع لأنّ
+     الشرطَ حُسب مرّةً واحدةً عند الرسم — والإرسالُ يطلب مربّعاً لا وجودَ له). */
+  var overThBox = '<div id="ct-r-overth-wrap">'+overThBoxHTML(d, tot)+'</div>';
 
   // بنودُ المقايسة
   var boqRows = items.length ? items.map(function(it,i){
@@ -5718,7 +5710,7 @@ function reqFormHTML(){
       '<td><input class="form-input" data-lf="unit" data-i="'+i+'" value="'+_esc(l.unit)+'" style="min-width:70px"></td>'+
       '<td><input class="form-input num" data-lf="qty" data-i="'+i+'" type="number" step="any" value="'+_esc(l.qty)+'" style="min-width:80px" oninput="contracts.recalc()"></td>'+
       '<td><input class="form-input num" data-lf="unitPrice" data-i="'+i+'" type="number" step="any" value="'+_esc(l.unitPrice)+'" style="min-width:90px" oninput="contracts.recalc()"></td>'+
-      '<td class="num">'+money(t.total)+'</td>'+
+      '<td class="num" data-lt="'+i+'">'+money(t.total)+'</td>'+
       '<td><button class="btn btn-delete" onclick="contracts.delReqLine('+i+')">'+_icn("trash","ic-sm")+'</button></td>'+
     '</tr>';
   }).join("") : '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">لم تُختَر بنودٌ بعد.</td></tr>';
@@ -5915,6 +5907,27 @@ function substituteChip(doc, compact){
     _icn("landmark","ic-sm")+' '+(compact?"مستعاض":"البند المستعاض")+'</span>';
 }
 
+/* هل يلزم مربّعُ الإقرار لهذه المسوّدة الآن؟ — أمرُ دفعٍ بقيمةٍ موجبةٍ فوق العتبة.
+   تُسأل عند الرسم وعند كلّ ضغطةٍ في السعر (`recalc`) فلا يفترق الشرطُ عن الشاشة. */
+function draftNeedsOverThAck(d, total){
+  return !!d && d.engagement==="pay_order" && Number(total)>0 && !payOrderAllowed(total, payOrderThreshold());
+}
+function payOverHint(payTh){ return "فوق "+money0(payTh)+" ر.س — يلزمه إقرارٌ صريح"; }
+/* مربّعُ الإقرار — لا يظهر إلا حين يلزم، ونصُّه يسمّي ما يُتنازل عنه بالاسم:
+   لا بنودَ عقدٍ ولا محتجزَ ضمانٍ ولا مستخلصات — والاعتماداتُ كلُّها باقية. */
+function overThBoxHTML(d, tot){
+  if(!draftNeedsOverThAck(d, tot.total)) return '';
+  var payTh=payOrderThreshold();
+  return '<div class="ct-note '+(d.overThreshold?'':'warn')+'" style="display:block">'+
+      '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-weight:700">'+
+        '<input type="checkbox" id="ct-r-overth" '+(d.overThreshold?'checked':'')+
+          ' onchange="contracts.setOverTh(this.checked)" style="margin-top:3px">'+
+        '<span>'+_icn("alertTriangle","ic-sm")+' أُقرّ بإنشاء أمر دفعٍ بقيمة '+money0(tot.total)+
+          ' ر.س رغم تجاوزه عتبةَ '+money0(payTh)+' ر.س — بلا بنود عقدٍ ولا محتجز ضمانٍ ولا مستخلصات، '+
+          'ويمرّ على بوّابات الاعتماد كلِّها (والتنفيذيِّ فوق سقفه)، ويُختم الإقرارُ باسمي على الطلب.</span>'+
+      '</label>'+
+    '</div>';
+}
 function totalsHTML(t, mode){
   var m=VAT_MODES[normVatMode(mode)];
   return '<div class="ct-tl"><span class="l">الأساس</span><span class="v num">'+money(t.base)+'</span></div>'+
@@ -6091,8 +6104,24 @@ function recalc(full){
   syncReqDraft();
   if(!_rDraft) return;
   if(full){ paintReqs(); return; }
+  var d=_rDraft, tot=linesTotal(d.lines,d.vatMode);
   var box=document.getElementById("ct-r-total");
-  if(box) box.innerHTML = totalsHTML(linesTotal(_rDraft.lines,_rDraft.vatMode), _rDraft.vatMode);
+  if(box) box.innerHTML = totalsHTML(tot, d.vatMode);
+  // إجماليُّ كلّ بندٍ يتحرّك مع سعره — لا يبقى صفراً حتى إعادة الرسم
+  document.querySelectorAll("[data-lt]").forEach(function(td){
+    var l=d.lines[parseInt(td.dataset.lt,10)]; if(!l) return;
+    td.textContent = money(lineTotal(l.qty,l.unitPrice,d.vatMode).total);
+  });
+  // مربّعُ الإقرار يظهر لحظةَ تجاوز العتبة ويختفي دونها — بلا إعادة رسمٍ تُفقد التركيز
+  var wrap=document.getElementById("ct-r-overth-wrap");
+  if(wrap) wrap.innerHTML = overThBoxHTML(d, tot);
+  var hint=document.getElementById("ct-eng-hint-pay_order");
+  if(hint) hint.textContent = draftNeedsOverThAck(d, tot.total) ? payOverHint(payOrderThreshold()) : ENGAGEMENTS.pay_order.hint;
+  // مبالغُ خطة الدفعات تتبع الإجماليَّ الجديد
+  document.querySelectorAll(".ct-plan-amt").forEach(function(td){
+    var p=(d.payPlan||[])[parseInt(td.dataset.i,10)]||0;
+    td.textContent = money(r2(tot.total*p/100));
+  });
 }
 function toggleSubstitute(){
   syncReqDraft(); if(!_rDraft) return;
