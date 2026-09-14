@@ -18564,22 +18564,31 @@ function docVaultGuards() {
     V.newDoc();
     T("★★ dv: خانةُ الاسم اليدويّ غائبةٌ ما دام النوعُ مسمّى",
       !W.document.getElementById("dv-type-other"));
-    T("★★ dv: ومنتقي المسؤول `<select>` يحمل كلَّ المستخدمين وخيارَ «بلا مسؤول»",
-      W.document.querySelectorAll("#dv-owner option").length === 4 &&
-      W.document.querySelector("#dv-owner option").value === "",
-      String(W.document.querySelectorAll("#dv-owner option").length));
-    T("★★ dv: ومَن لا رقمَ واتساب مفعَّلاً له يُقال ذلك في خيارِه — لا يُكتشَف يومَ يصمت التنبيه",
-      /نورة الشمري \(بلا واتساب\)/.test(pg2.innerHTML) &&
-      /سعد القحطاني \(بلا واتساب\)/.test(pg2.innerHTML) &&
-      /محمد العتيبي<\/option>/.test(pg2.innerHTML));
+    T("★★ dv: منتقي المسؤول خانةُ كتابةٍ (combobox) وحقلٌ خفيٌّ باسم الدخول — لا `<select>`",
+      !!W.document.getElementById("dv-owner-q") &&
+      W.document.getElementById("dv-owner-q").getAttribute("role") === "combobox" &&
+      W.document.getElementById("dv-owner").type === "hidden" &&
+      !W.document.querySelector("select#dv-owner"));
+    V.ownerOpen();
+    const rowsOf = () => Array.from(W.document.querySelectorAll("#dv-owner-l .dv-up-row"));
+    T("★★ dv: والتركيزُ يفتح القائمةَ كاملةً: كلُّ المستخدمين وصفُّ «بلا مسؤول» أوّلاً",
+      !W.document.getElementById("dv-owner-l").hidden && rowsOf().length === 4 &&
+      rowsOf()[0].classList.contains("none"), String(rowsOf().length));
+    T("★★ dv: ومَن لا رقمَ واتساب مفعَّلاً له يُقال ذلك في صفّه — لا يُكتشَف يومَ يصمت التنبيه",
+      /نورة الشمري<span class="dv-up-wa">بلا واتساب<\/span>/.test(pg2.innerHTML) &&
+      /سعد القحطاني<span class="dv-up-wa">بلا واتساب<\/span>/.test(pg2.innerHTML) &&
+      /محمد العتيبي<\/span>/.test(pg2.innerHTML));
+    T("★ dv: وكلُّ صفٍّ يحمل اسمَ الدخول والدور — بهما يُميَّز متشابها الاسم",
+      /mohammed · procurement_officer/.test(pg2.innerHTML));
+    V.ownerClose(true);
     /* ── البحثُ بالاسم فوق المنتقي (طلبُ المالك 14/09) ──
        القائمةُ صارت عشراتِ الأسماء ولفُّ `<select>` بالإصبع ليس اختياراً. والمطابقةُ
        نسخةٌ نقيّةٌ من `staffTasks._userMatches` — وهذا الحارسُ هو الرباطُ الوحيد
        بينهما: لو طُوِّرت إحداهما (تطبيعٌ جديد) وبقيت الأخرى سقط الفحصُ هنا. */
     {
-      T("★ dv: دالّةُ المطابقة وبناءُ الخيارات مكشوفان للفحص بلا متصفّح",
-        typeof V.ownerMatches === "function" && typeof V.ownerOptionsHTML === "function" &&
-        typeof V.searchOwner === "function");
+      T("★ dv: دالّةُ المطابقة وبناءُ القائمة مكشوفان للفحص بلا متصفّح",
+        typeof V.ownerMatches === "function" && typeof V.ownerListHTML === "function" &&
+        typeof V.ownerHits === "function" && typeof V.ownerInputLabel === "function");
       const STS = fs.readFileSync(path.resolve(path.dirname(IDX), "staff-tasks.js"), "utf8");
       const stMatch = (() => {
         const norm = (STS.match(/function _normAr\(s\)\{[\s\S]*?\n  \}/) || [])[0] || "";
@@ -18607,43 +18616,64 @@ function docVaultGuards() {
       T("★ dv: والأرقامُ العربيةُ لا تُنزَع في التطبيع (المدى لا يبتلع ٠-٩)",
         V.ownerMatches({ user:"u", name:"عبدالله ٠١" }, "٠١") &&
         !V.ownerMatches({ user:"u", name:"عبدالله ٠١" }, "٠٢"));
+      /* والقائمةُ النقيّة: صفُّ «بلا مسؤول» مع البحث الفارغ وحدَه، ولا مطابقةَ تُقال */
+      T("★★ dv: صفُّ «بلا مسؤول» يظهر مع البحث الفارغ وحدَه — لا يزاحم النتيجةَ الوحيدة",
+        /بلا مسؤول تجديد/.test(V.ownerListHTML(W.USERS, "", "").html) &&
+        !/بلا مسؤول تجديد/.test(V.ownerListHTML(W.USERS, "", "نورة").html));
+      T("★ dv: ولا مطابقةَ ⇒ يُقال ذلك بنصّ البحث نفسِه",
+        V.ownerListHTML(W.USERS, "", "لا أحد").count === 0 &&
+        /لا أحدَ يطابق «لا أحد»/.test(V.ownerListHTML(W.USERS, "", "لا أحد").html));
+      T("★ dv: والخانةُ تعرض الاسمَ الطازج للمختار، والمحفوظَ موسوماً لمن غادر",
+        V.ownerInputLabel("mohammed", "قديم") === "محمد العتيبي" &&
+        V.ownerInputLabel("ghost", "من غادر") === "من غادر (خارج القائمة)" &&
+        V.ownerInputLabel("", "x") === "");
 
-      /* الرسمُ الحقيقيّ: الخانةُ فوق القائمة، والكتابةُ تُصفّي الخياراتِ في مكانها */
-      const qEl = W.document.getElementById("dv-owner-q");
-      T("★★ dv: خانةُ البحث تُرسَم فوق المنتقي وتنادي `searchOwner` مع كلّ حرف",
-        !!qEl && /docVault\.searchOwner/.test(qEl.getAttribute("oninput") || ""));
-      const selEl = W.document.getElementById("dv-owner");
-      /* الترتيبُ أبجديٌّ بـ`localeCompare("ar")` ويختلف بين محرّكات ICU — فيُقارَن مرتَّباً */
-      const optVals = () => Array.from(W.document.querySelectorAll("#dv-owner option")).map(o => o.value).sort().join(",");
-      V.searchOwner("نوره");
-      T("★★★ dv: «نوره» بالهاء تُبقي نورة الشمري وحدَها (مع خيار «بلا مسؤول»)",
-        optVals() === ",noura", optVals());
-      T("★ dv: وعدّادُ المطابقة يُقال تحت القائمة",
-        /يطابق مستخدمٌ واحد/.test(W.document.getElementById("dv-owner-n").textContent));
-      V.searchOwner("لا أحد بهذا الاسم");
-      T("★ dv: ولا مطابقةَ ⇒ يبقى «بلا مسؤول» وحدَه ويُقال ذلك",
-        optVals() === "" && /لا أحدَ يطابق/.test(W.document.getElementById("dv-owner-n").textContent));
-      V.searchOwner("");
-      T("★★ dv: ومسحُ البحث يُعيد القائمةَ كاملةً", optVals() === ",mohammed,noura,saad", optVals());
-      /* المختارُ لا يسقط بالتصفية: اختر سعداً ثم ابحث عن محمد */
-      selEl.value = "saad";
-      V.searchOwner("محمد");
-      T("★★★ dv: المختارُ (سعد) يبقى خياراً ومختاراً ولو لم يطابق البحثَ عن محمد",
-        selEl.value === "saad" && optVals() === ",mohammed,saad", optVals() + " | " + selEl.value);
-      T("★ dv: والعدّادُ يعدّ المطابِقين وحدَهم — لا المختارَ الباقي",
-        /يطابق مستخدمٌ واحد/.test(W.document.getElementById("dv-owner-n").textContent),
-        W.document.getElementById("dv-owner-n").textContent);
-      /* وإعادةُ رسم النموذج (تبديلُ النوع) تحفظ نصَّ البحث والاختيارَ معاً */
-      qEl.value = "محمد";
+      /* الرسمُ الحقيقيّ: الكتابةُ تُعيد القائمةَ وحدَها، والاختيارُ يكتب اسمَ الدخول في الحقل الخفيّ */
+      const qEl = () => W.document.getElementById("dv-owner-q");
+      const rows = () => Array.from(W.document.querySelectorAll("#dv-owner-l .dv-up-row:not(.none)"));
+      T("★★ dv: خانةُ البحث تنادي `ownerInput` مع كلّ حرف و`ownerOpen` عند التركيز",
+        /docVault\.ownerInput/.test(qEl().getAttribute("oninput") || "") &&
+        /docVault\.ownerOpen/.test(qEl().getAttribute("onfocus") || ""));
+      V.ownerOpen();
+      V.ownerInput("نوره");
+      T("★★★ dv: «نوره» بالهاء تُبقي نورة الشمري وحدَها في القائمة",
+        rows().length === 1 && /نورة الشمري/.test(rows()[0].innerHTML), String(rows().length));
+      T("★ dv: وإعادةُ الرسم للقائمة وحدَها — الخانةُ نفسُها لم تُستبدل",
+        qEl() === W.document.getElementById("dv-owner-q"));
+      V.ownerChoose("noura");
+      T("★★★ dv: والاختيارُ يكتب اسمَ الدخول في الحقل الخفيّ والاسمَ المعروضَ في الخانة، ويطوي القائمة",
+        W.document.getElementById("dv-owner").value === "noura" &&
+        qEl().value === "نورة الشمري" && qEl().classList.contains("has") &&
+        W.document.getElementById("dv-owner-l").hidden && !!W.document.querySelector(".dv-up-x"));
+      T("★★ dv: والتلميحُ تحتَه يتبع المختار (نورة بلا واتساب)",
+        /لا رقمَ واتساب مفعَّلاً/.test(W.document.getElementById("dv-owner-hint").innerHTML));
+      /* Enter يأخذ أوّلَ نتيجة */
+      V.ownerOpen(); V.ownerInput("محمد");
+      V.ownerKey({ key:"Enter", preventDefault(){} });
+      T("★★ dv: و«اكتب واضغط Enter» يأخذ النتيجةَ الأولى",
+        W.document.getElementById("dv-owner").value === "mohammed" && qEl().value === "محمد العتيبي");
+      T("★ dv: والتلميحُ يقول إنّ محمداً يصله واتساب",
+        /يصله تنبيهُ التجديد على واتساب/.test(W.document.getElementById("dv-owner-hint").innerHTML));
+      /* Esc يغلق ويُعيد اسمَ المختار — لا يبقى بحثٌ معلَّقٌ يُقرأ اختياراً */
+      V.ownerOpen(); V.ownerInput("سعد");
+      V.ownerKey({ key:"Escape" });
+      T("★★ dv: وEsc يغلق القائمةَ ويُعيد اسمَ المختار الحاليّ — البحثُ لا يُقرأ اختياراً",
+        W.document.getElementById("dv-owner-l").hidden && qEl().value === "محمد العتيبي" &&
+        W.document.getElementById("dv-owner").value === "mohammed");
+      /* إعادةُ رسم النموذج (تبديلُ النوع) تحفظ المختار — يُقرأ من الحقل الخفيّ */
       V.setType("other");
-      T("★★ dv: وتبديلُ النوع يحفظ نصَّ البحث والمختارَ معاً — ولا يُحفَظ النصُّ مع الوثيقة",
-        W.document.getElementById("dv-owner-q").value === "محمد" &&
-        W.document.getElementById("dv-owner").value === "saad" &&
-        !/ownerQ/.test((src.match(/function saveEdit\(\)\{[\s\S]*?\n\}/) || [""])[0]));
+      T("★★ dv: وتبديلُ النوع يحفظ المختارَ (الحقلُ الخفيُّ بالمعرّف القديم فلم يتغيّر `_readForm`)",
+        W.document.getElementById("dv-owner").value === "mohammed" && qEl().value === "محمد العتيبي");
       V.setType("cr");
-      W.document.getElementById("dv-owner-q").value = "";
-      V.searchOwner("");
-      W.document.getElementById("dv-owner").value = "";
+      /* زرُّ المسح يُفرغ الاختيارَ ويُخفي نفسَه */
+      V.ownerClear();
+      T("★★ dv: وزرُّ المسح يُفرغ الاختيارَ والخانةَ ويختفي",
+        W.document.getElementById("dv-owner").value === "" && qEl().value === "" &&
+        !W.document.querySelector(".dv-up-x") &&
+        /اختره من المستخدمين/.test(W.document.getElementById("dv-owner-hint").innerHTML));
+      /* ومَن غادر القائمة يبقى في الخانة موسوماً ولا يُفقَد عند الحفظ */
+      T("★ dv: ومَن غادر القائمة يُعرض موسوماً «خارج القائمة»",
+        /من غادر \(خارج القائمة\)/.test(String(V.ownerListHTML(W.USERS, "ghost", "").html) + V.ownerInputLabel("ghost", "من غادر")));
     }
     V.setType("other");
     T("★★ dv: واختيارُ «أخرى» يفتح الخانةَ فوراً",

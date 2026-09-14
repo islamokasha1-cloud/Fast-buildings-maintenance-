@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3219";
+var MODULE_BUILD = "v18.9.3221";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1847,8 +1847,21 @@ function injectCSS(){
 ".dv-l{font-size:11px;font-weight:700;color:var(--muted)}",
 ".dv-l b{color:var(--danger)}",
 ".dv-hint{font-size:10.5px;color:var(--muted);line-height:1.7;margin-top:3px}",
-".dv-owner-q{margin-bottom:2px}",
-".dv-owner-n:empty{display:none}",
+/* منتقي مسؤول التجديد — القواعدُ نفسُها التي لمنتقي التكليف في `staff-tasks.js` (`.st-up*`) */
+".dv-up{position:relative}",
+".dv-up-in{width:100%;padding-inline-end:30px}",
+".dv-up-in.has{font-weight:700}",
+".dv-up-x{position:absolute;inset-inline-end:6px;top:50%;transform:translateY(-50%);background:none;border:0;padding:2px;cursor:pointer;color:var(--muted);display:flex;line-height:0}",
+".dv-up-x:hover{color:var(--danger)}",
+".dv-up-list{position:absolute;z-index:40;inset-inline:0;top:calc(100% + 4px);max-height:300px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 26px rgba(0,0,0,.16);padding:5px}",
+".dv-up-row{display:flex;flex-direction:column;gap:2px;width:100%;text-align:start;background:none;border:0;border-radius:9px;padding:8px 10px;cursor:pointer;font:inherit;color:var(--text)}",
+".dv-up-row:hover,.dv-up-row:focus-visible{background:var(--surface2);outline:none}",
+".dv-up-row.on{background:color-mix(in srgb,var(--primary) 10%,var(--surface))}",
+".dv-up-row .nm{font-size:13px;font-weight:800;color:var(--primary);display:flex;align-items:center;gap:6px;flex-wrap:wrap}",
+".dv-up-row.none .nm{color:var(--muted)}",
+".dv-up-row .mt{font-size:11px;color:var(--muted);font-weight:700;padding-inline-start:18px}",
+".dv-up-wa{font-size:10px;font-weight:700;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:0 7px;line-height:1.7}",
+".dv-up-empty{font-size:12px;color:var(--muted);padding:12px 10px;text-align:center;line-height:1.7}",
 ".dv-check{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--text);cursor:pointer;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--surface2)}",
 ".dv-check input{width:16px;height:16px;cursor:pointer}",
 ".dv-acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:16px}",
@@ -2122,7 +2135,7 @@ function _formHTML(){
           ? '<div class="dv-hint">وثيقةُ شركةٍ: تظهر في ملفّ كلّ مشروع، ولا تُحجب عن أحدٍ في الخزانة.</div>' : "")
       + '</div>'
     + '<div class="dv-f wide"><label class="dv-l" for="dv-owner">مسؤول التجديد</label>'
-      + _ownerSelectHTML(e) + _ownerHintHTML(e) + '</div>'
+      + _ownerSelectHTML(e) + '</div>'
     /* ── مدّةُ الصلاحية كتلةٌ واحدةٌ لا حقلين متجاورَين بالمصادفة ──
        التوزيعُ التلقائيُّ في الشبكة يملأ صفّاً صفّاً، فحقلٌ يظهر أو يختفي (خانةُ
        «أخرى») يُزحزح كلَّ ما بعده **فينفصل التاريخان**: البدءُ في صفٍّ والانتهاءُ في
@@ -2164,17 +2177,24 @@ function _formHTML(){
 
    **والمسؤولُ الذي لم يعد في القائمة يبقى خياراً** (حُذف حسابُه أو تغيّر مشروعُه):
    بلا هذا يُسقطه الحفظُ صامتاً فتصير الوثيقةُ بلا مسؤولٍ لأنّ أحداً فتح نموذجَها. */
-/* ── والبحثُ بالاسم فوق القائمة (طلبُ المالك 14/09) ──
+/* ── منتقٍ يُبحَث فيه — لا `<select>` (طلبُ المالك 14/09، ثمّ «نفسُ منطق المهام») ──
    القائمةُ صارت عشراتِ الأسماء، ولَفُّ `<select>` بالإصبع على iPad حتى يظهر «محمد
-   العتيبي» ليس اختياراً. فخانةُ بحثٍ **فوق** القائمة تُصفّي خياراتِها في مكانها
-   بلا إعادة رسم النموذج (إعادةُ الرسم مع كلّ حرفٍ تُفقد الخانةَ المؤشّرَ — درسُ
-   `staff-tasks.js`). والمطابقةُ **بالتطبيع العربيّ نفسِه** الذي يبحث به منتقي
-   التكليف هناك (همزاتٌ · تاءٌ مربوطة · ألفٌ مقصورة · كلُّ كلمةٍ تُوجد بأيّ ترتيب)
-   — والدالّتان نسختان نقيّتان يربطهما حارسٌ في `hail-tests.js` يطابقهما على جدولٍ
-   واحد، لا استيرادٌ من وحدةٍ أخرى قد لا تكون محمّلة.
+   العتيبي» ليس اختياراً. فالمنتقي **خانةُ كتابةٍ** تحتها قائمةٌ تُعاد كتابتُها
+   **وحدَها** مع كلّ حرف — إعادةُ رسم النموذج مع كلّ حرفٍ تُفقد الخانةَ مؤشّرَها
+   وتمحو ما كُتب في بقيّة الحقول (هي في الـDOM لا في الحالة). وهو **منتقي التكليف
+   في `staff-tasks.js` نفسُه** سلوكاً وشكلاً: التركيزُ يفتح القائمةَ كاملةً ويُظلّل
+   الاسمَ ليمحوَه أوّلُ حرف · كلُّ صفٍّ اسمُ العرض ثمّ اسمُ الدخول والدور (بهما يُميَّز
+   متشابها الاسم) · Enter يأخذ أوّلَ نتيجة · Esc يغلق · فقدُ التركيز يغلق بعد
+   لحظةٍ (النقرُ على صفٍّ يُفقد التركيزَ قبل أن يصل `click`) · وزرُّ مسحٍ للمختار.
 
-   **والمختارُ لا يسقط بالتصفية أبداً**: يبقى خياراً ولو لم يطابق ما كُتب — وإلا
-   محا حرفٌ في خانة البحث مسؤولاً محفوظاً بلا أن يقصد أحد. */
+   ومصدرُ الحقيقة يبقى حيث كان: حقلٌ خفيٌّ `#dv-owner` يحمل **اسمَ الدخول** بالمعرّف
+   نفسِه الذي كان للـ`<select>`، فلم يتغيّر سطرٌ في `_readForm` ولا في `saveEdit`.
+   والمكتوبُ في الخانة اسمُ العرض — يُقرأ ولا يُحفَظ.
+
+   والمطابقةُ **بالتطبيع العربيّ نفسِه** (همزاتٌ · تاءٌ مربوطة · ألفٌ مقصورة · نزعُ
+   التشكيل · كلُّ كلمةٍ تُوجد بأيّ ترتيب، ويشمل اسمَ الدخول والدور) — والدالّتان
+   نسختان نقيّتان يربطهما حارسٌ في `hail-tests.js` يطابقهما على جدولٍ واحد، لا
+   استيرادٌ من وحدةٍ قد لا تكون محمّلة. */
 function _normAr(s){
   return String(s == null ? "" : s)
     .replace(/[\u064B-\u065F\u0670\u0640]/g, "")   // تشكيلٌ وتطويل
@@ -2191,55 +2211,133 @@ function ownerMatches(u, q){
   var hay = _normAr(((u && u.name) || "") + " " + ((u && u.user) || "") + " " + ((u && u.role) || ""));
   return needle.split(" ").every(function(w){ return !w || hay.indexOf(w) !== -1; });
 }
-/* خياراتُ المنتقي — نقيّةٌ: (المستخدمون · المختارُ الحاليّ · نصُّ البحث · الاسمُ
-   المحفوظ للغائب) ⇐ HTML. تُنادى عند الرسم وعند كلّ حرفٍ في خانة البحث. */
-function ownerOptionsHTML(users, cur, q, savedName){
-  cur = String(cur || "");
-  var arr = (Array.isArray(users) ? users : []).slice().sort(function(a, b){
-    return String(a.name || a.user || "").localeCompare(String(b.name || b.user || ""), "ar");
-  });
-  var seen = false, n = 0;
-  var opts = '<option value="">— بلا مسؤول تجديد —</option>';
-  arr.forEach(function(u){
-    if(!u || !u.user) return;
-    var isCur = u.user === cur, hit = ownerMatches(u, q);
-    if(isCur) seen = true;
-    if(!isCur && !hit) return;
-    if(hit) n++;   // العدُّ للمطابِقين وحدَهم — والمختارُ الباقي بلا مطابقةٍ لا يُعدّ
-    opts += '<option value="' + _esc(u.user) + '"' + (isCur ? " selected" : "") + '>'
-          + _esc(u.name || u.user) + (_hasWa(u) ? "" : " (بلا واتساب)") + '</option>';
-  });
-  if(cur && !seen){
-    opts += '<option value="' + _esc(cur) + '" selected>'
-          + _esc(savedName || cur) + ' (خارج القائمة)</option>';
-  }
-  return { html: opts, count: n };
+/* المستخدمون مرتّبين بالاسم — والمطابقون منهم لنصٍّ. نقيّة. */
+function ownerHits(users, q){
+  return (Array.isArray(users) ? users : []).filter(function(u){ return u && u.user && ownerMatches(u, q); })
+    .sort(function(a, b){
+      return String(a.name || a.user || "").localeCompare(String(b.name || b.user || ""), "ar");
+    });
 }
-function _ownerCountText(q, count){
-  if(!_normAr(q)) return "";
-  if(!count) return "لا أحدَ يطابق — عدّل البحث";
-  if(count === 1) return "يطابق مستخدمٌ واحد";
-  if(count === 2) return "يطابق مستخدمان";
-  return "يطابق " + count + (count <= 10 ? " مستخدمين" : " مستخدماً");
+/* ما يُكتب في الخانة للمختار: اسمُه الطازج من القائمة، أو المحفوظُ موسوماً إن غاب. */
+function ownerInputLabel(login, savedName){
+  if(!login) return "";
+  var u = _userByLogin(login);
+  if(u) return String(u.name || u.user || "");
+  return String(savedName || login) + " (خارج القائمة)";
+}
+/* صفوفُ القائمة — نقيّةٌ: (المستخدمون · المختار · نصُّ البحث) ⇐ HTML وعددُ المطابِقين.
+   صفُّ «بلا مسؤول» ليس مستخدماً فلا يُطابَق: يظهر والخانةُ فارغةٌ وحدَها، وإلا
+   زاحم النتيجةَ الوحيدةَ التي يبحث عنها الكاتب. */
+function ownerListHTML(users, cur, q){
+  cur = String(cur || ""); q = String(q || "");
+  var all = (Array.isArray(users) ? users : []).filter(function(u){ return u && u.user; });
+  var hits = ownerHits(all, q);
+  var head = !q.trim()
+    ? '<button type="button" class="dv-up-row none' + (cur ? "" : " on") + '" role="option"'
+      + ' aria-selected="' + (cur ? "false" : "true") + '" onmousedown="event.preventDefault()"'
+      + ' onclick="docVault.ownerChoose(\'\')">'
+      + '<span class="nm">' + _icon("edit", "ic-sm") + '— بلا مسؤول تجديد —</span></button>'
+    : "";
+  if(!all.length)  return { html: head + '<div class="dv-up-empty">لا مستخدمين في القائمة.</div>', count: 0 };
+  if(!hits.length) return { html: head + '<div class="dv-up-empty">لا أحدَ يطابق «' + _esc(q) + '» — جرّب جزءاً من الاسم أو اسمَ الدخول.</div>', count: 0 };
+  var rows = hits.map(function(u){
+    var sub = [u.user || "", u.role || ""].filter(function(x){ return !!x; }).join(" · ");
+    var on = u.user === cur;
+    return '<button type="button" class="dv-up-row' + (on ? " on" : "") + '" role="option"'
+        + ' aria-selected="' + (on ? "true" : "false") + '" onmousedown="event.preventDefault()"'
+        + ' onclick="docVault.ownerChoose(\'' + _jq(u.user) + '\')">'
+      + '<span class="nm">' + _icon("user", "ic-sm") + _esc(u.name || u.user)
+        + (_hasWa(u) ? "" : '<span class="dv-up-wa">بلا واتساب</span>') + '</span>'
+      + (sub ? '<span class="mt">' + _esc(sub) + '</span>' : "")
+      + '</button>';
+  }).join("");
+  return { html: head + rows, count: hits.length };
+}
+var _ownerQ = "";        // نصُّ بحث المنتقي — عابرٌ، يُمحى عند الإغلاق
+var _ownerTmr = null;    // مؤقّتُ الإغلاق بعد فقد التركيز (يُلغى إن وقع اختيار)
+function _ownerPickHTML(cur, savedName){
+  cur = String(cur || "");
+  return '<div class="dv-up" id="dv-up">'
+    + '<input type="hidden" id="dv-owner" value="' + _esc(cur) + '">'
+    + '<input type="text" class="form-input dv-up-in' + (cur ? " has" : "") + '" id="dv-owner-q"'
+      + ' autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="dv-owner-l"'
+      + ' value="' + _esc(ownerInputLabel(cur, savedName)) + '" placeholder="مسؤول التجديد — اكتب للبحث"'
+      + ' onfocus="docVault.ownerOpen()" oninput="docVault.ownerInput(this.value)"'
+      + ' onkeydown="docVault.ownerKey(event)" onblur="docVault.ownerBlur()">'
+    + (cur ? '<button type="button" class="dv-up-x" title="مسح الاختيار" aria-label="مسح الاختيار"'
+             + ' onmousedown="event.preventDefault()" onclick="docVault.ownerClear()">' + _icon("xCircle", "ic-sm") + '</button>' : "")
+    + '<div class="dv-up-list" id="dv-owner-l" role="listbox" hidden></div>'
+    + '</div>';
 }
 function _ownerSelectHTML(e){
-  var q = String(e.ownerQ || "");
-  var r = ownerOptionsHTML(_users(), e.ownerUser, q, e.owner);
-  return '<input class="form-input dv-owner-q" id="dv-owner-q" type="search" value="' + _esc(q) + '"'
-       + ' placeholder="ابحث بالاسم…" autocomplete="off" oninput="docVault.searchOwner(this.value)">'
-       + '<select class="form-input" id="dv-owner">' + r.html + '</select>'
-       + '<div class="dv-hint dv-owner-n" id="dv-owner-n">' + _esc(_ownerCountText(q, r.count)) + '</div>';
+  return _ownerPickHTML(e.ownerUser, e.owner) + '<div id="dv-owner-hint">' + _ownerHintHTML(e) + '</div>';
 }
-/* يُعيد بناءَ خيارات القائمة وحدَها — لا النموذجَ — فتبقى الخانةُ بمؤشّرها. */
-function searchOwner(q){
-  var sel = document.getElementById("dv-owner");
-  if(!sel) return;
-  var cur = String(sel.value || "");
-  var r = ownerOptionsHTML(_users(), cur, q, _edit ? _edit.owner : "");
-  sel.innerHTML = r.html;
-  sel.value = cur;
-  var n = document.getElementById("dv-owner-n");
-  if(n) n.textContent = _ownerCountText(q, r.count);
+function _ownerCur(){ var v = document.getElementById("dv-owner"); return v ? String(v.value || "") : ""; }
+function _ownerPaint(){
+  var box = document.getElementById("dv-owner-l");
+  if(box) box.innerHTML = ownerListHTML(_users(), _ownerCur(), _ownerQ).html;
+}
+function ownerOpen(){
+  clearTimeout(_ownerTmr);
+  var box = document.getElementById("dv-owner-l"), inp = document.getElementById("dv-owner-q");
+  if(!box) return;
+  /* عند الفتح: البحثُ يبدأ فارغاً فتُعرض القائمةُ كاملة، والاسمُ المعروضُ يُظلَّل
+     ليمحوه أوّلُ حرفٍ يُكتب — لا حذفٌ يدويٌّ قبل البحث. */
+  _ownerQ = "";
+  _ownerPaint();
+  box.hidden = false;
+  if(inp){ inp.setAttribute("aria-expanded", "true"); try{ inp.select(); }catch(e){} }
+}
+function ownerInput(val){
+  _ownerQ = String(val || "");
+  var box = document.getElementById("dv-owner-l");
+  if(box && box.hidden) box.hidden = false;
+  _ownerPaint();           // القائمةُ وحدَها تُعاد — فيبقى المؤشّرُ حيث تركه الكاتب
+}
+function ownerBlur(){
+  clearTimeout(_ownerTmr);
+  _ownerTmr = setTimeout(function(){ ownerClose(true); }, 180);
+}
+function ownerClose(restore){
+  var box = document.getElementById("dv-owner-l"), inp = document.getElementById("dv-owner-q");
+  if(box) box.hidden = true;
+  if(inp) inp.setAttribute("aria-expanded", "false");
+  _ownerQ = "";
+  // ما لم يقع اختيارٌ يعود النصُّ إلى المختار الحاليّ — لا يبقى بحثٌ معلَّقٌ يُقرأ اختياراً
+  if(restore && inp) inp.value = ownerInputLabel(_ownerCur(), _edit ? _edit.owner : "");
+}
+function ownerKey(ev){
+  var k = ev && (ev.key || ev.keyCode);
+  if(k === "Escape" || k === "Esc" || k === 27){
+    clearTimeout(_ownerTmr); ownerClose(true);
+    var inp = document.getElementById("dv-owner-q"); if(inp) inp.blur();
+    return;
+  }
+  if(k === "Enter" || k === 13){
+    if(ev && ev.preventDefault) ev.preventDefault();
+    // «اكتب واضغط Enter» — تُؤخذ النتيجةُ الأولى، وهي الوحيدةُ غالباً بعد بحثٍ دقيق
+    var hits = ownerHits(_users(), _ownerQ);
+    if(hits.length) ownerChoose(hits[0].user);
+  }
+}
+function ownerClear(){ clearTimeout(_ownerTmr); _ownerApply(""); }
+function ownerChoose(login){ clearTimeout(_ownerTmr); _ownerApply(String(login || "")); }
+/* الاختيارُ يُكتب في الحقل الخفيّ، ويُبنى الغلافُ كلُّه من جديدٍ بحالته الصحيحة (زرُّ
+   المسح يظهر أو يختفي، والقائمةُ مطويّة) — ولا يُعاد التركيزُ إلى الخانة: التركيزُ
+   يفتح القائمةَ من جديد فيبدو للمختار أنّ اختيارَه لم يُسجَّل. والتلميحُ تحتَه
+   (واتساب؟ خارج القائمة؟) يتبع المختارَ الجديد. */
+function _ownerApply(login){
+  _ownerQ = "";
+  var v = document.getElementById("dv-owner");
+  if(v) v.value = login;
+  var wrap = document.getElementById("dv-up");
+  if(wrap && wrap.parentNode) wrap.outerHTML = _ownerPickHTML(login, _edit ? _edit.owner : "");
+  else ownerClose(false);
+  var h = document.getElementById("dv-owner-hint");
+  if(h && _edit){
+    var u = login ? _userByLogin(login) : null;
+    h.innerHTML = _ownerHintHTML({ ownerUser: login, owner: u ? (u.name || u.user) : (_edit.owner || "") });
+  }
 }
 /* ولا يُترك الغيابُ يُكتشَف يومَ يصمت التنبيه: يُقال الآن ومَن يُصلحه. */
 function _ownerHintHTML(e){
@@ -4899,7 +4997,6 @@ function _readForm(){
   /* المصدرُ اسمُ الدخول، والاسمُ المعروضُ يُشتقّ منه ويُحفَظ نسخةً احتياطيةً تُقرأ
      يومَ يُحذف الحساب. وبلا مسؤولٍ: يُمحى الاثنان معاً فلا يبقى اسمٌ بلا صاحب. */
   _edit.ownerUser = g("dv-owner");
-  _edit.ownerQ    = g("dv-owner-q");   // نصُّ البحث يبقى بعد إعادة الرسم — ولا يُحفَظ مع الوثيقة
   var _ow = _edit.ownerUser ? _userByLogin(_edit.ownerUser) : null;
   _edit.owner = _edit.ownerUser ? String((_ow && (_ow.name || _ow.user)) || _edit.owner || "") : "";
   _edit.start   = g("dv-start");
@@ -5801,7 +5898,9 @@ window.docVault = {
   daysUntil:daysUntil, alertLevel:alertLevel, docLevel:docLevel, needsAction:needsAction,
   horizonBuckets:horizonBuckets, rollup:rollup, nextRef:nextRef, renewDoc:renewDoc,
   typeLabel:typeLabel, ownerLabel:ownerLabel,
-  ownerMatches:ownerMatches, ownerOptionsHTML:ownerOptionsHTML, searchOwner:searchOwner, _normAr:_normAr,
+  ownerMatches:ownerMatches, ownerHits:ownerHits, ownerListHTML:ownerListHTML, ownerInputLabel:ownerInputLabel, _normAr:_normAr,
+  ownerOpen:ownerOpen, ownerInput:ownerInput, ownerKey:ownerKey, ownerBlur:ownerBlur, ownerClose:ownerClose,
+  ownerChoose:ownerChoose, ownerClear:ownerClear,
   code128SVG:code128SVG, _code128Bits:code128Bits, _code128Sanitize:code128Sanitize,
   filterDocs:filterDocs, sortDocs:sortDocs, cloneTemplate:cloneTemplate, cloneLetter:cloneLetter, filterLetters:filterLetters,
   newVerifyToken:newVerifyToken, isVerifyToken:isVerifyToken, verifyUrl:verifyUrl, verifyBase:verifyBase,
