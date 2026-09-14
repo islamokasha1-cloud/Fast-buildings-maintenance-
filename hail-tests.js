@@ -18572,6 +18572,79 @@ function docVaultGuards() {
       /نورة الشمري \(بلا واتساب\)/.test(pg2.innerHTML) &&
       /سعد القحطاني \(بلا واتساب\)/.test(pg2.innerHTML) &&
       /محمد العتيبي<\/option>/.test(pg2.innerHTML));
+    /* ── البحثُ بالاسم فوق المنتقي (طلبُ المالك 14/09) ──
+       القائمةُ صارت عشراتِ الأسماء ولفُّ `<select>` بالإصبع ليس اختياراً. والمطابقةُ
+       نسخةٌ نقيّةٌ من `staffTasks._userMatches` — وهذا الحارسُ هو الرباطُ الوحيد
+       بينهما: لو طُوِّرت إحداهما (تطبيعٌ جديد) وبقيت الأخرى سقط الفحصُ هنا. */
+    {
+      T("★ dv: دالّةُ المطابقة وبناءُ الخيارات مكشوفان للفحص بلا متصفّح",
+        typeof V.ownerMatches === "function" && typeof V.ownerOptionsHTML === "function" &&
+        typeof V.searchOwner === "function");
+      const STS = fs.readFileSync(path.resolve(path.dirname(IDX), "staff-tasks.js"), "utf8");
+      const stMatch = (() => {
+        const norm = (STS.match(/function _normAr\(s\)\{[\s\S]*?\n  \}/) || [])[0] || "";
+        const um   = (STS.match(/function _userMatches\(u, q\)\{[\s\S]*?\n  \}/) || [])[0] || "";
+        return (norm && um) ? new Function("u", "q", norm + "\n" + um + "\nreturn _userMatches(u, q);") : null;
+      })();
+      T("★ dv: مطابقةُ منتقي التكليف في `staff-tasks.js` موجودةٌ ليُقاس عليها", !!stMatch);
+      const CASES = [
+        [{ user:"اشرف", name:"أشرف عشري", role:"مشرف" }, "اشرف"],
+        [{ user:"اشرف", name:"أشرف عشري", role:"مشرف" }, "أشرف"],
+        [{ user:"اشرف", name:"أشرف عشري", role:"مشرف" }, "عشري اشرف"],
+        [{ user:"اشرف", name:"أشرف عشري", role:"مشرف" }, "محمد"],
+        [{ user:"visitor01", name:"زائر" }, "visitor0"],
+        [{ user:"m", name:"مصطفى حمزة" }, "مصطفي حمزه"],
+        [{ user:"m", name:"مصطفى حمزة" }, "  "],
+        [{ user:"u٠١", name:"عبدالله ٠١" }, "٠١"],
+        [{ user:"MOHAMMED", name:"Mohammed" }, "moham"],
+        [{ user:"x", name:"عَلِيّ" }, "علي"]
+      ];
+      const drift = stMatch ? CASES.filter(([u, q]) => V.ownerMatches(u, q) !== stMatch(u, q)) : [];
+      T("★★★ dv: مطابقةُ البحث تطابق `staffTasks._userMatches` حرفياً على جدول حالات",
+        drift.length === 0, drift.map(c => c[1]).join(" · "));
+      T("★★ dv: «اشرف» بلا همزةٍ تجد «أشرف عشري»، و«محمد» لا تجدها",
+        V.ownerMatches(CASES[0][0], "اشرف") && !V.ownerMatches(CASES[0][0], "محمد"));
+      T("★ dv: والأرقامُ العربيةُ لا تُنزَع في التطبيع (المدى لا يبتلع ٠-٩)",
+        V.ownerMatches({ user:"u", name:"عبدالله ٠١" }, "٠١") &&
+        !V.ownerMatches({ user:"u", name:"عبدالله ٠١" }, "٠٢"));
+
+      /* الرسمُ الحقيقيّ: الخانةُ فوق القائمة، والكتابةُ تُصفّي الخياراتِ في مكانها */
+      const qEl = W.document.getElementById("dv-owner-q");
+      T("★★ dv: خانةُ البحث تُرسَم فوق المنتقي وتنادي `searchOwner` مع كلّ حرف",
+        !!qEl && /docVault\.searchOwner/.test(qEl.getAttribute("oninput") || ""));
+      const selEl = W.document.getElementById("dv-owner");
+      /* الترتيبُ أبجديٌّ بـ`localeCompare("ar")` ويختلف بين محرّكات ICU — فيُقارَن مرتَّباً */
+      const optVals = () => Array.from(W.document.querySelectorAll("#dv-owner option")).map(o => o.value).sort().join(",");
+      V.searchOwner("نوره");
+      T("★★★ dv: «نوره» بالهاء تُبقي نورة الشمري وحدَها (مع خيار «بلا مسؤول»)",
+        optVals() === ",noura", optVals());
+      T("★ dv: وعدّادُ المطابقة يُقال تحت القائمة",
+        /يطابق مستخدمٌ واحد/.test(W.document.getElementById("dv-owner-n").textContent));
+      V.searchOwner("لا أحد بهذا الاسم");
+      T("★ dv: ولا مطابقةَ ⇒ يبقى «بلا مسؤول» وحدَه ويُقال ذلك",
+        optVals() === "" && /لا أحدَ يطابق/.test(W.document.getElementById("dv-owner-n").textContent));
+      V.searchOwner("");
+      T("★★ dv: ومسحُ البحث يُعيد القائمةَ كاملةً", optVals() === ",mohammed,noura,saad", optVals());
+      /* المختارُ لا يسقط بالتصفية: اختر سعداً ثم ابحث عن محمد */
+      selEl.value = "saad";
+      V.searchOwner("محمد");
+      T("★★★ dv: المختارُ (سعد) يبقى خياراً ومختاراً ولو لم يطابق البحثَ عن محمد",
+        selEl.value === "saad" && optVals() === ",mohammed,saad", optVals() + " | " + selEl.value);
+      T("★ dv: والعدّادُ يعدّ المطابِقين وحدَهم — لا المختارَ الباقي",
+        /يطابق مستخدمٌ واحد/.test(W.document.getElementById("dv-owner-n").textContent),
+        W.document.getElementById("dv-owner-n").textContent);
+      /* وإعادةُ رسم النموذج (تبديلُ النوع) تحفظ نصَّ البحث والاختيارَ معاً */
+      qEl.value = "محمد";
+      V.setType("other");
+      T("★★ dv: وتبديلُ النوع يحفظ نصَّ البحث والمختارَ معاً — ولا يُحفَظ النصُّ مع الوثيقة",
+        W.document.getElementById("dv-owner-q").value === "محمد" &&
+        W.document.getElementById("dv-owner").value === "saad" &&
+        !/ownerQ/.test((src.match(/function saveEdit\(\)\{[\s\S]*?\n\}/) || [""])[0]));
+      V.setType("cr");
+      W.document.getElementById("dv-owner-q").value = "";
+      V.searchOwner("");
+      W.document.getElementById("dv-owner").value = "";
+    }
     V.setType("other");
     T("★★ dv: واختيارُ «أخرى» يفتح الخانةَ فوراً",
       !!W.document.getElementById("dv-type-other") &&
