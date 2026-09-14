@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3221";
+var MODULE_BUILD = "v18.9.3223";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -4900,7 +4900,29 @@ function _isActive(id){
 /* ═══════════════════════════════════════════════════════════════════════════
    الأفعال — الوثائق
    ═══════════════════════════════════════════════════════════════════════════ */
-function setFilter(k, v){ _view[k] = String(v == null ? "" : v); render(); }
+/* ── إعادةُ الرسم مع كلّ حرفٍ في خانة البحث كانت تُخرج الكاتبَ منها (بلاغُ المالك 14/09) ──
+   الشاشاتُ الثلاث تُعاد كتابتُها كاملةً (`host.innerHTML = …`) عند كلّ تغييرٍ في المرشِّح،
+   فخانةُ البحث التي يكتب فيها تُتلَف وتُبنى غيرُها **بلا تركيز**: الحرفُ الأوّل يُرشِّح
+   ثمّ يخرج المؤشّرُ من الخانة، والثاني يذهب إلى لا مكان. فالحلُّ في مكانه: يُحفَظ قبل
+   الرسم أنّ التركيزَ في خانة بحثٍ وأين مؤشّرُها، ويُعاد إلى الخانة المبنيّة في الصفحة
+   نفسِها بعده. (بديلُه — رسمُ القائمة وحدَها كما في `staff-tasks.js` — إعادةُ بناءٍ
+   لثلاث شاشات لإصلاح تركيزٍ، والخطرُ فيه أكبر من نفعه.) */
+function _rerenderKeepingSearch(fn){
+  var a = null, s = null, e = null, host = null;
+  try{
+    a = document.activeElement;
+    if(a && a.classList && a.classList.contains("dv-search")){
+      s = a.selectionStart; e = a.selectionEnd;
+      for(host = a.parentNode; host && !(host.classList && host.classList.contains("page")); host = host.parentNode){}
+    }else a = null;
+  }catch(err){ a = null; }
+  fn();
+  if(!a) return;
+  var nx = (host || document).querySelector(".dv-search");
+  if(!nx || nx === a) return;
+  try{ nx.focus(); if(s != null && e != null) nx.setSelectionRange(s, e); }catch(err){}
+}
+function setFilter(k, v){ _view[k] = String(v == null ? "" : v); _rerenderKeepingSearch(render); }
 function pickMonth(ym){ _view.ym = (_view.ym === ym) ? "" : String(ym); _view.level = ""; render(); }
 /* اشتقاقُ افتراضِ المُرشِّح من المشروع المفتوح — **مرّةً واحدةً لكلّ شاشة**.
    `null` وحدَها تُشتقّ؛ و`""` اختيارٌ صريحٌ من المستخدم («كل المشاريع») يُحترَم. */
@@ -5148,7 +5170,7 @@ function saveRenew(){
    الأفعال — الخطابات
    ═══════════════════════════════════════════════════════════════════════════ */
 function letterTab(kind){ _letterMode("list"); _lview.kind = kind; renderLetters(); }
-function setLetterFilter(v){ _lview.q = String(v == null ? "" : v); renderLetters(); }
+function setLetterFilter(v){ _lview.q = String(v == null ? "" : v); _rerenderKeepingSearch(renderLetters); }
 function openLetter(id){ _letterMode("open"); _lview.open = String(id); renderLetters(); _top(); }
 function backToLetters(){ _letterMode("list"); renderLetters(); _top(); }
 
@@ -5296,7 +5318,7 @@ function delLetter(id){
 }
 
 /* ════════ أفعالُ المعتمدات ════════ */
-function setAprFilter(k, v){ _curAprView()[k] = String(v == null ? "" : v); renderApprovals(); }
+function setAprFilter(k, v){ _curAprView()[k] = String(v == null ? "" : v); _rerenderKeepingSearch(renderApprovals); }
 function clearAprFilters(){ var v = _curAprView(); v.q = v.type = v.status = ""; renderApprovals(); }
 function openApr(id){ _aEdit = null; _aview.open = String(id); renderApprovals(); _top(); }
 function backToApr(){ _aEdit = null; _aview.open = null; renderApprovals(); _top(); }
