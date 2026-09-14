@@ -3356,16 +3356,27 @@ function financialInvariants() {
     M.poActualCost(poMulti) === 2300, "الناتج: " + M.poActualCost(poMulti));
   T("★ C1: الكمية المستلمة = مجموع الجلستين", M.poReceivedQty(poMulti) === 20);
 
-  // ── v18.9to — H3: اصطلاح ض.ق.م موحّد على «الوحدة» في التدقيق (مطابق _poItemLine والفاتورة) ──
-  T("★ H3: التدقيق يحسب ض.ق.م على الوحدة (total=round((unit+vatUnit)×rcv))",
-    HTML.includes("Math.round((unitPrice+_vatUnit)*rcvQty*100)/100"));
-  T("★ H3: زال اصطلاح net×0.15 من تخزين التدقيق",
-    !HTML.includes("const vat   = Math.round(net*0.15*100)/100"));
+  // ── v18.9.3215: اصطلاح ض.ق.م موحّد على «صافي البند» في التدقيق (مطابق _poItemLine والإنشاء) ──
+  // (كان v18.9to/H3 يقرّب ضريبة الوحدة ثم يضربها في الكمية، فيتضاعف خطأ نصف قرش بالكمية.)
+  T("★ H3: التدقيق يحسب ض.ق.م على صافي البند (vat=round(net×0.15) · total=net+vat)",
+    HTML.includes("const vat   = Math.round(net*0.15*100)/100;") &&
+    HTML.includes("const total = Math.round((net+vat)*100)/100;"));
+  T("★ H3: زال اصطلاح الوحدة (unit+vatUnit)×rcv من تخزين التدقيق",
+    !HTML.includes("Math.round((unitPrice+_vatUnit)*rcvQty*100)/100"));
   T("★ H3: net مقرَّب في التدقيق (لا تسرّب عائم — L7)",
     HTML.includes("const net   = Math.round(rcvQty * unitPrice * 100)/100"));
-  // سلوكي: اصطلاح الوحدة يطابق فاتورة المورد (بخاخ 13.04×3 ⇒ 45.00 لا 44.99)
-  T("★ H3: تكلفة البند = فاتورة المورد (بخاخ 13.04×3 ⇒ 45.00)",
+  // سلوكي: الفارق قرشٌ واحد في البند الصغير يبقى ضمن عتبة الشفاء (بخاخ 13.04×3 مخزَّن 45.00 يبقى)
+  T("★ H3: فارقُ قرشٍ عن المخزَّن لا يُعاد كتابته (13.04×3 مخزَّن 45.00 ⇒ يبقى 45)",
     M._poItemLine({ rcvQty: 3, unitCost: 13.04, itemCost: 45, vat: 5.88 }, true).total === 45);
+  // ★★ حارس الانحدار — الحادثة الأصل: 256 متر × 3.5 ⇒ ض.ق.م 134.40 لا 135.68 (والإجمالي 1,030.40 لا 1,031.68)
+  {
+    const l = M._poItemLine({ rcvQty: 256, unitCost: 3.5, itemCost: 1031.68, vat: 135.68 }, true);
+    T("★★ ض.ق.م على الصافي لا الوحدة: 3.5×256 ⇒ صافي 896 · ض.ق.م 134.40 · إجمالي 1,030.40",
+      l.net === 896 && l.vat === 134.4 && l.total === 1030.4, JSON.stringify(l));
+    T("★★ ولا يبقى في index.html أيُّ موضعٍ يضرب (unit+vatUnit) في الكمية",
+      !/\(\s*\w+\s*\+\s*_?\w*[vV]at[uU]\w*\s*\)\s*\*\s*\w+\s*\*\s*100/.test(HTML) &&
+      !/unitTotal\s*\*\s*\w+\s*\*\s*100/.test(HTML));
+  }
 
   // ── v18.9tp — H2 + H4: حارسا تدقيق الاستلام ──
   T("★ H2: يُمنع الإغلاق ببندٍ مستلَم بسعر وحدة صفر (lumpSum لا يختفي)",
@@ -8042,8 +8053,8 @@ function comprehensiveReviewV18_9vl() {
   T("★ #3: rcvQty في بناء بنود التدقيق تراكميّ (cumRcv) لا كمية الجلسة",
     HTML.includes("rcvQty    : _cumQ,") &&
     /_cumQ\s*=\s*Number\(a\.cumRcv\)/.test(HTML));
-  T("★ #3: التكلفة (itemCost/lineTotal/vat) تُعاد على cumRcv باصطلاح الوحدة",
-    HTML.includes("const _cTot  = Math.round((_cUnit+_cVatU)*_cumQ*100)/100;") &&
+  T("★ #3: التكلفة (itemCost/lineTotal/vat) تُعاد على cumRcv باصطلاح صافي البند",
+    HTML.includes("const _cTot  = Math.round((_cNet+_cVat)*100)/100;") &&
     HTML.includes("itemCost  : _cTot,") && HTML.includes("lineTotal : _cNet,") &&
     HTML.includes("vat       : _cVat,"));
   T("★ #3: لم يعُد يُخزَّن rcvQty:a.rcvQty الجلسيّ في بناء البنود (منع التراجع)",
@@ -8051,9 +8062,8 @@ function comprehensiveReviewV18_9vl() {
   // سلوكي: بندٌ استُلم 5 ثم 5 (cumRcv=10) بسعر 100 ⇒ التكلفة على 10 لا 5.
   {
     const _u = 100, _cum = 10;
-    const _vatU = Math.round(_u * 0.15 * 100) / 100;
     const _net = Math.round(_u * _cum * 100) / 100;
-    const _tot = Math.round((_u + _vatU) * _cum * 100) / 100;
+    const _tot = Math.round((_net + Math.round(_net * 0.15 * 100) / 100) * 100) / 100;
     T("★ #3: تكلفة البند المُقسَّم = على التراكمي (10×115 = 1150)",
       _tot === 1150 && _net === 1000, `total=${_tot} net=${_net}`);
   }
@@ -10053,7 +10063,7 @@ function npLockedPriceSyncGuards() {
   const r1 = run({ ...locked });
   T("★ البند المقفول يتحدّث لسعر الكتالوج الجديد ويعاد حسابه كاملاً",
     r1.changed === true && r1.it.unitCost === 1.48 && r1.it.estUnitCost === 1.48 &&
-    r1.it.lineTotal === 14.8 && r1.it.itemCost === 17 && r1.it.vat === 2.2,
+    r1.it.lineTotal === 14.8 && r1.it.itemCost === 17.02 && r1.it.vat === 2.22,   // v18.9.3215: ض.ق.م على الصافي (14.8×0.15=2.22)
     JSON.stringify({ u: r1.it.unitCost, l: r1.it.lineTotal, c: r1.it.itemCost, v: r1.it.vat }));
   T("★ معادلة v18.9nc محفوظة بعد المزامنة: lineTotal + vat === itemCost",
     Math.abs(r1.it.lineTotal + r1.it.vat - r1.it.itemCost) < 0.001);
@@ -16605,13 +16615,16 @@ function vendorPOIssuance() {
   T("تعرّض window.vendorPO بدوالّه النقية", V && ["_lineCalc","_totals","_buyQty","_defaultItems","_canIssue","_applyIssue"].every(k => typeof V[k] === "function"));
   if (!V) return;
 
-  // ض.ق.م على الوحدة — نفس اصطلاح _poItemLine (v18.9nd): تقريبُ ضريبة الوحدة أولاً
+  // ض.ق.م على صافي السطر — نفس اصطلاح _poItemLine (v18.9.3215)
   const l1 = V._lineCalc(100, 3);
   T("حساب السطر: 100×3 ⇒ صافي 300 · ضريبة 45 · إجمالي 345",
     l1.net === 300 && l1.vat === 45 && l1.total === 345, JSON.stringify(l1));
-  const l2 = V._lineCalc(33.33, 3);   // 33.33×0.15=4.9995 ⇒ ضريبة الوحدة 5.00 ⇒ إجمالي الوحدة 38.33
-  T("★ التقريب على الوحدة لا على السطر (33.33×3 ⇒ إجمالي 114.99)",
+  const l2 = V._lineCalc(33.33, 3);   // صافي 99.99 ⇒ ض.ق.م 14.9985→15.00 ⇒ إجمالي 114.99
+  T("★ التقريب على السطر (33.33×3 ⇒ إجمالي 114.99)",
     l2.total === 114.99 && l2.net === 99.99 && l2.vat === 15, JSON.stringify(l2));
+  const l3 = V._lineCalc(3.5, 256);   // v18.9.3215: كان اصطلاح الوحدة يعطي 135.68 / 1031.68
+  T("★★ أمر المورد يطابق الطلب: 3.5×256 ⇒ ض.ق.م 134.40 وإجمالي 1,030.40",
+    l3.net === 896 && l3.vat === 134.4 && l3.total === 1030.4, JSON.stringify(l3));
   const tt = V._totals([{ unitCost: 100, qty: 3 }, { unitCost: 33.33, qty: 3 }]);
   T("الإجماليات جمعُ السطور", tt.net === 399.99 && tt.vat === 60 && tt.total === 459.99, JSON.stringify(tt));
 
@@ -17781,10 +17794,13 @@ function externalPurchaseApiGuards() {
     c1.vatUnit === 15 && c1.unitTotal === 115 && c1.lineTotal === 200 &&
     c1.vat === 30 && c1.itemCost === 230);
   const c2 = X.computeItem({ unitCost: 0.1, qty: 3 });
-  // كالتطبيق حرفياً: ض.ق.م الوحدة تُقرَّب أولاً (0.015→0.02) ثم يُشتق الباقي منها.
+  // كالتطبيق حرفياً (v18.9.3215): ض.ق.م على صافي البند (0.3×0.15=0.045→0.05)، وvatUnit عرضٌ فقط.
   T("★★ التقريب عند المصدر — لا عائم يتسرّب (0.1×3 = 0.3 لا 0.30000000004)",
     c2.lineTotal === 0.3 && c2.vatUnit === 0.02 && c2.unitTotal === 0.12 &&
-    c2.itemCost === 0.36 && c2.vat === 0.06);
+    c2.itemCost === 0.35 && c2.vat === 0.05);
+  const c4 = X.computeItem({ unitCost: 3.5, qty: 256 });
+  T("★★ الواجهة الخارجية تطابق التطبيق: 3.5×256 ⇒ ض.ق.م 134.40 وإجمالي 1,030.40",
+    c4.lineTotal === 896 && c4.vat === 134.4 && c4.itemCost === 1030.4, JSON.stringify(c4));
   const c3 = X.computeItem({ unitCost: 33.33, qty: 7 });
   T("★★ lineTotal + vat === itemCost دائماً (الاشتقاق طرحاً كما في التطبيق)",
     Math.round((c3.lineTotal + c3.vat) * 100) / 100 === c3.itemCost);
