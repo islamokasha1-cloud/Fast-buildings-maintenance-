@@ -18778,6 +18778,25 @@ function docVaultGuards() {
       /\.sgn-im\{[^}]*display:flex[^}]*justify-content:center/.test(src) &&
       /\.sgn-stp\{[^}]*margin-inline-start:-\d+mm/.test(src) &&
       !/\.sgn-sig\{[^}]*position:absolute/.test(src) && !/\.sgn-stp\{[^}]*position:absolute/.test(src));
+    /* ── الموضعُ يختلف من خطابٍ إلى خطاب ويثبت للخطاب الواحد ──
+       طلبُ المالك: «كل مرة ننشئ فيها خطاباً يكون وضع الختم والتوقيع مختلفاً». والعشوائيةُ
+       وقتَ الطباعة تُخرج للخطاب الواحد ورقتين — والمطبوعُ سجلّ. فالانحرافُ مشتقٌّ من `id`. */
+    const PL = V.signPlacement;
+    T("★★ dv: الانحرافُ دالّةٌ نقيّةٌ من رقم الخطاب — الخطابُ الواحدُ يخرج بالوضع نفسِه عند كل طباعة",
+      typeof PL === "function" && JSON.stringify(PL("LTR-2609-0009")) === JSON.stringify(PL("LTR-2609-0009")));
+    T("★★ dv: وخطابان متتاليان يخرجان بوضعين مختلفين",
+      JSON.stringify(PL("LTR-2609-0009")) !== JSON.stringify(PL("LTR-2609-0010")) &&
+      JSON.stringify(PL("LTR-2609-0010")) !== JSON.stringify(PL("LTR-2609-0011")));
+    T("★★★ dv: والمدى ضيّقٌ عمداً: الختمُ ±4/±3مم و±9°، والتوقيعُ ±3/±2مم و±3° — في 300 رقمٍ لا يخرج واحدٌ عنه",
+      Array.from({ length: 300 }, (_, i) => PL("LTR-26" + String(i).padStart(2, "0") + "-" + String(i * 7).padStart(4, "0")))
+        .every(p => Math.abs(p.stampX) <= 4 && Math.abs(p.stampY) <= 3 && Math.abs(p.stampRot) <= 9 &&
+                    Math.abs(p.sigX) <= 3 && Math.abs(p.sigY) <= 2 && Math.abs(p.sigRot) <= 3 &&
+                    Object.values(p).every(v => Number.isFinite(v))));
+    T("★★ dv: والانحرافُ يُطبَع على الصورتين نفسِهما (`transform` على `sgn-sig` و`sgn-stp`)",
+      /<img class="sgn-sig" src="https:\/\/x\.test\/sig\.png" alt="" style="transform:translate\(-?[\d.]+mm,-?[\d.]+mm\) rotate\(-?[\d.]+deg\)">/.test(P(withSig)) &&
+      /<img class="sgn-stp" src="https:\/\/x\.test\/stamp\.png" alt="" style="transform:translate\(-?[\d.]+mm,-?[\d.]+mm\) rotate\(-?[\d.]+deg\)">/.test(P(withSig)));
+    T("★ dv: والختمُ يغطّي نحو نصف التوقيع (هامشٌ سالبٌ ≥ 16مم)",
+      (() => { const m = src.match(/\.sgn-stp\{[^}]*margin-inline-start:-(\d+)mm/); return !!m && Number(m[1]) >= 16; })());
     /* النفيُ يطابق **الترميزَ** لا المستندَ كلَّه: ورقةُ الطباعة تحمل أنماطَها
        في `<style>` داخلها، فـ`sgn-sig` موجودةٌ فيها دائماً كقاعدةِ نمط. ومطابقةُ
        الاسم المجرّد كانت تسأل عن الأنماط لا عن الصورة. (أُمسك في أوّل تشغيل.) */
