@@ -20191,6 +20191,20 @@ function docVaultGuards() {
           /* والمصدرُ مصدرُ المنصّة نفسُه — لا قائمةٌ ثانيةٌ تفترق عن قائمة المشتريات */
           T("★★ dv/proj: ومصدرُ أسمائه هو `_manualProjectNamesAll` في النواة لا اشتقاقٌ ثانٍ",
             /_manualProjectNamesAll/.test(src) && /function _manualProjectNamesAll/.test(HTML));
+          /* ميزانيةُ الدخول (perf-probe): `startSync` تُنادى مع كلّ تغيّرٍ في DOM، فجلبةُ
+             `meta/manual_projects` بلا حارسٍ تكرّرت 15 مرّةً وأسقطت CI (v18.9.3227). */
+          {
+            const ss = (src.match(/function startSync\(\)\{[\s\S]*?\n\}/) || [""])[0];
+            const en = (src.match(/function _ensureManualNames\(\)\{[\s\S]*?\n\}/) || [""])[0];
+            T("★★★ dv/proj: وجلبةُ أسماء `meta/manual_projects` محروسةٌ بعلَمٍ فلا تتكرّر مع كلّ رسمة",
+              /if\(_manualLoaded\) return;\s*_manualLoaded = true;[\s\S]*?_loadManualProjectNames/.test(en),
+              en.slice(0, 200));
+            T("★★★ dv/proj: ولا تُطلَب عند الدخول (`startSync`) بل عند فتح صفحةٍ من الخزانة — ميزانيةُ الدخول 9 جلبات",
+              !/_loadManualProjectNames|_ensureManualNames/.test(ss) &&
+              /startSync\(\);\s*_ensureManualNames\(\);/.test(src));
+            T("★★ dv/proj: ويُصفَّر العلَمُ في `stopSync` فتُعاد الجلبةُ عند جلسةٍ جديدة",
+              /function stopSync\(\)\{[\s\S]*?_manualLoaded = false;[\s\S]*?\n\}/.test(src));
+          }
           W._manualProjectNamesAll = () => [];
           V.__test_seed([], [], [], [
             { id:"APR-M1", title:"مستخلص فيلا", docType:"extract", party:"المالك",

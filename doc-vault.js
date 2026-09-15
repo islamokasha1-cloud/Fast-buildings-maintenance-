@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3227";
+var MODULE_BUILD = "v18.9.3229";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1630,6 +1630,23 @@ function letters(){ return _ltrs.slice(); }
 function docById(id){ for(var i=0;i<_docs.length;i++) if(_docs[i].id === id) return _docs[i]; return null; }
 function letterById(id){ for(var i=0;i<_ltrs.length;i++) if(_ltrs[i].id === id) return _ltrs[i]; return null; }
 
+/* أسماءُ `meta/manual_projects` تُحمَّل في النواة عند فتح «طلب جديد» وحدَه؛ ومَن يدخل
+   الخزانةَ قبله يرى قائمةً يدويةً ناقصة. فتُحمَّل هنا أيضاً ثمّ يُعاد الرسم — **عند فتح
+   صفحةٍ من صفحات الخزانة لا عند الدخول**، و**مرّةً واحدةً لكلّ جلسة**: الدخولُ له
+   ميزانيةُ جلباتٍ يحرسها `perf-probe` (9) والخزانةُ لا تحتاج الأسماءَ قبل أن تُرسَم؛
+   و`startSync` تُنادى مع كلّ تغيّرٍ في DOM (مراقبُ الحقن في `init`) فجلبةٌ فيها بلا
+   حارسٍ تكرّرت 15 مرّةً وأسقطت CI (v18.9.3227). */
+var _manualLoaded = false;   // أسماءُ المشاريع اليدوية طُلبت في هذه الجلسة
+function _ensureManualNames(){
+  if(_manualLoaded) return;
+  _manualLoaded = true;
+  try{
+    if(typeof _loadManualProjectNames === "function"){
+      var pr = _loadManualProjectNames();
+      if(pr && typeof pr.then === "function") pr.then(function(){ _repaint(PAGE_DOCS); _repaint(PAGE_LETTERS); _repaint(PAGE_APPROVALS); }).catch(function(){});
+    }
+  }catch(e){}
+}
 function startSync(){
   var d = _db();
   if(!d || !canView()) return;
@@ -1638,14 +1655,6 @@ function startSync(){
   _partySync();
   _exsSync();
   _readReaders();
-  /* أسماءُ `meta/manual_projects` تُحمَّل في النواة عند فتح «طلب جديد» وحدَه؛ ومَن
-     يدخل الخزانةَ قبله يرى قائمةً يدويةً ناقصة. فتُحمَّل هنا أيضاً ثمّ يُعاد الرسم. */
-  try{
-    if(typeof _loadManualProjectNames === "function"){
-      var pr = _loadManualProjectNames();
-      if(pr && typeof pr.then === "function") pr.then(function(){ _repaint(PAGE_DOCS); _repaint(PAGE_LETTERS); _repaint(PAGE_APPROVALS); }).catch(function(){});
-    }
-  }catch(e){}
   if(!_docsUnsub){
     _docsUnsub = d.collection(DOCS_COLL()).onSnapshot(function(snap){
       _docs = snap.docs.map(function(s){ var v = s.data() || {}; v.id = s.id; return v; });
@@ -1669,7 +1678,7 @@ function stopSync(){
   try{ if(_docsUnsub) _docsUnsub(); }catch(e){}
   try{ if(_ltrsUnsub) _ltrsUnsub(); }catch(e){}
   _docsUnsub = _ltrsUnsub = null;
-  _docs = []; _ltrs = []; _docsLoaded = _ltrsLoaded = false;
+  _docs = []; _ltrs = []; _docsLoaded = _ltrsLoaded = false; _manualLoaded = false;
 }
 function retry(){ _tok = null; stopSync(); startSync(); }
 
@@ -5838,6 +5847,7 @@ function hookShowPage(){
     }catch(e){}
     document.querySelectorAll(".sidebar-nav-btn").forEach(function(b){ b.classList.toggle("active", b.dataset.page === id); });
     startSync();
+    _ensureManualNames();
     if(id === PAGE_LETTERS) renderLetters();
     else if(id === PAGE_APPROVALS || id === PAGE_EXTRACTS) renderApprovals();
     else if(id === PAGE_FILE) renderProjectFile();
