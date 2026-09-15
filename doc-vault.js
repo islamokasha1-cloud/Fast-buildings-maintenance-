@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3225";
+var MODULE_BUILD = "v18.9.3227";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -485,14 +485,18 @@ function inProject(rec, sel){
   return projKey(rec) === sel;
 }
 
-/* حصرُ الرؤية. وغيرُ المربوط والمشروعُ اليدويُّ محجوبان عن المحصور: لا معرّفَ
-   يُطابَق به، وعرضُ ما **قد** يكون له أسوأُ من حجبِه — وربطُ القديم عملُ مَن يرى
-   الكلَّ أصلاً. */
+/* حصرُ الرؤية. غيرُ المربوط محجوبٌ عن المحصور: لا معرّفَ يُطابَق به، وعرضُ ما
+   **قد** يكون له أسوأُ من حجبِه — وربطُ القديم عملُ مَن يرى الكلَّ أصلاً.
+   **والمشروعُ اليدويُّ مرئيٌّ للجميع كوثائق الشركة** (بلاغُ المالك 15/09): لا معرّفَ
+   له في `meta/projects` أصلاً فلا تستطيع قائمةُ `user.projects` أن تضمّه، وحجبُه
+   كان يُخفيه عن كلّ مستخدمٍ غيرِ الأدمن — والمنصّةُ كلُّها (منتقي المشتريات وأوامر
+   الصرف) تعرض المشاريعَ اليدوية لكلّ مستخدمٍ بلا حصر، فالخزانةُ تتبعها لا تخالفها. */
 function visibleTo(rec, allowedIds){
   if(!Array.isArray(allowedIds)) return true;
   var r = projRef(rec);
   if(r.scope === SCOPE_COMPANY) return true;
-  if(r.unlinked || r.manual) return false;
+  if(r.manual) return true;
+  if(r.unlinked) return false;
   return allowedIds.indexOf(r.id) !== -1;
 }
 function visibleList(list, allowedIds){
@@ -571,10 +575,9 @@ function _manualKeyName(v){ return _isManualKey(v) ? String(v).slice(11) : ""; }
 /* المشاريعُ اليدويةُ المعروضة: المعروفةُ من النواة، **وما وُجد في سجلّات الخزانة
    نفسِها** — سجلٌّ باسمٍ يدويٍّ لم يعد في قائمة النواة يبقى له خيارٌ يُعثَر به عليه. */
 function _manualOptions(list){
-  /* والمحصورُ بمشاريعَ بعينها لا تُعرض له المشاريعُ اليدوية أصلاً: لا معرّفَ لها
-     يُطابَق بقائمته، فهو **لا يرى سجلَّها ولو أودعه بنفسه**. وخيارٌ يُودَع فيه ثمّ
-     يختفي فورَ حفظه أسوأُ من غيابه. */
-  if(Array.isArray(allowedProjectIds())) return [];
+  /* وتُعرض **لكلّ مستخدم** ولو حُصرت مشاريعُه — كما في منتقي المشتريات: `visibleTo`
+     تُري سجلَّها للجميع، فلا يودعه أحدٌ ثمّ يختفي عنه. (كانت محجوبةً عن المحصور
+     حتى `v18.9.3225` فبدت «لا تظهر إلا للأدمن» — بلاغُ المالك 15/09.) */
   var seen = {}, out = [];
   _manualNames().forEach(function(nm){ if(nm && !seen[nm]){ seen[nm] = 1; out.push(nm); } });
   (Array.isArray(list) ? list : []).forEach(function(x){
@@ -645,7 +648,7 @@ function _projFieldHTML(e, setter, list){
   if(sel === MANUAL_ID){
     html += '<input class="form-input" id="dv-proj-manual" style="margin-top:6px"'
           + ' value="' + _esc(e.projManual || "") + '" placeholder="اسم المشروع كما تكتبه">'
-          + '<div class="dv-hint">المشروعُ اليدويُّ لا يظهر لمن حُصرت مشاريعُه — لا معرّفَ يُطابَق به.</div>';
+          + '<div class="dv-hint">المشروعُ اليدويُّ يراه كلُّ مستخدمٍ في الخزانة — لا معرّفَ يُحصَر به.</div>';
   } else if(sel === FILTER_UNLINKED){
     html += '<div class="dv-hint">سجلٌّ من قبل الربط: فيه اسمُ مشروعٍ نصّاً بلا معرّف. '
           + 'اخترِ المشروعَ من القائمة ليدخل ملفَّه — ولا يُخمَّن له مشروعٌ تلقائياً.</div>';
@@ -1635,6 +1638,14 @@ function startSync(){
   _partySync();
   _exsSync();
   _readReaders();
+  /* أسماءُ `meta/manual_projects` تُحمَّل في النواة عند فتح «طلب جديد» وحدَه؛ ومَن
+     يدخل الخزانةَ قبله يرى قائمةً يدويةً ناقصة. فتُحمَّل هنا أيضاً ثمّ يُعاد الرسم. */
+  try{
+    if(typeof _loadManualProjectNames === "function"){
+      var pr = _loadManualProjectNames();
+      if(pr && typeof pr.then === "function") pr.then(function(){ _repaint(PAGE_DOCS); _repaint(PAGE_LETTERS); _repaint(PAGE_APPROVALS); }).catch(function(){});
+    }
+  }catch(e){}
   if(!_docsUnsub){
     _docsUnsub = d.collection(DOCS_COLL()).onSnapshot(function(snap){
       _docs = snap.docs.map(function(s){ var v = s.data() || {}; v.id = s.id; return v; });
@@ -5946,6 +5957,7 @@ window.docVault = {
   openDocsForFile:openDocsForFile, openLettersForFile:openLettersForFile, openAprForFile:openAprForFile,
   newDocHere:newDocHere, newLetterHere:newLetterHere, newAprHere:newAprHere,
   _SCOPE_COMPANY:SCOPE_COMPANY, _SCOPE_PROJECT:SCOPE_PROJECT, _MANUAL_ID:MANUAL_ID,
+  _projFieldHTML:_projFieldHTML, _manualOptions:_manualOptions,
   _FILTER_ALL:FILTER_ALL, _FILTER_COMPANY:FILTER_COMPANY, _FILTER_UNLINKED:FILTER_UNLINKED,
   /* ثقبُ فحصٍ صريحٌ لا بابٌ خلفيّ: يزرع بياناتٍ في الحالة **بلا شبكة** ليُرسَم الأفقُ
      والجدولُ في DOM حقيقيّ داخل `hail-tests.js`. لأنّ الحسابَ الصحيحَ الذي لا يُرسَم

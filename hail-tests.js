@@ -20059,11 +20059,16 @@ function docVaultGuards() {
         T("★★ dv/proj: ويرى سجلَّ مشروعه ولا يرى سجلَّ غيره",
           V.visibleTo(linked, ALLOW) === true &&
           V.visibleTo({ scope:"project", projectId:"other" }, ALLOW) === false);
-        T("★★ dv/proj: وغيرُ المربوط واليدويُّ محجوبان عن المحصور — لا معرّفَ يُطابَق به",
-          V.visibleTo(legacyApr, ALLOW) === false && V.visibleTo(manual, ALLOW) === false);
+        T("★★ dv/proj: وغيرُ المربوط محجوبٌ عن المحصور — لا معرّفَ يُطابَق به",
+          V.visibleTo(legacyApr, ALLOW) === false);
+        /* بلاغُ المالك 15/09: «المشاريع اليدوية لا تظهر عند المستخدمين وتظهر عند
+           مدير النظام» — كانت تُحجب عن كلّ مَن حُصرت مشاريعُه لأنّ لا معرّفَ لها
+           يُطابَق. والمنصّةُ تعرضها للجميع (منتقي المشتريات)، فالخزانةُ مثلُها. */
+        T("★★★ dv/proj: والمشروعُ اليدويُّ **مرئيٌّ للمحصور** كوثائق الشركة — لا معرّفَ له يُحصَر به (بلاغ 15/09)",
+          V.visibleTo(manual, ALLOW) === true);
         T("★★★ dv/proj: و`null` (أدمن أو بلا قائمةِ مشاريع) تعني **بلا حصر** — لا «لا شيء»",
           V.visibleList([legacyDoc, linked, manual, legacyApr], null).length === 4 &&
-          V.visibleList([legacyDoc, linked, manual, legacyApr], ALLOW).length === 2);
+          V.visibleList([legacyDoc, linked, manual, legacyApr], ALLOW).length === 3);
       }
 
       /* ── الرسمُ الحقيقيّ: مِلَفُّ المشروع ── */
@@ -20203,15 +20208,22 @@ function docVaultGuards() {
             manualPick2.projectId === V._MANUAL_ID && manualPick2.isCustomProject === true &&
             manualPick2.projectName === "فيلا الأمير",
             JSON.stringify(manualPick2));
-          /* والمحصورُ لا تُعرض له أصلاً: لا يرى سجلَّها ولو أودعه بنفسه، وخيارٌ
-             يُودَع فيه ثمّ يختفي فورَ حفظه أسوأُ من غيابه. */
+          /* والمحصورُ بمشاريعَ بعينها **يراها ويرى سجلَّها** (بلاغُ المالك 15/09: كانت
+             تختفي عن كلّ مستخدمٍ غيرِ الأدمن). الخيارُ في المُرشِّح والسجلُّ في الجدول معاً
+             — خيارٌ بلا سجلٍّ يودع فيه فيختفي، وسجلٌّ بلا خيارٍ لا يُعثَر عليه. */
           W._manualProjectNamesAll = () => ["فيلا الأمير"];
           const prevU6 = W.currentUser;
           W.currentUser = { name:"مشرف", user:"sv", role:"supervisor",
                             projects:["hail"], permissions:{ docVault:true } };
           V.setAprProj("");
-          T("★★★ dv/proj: والمحصورُ بمشاريعَ بعينها لا تُعرض له المشاريعُ اليدوية (يودعها فتختفي عنه)",
-            !/يدويّ<\/option>/.test(pga3.innerHTML));
+          T("★★★ dv/proj: والمحصورُ بمشاريعَ بعينها تُعرض له المشاريعُ اليدوية في المُرشِّح (بلاغ 15/09)",
+            /فيلا الأمير — يدويّ<\/option>/.test(pga3.innerHTML));
+          T("★★★ dv/proj: ويرى سجلَّ المشروع اليدويّ في الجدول لا الأدمنُ وحدَه",
+            /مستخلص فيلا/.test(pga3.innerHTML));
+          /* ومنتقي النموذج كذلك: خيارُ الاسم القائم للمحصور، لا «اكتب اسمه» وحدَه */
+          T("★★ dv/proj: ومنتقي المشروع في النموذج يعرض له الاسمَ اليدويَّ القائم",
+            /فيلا الأمير — يدويّ/.test(V._projFieldHTML({ projSel:"__COMPANY__" }, "setDocProj", [])) &&
+            V._manualOptions([]).indexOf("فيلا الأمير") !== -1);
           W.currentUser = prevU6;
           V.setAprProj("");
           T("★★ dv/proj: وتعود لغير المحصور", /فيلا الأمير — يدويّ/.test(pga3.innerHTML));
