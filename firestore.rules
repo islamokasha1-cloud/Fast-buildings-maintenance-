@@ -741,8 +741,10 @@ service cloud.firestore {
     // ورقةٌ ماتت قبل أن تُنتج أثراً — لا عقدَ ولا سداد — فحذفُها تنظيفٌ لا طمسٌ
     // لأثرٍ ماليّ. وما عداه لا يُحذف مهما كان الدور: المعتمَدُ والمحوَّلُ والمسدَّدُ
     // سجلٌّ ماليٌّ يُقرأ ولا يُمحى، والقيدُ في `audit` يبقى شاهداً على الحذف نفسِه.
+    // (تدقيق 15/09) ولا يُحذف ملغًى خرج منه مالٌ قبل حارس الإلغاء: الدفعاتُ سجلٌّ ماليّ.
     function crqDeleteOk() {
-      return isAdmin() && resource.data.status == 'crq_cancelled';
+      return isAdmin() && resource.data.status == 'crq_cancelled'
+             && !(('payments' in resource.data) && resource.data.payments is list && resource.data.payments.size() > 0);
     }
     match /global_contract_requests/{id} {
       allow read:   if hasRole();
