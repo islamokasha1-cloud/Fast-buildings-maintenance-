@@ -59,20 +59,31 @@ export type AnnouncementProps = {
   musicVolume?: number;
 };
 
-const Stage: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <AbsoluteFill
-    style={{
-      direction: "rtl",
-      fontFamily: bodyFont,
-      color: theme.ink,
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "70px 90px",
-    }}
-  >
-    {children}
-  </AbsoluteFill>
-);
+// الشاشة الطولية (1080×1920) تُشتقّ من أبعاد التركيبة نفسها لا من prop —
+// فالمشاهد واحدة والفرق تخطيطٌ فقط: عمود واحد بدل الشبكة، والخريطة
+// واللقطات تحت النص بدل جانبه.
+const usePortrait = () => {
+  const { width, height } = useVideoConfig();
+  return height > width;
+};
+
+const Stage: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const portrait = usePortrait();
+  return (
+    <AbsoluteFill
+      style={{
+        direction: "rtl",
+        fontFamily: bodyFont,
+        color: theme.ink,
+        alignItems: "center",
+        justifyContent: "center",
+        padding: portrait ? "80px 60px 150px" : "70px 90px",
+      }}
+    >
+      {children}
+    </AbsoluteFill>
+  );
+};
 
 const SectionTitle: React.FC<{ label: string; delay?: number }> = ({ label, delay = 0 }) => (
   <RevealText delay={delay}>
@@ -102,6 +113,7 @@ const SceneIntro: React.FC<{ companyName: string; tagline: string }> = ({ compan
 
 // المشهد 2 — من نحن
 const SceneAbout: React.FC = () => {
+  const portrait = usePortrait();
   const points = [
     { Icon: IconBuildings, color: theme.primary, text: "الدرجة الأولى في التشييد والبناء" },
     { Icon: IconFacility, color: theme.accent, text: "الدرجة الأولى في التشغيل والصيانة" },
@@ -120,7 +132,7 @@ const SceneAbout: React.FC = () => {
             </div>
           </Card>
         </RevealText>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 22 }}>
+        <div style={{ display: "grid", gridTemplateColumns: portrait ? "1fr" : "repeat(3, 1fr)", gap: 22 }}>
           {points.map((p, i) => (
             <RevealText key={p.text} delay={20 + i * 6}>
               <Card padding={26} style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -147,12 +159,13 @@ const DIVISION_STYLE = {
 const SceneDivisions: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const portrait = usePortrait();
 
   return (
     <Stage>
       <div style={{ width: "100%", maxWidth: 1580, display: "flex", flexDirection: "column", gap: 30 }}>
         <SectionTitle label="قطاعات أعمالنا" delay={0} />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 26 }}>
+        <div style={{ display: "grid", gridTemplateColumns: portrait ? "1fr" : "repeat(3, 1fr)", gap: 26 }}>
           {divisions.map((d, i) => {
             const st = DIVISION_STYLE[d.key];
             const delay = 10 + i * 8;
@@ -174,7 +187,15 @@ const SceneDivisions: React.FC = () => {
                       </div>
                     </div>
                     <div style={{ height: 1, background: theme.border }} />
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {/* في الطولي الخدماتُ في عمودين حتى لا يطول الكارت */}
+                    <div
+                      style={{
+                        display: portrait ? "grid" : "flex",
+                        gridTemplateColumns: portrait ? "1fr 1fr" : undefined,
+                        flexDirection: "column",
+                        gap: 12,
+                      }}
+                    >
                       {d.services.map((sv, j) => {
                         const sd = delay + 8 + j * 4;
                         const o = spring({ frame: frame - sd, fps, config: { damping: 200 } });
@@ -203,11 +224,13 @@ const SceneDivisions: React.FC = () => {
 // المشهد 4 — عملاؤنا (لوجو + اسم العميل)
 // التخطيط يتكيّف مع عدد العملاء: بطاقة كبيرة للواحد أو الاثنين، وشبكة لما زاد.
 const SceneClients: React.FC = () => {
+  const portrait = usePortrait();
   const count = clients.length;
-  const columns = count <= 2 ? count : count <= 6 ? 3 : 4;
   const featured = count <= 2;
+  // في الطولي لا يتّسع العرض لأكثر من ثلاثة أعمدة (أو عمودين للقلّة)
+  const columns = featured ? count : portrait ? (count <= 4 ? 2 : 3) : count <= 6 ? 3 : 4;
   // وضع مكثّف عند كثرة العملاء حتى تتسع الشبكة دون ازدحام
-  const dense = count >= 7;
+  const dense = count >= 7 || (portrait && count > 4);
 
   const GAP = dense ? 18 : 26;
   const sz = {
@@ -460,10 +483,20 @@ const ScenePhotos: React.FC = () => {
 // المشهد 5 — نطاق الأعمال الجغرافي
 const SceneReach: React.FC = () => {
   const hq = regions.find((r) => r.hq);
+  const portrait = usePortrait();
   return (
     <Stage>
-      <div style={{ width: "100%", maxWidth: 1580, display: "flex", alignItems: "center", gap: 60 }}>
-        <div style={{ width: 520, display: "flex", flexDirection: "column", gap: 24 }}>
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 1580,
+          display: "flex",
+          flexDirection: portrait ? "column" : "row",
+          alignItems: "center",
+          gap: portrait ? 30 : 60,
+        }}
+      >
+        <div style={{ width: portrait ? "100%" : 520, display: "flex", flexDirection: "column", gap: 24 }}>
           <SectionTitle label="نطاق أعمالنا" delay={0} />
           <RevealText delay={8}>
             <div style={{ fontSize: 30, color: theme.ink, fontWeight: 600, lineHeight: 1.65 }}>
@@ -472,7 +505,16 @@ const SceneReach: React.FC = () => {
               وإدارة مركزية تتابع كل موقع.
             </div>
           </RevealText>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 4 }}>
+          {/* في الطولي بطاقاتُ المناطق صفٌّ ملتفّ فوق الخريطة بدل عمودٍ بجانبها */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: portrait ? "row" : "column",
+              flexWrap: portrait ? "wrap" : undefined,
+              gap: 12,
+              marginTop: 4,
+            }}
+          >
             {regions.map((r, i) => (
               <RevealText key={r.name} delay={50 + i * 8}>
                 <Card padding={20} style={{ display: "flex", alignItems: "center", gap: 15 }}>
@@ -496,8 +538,8 @@ const SceneReach: React.FC = () => {
             ))}
           </div>
         </div>
-        <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center" }}>
-          <SaudiMap width={920} />
+        <div style={{ flex: portrait ? undefined : 1, display: "flex", justifyContent: "center", alignItems: "center" }}>
+          <SaudiMap width={portrait ? 900 : 920} />
         </div>
       </div>
     </Stage>
@@ -512,11 +554,21 @@ const ScenePlatform: React.FC = () => {
     { Icon: IconCart, text: "دورة مشتريات وتوريد موثّقة" },
     { Icon: IconCheckCircle, text: "مؤشرات أداء بأهداف محددة" },
   ];
+  const portrait = usePortrait();
   return (
     <Stage>
-      <div style={{ width: "100%", maxWidth: 1620, display: "flex", alignItems: "center", gap: 54 }}>
-        {/* النص على اليمين لأن التخطيط RTL */}
-        <div style={{ width: 520, display: "flex", flexDirection: "column", gap: 22 }}>
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 1620,
+          display: "flex",
+          flexDirection: portrait ? "column" : "row",
+          alignItems: portrait ? "stretch" : "center",
+          gap: portrait ? 34 : 54,
+        }}
+      >
+        {/* النص على اليمين لأن التخطيط RTL — وفي الطولي فوق اللقطات */}
+        <div style={{ width: portrait ? "100%" : 520, display: "flex", flexDirection: "column", gap: 22 }}>
           <SectionTitle label="منصتنا الرقمية" delay={0} />
           <RevealText delay={8}>
             <div style={{ fontSize: 29, color: theme.ink, fontWeight: 600, lineHeight: 1.65 }}>
@@ -538,16 +590,16 @@ const ScenePlatform: React.FC = () => {
           </div>
         </div>
 
-        {/* اللقطات على اليسار، متراكبة لإيحاء العمق */}
-        <div style={{ flex: 1, position: "relative", height: 660 }}>
+        {/* اللقطات على اليسار، متراكبة لإيحاء العمق — وفي الطولي تحت النص بالتراكب نفسه */}
+        <div style={{ flex: portrait ? undefined : 1, position: "relative", height: portrait ? 900 : 660 }}>
           <RevealText delay={6} style={{ position: "absolute", top: 0, right: 0 }}>
-            <ScreenFrame src="platform/dashboard.png" width={760} />
+            <ScreenFrame src="platform/dashboard.png" width={portrait ? 860 : 760} />
           </RevealText>
-          <RevealText delay={14} style={{ position: "absolute", top: 196, left: 24 }}>
-            <ScreenFrame src="platform/buildings.png" width={620} />
+          <RevealText delay={14} style={{ position: "absolute", top: portrait ? 250 : 196, left: portrait ? 0 : 24 }}>
+            <ScreenFrame src="platform/buildings.png" width={portrait ? 720 : 620} />
           </RevealText>
-          <RevealText delay={22} style={{ position: "absolute", top: 392, right: 96 }}>
-            <ScreenFrame src="platform/kpi.png" width={520} />
+          <RevealText delay={22} style={{ position: "absolute", top: portrait ? 500 : 392, right: portrait ? 60 : 96 }}>
+            <ScreenFrame src="platform/kpi.png" width={portrait ? 600 : 520} />
           </RevealText>
         </div>
       </div>
@@ -557,6 +609,7 @@ const ScenePlatform: React.FC = () => {
 
 // المشهد 6 — الشهادات والاعتمادات
 const SceneCertifications: React.FC = () => {
+  const portrait = usePortrait();
   return (
     <Stage>
       <div style={{ width: "100%", maxWidth: 1560, display: "flex", flexDirection: "column", gap: 26 }}>
@@ -565,7 +618,7 @@ const SceneCertifications: React.FC = () => {
         {/* التصنيف الرسمي — الاعتماد الأقوى، لذا يأخذ بطاقة مستقلة */}
         <RevealText delay={8}>
           <Card accent={theme.accent} padding={32}>
-            <div style={{ display: "flex", alignItems: "center", gap: 30 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 30, flexWrap: portrait ? "wrap" : undefined }}>
               <IconChip color={theme.accent} size={92}>
                 <IconAward size={52} color={theme.accent} />
               </IconChip>
@@ -595,7 +648,8 @@ const SceneCertifications: React.FC = () => {
                   ))}
                 </div>
               </div>
-              <div style={{ textAlign: "center", paddingInline: 14 }}>
+              {/* في الطولي تأخذ الدرجة صفّاً كاملاً تحت العنوان بدل مزاحمته */}
+              <div style={{ textAlign: "center", paddingInline: 14, flexBasis: portrait ? "100%" : undefined }}>
                 <div style={{ fontFamily: headingFont, fontWeight: 900, fontSize: 54, color: theme.accent, lineHeight: 1.1 }}>
                   {classification.grade}
                 </div>
@@ -605,7 +659,7 @@ const SceneCertifications: React.FC = () => {
         </RevealText>
 
         {/* المواصفات الدولية */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 22 }}>
+        <div style={{ display: "grid", gridTemplateColumns: portrait ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 22 }}>
           {certifications.map((c, i) => (
             <RevealText key={c.code} delay={20 + i * 6}>
               <Card accent={theme.primary} padding={26} style={{ height: "100%" }}>
@@ -671,24 +725,36 @@ const SceneStats: React.FC = () => {
       bar: 100,
     },
   ];
+  const portrait = usePortrait();
   return (
     <Stage>
       <div style={{ width: "100%", maxWidth: 1500, display: "flex", flexDirection: "column", gap: 34 }}>
         <SectionTitle label="لماذا المباني السريعة؟" delay={0} />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 26 }}>
+        <div style={{ display: "grid", gridTemplateColumns: portrait ? "1fr" : "repeat(3, 1fr)", gap: 26 }}>
           {stats.map((st, i) => {
             const delay = 12 + i * 8;
             return (
               <RevealText key={st.label} delay={delay}>
                 <Card accent={st.color} padding={34}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    {/* في الطولي الرقمُ والوصفُ بجانب الأيقونة في صفٍّ واحد حتى لا يطول الكارت */}
+                    <div style={{ display: "flex", alignItems: "center", gap: portrait ? 24 : 0, justifyContent: "space-between" }}>
                       <IconChip color={st.color} size={64}>
                         <st.Icon size={36} color={st.color} />
                       </IconChip>
+                      {portrait ? (
+                        <div style={{ flex: 1, display: "flex", alignItems: "baseline", gap: 18 }}>
+                          <AnimatedNumber to={st.to} suffix={st.suffix} color={st.color} delay={delay + 2} />
+                          <div style={{ fontSize: 28, color: theme.ink, fontWeight: 700 }}>{st.label}</div>
+                        </div>
+                      ) : null}
                     </div>
-                    <AnimatedNumber to={st.to} suffix={st.suffix} color={st.color} delay={delay + 2} />
-                    <div style={{ fontSize: 28, color: theme.ink, fontWeight: 700 }}>{st.label}</div>
+                    {portrait ? null : (
+                      <>
+                        <AnimatedNumber to={st.to} suffix={st.suffix} color={st.color} delay={delay + 2} />
+                        <div style={{ fontSize: 28, color: theme.ink, fontWeight: 700 }}>{st.label}</div>
+                      </>
+                    )}
                     <KpiBar to={st.bar} color={st.color} delay={delay + 4} />
                   </div>
                 </Card>
@@ -707,6 +773,7 @@ const SceneOutro: React.FC<{ companyName: string; phone: string; website: string
   phone,
   website,
 }) => {
+  const portrait = usePortrait();
   return (
     <Stage>
       <div style={{ width: "100%", maxWidth: 1200, display: "flex", flexDirection: "column", alignItems: "center", gap: 30 }}>
@@ -727,7 +794,7 @@ const SceneOutro: React.FC<{ companyName: string; phone: string; website: string
         </RevealText>
         {(phone || website) && (
           <RevealText delay={24}>
-            <div style={{ display: "flex", gap: 18, marginTop: 6 }}>
+            <div style={{ display: "flex", flexDirection: portrait ? "column" : "row", alignItems: "center", gap: 18, marginTop: 6 }}>
               {phone ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 14, padding: "14px 22px", boxShadow: theme.cardShadow }}>
                   <IconPhone size={28} color={theme.primary} />

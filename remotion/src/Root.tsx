@@ -2,23 +2,38 @@ import { Composition } from "remotion";
 import { CompanyAnnouncement } from "./CompanyAnnouncement";
 import { fps } from "./theme";
 
+// المدة مشتركة بين التركيبتين — وعند تغييرها حدِّث DURATION في scripts/make-music.py
+const DURATION_IN_FRAMES = 54 * fps;
+
+const defaultProps = {
+  companyName: "شركة المباني السريعة للمقاولات",
+  tagline: "المقاولات · إدارة المرافق · تصنيع المعادن — تحت مظلة واحدة",
+  phone: "+966 55 841 6888",
+  website: "fastbuildings.sa",
+  musicVolume: 0.7,
+};
+
 export const RemotionRoot: React.FC = () => {
   return (
     <>
       <Composition
         id="CompanyAnnouncement"
         component={CompanyAnnouncement}
-        durationInFrames={54 * fps}
+        durationInFrames={DURATION_IN_FRAMES}
         fps={fps}
         width={1920}
         height={1080}
-        defaultProps={{
-          companyName: "شركة المباني السريعة للمقاولات",
-          tagline: "المقاولات · إدارة المرافق · تصنيع المعادن — تحت مظلة واحدة",
-          phone: "+966 55 841 6888",
-          website: "fastbuildings.sa",
-          musicVolume: 0.7,
-        }}
+        defaultProps={defaultProps}
+      />
+      {/* النسخة الطولية للجوّال (ستوري · ريلز · تيك توك) — المشاهد نفسها بتخطيط عمودي */}
+      <Composition
+        id="CompanyAnnouncementPortrait"
+        component={CompanyAnnouncement}
+        durationInFrames={DURATION_IN_FRAMES}
+        fps={fps}
+        width={1080}
+        height={1920}
+        defaultProps={defaultProps}
       />
     </>
   );
