@@ -221,6 +221,13 @@ await check("★ ولا مديرُ المشاريع مُنشئُ الطلب",
 await seed(`${R}/RPAID`, Object.assign({}, REQ, { status: "crq_paid" }));
 await check("★★ ولا يُحذف المسدَّدُ ولو من الأدمن (أثرٌ ماليٌّ لا يُمحى)",
   assertFails(deleteDoc(doc(ADMIN, `${R}/RPAID`))));
+/* (تدقيق 15/09) الملغى الذي خرج منه مالٌ (دفعاتٌ قبل حارس الإلغاء) سجلٌّ ماليٌّ لا يُحذف. */
+await seed(`${R}/RDELPAY`, Object.assign({}, REQ, { status: "crq_cancelled", payments: [{ amount: 400, ref: "x" }] }));
+await check("★★ ولا يُحذف ملغًى سُدِّد منه شيء (الدفعاتُ أثرٌ ماليّ)",
+  assertFails(deleteDoc(doc(ADMIN, `${R}/RDELPAY`))));
+await seed(`${R}/RDEL0`, Object.assign({}, REQ, { status: "crq_cancelled", payments: [] }));
+await check("★ والملغى بمصفوفةِ دفعاتٍ فارغة يُحذف كالملغى بلا مصفوفة",
+  assertSucceeds(deleteDoc(doc(ADMIN, `${R}/RDEL0`))));
 await seed(`${R}/RCONV`, Object.assign({}, REQ, { status: "crq_converted", contractId: "CT-1" }));
 await check("★ ولا المحوَّلُ إلى عقد (وإلا صار عقدٌ بلا طلبٍ يفسّره)",
   assertFails(deleteDoc(doc(ADMIN, `${R}/RCONV`))));

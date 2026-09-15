@@ -2769,14 +2769,19 @@ const trans = await page.evaluate(async (cid) => {
   await window.contracts._transit(cid, 'close', '');
   const c = window.contracts.contractById(cid);
   out.push(c.status);
-  // المحتجزُ نسبةٌ من **القيمة النافذة** — أي بعد أوامر التغيير المعتمَدة
-  return { out, released: c.retention.released,
-           want: Math.round(window.contracts._contractValue(c) * c.retention.pct / 100 * 100) / 100 };
+  // (تدقيق 15/09) المُفرَجُ = المحتجزُ **المخصومُ فعلاً** من المستخلصات المسدَّدة (لقطاتُ السداد) —
+  // لا نسبةٌ من القيمة: القيمةُ شاملةُ الضريبة وتشمل ما لم يُنفَّذ.
+  const held = window.contracts.extractsList()
+    .filter(e => e.contractId === cid && e.status === 'ext_paid')
+    .reduce((s, e) => s + (Number((e.settled || {}).retention) || 0), 0);
+  return { out, released: c.retention.released, want: Math.round(held * 100) / 100,
+           naive: Math.round(window.contracts._contractValue(c) * c.retention.pct / 100 * 100) / 100 };
 }, conv.cid);
 check('★ دورةُ الحالة تكتمل: منتهٍ فنّياً (بالختاميّ) ⇒ مقفل',
   trans.out.join(' → ') === 'ctr_completed → ctr_closed', trans.out.join(' → '));
-check('★ والإقفالُ أفرج عن المحتجز بقيمةٍ محسوبة من **القيمة النافذة** (بعد أوامر التغيير)',
-  trans.released === trans.want && trans.released > 0, 'مرسوم ' + trans.released + ' · محسوب ' + trans.want);
+check('★ والإقفالُ أفرج عن المحتجز بما خُصم فعلاً من المستخلصات المسدَّدة — لا بنسبةٍ من القيمة',
+  trans.released === trans.want && trans.released > 0 && trans.released !== trans.naive,
+  'مرسوم ' + trans.released + ' · محسوب ' + trans.want + ' · نسبةُ القيمة ' + trans.naive);
 
 const afterClose = await page.evaluate(async (cid) => {
   try { await window.contracts._transit(cid, 'suspend', 'x'); return 'مرّ على عقدٍ مقفل'; }

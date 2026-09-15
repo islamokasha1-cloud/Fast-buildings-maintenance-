@@ -804,7 +804,10 @@ function predelivery() {
        لا تعيش في وحدة: وسمُ <script> وحاويةٌ في الصفحة وسطرٌ في `renderKPI`. */
     /* رُفع من 39944 إلى 39946 — سطران لا يعيشان في وحدة: وسمُ `qr-code.js` وسطرُ
        تسجيلها في كاشف الوحدات القديمة. المُرمِّزُ كلُّه في ملفّه. */
-    const IDX_CEILING = 39957;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 39957 إلى 40011 — إصلاحاتُ التدقيق الحسابيّ (15/09) في مكانها (CLAUDE.md: الإصلاحُ
+       حيث المنطق): صافي الاستلام التراكميّ · تقديرُ المُدقَّق · تأكيدُ الاستلام فوق المطلوب ·
+       أصلُ التسوية · قارئُ المبالغ. لا ميزةَ جديدة. */
+    const IDX_CEILING = 40011;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -8063,6 +8066,92 @@ function cleaningOpsTests() {
        • #5a: مراجعة المخزون الفاشلة تُطلق الحارس الدائم (بلا خصم مزدوج).
        • #5b: كاشف التقادم يحرس cleaning-operations.js وبصمتها تطابق APP_VERSION.
    ════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   التدقيقُ الحسابيُّ الشامل (15/09) — المشتريات: الاستلامُ بسعرين، تقديرُ
+   المُدقَّق، الاستلامُ فوق المطلوب، أصلُ التسوية، وقارئُ المبالغ
+   ═══════════════════════════════════════════════════════════════════ */
+function financeArithmeticAudit0915() {
+  H("التدقيقُ الحسابيُّ (15/09) — المشتريات");
+  const vm = require("vm");
+  // ١) الاستلامُ على دفعتين بسعرين: الصافي التراكميّ من السندات لا سعرُ آخر جلسة × التراكمي
+  T("★★★ صافي البند التراكميّ = صافي السندات السابقة + صافي الجلسة (cumNet) — لا سعر الجلسة × cumRcv",
+    HTML.includes("const prevNet = _waPrevNet(p, i, it);") &&
+    HTML.includes("const cumNet  = _r2(prevNet + net);") &&
+    /const _cNet\s*=\s*\(a\.cumNet!=null && isFinite\(Number\(a\.cumNet\)\)\) \? Math\.round\(Number\(a\.cumNet\)\*100\)\/100/.test(HTML) &&
+    HTML.includes("rcvQty, stockQty, directQty, prevRcv, cumRcv, prevNet, cumNet,"));
+  T("★★ وسعرُ الوحدة المخزَّن متوسّطٌ مرجَّح (فلا تُعيد _poItemLine حسابَه على سعرٍ واحد) وآخرُ فاتورةٍ في lastUnitPrice",
+    HTML.includes("unitCost  : (_cumQ>0 && _cNet>0) ? (_cNet/_cumQ) : a.unitPrice,") &&
+    HTML.includes("lastUnitPrice: a.unitPrice,") &&
+    HTML.includes("value=\"${it.lastUnitPrice!=null?it.lastUnitPrice:(it.unitCost!=null?it.unitCost:'')}\""));
+  {
+    // سلوكي: _waPrevNet على سندين (5@10 ثمّ 5@12) = 110 لا 120؛ وسندٌ قديمٌ بلا net يُحسب من كميته وسعره
+    const a = HTML.indexOf("function _waPrevRcv(p, idx, it){");
+    const b = HTML.indexOf("\n// جمع حقل على مستوى السند عبر كل السندات", a);
+    const fn = HTML.slice(a, b);
+    const sb = { _poItemKey: r => (r && (r.itemId || r.itemCode || r.itemName)) || "" };
+    vm.createContext(sb);
+    let ok = false, msg = "";
+    try {
+      vm.runInContext(fn + "\n;this.__n=_waPrevNet;this.__r=_waPrevRcv;", sb);
+      const it = { itemId: "A" };
+      const p = { grnDocs: [ { items: [{ itemId: "A", rcvQty: 5, unitPrice: 10, net: 50 }] },
+                             { items: [{ itemId: "A", rcvQty: 5, unitPrice: 12, net: 60 }] } ] };
+      const pOld = { grnDocs: [ { items: [{ itemId: "A", rcvQty: 5, unitPrice: 10 }] } ] };
+      const n1 = sb.__n(p, 0, it), r1 = sb.__r(p, 0, it), n2 = sb.__n(pOld, 0, it);
+      ok = n1 === 110 && r1 === 10 && n2 === 50;
+      msg = `net=${n1} rcv=${r1} old=${n2}`;
+    } catch (e) { msg = String(e.message).slice(0, 140); }
+    T("★★★ سلوكي: 5@10 ثمّ 5@12 ⇒ الصافي السابق 110 (لا 120) والكمية 10، والسندُ القديم بلا net يُحسب", ok, msg);
+    // التكلفة الفعلية للبند بعد الجلستين: 110 صافي ⇒ 126.50 بالضريبة، لا 138
+    const _net = 110, _vat = Math.round(_net * 0.15 * 100) / 100, _tot = Math.round((_net + _vat) * 100) / 100;
+    T("★★ فالتكلفةُ الفعلية 126.50 (= مجموع الفاتورتين) لا 138", _tot === 126.5, `tot=${_tot}`);
+  }
+  // ٢) تعديلُ المسؤول لطلبٍ مُدقَّق لا يدهس التقدير بالمستلَم
+  T("★★ paeSave: للمُدقَّق التقديرُ = المطلوب × سعر التقدير المجمَّد (لا Σ itemCost على المستلَم)",
+    /if\(_paeAudited\)\{[\s\S]{0,700}const u = parseFloat\(it\.estUnitCost!=null \? it\.estUnitCost : it\.unitCost\)\|\|0, q = parseFloat\(it\.qty\)\|\|0;[\s\S]{0,600}pf\.estCost     = Math\.round\(_est\.reduce/.test(HTML));
+  // ٣) الاستلامُ فوق المطلوب يحتاج تأكيداً صريحاً
+  T("★★ الاستلامُ فوق المطلوب لا يمرّ بصمت — تأكيدٌ صريحٌ يسمّي البند والكميتين",
+    HTML.includes("const _over = [];") &&
+    /if\(_req > 0 && rcv > 0 && _cum > _req \+ 0\.001\) _over\.push/.test(HTML) &&
+    /if\(_over\.length\)\{\s*\n\s*const _okOver = await showConfirm\(\{\s*\n\s*title:"استلامٌ فوق الكمية المطلوبة"/.test(HTML) &&
+    /okText:"تأكيد الزيادة"[\s\S]{0,80}if\(!_okOver\) return;/.test(HTML));
+  // ٤) أصلُ التسوية لا يتلف
+  T("★★ _poBaseFinanceTotal بعد التسوية = الأصلُ من أوّل قيدِ تسويةٍ قائم (لا actualCost المُسوّى)",
+    /function _poBaseFinanceTotal\(p\)\{[\s\S]{0,700}if\(p && !p\.auditedBy && _poSettledTotal\(p\)!=null\)\{[\s\S]{0,400}_first = _log\.find\(x=> x && !x\.cleared && isFinite\(Number\(x\.base\)\) && Number\(x\.base\)>0\);/.test(HTML));
+  {
+    const a = HTML.indexOf("function _poSettledTotal(p){");
+    const b = HTML.indexOf("function _poFinanceTotal(p){", a);
+    const sb = { getPOTotal: p => 22402, poActualCost: p => Number(p.actualCost) || 22402 };
+    vm.createContext(sb);
+    let ok = false, msg = "";
+    try {
+      vm.runInContext(HTML.slice(a, b) + "\n;this.__b=_poBaseFinanceTotal;", sb);
+      const settled = { actualCost: 21592.4, payment: { settledTotal: 21592.4, settleLog: [{ from: 22402, to: 21592.4, base: 22402 }] } };
+      const cleared = { payment: { settleLog: [{ from: 22402, to: 21592.4, base: 22402 }, { from: 21592.4, to: 22402, base: 22402, cleared: true }] } };
+      const b1 = sb.__b(settled), b2 = sb.__b(cleared), b3 = sb.__b({ actualCost: 500 });
+      ok = b1 === 22402 && b2 === 22402 && b3 === 500;
+      msg = `settled=${b1} cleared=${b2} plain=${b3}`;
+    } catch (e) { msg = String(e.message).slice(0, 140); }
+    T("★★ سلوكي: مُسوّى على 21,592.4 ⇒ الأصل 22,402 (كان 21,592.4)؛ وبعد الإلغاء 22,402؛ وبلا تسوية actualCost", ok, msg);
+  }
+  // ٥) قارئُ المبالغ
+  {
+    const a = HTML.indexOf("function parseAmountInput(v){");
+    const b = HTML.indexOf("function calcItemTotals(){", a);
+    const sb = {}; vm.createContext(sb);
+    let ok = false, msg = "";
+    try {
+      vm.runInContext(HTML.slice(a, b) + "\n;this.__p=parseAmountInput;", sb);
+      const cases = [["1,250", 1250], ["12,500.50", 12500.5], ["1,25", 1.25], ["1,250,000", 1250000], ["١٢٥٠", 1250], ["١٬٢٥٠", 1250], ["", 0], ["abc", 0], [12.5, 12.5], ["1.250,50", 1250.5]];
+      const bad = cases.filter(([i, e]) => sb.__p(i) !== e).map(([i, e]) => `${JSON.stringify(i)}⇒${sb.__p(i)}≠${e}`);
+      ok = bad.length === 0; msg = bad.join(" · ");
+    } catch (e) { msg = String(e.message).slice(0, 140); }
+    T("★★ سلوكي: «1,250» ⇒ 1250 (كان 1.25) · «1,25» ⇒ 1.25 · «12,500.50» ⇒ 12500.5 · الأرقامُ الهندية", ok, msg);
+    T("★ وثلاثةُ مواضع الإدخال تقرأ به (إنشاءُ الطلب · إضافةُ بند · تعديلُ المسؤول)",
+      (HTML.match(/parseAmountInput\(/g) || []).length >= 4 && !HTML.includes('.replace(/،/g,".").replace(/,/g,".")'));
+  }
+}
+
 function comprehensiveReviewV18_9vl() {
   H("27) إصلاحات المراجعة الشاملة (v18.9vl)");
 
@@ -12067,9 +12156,9 @@ function contractsPhase1() {
     C._crqPayDue({ value:1500, payments:[{amount:500}] }) === 1000 &&
     C._crqPayDue({ value:1500, payments:[{amount:1600}] }) === 0);
   T("★★ الدفعةُ الجزئية تُبقي الأمرَ مفتوحاً وتُغلقه الأخيرة (المصدرُ في payRequest)",
-    /var done = paid >= r2\(Number\(r\.value\)\|\|0\) - 0\.01;[\s\S]{0,80}r\.status = done \? "crq_paid" : "crq_pending_pay";/.test(src));
+    /var done = paid >= r2\(Number\(r\.value\)\|\|0\);[\s\S]{0,120}r\.status = done \? "crq_paid" : "crq_pending_pay";/.test(src));
   T("★ ولا دفعةَ فوق المتبقّي — سندٌ بمبلغٍ فوق قيمته بابُ صرفٍ بلا اعتماد",
-    /if\(amt > due \+ 0\.01\) throw new Error\("الدفعة أكبر من المتبقّي/.test(src));
+    /if\(amt > due\) throw new Error\("الدفعة أكبر من المتبقّي/.test(src));   // (تدقيق 15/09) بلا سماحية هللة
   T("★ كلُّ دفعةٍ تُلحَق بالمصفوفة وبإيصالها، والملخّصُ القديم يُكتب بالمجموع",
     /r\.payments\.push\(\{ id:"PAY-"/.test(src) &&
     /r\.payment = \{ amount:paid, ref:payload\.ref\|\|"", receiptUrl:payload\.receiptUrl/.test(src));
@@ -12109,7 +12198,7 @@ function contractsPhase1() {
   {
     const W = (n) => C._amountWords(n);
     T("★★ التفقيط — ألفٌ ومائتان (الرقمُ في الورقة مرّتين: رقماً وكتابةً)",
-      W(1200) === "ألف ومائتان ريال لا غير", W(1200));
+      W(1200) === "ألف ومائتا ريال لا غير", W(1200));   // (تدقيق 15/09) المثنّى مضافاً بلا نون
     T("★ والهللاتُ تُكتَب حين توجد وتُسكَت حين لا توجد",
       W(1500.75) === "ألف وخمسمائة ريال وخمسة وسبعون هللة لا غير" &&
       W(1500) === "ألف وخمسمائة ريال لا غير", W(1500.75));
@@ -12117,7 +12206,7 @@ function contractsPhase1() {
       W(1) === "ريال واحد لا غير" && W(2) === "ريالان لا غير" && W(3) === "ثلاثة ريالات لا غير",
       [W(1), W(2), W(3)].join(" | "));
     T("★ والمراتبُ بصيغها: ألفان · ثلاثةُ آلافٍ · ومليون",
-      W(2000) === "ألفان ريال لا غير" && W(3000) === "ثلاثة آلاف ريال لا غير" &&
+      W(2000) === "ألفا ريال لا غير" && W(3000) === "ثلاثة آلاف ريال لا غير" &&
       W(1000000) === "مليون ريال لا غير", [W(2000), W(3000), W(1000000)].join(" | "));
     T("★ وصفرٌ يُكتَب صفراً لا فراغاً (خانةٌ فارغةٌ في سندِ صرفٍ تُملأ بقلم)",
       W(0) === "صفر ريال لا غير", W(0));
@@ -12914,7 +13003,7 @@ function contractsPhase1() {
     /function payAdvance\(id, payload\)\{[\s\S]{0,300}إيصال السداد إلزامي[\s\S]{0,200}مبلغ السداد إلزامي[\s\S]{0,300}سداد الدفعة المقدمة للمالية فقط[\s\S]{0,1200}يتجاوز المتبقّي[\s\S]{0,900}_pushTimeline\(c, "سداد دفعة مقدمة", "advance_paid"/.test(src));
   T("★ والمدفوعُ فعلاً من المقدمة مصروفٌ في التجميعَين (الموازنةُ والبندُ المستعاض) بلا ازدواج",
     /var paid = advancePaidOf\(c\);[\s\S]{0,300}ext_paid/.test(src) &&
-    (src.match(/var paid = advancePaidOf\(c\);/g) || []).length === 2);
+    (src.match(/var paid = advancePaidOf\(c\);/g) || []).length === 3);   // (تدقيق 15/09) + حارسُ أمر التغيير
 
   /* ════ سريانُ الوثائق ════ */
   const today = new Date("2026-08-08T00:00:00Z");
@@ -13542,7 +13631,7 @@ function contractsPhase1() {
   T("★ القاعدةُ نفسُها تحرس المعاملة لا الأزرارَ وحدها",
     /if\(!ctrCanTransit\(action, c\.status, role\)\) throw/.test(src));
   T("★ الإقفالُ يُفرِج عن المحتجز بقيمةٍ محسوبةٍ لا مُدخَلة",
-    /if\(action==="close"\) c\.retention = Object\.assign\([\s\S]{0,120}released: r2\(contractValue\(c\)/.test(src));
+    /if\(action==="close"\) c\.retention = Object\.assign\([\s\S]{0,120}released: retentionHeldOf\(c, _exts\)/.test(src));   // (تدقيق 15/09) المخصومُ فعلاً
   T("والسببُ إلزاميٌّ للإيقاف والفسخ في طبقة البيانات",
     /if\(t\.needsReason && !reason\) return Promise\.reject/.test(src));
 
@@ -13665,6 +13754,115 @@ function contractsPhase1() {
     T("ومستخلصٌ مسدَّدٌ ثمّ معلّقٌ عند المدير: «سابقاً» للمعلّق = المسدَّد، وللمسدَّد صفر",
       C._prevGrossOf([E1, { ...E2, status: "ext_pending_ceo" }], CT4, "E2") === 30000 &&
       C._prevGrossOf([E1, { ...E2, status: "ext_pending_ceo" }], CT4, "E1") === 0);
+  }
+
+  /* ════ التدقيقُ الحسابيُّ الشامل (15/09) — المستخلصات ════ */
+  {
+    const E1 = { ...E_PAID, createdAt: "2026-08-29T10:00:00.000Z" };
+    const E2 = { id: "E2", contractId: "CTR-1", status: "ext_paid", createdAt: "2026-09-15T10:00:00.000Z",
+                 lines: [{ lineId: "L1", cumQty: 500, unitPrice: 100 }] };
+    /* ١) الإحياء */
+    const A_RET = { ...E1, status: "ext_returned" };
+    T("★★★ مستخلصٌ مُعادٌ لا يعود إلى الدورة وبعده مستخلصٌ مسدَّد (كان يُصرف العملُ مرّتين)",
+      (C._extReviveBlocker(A_RET, [A_RET, E2]) || {}).id === "E2");
+    T("★★ ولا وللعقد مستخلصٌ آخرُ مفتوح (واحدٌ في المرة)",
+      (C._extReviveBlocker(A_RET, [A_RET, { ...E2, status: "ext_pending_pm" }]) || {}).id === "E2");
+    T("★ ويعود إن لم يكن بعده شيءٌ حيّ — أو كان اللاحقُ مرفوضاً هو الآخر",
+      C._extReviveBlocker(A_RET, [A_RET]) === null &&
+      C._extReviveBlocker(A_RET, [A_RET, { ...E2, status: "ext_pm_rejected" }]) === null);
+    T("★ والمسدَّدُ **قبله** لا يمنعه (المفتوحُ الأخير يُعدَّل بحرّية)",
+      C._extReviveBlocker({ ...E2, status: "ext_pending_pm" }, [E1, { ...E2, status: "ext_pending_pm" }]) === null);
+    T("★ والحارسُ في التعديل والإرجاع معاً",
+      (src.match(/var blk=extReviveBlocker\(e, _exts\);/g) || []).length === 2 &&
+      /function editExtract[\s\S]{0,1500}extReviveBlocker/.test(src) &&
+      /function rewindExtract[\s\S]{0,1200}extReviveBlocker/.test(src));
+    /* ٢) سقفُ الغرامة للعقد لا للمستخلص */
+    T("★★ الغرامةُ المحتسَبةُ سابقاً تُجمَع من لقطات السداد ثمّ المُدخَل",
+      C._prevPenaltyOf([{ ...E1, settled: { penalty: 6000 }, penaltyAmount: 9000 }, E2], CT4, "E2") === 6000 &&
+      C._prevPenaltyOf([{ ...E1, settled: null, penaltyAmount: 2500 }, E2], CT4, "E2") === 2500 &&
+      C._prevPenaltyOf([{ ...E1, settled: { penalty: 6000 } }, E2], CT4, "E1") === 0);
+    T("★★ وسُلَّمُ الحساب يقصّ الغرامةَ على **المتبقّي من سقف العقد** (سقف 10,000 − 6,000 = 4,000)",
+      C._extNet({ lines: [{ cumQty: 500, unitPrice: 100 }] }, CT4, { prevGross: 30000, penaltyAmount: 9000, prevPenalty: 6000 }).penalty === 4000 &&
+      C._extNet({ lines: [{ cumQty: 500, unitPrice: 100 }] }, CT4, { prevGross: 30000, penaltyAmount: 9000, prevPenalty: 12000 }).penalty === 0 &&
+      C._extNet({ lines: [{ cumQty: 500, unitPrice: 100 }] }, CT4, { prevGross: 30000, penaltyAmount: 9000 }).penalty === 9000);
+    T("★ والمقترَحُ يطرح المُغرَّمَ سابقاً (200 يوم × 100 = 20,000 ⇒ سقف 10,000 − 6,000 = 4,000)",
+      C._suggestedPenalty(CT4, 200, 6000) === 4000 && C._suggestedPenalty(CT4, 200, 0) === 10000 &&
+      C._suggestedPenalty(CT4, 200, 12000) === 0);
+    T("★ وكلُّ مواضع بناء السياق تمرّر prevPenalty",
+      (src.match(/prevPenalty:\s*prevPenaltyOf\(/g) || []).length >= 5);
+    /* ٣) المحتجزُ المُفرَج */
+    T("★★ المحتجزُ المخصومُ فعلاً = Σ لقطات السداد للمسدَّد وحدَه",
+      C._retentionHeldOf(CT4, [{ ...E1, settled: { retention: 1500 } }, { ...E2, settled: { retention: 700 } },
+                               { id: "E3", contractId: "CTR-1", status: "ext_pending_finance", settled: { retention: 999 } },
+                               { id: "E9", contractId: "CTR-9", status: "ext_paid", settled: { retention: 999 } }]) === 2200);
+    /* ٤) صفُّ الجدول يقرأ لقطة السداد */
+    T("★★ جدولُ مستخلصات العقد يقرأ لقطةَ السداد للمسدَّد لا الحسابَ الحيّ",
+      /var calc=e\.settled \|\| extCalc\(e,c\);/.test(src));
+    /* ٥) نسبةُ الإنجاز على أساس العقد */
+    T("★★ أساسُ العقد قبل الضريبة في الأوضاع الثلاثة (كان excl يُظهر 87٪ لعقدٍ منفَّذٍ كاملاً)",
+      C._contractBaseOf({ vatMode: "excl", lines: [{ qty: 1000, unitPrice: 100 }] }) === 100000 &&
+      C._contractBaseOf({ vatMode: "incl", lines: [{ qty: 1000, unitPrice: 115 }] }) === 100000 &&
+      C._contractBaseOf({ vatMode: "none", lines: [{ qty: 1000, unitPrice: 100 }] }) === 100000 &&
+      C._contractBaseOf({ vatMode: "excl", value: 115000 }) === 100000 &&
+      C._contractBaseOf({ vatMode: "excl", lines: [{ qty: 1000, unitPrice: 100 }],
+        changeOrders: [{ status: "approved", lines: [{ id: "L1", qty: 100, unitPrice: 100 }] }, { status: "pending", lines: [{ id: "L1", qty: 900, unitPrice: 100 }] }] }) === 110000);
+    T("★ ونسبةُ تبويب المستخلصات تُحسب عليه", /var base = contractBaseOf\(c\);\s*\n\s*var pct = base>0 \? Math\.min\(100, Math\.round\(gross\/base\*100\)\) : 0;/.test(src));
+    /* ٦) المتبقّي يخصم المقدمة */
+    {
+      const CD = { id: "CTR-D", status: "ctr_active", vatMode: "excl", value: 100000, lines: [], advance: { pct: 10, amount: 10000, paid: 10000, payments: [] } };
+      const EX = { id: "ED", contractId: "CTR-D", status: "ext_paid", payment: { amount: 40000 }, settled: { net: 40000 } };
+      T("★★ لوحةُ العقود: المتبقّي = القيمة − المستخلصات المسدَّدة − المقدمة المسدَّدة (كما contractRollup)",
+        C._dashSummary([CD], [EX], new Date("2026-09-15")).remaining === 50000);
+      T("★ وبطاقةُ أداء المورد كذلك",
+        C._vendorScorecard("V1", [{ ...CD, vendorId: "V1" }], [EX], [], new Date("2026-09-15")).remaining === 50000);
+    }
+    /* ٧) بنودُ أمر التغيير الجديدة */
+    T("★★ بنودُ العقد كلُّها تشمل ما أضافه أمرُ تغييرٍ معتمد (كان لا يُستخلَص أبداً)",
+      (function(){
+        const c = { lines: [{ id: "L1", desc: "a", qty: 10, unitPrice: 5 }],
+          changeOrders: [{ id: "CHG-1", status: "approved", lines: [{ id: "L1", qty: 5 }, { id: "NEW-1", desc: "b", unit: "م", qty: 10, unitPrice: 1000 }] },
+                         { id: "CHG-2", status: "pending",  lines: [{ id: "NEW-2", desc: "c", qty: 1, unitPrice: 1 }] }] };
+        const all = C._contractAllLines(c);
+        return all.length === 2 && all[1].id === "NEW-1" && all[1].fromChange === "CHG-1" && all[1].qty === 10 && all[1].unitPrice === 1000;
+      })());
+    T("★ ومسوّدةُ المستخلص الجديد وتبويبُ البنود يقرآنها",
+      /lines:contractAllLines\(c\)\.map\(function\(l\)\{/.test(src) && /var rows=contractAllLines\(c\)\.map\(function\(l,i\)\{/.test(src));
+    /* ٨) حارسُ الخفض يحسب المقدمة */
+    T("★ خفضُ العقد تحت (المقدمة المسدَّدة + المستخلصات) يُمنَع",
+      C._chgGuard({ amount: -90000, lines: [{ id: "L1", qty: -900 }] },
+        { ...CT4, advance: { pct: 20, amount: 23000, paid: 23000 } }, []).belowPaid !== null);
+    /* ٩) رقمٌ واحدٌ للدفعة المقدمة */
+    T("★★ الدفعةُ المقدمة على العقد المتتبَّع = المخزَّنُ عند التحويل لا المشتقُّ من القيمة بعد أوامر التغيير",
+      C._advanceAmountOf({ value: 120000, advance: { pct: 10, amount: 10000, paid: 0 } }) === 10000 &&
+      C._advanceAmountOf({ value: 120000, advance: { pct: 10, amount: 10000 } }) === 12000 &&
+      C._advanceAmountOf({ value: 120000, advance: { pct: 10, amount: 0, paid: 0 } }) === 12000);
+    /* ١١) سقفُ الاسترداد بلا حقل amount */
+    T("★ عقدٌ قديمٌ بلا `advance.amount` يستردّ بنسبته من القيمة",
+      C._advanceRecoveryCapOf({ value: 100000, advance: { pct: 10, recoveryPct: 10 } }) === 10000);
+  }
+
+  /* ════ التدقيقُ الحسابيُّ الشامل (15/09) — أوامرُ الدفع ════ */
+  {
+    T("★★ أمرٌ خرج منه مالٌ لا يُلغى ولا يُحذف (كان الإلغاءُ ثمّ الحذفُ يُسقطان دفعاتٍ من الموازنة)",
+      /function cancelRequest[\s\S]{0,900}if\(crqPaidTotal\(r\) > 0\) throw new Error/.test(src) &&
+      /function deleteRequest[\s\S]{0,700}if\(crqPaidTotal\(r\) > 0\) throw new Error/.test(src));
+    T("★★ رصيدُ المستعاض يعدّ المسدَّدَ من أمرٍ ملغى أو مُعاد مصروفاً (كما contractRollup)",
+      C._substituteRollup("ACC", [
+        { id: "R1", isSubstitute: true, substituteAccountId: "ACC", engagement: "pay_order", status: "crq_cancelled", value: 1000, payments: [{ amount: 500 }] },
+        { id: "R2", isSubstitute: true, substituteAccountId: "ACC", engagement: "pay_order", status: "crq_finance_returned", value: 1000, payments: [{ amount: 700 }] }
+      ], [], []).spent === 1200);
+    T("★★ تعديلُ البنود لا يهبط بالقيمة تحت المسدَّد فعلاً",
+      /function editRequestLines[\s\S]{0,1600}if\(r\.value < crqPaidTotal\(r\)\) throw new Error/.test(src));
+    T("★ خطةٌ تُنتج دفعةً بصفرٍ تُرفض عند الإنشاء",
+      C._paymentPlanRowsOk([0.1, 99.9], 2) === false && C._paymentPlanRowsOk([50, 50], 1000) === true &&
+      C._paymentPlanRowsOk([], 1000) === true && /paymentPlanRowsOk\(doc\.paymentPlan, doc\.value\)/.test(src));
+    T("★ صفُّ الدفعة الأخيرة على السند = القيمة − ما قبلها (كما تُصرف)",
+      /var _amt = \(i===_plan\.length-1\) \? r2\(_v-_acc\) : r2\(_v\*p\/100\);/.test(src));
+    T("★ المبلغُ كتابةً: «مائة ألف» لا «مائة ألفاً» · «مائتا ألف» · «ألفا ريال» · و«خمسة وعشرون ألفاً» تبقى",
+      /مائة ألف ريال/.test(C._amountWords(100000)) && !/ألفاً/.test(C._amountWords(100000)) &&
+      /مائتا ألف ريال/.test(C._amountWords(200000)) && /^ألفا ريال/.test(C._amountWords(2000)) &&
+      /مليونان ومائتا ريال/.test(C._amountWords(2000200)) &&
+      /خمسة وعشرون ألفاً ريال/.test(C._amountWords(25000)) && /ثلاثمائة مليون ريال/.test(C._amountWords(300000000)));
   }
 
   /* الحارسُ المانعُ الوحيد */
@@ -21562,6 +21760,7 @@ function pageScrollResetGuards() {
   fuzz();
   rollupMonthIsolation();
   comprehensiveReviewV18_9vl();
+  financeArithmeticAudit0915();
   deepReviewV18_9vu();
   ticketWhoLabels();
   partialReceiptBackToProc();

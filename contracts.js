@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3233";
+var MODULE_BUILD = "v18.9.3236";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -494,6 +494,14 @@ function paymentPlanOk(plan){
   var s = 0; l.forEach(function(p){ s += p; });
   return Math.abs(r2(s) - 100) <= 0.01;
 }
+/* كلُّ دفعةٍ في الخطة يجب أن تُنتج مبلغاً موجباً على هذه القيمة — وإلا وقف الأمرُ
+   عند دفعةٍ بصفرٍ لا تُصرف ولا تُتخطّى (تدقيق 15/09). */
+function paymentPlanRowsOk(plan, value){
+  var l = normPaymentPlan(plan), v = r2(Number(value)||0);
+  if(!l.length) return true;
+  for(var i=0;i<l.length;i++){ if(r2(v * l[i] / 100) <= 0) return false; }
+  return true;
+}
 function crqPlanInstallment(req){
   var r = req || {};
   var plan = normPaymentPlan(r.paymentPlan);
@@ -573,8 +581,12 @@ function awGroup(n, g){
   if(n === 1) return g.one;
   if(n === 2) return g.two;
   if(n <= 10) return awUnder1000(n)+" "+g.few;
+  // المئاتُ المستديرة (١٠٠ · ٢٠٠ · ٣٠٠…) تُضاف إلى المفرد المجرور: «مائة ألف» لا «مائة ألفاً»
+  if(n % 100 === 0) return awConstruct(awUnder1000(n))+" "+g.one;
   return awUnder1000(n)+" "+g.many;
 }
+/* المثنّى مضافاً يسقط نونُه: «مائتا ألف» · «ألفا ريال» · «مليونا ريال» — لا «مائتان ألف». */
+function awConstruct(s){ return String(s||"").replace(/(مائت|ألف|مليون|مليار)ان$/, "$1ا"); }
 function amountWords(value){
   var num = Number(value);
   if(!isFinite(num)) num = 0;
@@ -602,7 +614,7 @@ var AW_HALALA = { one:"هللة واحدة", two:"هللتان", few:"هللات
 function awMoneyPhrase(n, numeral, f){
   if(n === 1) return f.one;
   if(n === 2) return f.two;
-  return (numeral || "صفر") + " " + ((n >= 3 && n <= 10) ? f.few : f.plain);
+  return awConstruct(numeral || "صفر") + " " + ((n >= 3 && n <= 10) ? f.few : f.plain);
 }
 
 /* ════ غرامةُ التأخير — **بالريال** ════   (طلبُ المالك)
@@ -1225,8 +1237,12 @@ function crqDraftContract(req, clauses){
 }
 
 /* مبلغُ الدفعة المقدمة يُشتقّ من نسبتها على قيمة العقد — رقمٌ محسوبٌ لا مُدخَل. */
+/* وعلى العقد **المتتبَّع** (له حقلُ `paid`) الرقمُ المخزَّنُ عند التحويل هو الحقيقة —
+   لا المشتقُّ من القيمة الحالية: أمرُ تغييرٍ يرفع القيمةَ كان يرفع المعروضَ إلى
+   ١٢,٠٠٠ بينما المستحقُّ والسقفُ يقرآن ١٠,٠٠٠ (تدقيق 15/09) — رقمان لشيءٍ واحد. */
 function advanceAmountOf(contract){
-  var c = contract || {}, pct = Number((c.advance||{}).pct);
+  var c = contract || {}, a = c.advance || {}, pct = Number(a.pct);
+  if(a.paid != null && a.amount != null){ var st = Number(a.amount); if(isFinite(st) && st > 0) return r2(st); }   // صفرٌ = لم يُثبَّت بعد (قبل التحويل)
   if(!isFinite(pct) || pct <= 0) return 0;
   return r2(contractValue(c) * pct / 100);
 }
@@ -1254,7 +1270,8 @@ function advanceAmountOf(contract){
    بها — التلقائيُّ للسهو لا ليُلغي شرطاً وُقِّع عليه. */
 function advanceRecoveryCapOf(contract){
   var c = contract || {}, a = c.advance || {};
-  var total = Number(a.amount); if(!isFinite(total)) total = 0;
+  var total = (a.amount == null) ? advanceAmountOf(c) : Number(a.amount);   // بلا حقلٍ ⇒ من نسبة العقد
+  if(!isFinite(total)) total = 0;
   var cap = (a.paid == null) ? r2(total) : r2(Math.min(r2(total), advancePaidOf(c)));
   return r2(Math.max(0, r2(cap - advanceRecoveredOf(c))));
 }
@@ -1378,6 +1395,40 @@ function contractValue(contract){
   return r2(base + add);
 }
 
+/* أساسُ العقد **قبل الضريبة** (بعد أوامر التغيير المعتمدة) — مقامُ نسبة الإنجاز
+   ونظيرُ «المنجَز التراكميّ» الذي يُحسب من أساس البنود. من البنود نفسِها إن وُجدت،
+   وإلا من القيمة الإجمالية بحلّ الضريبة منها. */
+function contractBaseOf(contract){
+  var c = contract || {}, mode = normVatMode(c.vatMode);
+  var lines = Array.isArray(c.lines) ? c.lines : [];
+  if(!lines.length){
+    var v = contractValue(c);
+    return mode === "none" ? v : r2(v / (1 + VAT_RATE));
+  }
+  var base = linesTotal(lines, mode).base;
+  (Array.isArray(c.changeOrders)?c.changeOrders:[]).forEach(function(co){
+    if(co && co.status === "approved") base += linesTotal(co.lines, mode).base;
+  });
+  return r2(base);
+}
+
+/* بنودُ العقد **كلُّها**: بنودُ التوقيع + ما أضافته أوامرُ التغيير المعتمدة من بنودٍ
+   جديدة (`NEW-…`) لا يقابلها بندٌ أصليّ (تدقيق 15/09: كانت مسوّدةُ المستخلص تُبنى
+   من بنود التوقيع وحدَها، فبندٌ أُضيف بأمر تغييرٍ يدخل القيمةَ ولا يُستخلَص أبداً). */
+function contractAllLines(contract){
+  var c = contract || {}, out = [], seen = {};
+  (Array.isArray(c.lines)?c.lines:[]).forEach(function(l){ if(l && l.id){ seen[l.id]=1; out.push(l); } });
+  (Array.isArray(c.changeOrders)?c.changeOrders:[]).forEach(function(co){
+    if(!co || co.status !== "approved") return;
+    (Array.isArray(co.lines)?co.lines:[]).forEach(function(l){
+      if(!l || !l.id || seen[l.id]) return;
+      seen[l.id]=1;
+      out.push({ id:l.id, desc:l.desc||"", unit:l.unit||"", qty:Number(l.qty)||0, unitPrice:Number(l.unitPrice)||0, fromChange:co.id||"" });
+    });
+  });
+  return out;
+}
+
 /* الكميةُ المتعاقَدُ عليها لبندٍ = كميةُ العقد + ما أضافته أوامرُ التغيير المعتمدة. */
 function contractLineQty(contract, lineId){
   var c = contract || {}, q = 0;
@@ -1429,6 +1480,7 @@ function vendorScorecard(vendorId, contracts, extracts, changes, today){
     else if(c.status==="ctr_completed" || c.status==="ctr_closed") out.done++;
     else if(c.status==="ctr_terminated") out.terminated++;
     out.value += contractValue(c);
+    out.paid += advancePaidOf(c);   // المقدمةُ المسدَّدة مالٌ خرج (تدقيق 15/09)
     var late = ctrLateDays(c, today);
     if(late > 0){ out.lateContracts++; out.lateDaysSum += late; if(late > out.lateDaysMax) out.lateDaysMax = late; }
     // أثرُ أوامر التغيير المطبَّقة يُقرأ من العقد نفسِه (لا من المجموعة) — فيبقى صحيحاً
@@ -1581,7 +1633,7 @@ function chgGuard(chg, contract, extracts){
     if(after < executed - 1e-9) out.under.push({ lineId:id, desc:ln.desc||"", after:after, executed:executed });
   });
 
-  var paid = 0;
+  var paid = advancePaidOf(c);   // المقدمةُ المسدَّدة نقدٌ خرج أيضاً (تدقيق 15/09)
   (Array.isArray(extracts)?extracts:[]).forEach(function(e){
     if(e && e.contractId===c.id && e.status==="ext_paid") paid += r2((e.payment||{}).amount);
   });
@@ -1643,10 +1695,12 @@ function extNet(ext, contract, ctx){
   var retPct = Number((c.retention||{}).pct); if(!isFinite(retPct)) retPct = 0;
   var retention = r2(period * retPct / 100);
 
-  // (٥) − غرامةُ التأخير (بسقفها من قيمة العقد إن حُدِّد)
+  // (٥) − غرامةُ التأخير — بسقفها من قيمة العقد إن حُدِّد، **والسقفُ للعقد كلِّه**:
+  //       ما احتُسب في المستخلصات السابقة (`prevPenalty`) يُخصَم من المتاح منه.
   var penalty = r2(Math.max(0, Number(x.penaltyAmount)||0));
+  var prevPen = r2(Math.max(0, Number(x.prevPenalty)||0));
   var penCap = penaltyCap(c.penalty, contractValue(c));
-  if(penCap > 0) penalty = r2(Math.min(penalty, penCap));
+  if(penCap > 0) penalty = r2(Math.min(penalty, Math.max(0, r2(penCap - prevPen))));
 
   // (٦) − الموادُّ المصروفةُ له من مستودعنا
   var materials = r2(Math.max(0, Number(x.materialsIssued)||0));
@@ -1670,7 +1724,7 @@ function extNet(ext, contract, ctx){
     gross: gross, prevGross: prev, period: period,
     vat: vat, withVat: withVat,
     retention: retention, advanceRecovery: advanceRecovery,
-    penalty: penalty, materials: materials, nonConformity: nonConformity,
+    penalty: penalty, prevPenalty: prevPen, materials: materials, nonConformity: nonConformity,
     deductions: deductions, net: net
   };
 }
@@ -1743,6 +1797,53 @@ function prevCumByLine(extracts, contract, exceptId){
   return out;
 }
 
+/* حارسُ **إحياء** المستخلص (تدقيق 15/09): المرفوضُ والمُعادُ ليسا «مفتوحَين» (فلا
+   يمنعان إنشاءَ مستخلصٍ جديد) ولا «محسوبَين» (فلا يدخلان «سابقاً») — فإن أُنشئ
+   بعدهما مستخلصٌ وسُدِّد، ثمّ أُعيد المرفوضُ إلى الدورة بالتعديل أو بالإرجاع، صُرف
+   العملُ نفسُه مرّتين: أرضيتُه من السابقة له وحدَها، واللاحقُ لا يراه. القاعدة:
+   لا يعود مستخلصٌ إلى الدورة وللعقد مستخلصٌ **آخرُ مفتوح** (مستخلصٌ واحدٌ في المرة)
+   أو مستخلصٌ **مسدَّدٌ أُنشئ بعده**. تُرجع المستخلصَ المانعَ أو null. */
+function extReviveBlocker(ext, extracts){
+  var e = ext || {}, list = Array.isArray(extracts) ? extracts : [];
+  var key = extOrderKey(e), selfIdx = -1;
+  for(var i=0;i<list.length;i++){ if(list[i] && list[i].id===e.id){ selfIdx=i; break; } }
+  for(var j=0;j<list.length;j++){
+    var o = list[j];
+    if(!o || o.contractId !== e.contractId || o.id === e.id) continue;
+    if(EXT_OPEN.indexOf(o.status) !== -1) return o;
+    if(o.status !== "ext_paid") continue;
+    var k = extOrderKey(o);
+    var after = (k !== key) ? (k > key) : (selfIdx !== -1 && j > selfIdx);
+    if(after) return o;
+  }
+  return null;
+}
+
+/* الغرامةُ **المحتسَبةُ سابقاً** على العقد (تدقيق 15/09): سقفُ الغرامة سقفٌ **للعقد**
+   لا لكلّ مستخلص — وكان يُطبَّق على كلّ مستخلصٍ منفرداً فتبلغ غراماتُ ثلاثة مستخلصاتٍ
+   ثلاثةَ أضعاف السقف. تُجمَع من المستخلصات المحسوبة السابقة: لقطةُ السداد إن وُجدت،
+   وإلا المُدخَل. */
+function prevPenaltyOf(extracts, contract, exceptId){
+  var sum = 0;
+  extsBefore(extracts, contract, exceptId).forEach(function(e){
+    var v = (e.settled && e.settled.penalty != null) ? Number(e.settled.penalty) : Number(e.penaltyAmount);
+    if(isFinite(v) && v > 0) sum += v;
+  });
+  return r2(sum);
+}
+
+/* المحتجزُ **المخصومُ فعلاً** من مستخلصات العقد المسدَّدة — من لقطات السداد لا من
+   قيمة العقد: القيمةُ شاملةُ الضريبة وتشمل ما لم يُنفَّذ، والمحتجزُ يُخصَم على أعمال
+   الفترة قبل الضريبة. */
+function retentionHeldOf(contract, extracts){
+  var cid = (contract && contract.id) || "", sum = 0;
+  (Array.isArray(extracts)?extracts:[]).forEach(function(e){
+    if(!e || e.contractId !== cid || e.status !== "ext_paid") return;
+    var v = Number((e.settled||{}).retention); if(isFinite(v) && v > 0) sum += v;
+  });
+  return r2(sum);
+}
+
 /* الحارسُ **المانعُ الوحيد** في المنظومة: التراكميُّ لا يتجاوز كميةَ العقد
    (بعد أوامر التغيير المعتمدة). تجاوزُه ليس اجتهاداً بل خطأ — ولو مرّ لصار العقدُ
    سقفاً بلا معنى. ويُمنَع كذلك التراجعُ عمّا اعتُمد سابقاً: يُنتج فترةً سالبةً
@@ -1786,14 +1887,17 @@ function lateDaysOf(contract, asOf){
                       Date.UTC(due.getFullYear(),due.getMonth(),due.getDate())) / day);
   return d > 0 ? d : 0;
 }
-function suggestedPenalty(contract, lateDays){
+/* المقترَحُ لهذا المستخلص = غرامةُ كلّ أيام التأخّر (بسقفها) **ناقصَ ما احتُسب في
+   المستخلصات السابقة** — وإلا اقتُرحت الأيامُ نفسُها في كلّ مستخلص. */
+function suggestedPenalty(contract, lateDays, prevPenalty){
   var c = contract || {}, val = contractValue(c);
   var perDay = penaltyPerDay(c.penalty, val);
   if(perDay<=0 || !lateDays) return 0;
   var raw = r2(perDay * lateDays);
   var cap = penaltyCap(c.penalty, val);
   if(cap>0) raw = r2(Math.min(raw, cap));
-  return raw;
+  var prev = r2(Math.max(0, Number(prevPenalty)||0));
+  return r2(Math.max(0, raw - prev));
 }
 
 /* توجيهُ المستخلص — دورةٌ **أقصرُ عمداً**: النطاقُ والطرفُ والسعرُ حُسمت في العقد،
@@ -2055,6 +2159,11 @@ function substituteRollup(accountId, requests, contracts, extracts){
       if(part > 0){ out.spent += part; out.spentCount++; }
       out.pending += r2(Math.max(0, val - part)); out.liveCount++;
       row.spent = part; row.state = "live";
+    } else {
+      /* المُعادُ أو الملغى (وثائقُ ما قبل حارس الإلغاء) بدفعاتٍ سُدِّدت: ما خرج
+         خرج — يبقى مصروفاً كما يعدّه `contractRollup` (تدقيق 15/09). */
+      var gone = crqPaidTotal(r);
+      if(gone > 0){ out.spent += gone; out.spentCount++; row.spent = gone; row.state = "spent"; }
     }
     out.docs.push(row);
   });
@@ -2845,6 +2954,8 @@ function createRequest(draft){
       doc.paymentPlan = normPaymentPlan(doc.paymentPlan);
       if(!paymentPlanOk(doc.paymentPlan))
         return Promise.reject(new Error("خطة صرف الدفعات: نسبٌ موجبةٌ مجموعُها ١٠٠٪ بالضبط"));
+      if(!paymentPlanRowsOk(doc.paymentPlan, doc.value))
+        return Promise.reject(new Error("خطة صرف الدفعات: نسبةٌ تُنتج دفعةً بصفر ريال — لا تُصرف ولا تُتخطّى"));
     } else if(doc.paymentPlan != null) delete doc.paymentPlan;
     doc.createdAt=_now(); doc.createdBy=_me(); doc.createdByUser=_meUser();
     doc.status = crqNextStage(doc, ceoThreshold());
@@ -2952,7 +3063,7 @@ function payRequest(id, payload){
         amt = r2(payload.amount != null ? payload.amount : due);
       }
       if(!(amt > 0)) throw new Error("مبلغ الدفعة إلزامي — اكتب كم يُسدَّد فعلاً");
-      if(amt > due + 0.01) throw new Error("الدفعة أكبر من المتبقّي ("+money(due)+" ر.س) — لا يُسدَّد فوق قيمة الأمر");
+      if(amt > due) throw new Error("الدفعة أكبر من المتبقّي ("+money(due)+" ر.س) — لا يُسدَّد فوق قيمة الأمر");
       if(!Array.isArray(r.payments)) r.payments = [];
       r.payments.push({ id:"PAY-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),
         amount:amt, ref:payload.ref||"", receiptUrl:payload.receiptUrl,
@@ -2961,7 +3072,7 @@ function payRequest(id, payload){
       paid = r2(paid);
       // الملخّصُ القديم = المجموعُ التراكميّ وآخرُ إيصال — لقرّاء ما قبل الدفعات
       r.payment = { amount:paid, ref:payload.ref||"", receiptUrl:payload.receiptUrl, at:_now(), by:_me() };
-      var done = paid >= r2(Number(r.value)||0) - 0.01;
+      var done = paid >= r2(Number(r.value)||0);   // المبالغُ كلُّها r2 — لا سماحيةَ هللةٍ تُغلق أمراً ناقصاً
       r.status = done ? "crq_paid" : "crq_pending_pay";
       var pdlg = (pmode === "delegate") ? " · نيابةً — لا يوجد غيرُك يملك السداد" : "";
       if(pmode === "delegate") r.delegatedApproval = true;
@@ -3068,6 +3179,9 @@ function cancelRequest(id, reason){
       var r=s.data()||{}; r.id=id;
       if(crqIsFinal(r.status)) throw new Error("الطلب في حالةٍ نهائية");
       if(role!=="admin" && r.createdByUser!==me) throw new Error("الإلغاء لمُنشئ الطلب أو الأدمن");
+      // أمرٌ خرج منه مالٌ لا يُلغى (تدقيق 15/09): الإلغاءُ ثمّ الحذفُ كانا يُسقطان
+      // دفعاتٍ مسدَّدةً من الموازنة بلا أثر. يُردّ من بوّابة السداد بدفعاته محفوظة.
+      if(crqPaidTotal(r) > 0) throw new Error("سُدِّد من هذا الأمر "+money(crqPaidTotal(r))+" ر.س — لا يُلغى أمرٌ خرج منه مال");
       r.status="crq_cancelled";
       _pushTimeline(r, "إلغاء الطلب", "cancelled", reason||"");
       r.updatedAt=_now(); r.updatedBy=_me();
@@ -3115,6 +3229,7 @@ function editRequestLines(id, lines, reason){
       r.lines = clean;
       r.value = crqValueOf(r);
       if(r.value <= 0) throw new Error("قيمة الطلب صفر — راجع الكميات والأسعار");
+      if(r.value < crqPaidTotal(r)) throw new Error("القيمةُ الجديدة ("+money(r.value)+") أقلُّ ممّا سُدِّد فعلاً ("+money(crqPaidTotal(r))+" ر.س) — لا مسارَ لاسترداد الفرق");
       // فوق العتبة يمرّ **ما وُلد بإقرارٍ صريح** وحدَه — والتعديلُ لا يفتح الباب
       if(r.engagement==="pay_order" && !payOrderAllowed(r.value, payOrderThreshold()) && !r.overThresholdAck)
         throw new Error("أمر الدفع عند "+money0(payOrderThreshold())+" ر.س فأكثر يلزمه إقرارٌ صريح عند الإنشاء — حوّله إلى عقد");
@@ -3183,6 +3298,7 @@ function deleteRequest(id){
     if(!s.exists) throw new Error("الطلب غير موجود");
     var r=s.data()||{};
     if(r.status !== "crq_cancelled") throw new Error("لا يُحذف إلا الطلبُ الملغى");
+    if(crqPaidTotal(r) > 0) throw new Error("سُدِّد من هذا الأمر "+money(crqPaidTotal(r))+" ر.س — سجلٌّ ماليٌّ لا يُحذف");
     return ref.delete().then(function(){
       var i=_reqs.findIndex(function(x){ return x.id===id; });
       if(i>=0) _reqs.splice(i,1);
@@ -3467,7 +3583,9 @@ function transitContract(id, action, reason){
       var c=s.data()||{}; c.id=id;
       if(!ctrCanTransit(action, c.status, role)) throw new Error("لا يجوز هذا الإجراء على حالة العقد الحالية أو ليس لدورك");
       c.status=t.to;
-      if(action==="close") c.retention = Object.assign({}, c.retention||{}, { released: r2(contractValue(c) * (Number((c.retention||{}).pct)||0) / 100) });
+      /* المُفرَجُ = المخصومُ فعلاً من المستخلصات المسدَّدة (تدقيق 15/09) — كان
+         `قيمةُ العقد × النسبة`: شاملَ الضريبة وما لم يُنفَّذ، فيفوق المحتجزَ الحقيقيّ. */
+      if(action==="close") c.retention = Object.assign({}, c.retention||{}, { released: retentionHeldOf(c, _exts) });
       _pushTimeline(c, t.lbl, action, reason||"");
       c.updatedAt=_now(); c.updatedBy=_me();
       var out=Object.assign({},c); delete out.id;
@@ -3525,6 +3643,7 @@ function genExtId(){
 function extCtx(ext, contract, exts){
   return {
     prevGross: prevGrossOf(exts||_exts, contract, ext && ext.id),
+    prevPenalty: prevPenaltyOf(exts||_exts, contract, ext && ext.id),
     materialsIssued: Number((ext||{}).materialsIssued)||0,
     penaltyAmount:   Number((ext||{}).penaltyAmount)||0,
     ncDeduction:     Number((ext||{}).ncDeduction)||0
@@ -3615,6 +3734,7 @@ function createExtract(contract, draft){
   var g = extCumGuard(draft, contract, _exts);
   if(!g.ok) return Promise.reject(new Error(_guardMsg(g)));
   var calc = extNet(draft, contract, { prevGross: prevGrossOf(_exts, contract, null),
+    prevPenalty: prevPenaltyOf(_exts, contract, null),
     materialsIssued:draft.materialsIssued, penaltyAmount:draft.penaltyAmount, ncDeduction:draft.ncDeduction });
   if(calc.period < 0) return Promise.reject(new Error("قيمة الفترة سالبة — التراكميُّ أقلُّ ممّا اعتُمد سابقاً"));
 
@@ -3703,6 +3823,8 @@ function rewindExtract(id, gateKey, reason){
       if(extIsFinal(e.status)) throw new Error("المستخلص في حالةٍ نهائية — لا يُرجَع");
       var c=contractById(e.contractId);
       if(!c) throw new Error("عقد المستخلص غير محمَّل");
+      var blk=extReviveBlocker(e, _exts);
+      if(blk) throw new Error("لا يُعاد هذا المستخلصُ إلى الدورة — للعقد مستخلصٌ "+(blk.status==="ext_paid"?"مسدَّدٌ أُنشئ بعده":"آخرُ مفتوح")+" ("+blk.id+")");
       var net=r2(extCalc(e,c).net);
       if(extRewindTargets(e, net, th).indexOf(gateKey) === -1) throw new Error("هذه المرحلة ليست وجهةً صالحةً لهذا المستخلص");
       var from=EXT_STATUS[e.status]||e.status;
@@ -3792,6 +3914,8 @@ function editExtract(id, patch, reason){
       if(extIsFinal(e.status)) throw new Error("المستخلصُ في حالةٍ نهائية — لا يُعدَّل");
       var c=contractById(e.contractId);
       if(!c) throw new Error("عقد المستخلص غير محمَّل");
+      var blk=extReviveBlocker(e, _exts);
+      if(blk) throw new Error("لا يُعاد هذا المستخلصُ إلى الدورة — للعقد مستخلصٌ "+(blk.status==="ext_paid"?"مسدَّدٌ أُنشئ بعده":"آخرُ مفتوح")+" ("+blk.id+")");
       var was=r2(extCalc(e, c).net);
       var d=patch||{};
       /* الحقولُ القابلةُ للتعديل وحدَها تُنسَخ — لا عقدٌ ولا حالةٌ ولا خطٌّ زمنيٌّ
@@ -3810,6 +3934,7 @@ function editExtract(id, patch, reason){
       var g=extCumGuard(next, c, _exts);
       if(!g.ok) throw new Error(_guardMsg(g));
       var calc=extNet(next, c, { prevGross:prevGrossOf(_exts, c, id),
+        prevPenalty:prevPenaltyOf(_exts, c, id),
         materialsIssued:next.materialsIssued, penaltyAmount:next.penaltyAmount,
         ncDeduction:next.ncDeduction });
       if(calc.period < 0) throw new Error("قيمة الفترة سالبة — التراكميُّ أقلُّ ممّا اعتُمد سابقاً");
@@ -7383,9 +7508,9 @@ function ctrOverviewHTML(c){
 }
 
 function ctrLinesHTML(c){
-  var rows=(c.lines||[]).map(function(l,i){
+  var rows=contractAllLines(c).map(function(l,i){
     var lt=lineTotal(l.qty,l.unitPrice,c.vatMode);
-    return '<tr>'+lnSeq(i)+'<td>'+_esc(l.desc||"—")+(l.boqLineId?'':' <span class="ct-doc s-soon">خارج المقايسة</span>')+'</td>'+
+    return '<tr>'+lnSeq(i)+'<td>'+_esc(l.desc||"—")+(l.fromChange?' <span class="ct-doc s-ok">بأمر تغيير '+_esc(l.fromChange)+'</span>':(l.boqLineId?'':' <span class="ct-doc s-soon">خارج المقايسة</span>'))+'</td>'+
       '<td>'+_esc(l.unit||"")+'</td><td class="num">'+money0(contractLineQty(c,l.id))+'</td>'+
       '<td class="num">'+money(l.unitPrice)+'</td><td class="num">'+money(lt.total)+'</td></tr>';
   }).join("") || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:14px">—</td></tr>';
@@ -7425,7 +7550,11 @@ function ctrExtractsHTML(c){
   var paidSum = paid.reduce(function(s,e){ return s + (Number((e.payment||{}).amount)||0); },0);
   var gross = prevGrossOf(_exts, c, null);
   var val = contractValue(c);
-  var pct = val>0 ? Math.min(100, Math.round(gross/vatSplit(val, c.vatMode).base*100)) : 0;
+  /* المقامُ أساسُ العقد قبل الضريبة (تدقيق 15/09): `contractValue` إجماليٌّ شاملُ
+     الضريبة في كلّ الأوضاع، و`vatSplit(x,"excl")` يعدّ x أساساً — فكان عقدٌ منفَّذٌ
+     كاملاً بوضع excl يظهر 87٪. */
+  var base = contractBaseOf(c);
+  var pct = base>0 ? Math.min(100, Math.round(gross/base*100)) : 0;
 
   var head='<div class="card ct-sec">'+
     '<div class="ct-sec-h">'+_icn("banknote","ic-sm")+' المستخلصات'+
@@ -7443,7 +7572,10 @@ function ctrExtractsHTML(c){
   '</div>';
 
   var rows = list.length ? list.map(function(e){
-    var calc=extCalc(e,c);
+    /* المسدَّدُ يُقرأ من لقطة سداده لا حيّاً (تدقيق 15/09): بعد السداد يرتفع
+       `advance.recovered` فيُسقط الحسابُ الحيُّ استردادَ المستخلص نفسِه ويعرض صافياً
+       يخالف المدفوع — كما تقرأ البطاقةُ والورقة. */
+    var calc=e.settled || extCalc(e,c);
     var owner=extGateOwner(e.status);
     return '<tr class="fa-click" style="cursor:pointer" onclick="contracts.openExt(\''+_jq(e.id)+'\')">'+
       '<td><span class="num">'+_esc(e.id)+'</span>'+(e.isFinal?' <span class="ct-doc s-ok">ختاميّ</span>':'')+'</td>'+
@@ -7491,7 +7623,8 @@ function extFormHTML(c){
      فامتنع عليه تصحيحُ الخطأ الذي فتح البابَ من أجله. */
   var xid=d.editOf||null;
   var floor=prevCumByLine(_exts, c, xid);
-  var ctx={ prevGross:prevGrossOf(_exts,c,xid), materialsIssued:d.materialsIssued,
+  var ctx={ prevGross:prevGrossOf(_exts,c,xid), prevPenalty:prevPenaltyOf(_exts,c,xid),
+            materialsIssued:d.materialsIssued,
             penaltyAmount:d.penaltyAmount, ncDeduction:d.ncDeduction };
   var calc=extNet(d, c, ctx);
   var g=extCumGuard(d, c, _exts);
@@ -7512,7 +7645,7 @@ function extFormHTML(c){
   }).join("");
 
   var warn = '<div id="ct-e-warn">'+(g.ok ? "" : '<div class="ct-note crit">'+_icn("alertTriangle","ic-sm")+' '+_esc(_guardMsg(g))+'</div>')+'</div>';
-  var lateNote = late ? '<div class="ct-note warn">'+_icn("timer","ic-sm")+' تأخّرٌ '+late+' يوماً عن مدة العقد — غرامةٌ مقترَحة '+money(suggestedPenalty(c,late))+' ر.س. '+
+  var lateNote = late ? '<div class="ct-note warn">'+_icn("timer","ic-sm")+' تأخّرٌ '+late+' يوماً عن مدة العقد — غرامةٌ مقترَحة '+money(suggestedPenalty(c,late,ctx.prevPenalty))+' ر.س. '+
     '<button class="btn btn-ghost btn-sm" style="margin-inline-start:auto" onclick="contracts.applyPenalty()">تطبيق المقترَح</button></div>' : "";
 
   return '<button class="btn btn-ghost btn-sm ct-back" onclick="contracts.cancelExtract()">'+_icn("rotateCcw")+' إلغاء</button>'+
@@ -7840,7 +7973,8 @@ function dashSummary(contracts, extracts, today){
   });
   (Array.isArray(contracts)?contracts:[]).forEach(function(c){
     if(!c || !live[c.id]) return;
-    out.remaining += Math.max(0, contractValue(c) - (paid[c.id]||0));
+    // المقدمةُ المسدَّدة مالٌ خرج — تُخصَم من المتبقّي كما في `contractRollup` (تدقيق 15/09)
+    out.remaining += Math.max(0, contractValue(c) - (paid[c.id]||0) - advancePaidOf(c));
   });
   out.value=r2(out.value); out.remaining=r2(out.remaining); out.awaitingPayAmt=r2(out.awaitingPayAmt);
   return out;
@@ -8876,11 +9010,18 @@ function printPayOrder(id){
      فتقرؤها المحاسبةُ والمراجعةُ من السند لا من الشاشة. تظهر ولو قبل أول دفعة. */
   var _plan = normPaymentPlan(r.paymentPlan);
   var planBox = _plan.length ? '<h2>خطةُ صرف الدفعات — حدّدها منشئ الطلب</h2>'+
-    '<table class="kv">'+_plan.map(function(p,i){
-      var _paidRow = i < _pl.length;
-      return '<tr><td>الدفعة '+(i+1)+' — '+p+'٪</td><td class="n">'+
-        money(r2(r2(Number(r.value)||0)*p/100))+' ر.س'+(_paidRow?' — سُدِّدت ✓':'')+'</td></tr>';
-    }).join("")+'</table>' : "";
+    '<table class="kv">'+(function(){
+      /* الأخيرةُ = القيمة − مجموعُ ما قبلها، كما تُصرف فعلاً في `crqPlanInstallment`
+         (تدقيق 15/09: كانت تُطبع بنسبتها فتخالف المدفوعَ بهللات). */
+      var _v=r2(Number(r.value)||0), _acc=0;
+      return _plan.map(function(p,i){
+        var _paidRow = i < _pl.length;
+        var _amt = (i===_plan.length-1) ? r2(_v-_acc) : r2(_v*p/100);
+        _acc = r2(_acc+_amt);
+        return '<tr><td>الدفعة '+(i+1)+' — '+p+'٪</td><td class="n">'+
+          money(_amt)+' ر.س'+(_paidRow?' — سُدِّدت ✓':'')+'</td></tr>';
+      }).join("");
+    })()+'</table>' : "";
   var paidBox = _pl.length ? '<h2>بيانُ السداد</h2>'+
     '<table><thead><tr><th style="width:36px">#</th><th>المبلغ</th><th>مرجع التحويل</th><th>سجّله</th><th>التاريخ</th></tr></thead><tbody>'+
     _pl.map(function(p,i){
@@ -9442,7 +9583,7 @@ function newExtract(){
   _extOpen=null;
   _extDraft={ contractId:c.id, period:"", isFinal:false,
     materialsIssued:0, penaltyAmount:0, ncDeduction:0, attachFiles:[],
-    lines:(c.lines||[]).map(function(l){
+    lines:contractAllLines(c).map(function(l){
       return { lineId:l.id, desc:l.desc||"", unit:l.unit||"", unitPrice:Number(l.unitPrice)||0,
                cumQty: Number(floor[l.id])||0 };
     }) };
@@ -9518,7 +9659,8 @@ function extRecalc(from, i){
   }
   syncExtDraft();
   var xid=_extDraft.editOf||null;
-  var ctx={ prevGross:prevGrossOf(_exts,c,xid), materialsIssued:_extDraft.materialsIssued,
+  var ctx={ prevGross:prevGrossOf(_exts,c,xid), prevPenalty:prevPenaltyOf(_exts,c,xid),
+            materialsIssued:_extDraft.materialsIssued,
             penaltyAmount:_extDraft.penaltyAmount, ncDeduction:_extDraft.ncDeduction };
   var box=document.getElementById("ct-e-ladder");
   if(box) box.innerHTML=ladderHTML(extNet(_extDraft,c,ctx), c);
@@ -9546,7 +9688,7 @@ function extRecalc(from, i){
 function applyPenalty(){
   syncExtDraft();
   var c=contractById(_cOpen); if(!c||!_extDraft) return;
-  _extDraft.penaltyAmount = suggestedPenalty(c, lateDaysOf(c,_today()));
+  _extDraft.penaltyAmount = suggestedPenalty(c, lateDaysOf(c,_today()), prevPenaltyOf(_exts,c,_extDraft.editOf||null));
   paintCtrs();
 }
 function submitExtract(){
@@ -10403,6 +10545,12 @@ window.contracts = {
   _CLAUSE_CATS: CLAUSE_CATS,
   _CTR_TRANSITIONS: CTR_TRANSITIONS,
   _prevGrossOf: prevGrossOf,
+  _extReviveBlocker: extReviveBlocker,
+  _prevPenaltyOf: prevPenaltyOf,
+  _retentionHeldOf: retentionHeldOf,
+  _contractBaseOf: contractBaseOf,
+  _contractAllLines: contractAllLines,
+  _paymentPlanRowsOk: paymentPlanRowsOk,
   _extsBefore: extsBefore,
   _extGrossOf: extGrossOf,
   _prevCumByLine: prevCumByLine,
