@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3229";
+var MODULE_BUILD = "v18.9.3231";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1622,6 +1622,11 @@ var _renew = null;       // مسوّدةُ التجديد
    الشاراتُ والحصائلُ و**التنبيهات** تُحسَب على هذا الأساس وحدَه، فلا يكتم مُرشِّحُ
    عرضٍ تنبيهَ انتهاءِ شهادةٍ لأنّ صاحبَه كان ينظر في مشروعٍ آخرَ لحظتها. */
 function _visDocs(){ return visibleList(_docs, allowedProjectIds()); }
+/* وثائقُ الشركة وحدَها — ما تعرضه شاشةُ «السجلّات والشهادات»: الفصلُ بين الشاشتين
+   نطاقٌ لا ترشيح، فوثيقةُ المشروع لا تظهر هنا ولو رُفع كلُّ مُرشِّح. */
+function _companyDocs(){
+  return _visDocs().filter(function(d){ return projRef(d).scope === SCOPE_COMPANY; });
+}
 function _visLtrs(){ return visibleList(_ltrs, allowedProjectIds()); }
 function _visAprs(){ return visibleList(_aprs, allowedProjectIds()); }
 
@@ -2065,11 +2070,10 @@ function _filterBarHTML(){
   var lvls = LEVELS.map(function(l){
     return '<option value="' + l.key + '"' + (_view.level === l.key ? " selected" : "") + '>' + _esc(l.lbl) + '</option>';
   }).join("");
-  var dirty = _view.q || _view.type || _view.level || _view.ym || _view.proj;
+  var dirty = _view.q || _view.type || _view.level || _view.ym;
   return '<div class="dv-bar">'
-    + '<input class="form-input dv-search" type="search" placeholder="ابحث بالعنوان أو الرقم أو الجهة أو المشروع…"'
+    + '<input class="form-input dv-search" type="search" placeholder="ابحث بالعنوان أو الرقم أو الجهة…"'
     + ' value="' + _esc(_view.q) + '" oninput="docVault.setFilter(\'q\',this.value)">'
-    + _projFilterHTML(_view.proj, "setFilterProj", _visDocs())
     + '<select class="form-input" onchange="docVault.setFilter(\'type\',this.value)"><option value="">كل الأنواع</option>' + types + '</select>'
     + '<select class="form-input" onchange="docVault.setFilter(\'level\',this.value)"><option value="">كل الحالات</option>' + lvls + '</select>'
     + (dirty ? '<button type="button" class="dv-clear" onclick="docVault.clearFilters()">مسح الترشيح</button>' : "")
@@ -2090,7 +2094,7 @@ function _filesHTML(files, onDel){
 function _tableHTML(list, today, curProj, emptyNote){
   if(!list.length){
     if(emptyNote) return '<div class="dv-wrap"><div class="dv-empty">' + emptyNote + '</div></div>';
-    var any = _visDocs().filter(function(d){ return !d.archived; }).length;
+    var any = _companyDocs().filter(function(d){ return !d.archived; }).length;
     return '<div class="dv-wrap"><div class="dv-empty">'
       + (any ? 'لا وثيقة تطابق الترشيح الحالي.<br><button type="button" class="dv-clear" onclick="docVault.clearFilters()">امسح الترشيح</button>'
              : 'الخزانة فارغة.<br>ابدأ بإضافة السجل التجاري وشهادات الزكاة والتأمينات — لكلٍّ تاريخُ بدءٍ وانتهاءٍ ومرفق،<br>ويصلك التنبيه قبل انتهائها بتسعين يوماً.')
@@ -2531,7 +2535,7 @@ function render(){
   var today = new Date();
   var head = '<div class="dv-head"><div>'
     + '<h2 class="dv-ttl">' + _icon("folderOpen") + ' خزانة الوثائق — السجلّات والشهادات</h2>'
-    + '<div class="dv-sub">وثائقُ الشركة بتواريخ بدئها وانتهائها ومرفقاتها. التنبيهُ يبدأ قبل الانتهاء بتسعين يوماً ويشتدّ كلّما اقترب.</div>'
+    + '<div class="dv-sub">وثائقُ الشركة بتواريخ بدئها وانتهائها ومرفقاتها. التنبيهُ يبدأ قبل الانتهاء بتسعين يوماً ويشتدّ كلّما اقترب. ووثائقُ المشاريع في «ملفّ المشروع».</div>'
     + '</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
     + (canEdit() ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.newDoc()">' + _icon("plus", "ic-sm") + ' وثيقة جديدة</button>' : "")
     + '</div></div>';
@@ -2558,13 +2562,14 @@ function render(){
     var d = docById(_open);
     body = d ? _cardHTML(d, today) : '<div class="dv-empty">لم تعد هذه الوثيقة موجودة.</div>';
   } else {
-    _view.proj = _seedProjDocs(_view.proj);
-    /* الأفقُ يتبع المُرشِّحَ — سؤالُه «متى يتزاحم ما أنظر إليه؟» لا «كم في الخزانة».
-       والتنبيهاتُ **لا تتبعه**: تلك تُحسَب في `scanAndAlert` على المرئيّ كلِّه. */
-    var vis  = _visDocs();
+    /* الشاشةُ **لوثائق الشركة وحدَها** (طلبُ المالك 15/09): وثائقُ المشاريع في ملفّ
+       كلِّ مشروع، ولا مُرشِّحَ مشروعٍ هنا. والتنبيهاتُ **لا تتبع الشاشة**: تُحسَب في
+       `scanAndAlert` على المرئيّ كلِّه — وثائقُ المشاريع فيها. */
+    _view.proj = FILTER_ALL;
+    var vis  = _companyDocs();
     var list = sortDocs(filterDocs(vis, _view, today), today);
-    body = _readerLockNoticeHTML() + _unlinkedNoticeHTML(vis, "setFilterProj", _view.proj) + _horizonHTML(filterDocs(vis, { proj:_view.proj }, today), today)
-         + _filterBarHTML() + _tableHTML(list, today, _view.proj);
+    body = _readerLockNoticeHTML() + _horizonHTML(filterDocs(vis, { proj:FILTER_ALL }, today), today)
+         + _filterBarHTML() + _tableHTML(list, today, FILTER_COMPANY);
   }
   host.innerHTML = head + body;
 }
@@ -4954,7 +4959,6 @@ function _seedProj(v){ return (v === null || v === undefined) ? _curProjId() : S
    (أُمسكت بالعين في لقطةٍ من متصفّحٍ حقيقيّ قبل الاعتماد.)
    والخطاباتُ والمعتمداتُ عكسُها: تُكتب من داخل المشروع ولمشروع، فافتراضُها هو
    المفتوح — كما هو افتراضُ نموذجِ إنشائها. */
-function _seedProjDocs(v){ return (v === null || v === undefined) ? FILTER_ALL : String(v); }
 
 /* افتراضُ **النموذج الجديد** يختلف عن افتراض المُرشِّح، لأنّ الواقعَ يختلف:
    وثائقُ الخزانة أغلبُها وثائقُ شركةٍ (سجلٌّ · زكاةٌ · تأمينات) فافتراضُها الشركة
@@ -4997,7 +5001,10 @@ function clearLetterFilters(){ _lview.q = ""; _lview.proj = _curProjId(); render
 function setAprProj(v){ _curAprView().proj = String(v || ""); renderApprovals(); }
 
 function clearFilters(){ _view = { q:"", type:"", level:"", ym:"", proj:FILTER_ALL }; render(); }
-function open(id){ _open = String(id); _edit = null; _renew = null; render(); _top(); }
+/* فتحُ سجلٍّ من ملفّ المشروع: الرسمُ يكتب في صفحة السجلّ لا في الملفّ، فلا بدّ من
+   الانتقال إليها — وإلّا نُقر الصفُّ ولم يحدث شيءٌ يُرى. */
+function _goto(page){ if(!_isActive(page)){ try{ showPage(page); }catch(e){} } }
+function open(id){ _open = String(id); _edit = null; _renew = null; render(); _top(); _goto(PAGE_DOCS); }
 function backToList(){ _open = null; _renew = null; render(); _top(); }
 function _top(){ try{ (window._scrollAppToTop || function(){ window.scrollTo(0, 0); })(); }catch(e){} }
 
@@ -5107,6 +5114,9 @@ function saveEdit(){
   p.then(function(id){
     _audit(was ? "تعديل وثيقة في الخزانة" : "إضافة وثيقة إلى الخزانة", id + " — " + body.title);
     _edit = null; _open = id; render(); _top();
+    /* وثيقةُ مشروعٍ لا تظهر في شاشة السجلّات — فتُفتَح بطاقتُها ثمّ يُؤخَذ صاحبُها
+       إلى ملفّ مشروعها حين يرجع، لا إلى قائمةٍ ليست فيها. */
+    if(body.scope === SCOPE_PROJECT){ _fview.proj = projKey(body); _open = null; _goto(PAGE_FILE); }
     _toast(was ? "✅ حُفظ التعديل" : "✅ أُضيفت الوثيقة", "success");
   }).catch(function(e){ _toast("⚠ تعذّر الحفظ: " + _writeErr(e), "warn"); });
 }
@@ -5191,7 +5201,7 @@ function saveRenew(){
    ═══════════════════════════════════════════════════════════════════════════ */
 function letterTab(kind){ _letterMode("list"); _lview.kind = kind; renderLetters(); }
 function setLetterFilter(v){ _lview.q = String(v == null ? "" : v); _rerenderKeepingSearch(renderLetters); }
-function openLetter(id){ _letterMode("open"); _lview.open = String(id); renderLetters(); _top(); }
+function openLetter(id){ _letterMode("open"); _lview.open = String(id); renderLetters(); _top(); _goto(PAGE_LETTERS); }
 function backToLetters(){ _letterMode("list"); renderLetters(); _top(); }
 
 function newLetter(kind, seed){
@@ -5340,7 +5350,14 @@ function delLetter(id){
 /* ════════ أفعالُ المعتمدات ════════ */
 function setAprFilter(k, v){ _curAprView()[k] = String(v == null ? "" : v); _rerenderKeepingSearch(renderApprovals); }
 function clearAprFilters(){ var v = _curAprView(); v.q = v.type = v.status = ""; renderApprovals(); }
-function openApr(id){ _aEdit = null; _aview.open = String(id); renderApprovals(); _top(); }
+function openApr(id){
+  _aEdit = null; _aview.open = String(id); renderApprovals(); _top();
+  /* من ملفّ المشروع: المعتمَدُ إلى «المعتمدات» وما في مساره إلى «المستخلصات». */
+  if(!_isActive(PAGE_APPROVALS) && !_isActive(PAGE_EXTRACTS)){
+    var a = approvalById(id), pg = (a && !aprIsDone(a)) ? PAGE_EXTRACTS : PAGE_APPROVALS;
+    _goto(pg);   // `_aview.open` مشتركةٌ بين الشاشتين
+  }
+}
 function backToApr(){ _aEdit = null; _aview.open = null; renderApprovals(); _top(); }
 
 function newApr(){
@@ -5556,7 +5573,7 @@ function _fSec(title, icon, n, openFn, addFn, addLbl){
     + '<div><h3 class="dv-ttl" style="font-size:1.02rem">' + _icon(icon) + ' ' + _esc(title)
       + ' <span class="dv-cnt">' + n + '</span></h3></div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-    + '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.' + openFn + '()">افتح السجلّ</button>'
+    + (openFn ? '<button type="button" class="btn btn-ghost btn-sm" onclick="docVault.' + openFn + '()">افتح السجلّ</button>' : "")
     + (canEdit() && addFn ? '<button type="button" class="btn btn-primary btn-sm" onclick="docVault.' + addFn + '()">'
         + _icon("plus", "ic-sm") + ' ' + _esc(addLbl) + '</button>' : "")
     + '</div></div>';
@@ -5606,21 +5623,13 @@ function renderProjectFile(){
   var apsAll = filterApprovals(_visAprs(), f, today);
   var aps = sortApprovals(filterDone(apsAll), today);      // المعتمدات — ما اعتُمد فعلاً
   var flw = sortApprovals(filterFlow(apsAll), today);      // قيد الاعتماد — في مساره أو رُفض
-  /* وثائقُ الشركة قسمٌ ثانٍ — وتُسقَط حين يكون المعروضُ **هو** نطاقَ الشركة، وإلّا
-     ظهرت القائمةُ نفسُها مرّتين تحت عنوانين. */
-  var comp = (String(_fview.proj) === FILTER_COMPANY) ? []
-           : sortDocs(filterDocs(_visDocs(), { proj:FILTER_COMPANY }, today), today);
-
+  /* وثائقُ الشركة **لا تُعرض في ملفّ المشروع** (طلبُ المالك 15/09) — مكانُها شاشةُ
+     «السجلّات والشهادات» وحدَها، كما أنّ وثائقَ المشروع لا تُعرض هناك. وزرُّ «افتح
+     السجلّ» لقسم الوثائق يُسقَط لمشروعٍ بعينه: السجلُّ لا يعرض وثائقَه أصلاً. */
+  var isCo = (String(_fview.proj) === FILTER_COMPANY);
   var body = picker
-    + _fSec("وثائق المشروع", "shield", dcs.length, "openDocsForFile", "newDocHere", "وثيقة")
+    + _fSec(isCo ? "وثائق الشركة" : "وثائق المشروع", "shield", dcs.length, isCo ? "openDocsForFile" : null, "newDocHere", "وثيقة")
     + _tableHTML(dcs, today, _fview.proj, 'لا وثائقَ خاصّةً بهذا المشروع بعد.')
-    + (comp.length
-        ? '<div class="dv-head" style="margin:18px 0 8px"><div>'
-          + '<h3 class="dv-ttl" style="font-size:1.02rem">' + _icon("shield") + ' وثائقُ الشركة السارية على كلّ المشاريع'
-          + ' <span class="dv-cnt">' + comp.length + '</span></h3>'
-          + '<div class="dv-sub">تُطلَب مع كلّ تقديم، وليست من وثائق هذا المشروع — فعددُها منفصل.</div>'
-          + '</div></div>' + _tableHTML(comp, today, FILTER_COMPANY)
-        : "")
     + _fSec("الخطابات الصادرة", "scrollText", lts.length, "openLettersForFile", "newLetterHere", "خطاب صادر")
     + _letterTableHTML(lts, _fview.proj, 'لا خطاباتٍ صادرةً لهذا المشروع بعد.')
     + _fSec("المستخلصات قيد الاعتماد", "receipt", flw.length, "openExtractsForFile", "newAprHere", "مستند مُقدَّم")
@@ -5680,7 +5689,7 @@ function setFileProj(v){ _fview.proj = String(v || ""); renderProjectFile(); }
 
 /* «افتح السجلّ» ينقل المُرشِّحَ معه — وإلّا فتح المستخدمُ شاشةً تعرض شيئاً آخرَ
    فظنّ أنّ ما رآه في الملفّ ناقص. */
-function openDocsForFile(){    _view.proj  = _fview.proj; _view.ym = ""; try{ showPage(PAGE_DOCS); }catch(e){} }
+function openDocsForFile(){    _view.ym = ""; try{ showPage(PAGE_DOCS); }catch(e){} }   // شاشةُ السجلّات لوثائق الشركة وحدَها — لا مُرشِّحَ يُنقَل
 function openLettersForFile(){ _lview.proj = _fview.proj; _lview.kind = "issued"; try{ showPage(PAGE_LETTERS); }catch(e){} }
 function openAprForFile(){     _aview.proj = _fview.proj; try{ showPage(PAGE_APPROVALS); }catch(e){} }
 function openExtractsForFile(){ _xview.proj = _fview.proj; try{ showPage(PAGE_EXTRACTS); }catch(e){} }
