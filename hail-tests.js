@@ -20114,8 +20114,22 @@ function docVaultGuards() {
             !/مستخلص الرياض/.test(html) &&
             pgf.querySelectorAll(".dv-ap-tbl tbody tr").length === 1,
             String(pgf.querySelectorAll(".dv-ap-tbl tbody tr").length));
-          T("★★★ dv/proj: ووثائقُ الشركة قسمٌ **مفصولٌ** بعنوانه — دمجُها يجعل «وثائق هذا المشروع» رقماً كاذباً",
-            /وثائقُ الشركة السارية/.test(html) && /سجلّ الشركة التجاريّ/.test(html));
+          /* طلبُ المالك 15/09: وثائقُ الشركة **لا تظهر في ملفّ المشروع** — مكانُها شاشةُ
+             السجلّات وحدَها؛ وقبلها كانت قسماً ثانياً تحت عنوانٍ مفصول. */
+          T("★★★ dv/proj: ووثائقُ الشركة لا تظهر في ملفّ المشروع — لا قسمَ لها فيه (طلب 15/09)",
+            !/وثائقُ الشركة السارية/.test(html) && !/سجلّ الشركة التجاريّ/.test(html));
+          T("★★ dv/proj: وقسمُ وثائق المشروع بلا زرّ «افتح السجلّ» — السجلُّ لا يعرض وثائقَ المشاريع أصلاً",
+            !/openDocsForFile/.test(html) && /newDocHere/.test(html));
+          /* وفتحُ صفٍّ من الملفّ ينتقل إلى صفحة السجلّ ويعرض بطاقتَه — لا نقرةٌ بلا أثر */
+          V.open("DOC-2");
+          T("★★★ dv/proj: وفتحُ وثيقةٍ من ملفّ المشروع ينتقل إلى صفحة السجلّات ويعرض بطاقتَها",
+            W.document.getElementById("page-" + V._PAGE_DOCS).classList.contains("active") &&
+            /تأمين مشروع حائل/.test(W.document.getElementById("page-" + V._PAGE_DOCS).innerHTML) &&
+            !!W.document.getElementById("page-" + V._PAGE_DOCS).querySelector(".dv-card, .dv-panel"));
+          V.backToList();
+          W.document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+          pgf.classList.add("active");
+          V.setFileProj("hail");
           T("★★ dv/proj: والنموذجُ (قالبٌ يُستنسَخ) ليس من خطابات المشروع",
             !/نموذج عام/.test(html));
           T("★★ dv/proj: وحصيلةُ المعتمدات تقول رقمَ هذا المشروع لا رقمَ الشركة",
@@ -20168,11 +20182,35 @@ function docVaultGuards() {
           /* والقياسُ على **صفوف الجدول** لا على نصّ الصفحة: عنوانُ الوثيقة يظهر في
              شريط الأفق أيضاً، فمطابقةُ النصّ تمرّ والجدولُ فارغ. (مرّت فعلاً في أوّل
              كتابةٍ لهذا الحارس، فلم يمسك شيئاً.) */
-          T("★★★ dv/proj: شاشةُ السجلّات تفتح على **كلّ المشاريع** — وإلّا بدت فارغةً داخل أيّ مشروع",
+          T("★★★ dv/proj: شاشةُ السجلّات تعرض وثائقَ الشركة ولو كنتَ داخل مشروع — وإلّا بدت فارغةً",
             pgd.querySelectorAll(".dv-tbl tbody tr").length === 1 &&
             !/لا وثيقة تطابق/.test(pgd.innerHTML),
             pgd.querySelectorAll(".dv-tbl tbody tr").length + " صفّاً");
           W.CURRENT_PROJECT = null;
+          /* طلبُ المالك 15/09: شاشةُ السجلّات **لوثائق الشركة وحدَها** — وثيقةُ المشروع لا
+             تظهر فيها بلا مُرشِّح ولا معه، فلا مُرشِّحَ مشروعٍ أصلاً. */
+          V.__test_seed(
+            [{ id:"DOC-9", title:"شهادة الزكاة والدخل", docType:"zakat", expiry:"2027-03-01" },
+             { id:"DOC-10", title:"تأمين مشروع حائل", docType:"insurance", expiry:"2027-02-01",
+               scope:"project", projectId:"hail", projectName:"مشروع حائل" }],
+            [], [], []);
+          V.setFilterProj("");
+          const rows9 = pgd.querySelectorAll(".dv-tbl tbody tr");
+          T("★★★ dv/proj: ووثيقةُ المشروع لا تظهر في شاشة السجلّات — هي لوثائق الشركة وحدَها (طلب 15/09)",
+            rows9.length === 1 && /شهادة الزكاة/.test(pgd.innerHTML) && !/تأمين مشروع حائل/.test(pgd.innerHTML),
+            rows9.length + " صفّاً");
+          T("★★ dv/proj: ولا مُرشِّحَ مشروعٍ في شريطها — الفصلُ نطاقٌ لا ترشيح",
+            !/setFilterProj/.test(pgd.innerHTML) && !/كل المشاريع/.test(pgd.innerHTML));
+          T("★★ dv/proj: ولا سطرَ «على مستوى الشركة» تحت كلّ صفّ — كلُّها كذلك فتكرارُه ضجيج",
+            !/على مستوى الشركة<\/div>/.test(pgd.querySelector(".dv-tbl tbody").innerHTML));
+          V.setFilterProj("hail");
+          T("★★ dv/proj: ومُرشِّحُ مشروعٍ قديمٌ في الحالة لا يُفرغها",
+            pgd.querySelectorAll(".dv-tbl tbody tr").length === 1);
+          T("★★★ dv/proj: والتنبيهُ ما زال يُحسَب على وثائق المشاريع وإن غابت عن الشاشة",
+            /_companyDocs\(\)/.test(src) && /function scanAndAlert[\s\S]*?_visDocs\(\)/.test(src));
+          T("★★ dv/proj: وحفظُ وثيقةِ مشروعٍ ينتهي في ملفّ مشروعها لا في قائمةٍ ليست فيها",
+            /if\(body\.scope === SCOPE_PROJECT\)\{ _fview\.proj = projKey\(body\);[^\n]*_goto\(PAGE_FILE\)/.test(src));
+          V.setFilterProj("");
         }
 
         /* ── المشاريعُ المُدخَلةُ يدوياً: تُودَع **ويُعثَر عليها** ── */
