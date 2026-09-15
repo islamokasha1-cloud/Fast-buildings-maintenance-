@@ -19,11 +19,19 @@ description: العمل على إعلان فيديو الشركة المبني �
 npm start                          # معاينة تفاعلية (Remotion Studio)
 npm run render                     # 1920×1080 → out/company-announcement.mp4
 npm run render:4k                  # 3840×2160 → out/company-announcement-4k.mp4
+npm run render:portrait            # 1080×1920 طولي للجوّال → out/company-announcement-portrait.mp4
 npm run music                      # إعادة توليد موسيقى الخلفية
 node scripts/capture-platform.mjs  # إعادة التقاط لقطات النظام
 ```
 
 الرندر بدقة 4K يتجاوز عشر دقائق — شغّله في الخلفية.
+
+النسخة الطولية تركيبة `CompanyAnnouncementPortrait` بالمشاهد نفسها؛ الفرق
+تخطيطٌ يكتشفه `usePortrait()` من أبعاد التركيبة. تعديلُ مشهدٍ يمسّ النسختين،
+فارندر لقطةً ثابتة من كلتيهما قبل التسليم.
+
+إن فشل إطلاق المتصفّح برسالة «Old Headless mode has been removed» أضِف
+`--browser-executable=/opt/pw-browsers/chromium_headless_shell-*/chrome-linux/headless_shell`.
 
 ## أين تعدّل ماذا
 
