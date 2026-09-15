@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3231";
+var MODULE_BUILD = "v18.9.3233";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -1681,32 +1681,60 @@ function extNet(ext, contract, ctx){
    التراكميُّ الآن − المستخلَصُ سابقاً. وثلاثةُ حرّاسٍ بنيوية تحميه. */
 
 /* «المستخلَصُ سابقاً» **يُحسب ولا يُخزَّن** — رقمٌ مخزَّنٌ ينحرف عن مصدره بعد أوّل
-   تعديلٍ أو حذف. يُجمَع من المستخلصات **المعتمدةِ أو المسدَّدة** وحدَها لهذا العقد. */
+   تعديلٍ أو حذف. وهو **تراكميُّ آخرِ مستخلصٍ معتمدٍ أو مسدَّدٍ قبل هذا** لهذا العقد —
+   لا مجموعُ المعتمدات: كلُّ مستخلصٍ يذكر المنفَّذَ منذ بداية العقد، فجمعُ تراكميّين
+   يعدّ الأعمالَ مرّتين. (كان يُجمَع، فبمستخلصَين مسدَّدَين 7,560 و13,500 ظهر «المنجَز
+   التراكميّ» 21,060، وظهرت فترةُ الأوّل سالبةً −5,940 في جدول العقد لأنّ الثاني الذي
+   جاء بعده خُصم منه — والثالثُ كان سيُحسب على أساسٍ مضاعف.)
+   و«قبل هذا» بترتيب الإنشاء (`createdAt` ثمّ موضعُ القائمة — ترتيبُ المزامنة نفسُه)،
+   فمستخلصٌ لاحقٌ لا يدخل في حساب سابقِه. ومستخلصٌ ليس في القائمة (مسوّدةٌ جديدة)
+   يسبقه كلُّ المعتمَد. */
 var EXT_COUNTED = ["ext_pending_ceo","ext_pending_finance","ext_paid"];
-function prevGrossOf(extracts, contract, exceptId){
+function extOrderKey(e){ return String((e && e.createdAt) || ""); }
+function extsBefore(extracts, contract, exceptId){
   var list = Array.isArray(extracts) ? extracts : [];
   var cid = (contract && contract.id) || "";
-  var mode = normVatMode(contract && contract.vatMode);
-  var sum = 0;
-  list.forEach(function(e){
+  var selfIdx = -1;
+  if(exceptId){ for(var i=0;i<list.length;i++){ if(list[i] && list[i].id===exceptId){ selfIdx=i; break; } } }
+  var selfKey = selfIdx===-1 ? null : extOrderKey(list[selfIdx]);
+  var out = [];
+  list.forEach(function(e, idx){
     if(!e || e.contractId !== cid) return;
     if(e.id && exceptId && e.id === exceptId) return;
     if(EXT_COUNTED.indexOf(e.status) === -1) return;
-    (Array.isArray(e.lines)?e.lines:[]).forEach(function(l){
-      var q = Number(l && l.cumQty); if(!isFinite(q)) q = 0;
-      var p = Number(l && l.unitPrice); if(!isFinite(p)) p = 0;
-      sum += r2(vatSplit(p, mode).base * q);
-    });
+    if(selfIdx !== -1){
+      var k = extOrderKey(e);
+      var after = (k !== selfKey) ? (k > selfKey) : (idx > selfIdx);
+      if(after) return;
+    }
+    out.push({ e:e, idx:idx });
+  });
+  out.sort(function(a,b){
+    var ka=extOrderKey(a.e), kb=extOrderKey(b.e);
+    return ka!==kb ? (ka<kb?-1:1) : (a.idx-b.idx);
+  });
+  return out.map(function(o){ return o.e; });
+}
+function extGrossOf(e, contract){
+  var mode = normVatMode(contract && contract.vatMode);
+  var sum = 0;
+  (Array.isArray(e && e.lines)?e.lines:[]).forEach(function(l){
+    var q = Number(l && l.cumQty); if(!isFinite(q)) q = 0;
+    var p = Number(l && l.unitPrice); if(!isFinite(p)) p = 0;
+    sum += r2(vatSplit(p, mode).base * q);
   });
   return r2(sum);
 }
-/* أكبرُ كميةٍ تراكميةٍ سبق اعتمادُها لكلّ بند — أرضيةُ المستخلص الجديد. */
+function prevGrossOf(extracts, contract, exceptId){
+  var before = extsBefore(extracts, contract, exceptId);
+  if(!before.length) return 0;
+  return extGrossOf(before[before.length-1], contract);
+}
+/* أكبرُ كميةٍ تراكميةٍ سبق اعتمادُها لكلّ بند — أرضيةُ المستخلص الجديد.
+   من السابقة له وحدَها (بالترتيب نفسِه)، فلا يُقاس مستخلصٌ على لاحقٍ له. */
 function prevCumByLine(extracts, contract, exceptId){
-  var out = {}, cid = (contract && contract.id) || "";
-  (Array.isArray(extracts)?extracts:[]).forEach(function(e){
-    if(!e || e.contractId !== cid) return;
-    if(e.id && exceptId && e.id === exceptId) return;
-    if(EXT_COUNTED.indexOf(e.status) === -1) return;
+  var out = {};
+  extsBefore(extracts, contract, exceptId).forEach(function(e){
     (Array.isArray(e.lines)?e.lines:[]).forEach(function(l){
       var q = Number(l && l.cumQty); if(!isFinite(q)) q = 0;
       if(!(l.lineId in out) || q > out[l.lineId]) out[l.lineId] = q;
@@ -10375,6 +10403,8 @@ window.contracts = {
   _CLAUSE_CATS: CLAUSE_CATS,
   _CTR_TRANSITIONS: CTR_TRANSITIONS,
   _prevGrossOf: prevGrossOf,
+  _extsBefore: extsBefore,
+  _extGrossOf: extGrossOf,
   _prevCumByLine: prevCumByLine,
   _extCumGuard: extCumGuard,
   _openExtractOf: openExtractOf,

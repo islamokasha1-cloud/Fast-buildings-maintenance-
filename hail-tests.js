@@ -13638,6 +13638,35 @@ function contractsPhase1() {
     C._prevGrossOf([{ ...E_PAID, status: "ext_draft" }], CT4, null) === 0);
   T("ولا مستخلصُ عقدٍ آخر", C._prevGrossOf([{ ...E_PAID, contractId: "CTR-9" }], CT4, null) === 0);
 
+  /* ★★ حارسُ الارتداد (15/09): «سابقاً» = تراكميُّ **آخرِ** معتمدٍ قبله، لا مجموعُ المعتمدات.
+     بمستخلصَين مسدَّدَين (300 ثمّ 500 وحدة × 100) كان يظهر 80,000 بدل 50,000، وفترةُ الأوّل
+     −20,000 لأنّ الثاني الذي جاء بعده خُصم منه. */
+  {
+    const E1 = { ...E_PAID, createdAt: "2026-08-29T10:00:00.000Z" };
+    const E2 = { id: "E2", contractId: "CTR-1", status: "ext_paid", createdAt: "2026-09-15T10:00:00.000Z",
+                 lines: [{ lineId: "L1", cumQty: 500, unitPrice: 100 }] };
+    T("★★ مستخلصان معتمدان: «سابقاً» للجديد = تراكميُّ آخرِهما لا مجموعُهما",
+      C._prevGrossOf([E1, E2], CT4, null) === 50000);
+    T("★★ وللأوّل صفرٌ (اللاحقُ لا يُخصم من سابقه) وللثاني تراكميُّ الأوّل",
+      C._prevGrossOf([E1, E2], CT4, "E1") === 0 && C._prevGrossOf([E1, E2], CT4, "E2") === 30000);
+    T("★ والترتيبُ بـcreatedAt لا بموضع القائمة",
+      C._prevGrossOf([E2, E1], CT4, "E1") === 0 && C._prevGrossOf([E2, E1], CT4, "E2") === 30000 &&
+      C._prevGrossOf([E2, E1], CT4, null) === 50000);
+    T("وبلا createdAt يحكم موضعُ القائمة",
+      C._prevGrossOf([E_PAID, { ...E2, createdAt: undefined }], CT4, "E1") === 0 &&
+      C._prevGrossOf([E_PAID, { ...E2, createdAt: undefined }], CT4, "E2") === 30000);
+    T("★★ فأعمالُ الفترة في جدول العقد صحيحةٌ لكليهما (30,000 ثمّ 20,000) لا سالبة",
+      C._extNet(E1, CT4, { prevGross: C._prevGrossOf([E1, E2], CT4, "E1") }).period === 30000 &&
+      C._extNet(E2, CT4, { prevGross: C._prevGrossOf([E1, E2], CT4, "E2") }).period === 20000);
+    T("★ وأرضيةُ الكميات لكلّ بند من السابقة له وحدَها",
+      C._prevCumByLine([E1, E2], CT4, "E1").L1 === undefined &&
+      C._prevCumByLine([E1, E2], CT4, "E2").L1 === 300 &&
+      C._prevCumByLine([E1, E2], CT4, null).L1 === 500);
+    T("ومستخلصٌ مسدَّدٌ ثمّ معلّقٌ عند المدير: «سابقاً» للمعلّق = المسدَّد، وللمسدَّد صفر",
+      C._prevGrossOf([E1, { ...E2, status: "ext_pending_ceo" }], CT4, "E2") === 30000 &&
+      C._prevGrossOf([E1, { ...E2, status: "ext_pending_ceo" }], CT4, "E1") === 0);
+  }
+
   /* الحارسُ المانعُ الوحيد */
   T("★ التراكميُّ فوق كمية العقد **يُمنَع** (تجاوزُه خطأٌ لا اجتهاد)",
     C._extCumGuard({ lines: [{ lineId: "L1", cumQty: 1200, desc: "x" }] }, CT4, []).ok === false);
