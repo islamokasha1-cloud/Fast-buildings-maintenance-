@@ -21756,8 +21756,9 @@ function staffTasksGuards() {
       T("★★ شريطُ العمود من حالات الموعد: متأخّرةٌ واحدة واليومَ واحدة",
         mix.late === 1 && mix.due === 1 && mix.soon === 0 && mix.none === 0, JSON.stringify(mix));
     }
-    T("★★ خانةُ «كلّفتُ بها» وحدَها تُرسم لوحةً (`_boardHtml`) مع زرّ تبديلٍ إلى القائمة",
-      /if\(_tab==="sent"\)\{[\s\S]{0,200}_view==="board" \? _boardHtml\(rows, today\)/.test(src) &&
+    T("★★ خانتا «كلّفتُ بها» و«شارَكوني فيها» تُرسمان لوحةً (`_boardHtml`) مع زرّ تبديلٍ إلى القائمة — و«مهامّي» لا (كلُّها عليّ)",
+      /function _boardTab\(\)\{ return _tab==="sent" \|\| _tab==="shared"; \}/.test(src) &&
+      /if\(_boardTab\(\)\)\{[\s\S]{0,200}_view==="board" \? _boardHtml\(rows, today\)/.test(src) &&
       /onclick="staffTasks\.view\(\\''\+k\+'\\'\)"/.test(src) && typeof ST.view === "function");
     T("★ والتبديلُ يُعيد رسمَ القائمة وحدَها ويُحفَظ تفضيلاً في المتصفّح (لا في المستند)",
       /function view\(v\)\{[\s\S]{0,200}localStorage\.setItem\("st_sent_view"[\s\S]{0,80}_refreshList\(\)/.test(src) &&
