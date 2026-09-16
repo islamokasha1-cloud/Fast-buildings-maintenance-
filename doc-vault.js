@@ -67,7 +67,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3236";
+var MODULE_BUILD = "v18.9.3238";
 
 var PAGE_DOCS    = "vault-docs";
 var PAGE_LETTERS = "vault-letters";
@@ -1605,6 +1605,11 @@ function aprFlowRollup(list, today){
 var _docs = [], _ltrs = [];
 var _docsUnsub = null, _ltrsUnsub = null;
 var _docsLoaded = false, _ltrsLoaded = false, _err = "";
+/* ساعةُ الرسم: `null` = ساعةُ الجهاز (الإنتاج دائماً). يضبطها `__test_seed` وحدَه كي تُرسَم
+   الشاشاتُ على يومٍ ثابت — فحصٌ يقيس «كم وثيقةً انتهت» على ساعةِ الجهاز يصحّ اليومَ
+   ويسقط غداً حين تنتهي وثيقةُ الاختبار فعلاً (وقع صباحَ 2026-09-16 بلا تغييرٍ في الكود). */
+var _clock = null;
+function _today(){ return _clock ? new Date(_clock) : new Date(); }
 
 /* `proj:null` تعني **«لم يُضبَط بعد»** لا «كلّ المشاريع»: الوحدةُ تُحمَّل قبل اختيار
    المشروع، فلو ضُبط الافتراضُ هنا لَجُمِّد على قيمةِ لحظةِ التحميل. ويُشتقّ من
@@ -2532,7 +2537,7 @@ function render(){
     host.innerHTML = '<div class="dv-empty">🔒 خزانة الوثائق غير متاحة لحسابك.</div>';
     return;
   }
-  var today = new Date();
+  var today = _today();
   var head = '<div class="dv-head"><div>'
     + '<h2 class="dv-ttl">' + _icon("folderOpen") + ' خزانة الوثائق — السجلّات والشهادات</h2>'
     + '<div class="dv-sub">وثائقُ الشركة بتواريخ بدئها وانتهائها ومرفقاتها. التنبيهُ يبدأ قبل الانتهاء بتسعين يوماً ويشتدّ كلّما اقترب. ووثائقُ المشاريع في «ملفّ المشروع».</div>'
@@ -4609,7 +4614,7 @@ function _exsUpcomingHTML(today){
 
 /* ════════ لوحةُ الجداول ════════ */
 function _schedulesPanelHTML(){
-  var today = new Date();
+  var today = _today();
   var h = '<div class="dv-panel" style="margin-top:14px">'
     + '<div class="dv-head" style="margin-bottom:6px"><div>'
     + '<div class="dv-panel-h">' + _icon("calendar", "ic-sm") + ' المستخلصات الدورية — مواعيدُها ومسؤولوها</div>'
@@ -4846,7 +4851,7 @@ function _renderAprPage(pid){
   if(!host) return;
   if(!canView()){ host.innerHTML = '<div class="dv-empty">🔒 خزانة الوثائق غير متاحة لحسابك.</div>'; return; }
   var flow = (pid === PAGE_EXTRACTS), view = flow ? _xview : _aview;
-  var today = new Date();
+  var today = _today();
   var head = '<div class="dv-head"><div>'
     + (flow
         ? '<h2 class="dv-ttl">' + _icon("receipt") + ' خزانة الوثائق — المستخلصات</h2>'
@@ -5583,7 +5588,7 @@ function renderProjectFile(){
   var host = document.getElementById("page-" + PAGE_FILE);
   if(!host) return;
   if(!canView()){ host.innerHTML = '<div class="dv-empty">🔒 خزانة الوثائق غير متاحة لحسابك.</div>'; return; }
-  var today = new Date();
+  var today = _today();
   _fview.proj = _seedProj(_fview.proj);
 
   var head = _fileHead();
@@ -5982,7 +5987,10 @@ window.docVault = {
      والجدولُ في DOM حقيقيّ داخل `hail-tests.js`. لأنّ الحسابَ الصحيحَ الذي لا يُرسَم
      خطأٌ لا يُنذر، ولا سبيلَ لفحص الرسم بلا مصدرِ بياناتٍ سوى `onSnapshot`.
      لا يُنادى من الواجهة قطّ، ولا يكتب حرفاً في Firestore. */
-  __test_seed:function(d, l, sg, ap, pt, ex){
+  __test_seed:function(d, l, sg, ap, pt, ex, today){
+    /* لا `instanceof Date` — الفحصُ يمرّر تاريخاً من نطاق Node إلى نافذة jsdom فيسقط
+       الفحصُ بين النطاقَين بصمت ويعود الرسمُ إلى ساعة الجهاز. الصلاحيةُ وحدَها المعيار. */
+    _clock = (today != null && !isNaN(new Date(today).getTime())) ? today : null;
     if(Array.isArray(pt)){ _parties = pt.slice(); _partiesLoaded = true; }
     if(Array.isArray(ex)){ _exs = ex.slice(); _exsLoaded = true; }
     _pPanel = false; _pEdit = null; _pAct = null; _sPanel = false; _sEdit = null;

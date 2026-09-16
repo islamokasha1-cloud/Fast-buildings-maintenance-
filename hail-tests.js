@@ -407,6 +407,16 @@ function predelivery() {
   T("★ wk: قيدُ الإصدار الحالي موثَّق في NOTES.md (حدّث NOTES مع كل تغيير)",
     NOTES.includes("**" + VER + " —"), "لا قيد لـ " + VER + " في §6 — أضف سطر التغيير قبل الدفع");
 
+  // ── حقولُ الأرقام بلا أسهم ولا تغيّرٍ بعجلة الفأرة (كلُّ الكميات والمبالغ) ──
+  // الخللُ المُبلَغ: التمريرُ فوق حقل كميةٍ/مبلغٍ مركَّز يُبدّل قيمتَه. الحلُّ جزءان لا يُغني
+  // أحدُهما عن الآخر: CSS يُخفي الأسهمَ (شكل)، ومستمعُ wheel يُفلت التركيزَ (سلوك).
+  T("★★ number: الأسهمُ مخفيّةٌ عامّةً في app.css (webkit + firefox)",
+    /input\[type=number\]\{-moz-appearance:textfield;appearance:textfield\}/.test(HTML) &&
+    /input\[type=number\]::-webkit-outer-spin-button,input\[type=number\]::-webkit-inner-spin-button\{-webkit-appearance:none;margin:0\}/.test(HTML));
+  T("★★ number: مستمعُ wheel يُفلت تركيزَ الحقل الرقميّ المركَّز (capture · passive · بلا preventDefault)",
+    /document\.addEventListener\("wheel", e=>\{[^\n]{0,200}?t\.type==="number" && t===document\.activeElement\) t\.blur\(\); \}, \{capture:true, passive:true\}\)/.test(HTML) &&
+    !/addEventListener\("wheel"[^\n]*preventDefault/.test(HTML));
+
   /* ── سقفُ index.html: سقّاطةٌ تنزل ولا تصعد ────────────────────────────────
      القاعدةُ في CLAUDE.md («كل إضافةٍ جديدة في ملفٍ مستقل») **نيّةٌ بلا فحصٍ آليّ**،
      وقد ثبت أنها لا تكفي: الخمسةُ commits التي سبقت كتابتَها أضافت ٧٠ و١٢٤ و١٤٦
@@ -18639,9 +18649,14 @@ function docVaultGuards() {
 
     const pg = W.document.getElementById("page-vault-docs");
     pg.classList.add("active");
-    V.__test_seed(DOCS, []);
+    /* اليومُ ثابتٌ كبقيّة فحوص الخزانة — وإلّا انتهت DOC-2 (2026-09-15) على ساعة الجهاز
+       فصار الكعبُ 2 والنقاطُ 3 بلا حرجة، وسقط الفحصُ صباحَ 2026-09-16 بلا تغييرٍ في الكود. */
+    V.__test_seed(DOCS, [], undefined, undefined, undefined, undefined, TODAY);
     V.render();
     const html = pg.innerHTML;
+    T("★ dv: كلُّ رسمٍ يقرأ `_today()` (ساعةَ الفحص أو الجهاز) لا `new Date()` مباشرةً — وإلّا فحصٌ يصحّ اليومَ ويسقط غداً",
+      !/\n  var today = new Date\(\);\n/.test(src) && (src.match(/\n  var today = _today\(\);\n/g) || []).length === 4 &&
+      /_clock = \(today != null && !isNaN\(new Date\(today\)\.getTime\(\)\)\) \? today : null;/.test(src) && !/_clock = \(today instanceof/.test(src));
     T("★★ dv: الأفقُ يُرسَم بكعبِ المنتهيات واثني عشر شهراً",
       W.document.querySelectorAll("#page-vault-docs .dv-hz-m").length === 12 &&
       /class="dv-hz-past[^"]*"/.test(html) && html.includes(">1</span><span class=\"l\">منتهية<"));
