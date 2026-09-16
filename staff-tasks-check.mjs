@@ -173,6 +173,53 @@ check('★★ المهامُّ تظهر في «كلّفتُ بها»',
   await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-card').length === 4),
   await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-card').length + ' بطاقة'));
 
+/* لوحةُ الأعمدة (طلبُ المالك 16/09): «كلّفتُ بها» عمودٌ لكلّ مكلَّف. الأربعُ كلُّها على
+   خالد ⇐ عمودٌ واحدٌ بعدده؛ ومهمّةٌ مؤقّتةٌ لسعيد تفتح عموداً ثانياً ثمّ تُحذف فلا
+   تُفسد أعدادَ الفحوص التالية. */
+check('★★★ الخانةُ تُرسَم لوحةً: عمودٌ واحدٌ باسم خالد وعددِه 4 وبطاقاتُه الأربعُ تحته',
+  await page.evaluate(() => {
+    const cols = [...document.querySelectorAll('#page-staff-tasks .st-board .st-col')];
+    return cols.length === 1 && cols[0].dataset.user === 'khaled' &&
+      cols[0].querySelector('.st-col-nm').textContent.includes('خالد') &&
+      cols[0].querySelector('.st-col-n').textContent === '4' &&
+      cols[0].querySelectorAll('.st-card').length === 4;
+  }),
+  await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-board .st-col').length + ' عمود'));
+check('★ والبطاقةُ في العمود بلا سطر «إلى: خالد» — العمودُ يقوله فوقها',
+  await page.evaluate(() => ![...document.querySelectorAll('#page-staff-tasks .st-col .st-card .st-meta')].some(m => m.textContent.includes('إلى:'))));
+check('★ وشريطُ الحالات في رأس العمود: الموعدُ 2026-09-10 مضى فكلُّها متأخّرة',
+  await page.evaluate(() => { const c = document.querySelector('#page-staff-tasks .st-col');
+    return !!c && !!c.querySelector('.st-col-bar .late') && /4 متأخّرة/.test(c.querySelector('.st-col-sub').textContent); }),
+  await page.evaluate(() => (document.querySelector('#page-staff-tasks .st-col-sub') || {}).textContent));
+await page.evaluate(() => db.collection('staff_tasks').doc('tmp-saeed').set({
+  title: 'مهمّةٌ مؤقّتة لسعيد', kind: 'task', status: 'open', due: '', priority: 'normal',
+  createdBy: 'المسؤول', createdByUser: 'admin', assignedToUser: 'saeed', assignedToName: 'سعيد',
+  shared: [], comments: [], participants: ['admin', 'saeed'], createdAt: new Date(), updatedAt: new Date() }));
+await page.waitForTimeout(500);
+check('★★ مكلَّفٌ ثانٍ ⇐ عمودٌ ثانٍ باسمه، والأعمدةُ بالاسم: خالد ثمّ سعيد',
+  await page.evaluate(() => {
+    const cols = [...document.querySelectorAll('#page-staff-tasks .st-board .st-col')];
+    return cols.length === 2 && cols.map(c => c.dataset.user).join(',') === 'khaled,saeed' &&
+      cols[1].querySelector('.st-col-n').textContent === '1' && cols[1].querySelectorAll('.st-card').length === 1;
+  }),
+  await page.evaluate(() => [...document.querySelectorAll('#page-staff-tasks .st-col')].map(c => c.dataset.user).join(',')));
+await page.click('#page-staff-tasks .st-vw button:last-child');
+await page.waitForTimeout(300);
+check('★★ زرُّ «قائمة» يُعيدها قائمةً واحدةً (لا أعمدة) بالبطاقات الخمس وسطرِ «إلى:»',
+  await page.evaluate(() => !document.querySelector('#page-staff-tasks .st-board') &&
+    document.querySelectorAll('#page-staff-tasks .st-card').length === 5 &&
+    [...document.querySelectorAll('#page-staff-tasks .st-card .st-meta')].every(m => m.textContent.includes('إلى:'))));
+check('★ والتفضيلُ محفوظٌ في المتصفّح', await page.evaluate(() => localStorage.getItem('st_sent_view') === 'list'));
+await page.click('#page-staff-tasks .st-vw button:first-child');
+await page.waitForTimeout(300);
+check('★ و«حسب المكلَّف» يُعيد اللوحة',
+  await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-board .st-col').length === 2));
+await page.evaluate(() => db.collection('staff_tasks').doc('tmp-saeed').delete());
+await page.waitForTimeout(500);
+check('(تنظيف) حُذفت المؤقّتة فعاد العمودُ واحداً',
+  await page.evaluate(() => document.querySelectorAll('#page-staff-tasks .st-board .st-col').length === 1 &&
+    document.querySelectorAll('#page-staff-tasks .st-card').length === 4));
+
 /* البحثُ: يكتب كما يكتب الموظف (لا `fill` دفعةً — حرفاً حرفاً حتى يُقاس التركيز)
    ويُصفّي القائمةَ وحدَها فلا يفقد المؤشّر. */
 await page.click('#st-search-q');
