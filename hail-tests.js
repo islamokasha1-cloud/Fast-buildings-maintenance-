@@ -21602,7 +21602,7 @@ function staffTasksGuards() {
       /function exitStandaloneModule\(\)\{[\s\S]*?subEl\.textContent = subEl\.dataset\.base;/.test(IDX_RAW));
 
     T("★★ وقشرةُ الوضع المستقلّ موجودةٌ في النواة بمدخلٍ ومخرج",
-      /function openStandaloneModule\(pageId, label\)\{/.test(IDX_RAW) &&
+      /function openStandaloneModule\(pageId, label, icon\)\{/.test(IDX_RAW) &&
       /function exitStandaloneModule\(\)\{/.test(IDX_RAW) &&
       /classList\.add\("standalone-mode"\)/.test(IDX_RAW) &&
       /classList\.remove\("standalone-mode"\)/.test(IDX_RAW));
@@ -21683,6 +21683,46 @@ function staffTasksGuards() {
       /function filterUser\(v\)\{[\s\S]{0,400}_refreshList\(\)/.test(src));
     T("والفراغُ بسبب الفلتر يقول «لا مهمّةَ لـ…» مع زرّ «كل الموظفين»",
       /لا مهمّةَ لـ«'\+_e\(_nameOf\(_who\)\)\+'» في هذه الخانة/.test(src) && /filterUser\(\\'\\'\)">كل الموظفين/.test(src));
+  }
+
+  /* ── (١٩) سجلُّ المستخدمين عبر كلّ المشاريع (بلاغُ المالك 16/09) ──
+     «لا يظهر كل المستخدمين»: `USERS` قائمةُ المشروع المفتوح وتُصفّى للأدمن عند الخروج
+     منه، والمهامُّ لا تخصّ مشروعاً — فالوحدةُ تجلب سجلَّها من مستندات المشاريع كلِّها. */
+  {
+    const NEEDU = ["_mergeUsers", "_users", "loadUsersDir"].filter(k => typeof ST[k] !== "function");
+    T("★ دوالُّ السجلّ مكشوفة", NEEDU.length === 0, NEEDU.join(" · "));
+    if (NEEDU.length === 0) {
+      const live = [{ user: "admin", name: "مدير النظام", role: "admin" }, { user: "khaled", name: "خالد", role: "مشرف (حُدِّث)" }];
+      const fetched = [{ user: "khaled", name: "خالد", role: "مشرف" }, { user: "saeed", name: "سعيد", role: "مشرف" },
+                       { user: "", name: "بلا دخول" }, null, { user: "ashraf", name: "أشرف عشري", role: "مشرف" }];
+      const m = ST._mergeUsers([live, fetched]);
+      T("★★★ الدمجُ باسم الدخول: لا تكرارَ، والحيُّ يسبق المجلوب، وبلا اسمِ دخولٍ يُسقَط، والترتيبُ بالاسم",
+        m.length === 4 && m.map(u => u.user).join(",") === "ashraf,khaled,saeed,admin" &&
+        m.find(u => u.user === "khaled").role === "مشرف (حُدِّث)", JSON.stringify(m.map(u => u.user)));
+      T("★ وقوائمُ فارغةٌ أو ناقصة لا تكسر", ST._mergeUsers([]).length === 0 && ST._mergeUsers(null).length === 0 && ST._mergeUsers([null, []]).length === 0);
+    }
+    T("★★★ السجلُّ يُجلَب من `meta/projects` ثمّ مستندِ مستخدمي كلّ مشروعٍ والمركزيّ — مرّةً في الجلسة ومع الاشتراك",
+      /function _loadDir\(\)\{[\s\S]{0,120}if\(_dirState==="loading" \|\| _dirState==="ok"\) return;/.test(src) &&
+      /db\.doc\(dev \? "meta\/projects_dev" : "meta\/projects"\)\.get\(\)/.test(src) &&
+      /db\.doc\("meta\/"\+p\.id\+suffix\)\.get\(\)/.test(src) &&
+      /db\.doc\(dev \? "meta\/users_dev" : "meta\/users"\)\.get\(\)/.test(src) &&
+      /_loadDir\(\);[^\n]*\n\s*_syncFor = me;/.test(src));
+    T("★★ و`_users` تدمج `USERS` الحيّة مع المجلوب ولا تكتب في `USERS` (فحوصُ الأدوار في شاشاتٍ أخرى تقرؤها)",
+      /function _users\(\)\{[\s\S]{0,200}return _mergeUsers\(\[live, _dir\]\);/.test(src) &&
+      !/\bUSERS\s*=/.test(src));
+    T("★ ووصولُ السجلّ يُعيد رسمَ القائمة المفتوحة في المنتقي وحدَها لا الشاشةَ (لا طردَ للكاتب من حقله)",
+      /function _dirArrived\(\)\{[\s\S]{0,400}_upickPaint\(key\)/.test(src) && !/function _dirArrived\(\)\{[\s\S]{0,400}_rerender\(\)/.test(src));
+  }
+
+  /* ── (٢٠) لا إيموجي في الشاشة: الأيقوناتُ من مُصنّع المنصّة (طلبُ المالك 16/09) ── */
+  {
+    /* الرموزُ المصوَّرة (U+1F300–1FAFF) وهروبُها `\ud83d` — في نصٍّ أو تعليق. أمّا علاماتُ
+       ⚠ و★ في التعليقات فليست إيموجي واجهة. */
+    const emoji = src.match(/[\u{1F300}-\u{1FAFF}\u{2705}]|\\ud83d/gu) || [];
+    T("★★★ لا إيموجي في `staff-tasks.js` ولا هروبَ `\\ud83d` — الأيقوناتُ `_icn` من المنصّة", emoji.length === 0, emoji.join(" "));
+    T("★★ وعنوانُ الوضع المستقلّ يُمرَّر باسم أيقونة، والنواةُ ترسمها SVG بـ`_ic` وتهرّب النصّ",
+      /openStandaloneModule\("staff-tasks", "المهامّ والملاحظات", "clipboardCheck"\)/.test(src) &&
+      /if\(icon && label && typeof _ic==="function"\) subEl\.innerHTML = _ic\(icon,"ic-sm"\)\+" "\+esc\(label\);/.test(IDX_RAW));
   }
 
   /* ── (١٨) لوحةُ «كلّفتُ بها»: عمودٌ لكلّ مكلَّف (طلبُ المالك 16/09) ──

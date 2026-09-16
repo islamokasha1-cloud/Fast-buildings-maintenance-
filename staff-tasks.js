@@ -95,7 +95,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3240";
+  var MODULE_BUILD = "v18.9.3243";
 
   function COLL(){
     var dev=false;
@@ -139,9 +139,78 @@
     catch(e){ return ""; }
   }
   function _isAdmin(){ return _myRole()==="admin"; }
+  /* ── سجلُّ المستخدمين عبر **كلّ** المشاريع (بلاغُ المالك 16/09) ──
+     «لماذا عند البحث عن مستخدم لا يظهر كل المستخدمين؟» — لأنّ `USERS` في النواة
+     **قائمةُ المشروع المفتوح** (`meta/<المشروع>_users`)، تُستبدَل عند دخول مشروعٍ وتُصفّى
+     إلى الأدمن وحدَه عند الخروج منه. والمهامُّ لا تخصّ مشروعاً: مديرٌ يكلّف مشرفَ مشروعٍ
+     آخر لا يجده في القائمة، ويظنّ البحثَ معطّلاً. فتقرأ الوحدةُ سجلَّها بنفسها من
+     `meta/projects` ثمّ مستندِ مستخدمي كلّ مشروعٍ والمستندِ المركزيّ (نمطُ
+     `_loadAllUsersForLogin` في النواة و`enableReaderLock` في الخزانة) — جلبةٌ واحدةٌ
+     في الجلسة، وتُدمَج مع `USERS` الحيّة وقتَ النداء (مستخدمٌ أُضيف الآن في المشروع
+     المفتوح يظهر بلا إعادة تحميل)، ولا تُكتب في `USERS`: تلك تقرؤها فحوصُ الأدوار في
+     شاشاتٍ أخرى ولا يُغيَّر معناها من هنا. */
+  var _dir = [];          // ما جُلب من مستندات المستخدمين كلِّها
+  var _dirState = "";     // "" | "loading" | "ok" | "err"
   function _users(){
-    try{ return (typeof USERS!=="undefined" && Array.isArray(USERS)) ? USERS : []; }
-    catch(e){ return []; }
+    var live=[];
+    try{ live=(typeof USERS!=="undefined" && Array.isArray(USERS)) ? USERS : []; }catch(e){}
+    return _mergeUsers([live, _dir]);
+  }
+  /* دمجُ قوائمَ: اسمُ الدخول مفتاحٌ، والأوّلُ يبقى (القائمةُ الحيّة تسبق المجلوبة —
+     فتعديلُ اسمٍ أو دورٍ في المشروع المفتوح يظهر فوراً)، والترتيبُ بالاسم المعروض. */
+  function _mergeUsers(lists){
+    var seen={}, out=[];
+    (Array.isArray(lists)?lists:[]).forEach(function(arr){
+      (Array.isArray(arr)?arr:[]).forEach(function(u){
+        var k=(u && u.user!=null) ? String(u.user).trim() : "";
+        if(!k || seen[k]) return;
+        seen[k]=true; out.push(u);
+      });
+    });
+    return out.sort(function(a,b){
+      return String(a.name||a.user).localeCompare(String(b.name||b.user), "ar");
+    });
+  }
+  function _loadDir(){
+    if(_dirState==="loading" || _dirState==="ok") return;
+    if(typeof db==="undefined" || !db) return;
+    _dirState="loading";
+    var dev=false;
+    try{ dev=(typeof IS_DEV!=="undefined" && IS_DEV); }catch(e){}
+    var suffix = dev ? "_users_dev" : "_users";
+    db.doc(dev ? "meta/projects_dev" : "meta/projects").get()
+      .then(function(ps){
+        var projs=(ps && ps.exists && Array.isArray((ps.data()||{}).projects)) ? ps.data().projects : [];
+        var refs=projs.filter(function(p){ return p && p.id; }).map(function(p){
+          return db.doc("meta/"+p.id+suffix).get().catch(function(){ return null; });
+        });
+        refs.push(db.doc(dev ? "meta/users_dev" : "meta/users").get().catch(function(){ return null; }));
+        return Promise.all(refs);
+      })
+      .then(function(snaps){
+        var all=[];
+        (snaps||[]).forEach(function(sn){
+          if(!sn || !sn.exists) return;
+          var u=(sn.data()||{}).users;
+          if(Array.isArray(u)) all=all.concat(u);
+        });
+        _dir=_mergeUsers([all]); _dirState="ok";
+        _dirArrived();
+      })
+      .catch(function(e){ console.warn("staff-tasks users dir failed:", e); _dirState="err"; });
+  }
+  /* وصولُ السجلّ لا يُعيد رسمَ الشاشة (يطرد الكاتبَ من حقله): تُعاد **القائمةُ
+     المفتوحةُ** في المنتقي وحدَها إن كانت مفتوحة، والأسماءُ في البطاقات تصحّ مع
+     أوّل رسمٍ تالٍ. */
+  function _dirArrived(){
+    try{
+      var boxes=document.querySelectorAll("#page-staff-tasks .st-up-list");
+      for(var i=0;i<boxes.length;i++){
+        if(boxes[i].hidden) continue;
+        var key=String(boxes[i].id||"").replace(/^st-up-l-/,"");
+        if(key) _upickPaint(key);
+      }
+    }catch(e){}
   }
   function _nameOf(login){
     var u=_users().filter(function(x){ return x.user===login; })[0];
@@ -723,6 +792,7 @@
        `staff-tasks-check`)، فتمرّ اللقطةُ بـ`_rerender` ⇐ `render` ⇐ `startSync`
        و`_unsub` لم يُسنَد بعد — فلو كان الحارسُ `_unsub` وحدَه لاشترك ثانيةً، ولَعادت
        الحلقةُ على نفسها حتى ينفد المكدّس. */
+    _loadDir();                                // سجلُّ الأسماء عبر المشاريع — مرّةً في الجلسة
     _syncFor = me;
     var q;
     try{ q = db.collection(COLL()).where("participants","array-contains", me); }
@@ -862,7 +932,7 @@
   function openFromLanding(){
     try{
       if(typeof openStandaloneModule==="function"){
-        openStandaloneModule("staff-tasks", "\ud83d\udcdd المهامّ والملاحظات");
+        openStandaloneModule("staff-tasks", "المهامّ والملاحظات", "clipboardCheck");
         return;
       }
     }catch(e){}
@@ -2279,6 +2349,7 @@
     _taskText:_taskText, _taskMatches:_taskMatches, _searchTasks:_searchTasks,
     _taskHasUser:_taskHasUser, _filterByUser:_filterByUser, _userOptions:_userOptions,
     _groupByAssignee:_groupByAssignee, _dueMix:_dueMix,
+    _mergeUsers:_mergeUsers, _users:_users, loadUsersDir:_loadDir,
     _msVal:_msVal, _lastActivity:_lastActivity, _seenMs:_seenMs, _isUnread:_isUnread,
     _unreadLabel:_unreadLabel,
     _canEditParticipants:_canEditParticipants, _canShare:_canShare,

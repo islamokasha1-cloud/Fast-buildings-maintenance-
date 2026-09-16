@@ -67,6 +67,9 @@ await page.waitForTimeout(2500);
 await page.evaluate(() => {
   window.__store[PROJECTS_DOC] = { projects: [{ id: 'hail', name: 'مشروع حائل', desc: 'صيانة', icon: '' }] };
   window.__store[_meta('settings')] = { buildings: ['مبنى الإدارة'], supervisors: ['أسامة'], workTypes: {} };
+  /* مستخدمٌ في مستند مشروعٍ (لا في `USERS` الحيّة) — يجب أن يجده منتقي التكليف
+     (بلاغُ المالك 16/09: «لا يظهر كل المستخدمين»). */
+  window.__store['meta/hail_users'] = { users: [{ user: 'omar', name: 'عمر الفاروق', role: 'مشرف' }] };
 });
 AUTH_OK = true;
 await page.fill('#login-user', 'admin'); await page.fill('#login-pass', 'Passw0rd!');
@@ -106,6 +109,14 @@ await page.waitForTimeout(300);
 check('★★ لمسُ خانة التكليف يفتح القائمةَ كاملةً قبل أيّ كتابة',
   await page.evaluate(() => document.querySelectorAll('#st-up-l-quick .st-up-row').length >= 5),
   await page.evaluate(() => document.querySelectorAll('#st-up-l-quick .st-up-row').length + ' صفّاً'));
+await page.fill('#st-up-q-quick', 'عمر');
+await page.waitForTimeout(300);
+check('★★★ مستخدمٌ من مستند مشروعٍ آخر (ليس في `USERS` الحيّة) يظهر في المنتقي — السجلُّ عبر كلّ المشاريع',
+  await page.evaluate(() => {
+    const r = [...document.querySelectorAll('#st-up-l-quick .st-up-row')];
+    return r.length === 1 && /عمر الفاروق/.test(r[0].textContent) && !USERS.some(u => u.user === 'omar');
+  }),
+  await page.evaluate(() => [...document.querySelectorAll('#st-up-l-quick .st-up-row')].map(x => x.textContent.trim()).join(' | ')));
 await page.fill('#st-up-q-quick', 'اشرف');
 await page.waitForTimeout(300);
 check('★★★ «اشرف» بلا همزةٍ تجد «أشرف عشري» — البحثُ يطبّع لا يطابق حرفياً',
@@ -1064,6 +1075,16 @@ check('★★★ خلفيةُ الحقل من نظام المنصّة لا من 
 check('★★ والخانةُ المفتوحة بلون الهوية --primary لا بلونٍ من خارجه',
   !!skin.tabBg && skin.tabBg !== 'rgba(0, 0, 0, 0)', skin.tabBg + '  (--primary: ' + skin.primary + ')');
 
+/* في آخر الرحلة: الخروجُ من الوضع المستقلّ يُعيد بوّابةَ المشاريع فوق التطبيق. */
+check('★★ الدخولُ من الصفحة الرئيسية يكتب اسمَ الوحدة في الترويسة بأيقونة SVG لا إيموجي (ويعود الأصلُ عند الخروج)',
+  await page.evaluate(() => {
+    const p = document.querySelector('.logo-text p'); if (!p) return false;
+    const base = p.textContent;
+    staffTasks.openFromLanding();
+    const ok = !!p.querySelector('.ic svg') && /المهامّ والملاحظات/.test(p.textContent) && !/\u{1F4DD}/u.test(p.textContent);
+    exitStandaloneModule();
+    return ok && p.textContent === base && !p.querySelector('svg');
+  }));
 check('★★★ لا خطأَ جافاسكربت في الرحلة كلّها', errors.length === 0, errors[0] || '');
 
 await browser.close();
