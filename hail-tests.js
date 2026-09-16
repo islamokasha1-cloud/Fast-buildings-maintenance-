@@ -18649,9 +18649,14 @@ function docVaultGuards() {
 
     const pg = W.document.getElementById("page-vault-docs");
     pg.classList.add("active");
-    V.__test_seed(DOCS, []);
+    /* اليومُ ثابتٌ كبقيّة فحوص الخزانة — وإلّا انتهت DOC-2 (2026-09-15) على ساعة الجهاز
+       فصار الكعبُ 2 والنقاطُ 3 بلا حرجة، وسقط الفحصُ صباحَ 2026-09-16 بلا تغييرٍ في الكود. */
+    V.__test_seed(DOCS, [], undefined, undefined, undefined, undefined, TODAY);
     V.render();
     const html = pg.innerHTML;
+    T("★ dv: كلُّ رسمٍ يقرأ `_today()` (ساعةَ الفحص أو الجهاز) لا `new Date()` مباشرةً — وإلّا فحصٌ يصحّ اليومَ ويسقط غداً",
+      !/\n  var today = new Date\(\);\n/.test(src) && (src.match(/\n  var today = _today\(\);\n/g) || []).length === 4 &&
+      /_clock = \(today != null && !isNaN\(new Date\(today\)\.getTime\(\)\)\) \? today : null;/.test(src) && !/_clock = \(today instanceof/.test(src));
     T("★★ dv: الأفقُ يُرسَم بكعبِ المنتهيات واثني عشر شهراً",
       W.document.querySelectorAll("#page-vault-docs .dv-hz-m").length === 12 &&
       /class="dv-hz-past[^"]*"/.test(html) && html.includes(">1</span><span class=\"l\">منتهية<"));
