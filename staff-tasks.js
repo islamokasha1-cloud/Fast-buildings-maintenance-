@@ -70,6 +70,13 @@
    والمرفقُ **حركةٌ كالتعليق** في `_lastActivity`: يلتهب به لونُ «فيها جديد» عند
    بقيّة الأطراف، وإلا رُفع الدليلُ فلم يفتحه أحد.
 
+   ── «كلّفتُ بها» لوحةُ أعمدةٍ لا قائمة (طلبُ المالك 16/09) ──
+   المديرُ الذي كلّف عشرةً بثلاثين مهمّةً لا يسأل «ما الذي كلّفتُ به؟» بل **«ما الذي
+   على كلّ واحد؟»** — والقائمةُ الواحدةُ لا تجيبه إلا بقراءة الثلاثين. فالخانةُ عمودٌ
+   لكلّ مكلَّف (اسمُه · عددُه · شريطُ حالاته) وتحته بطاقاتُه، والتجميعُ بالمكلَّف
+   وحدَه لا بالأطراف فلا تُحسب المهمّةُ الواحدةُ على ثلاثة. وزرٌّ يعيدها قائمةً لمن
+   شاء، يُحفَظ في المتصفّح (تفضيلُ عرضٍ لا بيانات).
+
    ── قيدٌ مقصود: لا دردشةَ عامة ──
    الكلامُ كلُّه **داخل المهمّة**. لا رسائلَ مباشرة ولا قناةَ عامة. بلا هذا القيد
    تتحوّل الأداةُ واتساب ثانياً فتمتلئ كلاماً وتُهجَر.
@@ -88,7 +95,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3238";
+  var MODULE_BUILD = "v18.9.3240";
 
   function COLL(){
     var dev=false;
@@ -109,6 +116,7 @@
   var _tab     = "mine";  // mine | sent | shared | notes | done | all
   var _srch    = "";      // نصُّ البحث في القائمة — يُصفّي الخانةَ المفتوحة وحدَها
   var _who     = "";      // فلترُ الموظف: اسمُ دخولٍ — يُظهر ما هو طرفٌ فيه (مكلَّفاً أو مشاركاً)
+  var _view    = _loadView(); // عرضُ «كلّفتُ بها»: board (عمودٌ لكلّ مكلَّف) | list (قائمةٌ واحدة)
   var _openId  = null;    // المهمّة المفتوحة تفصيلاً
   var _draft   = [];      // مسوّدةُ التكليف السريع
   var _draftTo = "";      // اسمُ دخول المكلَّف في المسوّدة
@@ -249,6 +257,45 @@
     });
     return out.map(function(u){ return { user:u, name:String(nm(u)||u), n:cnt[u] }; })
               .sort(function(a,b){ return a.name.localeCompare(b.name, "ar"); });
+  }
+
+  /* ── لوحةُ «كلّفتُ بها»: عمودٌ لكلّ مكلَّف (طلبُ المالك 16/09) ──
+     القائمةُ الواحدة تجيب «ما الذي كلّفتُ به؟» ولا تجيب السؤالَ الذي يسأله المديرُ
+     فعلاً: **«ما الذي على كلّ واحد؟»** — فمَن كلّف عشرةً بثلاثين مهمّةً يقرأ ثلاثين
+     بطاقةً ليعرف أنّ خالداً عليه اثنتا عشرة وسعيداً واحدة. فصارت الخانةُ لوحةَ أعمدةٍ
+     (نمطُ Kanban): عمودٌ باسم كلّ مكلَّف وعددِ ما عليه وشريطٍ يقول كم منها متأخّر،
+     وتحته بطاقاتُه بترتيب القائمة نفسِه (المتأخّرُ أوّلاً).
+     والتجميعُ **بالمكلَّف وحدَه** (`assignedToUser`) لا بالأطراف: المهمّةُ تُحسب على
+     مَن يُطالَب بها لا على كلّ مَن أُشرك فيها — وإلا ظهرت المهمّةُ الواحدةُ في ثلاثة
+     أعمدةٍ فصار مجموعُ الأعمدة كذبةً. والأعمدةُ مرتّبةٌ بالاسم لا بالعدد: العمودُ لا
+     يقفز من طرفٍ إلى طرفٍ كلّما أُنجزت مهمّة. ومهمّةٌ بلا مكلَّفٍ (إن وصلت) عمودٌ
+     أخيرٌ باسمٍ صريح لا مهمّةٌ تسقط من اللوحة بصمت. */
+  function _groupByAssignee(rows, nameOf){
+    var nm = typeof nameOf==="function" ? nameOf : function(x){ return x; };
+    var idx={}, out=[];
+    (Array.isArray(rows)?rows:[]).forEach(function(t){
+      if(!t) return;
+      var u=String(t.assignedToUser||"").trim();
+      if(!idx[u]){
+        idx[u]={ user:u, name: u ? String(nm(u)||u) : "بلا مكلَّف", tasks:[] };
+        out.push(idx[u]);
+      }
+      idx[u].tasks.push(t);
+    });
+    return out.sort(function(a,b){
+      if(!a.user !== !b.user) return a.user ? -1 : 1;
+      return a.name.localeCompare(b.name, "ar");
+    });
+  }
+  /* توزيعُ مهامّ العمود على حالات الموعد — منه شريطُ الرأس وسطرُه («2 متأخّرة · 1 اليوم»). */
+  function _dueMix(tasks, todayISO){
+    var m={ late:0, due:0, soon:0, none:0 };
+    (Array.isArray(tasks)?tasks:[]).forEach(function(t){ m[_dueState(t, todayISO)]++; });
+    return m;
+  }
+  function _viewOk(v){ return v==="list" ? "list" : "board"; }
+  function _loadView(){
+    try{ return _viewOk(localStorage.getItem("st_sent_view")||""); }catch(e){ return "board"; }
   }
 
   /* المشاركون: المُنشئ + المكلَّف + المضافون — بلا تكرارٍ وبلا فراغ.
@@ -1452,6 +1499,39 @@
       '#page-staff-tasks .st-pill.rt{color:var(--ai-ink);border-color:color-mix(in srgb,var(--ai) 34%,var(--border))}'+
       '#page-staff-tasks .st-pill.nw{color:var(--info);background:color-mix(in srgb,var(--info) 13%,var(--surface));'+
         'border-color:color-mix(in srgb,var(--info) 38%,var(--border))}'+
+      /* لوحةُ الأعمدة («كلّفتُ بها»): صفٌّ يُمرَّر أفقياً، عمودٌ لكلّ مكلَّف بعرضٍ ثابت
+         فلا تتكدّس عشرةُ أعمدةٍ في سطرٍ واحدٍ ضيّق، وعلى الجوّال تُقلَّب بالإصبع
+         (`scroll-snap`). والبطاقةُ داخله هي `.st-card` نفسُها — لا طرازَ ثانٍ. */
+      '#page-staff-tasks .st-vw{display:flex;gap:4px;justify-content:flex-start;margin:0 0 10px}'+
+      '#page-staff-tasks .st-vw button{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:11.5px;'+
+        'font-weight:700;padding:5px 11px;border-radius:9px;border:1px solid var(--border);background:var(--surface2);'+
+        'color:var(--muted);cursor:pointer}'+
+      '#page-staff-tasks .st-vw button .ic svg{width:13px;height:13px}'+
+      '#page-staff-tasks .st-vw button.on{background:var(--primary);color:#fff;border-color:var(--primary)}'+
+      '#page-staff-tasks .st-board{display:flex;gap:12px;align-items:flex-start;overflow-x:auto;'+
+        'padding:2px 2px 10px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}'+
+      '#page-staff-tasks .st-col{flex:0 0 300px;max-width:86vw;scroll-snap-align:start;'+
+        'background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:10px}'+
+      '#page-staff-tasks .st-col-h{padding:2px 4px 10px}'+
+      '#page-staff-tasks .st-col-t{display:flex;align-items:center;gap:8px}'+
+      '#page-staff-tasks .st-col-nm{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:800;'+
+        'color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'+
+      '#page-staff-tasks .st-col-nm .ic svg{width:14px;height:14px;color:var(--primary)}'+
+      '#page-staff-tasks .st-col-n{margin-inline-start:auto;min-width:22px;text-align:center;padding:1px 7px;'+
+        'border-radius:10px;font-size:11px;font-weight:800;background:var(--primary);color:#fff}'+
+      /* شريطُ الحالات: قطعٌ بعرضٍ يساوي نصيبَ كلّ حالة — أحمرُ للمتأخّر، ثمّ اليوم،
+         ثمّ القريب، والباقي بلون الحدّ. قراءتُه بلمحةٍ قبل قراءة الأرقام. */
+      '#page-staff-tasks .st-col-bar{display:flex;height:5px;border-radius:3px;overflow:hidden;margin-top:8px;'+
+        'background:var(--border)}'+
+      '#page-staff-tasks .st-col-bar i{display:block;height:100%}'+
+      '#page-staff-tasks .st-col-bar .late{background:var(--danger)}'+
+      '#page-staff-tasks .st-col-bar .due{background:var(--warn)}'+
+      '#page-staff-tasks .st-col-bar .soon{background:var(--stage-wait-fill)}'+
+      '#page-staff-tasks .st-col-sub{font-size:11px;color:var(--muted);font-weight:700;margin-top:6px;'+
+        'display:flex;gap:8px;flex-wrap:wrap}'+
+      '#page-staff-tasks .st-col-sub .late{color:var(--danger)}'+
+      '#page-staff-tasks .st-col .st-card{margin-bottom:8px}'+
+      '#page-staff-tasks .st-col .st-card:last-child{margin-bottom:0}'+
       /* الفراغ: دعوةٌ إلى فعلٍ لا احتفال — أيقونةٌ خافتةٌ وسطرٌ يقول ما التالي. */
       '#page-staff-tasks .st-empty{text-align:center;padding:44px 18px;color:var(--muted);font-size:13px;line-height:1.9}'+
       '#page-staff-tasks .st-empty .ic{display:block;margin:0 auto 10px}'+
@@ -1597,6 +1677,13 @@
       if(sel.value!==_who) sel.value=_who;
       if(_who) sel.classList.add("has"); else sel.classList.remove("has");
     }
+    _refreshList();
+  }
+  /* تبديلُ عرض «كلّفتُ بها» (لوحةٌ | قائمة): يُحفَظ في المتصفّح — تفضيلُ عرضٍ لا
+     بياناتٌ، فمكانُه هنا لا في المستند. ويمرّ بالمسار نفسِه: القائمةُ وحدَها تُرسم. */
+  function view(v){
+    _view=_viewOk(v);
+    try{ localStorage.setItem("st_sent_view", _view); }catch(e){}
     _refreshList();
   }
   function _refreshList(){
@@ -1907,7 +1994,44 @@
     }
     var rows=_currentRows();
     if(!rows.length) return _emptyHtml();
+    if(_tab==="sent"){
+      return _viewToggleHtml()+
+        (_view==="board" ? _boardHtml(rows, today)
+                         : rows.map(function(t){ return _cardHtml(t, today); }).join(""));
+    }
     return rows.map(function(t){ return _cardHtml(t, today); }).join("");
+  }
+
+  function _viewToggleHtml(){
+    function b(k, icon, label){
+      return '<button type="button"'+(_view===k?' class="on"':'')+' onclick="staffTasks.view(\''+k+'\')"'+
+        ' title="'+_e(label)+'">'+_icn(icon)+_e(label)+'</button>';
+    }
+    return '<div class="st-vw" id="st-vw">'+b("board","layers","حسب المكلَّف")+b("list","clipboardList","قائمة")+'</div>';
+  }
+
+  /* عمودٌ لكلّ مكلَّف: رأسٌ باسمه وعدده وشريطِ حالاته، وتحته بطاقاتُه — البطاقةُ
+     نفسُها التي في القائمة، بلا سطر «إلى: فلان» فالعمودُ يقوله مرّةً واحدةً فوقها. */
+  function _boardHtml(rows, today){
+    var cols=_groupByAssignee(rows, _nameOf);
+    return '<div class="st-board" id="st-board">'+cols.map(function(c){
+      var m=_dueMix(c.tasks, today), n=c.tasks.length;
+      function seg(k){ return m[k] ? '<i class="'+k+'" style="flex:'+m[k]+'"></i>' : ""; }
+      var sub=[];
+      if(m.late) sub.push('<span class="late">'+m.late+' متأخّرة</span>');
+      if(m.due)  sub.push('<span>'+m.due+' اليوم</span>');
+      if(m.soon) sub.push('<span>'+m.soon+' غداً</span>');
+      if(!sub.length) sub.push('<span>لا متأخّرَ فيها</span>');
+      return '<div class="st-col" data-user="'+_e(c.user)+'">'+
+        '<div class="st-col-h">'+
+          '<div class="st-col-t"><span class="st-col-nm">'+_icn(c.user?"user":"edit")+_e(c.name)+'</span>'+
+            '<span class="st-col-n">'+n+'</span></div>'+
+          '<div class="st-col-bar">'+seg("late")+seg("due")+seg("soon")+'</div>'+
+          '<div class="st-col-sub">'+sub.join("")+'</div>'+
+        '</div>'+
+        c.tasks.map(function(t){ return _cardHtml(t, today, true); }).join("")+
+      '</div>';
+    }).join("")+'</div>';
   }
 
   /* الفراغُ دعوةٌ إلى فعل: أيقونةٌ خافتةٌ وسطرٌ يقول ما التالي — لا احتفالَ ولا مزاج. */
@@ -1927,7 +2051,7 @@
     return '<div class="st-empty">'+_icn(m[0])+m[1]+'</div>';
   }
 
-  function _cardHtml(t, today){
+  function _cardHtml(t, today, inCol){
     var st=_dueState(t,today);
     var act=_lastActivity(t), nw=_isUnread(t,_me());
     var cls="st-card "+(t.status==="done"?"done":(t.status==="returned"?"returned":st))+(nw?" nw":"");
@@ -1946,7 +2070,7 @@
     return '<div class="'+cls+'" onclick="staffTasks.open(\''+_q(t.id)+'\')">'+
       '<div class="st-ttl">'+(nw?'<i class="st-dot"></i>':"")+_e(t.title)+'</div>'+
       '<div class="st-meta">'+
-        '<span>'+_icn(whoIcon)+_e(who)+'</span>'+
+        (inCol ? "" : '<span>'+_icn(whoIcon)+_e(who)+'</span>')+
         '<span'+(st==="late"?' class="late"':'')+'>'+_icn(st==="late"?"alertTriangle":"clock")+_e(dueTxt)+'</span>'+
         /* «مردودة» حالةٌ قائمة، و«فيها جديد» ما طرأ — رقاقتان لا واحدة.
            ولا تُخفى الحالةُ خلف الجديد: مهمّةٌ مردودةٌ جدّ فيها تعليقٌ تبقى مردودة.
@@ -2137,7 +2261,7 @@
     loadAll:_loadAll,
     refreshNav:refreshNav, canView:_canView,
     refreshLanding:refreshLanding, openFromLanding:openFromLanding,
-    tab:tab, open:open, back:back, byId:byId, search:search, searchClear:searchClear, filterUser:filterUser,
+    tab:tab, open:open, back:back, byId:byId, search:search, searchClear:searchClear, filterUser:filterUser, view:view,
     markDone:markDone, reopen:reopen, returnTask:returnTask, acceptBack:acceptBack,
     startEdit:startEdit, cancelEdit:cancelEdit, saveEdit:saveEdit,
     addComment:addComment, cmtKey:cmtKey, shareTask:shareTask, unshareTask:unshareTask,
@@ -2154,6 +2278,7 @@
     _normAr:_normAr, _userMatches:_userMatches,
     _taskText:_taskText, _taskMatches:_taskMatches, _searchTasks:_searchTasks,
     _taskHasUser:_taskHasUser, _filterByUser:_filterByUser, _userOptions:_userOptions,
+    _groupByAssignee:_groupByAssignee, _dueMix:_dueMix,
     _msVal:_msVal, _lastActivity:_lastActivity, _seenMs:_seenMs, _isUnread:_isUnread,
     _unreadLabel:_unreadLabel,
     _canEditParticipants:_canEditParticipants, _canShare:_canShare,

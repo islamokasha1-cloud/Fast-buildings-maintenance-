@@ -21684,6 +21684,50 @@ function staffTasksGuards() {
     T("والفراغُ بسبب الفلتر يقول «لا مهمّةَ لـ…» مع زرّ «كل الموظفين»",
       /لا مهمّةَ لـ«'\+_e\(_nameOf\(_who\)\)\+'» في هذه الخانة/.test(src) && /filterUser\(\\'\\'\)">كل الموظفين/.test(src));
   }
+
+  /* ── (١٨) لوحةُ «كلّفتُ بها»: عمودٌ لكلّ مكلَّف (طلبُ المالك 16/09) ──
+     «ما الذي على كلّ واحد؟» — التجميعُ بالمكلَّف وحدَه (لا بالأطراف، وإلا حُسبت
+     المهمّةُ على ثلاثة)، والأعمدةُ بالاسم لا بالعدد، وبلا مكلَّفٍ عمودٌ أخيرٌ صريح. */
+  {
+    const NEEDB = ["_groupByAssignee", "_dueMix"].filter(k => typeof ST[k] !== "function");
+    T("★ دوالُّ اللوحة مكشوفةٌ للفحص بلا متصفّح", NEEDB.length === 0, NEEDB.join(" · "));
+    if (NEEDB.length === 0) {
+      const nm = l => ({ khaled: "خالد", ashraf: "أشرف عشري", saeed: "سعيد" }[l] || l);
+      const rows = [
+        { title: "a", createdByUser: "admin", assignedToUser: "khaled", shared: ["ashraf"], due: "2026-01-01" },
+        { title: "b", createdByUser: "admin", assignedToUser: "saeed",  shared: [] },
+        { title: "c", createdByUser: "admin", assignedToUser: "khaled", shared: [], due: "2026-09-16" },
+        { title: "d", createdByUser: "admin", assignedToUser: "ashraf", shared: ["khaled"] },
+        { title: "e", createdByUser: "admin", assignedToUser: "", shared: [] } ];
+      const cols = ST._groupByAssignee(rows, nm);
+      T("★★★ عمودٌ لكلّ مكلَّف بعدد ما عليه — والمُشارَكُ لا يُحسَب على المشارِك (خالد 2 لا 3)",
+        cols.length === 4 && cols.find(c => c.user === "khaled").tasks.length === 2 &&
+        cols.find(c => c.user === "ashraf").tasks.length === 1 && cols.find(c => c.user === "saeed").tasks.length === 1,
+        JSON.stringify(cols.map(c => [c.user, c.tasks.length])));
+      T("★★ الأعمدةُ مرتّبةٌ بالاسم المعروض (لا بالعدد فلا تقفز)، وبلا مكلَّفٍ عمودٌ أخيرٌ باسمٍ صريح",
+        cols.map(c => c.user).join(",") === "ashraf,khaled,saeed," && cols[3].name === "بلا مكلَّف",
+        cols.map(c => c.name).join(" | "));
+      T("★ وترتيبُ البطاقات داخل العمود هو ترتيبُ القائمة (لا إعادةَ فرزٍ ثانية)",
+        cols.find(c => c.user === "khaled").tasks.map(t => t.title).join("") === "ac");
+      T("★ ومجموعُ الأعمدة = عددُ الصفوف — لا مهمّةَ تسقط ولا تتكرّر",
+        cols.reduce((n, c) => n + c.tasks.length, 0) === rows.length &&
+        ST._groupByAssignee([], nm).length === 0 && ST._groupByAssignee(null, nm).length === 0);
+      const mix = ST._dueMix(cols.find(c => c.user === "khaled").tasks, "2026-09-16");
+      T("★★ شريطُ العمود من حالات الموعد: متأخّرةٌ واحدة واليومَ واحدة",
+        mix.late === 1 && mix.due === 1 && mix.soon === 0 && mix.none === 0, JSON.stringify(mix));
+    }
+    T("★★ خانةُ «كلّفتُ بها» وحدَها تُرسم لوحةً (`_boardHtml`) مع زرّ تبديلٍ إلى القائمة",
+      /if\(_tab==="sent"\)\{[\s\S]{0,200}_view==="board" \? _boardHtml\(rows, today\)/.test(src) &&
+      /onclick="staffTasks\.view\(\\''\+k\+'\\'\)"/.test(src) && typeof ST.view === "function");
+    T("★ والتبديلُ يُعيد رسمَ القائمة وحدَها ويُحفَظ تفضيلاً في المتصفّح (لا في المستند)",
+      /function view\(v\)\{[\s\S]{0,200}localStorage\.setItem\("st_sent_view"[\s\S]{0,80}_refreshList\(\)/.test(src) &&
+      !/st_sent_view[\s\S]{0,200}\.update\(/.test(src));
+    T("★ البطاقةُ داخل العمود هي `.st-card` نفسُها بلا سطر «إلى: فلان» (العمودُ يقوله فوقها)",
+      /_cardHtml\(t, today, true\)/.test(src) && /\(inCol \? "" : '<span>'\+_icn\(whoIcon\)\+_e\(who\)\+'<\/span>'\)/.test(src));
+    T("★ رأسُ العمود: الاسمُ والعددُ وشريطُ الحالات (`.st-col-bar`) والأنماطُ محصورةٌ بالصفحة",
+      /class="st-col-n">'\+n\+'<\/span>/.test(src) && /'#page-staff-tasks \.st-col-bar \.late\{background:var\(--danger\)\}'/.test(src) &&
+      /'#page-staff-tasks \.st-board\{display:flex;[^']*overflow-x:auto/.test(src));
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════
