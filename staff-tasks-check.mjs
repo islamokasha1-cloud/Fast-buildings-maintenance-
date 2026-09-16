@@ -341,6 +341,11 @@ const sharedView = await page.evaluate(async () => {
   const host = document.getElementById('page-staff-tasks');
   const count = (t) => { staffTasks.tab(t); return host.querySelectorAll('.st-card').length; };
   const out = { mine: count('mine'), sent: count('sent'), notes: count('notes'), shared: count('shared') };
+  /* واللوحةُ في «شارَكوني فيها» كما في «كلّفتُ بها» (طلبُ المالك 16/09): عمودٌ باسم المكلَّف. */
+  out.cols = [...host.querySelectorAll('.st-board .st-col')].map(c => c.dataset.user + ':' + c.querySelector('.st-col-n').textContent);
+  out.toggle = !!host.querySelector('.st-vw');
+  out.mineBoard = (staffTasks.tab('mine'), !!host.querySelector('.st-board'));
+  staffTasks.tab('shared');
   out.tab = !![...host.querySelectorAll('.st-tab')].find(b => /شارَكوني/.test(b.textContent));
   out.badge = ((document.getElementById('nav-staff-tasks-badge') || {}).style || {}).display;
   // إرجاعُ المستند إلى حاله — لا يُلوَّث ما بعده
@@ -357,6 +362,9 @@ check('★★★ المهمّةُ التي أُشرِك فيها تظهر له �
 check('★★★ ولم تكن تظهر في أيٍّ من الخانات الأخرى (هذا هو العطلُ المُبلَّغ عنه)',
   sharedView.mine === 0 && sharedView.sent === 0 && sharedView.notes === 0, JSON.stringify(sharedView));
 check('★★ وللخانة زرٌّ في الشريط يفتحها (بضاعةٌ بلا زرٍّ لا تُرى)', sharedView.tab === true);
+check('★★★ و«شارَكوني فيها» لوحةُ أعمدةٍ كـ«كلّفتُ بها»: عمودٌ باسم المكلَّف خالد بعدده 1 وزرُّ التبديل',
+  JSON.stringify(sharedView.cols) === '["khaled:1"]' && sharedView.toggle === true, JSON.stringify(sharedView.cols));
+check('★ و«مهامّي» تبقى قائمةً — كلُّها عليّ فعمودٌ واحدٌ بلا معنى', sharedView.mineBoard === false);
 check('★★ ولا تُعدّ في الشارة الحمراء — تلك ما عليّ أنا لا ما أتابعه',
   sharedView.badge === 'none', String(sharedView.badge));
 

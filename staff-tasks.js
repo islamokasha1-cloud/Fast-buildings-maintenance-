@@ -95,7 +95,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3243";
+  var MODULE_BUILD = "v18.9.3244";
 
   function COLL(){
     var dev=false;
@@ -116,7 +116,7 @@
   var _tab     = "mine";  // mine | sent | shared | notes | done | all
   var _srch    = "";      // نصُّ البحث في القائمة — يُصفّي الخانةَ المفتوحة وحدَها
   var _who     = "";      // فلترُ الموظف: اسمُ دخولٍ — يُظهر ما هو طرفٌ فيه (مكلَّفاً أو مشاركاً)
-  var _view    = _loadView(); // عرضُ «كلّفتُ بها»: board (عمودٌ لكلّ مكلَّف) | list (قائمةٌ واحدة)
+  var _view    = _loadView(); // عرضُ «كلّفتُ بها» و«شارَكوني فيها»: board (عمودٌ لكلّ مكلَّف) | list
   var _openId  = null;    // المهمّة المفتوحة تفصيلاً
   var _draft   = [];      // مسوّدةُ التكليف السريع
   var _draftTo = "";      // اسمُ دخول المكلَّف في المسوّدة
@@ -1749,8 +1749,10 @@
     }
     _refreshList();
   }
-  /* تبديلُ عرض «كلّفتُ بها» (لوحةٌ | قائمة): يُحفَظ في المتصفّح — تفضيلُ عرضٍ لا
-     بياناتٌ، فمكانُه هنا لا في المستند. ويمرّ بالمسار نفسِه: القائمةُ وحدَها تُرسم. */
+  /* تبديلُ العرض (لوحةٌ | قائمة) لخانتَي اللوحة معاً — تفضيلٌ واحدٌ: مَن يريد القائمةَ
+     يريدها في الاثنتين. يُحفَظ في المتصفّح (تفضيلُ عرضٍ لا بياناتٌ) تحت مفتاحه الأوّل
+     `st_sent_view` كي لا يضيع ما اختاره المستخدمُ قبل ضمّ الخانة الثانية. ويمرّ
+     بالمسار نفسِه: القائمةُ وحدَها تُرسم. */
   function view(v){
     _view=_viewOk(v);
     try{ localStorage.setItem("st_sent_view", _view); }catch(e){}
@@ -2064,13 +2066,18 @@
     }
     var rows=_currentRows();
     if(!rows.length) return _emptyHtml();
-    if(_tab==="sent"){
+    if(_boardTab()){
       return _viewToggleHtml()+
         (_view==="board" ? _boardHtml(rows, today)
                          : rows.map(function(t){ return _cardHtml(t, today); }).join(""));
     }
     return rows.map(function(t){ return _cardHtml(t, today); }).join("");
   }
+
+  /* أيُّ الخانات لوحةٌ: «كلّفتُ بها» و«شارَكوني فيها» (طلبُ المالك 16/09 بعد الأولى).
+     كلتاهما مهامُّ **على غيري** — السؤالُ فيهما «ما الذي على كلّ واحد؟» — فالعمودُ
+     بالمكلَّف يصلح لهما. أمّا «مهامّي» فكلُّها عليّ أنا، عمودٌ واحدٌ بلا معنى. */
+  function _boardTab(){ return _tab==="sent" || _tab==="shared"; }
 
   function _viewToggleHtml(){
     function b(k, icon, label){
