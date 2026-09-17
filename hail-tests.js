@@ -9078,9 +9078,14 @@ function deepReviewV18_9ad() {
 
   // ── M8: الاستعاضة مفصولةٌ ومعلَنة ──
   T("★ M8: الملخّص يفصل المموَّل بالاستعاضة", /substTotal: substActual \+ substCommitted/.test(pmSrc));
+  // (المستعاضُ يبقى داخلَ المجموع ويُحصى بجانبه في الفرع نفسِه — لا يُرشَّح ولا يُطرَح.
+  //  ومنذ 17/09 المجموعُ = شراءٌ + تعاقدٌ مسدَّد، والمتبقّي يخصم الأربعة كتبويب الموازنة.)
   T("★ M8: المجموع لم يتغيّر (لا قرار محاسبي من طرفٍ واحد)",
-    /if\(poClosed\(p\)\)\{ actual \+= poActual\(p\);/.test(pmSrc) &&
-    /const remaining = planned - actual - committed;/.test(pmSrc));
+    /if\(poClosed\(p\)\)\{ poActualSum \+= poActual\(p\); if\(sub\) substActual \+= poActual\(p\); \}/.test(pmSrc) &&
+    !/isSubstitute\s*\)\s*return/.test(pmSrc) && !/filter\(p=>!p\.isSubstitute/.test(pmSrc) &&
+    /const actual = poActualSum \+ ctrSpent;/.test(pmSrc) &&
+    /const used = actual \+ committed \+ contracted \+ pending;/.test(pmSrc) &&
+    /const remaining = planned - used;/.test(pmSrc));
   T("★ M8: البطاقة تُعلن المصدر للقارئ", pmSrc.includes("مموَّلةٍ بالاستعاضة"));
 
   // ── M14: مفتاح التكرار يميّز الحدث الجديد عن إعادة الإطلاق ──
@@ -14292,6 +14297,54 @@ function contractsPhase1() {
       /const spent = cr\.actual \+ cc\.spent/.test(PMSRC5));
     T("★ وصفُّ «غير مصنّف» يظهر لتعاقدٍ بلا بندٍ أيضاً (لا يختفي المال)",
       /uncC\.pending\|\|uncC\.contracted\|\|uncC\.spent/.test(PMSRC5));
+
+    /* ── بطاقةُ المشروع ونظرتُه العامة تقرآن المستخلصاتِ وأوامرَ الدفع المسدَّدة ──
+       (طلبُ المالك 17/09) كان `projectRollup` يجمع الشراءَ المغلقَ وحدَه بينما تبويبُ
+       الموازنة يضيف التعاقد — فمشروعٌ بمقاولي باطن يظهر في القائمة بمصروفٍ صفر.
+       نشغّل الدالةَ فعلياً في صندوقٍ بتعاقداتٍ وهمية ونطابق الرقمَ لا نصَّ الشيفرة. */
+    if (PMSRC5) {
+      const noop = () => {};
+      const el = () => ({ style: {}, dataset: {}, classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+                          appendChild: noop, setAttribute: noop, querySelectorAll: () => [], querySelector: () => null, innerHTML: "" });
+      const docStub = { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener: noop,
+                        createElement: el, head: el(), body: el(), readyState: "complete" };
+      const sb = {
+        window: {}, document: docStub, console, setTimeout: () => 0, clearTimeout: noop,
+        MutationObserver: function () { this.observe = noop; },
+        purchases: [
+          { id: "P1", projectId: "hail", status: "closed",   actualCost: 1000, estCost: 900 },
+          { id: "P2", projectId: "hail", status: "wip",      actualCost: 0,    estCost: 400 },
+          { id: "P3", projectId: "hail", status: "closed",   actualCost: 5000, estCost: 5000, contractId: "C1" },
+          { id: "P4", projectId: "other", status: "closed",  actualCost: 7777, estCost: 7777 },
+        ],
+        poIsClosed: p => p.status === "closed", poStageIsWip: p => p.status === "wip",
+        poActualCost: p => p.actualCost, getPOTotal: p => p.estCost,
+      };
+      sb.window.contracts = {
+        poIsUnderContract: p => !!(p && p.contractId),
+        rollupForProject: id => id === "hail"
+          ? { byCat: {}, total: { pending: 300, contracted: 2000, spent: 6500 } }   // مستخلصات + أوامر دفع مسدَّدة
+          : { byCat: {}, total: { pending: 0, contracted: 0, spent: 0 } }
+      };
+      vm.createContext(sb);
+      let PM = null;
+      try { vm.runInContext(PMSRC5, sb); PM = sb.window.projectMgmt; } catch (e) { T("تُحمَّل project-management.js في الصندوق", false, String(e.message).slice(0, 120)); }
+      const R = PM && PM._projectRollup ? PM._projectRollup("hail") : null;
+      T("★★ مصروفُ البطاقة = شراءٌ مغلق (بلا طلبات العقود) + المستخلصاتُ وأوامرُ الدفع المسدَّدة",
+        !!R && R.actual === 1000 + 6500 && R.poActual === 1000 && R.ctrSpent === 6500, R && JSON.stringify(R));
+      T("★ وطلبُ الشراء الذي يحمل contractId لا يدخل مصروفَ الشراء (محسوبٌ في عقده)",
+        !!R && R.poActual === 1000);
+      T("★ والمتبقّي يخصم الأربعة كما في تبويب الموازنة (مصروف + مرتبط + متعاقَد + قيدَ اعتماد)",
+        !!R && R.committed === 400 && R.contracted === 2000 && R.pending === 300 &&
+        R.remaining === 0 - (7500 + 400 + 2000 + 300));
+      T("ومشروعٌ بلا تعاقدات يبقى على أرقام الشراء وحدَها", (() => {
+        const O = PM && PM._projectRollup ? PM._projectRollup("other") : null;
+        return !!O && O.actual === 7777 && O.ctrSpent === 0 && O.contracted === 0 && O.pending === 0;
+      })());
+      T("★ وتعرّض onContractsChanged لتعيد الرسمَ عند وصول لقطة التعاقدات",
+        !!PM && typeof PM.onContractsChanged === "function" && /_notifyPm\(\)/.test(src) &&
+        (src.match(/_notifyPm\(\);/g) || []).length >= 4);
+    }
   }
 
   /* ════════════════════════════════════════════════════════════

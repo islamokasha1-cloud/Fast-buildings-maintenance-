@@ -11,8 +11,9 @@
    ── نطاق أول حتة (للمراجعة قبل التوسّع) ──
    • قائمة المشاريع بأرقام مالية: الموازنة / المصروف الفعلي / المرتبط / المتبقّي.
    • بطاقة المشروع: تبويب «نظرة عامة» + تبويب «الموازنة» (بنود عامة هجينة قابلة للتحرير).
-   • المصروف الفعلي يُسحب حصراً من المشتريات (poIsClosed + poActualCost) — مصدر واحد
-     للحقيقة، بلا تخزين مزدوج. الطلبات غير الموسومة ببند تُجمَّع تحت «غير مصنّف».
+   • المصروف الفعلي = المشتريات المغلقة (poIsClosed + poActualCost) + المستخلصاتُ وأوامرُ
+     الدفع المسدَّدة (من `contracts.rollupForProject`) — مصدر واحد للحقيقة لكلٍّ منهما،
+     بلا تخزين مزدوج. الطلبات غير الموسومة ببند تُجمَّع تحت «غير مصنّف».
 
    ── مؤجَّل لمراحل تالية (موثّق في docs/project-management-plan.md) ──
    بنود المقايسة التفصيلية، حقل «بند الموازنة» على طلب الشراء، الإيراد/المستخلصات،
@@ -208,16 +209,32 @@ function budgetTotal(projId){
 // من طرفٍ واحد — فذلك يغيّر أرقامَ كل مشروعٍ بقرارٍ محاسبيٍّ ليس لنا — بل **نفصلها
 // ونعلنها**: المجموع كما هو، وبجانبه كم منه مموَّلٌ بالاستعاضة. القارئ يرى المصدر.
 function projectRollup(projId){
-  let actual=0, committed=0, substActual=0, substCommitted=0;
-  poForProject(projId).forEach(p=>{
+  /* v18.9 (طلبُ المالك 17/09): بطاقةُ المشروع ونظرتُه العامة كانتا تجمعان طلباتِ الشراء
+     المغلقةَ وحدَها، بينما تبويبُ «الموازنة» وحدَه يضيف مصروفَ التعاقدات — فمشروعٌ
+     كلُّ أعماله بمقاولي باطن يظهر في القائمة بمصروفٍ صفر. الآن الأرقامُ الثلاثةُ
+     (بطاقة · نظرة عامة · موازنة) من معادلةٍ واحدة:
+       المصروف  = شراءٌ مغلق (بلا طلبات العقود) + المستخلصاتُ وأوامرُ الدفع المسدَّدة
+       المرتبط  = شراءٌ جارٍ (بلا طلبات العقود)
+       المتبقّي = الموازنة − المصروف − المرتبط − المتعاقَدُ عليه − قيدَ الاعتماد
+     ومصروفُ التعاقدات يُقرأ من `contracts.rollupForProject` **ولا يُحسَب هنا** (مصدرٌ
+     واحدٌ لقاعدة «المالُ المدفوعُ مصروفٌ أبداً»)، وطلبُ الشراء الذي يحمل `contractId`
+     يُستبعَد كما في `rollupByCategory` — وإلا حُسب الريالُ في العقد وفي الشراء معاً. */
+  let poActualSum=0, poCommitted=0, substActual=0, substCommitted=0;
+  poForProject(projId).filter(p=>!_poUnderContract(p)).forEach(p=>{
     const sub = !!(p && p.isSubstitute);
-    if(poClosed(p)){ actual += poActual(p); if(sub) substActual += poActual(p); }
-    else if(poWip(p)){ committed += poTotal(p); if(sub) substCommitted += poTotal(p); }
+    if(poClosed(p)){ poActualSum += poActual(p); if(sub) substActual += poActual(p); }
+    else if(poWip(p)){ poCommitted += poTotal(p); if(sub) substCommitted += poTotal(p); }
   });
+  const ctr = _ctrRollup(projId).total;
+  const ctrSpent = Number(ctr.spent)||0, contracted = Number(ctr.contracted)||0, pending = Number(ctr.pending)||0;
+  const actual = poActualSum + ctrSpent;
+  const committed = poCommitted;
   const planned = budgetTotal(projId);
-  const remaining = planned - actual - committed;
-  const pct = planned>0 ? Math.round(((actual+committed)/planned)*100) : 0;
-  return { planned, actual, committed, remaining, pct,
+  const used = actual + committed + contracted + pending;
+  const remaining = planned - used;
+  const pct = planned>0 ? Math.round((used/planned)*100) : 0;
+  return { planned, actual, committed, contracted, pending, remaining, pct,
+           poActual: poActualSum, poCommitted, ctrSpent,
            substActual, substCommitted, substTotal: substActual + substCommitted };
 }
 // توزيع الفعلي/المرتبط على بنود الموازنة حسب **نوع كل بند** في الطلب (لا اختيار يدوي):
@@ -442,6 +459,19 @@ function render(){
   else renderList(el);
 }
 
+/* لقطةُ تعاقداتٍ جديدة (مستخلصٌ سُدِّد · أمرُ دفعٍ سُدِّد · عقدٌ اعتُمد): الأرقامُ المرسومةُ
+   صارت قديمة. تُعاد الرسمةُ المرئيةُ وحدَها — القائمةُ أو تبويبُ الأرقام في البطاقة —
+   ولا يُلمَس تبويبٌ يُحرَّر فيه (موازنةٌ قيدَ التعديل تضيع قيمُها بإعادة الرسم). */
+function onContractsChanged(){
+  try{
+    const el=document.getElementById("page-"+PAGE_ID);
+    if(!el || !el.classList.contains("active") || _usageView || _mapView) return;
+    if(_curId==null){ if(_lastList.length) paintList(_lastList); return; }
+    if(_editing || _cleaningEditing) return;
+    if(_curTab==="overview" || _curTab==="budget") renderTabBody();
+  }catch(e){ console.warn("pm/onContractsChanged", e); }
+}
+
 /* ── قائمة المشاريع ── */
 function renderList(el){
   // حمّل أسماء المشاريع اليدوية مرة (meta) ثم أعد الرسم — المشتقّة من الطلبات تظهر فوراً
@@ -593,7 +623,7 @@ function overviewHTML(){
       <div class="sv">${money(val)}</div>
       ${sub?`<div class="click-hint">${sub}</div>`:""}
     </div>`;
-  const over = r.planned>0 && (r.actual+r.committed)>r.planned;
+  const over = r.planned>0 && r.remaining<0;
   // شريط تصنيف نوع المشروع — الجدول الزمني يظهر لمقاولات/ترميم فقط
   const t=effType(_curId);
   const typeCtrl = _canEdit()
@@ -605,9 +635,9 @@ function overviewHTML(){
     ${typeBar}
     <div class="pm-stats">
       ${card("الموازنة المخطّطة (ريال)", r.planned, "var(--primary)", "")}
-      ${card("المصروف الفعلي (مغلق)", r.actual, "var(--accent)", spentPct+"% من الموازنة")}
-      ${card("المرتبط (طلبات جارية)", r.committed, "var(--warn)", "")}
-      ${card("المتبقّي", r.remaining, r.remaining<0?"var(--danger)":"var(--accent)", "")}
+      ${card("المصروف الفعلي", r.actual, "var(--accent)", spentPct+"% من الموازنة — شراء مغلق "+money(r.poActual)+" · مستخلصات وأوامر دفع مسدَّدة "+money(r.ctrSpent))}
+      ${card("المرتبط (طلبات جارية)", r.committed, "var(--warn)", (r.contracted||r.pending)?"وتعاقداً: متعاقَدٌ عليه "+money(r.contracted)+" · قيدَ الاعتماد "+money(r.pending):"")}
+      ${card("المتبقّي", r.remaining, r.remaining<0?"var(--danger)":"var(--accent)", (r.contracted||r.pending)?"بعد خصم المتعاقَد عليه وقيدَ الاعتماد":"")}
     </div>
     ${r.substTotal>0?`<div class="pm-typebar" style="border-color:color-mix(in srgb,var(--warn) 40%,var(--border));background:color-mix(in srgb,var(--warn) 8%,var(--surface))">
       ${_icon('info')} منها <b>${money(r.substTotal)}</b> ريال بطلباتٍ <b>مموَّلةٍ بالاستعاضة</b>
@@ -616,7 +646,7 @@ function overviewHTML(){
     </div>`:""}
     <div class="pm-progress-wrap">
       <div class="pm-progress"><div class="pm-progress-fill" style="width:${Math.min(r.pct,100)}%;background:${barColor}"></div></div>
-      <div class="pm-progress-lbl">${r.pct}% من الموازنة (مصروف + مرتبط)</div>
+      <div class="pm-progress-lbl">${r.pct}% من الموازنة (مصروف + مرتبط + متعاقَد + قيدَ اعتماد)</div>
     </div>
     ${over?`<div class="pm-alert">${_icon('alertTriangle')} تنبيه: المصروف والمرتبط تجاوزا الموازنة المخطّطة — تحذير فقط، لا يمنع أي إجراء.</div>`:""}
     ${r.planned<=0?`<div class="pm-hint">لم تُدخَل موازنة بعد. افتح تبويب «الموازنة» وأدخل تقديراتك لكل بند.</div>`:""}`;
@@ -1633,6 +1663,7 @@ window.projectMgmt = {
   aiGenSchedule, doAiGen, cancelGen, editSchedule, addPhase, delPhase,
   saveScheduleEdit, cancelScheduleEdit, setProgress,
   startSync(){ /* لا مزامنة مستقلة — يقرأ purchases و_projectsList الحيّة */ },
+  onContractsChanged,   // تناديها `contracts.js` عند كل لقطةٍ لطلبات/عقود/مستخلصات/تغييرات
   // مكشوفة لفحوص hail-tests (دوال نقية)
   _projectRollup: projectRollup,
   _rollupByCategory: rollupByCategory,

@@ -62,7 +62,7 @@
 (function(){
 "use strict";
 
-var MODULE_BUILD = "v18.9.3244";
+var MODULE_BUILD = "v18.9.3246";
 
 /* ════════════════════════════════════════════════════════════════════
    ١) الثوابت
@@ -2217,6 +2217,12 @@ function rollupForProject(pmProjectId){
   startReqSync(); startCtrSync(); startExtSync(); startChgSync();
   return contractRollup(projectKeyOfPm(pmProjectId, pmManualPrefix()), _reqs, _ctrs, _exts, _chgs);
 }
+/* إدارةُ المشاريع ترسم مصروفَ التعاقدات من `rollupForProject`، والمزامنةُ تبدأ كسولةً
+   عند أوّل نداء — فأوّلُ رسمةٍ للبطاقات تقع **قبل** وصول اللقطة وتُظهر صفراً يبقى
+   حتى يغادر المستخدمُ الصفحةَ ويعود. كلُّ لقطةٍ تنادي الوحدةَ لتعيد رسمَ ما يُرى. */
+function _notifyPm(){
+  try{ var pm=window.projectMgmt; if(pm && typeof pm.onContractsChanged==="function") pm.onContractsChanged(); }catch(e){ console.warn("contracts/_notifyPm", e); }
+}
 function contractsLoaded(){ return _rLoaded && _cLoaded && _eLoaded && _gLoaded; }
 
 /* حالةُ وثيقةِ طرفٍ من تاريخ انتهائها: `none` بلا تاريخ · `ok` · `soon` · `expired`.
@@ -2889,6 +2895,7 @@ function startReqSync(){
       out.sort(function(a,b){ return String(b.createdAt||"").localeCompare(String(a.createdAt||"")); });
       _reqs=out; _rLoaded=true; _rError="";
       if(_page===PAGE_REQS) paintReqs();
+      _notifyPm();
     }, function(err){
       console.warn("contracts/requests sync", err);
       _rError = "تعذّر الاتصال بطلبات التعاقد — تحقّق من الشبكة ثم أعِد المحاولة.";
@@ -3329,6 +3336,7 @@ function startCtrSync(){
       _ctrs=out; _cLoaded=true; _cError="";
       if(_page===PAGE_CTRS) paintCtrs();
       if(_page===PAGE_REQS) paintReqs();     // بطاقةُ الطلب تعرض رابطَ عقده
+      _notifyPm();
     }, function(err){
       console.warn("contracts/contracts sync", err);
       _cError="تعذّر الاتصال بالعقود — تحقّق من الشبكة ثم أعِد المحاولة.";
@@ -3619,6 +3627,7 @@ function startExtSync(){
       out.sort(function(a,b){ return String(a.createdAt||"").localeCompare(String(b.createdAt||"")); });
       _exts=out; _eLoaded=true;
       if(_page===PAGE_CTRS) paintCtrs();
+      _notifyPm();
     }, function(err){ console.warn("contracts/extracts sync", err); _eLoaded=true; });
   }catch(e){ console.warn("contracts/startExtSync", e); }
 }
@@ -4147,6 +4156,7 @@ function startChgSync(){
       out.sort(function(a,b){ return String(a.createdAt||"").localeCompare(String(b.createdAt||"")); });
       _chgs=out; _gLoaded=true;
       if(_page===PAGE_CTRS) paintCtrs();
+      _notifyPm();
     }, function(err){ console.warn("contracts/changes sync", err); _gLoaded=true; });
   }catch(e){ console.warn("contracts/startChgSync", e); }
 }
