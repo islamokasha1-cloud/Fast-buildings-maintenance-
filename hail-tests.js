@@ -21443,6 +21443,27 @@ function staffTasksGuards() {
         ST._attReject({ name: "x.jpg", size: 60 * 1048576 }, 0) !== "");
       T("★ ولا ملفَّ = سببٌ لا انهيار", ST._attReject(null, 0) !== "");
 
+      /* الملفُّ المضغوط (طلبُ المالك 17/09): يُقبل بامتداده لا بـ`type` وحدَه (المتصفّحاتُ
+         تختلف فيه، والجوّالُ يُفرغه)، وله سقفُه ونوعُه وأيقونتُه — ولا يفتح البابَ لغيره. */
+      T("★★ الملفُّ المضغوط يُقبل مرفقاً (zip · rar · 7z) ولو أرسل المتصفّحُ type فارغاً",
+        ST._attReject({ name: "صور العطل.zip", size: 10, type: "" }, 0) === "" &&
+        ST._attReject({ name: "x.rar", size: 10, type: "application/x-rar-compressed" }, 0) === "" &&
+        ST._attReject({ name: "x.7z",  size: 10, type: "" }, 0) === "",
+        ST._attReject({ name: "صور العطل.zip", size: 10, type: "" }, 0));
+      T("★★ ونوعُه «archive» بأيقونته من `type` أو الامتداد — والاسمُ الكبيرُ الحروف مقبول",
+        ST._attKind({ type: "", name: "حزمة.ZIP" }) === "archive" &&
+        ST._attKind({ type: "application/x-zip-compressed", name: "x" }) === "archive" &&
+        ST._attIcon({ type: "", name: "a.zip" }) === "archive");
+      T("★★ وسقفُ المضغوط أوسعُ من المستند ودون الصورة — والتجاوزُ يُردّ بسببٍ مكتوب",
+        ST._ATT_ZIP_MAX_MB > ST._ATT_MAX_MB && ST._ATT_ZIP_MAX_MB < ST._ATT_IMG_MAX_MB &&
+        ST._attReject({ name: "x.zip", size: (ST._ATT_ZIP_MAX_MB - 1) * 1048576 }, 0) === "" &&
+        ST._attReject({ name: "x.zip", size: (ST._ATT_ZIP_MAX_MB + 1) * 1048576 }, 0).indexOf("حجمُ") === 0);
+      T("★★★ وبابُ المضغوط لا يُدخل التنفيذيَّ باسم zip في `type` — الامتدادُ هو الحَكَم",
+        ST._attReject({ name: "x.exe", size: 10, type: "application/zip" }, 0) !== "" &&
+        ST._attReject({ name: "x.tar.gz", size: 10, type: "" }, 0) !== "");
+      T("★ وقائمةُ القبول في المنتقي تذكر الامتداداتِ الثلاثة",
+        /\.zip/.test(ST._ATT_ACCEPT || "") && /\.rar/.test(ST._ATT_ACCEPT || "") && /\.7z/.test(ST._ATT_ACCEPT || ""));
+
       /* `undefined` واحدٌ يُسقط كتابةَ Firestore كلَّها فتبدو الشبكةُ هي العطل. */
       const ent = ST._attEntry({ url: "https://x/1.jpg", by: "خالد" });
       T("★★★ قيدُ المرفق بلا حقلٍ غيرِ معرَّف (undefined واحدٌ يُسقط الكتابةَ كلَّها)",
