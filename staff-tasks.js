@@ -57,7 +57,7 @@
    المهمّةُ سطرُ كلامٍ بلا دليل: «صيانةُ المكيّف في الدور الثاني» لا تقول أيَّ مكيّفٍ
    ولا ما عطلُه ولا أين العرضُ الذي بُني عليه التكليف — فيخرج المكلَّفُ إلى الواتساب
    ليطلب الصورة، وهو البابُ الذي أُنشئت الوحدةُ لإغلاقه. فالمرفقُ (صورةٌ · PDF ·
-   مستند) يسكن المهمّةَ نفسَها: يرفعه **أيُّ طرفٍ فيها** كما يعلّق، ويحمله الحقلُ
+   مستند · ملفٌّ مضغوط) يسكن المهمّةَ نفسَها: يرفعه **أيُّ طرفٍ فيها** كما يعلّق، ويحمله الحقلُ
    `attachments` قيداً لكلّ ملفّ (رابطٌ · مسارُ التخزين · اسمٌ · نوعٌ · حجمٌ · مَن
    رفع ومتى). وثلاثةُ قيودٍ تحرسه:
      • **لا رابطَ محلّيٍّ في قاعدة البيانات**: القيدةُ تُكتب بعد نجاح الرفع لا قبلَه
@@ -95,7 +95,7 @@
 (function(){
   "use strict";
 
-  var MODULE_BUILD = "v18.9.3246";
+  var MODULE_BUILD = "v18.9.3248";
 
   function COLL(){
     var dev=false;
@@ -675,9 +675,14 @@
   var ATT_MAX        = 6;      // مرفقاتٍ للمهمّة الواحدة
   var ATT_MAX_MB     = 12;     // للملفّ غير الصورة
   var ATT_IMG_MAX_MB = 40;     // للصورة قبل الضغط (تُضغط إلى ~١٢٨٠px بعده)
+  /* الملفُّ المضغوط (طلبُ المالك 17/09): المهمّةُ التي دليلُها عشرون صورةً ومخطّطان
+     لا تحمله ستّةُ مرفقات — فيُرفع حزمةً واحدة. وسقفُه أوسعُ من المستند لأنه
+     يحمل عدّةَ ملفّاتٍ لا واحداً، ودون سقف الصورة لأنه لا يُضغط هنا قبل الرفع. */
+  var ATT_ZIP_MAX_MB = 25;     // للملفّ المضغوط
   var ATT_IMG_EXT    = ["jpg","jpeg","png","webp","heic","heif","gif"];
   var ATT_DOC_EXT    = ["pdf","doc","docx","xls","xlsx","csv","txt"];
-  var ATT_ACCEPT     = "image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt";
+  var ATT_ZIP_EXT    = ["zip","rar","7z"];
+  var ATT_ACCEPT     = "image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip,.rar,.7z";
 
   function _attList(t){
     return (Array.isArray(t&&t.attachments)?t.attachments:[]).filter(function(a){
@@ -692,11 +697,14 @@
     var ty=String((a&&a.type)||"").toLowerCase(), ex=_attExt(a&&a.name);
     if(ty.indexOf("image/")===0 || ATT_IMG_EXT.indexOf(ex)!==-1) return "image";
     if(ty==="application/pdf" || ex==="pdf") return "pdf";
+    /* الامتدادُ أولاً: المتصفّحاتُ تختلف في `type` للمضغوط (`application/zip` ·
+       `application/x-zip-compressed` · فارغٌ على الجوّال)، والامتدادُ ثابت. */
+    if(ATT_ZIP_EXT.indexOf(ex)!==-1 || /zip|rar|7z/.test(ty)) return "archive";
     return "file";
   }
   function _attIcon(a){
     var k=_attKind(a);
-    return k==="image" ? "image" : (k==="pdf" ? "fileText" : "paperclip");
+    return k==="image" ? "image" : (k==="pdf" ? "fileText" : (k==="archive" ? "archive" : "paperclip"));
   }
   /* الحجمُ بالعربية: رقمٌ واحدٌ بعد الفاصلة يكفي — «2.4 م.ب» تقول ما يقوله
      «2516582 بايت» وتُقرأ بلمحة. */
@@ -725,9 +733,12 @@
   function _attReject(file, have){
     if(!file) return "لا ملفَّ مختار";
     if(Number(have||0) >= ATT_MAX) return "الحدُّ "+ATT_MAX+" مرفقاتٍ للمهمّة";
-    var ex=_attExt(file.name), img=(_attKind(file)==="image");
-    if(!img && ATT_DOC_EXT.indexOf(ex)===-1) return "نوعُ الملفّ غيرُ مدعوم — صورةٌ أو PDF أو مستند";
-    var mb=Number(file.size||0)/1048576, cap=img?ATT_IMG_MAX_MB:ATT_MAX_MB;
+    var ex=_attExt(file.name), kind=_attKind(file), img=(kind==="image"), zip=(kind==="archive");
+    /* القبولُ بالامتداد لا بـ`type` وحدَه — فـ`type` يكتبه المتصفّح وقد يُفرَغ،
+       والامتدادُ هو ما يُقفَل به البابُ على التنفيذيّ المسمّى مرفقاً. */
+    if(!img && !zip && ATT_DOC_EXT.indexOf(ex)===-1) return "نوعُ الملفّ غيرُ مدعوم — صورةٌ أو PDF أو مستند أو ملفٌّ مضغوط (zip)";
+    if(zip && ATT_ZIP_EXT.indexOf(ex)===-1) return "نوعُ الملفّ غيرُ مدعوم — المضغوطُ zip أو rar أو 7z";
+    var mb=Number(file.size||0)/1048576, cap=img?ATT_IMG_MAX_MB:(zip?ATT_ZIP_MAX_MB:ATT_MAX_MB);
     if(mb > cap) return "حجمُ الملفّ فوق "+cap+" م.ب";
     return "";
   }
@@ -2313,7 +2324,7 @@
               _icn("paperclip")+'إرفاق ملف</button>'+
             '<button class="btn btn-ghost" onclick="staffTasks.pickAttachment(\''+_q(t.id)+'\',true)">'+
               _icn("camera")+'صورة</button>'+
-            '<span class="st-hint" style="margin:0">صورٌ · PDF · مستندات — حتى '+ATT_MAX+' مرفقاتٍ للمهمّة.</span>'+
+            '<span class="st-hint" style="margin:0">صورٌ · PDF · مستندات · ملفٌّ مضغوط (zip) — حتى '+ATT_MAX+' مرفقاتٍ للمهمّة.</span>'+
           '</div>'
         : "")+
       '<div class="st-sec">'+_icn("edit")+'الملاحظات</div>'+cmts+
@@ -2366,7 +2377,7 @@
     _attList:_attList, _attKind:_attKind, _attExt:_attExt, _attIcon:_attIcon,
     _attSafeName:_attSafeName, _attPath:_attPath, _attReject:_attReject, _attEntry:_attEntry,
     _fmtBytes:_fmtBytes, _canAttach:_canAttach, _canDropAtt:_canDropAtt,
-    _ATT_MAX:ATT_MAX, _ATT_MAX_MB:ATT_MAX_MB, _ATT_IMG_MAX_MB:ATT_IMG_MAX_MB,
+    _ATT_MAX:ATT_MAX, _ATT_MAX_MB:ATT_MAX_MB, _ATT_IMG_MAX_MB:ATT_IMG_MAX_MB, _ATT_ZIP_MAX_MB:ATT_ZIP_MAX_MB, _ATT_ACCEPT:ATT_ACCEPT,
     _splitTabs:_splitTabs, _countOpen:_countOpen, _sortTasks:_sortTasks,
     build:MODULE_BUILD
   };
