@@ -113,9 +113,14 @@ npm run music     # إعادة توليد المقطوعة بعد تعديل ا�
 يسجّلها `promo-video.mjs`، بذوبانٍ عند الوصلتين وفراشٍ موسيقيٍّ واحدٍ متّصل:
 
 ```bash
+npm install --no-save playwright-core ffmpeg-static chart.js@4.4.1   # أمرٌ واحد (انظر رأس promo-video.mjs)
 node promo-assemble.mjs              # → dist-video/promo-film.mp4
+node promo-assemble.mjs --4k         # → dist-video/promo-film-4k.mp4 (يتجاوز ربع ساعة)
 node promo-assemble.mjs --skip-body  # أعِد التجميع دون إعادة تسجيل الجولة
 ```
+
+الصوتُ يُعاد إلى **48 ك.هرتز** بعد `loudnorm` — الأخيرُ يُخرج 96 ك.هرتز، وAAC على
+هذا التردّد لا تفكّه كثيرٌ من مشغّلات الهواتف فيبدو الفيلمُ بلا صوت.
 
 المشهدان يُرندَران بـ`musicVolume: 0` لأن الموسيقى تُفرَش على الفيلم كلِّه
 دفعةً واحدة. **أرقامُ إطارات الختام مشتقّةٌ من `Sequence` في

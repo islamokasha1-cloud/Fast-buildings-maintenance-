@@ -9,7 +9,8 @@
 //   node promo-video.mjs            → فيديو MP4 كامل (~٣ دقائق)
 //   node promo-video.mjs --probe    → لقطاتٌ فقط بلا تسجيل (تكرارٌ سريع أثناء الضبط)
 //
-// المتطلّبات:  npm install --no-save playwright-core ffmpeg-static
+// المتطلّبات:  npm install --no-save playwright-core ffmpeg-static chart.js@4.4.1
+//              (في أمرٍ واحد — `--no-save` يحذف ما لم يُذكر فيه من الحزم غير المسجَّلة)
 // المخرجات:    dist-video/promo.mp4 (1920×1080) · promo-hd.mp4 (نسخةُ مشاركةٍ تحت سقف حجم) · shots/*.png
 //
 // لا يلمس الإنتاج إطلاقاً: كل نداءٍ خارجيٍّ مُجهَض، وFirestore في الذاكرة.
@@ -50,9 +51,14 @@ const MOCK_FIREBASE = bsrc.slice(_s, _e);
 if (!MOCK_FIREBASE.includes('window.__store')) { console.error('تعذّر استخراج المُحاكي من browser-scenarios.mjs'); process.exit(1); }
 
 // مكتبات CDN غير متاحة (كلُّ نداءٍ خارجيٍّ مُجهَض) — بدائلُ صامتةٌ حتى لا تظهر أخطاؤها.
-const CDN_STUBS = `
+// Chart.js وحدَها تُرى في الشاشة (رسومُ لوحة القيادة والمؤشّرات والمقارنة الشهرية):
+// إن وُجدت نسخةٌ محلية (`npm install --no-save chart.js@4.4.1`) تُلبّى بها بدل الوهمية،
+// فتمتلئ مساحاتُ الرسوم بدل أن تبقى بيضاء. غيابُها لا يُسقط شيئاً — يعود البديلُ الصامت.
+const CHART_LOCAL = path.join(REPO, 'node_modules', 'chart.js', 'dist', 'chart.umd.js');
+const HAVE_CHART = fs.existsSync(CHART_LOCAL);
+const CDN_STUBS = (HAVE_CHART ? '' : `
   window.Chart = function(){ return { destroy(){}, update(){}, resize(){}, data:{}, options:{} }; };
-  window.Chart.register = function(){}; window.Chart.defaults = { font:{} };
+  window.Chart.register = function(){}; window.Chart.defaults = { font:{} };`) + `
   window.XLSX = { utils:{ book_new:()=>({}), json_to_sheet:()=>({}), book_append_sheet(){}, aoa_to_sheet:()=>({}) }, writeFile(){}, write(){} };
   window.PptxGenJS = function(){ return { addSlide:()=>({ addText(){}, addImage(){}, addTable(){} }), writeFile(){ return Promise.resolve(); } }; };
 `;
@@ -233,6 +239,9 @@ function seedAll() {
     buildings: BLD, supervisors: SUP, technicians: TECH, workTypes: WT,
     companyName: 'شركة المباني السريعة', projectName: 'مشروع صيانة مباني حائل'
   };
+  // تفعيلُ الذكاء الاصطناعي: التطبيقُ يقرأ رابطَ الوكيل من هذه الوثيقة قبل أيّ نداء،
+  // والنداءُ نفسُه يُلبّى محلياً بردٍّ مُعدٍّ (انظر `AI_CANNED`) — لا يصل شيءٌ للشبكة.
+  S['meta/ai_settings'] = { proxyUrl: 'https://hail-ai-proxy.islamokasha1.workers.dev' };
   S[_meta('users')] = { users: [
     { user: 'admin', name: 'م. إسلام عكاشة', role: 'admin' },
     { user: 'pm', name: 'م. أسامة السادات', role: 'pm' },
@@ -442,6 +451,84 @@ function seedAll() {
   });
   S[PPM_META_DOC()] = { counter: 71 };
 
+  /* ── المهامّ والملاحظات (`staff_tasks` — عامّة لا مشروعية) ──
+     التبويبُ الافتراضي «مهامّي» يعرض ما أُسند إلى المستخدم الحاليّ (admin) — فأكثرُ
+     البذرة مُسندٌ إليه، ومعها مهمّةٌ كلّف بها غيرَه وملاحظةٌ ومهمّةٌ منجَزة. */
+  const ME = { user: 'admin', name: 'م. إسلام عكاشة' }, PM = { user: 'pm', name: 'م. أسامة السادات' };
+  const ST = (id, o) => {
+    const parts = [...new Set([o.createdByUser, o.assignedToUser].concat(o.shared || []).filter(Boolean))];
+    S['staff_tasks/' + id] = Object.assign({ body: '', kind: 'task', status: 'open', priority: 'normal', shared: [], comments: [], attachments: [], seenBy: {}, batchId: '' }, o, { participants: parts });
+  };
+  ST('ST-1008', { title: 'اعتماد عرض المقاول لتركيب مضخة الحريق — مبنى الورشة', body: 'المضخة وصلت أمس. يلزم اعتمادُ المقاول قبل التشغيل، وإرفاق شهادة المطابقة.',
+    priority: 'high', due: FUT(1), createdBy: PM.name, createdByUser: PM.user, assignedToUser: ME.user, assignedToName: ME.name, shared: ['wh'],
+    comments: [{ user: PM.user, name: PM.name, text: 'عرضُ المقاول والفاتورةُ الأولية مرفقان.', at: D(12, 8) }],
+    attachments: [{ url: 'https://example.com/pump-offer.pdf', path: 'po/staff_tasks/ST-1008/offer.pdf', name: 'عرض-المقاول.pdf', type: 'application/pdf', size: 248000, by: PM.user, byName: PM.name, at: D(12, 8) }],
+    createdAt: D(11, 9), updatedAt: D(12, 8) });
+  ST('ST-1007', { title: 'مراجعة كشف العهد الشهري قبل إرساله للمالية', body: 'التأكّد من إرجاع سلّم الألمنيوم ومثقاب ماهر يوسف.',
+    due: FUT(3), createdBy: PM.name, createdByUser: PM.user, assignedToUser: ME.user, assignedToName: ME.name, createdAt: D(10, 10), updatedAt: D(10, 10) });
+  ST('ST-1006', { title: 'زيارة مبنى العيادة — تجهيز نقاط الطاقة لجهاز الأشعة الجديد', body: 'طلبُ الإدارة الطبية: ثلاثُ نقاطٍ ٣٢ أمبير وتأريضٌ مستقلّ.',
+    priority: 'high', due: FUT(-1), createdBy: PM.name, createdByUser: PM.user, assignedToUser: ME.user, assignedToName: ME.name, shared: ['pm'],
+    comments: [{ user: ME.user, name: ME.name, text: 'تمّت المعاينة — نحتاج قاطعاً إضافياً في اللوحة الفرعية.', at: D(12, 14) }],
+    createdAt: D(8, 9), updatedAt: D(12, 14) });
+  ST('ST-1005', { title: 'حصرُ وحدات التكييف المطلوب استبدالها في السكن (ب) وتسعيرُها', body: 'المطلوب جدولٌ بالوحدات وأعمارها وتكلفة الاستبدال التقديرية.',
+    due: FUT(6), createdBy: ME.name, createdByUser: ME.user, assignedToUser: PM.user, assignedToName: PM.name, createdAt: D(9, 11), updatedAt: D(9, 11) });
+  ST('ST-1004', { title: 'ملاحظة: المورّد «الأساس للمواد» يطلب تحديث بيانات التحويل البنكي', body: 'وردت رسالةٌ من المورّد — تُحدَّث عند اعتماد الطلب القادم.',
+    kind: 'note', createdBy: ME.name, createdByUser: ME.user, createdAt: D(7, 13), updatedAt: D(7, 13) });
+  ST('ST-1003', { title: 'تسليم تقرير أغسطس الشهري للأمانة', body: 'سُلِّم بالبريد الرسمي مع نسخة PDF.',
+    status: 'done', due: D(5, 9).slice(0, 10), createdBy: PM.name, createdByUser: PM.user, assignedToUser: ME.user, assignedToName: ME.name,
+    doneAt: D(4, 15), doneByUser: ME.user, doneByName: ME.name, createdAt: D(1, 9), updatedAt: D(4, 15) });
+
+  /* ── خزانة الوثائق (`global_docs` — نطاقُ الشركة وحدَه يظهر في السجلّات) ──
+     الانتهاءاتُ موزَّعةٌ على سلّم الألوان كلِّه: منتهيةٌ · حرجة · عاجلة · قريبة · سليمة · دائمة. */
+  const DV = (id, o) => {
+    S['global_docs/' + id] = Object.assign({ docTypeOther: '', notes: '', files: [{ name: id + '.pdf', url: 'https://example.com/' + id + '.pdf', storagePath: 'po/vault/docs/' + id + '.pdf', size: 184320, at: D(1, 9), by: ME.name }],
+      archived: false, renewCount: 0, noExpiry: false, scope: 'company', projectId: '', projectName: '', isCustomProject: false,
+      owner: 'قسم الشؤون الإدارية', ownerUser: 'admin', createdAt: D(1, 9), createdBy: ME.name, updatedAt: D(1, 9), updatedBy: ME.name, history: [] }, o);
+  };
+  DV('DOC-2609-0001', { title: 'السجل التجاري', docType: 'cr', number: '1010234567', issuer: 'وزارة التجارة', start: '2025-10-01', expiry: FUT(200), renewCount: 1, notes: 'يُجدَّد إلكترونياً عبر بوابة التجارة.' });
+  DV('DOC-2609-0002', { title: 'شهادة الزكاة والدخل', docType: 'zakat', number: 'ZK-2026-44810', issuer: 'هيئة الزكاة والضريبة والجمارك', start: '2026-04-30', expiry: FUT(5), owner: 'المحاسب العام', ownerUser: 'pm' });
+  DV('DOC-2609-0003', { title: 'شهادة التأمينات الاجتماعية', docType: 'gosi', number: 'GO-771204', issuer: 'التأمينات الاجتماعية', start: '2026-08-01', expiry: FUT(20), owner: 'الموارد البشرية' });
+  DV('DOC-2609-0004', { title: 'شهادة السعودة (نطاقات)', docType: 'saudization', number: 'NT-5520981', issuer: 'وزارة الموارد البشرية', start: '2026-07-15', expiry: FUT(50), owner: 'الموارد البشرية' });
+  DV('DOC-2609-0005', { title: 'رخصة البلدية — المقرّ الرئيسي', docType: 'municipal', number: 'BL-HA-30217', issuer: 'أمانة منطقة حائل', start: '2025-09-10', expiry: FUT(-3), renewCount: 2 });
+  DV('DOC-2609-0006', { title: 'شهادة تصنيف المقاولين', docType: 'classification', number: 'CL-100-2288', issuer: 'وزارة الشؤون البلدية والإسكان', start: '2024-11-01', expiry: FUT(90) });
+  DV('DOC-2609-0007', { title: 'شهادة الآيزو 9001', docType: 'iso', number: 'ISO-SA-91882', issuer: 'جهة مانحة معتمدة', start: '2025-03-01', expiry: FUT(140), owner: 'إدارة الجودة' });
+  DV('DOC-2609-0008', { title: 'عقد تأسيس الشركة', docType: 'agreement', number: '—', issuer: 'وزارة التجارة', start: '2010-05-01', expiry: '', noExpiry: true });
+  S['meta/global_docs_counter'] = { n: 8, updatedAt: D(1, 9) };
+  S['meta/global_letters_counter'] = { n: 14, updatedAt: D(1, 9) };
+  S['meta/vault_readers'] = { users: ['admin'] };
+
+  /* ── إدارة المشاريع: موازنةٌ لكلّ مشروع + عقدٌ ومستخلصاتٌ وأوامرُ دفع (مجموعاتٌ عامّة) ──
+     بطاقةُ المشروع تجمع: الموازنةَ من `meta/<id>_budget`، والمصروفَ من الطلبات المغلقة
+     والمستخلصات المسدَّدة وأوامر الدفع، والمتعاقَدَ عليه من العقود النشطة. */
+  const CATS = (m) => [['materials', 'مواد بناء', m[0]], ['electrical', 'كهرباء', m[1]], ['plumbing', 'سباكة', m[2]], ['hvac', 'تكييف', m[3]], ['subcontractor', 'مقاول باطن', m[4]], ['labor', 'مصنعيات/عمالة', m[5]], ['overhead', 'مصاريف إدارية', m[6]]]
+    .map(c => ({ key: c[0], name: c[1], planned: c[2] }));
+  S['meta/hail_budget'] = { type: 'maintenance', categories: CATS([450000, 260000, 180000, 320000, 540000, 210000, 90000]), boq: [], cleaning: {} };
+  S['meta/qsm_budget'] = { type: 'maintenance', categories: CATS([180000, 120000, 90000, 160000, 220000, 110000, 40000]), boq: [], cleaning: {} };
+  S['meta/jouf_budget'] = { type: 'cleaning', categories: CATS([60000, 30000, 25000, 40000, 380000, 260000, 35000]), boq: [], cleaning: {} };
+  const VEND = 'مؤسسة الإنجاز الفني للمقاولات';
+  S['global_contracts/CTR-2609-0004'] = {
+    requestId: 'CRQ-2609-0011', vendorId: 'V-014', vendorName: VEND, projectId: P, isCustomProject: false, projectName: '',
+    budgetCategoryKey: 'subcontractor', isSubstitute: false, substituteAccountId: '',
+    title: 'أعمال ترميم وصيانة مبنى الورشة الرئيسية', scope: 'ترميم أرضيات وواجهات وأعمال كهروميكانيكية', type: 'works_order', lines: [],
+    value: 480000, vatMode: 'inclusive', startDate: '2026-06-01', durationDays: 180,
+    advance: { pct: 10, recoveryPct: 10, amount: 48000, recovered: 24000, paid: 48000, payments: [] },
+    retention: { pct: 5, releaseOn: 'completion', released: 0 }, warranty: { months: 12 },
+    guarantees: [], changeOrders: [], clauses: [], signedDocs: [], status: 'ctr_active', timeline: [],
+    createdAt: '2026-06-01T08:00:00.000Z', createdBy: ME.name
+  };
+  [['EXT-2607-0001', 'المستخلص الأول', 'يونيو 2026', 1, 132000, 'TR-88214', '2026-07-05'], ['EXT-2608-0002', 'المستخلص الثاني', 'يوليو 2026', 2, 96500, 'TR-89033', '2026-08-06']].forEach(x => {
+    S['global_contract_extracts/' + x[0]] = { contractId: 'CTR-2609-0004', vendorName: VEND, projectId: P, isCustomProject: false, projectName: '',
+      title: x[1], period: x[2], seq: x[3], status: 'ext_paid', payment: { amount: x[4], ref: x[5], receiptUrl: '', at: x[6] + 'T10:00:00.000Z', by: ME.name },
+      createdAt: x[6] + 'T08:00:00.000Z', createdBy: PM.name, timeline: [] };
+  });
+  S['global_contract_requests/CRQ-2609-0014'] = { engagement: 'pay_order', projectId: P, isCustomProject: false, projectName: '', budgetCategoryKey: 'labor',
+    vendorId: 'V-021', vendorName: 'مؤسسة الرواد للتشغيل', title: 'أمر دفع — مصنعيات تركيب وحدات تكييف', value: 74000,
+    payments: [{ amount: 74000, ref: 'TR-90112', at: D(3, 9), by: ME.name }], status: 'crq_paid', isSubstitute: false, substituteAccountId: '', timeline: [],
+    createdAt: D(1, 8), createdBy: PM.name };
+  S['global_contract_requests/CRQ-2609-0015'] = { engagement: 'contract', projectId: P, isCustomProject: false, projectName: '', budgetCategoryKey: 'electrical',
+    vendorName: 'شركة التيار الحديث', title: 'طلب تعاقد — تحديث لوحات التوزيع الرئيسية', value: 155000, status: 'crq_pending_ceo',
+    payments: [], timeline: [], createdAt: D(8, 8), createdBy: PM.name };
+
   CURRENT_PROJECT = _prevProj;
   return Object.keys(S).length;
 }
@@ -449,68 +536,91 @@ function seedAll() {
 /* ═══════════════════════════════ سيناريو الجولة ═══════════════════════════════ */
 // كل فصلٍ: بطاقةُ عنوان ← انتقالٌ بالنقر ← تعليقٌ سفليّ ← تصفّحٌ هادئ.
 const CHAPTERS = [
-  { n: '١', page: 'dashboard', kicker: 'لوحة القيادة', title: 'صورةٌ واحدةٌ لحالة المشروع',
+  { page: 'dashboard', kicker: 'لوحة القيادة', title: 'صورةٌ واحدةٌ لحالة المشروع',
     sub: 'مؤشّراتُ البلاغات والمشتريات والمخزون في شاشةٍ واحدة — بلا تجميعٍ يدويّ',
     lower: ['لوحة المعلومات', 'كلُّ رقمٍ محسوبٌ لحظياً من مصدره — لا جداول Excel موازية'] },
 
-  { n: '٢', page: 'daily', kicker: 'التشغيل اليوميّ', title: 'البلاغاتُ من الفتح إلى الإغلاق',
+  { page: 'daily', kicker: 'التشغيل اليوميّ', title: 'البلاغاتُ من الفتح إلى الإغلاق',
     sub: 'أولوياتٌ بزمنِ استجابةٍ ملزم، وإسنادٌ للفنيّين، وتتبّعٌ حتى الإغلاق والاستلام',
     lower: ['الحركة اليومية', 'البلاغاتُ المتأخّرةُ عن زمن الاستجابة تُرفَع تلقائياً إلى أعلى الشاشة'] },
 
-  { n: '٣', page: 'tickets', kicker: 'سجلّ البلاغات', title: 'بحثٌ وتصفيةٌ في كلّ بلاغ',
+  { page: 'tickets', kicker: 'سجلّ البلاغات', title: 'بحثٌ وتصفيةٌ في كلّ بلاغ',
     sub: 'بالمبنى ونوع العمل والمشرف والحالة — والأرشيف الشهريّ محفوظٌ بلا حذف',
     lower: ['سجلّ البلاغات', 'تصفيةٌ فوريةٌ بالمبنى ونوع العمل والمشرف — والمغلقُ يُرحَّل للأرشيف'] },
 
-  { n: '٤', page: 'new', kicker: 'تسجيل بلاغ', title: 'بلاغٌ كاملٌ في أقلّ من دقيقة',
+  { page: 'new', kicker: 'تسجيل بلاغ', title: 'بلاغٌ كاملٌ في أقلّ من دقيقة',
     sub: 'مبنى ودورٌ ونوعُ عملٍ وأولويةٌ ومرفقاتٌ مصوّرة — بحقولٍ مضبوطةٍ لا نصٍّ حرّ',
     lower: ['تسجيل بلاغ جديد', 'قوائمُ مضبوطةٌ من إعدادات المشروع — تمنع الأخطاء الإملائية في التقارير'] },
 
-  { n: '٥', page: 'purchases', kicker: 'دورة الشراء', title: 'طلبُ الشراء بمراحلَ لا تُتخطّى',
+  { page: 'purchases', kicker: 'دورة الشراء', title: 'طلبُ الشراء بمراحلَ لا تُتخطّى',
     sub: 'من الطلب إلى اعتماد مدير المشروع فمراجعة المستودع فالاستلام فالإغلاق',
     lower: ['المشتريات', 'كلُّ مرحلةٍ باعتمادٍ موثَّقٍ باسم صاحبه ووقته — لا اعتمادَ شفهيّ'],
     after: () => poCloseUp() },
 
-  { n: '٦', page: 'new-purchase', kicker: 'طلبٌ جديد', title: 'أصنافٌ من الكتالوج بأسعارها',
+  { page: 'new-purchase', kicker: 'طلبٌ جديد', title: 'أصنافٌ من الكتالوج بأسعارها',
     sub: 'ضريبةُ القيمة المضافة والإجمالي يُحسبان آلياً — والصنفُ مربوطٌ برصيد المخزون',
     lower: ['طلب شراء جديد', 'الأصنافُ من كتالوجٍ موحَّد — فتتطابق أسماؤها عبر كلّ التقارير'] },
 
-  { n: '٧', page: 'rfq', kicker: 'التسعير', title: 'ثلاثةُ عروضٍ قبل كلّ ترسية',
+  { page: 'rfq', kicker: 'التسعير', title: 'ثلاثةُ عروضٍ قبل كلّ ترسية',
     sub: 'مقارنةُ عروض المورّدين صنفاً بصنف، والترسيةُ موثّقةٌ بسببها',
     lower: ['طلبات التسعير', 'مقارنةٌ صنفاً بصنف بين المورّدين — والفارقُ ظاهرٌ قبل الترسية'] },
 
-  { n: '٨', page: 'inventory', kicker: 'المخزون', title: 'رصيدٌ حيٌّ لا جردٌ متأخّر',
+  { page: 'inventory', kicker: 'المخزون', title: 'رصيدٌ حيٌّ لا جردٌ متأخّر',
     sub: 'كلُّ استلامٍ وصرفٍ يُحدّث الرصيد لحظياً، وحدُّ إعادة الطلب ينبّه قبل النفاد',
     lower: ['المخزون', 'الرصيدُ يتحرّك مع الاستلام والصرف — والأصنافُ دون الحدّ الأدنى مُعلَّمة'] },
 
-  { n: '٩', page: 'inventory-log', kicker: 'أثرُ الحركة', title: 'كلُّ حركةٍ لها أثرٌ لا يُمحى',
+  { page: 'inventory-log', kicker: 'أثرُ الحركة', title: 'كلُّ حركةٍ لها أثرٌ لا يُمحى',
     sub: 'استلامٌ وصرفٌ وتسويةٌ ونقل — باسم المنفِّذ ووقته ومرجعِ الطلب أو البلاغ',
     lower: ['سجلّ حركة المخزون', 'أثرٌ كاملٌ لكلّ حركة — يُغلق باب الفرق غير المُفسَّر في الجرد'] },
 
-  { n: '١٠', page: 'custody', kicker: 'العهد', title: 'ما بيد كلِّ فنّيٍّ موثَّقٌ باسمه',
+  { page: 'custody', kicker: 'العهد', title: 'ما بيد كلِّ فنّيٍّ موثَّقٌ باسمه',
     sub: 'صرفُ العهدة وتوقيعُها واستردادُها — فلا عهدةَ معلّقةٌ بلا صاحب',
     lower: ['كشف العهد', 'العهدةُ باسم حاملها وتوقيعه — والمستردُّ يعود لرصيد المستودع'] },
 
-  { n: '١١', page: 'assets', kicker: 'الأصول', title: 'سجلُّ أصولٍ بحالتها لا بعددها',
+  { page: 'assets', kicker: 'الأصول', title: 'سجلُّ أصولٍ بحالتها لا بعددها',
     sub: 'كلُّ أصلٍ بموقعه وطرازه ورقمه التسلسليّ وضمانه وحالته التشغيلية',
     lower: ['سجلّ الأصول', 'الأصلُ مربوطٌ ببلاغاته وخطط صيانته — فتاريخُه كاملٌ في مكانٍ واحد'] },
 
-  { n: '١٢', page: 'ppm', kicker: 'الصيانة الوقائية', title: 'صيانةٌ تسبق العطل',
+  { page: 'ppm', kicker: 'الصيانة الوقائية', title: 'صيانةٌ تسبق العطل',
     sub: 'خططٌ دوريةٌ بمواعيدَ محسوبة، والمتأخّرةُ منها تُعلَّم بوضوحٍ لا يُتجاهَل',
     lower: ['الصيانة الوقائية (PPM)', 'الخططُ المتأخّرةُ تُرفَع أعلى القائمة بلافتةٍ حمراء'] },
 
-  { n: '١٣', page: 'kpi', kicker: 'المؤشّرات', title: 'أداءٌ يُقاس لا يُوصَف',
+  { page: 'projects', kicker: 'إدارة المشاريع', title: 'كلُّ مشروعٍ بموازنته ومصروفه في بطاقةٍ واحدة',
+    sub: 'الموازنةُ المعتمدة مقابل المصروف والمتعاقَد عليه وما ينتظر الاعتماد — من المشتريات والعقود والمستخلصات نفسِها',
+    lower: ['إدارة المشاريع', 'المصروفُ يُجمَع من الطلبات المغلقة والمستخلصات المسدَّدة وأوامر الدفع — لا من رقمٍ يُكتب'],
+    after: () => projectCloseUp() },
+
+  { page: 'vault-docs', kicker: 'خزانة الوثائق', title: 'وثائقُ الشركة لا تنتهي في صمت',
+    sub: 'السجلُّ التجاريّ والزكاةُ والتأميناتُ والتصنيفُ والرخص — بمسؤول تجديدٍ وتنبيهٍ متدرّجٍ قبل الانتهاء',
+    lower: ['خزانة الوثائق', 'أفقُ الانتهاء بالألوان: منتهيةٌ · حرجةٌ · عاجلةٌ · قريبةٌ — ولكلّ وثيقةٍ مسؤولُ تجديد'] },
+
+  { page: 'staff-tasks', kicker: 'المهامّ والملاحظات', title: 'ما كُلِّفتَ به وما كلّفتَ به غيرَك',
+    sub: 'مهامٌّ بموعدٍ وأولويةٍ ومرفقاتٍ وتعليقات — تُنجَز أو تُعاد بسبب، ولا تضيع في الواتساب',
+    lower: ['المهامّ والملاحظات', 'مهامّي · كلّفتُ بها · شارَكوني فيها · ملاحظاتي — والمتأخّرُ عن موعده ملوَّنٌ'] },
+
+  { page: 'kpi', kicker: 'المؤشّرات', title: 'أداءٌ يُقاس لا يُوصَف',
     sub: 'زمنُ الاستجابة والإنجاز والالتزامُ بالأولويات — بأرقامٍ من البيانات نفسها',
     lower: ['مؤشّرات الأداء', 'المؤشّرُ محسوبٌ من البلاغات ذاتها — لا إدخالَ يدويَّ يقبل التجميل'] },
 
-  { n: '١٤', page: 'reports', kicker: 'التقارير', title: 'تقريرٌ جاهزٌ للعميل بضغطة',
+  { page: 'reports', kicker: 'التقارير', title: 'تقريرٌ جاهزٌ للعميل بضغطة',
     sub: 'تقاريرُ شهريةٌ ومصوَّرةٌ وتصديرٌ إلى Excel وPowerPoint — من البيانات الحيّة',
     lower: ['التقارير', 'تصديرٌ إلى Excel وPowerPoint من البيانات الحيّة — بلا إعادة كتابة'],
     act: '#page-reports [onclick*="generateReport()"]' },
 
-  { n: '١٥', page: 'tv', kicker: 'شاشة العرض', title: 'الحالةُ معروضةٌ في موقع العمل',
+  { page: 'monthly-compare', kicker: 'الذكاء الاصطناعي', title: 'ذكاءٌ اصطناعيٌّ في صميم العمل',
+    sub: 'ملخّصٌ تنفيذيّ · فرزُ البلاغات وتحليلُ صورها · صياغةُ الخطابات والتقارير · استخراجُ المقايسة · تحليلُ عروض الأسعار',
+    lower: ['المقارنة الشهرية', 'شهرٌ مقابل شهر بالأرقام — وزرٌّ واحدٌ يحوّلها إلى ملخّصٍ تنفيذيٍّ مكتوب'],
+    // الصفحةُ تختار الشهرَ المنصرم افتراضاً وبياناتُ البذرة في الشهر الجاري — فيُنقَر أوّلاً.
+    act: '#mcomp-months-row .mcomp-month-btn:first-child',
+    after: () => aiCloseUp() },
+
+  { page: 'tv', kicker: 'شاشة العرض', title: 'الحالةُ معروضةٌ في موقع العمل',
     sub: 'شاشةُ عرضٍ دائمةٌ في غرفة التشغيل تُحدَّث لحظياً — البلاغُ يظهر فور تسجيله',
     lower: ['لوحة العرض TV', 'شاشةٌ تعمل بلا تدخّل — تُحدَّث مع كلّ بلاغٍ يُسجَّل أو يُغلق'] }
 ];
+// ترقيمُ الفصول مشتقٌّ من ترتيبها — فإدراجُ فصلٍ لا يُعيد ترقيمَ ما بعده يدوياً.
+const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩';
+CHAPTERS.forEach((c, i) => { c.n = String(i + 1).replace(/\d/g, d => AR_DIGITS[d]); });
 
 /* ═════════════════════════════════ التشغيل ═════════════════════════════════ */
 const t0 = Date.now();
@@ -566,8 +676,78 @@ const FONT_CSS = fs.readFileSync(path.join(FONT_DIR, 'fonts.css'), 'utf8')
   .replace(/url\(\.\/([^)]+)\)/g, 'url(https://fonts.gstatic.com/pv/$1)');
 const CORS = { 'access-control-allow-origin': '*' };
 
+/* ── الذكاء الاصطناعي: ردودٌ مُعدَّة بدل النموذج ──
+   كلُّ ميزات الذكاء الاصطناعي في المنصة تمرّ بوكيلٍ واحد (`hail-ai-proxy`) ويقرأ
+   التطبيقُ الردَّ بشكل Anthropic Messages (`content[].text` و`usage`). في الفيلم
+   يُلبّى النداءُ محلياً بردٍّ ثابتٍ يُختار من نصّ الطلب — فيُرى **سلوكُ الشاشة الحقيقيّ**
+   (الزرّ · الانتظار · العرض المنسَّق) بلا مفتاحٍ ولا شبكة. النصوصُ توضيحيةٌ تُشبه
+   ما يُنتجه النموذجُ فعلاً على بيانات البذرة، ولا تُبنى عليها أرقامٌ في التعليق. */
+const AI_CANNED = {
+  triage: [
+    '**التصنيف المقترح:** أعمال الكهرباء — لوحة توزيع رئيسية',
+    '**الأولوية:** 🔴 حرج (انقطاعٌ كاملٌ عن دورٍ مشغول) — الأولويةُ المسجَّلة صحيحة',
+    '',
+    '**السبب الأرجح:** فصلٌ تلقائيٌّ للقاطع الرئيسي بسبب حملٍ زائد أو تسرّبٍ أرضيّ في أحد الخطوط الفرعية للدور الثاني.',
+    '',
+    '**خطوات الفحص المقترحة:**',
+    '1. قياس الأحمال على خطوط الدور الثاني وفصل الدوائر الفرعية واحدةً واحدة.',
+    '2. فحص قاطع التسرّب الأرضي (ELCB) بالاختبار اليدوي.',
+    '3. مراجعة الربط الحراريّ للوحة DB-01 — آخر فحصٍ مسجَّلٍ قبل ٣ أشهر.',
+    '',
+    '**الفنّي المناسب:** فنّي كهرباء مرخَّص — يُنصح بإسناده لـ **ماهر يوسف** (أقلّ حملٍ حاليّ في هذا التخصّص).',
+    '',
+    '⚠️ يُلاحَظ **بلاغٌ مشابهٌ معادُ فتحه** في المبنى نفسه (TK-2036) — يُنصح بالربط بينهما.'
+  ].join('\n'),
+  monthly: [
+    '## أبرز ما حدث',
+    '',
+    'استُلم **١٤ بلاغاً** هذا الشهر وأُغلق منها **٦** — الحملُ الأكبر على **مبنى الإدارة العامة** بأربعة بلاغات، وأعمالُ الكهرباء والتكييف تمثّل نصفَ البلاغات.',
+    '',
+    '- ✅ خطط الصيانة الوقائية أنتجت **٣ بلاغاتٍ روتينية** في موعدها دون تدخّلٍ يدويّ.',
+    '- ⏱ متوسط زمن الإغلاق **٢٫٣ يوم عمل** — ضمن المستهدف للأولوية العادية.',
+    '',
+    '## الاتجاهات مقارنة بالشهر السابق',
+    '',
+    '| المؤشر | الشهر السابق | الشهر الحالي | التغيّر |',
+    '|---|---|---|---|',
+    '| البلاغات المستلمة | ١١ | ١٤ | ▲ ٢٧٪ |',
+    '| الالتزام بالـ SLA | ٧٣٪ | ٦٧٪ | ▼ ٦ نقاط |',
+    '| متوسط زمن الإغلاق | ٢٫٩ يوم | ٢٫٣ يوم | ▼ ٢١٪ |',
+    '',
+    '## نقاط تستحق الانتباه',
+    '',
+    '- ⚠️ **٦ بلاغاتٍ تجاوزت الزمن المستهدف** — أربعةٌ منها بلا فنّيٍّ مُسنَد.',
+    '- ⚠️ المصعد الرئيسي (AST-0102) عليه بلاغُ توقّفٍ حرج وخطةُ صيانةٍ مستحقّة في الوقت نفسه.',
+    '',
+    '## توصيات',
+    '',
+    '1. **إسناد البلاغات الأربعة المتأخّرة اليوم** — التأخّرُ ناتجٌ عن غياب الإسناد لا عن التنفيذ.',
+    '2. **دمج بلاغ المصعد مع خطة PPM-070** في زيارةٍ واحدة للمقاول المختصّ.',
+    '3. مراجعة لوحة التوزيع DB-01 بعد بلاغَي الانقطاع المتكرّرَين في مبنى الإدارة.'
+  ].join('\n')
+};
+function aiCanned(prompt) {
+  const text = /شهر|ملخص|مقارنة/.test(prompt) && !/بلاغ رقم|تصنيف/.test(prompt) ? AI_CANNED.monthly : AI_CANNED.triage;
+  return {
+    id: 'msg_demo', type: 'message', role: 'assistant', model: 'claude-sonnet-4-6', stop_reason: 'end_turn',
+    usage: { input_tokens: 380, output_tokens: 310 }, content: [{ type: 'text', text }]
+  };
+}
+
 await page.route('**/*', route => {
   const u = route.request().url();
+  const method = route.request().method();
+  if (u.includes('workers.dev') && !u.includes('/login')) {
+    if (method === 'OPTIONS')
+      return route.fulfill({ status: 204, headers: Object.assign({ 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, GET, OPTIONS' }, CORS) });
+    let prompt = '';
+    try { prompt = JSON.stringify(JSON.parse(route.request().postData() || '{}').messages || ''); } catch (e) { }
+    // مهلةٌ قصيرةٌ كي يُرى مؤشّرُ الانتظار الحقيقيّ في الشاشة قبل الردّ.
+    return new Promise(r => setTimeout(r, 1400)).then(() =>
+      route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify(aiCanned(prompt)) }));
+  }
+  if (HAVE_CHART && /\/Chart\.js\/[\d.]+\/chart\.umd(\.min)?\.js$/.test(u))
+    return route.fulfill({ status: 200, contentType: 'application/javascript', headers: CORS, body: fs.readFileSync(CHART_LOCAL) });
   if (u.includes('fonts.googleapis.com/css'))
     return route.fulfill({ status: 200, contentType: 'text/css; charset=utf-8', headers: CORS, body: FONT_CSS });
   const fm = /fonts\.gstatic\.com\/pv\/([A-Za-z0-9_-]+\.woff2)$/.exec(u);
@@ -775,8 +955,18 @@ async function goPage(id) {
   // مطويّةٍ بمقاسٍ صفريّ لا تستقبل النقر.
   const target = await page.evaluate(pid => {
     const q = '[onclick*="showPage(\'' + pid + '\')"]';
-    const btn = document.querySelector('.sidebar-nav-btn' + q) || document.querySelector('.sidebar ' + q) || document.querySelector(q);
+    // الوحداتُ التي تحقن أزرارَها وقتَ التشغيل (خزانةُ الوثائق · إدارةُ المشاريع) تربط
+    // النقرَ بخاصيّة `onclick` لا بسمةٍ — فلا يلتقطها المنتقي النصّيّ. `data-page` يلتقطها.
+    const btn = document.querySelector('.sidebar-nav-btn' + q) || document.querySelector('.sidebar ' + q) || document.querySelector(q)
+      || document.querySelector('.sidebar-nav-btn[data-page="' + pid + '"]');
     if (!btn) return null;
+    if (btn.id && !btn.getAttribute('onclick')) {
+      const groups = [];
+      for (let e = btn.closest('.sidebar-group'); e; e = e.parentElement && e.parentElement.closest('.sidebar-group')) {
+        if (e.id) groups.unshift({ id: e.id, collapsed: e.classList.contains('collapsed') });
+      }
+      return { sel: '#' + btn.id, groups };
+    }
     const groups = [];
     for (let e = btn.closest('.sidebar-group'); e; e = e.parentElement && e.parentElement.closest('.sidebar-group')) {
       if (e.id) groups.unshift({ id: e.id, collapsed: e.classList.contains('collapsed') });
@@ -813,6 +1003,68 @@ async function goPage(id) {
 const TOTAL_STEPS = CHAPTERS.length + 3;
 
 /* ── مشاهدُ «عن قرب» داخل الفصول ── */
+// بطاقةُ مشروعٍ مفتوحة: نظرةٌ عامة بالموازنة والمصروف حسب الفئة، ثم العودةُ للقائمة.
+async function projectCloseUp() {
+  await captionOut();
+  await page.evaluate(() => { try { projectMgmt.openAt(0); } catch (e) { } }).catch(() => { });
+  await waitSettled('projects');
+  await overlay();
+  await captionIn('داخل بطاقة المشروع',
+    'الموازنةُ حسب الفئة مقابل ما صُرف وما التُزم به — والمقايسةُ والجدولُ الزمنيّ في تبويباتٍ بجانبها',
+    'إدارة المشاريع — عن قرب');
+  await wait(2400);
+  await shot('project-card');
+  await browseTour();
+  await page.evaluate(() => { try { projectMgmt.back(); } catch (e) { } }).catch(() => { });
+  await wait(600);
+}
+
+// الذكاء الاصطناعي: بيتان في فصلٍ واحد — ملخّصٌ تنفيذيٌّ للشهر بضغطة، ثم فرزُ بلاغٍ
+// من داخل نافذته. الردّان مُعدّان (انظر `AI_CANNED`)، والشاشةُ وسلوكُها حقيقيان.
+async function aiCloseUp() {
+  // ① الملخّص التنفيذي من صفحة المقارنة الشهرية
+  const b1 = await cursorTo('#page-monthly-compare [onclick="aiMonthlySummary()"]', { settle: 600 });
+  if (b1) {
+    await clickAt('#page-monthly-compare [onclick="aiMonthlySummary()"]', b1);
+    await page.waitForFunction(() => {
+      const el = document.getElementById('ai-summary-body');
+      return el && /توصيات/.test(el.textContent || '');
+    }, null, { timeout: 15000 }).catch(() => { });
+    await overlay();
+    await captionIn('ملخّصٌ تنفيذيٌّ للشهر بضغطةٍ واحدة',
+      'يقرأ النموذجُ أرقامَ الشهر من المنصة نفسِها ويكتب: أبرزَ ما حدث · الاتجاهات · ما يستحقّ الانتباه · توصيات — جاهزٌ للنسخ أو الطباعة',
+      'الذكاء الاصطناعي — ملخّص تنفيذي');
+    await wait(5600);
+    await shot('ai-summary');
+    await page.evaluate(() => { try { closeModal('modal-ai-summary'); } catch (e) { } }).catch(() => { });
+    await wait(700);
+  }
+  // ② فرزُ بلاغٍ من داخل نافذته
+  await captionOut();
+  await page.evaluate(() => { try { openDetail('TK-2041'); } catch (e) { } }).catch(() => { });
+  await wait(1800);
+  await overlay();
+  await page.evaluate(() => { const b = document.getElementById('ai-triage-btn'); if (b) b.scrollIntoView({ block: 'center', behavior: 'instant' }); }).catch(() => { });
+  await wait(500);
+  const b2 = await cursorTo('#ai-triage-btn', { settle: 600 });
+  if (b2) {
+    await clickAt('#ai-triage-btn', b2);
+    await page.waitForFunction(() => {
+      const el = document.getElementById('detail-ai-result');
+      return el && /الفنّي المناسب/.test(el.textContent || '');
+    }, null, { timeout: 15000 }).catch(() => { });
+    await overlay();
+    await page.evaluate(() => { const r = document.getElementById('detail-ai-result'); if (r) r.scrollIntoView({ block: 'center', behavior: 'instant' }); }).catch(() => { });
+    await captionIn('فرزُ البلاغ وتصنيفُه بالذكاء الاصطناعي',
+      'من نافذة البلاغ: التصنيفُ والأولوية والسببُ الأرجح وخطواتُ الفحص والفنّي المناسب — ومعه تحليلُ صورة العطل ورصدُ البلاغات المتكرّرة',
+      'الذكاء الاصطناعي — فرز البلاغات');
+    await wait(5600);
+    await shot('ai-triage');
+  }
+  await page.evaluate(() => { try { closeModal('modal-detail'); } catch (e) { } }).catch(() => { });
+  await wait(600);
+}
+
 // مراحلُ الشراء: نافذةُ طلبٍ مغلقٍ يظهر أعلاها مسارُ المراحل كاملاً — تُفتح داخل
 // فصل طلبات الشراء مباشرةً (كانت مُلحقةً بآخر الفيلم فانفصلت عن سياقها).
 async function poCloseUp() {
@@ -890,6 +1142,9 @@ await page.evaluate(() => {
   try { _ppmUnsub = null; startPPMSync(); } catch (e) { }
   try { _rfqUnsub = null; _poUnsub = null; startPurchaseSync(); } catch (e) { }
   try { _invUnsub = null; _invLogUnsub = null; _whUnsub = null; _catalogUnsub = null; startInventorySync(); } catch (e) { }
+  // الوحداتُ المستقلّة تعرض دالّةَ إعادةِ الاشتراك بنفسها.
+  try { staffTasks.retry(); } catch (e) { }
+  try { docVault.retry(); } catch (e) { }
 }).catch(() => { });
 await wait(1200);
 await overlay();
