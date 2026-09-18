@@ -5,13 +5,13 @@
 
 | الملف | الدقة | المدة | الحجم |
 |---|---|---|---|
-| `promo-film-4k.mp4` | 3840×2160 | ٣:٢٩ | ~٥٥ م.ب |
-| `promo-film-1080-from4k.mp4` | 1920×1080 (مسحوبة من أصل 4K) | ٣:٢٩ | ~٢٢ م.ب |
+| `promo-film-4k.mp4` | 3840×2160 | ٤:٤٣ | ~٦٧ م.ب |
+| `promo-film-1080-from4k.mp4` | 1920×1080 (مسحوبة من أصل 4K) | ٤:٤٣ | ~٢٨ م.ب |
 
 يُعاد توليدُهما في أي وقتٍ من الفرع الرئيسي:
 
 ```bash
-npm install --no-save playwright-core ffmpeg-static   # وnumpy للموسيقى
+npm install --no-save playwright-core ffmpeg-static chart.js@4.4.1   # أمرٌ واحد · وnumpy للموسيقى
 cd remotion && npm install && cd ..
 node promo-assemble.mjs --4k     # → dist-video/promo-film-4k.mp4
 node promo-assemble.mjs          # → dist-video/promo-film.mp4 (1080p)
