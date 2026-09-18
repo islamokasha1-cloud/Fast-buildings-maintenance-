@@ -88,6 +88,7 @@ const ST_PATH  = [path.resolve(path.dirname(IDX), "stocktake.js")].find(p => fs.
 const IVR_PATH = [path.resolve(path.dirname(IDX), "inventory-reports.js")].find(p => fs.existsSync(p));
 const FA_PATH  = [path.resolve(path.dirname(IDX), "finance-audit.js")].find(p => fs.existsSync(p));
 const HRP_PATH = [path.resolve(path.dirname(IDX), "hr-payments.js")].find(p => fs.existsSync(p));
+const PH_PATH  = [path.resolve(path.dirname(IDX), "price-history.js")].find(p => fs.existsSync(p));
 const CTR_PATH = [path.resolve(path.dirname(IDX), "contracts.js")].find(p => fs.existsSync(p));
 
 const VER = (HTML.match(/const APP_VERSION = "(v[\d.a-z]+)"/) || [])[1] || "?";
@@ -817,7 +818,9 @@ function predelivery() {
     /* رُفع من 39957 إلى 40011 — إصلاحاتُ التدقيق الحسابيّ (15/09) في مكانها (CLAUDE.md: الإصلاحُ
        حيث المنطق): صافي الاستلام التراكميّ · تقديرُ المُدقَّق · تأكيدُ الاستلام فوق المطلوب ·
        أصلُ التسوية · قارئُ المبالغ. لا ميزةَ جديدة. */
-    const IDX_CEILING = 40011;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
+    /* رُفع من 40011 إلى 40013 — سطران لا يعيشان في وحدة: وسمُ `price-history.js` وسطرُ
+       تسجيلها في كاشف الوحدات القديمة. التقاريرُ كلُّها في ملفّها (تبويبٌ يُركَّب ذاتياً). */
+    const IDX_CEILING = 40013;   // ← خفِّضه بعد كل استخراج (الأرضيةُ الواقعية ~٣٠ ألفاً، §6)
     const IDX_SLACK   = 300;     // مساحةُ عملٍ عاديّ قبل أن تُطلَب إعادةُ الضبط
     const idxLines = IDX_RAW.split("\n").length;
     T("★ سقفُ index.html غيرُ متجاوَز (الإضافةُ الجديدة مكانُها وحدة)",
@@ -21890,6 +21893,132 @@ function pageScrollResetGuards() {
   });
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   vNEXT: تقارير تغيّر أسعار البنود (price-history.js)
+
+   الوحدةُ **تشتقّ ولا تخزّن**: السجلُّ في `grnDocs` والتقريرُ يُحسَب في الذاكرة.
+   فالحرّاسُ هنا يمسكون ما لا يُرى في المتصفّح: استلامٌ يُعدّ مرّتين (سندٌ + تدقيق)،
+   سعرٌ تقديريٌّ يُخلط بالفعليّ بلا وسم، مورّدٌ واحدٌ ينقسم على صيغتَي اسمه، بندٌ
+   مدموجٌ يظهر بندَين، ونسبةٌ تُحسب على غير مرجعها. وكلُّ حارسٍ يحمل مثالاً حقيقياً
+   يفشل لو ارتدّ المنطق.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function priceHistoryGuards() {
+  H("vNEXT) تقارير تغيّر الأسعار (price-history.js)");
+  if (!PH_PATH) { T("price-history.js موجود", false, "لم يُعثر على الملف"); return; }
+  const vm = require("vm");
+  const src = fs.readFileSync(PH_PATH, "utf8");
+  try { new vm.Script(src); T("صياغة price-history.js سليمة", true); }
+  catch (e) { T("صياغة price-history.js سليمة", false, String(e.message).slice(0, 120)); return; }
+
+  // ── الوسم والتركيب في index.html: وسمٌ · خطّافُ showPage · سجلُّ الوحدات القديمة ──
+  T("★ الوسم موجود في index.html", /<script src="price-history\.js\?v=/.test(HTML));
+  T("★ خطّاف showPage('purchase-reports') يركّب الوحدة تبويباً (لا صفحةَ جديدة)",
+    HTML.includes('if(id==="purchase-reports") { initPurchaseFilters(); if(window.priceHistory&&window.priceHistory.mount) window.priceHistory.mount(); }'));
+  T("★ الوحدة في سجلّ كاشف الوحدات القديمة", HTML.includes('{name:"price-history.js", get:function(){ return window.priceHistory; }}'));
+  T("★ لا صفحةَ ولا زرَّ قائمةٍ مستقلَّين (قرار المالك: داخل تقارير المشتريات)",
+    !HTML.includes('id="page-price-history"') && !HTML.includes("showPage('price-history')"));
+  T("★ الوحدة قراءةٌ فقط — لا كتابةَ على Firestore", !/\.(set|update|add|delete)\(/.test(src.replace(/_sheets\[|\.delete\(id\)/g, "")) && !/firebase\.firestore|db\.collection/.test(src));
+
+  const sandbox = { window: {}, document: { getElementById: () => null, querySelector: () => null, head: { appendChild() {} }, createElement: () => ({ style: {}, classList: { add() {}, remove() {}, toggle() {} }, setAttribute() {} }) }, console, setTimeout: () => 0 };
+  vm.createContext(sandbox);
+  try { vm.runInContext(src, sandbox); } catch (e) { T("تُحمَّل الوحدة", false, String(e.message).slice(0, 120)); return; }
+  const M = sandbox.window.priceHistory;
+  T("تعرّض window.priceHistory بدوالّها النقيّة",
+    M && ["_collect", "_filter", "_sameVendor", "_crossVendor", "_flatten", "_itemKey", "_dev", "mount", "switchTab", "generate", "exportExcel", "exportPDF"].every(k => typeof M[k] === "function"));
+  T("★ بصمة build تطابق APP_VERSION", M && M.build === VER, `build=${M && M.build}  APP_VERSION=${VER}`);
+  if (!M) return;
+
+  // مورّدٌ بصيغتين، وبندٌ مدموجٌ في آخر — المعتمداتُ تُحقَن كما يحقنها المتصفّح
+  const deps = {
+    canon: v => String(v || "").trim().replace(/^شركة\s+/, ""),
+    resolveId: id => (id === "old" ? "c1" : id),
+    catalogVendor: id => (id === "c1" ? "الف" : "")
+  };
+  const grn = (vendor, date, items, extra) => Object.assign({ vendor, receiptDate: date, grnRef: "G-" + date.slice(0, 10), invoiceNo: "INV-" + date.slice(5, 10), items }, extra || {});
+  const PS = [
+    { id: "PO-1", status: "closed", grnDocs: [grn("شركة الف", "2026-01-05T09:00:00.000Z", [{ itemId: "c1", itemName: "كابل نحاس", itemCode: "K1", unit: "م", unitPrice: 10, rcvQty: 100 }])] },
+    { id: "PO-2", status: "closed", grnDocs: [grn("الف", "2026-03-05T09:00:00.000Z", [{ itemId: "old", itemName: "كابل نحاس", itemCode: "K1", unit: "م", unitPrice: 12, rcvQty: 50 }])] },
+    { id: "PO-3", status: "closed", grnDocs: [grn("باء", "2026-03-06T09:00:00.000Z", [{ itemId: "c1", itemName: "كابل نحاس", itemCode: "K1", unit: "م", unitPrice: 9, rcvQty: 20 }])] },
+    // سندٌ **و**تدقيق — يُقرأ السندُ وحدَه (وإلا عُدّ الاستلامُ مرّتين)
+    { id: "PO-4", status: "closed", auditedBy: "x", auditedAt: "2026-04-01T09:00:00.000Z", auditItems: [{ itemId: "c1", itemName: "كابل نحاس", unitPrice: 99, rcvQty: 5 }],
+      grnDocs: [grn("الف", "2026-04-01T09:00:00.000Z", [{ itemId: "c1", itemName: "كابل نحاس", unit: "م", unitPrice: 11, rcvQty: 30 }])] },
+    // تدقيقٌ قديم بلا سند
+    { id: "PO-5", status: "closed", auditedBy: "x", auditedAt: "2026-02-10T09:00:00.000Z", actualVendor: "جيم", auditItems: [{ itemId: "c2", itemName: "مفتاح كهرباء", unit: "قطعة", unitPrice: 5, rcvQty: 40 }] },
+    // مغلقٌ بلا سندٍ ولا تدقيق — تقديري
+    { id: "PO-6", status: "closed", closedAt: "2026-05-01T09:00:00.000Z", vendor: "جيم", items: [{ itemId: "c2", itemName: "مفتاح كهرباء", unit: "قطعة", unitCost: 6, qty: 10 }] },
+    // مفتوحٌ بلا سند — لا يدخل (طلبٌ لم يُشترَ)
+    { id: "PO-7", status: "pending_pm", vendor: "جيم", items: [{ itemId: "c2", itemName: "مفتاح كهرباء", unitCost: 7, qty: 10 }] },
+    // سعرٌ صفر وكميةٌ صفر — يُسقطان
+    { id: "PO-8", status: "closed", grnDocs: [grn("باء", "2026-03-07T09:00:00.000Z", [{ itemId: "c1", itemName: "كابل نحاس", unitPrice: 0, rcvQty: 10 }, { itemId: "c1", itemName: "كابل نحاس", unitPrice: 9, rcvQty: 0 }, { itemId: "c1", itemName: "كابل نحاس", unitPrice: 9, rcvQty: 3, _fromStockOnly: true }])] },
+    // غير مربوطٍ بالكتالوج — يُجمَّع بالاسم المطبَّع (همزةٌ وتاءٌ مربوطة)
+    { id: "PO-9", status: "closed", grnDocs: [grn("دال", "2026-06-01T09:00:00.000Z", [{ itemName: "مصباح إنارة", unitPrice: 20, rcvQty: 4 }])] },
+    { id: "PO-10", status: "closed", grnDocs: [grn("دال", "2026-07-01T09:00:00.000Z", [{ itemName: "مصباح اناره", unitPrice: 25, rcvQty: 4 }])] },
+    // بلا مورّدٍ في أيّ حقل — يُسقَط ويُعدّ
+    { id: "PO-11", status: "closed", grnDocs: [grn("", "2026-07-02T09:00:00.000Z", [{ itemId: "c1", itemName: "كابل نحاس", unitPrice: 9, rcvQty: 3 }])] }
+  ];
+  const R = M._collect(PS, deps);
+  const by = id => R.filter(r => r.poId === id);
+  T("★ جمع: السندُ مصدرُ الطلب وحدَه — التدقيقُ المرافقُ لا يُعدّ مرّةً ثانية", by("PO-4").length === 1 && by("PO-4")[0].price === 11 && by("PO-4")[0].src === "grn");
+  T("★ جمع: التدقيقُ القديم بلا سندٍ يُقرأ ويُوسَم audit", by("PO-5").length === 1 && by("PO-5")[0].src === "audit" && by("PO-5")[0].vendor === "جيم");
+  T("★ جمع: المغلقُ بلا سندٍ ولا تدقيق يُقرأ من سعر البند ويُوسَم **تقديري**", by("PO-6").length === 1 && by("PO-6")[0].src === "est" && by("PO-6")[0].price === 6);
+  T("★ جمع: المفتوحُ لا يدخل — طلبٌ لم يُشترَ ليس سعراً", by("PO-7").length === 0);
+  T("★ جمع: سعرٌ صفر · كميةٌ صفر · المغطّى من المخزون — تُسقط كلُّها", by("PO-8").length === 0);
+  T("★ جمع: بلا مورّدٍ يُسقَط ويُعدّ في التحفّظات", by("PO-11").length === 0 && R._skipped.noVendor === 1);
+  T("★ هوية المورّد: «شركة الف» و«الف» مفتاحٌ واحد", by("PO-1")[0].vkey === by("PO-2")[0].vkey && by("PO-1")[0].vendor === "الف");
+  T("★ هوية البند: المدموجُ (old→c1) يُرسى على المرساة الحيّة", by("PO-2")[0].itemId === "c1" && by("PO-2")[0].itemKey === "id:c1");
+  T("★ هوية البند غير المربوط: الهمزةُ والتاءُ المربوطة لا تفرّقان", by("PO-9")[0].itemKey === by("PO-10")[0].itemKey && by("PO-9")[0].itemKey.indexOf("nm:") === 0);
+  T("السعرُ يُقرأ صافياً كما في السند، والكميةُ rcvQty", by("PO-1")[0].price === 10 && by("PO-1")[0].qty === 100 && by("PO-1")[0].invoiceNo === "INV-01-05");
+
+  // ── النسبة ──
+  T("★ _dev مطابقةٌ لـ_vrefDev: (جديد−مرجع)÷مرجع، بعشريٍّ واحد، وnull بلا مرجع",
+    M._dev(10, 12) === 20 && M._dev(12, 9) === -25 && M._dev(0, 5) === null && M._dev(3, 4) === 33.3);
+
+  // ── التقرير ١: نفس المورّد ──
+  const S = M._sameVendor(R, { minPct: 0, flagPct: 10 });
+  const gA = S.groups.find(g => g.key === "id:c1|الف");
+  T("★ نفس المورّد: كابل×الف — ثلاثةُ استلاماتٍ بترتيب التاريخ (10 → 12 → 11)",
+    gA && gA.n === 3 && gA.rows.map(r => r.price).join(",") === "10,12,11" && gA.rows[0].pct === null && gA.rows[1].pct === 20 && gA.rows[2].pct === -8.3);
+  T("★ نفس المورّد: الأثرُ = Σ(الفرق × الكمية) — (+2×50) + (−1×30) = 70، والزيادةُ المدفوعة 100",
+    gA && gA.impact === 70 && gA.riseImpact === 100 && gA.trend === "up" && gA.totalPct === 10);
+  T("★ نفس المورّد: العلَمُ على الصفّ الذي بلغ العتبة وحدَه (20% نعم · 8.3% لا)", gA && gA.rows[1].flag === true && gA.rows[2].flag === false);
+  T("★ نفس المورّد: استلامٌ واحدٌ لا يُبلَّغ عنه (باء لها استلامٌ واحدٌ بسعر > 0)", !S.groups.some(g => g.key === "id:c1|باء"));
+  const gJ = S.groups.find(g => g.key.indexOf("|جيم") > 0);
+  T("★ نفس المورّد: التقديريُّ يدخل السلسلةَ **موسوماً** على المجموعة (est=true)", gJ && gJ.est === true && gJ.rows.some(r => r.src === "est"));
+  T("★ نفس المورّد: الترتيبُ بالأثر لا بالنسبة (مصباح +25% أثرُه 20 · كابل +10% أثرُه 70 يتقدّمه)",
+    S.groups[0].key === "id:c1|الف");
+  T("نفس المورّد: الملخّص — مجموعاتٌ ثلاث، تجاوزت العتبةَ ثلاث", S.summary.groups === 3 && S.summary.flagged === 3 && S.summary.up === 3);
+  T("★ نفس المورّد: minPct يُبقي ما بلغ أكبرُ تغيّرٍ فيه العتبةَ فقط", M._sameVendor(R, { minPct: 21, flagPct: 10 }).groups.map(g => g.key).join() === "nm:مصباح اناره|دال");
+  T("★ نفس المورّد: سعرٌ ثابتٌ عبر الاستلامات لا يُبلَّغ عنه",
+    M._sameVendor(M._collect([PS[0], { id: "PO-1b", status: "closed", grnDocs: [grn("الف", "2026-02-01T09:00:00.000Z", [{ itemId: "c1", itemName: "كابل نحاس", unitPrice: 10, rcvQty: 7 }])] }], deps), { minPct: 0, flagPct: 10 }).groups.length === 0);
+
+  // ── التقرير ٢: أكثر من مورّد ──
+  const C = M._crossVendor(R, deps);
+  const cK = C.groups.find(g => g.key === "id:c1");
+  T("★ أكثر من مورّد: كابل عند مورّدَين (الف · باء) — والمصباحُ عند مورّدٍ واحدٍ لا يدخل",
+    cK && cK.vendorsCount === 2 && !C.groups.some(g => g.key.indexOf("nm:") === 0) && C.groups.length === 1);
+  T("★ أكثر من مورّد: الأرخصُ بآخر سعرٍ (باء 9) لا بالتاريخيّ، والفارقُ (11−9)÷9 = 22.2%",
+    cK && cK.cheapestVendor === "باء" && cK.cheapestPrice === 9 && cK.dearestPrice === 11 && cK.spreadPct === 22.2);
+  const vA = cK && cK.vendors.find(v => v.vendor === "الف");
+  T("★ أكثر من مورّد: صفُّ الف — آخر سعر 11 · 3 استلامات · كمية 180 · متوسّطٌ مرجَّح (1000+600+330)/180 = 10.72 · أدنى 10 · أعلى 12",
+    vA && vA.lastPrice === 11 && vA.n === 3 && vA.qty === 180 && vA.avg === 10.72 && vA.min === 10 && vA.max === 12 && vA.vsCheapestPct === 22.2 && vA.cheapest === false);
+  T("★ أكثر من مورّد: الأثرُ = Σ(آخر سعر − الأرخص) × الكمية = (11−9)×180 = 360", cK && cK.impact === 360 && C.summary.impact === 360);
+  T("★ أكثر من مورّد: الافتراضيُّ في الكتالوج (الف) ليس الأرخص — يُعلَّم", cK && cK.defaultVendor === "الف" && cK.defaultNotCheapest === true && C.summary.defaultNotCheapest === 1);
+  T("أكثر من مورّد: الصفوفُ مرتّبةٌ من الأرخص", cK && cK.vendors[0].cheapest === true && cK.vendors[0].vendor === "باء");
+
+  // ── الفلاتر ──
+  T("★ الفلتر: حدودُ الفترة بالتوقيت المحلّي وشاملةٌ ليومَي الطرفين", M._filter(R, { from: "2026-03-05", to: "2026-03-06" }, deps).length === 2 && M._bounds("2026-03-06", "2026-03-05") === null);
+  T("★ الفلتر: المورّدُ بمفتاحه المعتمد — «شركة الف» تُصيب صفوفَ «الف» كلَّها", M._filter(R, { vendor: "شركة الف" }, deps).length === 3);
+  T("الفلتر: البندُ بالاسم المطبَّع أو الكود", M._filter(R, { q: "K1" }, deps).length === 3 && M._filter(R, { q: "اناره" }, deps).length === 2);
+
+  // ── التسطيح: مصدرٌ واحدٌ للشاشة وExcel وPDF ──
+  const flat = M._flatten("same", S.groups);
+  T("★ التسطيح: عمودُ «م» متسلسلٌ على الترتيب المعروض، وأعمدةُ Excel من COLS", flat.length === 7 && flat[0]._n === 1 && flat[6]._n === 7 && M.COLS.same[0].k === "_n" && M.COLS.same.some(c => c.k === "src"));
+  const sr = M._sheetRows({ cols: M.COLS.same, rows: flat });
+  T("★ Excel: المصدرُ نصٌّ عربيّ (لا رمز)، والتاريخُ يوماً، والأرقامُ أرقاماً", sr[0]["المصدر"] === "سند استلام" && typeof sr[0]["سعر الوحدة"] === "number" && /\d{2}\/\d{2}\/\d{4}/.test(sr[0]["تاريخ الاستلام"]));
+  const flatC = M._flatten("cross", C.groups);
+  T("التسطيح (مورّدون): ملاحظةُ «الأرخص» و«الافتراضي في الكتالوج» في عمود الملاحظة", flatC[0].note === "الأرخص" && /الافتراضي في الكتالوج/.test(flatC[1].note));
+}
+
 (async () => {
   await step4;
   guards();
@@ -22001,6 +22130,7 @@ function pageScrollResetGuards() {
   poCountGuards();
   rulesCoverageGuards();
   pageScrollResetGuards();
+  priceHistoryGuards();
   // الفحوصُ المؤجَّلة (async) — تُنتظر كلُّها قبل الحصيلة.
   await Promise.all(_deferred);
   console.log("\n" + "═".repeat(64));
