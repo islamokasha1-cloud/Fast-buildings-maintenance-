@@ -128,7 +128,10 @@ args.push('-filter_complex', haveMusic
   // `volume=0.55` كان يخفضها إلى ~‏−٢٠ ديسيبل: مسموعةٌ في السكون، تختفي عملياً على
   // سمّاعة هاتف. `loudnorm` يضبطها على معيار الويب (−١٦ LUFS) فتبقى حاضرةً بثباتٍ
   // من أوّل الفيلم إلى آخره.
-  ? v.join(';') + `;[3:a]afade=t=in:st=0:d=2,afade=t=out:st=${fadeOutAt.toFixed(2)}:d=3,loudnorm=I=-16:TP=-1.5:LRA=11[aud]`
+  // `loudnorm` يرفع تردّدَ العيّنات داخلياً إلى ١٩٢ ك.هرتز ويُخرج ٩٦ ك.هرتز — وAAC على
+  // ٩٦ ك.هرتز لا تفكّه كثيرٌ من مشغّلات الهواتف (واتساب · iOS) فيُعرَض الفيلمُ **بلا صوتٍ
+  // أو بصوتٍ يتقطّع** بينما يبدو سليماً على الحاسوب. `aresample=48000` يعيده إلى المعيار.
+  ? v.join(';') + `;[3:a]afade=t=in:st=0:d=2,afade=t=out:st=${fadeOutAt.toFixed(2)}:d=3,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[aud]`
   : v.join(';'));
 args.push('-map', '[v]');
 if (haveMusic) args.push('-map', '[aud]', '-c:a', 'aac', '-b:a', '192k', '-shortest');

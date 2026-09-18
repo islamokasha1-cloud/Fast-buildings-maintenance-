@@ -467,7 +467,8 @@ const CHAPTERS = [
 
   { n: '٥', page: 'purchases', kicker: 'دورة الشراء', title: 'طلبُ الشراء بمراحلَ لا تُتخطّى',
     sub: 'من الطلب إلى اعتماد مدير المشروع فمراجعة المستودع فالاستلام فالإغلاق',
-    lower: ['المشتريات', 'كلُّ مرحلةٍ باعتمادٍ موثَّقٍ باسم صاحبه ووقته — لا اعتمادَ شفهيّ'] },
+    lower: ['المشتريات', 'كلُّ مرحلةٍ باعتمادٍ موثَّقٍ باسم صاحبه ووقته — لا اعتمادَ شفهيّ'],
+    after: () => poCloseUp() },
 
   { n: '٦', page: 'new-purchase', kicker: 'طلبٌ جديد', title: 'أصنافٌ من الكتالوج بأسعارها',
     sub: 'ضريبةُ القيمة المضافة والإجمالي يُحسبان آلياً — والصنفُ مربوطٌ برصيد المخزون',
@@ -555,8 +556,23 @@ const errors = [];
 const IGNORE = /ServiceWorkerRegistration|net::ERR_FAILED|Failed to load resource|ERR_BLOCKED|reCAPTCHA|AppCheck|purchase-kpi/i;
 page.on('pageerror', e => { const m = String(e.message).slice(0, 160); if (!IGNORE.test(m)) errors.push(m); });
 
+/* ── الخطوط: Cairo وTajawal من النسخ المحلية ──
+   `index.html` يحمّل Cairo من Google Fonts، وكلُّ نداءٍ خارجيٍّ هنا مُجهَض — فكان
+   التطبيقُ كلُّه يُصوَّر بخطّ النظام الاحتياطيّ لا بخطّه الحقيقيّ. نُلبّي طلبَ ورقة
+   الأنماط بـ`fonts.css` المحلية (نفسُ ملفات `remotion/public/fonts`)، ونوجّه ملفاتِ
+   الخطّ إلى القرص. لا تعديلَ في التطبيق: ما يُرى هو خطُّه في الإنتاج. */
+const FONT_DIR = path.join(REPO, 'remotion', 'public', 'fonts');
+const FONT_CSS = fs.readFileSync(path.join(FONT_DIR, 'fonts.css'), 'utf8')
+  .replace(/url\(\.\/([^)]+)\)/g, 'url(https://fonts.gstatic.com/pv/$1)');
+const CORS = { 'access-control-allow-origin': '*' };
+
 await page.route('**/*', route => {
   const u = route.request().url();
+  if (u.includes('fonts.googleapis.com/css'))
+    return route.fulfill({ status: 200, contentType: 'text/css; charset=utf-8', headers: CORS, body: FONT_CSS });
+  const fm = /fonts\.gstatic\.com\/pv\/([A-Za-z0-9_-]+\.woff2)$/.exec(u);
+  if (fm && fs.existsSync(path.join(FONT_DIR, fm[1])))
+    return route.fulfill({ status: 200, contentType: 'font/woff2', headers: CORS, body: fs.readFileSync(path.join(FONT_DIR, fm[1])) });
   if (u.includes('workers.dev/login')) {
     return AUTH_OK
       ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ token: 'tkn', profile: { user: 'admin', name: 'م. إسلام عكاشة', role: 'admin' } }) })
@@ -794,7 +810,24 @@ async function goPage(id) {
   return clicked;
 }
 
-const TOTAL_STEPS = CHAPTERS.length + 4;
+const TOTAL_STEPS = CHAPTERS.length + 3;
+
+/* ── مشاهدُ «عن قرب» داخل الفصول ── */
+// مراحلُ الشراء: نافذةُ طلبٍ مغلقٍ يظهر أعلاها مسارُ المراحل كاملاً — تُفتح داخل
+// فصل طلبات الشراء مباشرةً (كانت مُلحقةً بآخر الفيلم فانفصلت عن سياقها).
+async function poCloseUp() {
+  await captionOut();
+  await page.evaluate(() => { try { openPurchaseDetail('PO-1038'); } catch (e) { } }).catch(() => { });
+  await wait(2600);
+  await overlay();
+  await captionIn('مراحلُ الشراء على طلبٍ حقيقيّ — PO-1038',
+    'تقديمٌ ← اعتمادُ مدير المشروع ← مراجعةُ المستودع ← اعتمادُ المشتريات ← التنفيذ ← الاستلام ← التدقيق ← الإغلاق. المستلَمُ مقابل المطلوب ورقمُ الفاتورة شرطُ الإغلاق',
+    'مراحل الشراء — عن قرب');
+  await wait(5200);
+  await shot('po-detail');
+  await page.evaluate(() => { try { closeModal('modal-purchase-detail'); } catch (e) { } }).catch(() => { });
+  await wait(900);
+}
 let step = 0;
 const progress = async () => { step++; await pv('bar', (step / TOTAL_STEPS) * 100); };
 
@@ -888,27 +921,15 @@ for (const ch of CHAPTERS) {
   }
   await shot(ch.page);
   await browseTour();
+  // مشهدٌ تفصيليٌّ يخصّ الفصلَ نفسَه (نافذةُ طلبٍ · نتيجةُ مساعد) — يُعرَض في موضعه
+  // من الجولة لا مُلحقاً بآخرها، فيراه المشاهدُ في سياقه.
+  if (ch.after) await ch.after(ch);
   await captionOut();
   await progress();
   L(`  ${el()}  ${ch.n}) ${ch.page}${clicked ? '' : ' (فُتحت برمجياً)'}`);
 }
 
-/* ───────── ٥) تفصيلُ طلبِ شراءٍ حقيقيّ ───────── */
-await captionOut(); await pv('cursorOff');
-await goPage('purchases');
-const POCAP = ['تفاصيل الطلب PO-1038', 'المستلَمُ مقابل المطلوب، ومرجعُ الاستلام ورقمُ الفاتورة — الإغلاقُ لا يتمّ دونها', 'عن قرب'];
-await page.evaluate(() => { try { openPurchaseDetail('PO-1038'); } catch (e) { } }).catch(() => { });
-await wait(2600);
-await overlay();
-await captionIn(POCAP[0], POCAP[1], POCAP[2]);
-await wait(3400);
-await shot('po-detail');
-await page.evaluate(() => { try { closeModal('modal-purchase-detail'); } catch (e) { } }).catch(() => { });
-await wait(900);
-await captionOut();
-await progress();
-
-/* ───────── ٦) الخاتمة ───────── */
+/* ───────── ٥) الخاتمة ───────── */
 await pv('cursorOff'); await wait(300);
 // نُنهي على آخر شاشةٍ بلا تعليق: الذوبانُ إلى مشهد ختام Remotion يتكفّل بالانتقال.
 if (NO_BOOKENDS) { await captionOut(); await wait(900); }
