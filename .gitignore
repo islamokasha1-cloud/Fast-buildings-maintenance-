@@ -4,3 +4,7 @@ dist-video/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+# اللقطاتُ المولَّدة لفيديو الذكاء الاصطناعي (higgsfield-shots.mjs) — وسائطُ لا كود
+remotion/public/ai/*.mp4
+remotion/public/ai/manifest.json
+dist-video-*/

@@ -32,7 +32,17 @@ npm install --no-save playwright-core ffmpeg-static chart.js@4.4.1   # في أم
 node promo-video.mjs --probe  # لقطاتٌ فقط بلا تسجيل (~دقيقتان) — راجعها بالعين قبل الرندر
 node promo-video.mjs          # جولة شاشات المنصة الحقيقية (تسجيل شاشة في Chromium)
 node promo-assemble.mjs --4k  # الفيلم الكامل 4K: افتتاحية الإعلان + الجولة + الختام
+node promo-video.mjs --probe --topic ai   # فصول الذكاء الاصطناعي الستّة وحدها — لقطاتٌ بلا تسجيل
+NODE_USE_ENV_PROXY=1 node higgsfield-shots.mjs --parallel   # ستُّ لقطاتٍ مولَّدة بالشعار مرجعاً (مدفوع — اعتماد Higgsfield يحقنه الوسيط)
+(cd remotion && npm run render:ai:4k)     # فيلم اللقطات كاملةِ الإطار AiFilm بدقّة 4K
+node promo-assemble.mjs --film ai --4k    # فيلم «الذكاء الاصطناعي في إدارة المرافق» 4K
 ```
+
+**فيديو الذكاء الاصطناعي** تركيبتان مستقلّتان: `src/AiFacilities.tsx` (رسمٌ متجهيّ واللقطاتُ
+خلفيةً) و`src/AiFilm.tsx` (اللقطاتُ المولَّدة تملأ الإطار والهويةُ داخلها — هذا ما اعتمده
+المالك). نصوصُهما في `defaultProps` بـ`src/Root.tsx`؛ لا تعدّل مشاهدَ الإعلان من أجلهما.
+**مدّةُ كلّ لقطة في `SHOT_FRAMES` = ثواني توليدها في `higgsfield-shots.mjs` × 30** — غيّرهما معاً. التجميعُ قائمةُ مقاطع (`FILMS` في
+`promo-assemble.mjs`) — أضف فيلماً بقائمةٍ جديدة، لا بنسخ السكربت.
 
 الجولةُ ١٩ فصلاً تُرقَّم تلقائياً بترتيبها في `CHAPTERS`، ولبعضها مشهدٌ «عن قرب»
 في موضعه (`after`): نافذةُ طلب الشراء بمراحله داخل فصل المشتريات، بطاقةُ
@@ -40,7 +50,7 @@ node promo-assemble.mjs --4k  # الفيلم الكامل 4K: افتتاحية �
 الاصطناعي. **نداءاتُ الذكاء الاصطناعي تُلبّى بردودٍ مُعدَّة** (`AI_CANNED`) والخطوطُ
 وChart.js من نسخٍ محلية — فالشاشةُ حقيقيةٌ والشبكةُ معدومة.
 
-`promo-assemble.mjs` يستعمل تركيبة `PlatformIntro` افتتاحيةً، ويقتطع الختام
+`promo-assemble.mjs` يستعمل تركيبة `PlatformIntro` افتتاحيةً للفيلم الأصليّ، ويقتطع الختام
 من `CompanyAnnouncement` بأرقام إطاراتٍ ثابتة في رأسه (`OUTRO`) — **إن غيّرت
 ترتيب المشاهد أو مدتها في `src/CompanyAnnouncement.tsx` فحدِّث هذا الثابت**،
 وإلا اقتطع مشهداً آخر بلا أن يشتكي شيء.

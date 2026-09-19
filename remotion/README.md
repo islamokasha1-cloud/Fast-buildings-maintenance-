@@ -108,14 +108,17 @@ npm run music     # إعادة توليد المقطوعة بعد تعديل ا�
 
 ## الفيلم المجمَّع (إعلان + جولة الشاشات)
 
-`promo-assemble.mjs` في جذر المشروع يجمع **تركيبة `PlatformIntro`** ومشهد
-**الختام (١٣٨١–١٦٢٠)** من هذا الإعلان مع جولةِ شاشات المنصة الحقيقية التي
-يسجّلها `promo-video.mjs`، بذوبانٍ عند الوصلتين وفراشٍ موسيقيٍّ واحدٍ متّصل:
+`promo-assemble.mjs` في جذر المشروع يوصل **قائمةَ مقاطع** (`FILMS`) بذوبانٍ عند كلّ
+وصلة وفراشٍ موسيقيٍّ واحدٍ متّصل. كلُّ مقطعٍ تركيبةُ Remotion كاملة، أو مدى إطاراتٍ منها،
+أو جولةُ شاشاتٍ يسجّلها `promo-video.mjs`. الفيلمُ الافتراضيّ `platform`: **تركيبة
+`PlatformIntro`** + الجولة + مشهد **الختام (١٣٨١–١٦٢٠)** من هذا الإعلان؛ و`--film ai`:
+`AiFacilities` + جولة `--topic ai` + الختامُ نفسُه.
 
 ```bash
 npm install --no-save playwright-core ffmpeg-static chart.js@4.4.1   # أمرٌ واحد (انظر رأس promo-video.mjs)
 node promo-assemble.mjs              # → dist-video/promo-film.mp4
 node promo-assemble.mjs --4k         # → dist-video/promo-film-4k.mp4 (يتجاوز ربع ساعة)
+node promo-assemble.mjs --film ai    # → dist-video/ai-facilities-film.mp4
 node promo-assemble.mjs --skip-body  # أعِد التجميع دون إعادة تسجيل الجولة
 ```
 
@@ -137,6 +140,48 @@ node promo-assemble.mjs --skip-body  # أعِد التجميع دون إعادة
 الشركة وقطاعاتها الثلاثة، وهذا عرضٌ موضوعُه المنصةُ وحدَها. لو كُتب «عرضٌ
 لشرح المنصة» في مشهد الإعلان لصار الإعلانُ يعد بما لا يعرضه. المشهدان
 يتشاركان لغةَ التصميم ويفترقان في الرسالة.
+
+## فيديو «الذكاء الاصطناعي في إدارة المرافق» (`AiFacilities`)
+
+تركيبةٌ مستقلّةٌ في `src/AiFacilities.tsx` (٧٧ ثانية) بلغة الإعلان نفسِها: افتتاحيةٌ
+(تعيد استعمال `PlatformIntro` بنصوصٍ أخرى) وسبعةُ مشاهدَ عامّة خارج المنصة — المشكلة ·
+المبنى الذكيّ · الكاميرات · الروبوتات · الصيانة التنبّؤية · المبادئ · أدواتُ المنصة.
+النصوصُ كلُّها في `defaultProps` داخل `src/Root.tsx`؛ مدّةُ كلّ مشهد في `AI_SCENES`.
+
+- **لا أرقامَ ولا ادّعاءات:** الرقمُ الوحيد (عددُ أدوات المنصة) مشتقٌّ من طول `tools`.
+  ومشاهدُ ما لا تعرضه جولةُ الشاشات (حسّاسات · كاميرات · روبوتات) تُصاغ «حلولٌ نقدّمها».
+- **لقطاتٌ مولَّدة اختيارية:** كلُّ مشهدٍ يرسم نفسَه متجهياً، ويقبل لقطةً في `clips`
+  (مسارٌ تحت `public/`، مثل `ai/robots.mp4`) تحلّ محلَّ الرسم داخل الإطار نفسِه.
+  يولّدها `higgsfield-shots.mjs` في جذر المشروع ويكتب `public/ai/manifest.json`
+  (انظر `public/ai/README.md`). الغيابُ لا يُعطّل شيئاً.
+- **لا موسيقى في التركيبة:** `promo-assemble.mjs --film ai` يفرشها على الفيلم كلِّه.
+
+```bash
+npx remotion still AiFacilities out/check.png --frame=700   # لقطةٌ من مشهد المبنى الذكيّ
+npx remotion render AiFacilities out/ai-facilities.mp4      # الجزءُ العامّ وحدَه (صامت)
+```
+
+ومن جذر المشروع: `node promo-assemble.mjs --film ai --4k` يجمع هذه التركيبة مع جولة
+`promo-video.mjs --topic ai` (ستّةُ فصولٍ للذكاء الاصطناعي داخل المنصة) وختامِ الإعلان.
+
+## فيلمُ اللقطات المولَّدة كاملةِ الإطار (`AiFilm`)
+
+النسخةُ التي طلبها المالك بعد `AiFacilities`: **الفيديو نفسُه هو اللقطات المولَّدة**
+(54 ثانية) **والهويةُ داخلها** — `higgsfield-shots.mjs` يولّدها عبر `reference-to-video`
+بشعار الشركة صورةً مرجعية، فيظهر الشعار على السترة والروبوت ولافتة الجدار. التركيبةُ
+`src/AiFilm.tsx` تضيف ما لا يستطيعه النموذج: عنوانَ الفيلم في الافتتاحية، شريطاً سفلياً
+عربياً لكلّ لقطة، بطاقةَ ختامٍ بالتواصل، وموسيقى الإعلان (54 ثانية = طولُ الفيلم).
+
+- النصوصُ في `defaultProps` (`src/Root.tsx`)؛ مدّةُ كلّ لقطة في `SHOT_FRAMES` **يجب أن تساوي**
+  ثوانيَ توليدها في `higgsfield-shots.mjs` × 30 (يحرسها `hail-tests.js`).
+- اللقطاتُ في `public/ai/` خارج git — أعد توليدها بـ`NODE_USE_ENV_PROXY=1 node higgsfield-shots.mjs --parallel`
+  من جذر المشروع (مدفوع).
+
+```bash
+npx remotion still AiFilm out/check.png --frame=400   # لقطةٌ من الممرّ بشريطها السفليّ
+npm run render:ai        # 1920×1080 → out/ai-film.mp4
+npm run render:ai:4k     # 3840×2160 → out/ai-film-4k.mp4 (يتجاوز عشر دقائق — في الخلفية)
+```
 
 ## الخطوط
 
