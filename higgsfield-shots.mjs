@@ -14,7 +14,9 @@
 // بلا وجوهٍ قريبة) كي تبدو من عائلةٍ واحدة. الناتجُ `remotion/public/ai/<key>.mp4` وسجلٌّ
 // `manifest.json` يقرؤه `promo-assemble.mjs` ويمرّره خاصيّةَ `clips` للتركيبة.
 //
-//   node higgsfield-shots.mjs              → يولّد ما ينقص من اللقطات
+//   NODE_USE_ENV_PROXY=1 node higgsfield-shots.mjs   → يولّد ما ينقص من اللقطات
+//   (المتغيّرُ لازمٌ في بيئة Claude Code: `fetch` المدمج في Node يتجاهل HTTPS_PROXY فلا يمرّ
+//    بالوسيط الذي يحقن المفتاح — فيردّ الخادمُ 401. محلياً مع HF_CREDENTIALS لا حاجةَ له.)
 //   node higgsfield-shots.mjs --force      → يعيد توليدها كلَّها
 //   node higgsfield-shots.mjs --only camera,robots
 //   node higgsfield-shots.mjs --dry-run    → يطبع الطلبات ولا يرسل شيئاً
