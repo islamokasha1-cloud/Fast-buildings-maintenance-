@@ -19,9 +19,13 @@
 //   node higgsfield-shots.mjs --only camera,robots
 //   node higgsfield-shots.mjs --dry-run    → يطبع الطلبات ولا يرسل شيئاً
 //
-// شكلُ النداء (مسارُ النموذج · حقولُ الجسم · مسارُ الاستعلام) من التوثيق العامّ وقتَ
-// الكتابة، وقابلٌ للتجاوز بمتغيّرات البيئة دون تعديل السكربت — فإن تغيّرت الواجهة
-// فاضبط: HF_API_BASE · HF_MODEL_PATH · HF_STATUS_PATH · HF_RESOLUTION.
+// شكلُ النداء مأخوذٌ من مصدر الحزمة الرسمية `@higgsfield/client` (v2، الإصدار 0.2.6):
+// POST `{base}/{endpoint}` والجسمُ هو حقولُ الإدخال مباشرةً، ثم GET `/requests/{id}/status`
+// حتى `completed` (وفيه `video.url`) أو `failed` / `nsfw` (رفضٌ رقابيّ، يُردّ الرصيد).
+// الترويسة `Authorization: Key KEY_ID:KEY_SECRET` — وهي ما يحقنه وسيطُ الاعتماد.
+// قابلٌ للتجاوز بمتغيّرات البيئة دون تعديل السكربت: HF_API_BASE · HF_MODEL_PATH ·
+// HF_STATUS_PATH · HF_RESOLUTION. النموذجُ الافتراضيّ Seedance 2.0 لأنه يصل إلى 4K
+// (2.5 يقف عند 720p في جدول الأسعار)؛ لاختبارٍ رخيص: HF_MODEL_PATH=bytedance/seedance-2.5/text-to-video HF_RESOLUTION=720p.
 
 import fs from 'fs';
 import path from 'path';
@@ -37,7 +41,8 @@ const BASE = (process.env.HF_API_BASE || 'https://api.higgsfield.ai').replace(/\
 const MODEL = process.env.HF_MODEL_PATH || 'bytedance/seedance-2.0/text-to-video';
 const STATUS = process.env.HF_STATUS_PATH || '/requests/{id}/status';
 const RESOLUTION = process.env.HF_RESOLUTION || '1080p';
-const KEY = process.env.HIGGSFIELD_API_KEY || '';
+// المفتاحُ بصيغة `KEY_ID:KEY_SECRET` — الاسمُ الرسميّ للمتغيّر HF_CREDENTIALS، ويُقبل الآخر.
+const KEY = process.env.HF_CREDENTIALS || process.env.HIGGSFIELD_API_KEY || '';
 const POLL_MS = Number(process.env.HF_POLL_MS || 8000);
 const TIMEOUT_MS = Number(process.env.HF_TIMEOUT_MS || 15 * 60 * 1000);
 
@@ -62,7 +67,8 @@ export const SHOTS = [
 
 const L = (...a) => console.log(...a);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const headers = () => Object.assign({ 'content-type': 'application/json', accept: 'application/json' }, KEY ? { authorization: 'Key ' + KEY } : {});
+// `User-Agent` كما ترسله الحزمةُ الرسمية — الخادمُ يحجب طلباتِ المتصفّح.
+const headers = () => Object.assign({ 'content-type': 'application/json', accept: 'application/json', 'user-agent': 'higgsfield-server-js/2.0' }, KEY ? { authorization: 'Key ' + KEY } : {});
 
 async function call(method, url, body) {
   const res = await fetch(url, { method, headers: headers(), body: body ? JSON.stringify(body) : undefined });
@@ -101,6 +107,7 @@ async function generate(shot) {
     const st = await call('GET', sub.statusUrl);
     const s = statusOf(st);
     if (s !== last) { L(`     ${s || JSON.stringify(st).slice(0, 120)}`); last = s; }
+    if (s === 'nsfw') throw new Error('رفضٌ رقابيّ (nsfw) — الرصيدُ يُردّ، عدّل الوصف: ' + JSON.stringify(st).slice(0, 300));
     if (/fail|error|cancel/.test(s)) throw new Error('فشل التوليد: ' + JSON.stringify(st).slice(0, 400));
     let url = videoUrlOf(st);
     if (!url && /complete|succe|done|ready/.test(s) && sub.resultUrl) url = videoUrlOf(await call('GET', sub.resultUrl));
