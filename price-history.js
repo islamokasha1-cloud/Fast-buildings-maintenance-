@@ -43,7 +43,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.3258";
+  const MODULE_BUILD = "v18.9.3259";
   const PAGE_ID = "page-purchase-reports";
   const HOST_ID = "prh-root";
   const TABS_ID = "prh-tabs";
@@ -277,7 +277,9 @@
         const delta=prev?_r2(r.price-prev.price):null;
         if(prev && delta!==0){ changes++; impact+=delta*r.qty; if(delta>0) riseImpact+=delta*r.qty; }
         if(pct!=null && Math.abs(pct)>maxAbs) maxAbs=Math.abs(pct);
-        const row=Object.assign({}, r, { prevPrice:prev?prev.price:null, delta, pct, flag:(pct!=null && Math.abs(pct)>=o.flagPct) });
+        const row=Object.assign({}, r, {
+          prevPrice:prev?prev.price:null, prevDate:prev?prev.date:"", prevPo:prev?prev.poId:"", prevInvoice:prev?prev.invoiceNo:"",
+          delta, pct, changed:!!(prev && delta!==0), flag:(pct!=null && Math.abs(pct)>=o.flagPct) });
         prev=r; return row;
       });
       if(!changes) return;                          // سعرٌ ثابت — لا تغيّرَ يُبلَّغ عنه
@@ -381,8 +383,10 @@
       {k:"poId",l:"رقم الطلب",al:"center",w:12},
       {k:"invoiceNo",l:"رقم الفاتورة",al:"center",w:12},
       {k:"qty",l:"الكمية",al:"center",w:9,f:"num"},
-      {k:"price",l:"سعر الوحدة",al:"center",w:11,f:"money"},
-      {k:"prevPrice",l:"السعر السابق",al:"center",w:11,f:"money"},
+      {k:"price",l:"سعر الوحدة في هذه الفاتورة",al:"center",w:13,f:"money"},
+      {k:"prevPrice",l:"سعر الوحدة في الفاتورة السابقة",al:"center",w:13,f:"money"},
+      {k:"prevDate",l:"تاريخ الاستلام السابق",al:"center",w:13,f:"day"},
+      {k:"prevPo",l:"الطلب السابق",al:"center",w:12},
       {k:"delta",l:"الفرق",al:"center",w:10,f:"sign"},
       {k:"pct",l:"التغيّر %",al:"center",w:9,f:"pct"},
       {k:"src",l:"المصدر",al:"center",w:11,f:"src"}
@@ -393,7 +397,7 @@
       {k:"itemCode",l:"الكود",al:"center",w:12},
       {k:"unit",l:"الوحدة",al:"center",w:8},
       {k:"vendor",l:"المورّد",al:"right",w:22},
-      {k:"lastPrice",l:"آخر سعر",al:"center",w:11,f:"money"},
+      {k:"lastPrice",l:"آخر سعر وحدة دُفع",al:"center",w:12,f:"money"},
       {k:"lastDate",l:"تاريخه",al:"center",w:13,f:"day"},
       {k:"lastPo",l:"رقم الطلب",al:"center",w:12},
       {k:"n",l:"عدد الاستلامات",al:"center",w:9,f:"num"},
@@ -405,10 +409,14 @@
       {k:"note",l:"ملاحظة",al:"right",w:24}
     ]
   };
-  function _flatten(kind, groups){
-    const rows=[];
+  /* صفوفُ التقرير الأوّل: **التغيّراتُ فقط** افتراضياً — الصفُّ الأوّل في السلسلة (لا سابقَ له)
+     والاستلامُ بسعرٍ ثابتٍ ليسا «تغيّراً» فلا يُعرضان (ملاحظةُ المالك 19/09: «بنودٌ ليس لها سعرٌ
+     سابق فلماذا المقارنة، وبنودٌ لم يتغيّر سعرُها»). و`allRows` يعرض الخطَّ الزمنيَّ كاملاً. */
+  function _visibleRows(g, allRows){ return allRows ? g.rows : g.rows.filter(r=>r.changed); }
+  function _flatten(kind, groups, opts){
+    const rows=[]; const allRows=!!(opts&&opts.allRows);
     if(kind==="same"){
-      groups.forEach(g=>g.rows.forEach(r=>rows.push(Object.assign({}, r, {_g:g.key}))));
+      groups.forEach(g=>_visibleRows(g,allRows).forEach(r=>rows.push(Object.assign({}, r, {_g:g.key}))));
     }else{
       groups.forEach(g=>g.vendors.forEach(v=>{
         const notes=[];
@@ -425,7 +433,7 @@
   /* ════════════════════════════════════════════════════════════════════
      ٣) الحالة والتوليد
      ════════════════════════════════════════════════════════════════════ */
-  const _f = { kind:"same", from:"", to:"", vendor:"", q:"", minPct:0 };
+  const _f = { kind:"same", from:"", to:"", vendor:"", q:"", minPct:0, allRows:false };
   let _out=null;               // آخرُ تقريرٍ مولَّد (للشاشة وPDF)
   const _sheets={};            // ورقةٌ لكل نوعٍ وُلّد في الجلسة (Excel)
   let _tab="po";               // التبويب النشط: po (تقرير الشراء الأصلي) | prh
@@ -457,6 +465,7 @@
     if(_f.vendor) p.push(["المورّد",_f.vendor]);
     if(_f.q) p.push(["البند",_f.q]);
     if(_f.kind==="same") p.push(["أدنى نسبة تغيّر",_f.minPct>0?(_f.minPct+"%"):"كل التغيّرات"]);
+    if(_f.kind==="same") p.push(["الصفوف",_f.allRows?"كل الاستلامات (الخطّ الزمنيّ كاملاً)":"الاستلامات التي تغيّر فيها السعر فقط"]);
     p.push(["عتبة التنبيه",devPct()+"%"]);
     p.push(["المصدر","الأسعار المدفوعة فعلاً (سندات الاستلام) — والتقديري موسومٌ"]);
     p.push(["وقت التوليد",_shortDate(new Date().toISOString())]);
@@ -472,7 +481,7 @@
       const all=_allReceipts();
       const rs=_filter(all,_f,deps);
       const res=(_f.kind==="same") ? _sameVendor(rs,{minPct:_num(_f.minPct), flagPct:devPct()}) : _crossVendor(rs,deps);
-      const rows=_flatten(_f.kind,res.groups);
+      const rows=_flatten(_f.kind,res.groups,{allRows:_f.allRows});
       const caveats=[];
       const est=rs.filter(r=>r.src==="est").length, aud=rs.filter(r=>r.src==="audit").length;
       const unlinked=res.groups.filter(g=>!g.linked).length;
@@ -484,7 +493,7 @@
       if(_f.kind==="cross" && res.groups.length) caveats.push("المورّدون يُوحَّدون بجدول المرادفات المعتمد (أداة توحيد الموردين) — صيغتان لاسمٍ واحدٍ بلا مرادفٍ معتمد تظهران مورّدَين.");
       const rep={
         kind:_f.kind, kindName:KINDS[_f.kind], title:"تقرير "+KINDS[_f.kind],
-        cols:COLS[_f.kind], rows, groups:res.groups, summary:res.summary,
+        cols:COLS[_f.kind], rows, groups:res.groups, summary:res.summary, allRows:_f.allRows,
         stats:_stats(_f.kind,res.summary), params:_paramsList(), caveats,
         receipts:rs.length, generated:new Date().toISOString()
       };
@@ -594,7 +603,23 @@
       ".prh-cav ul{margin:0;padding-inline-start:17px}",
       ".prh-empty{text-align:center;padding:44px 20px;color:var(--muted)}",
       ".prh-empty b{display:block;color:var(--text);font-size:14px;margin:8px 0 4px}",
-      ".prh-wrap{overflow-x:auto}",
+      /* رأسُ الجدول يثبت عند التمرير (ملاحظةُ المالك 19/09). الشرطُ ألّا يكون بين <th> وحاوية
+         التمرير (`.main-area`) أيُّ حاويةِ overflow: فـ`.report-table{overflow:hidden}` تكسر sticky في
+         Chrome، والغلافُ بـ`overflow-x:auto` يصير هو حاويةَ التمرير فلا يثبت الرأسُ في الصفحة.
+         لذلك `clip` (لا ينشئ حاويةَ تمرير) على الشاشات الواسعة، و`auto` على الضيّقة حيث التمريرُ
+         الأفقيُّ أهمُّ من الثبات. */
+      ".prh-wrap{overflow-x:clip;border-radius:12px;border:1px solid var(--border)}",
+      ".prh-wrap .report-table{overflow:visible;border:0;border-radius:0}",
+      ".prh-table thead th{position:sticky;top:0;z-index:3;background:var(--surface2);box-shadow:0 1px 0 var(--border)}",
+      ".prh-table thead th small{display:block;font-weight:600;color:var(--muted);font-size:9.5px}",
+      ".prh-table tr.prh-base td{background:color-mix(in srgb,var(--primary) 5%,var(--surface))}",
+      ".prh-table tr.prh-same td{color:var(--muted)}",
+      ".prh-legend{padding:10px 16px;font-size:12px;line-height:1.9;color:var(--muted);border-bottom:1px solid var(--border)}",
+      ".prh-legend b{color:var(--text)}",
+      ".prh-fld.prh-chk{grid-column:span 2;align-self:end}",
+      ".prh-chk-l{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--text);min-height:36px;white-space:normal;cursor:pointer;line-height:1.4}",
+      ".prh-chk-l input{width:16px;height:16px;margin:0}",
+      "@media(max-width:900px){.prh-wrap{overflow-x:auto}.prh-table thead th{position:static}}",
       "@media(max-width:640px){.prh-acts{grid-column:1/-1}.prh-acts .btn{flex:1}}"
     ].join("");
     document.head.appendChild(st);
@@ -605,6 +630,7 @@
      ════════════════════════════════════════════════════════════════════ */
   function _set(k,v){
     if(k==="minPct"){ _f.minPct=Math.max(0,_num(v)); return; }
+    if(k==="allRows"){ _f.allRows=!!v; return; }
     _f[k]=(v==null?"":String(v));
     if(k==="kind") render();
   }
@@ -630,7 +656,8 @@
               <option value="">كل المورّدين</option>${vs.map(v=>opt(v,v,_f.vendor)).join("")}
             </select></div>
           <div class="prh-fld"><label>البند (اسم أو كود)</label><input class="form-input" type="text" value="${_esc(_f.q)}" placeholder="بحث…" oninput="window.priceHistory._set('q',this.value)"></div>
-          ${_f.kind==="same"?`<div class="prh-fld"><label>أدنى نسبة تغيّر %</label><input class="form-input" type="number" min="0" step="1" value="${_esc(_f.minPct)}" placeholder="0 = الكل" onchange="window.priceHistory._set('minPct',this.value)"></div>`:""}
+          ${_f.kind==="same"?`<div class="prh-fld"><label>أدنى نسبة تغيّر %</label><input class="form-input" type="number" min="0" step="1" value="${_esc(_f.minPct)}" placeholder="0 = الكل" onchange="window.priceHistory._set('minPct',this.value)"></div>
+          <div class="prh-fld prh-chk"><label class="prh-chk-l"><input type="checkbox" ${_f.allRows?"checked":""} onchange="window.priceHistory._set('allRows',this.checked)"> إظهار كل الاستلامات (حتى التي لم يتغيّر سعرها)</label></div>`:""}
           <div class="prh-acts">
             <button class="btn btn-primary" data-viewer-hide onclick="window.priceHistory.generate()">${_icn("barChart")} إنشاء التقرير</button>
             <button class="btn btn-ghost btn-sm" data-viewer-hide onclick="window.priceHistory.exportExcel()" ${Object.keys(_sheets).length?"":"disabled"}>${_icn("sheet")} Excel</button>
@@ -664,25 +691,31 @@
     return `${_esc(g.itemName)}${g.itemCode?` <span class="prh-gsub">${_esc(g.itemCode)}</span>`:""}${g.unit?` <span class="prh-gsub">(${_esc(g.unit)})</span>`:""}${g.linked?"":` <span class="prh-pill warn">غير مربوط</span>`}`;
   }
   function _tableSame(rep){
-    const head=`<tr><th class="c">م</th><th>التاريخ</th><th>رقم الطلب</th><th>الفاتورة</th><th class="c">الكمية</th><th class="c">سعر الوحدة</th><th class="c">السابق</th><th class="c">الفرق</th><th class="c">التغيّر</th><th class="c">المصدر</th></tr>`;
+    const head=`<tr><th class="c">م</th><th>تاريخ الاستلام</th><th>رقم الطلب</th><th>الفاتورة</th><th class="c">الكمية</th><th class="c">سعر الوحدة<br><small>في هذه الفاتورة</small></th><th class="c">سعر الوحدة<br><small>في الفاتورة السابقة</small></th><th class="c">الفرق<br><small>ر.س للوحدة</small></th><th class="c">التغيّر %</th><th class="c">المصدر</th></tr>`;
     let n=0;
     const body=rep.groups.map(g=>{
       const tr=g.trend==="up"?`<span class="prh-pill crit">ارتفع ${_esc(_pctTxt(g.totalPct))}</span>`:(g.trend==="down"?`<span class="prh-pill ok">انخفض ${_esc(_pctTxt(g.totalPct))}</span>`:`<span class="prh-pill">عاد إلى سعره</span>`);
       const gh=`<tr class="prh-g"><td colspan="10">${_itemCell(g)} <span class="prh-gsub">—</span> ${_esc(g.vendor)}
-        <span class="prh-gsub">${g.n} استلاماً · ${_esc(_money(g.firstPrice))} ← ${_esc(_money(g.lastPrice))}</span> ${tr}
+        <span class="prh-gsub">${g.n} استلاماً، تغيّر السعرُ في ${g.changes} منها · من ${_esc(_money(g.firstPrice))} إلى ${_esc(_money(g.lastPrice))}</span> ${tr}
         <span class="prh-gsub">الأثر: <span class="prh-num ${g.impact>0?"prh-up":(g.impact<0?"prh-dn":"prh-zero")}">${_esc(_signMoney(g.impact))}</span> ر.س</span></td></tr>`;
-      const rs=g.rows.map(r=>{ n++; return `<tr${r.flag?' class="prh-flag"':""}>
+      const rs=_visibleRows(g,rep.allRows).map(r=>{ n++;
+        const cls=r.flag?"prh-flag":(r.prevPrice==null?"prh-base":(r.changed?"":"prh-same"));
+        const prevCell = r.prevPrice==null
+          ? `<span class="prh-pill info">أوّل استلام — لا سابقَ له</span>`
+          : `<span class="prh-num">${_esc(_money(r.prevPrice))}</span><div class="prh-gsub">${_esc(_dayOnly(r.prevDate))} · ${_esc(r.prevPo)}</div>`;
+        const chgCell = r.prevPrice==null ? `<span class="prh-zero">—</span>` : (r.changed ? _pctCell(r.pct) : `<span class="prh-pill">بلا تغيّر</span>`);
+        return `<tr${cls?` class="${cls}"`:""}>
         <td class="c">${n}</td><td>${_esc(_dayOnly(r.date))}</td><td>${_esc(r.poId)}${r.grnRef?`<div class="prh-gsub">${_esc(r.grnRef)}</div>`:""}</td><td>${_esc(r.invoiceNo||"—")}</td>
         <td class="c prh-num">${_esc(_fmt(r.qty))}</td><td class="c prh-num"><b>${_esc(_money(r.price))}</b></td>
-        <td class="c prh-num">${r.prevPrice!=null?_esc(_money(r.prevPrice)):"—"}</td>
-        <td class="c">${r.delta==null?"—":`<span class="prh-num ${r.delta>0?"prh-up":(r.delta<0?"prh-dn":"prh-zero")}">${_esc(_signMoney(r.delta))}</span>`}</td>
-        <td class="c">${_pctCell(r.pct)}</td><td class="c">${_srcPill(r.src)}</td></tr>`; }).join("");
+        <td class="c">${prevCell}</td>
+        <td class="c">${r.delta==null||!r.changed?`<span class="prh-zero">—</span>`:`<span class="prh-num ${r.delta>0?"prh-up":"prh-dn"}">${_esc(_signMoney(r.delta))}</span>`}</td>
+        <td class="c">${chgCell}</td><td class="c">${_srcPill(r.src)}</td></tr>`; }).join("");
       return gh+rs;
     }).join("");
     return `<div class="prh-wrap"><table class="report-table prh-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }
   function _tableCross(rep){
-    const head=`<tr><th class="c">م</th><th>المورّد</th><th class="c">آخر سعر</th><th class="c">تاريخه</th><th class="c">الطلب</th><th class="c">الاستلامات</th><th class="c">الكمية</th><th class="c">متوسّط مرجَّح</th><th class="c">أدنى</th><th class="c">أعلى</th><th class="c">فوق الأرخص</th></tr>`;
+    const head=`<tr><th class="c">م</th><th>المورّد</th><th class="c">آخر سعر وحدة<br><small>دُفع له</small></th><th class="c">تاريخه</th><th class="c">الطلب</th><th class="c">عدد<br><small>الاستلامات</small></th><th class="c">الكمية<br><small>الإجمالية</small></th><th class="c">متوسّط<br><small>مرجَّح بالكمية</small></th><th class="c">أدنى<br><small>سعر دُفع</small></th><th class="c">أعلى<br><small>سعر دُفع</small></th><th class="c">فوق الأرخص %</th></tr>`;
     let n=0;
     const body=rep.groups.map(g=>{
       const gh=`<tr class="prh-g"><td colspan="11">${_itemCell(g)}
@@ -703,7 +736,11 @@
     const rep=_out;
     const tbl=rep.groups.length ? (rep.kind==="same"?_tableSame(rep):_tableCross(rep))
       : `<div class="prh-empty"><b>لا نتائج مطابقة لهذه المعايير</b>${rep.kind==="same"?"لا زوجَ (بند × مورّد) تغيّر سعرُه في الفترة":"لا بندَ استُلم من مورّدَين فأكثر في الفترة"} — وسّع الفترة أو أزل الفلاتر.</div>`;
-    return `<div class="card"><div class="card-header"><h3>${_esc(rep.title)}</h3><span class="prh-gsub">${_esc(rep.receipts)} سطرَ استلامٍ مقروءاً · ${_esc(_shortDate(rep.generated))}</span></div>
+    const legend = rep.kind==="same"
+      ? "<b>سعر الوحدة</b> = سعرُ الوحدة الواحدة من البند <b>صافياً قبل الضريبة</b> كما كُتب في فاتورة المورّد عند الاستلام. كلُّ صفٍّ = استلامٌ <b>تغيّر فيه</b> هذا السعرُ عن الاستلام السابق لنفس البند من نفس المورّد"+(rep.allRows?" (وتُعرض هنا كلُّ الاستلامات، والثابتُ منها بلا فرق)":"")+"."
+      : "لكل بندٍ صفٌّ لكل مورّدٍ ورّده: <b>آخر سعر وحدة</b> دفعناه له (صافٍ قبل الضريبة من فاتورته)، مرتّبةً من الأرخص. «فوق الأرخص» = كم يزيد سعرُ هذا المورّد على أرخص مورّدٍ للبند نفسه.";
+    return `<div class="card"><div class="card-header" style="flex-wrap:wrap"><h3>${_esc(rep.title)}</h3><span class="prh-gsub">${_esc(rep.receipts)} سطرَ استلامٍ مقروءاً · ${_esc(_shortDate(rep.generated))}</span></div>
+      <div class="prh-legend">${legend}</div>
       ${_statsHTML(rep)}${_caveatsHTML(rep)}<div style="padding:12px 16px">${tbl}</div></div>`;
   }
   function render(){
@@ -793,10 +830,10 @@
       let n=0;
       const rows=rep.groups.map(g=>`<tr class="g"><td colspan="9">${_esc(g.itemName)}${g.itemCode?" · "+_esc(g.itemCode):""}${g.unit?" ("+_esc(g.unit)+")":""} — ${_esc(g.vendor)}
           <span class="sub">${g.n} استلاماً · ${_esc(_money(g.firstPrice))} ← ${_esc(_money(g.lastPrice))} (${_esc(_pctTxt(g.totalPct))}) · الأثر ${_esc(_signMoney(g.impact))} ر.س</span></td></tr>`
-        + g.rows.map(r=>{ n++; return `<tr${r.flag?' class="f"':""}><td class="c">${n}</td><td class="c">${_esc(_dayOnly(r.date))}</td><td class="c">${_esc(r.poId)}</td><td class="c">${_esc(r.invoiceNo||"—")}</td><td class="c">${_esc(_fmt(r.qty))}</td><td class="c"><b>${_esc(_money(r.price))}</b></td><td class="c">${r.prevPrice!=null?_esc(_money(r.prevPrice)):"—"}</td><td class="c">${_pdfPct(r.pct)}</td><td class="c">${_esc(SRC[r.src]||r.src)}</td></tr>`; }).join("")
+        + _visibleRows(g,rep.allRows).map(r=>{ n++; return `<tr${r.flag?' class="f"':""}><td class="c">${n}</td><td class="c">${_esc(_dayOnly(r.date))}</td><td class="c">${_esc(r.poId)}</td><td class="c">${_esc(r.invoiceNo||"—")}</td><td class="c">${_esc(_fmt(r.qty))}</td><td class="c"><b>${_esc(_money(r.price))}</b></td><td class="c">${r.prevPrice!=null?_esc(_money(r.prevPrice))+"<br><small>"+_esc(_dayOnly(r.prevDate))+" · "+_esc(r.prevPo)+"</small>":"أوّل استلام"}</td><td class="c">${r.prevPrice==null?"—":(r.changed?_pdfPct(r.pct):"بلا تغيّر")}</td><td class="c">${_esc(SRC[r.src]||r.src)}</td></tr>`; }).join("")
       ).join("");
       return `<table class="tbl"><colgroup><col style="width:5%"><col style="width:12%"><col style="width:13%"><col style="width:13%"><col style="width:9%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"></colgroup>
-        <thead><tr><th>م</th><th>التاريخ</th><th>رقم الطلب</th><th>الفاتورة</th><th>الكمية</th><th>سعر الوحدة</th><th>السابق</th><th>التغيّر</th><th>المصدر</th></tr></thead><tbody>${rows}</tbody></table>`;
+        <thead><tr><th>م</th><th>تاريخ الاستلام</th><th>رقم الطلب</th><th>الفاتورة</th><th>الكمية</th><th>سعر الوحدة في هذه الفاتورة</th><th>سعر الوحدة في الفاتورة السابقة</th><th>التغيّر %</th><th>المصدر</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
     let n=0;
     const rows=rep.groups.map(g=>`<tr class="g"><td colspan="9">${_esc(g.itemName)}${g.itemCode?" · "+_esc(g.itemCode):""}${g.unit?" ("+_esc(g.unit)+")":""}
@@ -816,7 +853,10 @@
     const docHead=on
       ? `<div class="dochead"><div class="dh-t">${_esc(rep.title)}</div><div class="dh-d">${_esc(_shortDate(rep.generated))}</div></div>`
       : `<div class="header"><div class="hr">${logo?`<img src="${_esc(logo)}" class="clogo" alt="">`:""}<div><div class="company">شركة المباني السريعة للمقاولات</div><div class="subtitle">${_esc(rep.title)}</div></div></div><div class="dh-d">تاريخ التقرير<br><strong>${_esc(_shortDate(rep.generated))}</strong></div></div>`;
-    const inner=`${docHead}<div class="params">${params}</div>${stats?`<div class="stats">${stats}</div>`:""}${caveats}${_pdfTable(rep)}
+    const legend = rep.kind==="same"
+      ? "سعر الوحدة = سعر الوحدة الواحدة صافياً قبل الضريبة كما في فاتورة المورّد عند الاستلام. كلُّ صفٍّ استلامٌ تغيّر فيه السعرُ عن الاستلام السابق لنفس البند من نفس المورّد."
+      : "لكل بندٍ صفٌّ لكل مورّدٍ ورّده: آخر سعر وحدة دُفع له (صافٍ قبل الضريبة)، من الأرخص. «فوق الأرخص» = زيادةُ سعره على أرخص مورّدٍ للبند.";
+    const inner=`${docHead}<div class="sub2">${legend}</div><div class="params">${params}</div>${stats?`<div class="stats">${stats}</div>`:""}${caveats}${_pdfTable(rep)}
       <div class="foot">شركة المباني السريعة للمقاولات — تقارير المشتريات · ${_esc(rep.kindName)} · ${_esc(String(rep.groups.length))} مجموعة</div>`;
     const html=`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${_esc(rep.title)} — شركة المباني السريعة</title>
@@ -865,7 +905,7 @@ ${on?_lhCSS():""}
   window.priceHistory = {
     mount, switchTab, render, generate, exportExcel, exportPDF, canView, _set,
     // دوالُّ نقيّة — مكشوفةٌ لفحوص hail-tests
-    _collect, _filter, _bounds, _sameVendor, _crossVendor, _flatten, _itemKey, _dev,
+    _collect, _filter, _bounds, _sameVendor, _crossVendor, _flatten, _visibleRows, _itemKey, _dev,
     _sheetRows, _cellVal, _safeSheetName, _defaultDeps, _normFallback, _vkeyFallback,
     _state: ()=>({f:Object.assign({},_f), tab:_tab, out:_out, sheets:Object.keys(_sheets)}),
     KINDS, SRC, COLS, DEV_PCT_FALLBACK,

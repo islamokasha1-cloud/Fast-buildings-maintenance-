@@ -22055,10 +22055,27 @@ function priceHistoryGuards() {
   T("الفلتر: البندُ بالاسم المطبَّع أو الكود", M._filter(R, { q: "K1" }, deps).length === 3 && M._filter(R, { q: "اناره" }, deps).length === 2);
 
   // ── التسطيح: مصدرٌ واحدٌ للشاشة وExcel وPDF ──
+  /* ── ملاحظةُ المالك 19/09: «بنودٌ ليس لها سعرٌ سابق فلماذا المقارنة، وبنودٌ لم يتغيّر سعرُها» ──
+     التقريرُ تقريرُ **تغيّرات**: الصفُّ الأوّل في السلسلة والاستلامُ بسعرٍ ثابتٍ لا يُعرضان
+     افتراضياً، ويُعرضان بطلبٍ صريح (`allRows`). والمرجعُ الذي قورن به يبقى ظاهراً في الصفّ
+     (سعرُ الفاتورة السابقة وتاريخُها وطلبُها) فلا يُقارَن رقمٌ بمجهول. */
   const flat = M._flatten("same", S.groups);
-  T("★ التسطيح: عمودُ «م» متسلسلٌ على الترتيب المعروض، وأعمدةُ Excel من COLS", flat.length === 7 && flat[0]._n === 1 && flat[6]._n === 7 && M.COLS.same[0].k === "_n" && M.COLS.same.some(c => c.k === "src"));
+  T("★★ التسطيح الافتراضيّ: التغيّراتُ فقط — لا صفَّ أوّلَ بلا سابق ولا صفَّ بسعرٍ ثابت (4 من 7)",
+    flat.length === 4 && flat.every(r => r.changed && r.prevPrice != null && r.delta !== 0) && flat[0]._n === 1 && flat[3]._n === 4);
+  T("★★ الصفُّ يحمل مرجعَه: سعرُ الفاتورة السابقة وتاريخُها ورقمُ طلبها", flat[0].prevPrice === 10 && flat[0].prevDate === "2026-01-05T09:00:00.000Z" && flat[0].prevPo === "PO-1");
+  const flatAll = M._flatten("same", S.groups, { allRows: true });
+  T("★ allRows يعرض الخطَّ الزمنيَّ كاملاً (7) وأوّلُ صفٍّ بلا سابق", flatAll.length === 7 && flatAll[0].prevPrice === null && flatAll[0].changed === false);
+  T("★ _visibleRows: ثابتُ السعر يُخفى افتراضياً ويظهر بـallRows",
+    M._visibleRows({ rows: [{ changed: false }, { changed: true }, { changed: false }] }).length === 1 && M._visibleRows({ rows: [{ changed: false }, { changed: true }] }, true).length === 2);
+  T("★ أعمدةُ Excel: اسمُ السعر يقول ما هو (في هذه الفاتورة / في الفاتورة السابقة) ومعه تاريخُ السابق وطلبُه",
+    M.COLS.same[0].k === "_n" && M.COLS.same.some(c => c.k === "price" && /في هذه الفاتورة/.test(c.l)) && M.COLS.same.some(c => c.k === "prevPrice" && /الفاتورة السابقة/.test(c.l)) && M.COLS.same.some(c => c.k === "prevDate") && M.COLS.same.some(c => c.k === "prevPo") && M.COLS.same.some(c => c.k === "src"));
   const sr = M._sheetRows({ cols: M.COLS.same, rows: flat });
-  T("★ Excel: المصدرُ نصٌّ عربيّ (لا رمز)، والتاريخُ يوماً، والأرقامُ أرقاماً", sr[0]["المصدر"] === "سند استلام" && typeof sr[0]["سعر الوحدة"] === "number" && /\d{2}\/\d{2}\/\d{4}/.test(sr[0]["تاريخ الاستلام"]));
+  T("★ Excel: المصدرُ نصٌّ عربيّ (لا رمز)، والتاريخُ يوماً، والأرقامُ أرقاماً", sr[0]["المصدر"] === "سند استلام" && typeof sr[0]["سعر الوحدة في هذه الفاتورة"] === "number" && sr[0]["سعر الوحدة في الفاتورة السابقة"] === 10 && /\d{2}\/\d{2}\/\d{4}/.test(sr[0]["تاريخ الاستلام"]));
+  /* رأسُ الجدول يثبت عند التمرير: sticky لا يعمل إلا بلا حاوية overflow بينه وبين `.main-area` —
+     `.report-table{overflow:hidden}` تكسره في Chrome، والغلافُ بـ`auto` يبتلع التمرير. */
+  T("★★ رأسُ الجدول مثبَّت عند التمرير (sticky) والغلافُ clip لا auto والجدولُ overflow:visible",
+    /\.prh-table thead th\{position:sticky;top:0;z-index:\d+/.test(src) && /\.prh-wrap\{overflow-x:clip/.test(src) && /\.prh-wrap \.report-table\{overflow:visible/.test(src));
+  T("★ الشاشةُ تشرح «سعر الوحدة» فوق الجدول (صافٍ قبل الضريبة من فاتورة المورّد)", /prh-legend/.test(src) && /صافياً قبل الضريبة/.test(src));
   const flatC = M._flatten("cross", C.groups);
   T("التسطيح (مورّدون): ملاحظةُ «الأرخص» و«الافتراضي في الكتالوج» في عمود الملاحظة", flatC[0].note === "الأرخص" && /الافتراضي في الكتالوج/.test(flatC[1].note));
 }
