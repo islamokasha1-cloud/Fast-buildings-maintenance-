@@ -1,14 +1,21 @@
-// الفيلمُ الكامل: افتتاحيةُ إعلان Remotion ← جولةُ الشاشات الحقيقية ← ختامُ الإعلان.
+// الفيلمُ الكامل: قائمةُ مقاطعَ تُوصَل بذوبانٍ تحت فراشٍ موسيقيٍّ واحد.
 //
 // يجمع مخرَجَي أداتين قائمتين بلا نسخِ منطقِ أيٍّ منهما:
-//   • `remotion/` — افتتاحيةُ `PlatformIntro` (تركيبةٌ خاصةٌ بهذا العرض) وختامُ
-//     `CompanyAnnouncement` (١٣٨١–١٦٢٠)، بلا موسيقى ليُفرَش تحت الفيلم فراشٌ متّصل.
-//   • `promo-video.mjs --no-bookends` — جولةُ الشاشات بلا بطاقتَي افتتاحٍ وختام.
-// الوصلتان ذوبانٌ (xfade) لا قطعٌ حادّ، والموسيقى مؤلَّفةٌ بطول الفيلم بسكربت
+//   • `remotion/` — تركيبةٌ كاملة (`PlatformIntro` · `AiFacilities`) أو مدى إطاراتٍ من
+//     تركيبة (ختامُ `CompanyAnnouncement` ١٣٨١–١٦٢٠)، بلا موسيقى ليُفرَش تحت الفيلم فراشٌ متّصل.
+//   • `promo-video.mjs --no-bookends [--topic X]` — جولةُ الشاشات بلا بطاقتَي افتتاحٍ وختام.
+// كلُّ وصلةٍ ذوبانٌ (xfade) لا قطعٌ حادّ، والموسيقى مؤلَّفةٌ بطول الفيلم بسكربت
 // الإعلان نفسِه (`make-music.py`) — فلا تنتهي قبله ولا تُقطَع في منتصفها.
 //
+// كان التجميعُ ثلاثيةً ثابتة (افتتاحية + جولة + ختام)؛ صار **قائمةَ مقاطع** (`FILMS`)
+// يختارها `--film` — فالفيلمُ الأصليّ (`platform`) يبقى كما هو حرفياً، وفيلمُ
+// «الذكاء الاصطناعي» (`ai`) قائمةٌ أخرى بالمحرّك نفسِه: تركيبةٌ عامّة ثم جولةُ فصول
+// الذكاء الاصطناعي ثم الختامُ نفسُه.
+//
 //   node promo-assemble.mjs              → dist-video/promo-film.mp4 (+ نسخة مشاركة 1080p)
+//   node promo-assemble.mjs --film ai    → dist-video/ai-facilities-film.mp4
 //   node promo-assemble.mjs --skip-body  → أعِد التجميع دون إعادة تسجيل الجولة
+//   node promo-assemble.mjs --4k         → 3840×2160 (المشاهدُ بـ--scale=2 والجولةُ 4K)
 //
 // المتطلّبات: playwright-core · ffmpeg-static · numpy (للموسيقى) · remotion/node_modules
 
@@ -29,11 +36,31 @@ const FOURK = process.argv.includes('--4k') || process.env.PROMO_4K === '1';
 
 const FPS = 30;
 const XF = 0.7;                                   // مدّةُ الذوبان عند كلّ وصلة (ثانية)
-// الافتتاحيةُ تركيبةٌ مستقلّةٌ (`PlatformIntro`) لا مشهدٌ من الإعلان: هذا عرضٌ موضوعُه
-// المنصةُ وحدَها، والإعلانُ عن الشركة وقطاعاتها الثلاثة — فلا يُكتَب فيه ما لا يعرضه.
-// أما الختامُ (الشعار والتواصل) فصالحٌ للاثنين، فيُقتطع من الإعلان بلا تكرار.
-const INTRO = { comp: 'PlatformIntro', label: 'الافتتاح' };
-const OUTRO = { comp: 'CompanyAnnouncement', from: 1380, to: 1619, label: 'الختام' };
+// الختامُ (الشعار والتواصل) صالحٌ لكلّ الأفلام، فيُقتطع من الإعلان بلا تكرار.
+// **أرقامُ إطاراته مرتبطةٌ بترتيب مشاهد `src/CompanyAnnouncement.tsx`** — حدِّثها إن تغيّر.
+const OUTRO = { kind: 'remotion', comp: 'CompanyAnnouncement', from: 1380, to: 1619, label: 'الختام' };
+// اللقطاتُ المولَّدة لمشاهد `AiFacilities`: يكتبها `higgsfield-shots.mjs` في
+// `remotion/public/ai/manifest.json` — وإن غابت رُندرت المشاهدُ برسومها المتجهية.
+const AI_MANIFEST = path.join(RM, 'public', 'ai', 'manifest.json');
+const aiProps = () => {
+  try { const m = JSON.parse(fs.readFileSync(AI_MANIFEST, 'utf8')); return { clips: m.clips || {} }; } catch { return {}; }
+};
+// كلُّ مقطعٍ إمّا `remotion` (تركيبةٌ كاملة، أو مدى `from`–`to`) أو `tour` (جولةُ شاشاتٍ بموضوعٍ اختياريّ).
+const FILMS = {
+  // الافتتاحيةُ تركيبةٌ مستقلّةٌ (`PlatformIntro`) لا مشهدٌ من الإعلان: هذا عرضٌ موضوعُه
+  // المنصةُ وحدَها، والإعلانُ عن الشركة وقطاعاتها الثلاثة — فلا يُكتَب فيه ما لا يعرضه.
+  platform: { name: 'promo-film', segments: [
+    { kind: 'remotion', comp: 'PlatformIntro', label: 'الافتتاح' },
+    { kind: 'tour', label: 'الجولة' },
+    OUTRO
+  ] },
+  ai: { name: 'ai-facilities-film', segments: [
+    { kind: 'remotion', comp: 'AiFacilities', label: 'الجزء العامّ — الذكاء الاصطناعي في إدارة المرافق', props: aiProps },
+    { kind: 'tour', topic: 'ai', label: 'جولة الذكاء الاصطناعي في المنصة' },
+    OUTRO
+  ] }
+};
+const FILM = (() => { const i = process.argv.indexOf('--film'); return i > 0 ? String(process.argv[i + 1] || '').trim() : 'platform'; })();
 
 const L = (...a) => console.log(...a);
 const die = (m) => { console.error('\n❌ ' + m + '\n'); process.exit(1); };
@@ -42,6 +69,8 @@ let FF;
 try { FF = require('ffmpeg-static'); } catch { }
 if (!FF || !fs.existsSync(FF)) die('ffmpeg-static غير مثبّت — npm install --no-save ffmpeg-static');
 if (!fs.existsSync(path.join(RM, 'node_modules'))) die('تبعيات Remotion غير مثبّتة — cd remotion && npm install');
+if (!FILMS[FILM]) die('فيلمٌ غيرُ معروف: ' + FILM + ' — المتاح: ' + Object.keys(FILMS).join(', '));
+const SEGMENTS = FILMS[FILM].segments;
 
 fs.mkdirSync(PARTS, { recursive: true });
 
@@ -58,45 +87,50 @@ function dur(file) {
 const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${(s % 60).toFixed(2).padStart(5, '0')}`;
 
 L('\n══════════════════════════════════════════════════════');
-L('  تجميعُ الفيلم — افتتاحيةُ Remotion · جولةُ الشاشات · الختام');
+L(`  تجميعُ الفيلم «${FILM}» — ${SEGMENTS.map(s => s.label).join(' · ')}`);
 L('══════════════════════════════════════════════════════');
 
-/* ═════════ ١) مشهدا الافتتاح والختام من إعلان Remotion ═════════ */
+/* ═════════ ١) المقاطع بالترتيب: مشاهدُ Remotion وجولاتُ الشاشات ═════════ */
 // `musicVolume: 0` — الموسيقى تُفرَش لاحقاً على الفيلم كلِّه دفعةً واحدة.
-for (const [name, r] of [['intro', INTRO], ['outro', OUTRO]]) {
-  const out = path.join(PARTS, `${name}.mp4`);
+function renderRemotion(r, out) {
   const range = r.from === undefined ? '' : ` (${r.from}–${r.to})`;
   L(`\n▸ رندر مشهد «${r.label}»${range}…`);
   const args = ['remotion', 'render', r.comp, out, '--log=error'];
   if (FOURK) args.push('--scale=2');
   if (r.from !== undefined) args.push(`--frames=${r.from}-${r.to}`);
-  // موسيقى الإعلان تُسكَت هنا لتُفرَش لاحقاً على الفيلم كلِّه؛ والتركيبةُ المستقلّةُ
-  // لا صوتَ فيها أصلاً فلا يضرّها المرور.
-  args.push('--props', JSON.stringify({ musicVolume: 0 }));
+  // موسيقى الإعلان تُسكَت هنا لتُفرَش لاحقاً على الفيلم كلِّه؛ والتركيباتُ المستقلّةُ
+  // لا صوتَ فيها أصلاً فلا يضرّها المرور. `props` دالّةٌ تُقيَّم وقتَ الرندر (اللقطاتُ المولَّدة).
+  args.push('--props', JSON.stringify(Object.assign({ musicVolume: 0 }, r.props ? r.props() : {})));
   const res = run('npx', args, { cwd: RM });
   if (res.status !== 0 || !fs.existsSync(out)) die(`فشل رندر مشهد ${r.label}`);
   L(`  ✅ ${out}  ·  ${dur(out).toFixed(2)} ث`);
 }
-
-/* ═════════ ٢) جولةُ الشاشات ═════════ */
-const body = path.join(OUT, 'promo-body.mp4');
-if (SKIP_BODY) {
-  if (!fs.existsSync(body)) die('لا يوجد promo-body.mp4 — شغّل بلا --skip-body');
-  L(`\n▸ تخطّي التسجيل — أُعيد استخدام ${body}`);
-} else {
-  L('\n▸ تسجيل جولة الشاشات (بلا بطاقتَي افتتاحٍ وختام)…');
-  // الجسمُ وسيطٌ يُعاد ترميزُه عند الوصل — فيُحفَظ شبهَ عديمِ الفقد كيلا يتراكم جيلان.
-  const res = run(process.execPath, ['promo-video.mjs', '--no-bookends', ...(FOURK ? ['--4k'] : [])],
-    { cwd: REPO, env: Object.assign({}, process.env, { PROMO_CRF: process.env.PROMO_BODY_CRF || '12' }) });
-  if (res.status !== 0 || !fs.existsSync(body)) die('فشل تسجيل الجولة');
+function recordTour(t) {
+  // `promo-video.mjs` يسمّي مخرَجَه بالموضوع — فلا تُدهَس جولةٌ بأخرى.
+  const body = path.join(OUT, 'promo-body' + (t.topic ? '-' + t.topic : '') + '.mp4');
+  if (SKIP_BODY) {
+    if (!fs.existsSync(body)) die(`لا يوجد ${path.basename(body)} — شغّل بلا --skip-body`);
+    L(`\n▸ تخطّي التسجيل — أُعيد استخدام ${body}`);
+  } else {
+    L(`\n▸ تسجيل «${t.label}» (بلا بطاقتَي افتتاحٍ وختام)…`);
+    // الجسمُ وسيطٌ يُعاد ترميزُه عند الوصل — فيُحفَظ شبهَ عديمِ الفقد كيلا يتراكم جيلان.
+    const args = ['promo-video.mjs', '--no-bookends', ...(t.topic ? ['--topic', t.topic] : []), ...(FOURK ? ['--4k'] : [])];
+    const res = run(process.execPath, args, { cwd: REPO, env: Object.assign({}, process.env, { PROMO_CRF: process.env.PROMO_BODY_CRF || '12' }) });
+    if (res.status !== 0 || !fs.existsSync(body)) die('فشل تسجيل الجولة');
+  }
+  L(`  ✅ الجولة: ${fmt(dur(body))}`);
+  return body;
 }
-L(`  ✅ الجولة: ${fmt(dur(body))}`);
+const parts = SEGMENTS.map((seg, i) => {
+  if (seg.kind === 'tour') return recordTour(seg);
+  const out = path.join(PARTS, `${String(i).padStart(2, '0')}-${seg.comp}${seg.from !== undefined ? '-' + seg.from : ''}.mp4`);
+  renderRemotion(seg, out);
+  return out;
+});
 
-/* ═════════ ٣) الموسيقى بطول الفيلم ═════════ */
-const dIn = dur(path.join(PARTS, 'intro.mp4'));
-const dBody = dur(body);
-const dOut = dur(path.join(PARTS, 'outro.mp4'));
-const total = dIn + dBody + dOut - 2 * XF;       // كلُّ ذوبانٍ يبتلع XF من الطول
+/* ═════════ ٢) الموسيقى بطول الفيلم ═════════ */
+const durs = parts.map(dur);
+const total = durs.reduce((a, b) => a + b, 0) - (parts.length - 1) * XF;   // كلُّ ذوبانٍ يبتلع XF من الطول
 
 const music = path.join(PARTS, 'music.mp3');
 L(`\n▸ تأليف الموسيقى بطول ${fmt(total)}…`);
@@ -108,19 +142,22 @@ const mres = run('python3', ['scripts/make-music.py'], {
 const haveMusic = mres.status === 0 && fs.existsSync(music);
 if (!haveMusic) L('  ⚠️  تعذّر تأليف الموسيقى (numpy؟) — يُجمَّع الفيلم صامتاً');
 
-/* ═════════ ٤) الوصل بذوبانٍ + فرشُ الموسيقى ═════════ */
-const film = path.join(OUT, FOURK ? 'promo-film-4k.mp4' : 'promo-film.mp4');
+/* ═════════ ٣) الوصل بذوبانٍ + فرشُ الموسيقى ═════════ */
+const film = path.join(OUT, FILMS[FILM].name + (FOURK ? '-4k' : '') + '.mp4');
 L('\n▸ الوصل والترميز…');
 
-// ذوبانان: الافتتاحُ في الجولة، ثم الناتجُ في الختام. الإزاحةُ = طولُ ما قبله ناقص XF.
-const v = [
-  `[0:v]fps=${FPS},format=yuv420p,setsar=1[a]`,
-  `[1:v]fps=${FPS},format=yuv420p,setsar=1[b]`,
-  `[2:v]fps=${FPS},format=yuv420p,setsar=1[c]`,
-  `[a][b]xfade=transition=fade:duration=${XF}:offset=${(dIn - XF).toFixed(3)}[ab]`,
-  `[ab][c]xfade=transition=fade:duration=${XF}:offset=${(dIn + dBody - 2 * XF).toFixed(3)}[v]`
-];
-const args = ['-y', '-i', path.join(PARTS, 'intro.mp4'), '-i', body, '-i', path.join(PARTS, 'outro.mp4')];
+// سلسلةُ ذوبانات: كلُّ مقطعٍ يذوب في الذي يليه. إزاحةُ الوصلة k = مجموعُ ما قبلها ناقص k×XF.
+const v = parts.map((_, i) => `[${i}:v]fps=${FPS},format=yuv420p,setsar=1[s${i}]`);
+let acc = 's0', off = 0;
+for (let i = 1; i < parts.length; i++) {
+  off += durs[i - 1] - XF;
+  const outLbl = i === parts.length - 1 ? 'v' : `x${i}`;
+  v.push(`[${acc}][s${i}]xfade=transition=fade:duration=${XF}:offset=${off.toFixed(3)}[${outLbl}]`);
+  acc = outLbl;
+}
+if (parts.length === 1) v.push(`[s0]null[v]`);
+const args = ['-y'];
+for (const p of parts) args.push('-i', p);
 if (haveMusic) args.push('-i', music);
 // تلاشٍ لطيفٌ في أوّل الموسيقى وآخرِها كي لا تبدأ أو تنقطع فجأة.
 const fadeOutAt = Math.max(0, total - 3);
@@ -131,7 +168,7 @@ args.push('-filter_complex', haveMusic
   // `loudnorm` يرفع تردّدَ العيّنات داخلياً إلى ١٩٢ ك.هرتز ويُخرج ٩٦ ك.هرتز — وAAC على
   // ٩٦ ك.هرتز لا تفكّه كثيرٌ من مشغّلات الهواتف (واتساب · iOS) فيُعرَض الفيلمُ **بلا صوتٍ
   // أو بصوتٍ يتقطّع** بينما يبدو سليماً على الحاسوب. `aresample=48000` يعيده إلى المعيار.
-  ? v.join(';') + `;[3:a]afade=t=in:st=0:d=2,afade=t=out:st=${fadeOutAt.toFixed(2)}:d=3,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[aud]`
+  ? v.join(';') + `;[${parts.length}:a]afade=t=in:st=0:d=2,afade=t=out:st=${fadeOutAt.toFixed(2)}:d=3,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[aud]`
   : v.join(';'));
 args.push('-map', '[v]');
 if (haveMusic) args.push('-map', '[aud]', '-c:a', 'aac', '-b:a', '192k', '-shortest');
@@ -145,12 +182,12 @@ if (enc.status !== 0 || !fs.existsSync(film)) {
   die('فشل الوصل');
 }
 
-/* ═════════ ٥) نسخةُ المشاركة — تُصنَع فقط إن تجاوز الأصلُ السقف ═════════ */
+/* ═════════ ٤) نسخةُ المشاركة — تُصنَع فقط إن تجاوز الأصلُ السقف ═════════ */
 // بعد أن صار الالتقاطُ نظيفاً، صار الأصلُ (CRF 18) أصغرَ من السقف أصلاً: المشاهدُ
 // الساكنةُ تكاد لا تكلّف بتّاً. وفرضُ معدّلِ بتٍّ عليها يُنتج ملفاً **أكبرَ وأدنى
 // جودةً** من الأصل — فلا تُصنع النسخةُ إلا عند الحاجة الفعلية إليها.
 const CAP_MB = Number(process.env.PROMO_MAX_MB || 28);
-const hd = path.join(OUT, 'promo-film-hd.mp4');
+const hd = path.join(OUT, FILMS[FILM].name + '-hd.mp4');
 fs.rmSync(hd, { force: true });
 const filmMB = fs.statSync(film).size / 1048576;
 if (filmMB > CAP_MB && !FOURK) {
@@ -174,5 +211,5 @@ L(`     ${fmt(dur(film))}  ·  ${FOURK ? '3840×2160' : '1920×1080'}  ·  ${mb(
 if (fs.existsSync(hd)) L(`  ✅ نسخةُ المشاركة: ${hd}  ·  ${mb(hd)} م.ب  ·  1920×1080`);
 else if (FOURK) L(`     (وضع 4K: لا نسخةَ مضغوطة — الحجمُ مقصودٌ هنا)`);
 else L(`     (الأصلُ دون سقف ${CAP_MB} م.ب — فهو نفسُه نسخةُ المشاركة، بلا إعادة ترميز)`);
-L(`     البنية: افتتاح ${dIn.toFixed(1)}ث + جولة ${fmt(dBody)} + ختام ${dOut.toFixed(1)}ث (ذوبان ${XF}ث ×٢)`);
+L(`     البنية: ${SEGMENTS.map((s, i) => `${s.label} ${fmt(durs[i])}`).join(' + ')} (ذوبان ${XF}ث ×${parts.length - 1})`);
 L('══════════════════════════════════════════════════════\n');

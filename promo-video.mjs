@@ -8,6 +8,8 @@
 //
 //   node promo-video.mjs            → فيديو MP4 كامل (~٣ دقائق)
 //   node promo-video.mjs --probe    → لقطاتٌ فقط بلا تسجيل (تكرارٌ سريع أثناء الضبط)
+//   node promo-video.mjs --topic ai → مجموعةُ فصولٍ أخرى (فصولُ الذكاء الاصطناعي) — الجولةُ
+//                                     الأصليةُ تبقى كما هي، والمخرَجُ باسمٍ مستقلّ (promo-ai.mp4)
 //
 // المتطلّبات:  npm install --no-save playwright-core ffmpeg-static chart.js@4.4.1
 //              (في أمرٍ واحد — `--no-save` يحذف ما لم يُذكر فيه من الحزم غير المسجَّلة)
@@ -35,7 +37,10 @@ const VW = FOURK ? 3840 : 1920, VH = FOURK ? 2160 : 1080;
 const STEP_MS = Number(process.env.PROMO_STEP_MS || (FOURK ? 152 : 44));
 // بلا بطاقتَي الافتتاح والختام — حين تأتيان من إعلان Remotion في `promo-assemble.mjs`.
 const NO_BOOKENDS = process.argv.includes('--no-bookends');
-const NAME = NO_BOOKENDS ? 'promo-body' : 'promo';
+// موضوعُ الجولة: مجموعةُ فصولٍ قابلةٌ للاختيار (`TOPICS` أدناه). بلا وسيطٍ = الجولةُ
+// الأصلية بفصولها كلِّها — فإضافةُ موضوعٍ لا تمسّ الفيديو القائم ولا تُعيد تسجيله.
+const TOPIC = (() => { const i = process.argv.indexOf('--topic'); return i > 0 ? String(process.argv[i + 1] || '').trim() : ''; })();
+const NAME = (NO_BOOKENDS ? 'promo-body' : 'promo') + (TOPIC ? '-' + TOPIC : '');
 const SPEED = Number(process.env.PROMO_SPEED || (PROBE ? 12 : 1));   // مُسرِّعٌ للتجريب
 
 // تُمسح مخرجاتُ هذا السكربت وحدَها لا المجلّدُ كلُّه — فقد تجاور فيه أجزاءُ التجميع.
@@ -117,7 +122,10 @@ const OVERLAY = `
    '#pv-flash.on{opacity:1}',
    // بطاقاتُ إشعارات HailNotify (بلاغاتُ الصيانة الوقائية المولَّدة تلقائياً وقتَ
    // الدخول) تطفو أسفل اليمين فوق شريط التعليق. تُخفى في الفيلم وحدَه — كالـtoast.
-   '#hn-stack{display:none!important}'
+   '#hn-stack{display:none!important}',
+   // شريطُ «بلاغاتٌ تجاوزت SLA» يطفو أعلى الشاشة ثماني ثوانٍ عند دخول بعض الصفحات (التقارير)
+   // فيغطّي ترويسةَ النافذة المفتوحة. يُخفى في الفيلم وحدَه بالمنطق نفسِه.
+   '#sla-alert-bar{display:none!important}'
   ].join('');
   document.head.appendChild(css);
 
@@ -275,6 +283,18 @@ function seedAll() {
     };
   });
 
+  // صورةُ عطلٍ توضيحية للبلاغ TK-2041 — رسمٌ متجهيٌّ للوحة توزيعٍ عليها أثرُ احتراق،
+  // مضمَّنٌ كـ`data:` كي يقرأه زرُّ «تحليل صورة العطل» بلا شبكة (`safeUrl` يقبل `data:image/`).
+  // ليست صورةً حقيقية: استبدلها بصورةِ موقعٍ فعلية متى توفّرت.
+  const svgPhoto = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480">'
+    + '<rect width="640" height="480" fill="#8f9aa6"/><rect x="90" y="40" width="460" height="400" rx="10" fill="#d9dee5" stroke="#5b6672" stroke-width="6"/>'
+    + '<rect x="120" y="70" width="400" height="60" rx="4" fill="#3b4652"/><text x="320" y="110" text-anchor="middle" font-family="sans-serif" font-size="26" fill="#e8edf2">DB-01 · 400V</text>'
+    + Array.from({ length: 8 }, (_, i) => '<rect x="' + (128 + i * 49) + '" y="170" width="38" height="110" rx="4" fill="#f4f6f8" stroke="#6b7580" stroke-width="3"/><rect x="' + (140 + i * 49) + '" y="195" width="14" height="40" rx="3" fill="' + (i === 2 ? '#c0392b' : '#2f3e4e') + '"/>').join('')
+    + '<ellipse cx="240" cy="235" rx="60" ry="46" fill="#1f1a17" opacity=".78"/><ellipse cx="236" cy="228" rx="34" ry="24" fill="#3a2a1e" opacity=".85"/>'
+    + Array.from({ length: 8 }, (_, i) => '<rect x="' + (128 + i * 49) + '" y="310" width="38" height="110" rx="4" fill="#f4f6f8" stroke="#6b7580" stroke-width="3"/><rect x="' + (140 + i * 49) + '" y="335" width="14" height="40" rx="3" fill="#2f3e4e"/>').join('')
+    + '</svg>';
+  S[T + '/TK-2041'].ticketPhoto = 'data:image/svg+xml;utf8,' + encodeURIComponent(svgPhoto);
+
   /* ── المشتريات ── */
   const mkPO = (id, status, vendor, items, extra) => {
     const sub = items.reduce((s, x) => s + x.qty * x.unitCost, 0);
@@ -314,6 +334,39 @@ function seedAll() {
     mkPO('PO-1035', 'rejected', 'مورّد غير معتمد', [IT('عدّة يدوية', 10, 'طقم', 310)], { rejectReason: 'المورّد خارج القائمة المعتمدة' })
   ];
   POS.forEach(po => { S[PC + '/' + po.id] = po; });
+  // مقارنةٌ ذكيةٌ محفوظةٌ على PO-1040: ثلاثةُ عروضٍ رُفعت ملفّاتُها واستُخرجت بنودُها — البندُ
+  // الأوّلُ ورد بثلاث تسمياتٍ فوُحّد، والثالثُ لم يسعّره مورّدٌ. تُعرَض في نافذة الطلب كما
+  // يُعرَض أيُّ استخراجٍ محفوظ (`_pcAIUsed`) — بلا نداءٍ وقتَ التسجيل. الأرقامُ توضيحية.
+  const AIS = ['مؤسسة الخليج للتكييف', 'شركة التبريد المتقدم', 'مؤسسة الرياض للتجارة'];
+  S[PC + '/PO-1040'].priceComparisons2 = [{
+    id: 'g_ai', label: 'مقارنة عامة', itemIndices: [0, 1], suppliers: [], decisions: [], rationale: '',
+    aiFiles: [
+      { name: 'عرض-الخليج-للتكييف.pdf', url: 'https://example.com/q1.pdf', ext: 'pdf', supplierName: AIS[0] },
+      { name: 'عرض-التبريد-المتقدم.pdf', url: 'https://example.com/q2.pdf', ext: 'pdf', supplierName: AIS[1] },
+      { name: 'عرض-الرياض-للتجارة.jpg', url: 'https://example.com/q3.jpg', ext: 'jpg', supplierName: AIS[2] }
+    ],
+    aiExtract: {
+      suppliers: AIS, at: D(10, 11), by: 'م. أسامة السادات',
+      items: [
+        { canonicalName: 'فلتر تكييف مقاس ٢٤', unit: 'قطعة', unified: true, unifyNote: 'ورد باسم «فلتر هواء 24 بوصة» و«فلتر AC-24» — المقاسُ والمواصفةُ نفسُها',
+          quotes: [{ supplierIndex: 0, rawName: 'فلتر تكييف 24', unitPrice: 38, qty: 60 }, { supplierIndex: 1, rawName: 'فلتر هواء 24 بوصة', unitPrice: 41.5, qty: 60 }, { supplierIndex: 2, rawName: 'فلتر AC-24', unitPrice: 36, qty: 60 }] },
+        { canonicalName: 'غاز تبريد R410', unit: 'أسطوانة', unified: false,
+          quotes: [{ supplierIndex: 0, rawName: 'غاز R410A أسطوانة 11.3 كجم', unitPrice: 420, qty: 8 }, { supplierIndex: 1, rawName: 'غاز تبريد R-410', unitPrice: 455, qty: 8 }] },
+        { canonicalName: 'زيت كمبروسر POE', unit: 'لتر', unified: false,
+          quotes: [{ supplierIndex: 0, rawName: 'زيت POE 68', unitPrice: 48, qty: 10 }, { supplierIndex: 1, rawName: 'زيت كمبروسر POE', unitPrice: 52, qty: 10 }, { supplierIndex: 2, rawName: 'زيت تبريد POE-68', unitPrice: 45, qty: 10 }] }
+      ],
+      notes: 'مؤسسة الرياض لم تسعّر غاز التبريد. عرض الخليج يشمل التوريد خلال ٥ أيام، وعرض التبريد المتقدم يمنح ضماناً سنةً على الغاز.'
+    },
+    aiSummary: [
+      '**التوصية:** الترسية على **مؤسسة الخليج للتكييف** للبنود الثلاثة.',
+      '',
+      '- **الأرخص إجمالاً** على البنود المسعَّرة كاملةً، مع تغطيةٍ لكلّ البنود.',
+      '- مؤسسة الرياض أرخصُ في الفلاتر والزيت لكنها **لم تسعّر غاز التبريد** — فتجزئةُ الترسية توفّر مبلغاً محدوداً مقابل تعقيد التوريد.',
+      '- شركة التبريد المتقدم أغلى في كلّ بند، وميزتُها الوحيدة ضمانُ الغاز.',
+      '',
+      '**ملاحظة:** يُنصح بتثبيت مدّة التوريد (٥ أيام) في أمر الشراء.'
+    ].join('\n')
+  }];
   S[PO_META_DOC()] = { counter: 1042 };
 
   /* ── طلبات التسعير ── */
@@ -618,9 +671,55 @@ const CHAPTERS = [
     sub: 'شاشةُ عرضٍ دائمةٌ في غرفة التشغيل تُحدَّث لحظياً — البلاغُ يظهر فور تسجيله',
     lower: ['لوحة العرض TV', 'شاشةٌ تعمل بلا تدخّل — تُحدَّث مع كلّ بلاغٍ يُسجَّل أو يُغلق'] }
 ];
+/* ── موضوعٌ آخر: فصولُ الذكاء الاصطناعي وحدَها ──
+   الشاشاتُ حقيقيةٌ والنقرُ حقيقيّ، والردودُ من `AI_CANNED`. كلُّ فصلٍ يفتح صفحتَه ثم
+   يدخل «عن قرب» في نافذةٍ أو زرّ. يُستهلك في فيلم «الذكاء الاصطناعي في إدارة المرافق»
+   (`promo-assemble.mjs --film ai`) بعد مشاهد Remotion العامّة. */
+const AI_CHAPTERS = [
+  { page: 'tickets', kicker: 'نافذة البلاغ', title: 'ثلاثُ أدواتٍ في نافذة كلّ بلاغ',
+    sub: 'فرزٌ وتصنيف · تحليلُ صورة العطل · كشفُ التكرار',
+    lower: ['سجلّ البلاغات', 'من نافذة أيّ بلاغ: فرزٌ وتصنيف · تحليلُ صورة العطل · كشفُ التكرار — بضغطة زرّ'],
+    after: () => aiTicketCloseUp() },
+
+  { page: 'daily', kicker: 'إغلاق البلاغ', title: 'من ملاحظةٍ مختصرة إلى تقريرٍ مكتمل',
+    sub: 'الفنّي يكتب سطراً، والذكاء الاصطناعي يصوغه تقريرَ إغلاق',
+    lower: ['الحركة اليومية', 'الفنّي يكتب سطراً بلغة الميدان، والذكاء الاصطناعي يصوغه تقريرَ إغلاقٍ رسمياً — والمشرفُ يراجع قبل الحفظ'],
+    after: () => aiCloseDraftCloseUp() },
+
+  { page: 'purchases', kicker: 'عروض الأسعار', title: 'العروضُ تُقرأ آلياً وتُقارَن بنداً بند',
+    sub: 'ملفّاتُ العروض تُرفع كما هي، فيستخرج النموذجُ البنودَ ويوحّد تسمياتها',
+    lower: ['المشتريات', 'ملفّاتُ العروض تُرفع كما هي — فيستخرج النموذجُ البنودَ ويوحّد تسمياتها المختلفة ويكتب توصيته'],
+    after: () => aiQuoteCloseUp() },
+
+  { page: 'reports', kicker: 'الخطابات الرسمية', title: 'خطابٌ رسميٌّ من نقاطٍ مختصرة',
+    sub: 'الموضوعُ والجهةُ والنقاط — والخطابُ بالصيغة الإدارية المعتمدة',
+    lower: ['التقارير', 'الموضوعُ والجهةُ والنقاط — والخطابُ يخرج بالصيغة الإدارية المعتمدة جاهزاً للمراجعة والطباعة'],
+    after: () => aiLetterCloseUp() },
+
+  { page: 'monthly-compare', kicker: 'الملخّص التنفيذي', title: 'شهرٌ كاملٌ في ملخّصٍ للإدارة',
+    sub: 'شهرٌ مقابل شهر بالأرقام — وزرٌّ واحدٌ يحوّلها إلى ملخّصٍ مكتوب',
+    lower: ['المقارنة الشهرية', 'شهرٌ مقابل شهر بالأرقام — وزرٌّ واحدٌ يحوّلها إلى ملخّصٍ تنفيذيٍّ مكتوب'],
+    act: '#mcomp-months-row .mcomp-month-btn:first-child',
+    after: () => aiMonthlyCloseUp() },
+
+  { page: 'admin-panel', kicker: 'الحوكمة', title: 'المفتاحُ خادميٌّ والاستهلاكُ مسجَّل',
+    sub: 'مفتاحُ الذكاء الاصطناعي لا يصل إلى المتصفّح، وكلُّ نداءٍ يُحصى',
+    lower: ['لوحة الإدارة', 'مفتاحُ الذكاء الاصطناعي لا يصل إلى المتصفّح ولا يُخزَّن في النظام — وكلُّ نداءٍ يُحصى شهرياً ولكلّ ميزة'],
+    after: () => aiSettingsCloseUp() }
+];
+const TOPICS = {
+  ai: {
+    chapters: AI_CHAPTERS,
+    intro: ['شركة المباني السريعة', 'الذكاء الاصطناعي داخل المنصة', 'فرزُ البلاغات وتحليلُ صورها · تقاريرُ الإغلاق · عروضُ الأسعار · الخطابات · الملخّصُ التنفيذيّ'],
+    outro: ['شركة المباني السريعة', 'الذكاءُ يقترح، والإنسانُ يقرّر', 'كلُّ توصيةٍ تُراجَع قبل أن تصبح قراراً — والبياناتُ داخل المنصة']
+  }
+};
+if (TOPIC && !TOPICS[TOPIC]) { console.error('موضوعٌ غيرُ معروف: ' + TOPIC + ' — المتاح: ' + Object.keys(TOPICS).join(', ')); process.exit(1); }
+const TOUR = TOPIC ? TOPICS[TOPIC] : null;
+const ACTIVE = TOUR ? TOUR.chapters : CHAPTERS;
 // ترقيمُ الفصول مشتقٌّ من ترتيبها — فإدراجُ فصلٍ لا يُعيد ترقيمَ ما بعده يدوياً.
 const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩';
-CHAPTERS.forEach((c, i) => { c.n = String(i + 1).replace(/\d/g, d => AR_DIGITS[d]); });
+ACTIVE.forEach((c, i) => { c.n = String(i + 1).replace(/\d/g, d => AR_DIGITS[d]); });
 
 /* ═════════════════════════════════ التشغيل ═════════════════════════════════ */
 const t0 = Date.now();
@@ -724,10 +823,66 @@ const AI_CANNED = {
     '1. **إسناد البلاغات الأربعة المتأخّرة اليوم** — التأخّرُ ناتجٌ عن غياب الإسناد لا عن التنفيذ.',
     '2. **دمج بلاغ المصعد مع خطة PPM-070** في زيارةٍ واحدة للمقاول المختصّ.',
     '3. مراجعة لوحة التوزيع DB-01 بعد بلاغَي الانقطاع المتكرّرَين في مبنى الإدارة.'
+  ].join('\n'),
+  // تحليلُ صورة العطل (TK-2041 — لوحةُ التوزيع المرسومة في البذرة)
+  photo: [
+    '**ما تُظهره الصورة:** لوحةُ توزيعٍ فرعية (DB-01) عليها **أثرُ احتراقٍ واسودادٍ** حول القاطع الثالث في الصفّ العلويّ.',
+    '',
+    '**الشدّة التقديرية:** متوسطة إلى عالية — أثرٌ حراريٌّ واضحٌ دون اشتعالٍ قائم.',
+    '',
+    '**السبب المحتمل:** ربطٌ غيرُ محكمٍ لطرف الكابل عند القاطع أدّى إلى مقاومة تلامسٍ وارتفاعِ حرارةٍ موضعيّ — يفسّر الفصلَ التلقائيَّ المتكرّر.',
+    '',
+    '**المواد المرجّح الحاجة إليها:** قاطع ٣٢ أمبير بديل · أطراف كابل ٦ مم · شريط عازل حراري.',
+    '',
+    '**الإجراء:** فصلُ التغذية عن اللوحة قبل أيّ عمل، استبدالُ القاطع وإعادةُ ربط الأطراف بالعزم المناسب، ثم فحصٌ حراريٌّ بعد التشغيل.'
+  ].join('\n'),
+  // كشفُ التكرار — يقرأ بلاغاتِ المبنى نفسِه من البذرة
+  recurring: [
+    '**نعم — يبدو العطل متكرّراً.**',
+    '',
+    'البلاغات المشابهة في المبنى نفسه:',
+    '- **TK-2036** — مقبس غرفة الخادم لا يعمل، **أُعيد فتحه** بعد الإصلاح (كهرباء).',
+    '- **TK-2033** — ربطٌ دوريٌّ وفحصُ حرارة لوحات التوزيع (وقائية، مغلق).',
+    '',
+    '**السبب الجذري المحتمل:** حملٌ زائدٌ على الخطّ الفرعيّ للدور الثاني أو ضعفُ ربطٍ في لوحة DB-01 — فالبلاغان السابقان على الدائرة نفسِها.',
+    '',
+    '**التوصية:** معالجةٌ جذرية على اللوحة (قياسُ الأحمال وإعادةُ توزيعها) بدل إصلاحٍ موضعيٍّ للمرّة الثالثة، وربطُ البلاغين معاً في تقرير الإغلاق.'
+  ].join('\n'),
+  // صياغةُ تقرير الإغلاق — من ملاحظة الفنّي المختصرة على TK-2040
+  close: 'تمّ فحص وحدة التكييف المركزي بقاعة الاجتماعات، وتبيّن انخفاض ضغط غاز التبريد نتيجة تسرّبٍ بسيط عند وصلة الأنبوب الخارجي. تمّت معالجة التسرّب بلحام الوصلة واختبار الضغط، ثم إعادة شحن الغاز (R410) وتنظيف الفلاتر، والتشغيل التجريبي مع التأكد من وصول درجة التبريد المطلوبة. الوحدة تعمل بكفاءة، ويُوصى بفحص دوري للوصلات خلال الشهر القادم.',
+  // الخطابُ الرسميّ — بعناصرَ نائبةٍ لما لم يُذكر
+  letter: [
+    'التاريخ: [التاريخ]        الرقم المرجعي: [الرقم]',
+    '',
+    '**إلى:** سعادة مدير عام أمانة منطقة حائل — حفظه الله',
+    '',
+    '**الموضوع:** إشعار إنجاز أعمال الصيانة الشهرية — مبنى الإدارة العامة',
+    '',
+    'السلام عليكم ورحمة الله وبركاته، وبعد:',
+    '',
+    'إشارةً إلى عقد التشغيل والصيانة رقم [رقم العقد]، نفيد سعادتكم بأنه قد تمّ بحمد الله إنجاز أعمال الصيانة الشهرية لمبنى الإدارة العامة، وشملت ما يلي:',
+    '',
+    '1. اكتمال صيانة وحدات التكييف المركزي.',
+    '2. استبدال لوحة التوزيع الفرعية بالدور الثاني.',
+    '3. إرفاق التقرير المصوّر للأعمال المنفَّذة.',
+    '',
+    'ونأمل من سعادتكم التكرّم بالاطّلاع، وتوجيه من يلزم بمعاينة الأعمال واستلامها.',
+    '',
+    'وتفضّلوا بقبول فائق الاحترام والتقدير،',
+    '',
+    '**مدير المشروع**',
+    'م. أسامة السادات',
+    'شركة المباني السريعة للمقاولات'
   ].join('\n')
 };
+// كلُّ ميزةٍ تُعرَف بجملةٍ ثابتةٍ في نصّ طلبها (`index.html`) — فالمطابقةُ عليها لا على كلمةٍ عامّة.
 function aiCanned(prompt) {
-  const text = /شهر|ملخص|مقارنة/.test(prompt) && !/بلاغ رقم|تصنيف/.test(prompt) ? AI_CANNED.monthly : AI_CANNED.triage;
+  const key = /الصورة أعلاه مرفقة/.test(prompt) ? 'photo'
+    : /بلاغات سابقة في نفس المبنى/.test(prompt) ? 'recurring'
+    : /تقارير إغلاق بلاغات/.test(prompt) ? 'close'
+    : /خطاباً رسمياً كاملاً/.test(prompt) ? 'letter'
+    : /ملخصاً تنفيذياً شهرياً/.test(prompt) ? 'monthly' : 'triage';
+  const text = AI_CANNED[key];
   return {
     id: 'msg_demo', type: 'message', role: 'assistant', model: 'claude-sonnet-4-6', stop_reason: 'end_turn',
     usage: { input_tokens: 380, output_tokens: 310 }, content: [{ type: 'text', text }]
@@ -1000,7 +1155,7 @@ async function goPage(id) {
   return clicked;
 }
 
-const TOTAL_STEPS = CHAPTERS.length + 3;
+const TOTAL_STEPS = ACTIVE.length + 3;
 
 /* ── مشاهدُ «عن قرب» داخل الفصول ── */
 // بطاقةُ مشروعٍ مفتوحة: نظرةٌ عامة بالموازنة والمصروف حسب الفئة، ثم العودةُ للقائمة.
@@ -1021,8 +1176,13 @@ async function projectCloseUp() {
 
 // الذكاء الاصطناعي: بيتان في فصلٍ واحد — ملخّصٌ تنفيذيٌّ للشهر بضغطة، ثم فرزُ بلاغٍ
 // من داخل نافذته. الردّان مُعدّان (انظر `AI_CANNED`)، والشاشةُ وسلوكُها حقيقيان.
+// (الجولةُ الأصلية تجمعهما في فصلٍ واحد؛ وموضوعُ `ai` يستعمل كلَّ بيتٍ في فصله.)
 async function aiCloseUp() {
-  // ① الملخّص التنفيذي من صفحة المقارنة الشهرية
+  await aiMonthlyCloseUp();
+  await aiTriageCloseUp();
+}
+// ① الملخّص التنفيذي من صفحة المقارنة الشهرية
+async function aiMonthlyCloseUp() {
   const b1 = await cursorTo('#page-monthly-compare [onclick="aiMonthlySummary()"]', { settle: 600 });
   if (b1) {
     await clickAt('#page-monthly-compare [onclick="aiMonthlySummary()"]', b1);
@@ -1039,7 +1199,9 @@ async function aiCloseUp() {
     await page.evaluate(() => { try { closeModal('modal-ai-summary'); } catch (e) { } }).catch(() => { });
     await wait(700);
   }
-  // ② فرزُ بلاغٍ من داخل نافذته
+}
+// ② فرزُ بلاغٍ من داخل نافذته
+async function aiTriageCloseUp() {
   await captionOut();
   await page.evaluate(() => { try { openDetail('TK-2041'); } catch (e) { } }).catch(() => { });
   await wait(1800);
@@ -1065,6 +1227,131 @@ async function aiCloseUp() {
   await wait(600);
 }
 
+/* ── مشاهدُ موضوع الذكاء الاصطناعي (`--topic ai`) ── */
+// تمريرُ عنصرٍ داخل نافذةٍ إلى وسط الشاشة — `cursorTo` لا يمرّر إلا داخل `.main-area`.
+const scrollTo = (sel, block) => page.evaluate(([s, b]) => {
+  const e = document.querySelector(s); if (e) e.scrollIntoView({ block: b || 'center', behavior: 'instant' });
+}, [sel, block]).catch(() => { });
+// ينتظر أن يحوي عنصرٌ نصّاً بعينه — بعد ردّ الوكيل المُعدّ (مهلةُ ١٫٤ث مقصودةٌ ليُرى الانتظار).
+const waitText = (sel, re) => page.waitForFunction(([s, r]) => {
+  const e = document.querySelector(s); return !!e && new RegExp(r).test((e.value !== undefined ? e.value : e.textContent) || '');
+}, [sel, re.source], { timeout: 15000 }).catch(() => { });
+
+// نافذةُ البلاغ TK-2041: الأزرارُ الثلاثة واحداً بعد الآخر، بردٍّ مُعدٍّ لكلٍّ منها.
+async function aiTicketCloseUp() {
+  await captionOut();
+  await page.evaluate(() => { try { openDetail('TK-2041'); } catch (e) { } }).catch(() => { });
+  await wait(1800);
+  await overlay();
+  const steps = [
+    ['#ai-triage-btn', /الفنّي المناسب/, 'فرزُ البلاغ وتصنيفُه', 'التصنيفُ والأولوية والسببُ الأرجح وخطواتُ الفحص والفنّي المناسب — من بيانات البلاغ نفسِها', 'ai-triage'],
+    ['#ai-photo-btn', /الإجراء/, 'تحليلُ صورة العطل', 'النموذجُ يقرأ الصورةَ المرفقة بالبلاغ: نوعُ الخلل وشدّتُه وسببُه المحتمل والموادُّ المرجّحة', 'ai-photo'],
+    ['#ai-recur-btn', /السبب الجذري/, 'كشفُ الأعطال المتكرّرة', 'يقارن البلاغَ بما سبقه في المبنى نفسِه ويقترح السببَ الجذريّ — بدل إصلاحٍ موضعيٍّ للمرّة الثالثة', 'ai-recurring']
+  ];
+  for (const [sel, re, main, sub, name] of steps) {
+    await scrollTo(sel); await wait(400);
+    const b = await cursorTo(sel, { settle: 600 });
+    if (!b) { L('  ⚠️  زرٌّ غيرُ موجود: ' + sel); continue; }
+    await clickAt(sel, b);
+    await waitText('#detail-ai-result', re);
+    await overlay();
+    await scrollTo('#detail-ai-result');
+    await captionIn(main, sub, 'الذكاء الاصطناعي — نافذة البلاغ');
+    await wait(5200);
+    await shot(name);
+  }
+  await page.evaluate(() => { try { closeModal('modal-detail'); } catch (e) { } }).catch(() => { });
+  await wait(600);
+}
+
+// نافذةُ إغلاق TK-2040: ملاحظةٌ مختصرةٌ تُكتب فعلاً، ثم زرُّ الصياغة يملأ الحقل.
+async function aiCloseDraftCloseUp() {
+  await captionOut();
+  await page.evaluate(() => { try { openCloseModal('TK-2040'); } catch (e) { } }).catch(() => { });
+  await wait(1500);
+  await overlay();
+  await captionIn('الفنّي يكتب ملاحظةً مختصرة', 'سطرٌ واحدٌ بلغة الميدان — بلا صياغةٍ ولا تنسيق', 'الذكاء الاصطناعي — إغلاق البلاغ');
+  await clickEl('#close-work', { settle: 500 });
+  await page.type('#close-work', 'غيرنا غاز التبريد ولحمنا الوصلة ونظفنا الفلاتر والتكييف اشتغل تمام', { delay: 45 });
+  await wait(900);
+  await shot('ai-close-brief');
+  const b = await cursorTo('#ai-close-btn', { settle: 600 });
+  if (b) {
+    await clickAt('#ai-close-btn', b);
+    await waitText('#close-work', /وحدة التكييف/);
+    await overlay();
+    await captionIn('…والذكاء الاصطناعي يصوغها تقريرَ إغلاق', 'وصفٌ مهنيٌّ منظّم لحقل «العمل المنجز» — ملتزمٌ بما ذكره الفنّي بلا إضافة، ويُراجَع قبل الحفظ', 'الذكاء الاصطناعي — إغلاق البلاغ');
+    await wait(5200);
+    await shot('ai-close-draft');
+  }
+  await page.evaluate(() => { try { closeModal('modal-close'); } catch (e) { } }).catch(() => { });
+  await wait(600);
+}
+
+// نافذةُ PO-1040: المقارنةُ الذكية المحفوظة (جدولُ الاستخراج ثم التوصية).
+async function aiQuoteCloseUp() {
+  await captionOut();
+  await page.evaluate(() => { try { openPurchaseDetail('PO-1040'); } catch (e) { } }).catch(() => { });
+  await wait(2600);
+  await overlay();
+  await scrollTo('#modal-purchase-detail .pcai-table'); await wait(500);
+  await captionIn('المقارنةُ الذكية على طلبٍ حقيقيّ — PO-1040',
+    'ثلاثةُ عروضٍ بثلاث تسمياتٍ للبند نفسِه — وحّدها النموذجُ في صفٍّ واحد، وعلّم الأرخصَ لكلّ بند، وأظهر ما لم يُسعَّر',
+    'الذكاء الاصطناعي — عروض الأسعار');
+  await wait(5200);
+  await shot('ai-quotes');
+  await scrollTo('#modal-purchase-detail .pc-ai-body'); await wait(400);
+  await captionIn('…وتوصيةٌ تنفيذيةٌ مكتوبة', 'الأرخصُ إجمالاً ليس دائماً الأفضل: التوصيةُ تزن السعرَ والتغطيةَ وشروطَ التوريد', 'الذكاء الاصطناعي — عروض الأسعار');
+  await wait(4600);
+  await shot('ai-quotes-summary');
+  await page.evaluate(() => { try { closeModal('modal-purchase-detail'); } catch (e) { } }).catch(() => { });
+  await wait(700);
+}
+
+// مساعدُ الخطابات من صفحة التقارير: موضوعٌ ونقاطٌ تُكتب، ثم الخطابُ كاملاً.
+async function aiLetterCloseUp() {
+  await captionOut();
+  const sel = '#page-reports [onclick="openAILetter()"]';
+  const b0 = await cursorTo(sel, { settle: 600 });
+  if (b0) await clickAt(sel, b0); else await page.evaluate(() => { try { openAILetter(); } catch (e) { } }).catch(() => { });
+  await wait(1200);
+  await overlay();
+  await captionIn('الموضوعُ والجهةُ والنقاط', 'لا يكتب المستخدمُ إلا ما يعرفه: موضوعَ الخطاب ونقاطَه الأساسية', 'الذكاء الاصطناعي — الخطابات الرسمية');
+  await clickEl('#ail-subject', { settle: 400 });
+  await page.type('#ail-subject', 'إشعار إنجاز أعمال الصيانة الشهرية — مبنى الإدارة العامة', { delay: 40 });
+  await clickEl('#ail-points', { settle: 400 });
+  await page.type('#ail-points', 'اكتمال صيانة وحدات التكييف المركزي\nاستبدال لوحة التوزيع الفرعية بالدور الثاني\nإرفاق التقرير المصوّر للأعمال', { delay: 32 });
+  await wait(700);
+  await shot('ai-letter-input');
+  const b = await cursorTo('#ail-gen-btn', { settle: 600 });
+  if (b) {
+    await clickAt('#ail-gen-btn', b);
+    await waitText('#ail-result', /الاحترام/);
+    await overlay();
+    await scrollTo('#ail-result', 'start');
+    await captionIn('خطابٌ بالصيغة الإدارية المعتمدة', 'تاريخٌ ومرجعٌ وتحيةٌ ومتنٌ وختام — بعناصرَ نائبةٍ لما لم يُذكر، بلا اختلاق', 'الذكاء الاصطناعي — الخطابات الرسمية');
+    await wait(5200);
+    await shot('ai-letter');
+  }
+  await page.evaluate(() => { try { closeModal('modal-ai-letter'); } catch (e) { } }).catch(() => { });
+  await wait(600);
+}
+
+// إعداداتُ الذكاء الاصطناعي في لوحة الإدارة: رابطُ الوسيط يُموَّه في الصورة وحدَها.
+async function aiSettingsCloseUp() {
+  await page.evaluate(() => {
+    const el = document.getElementById('admin-ai-proxy');
+    if (el) { el.value = 'https://hail-ai-proxy.••••••••.workers.dev'; el.scrollIntoView({ block: 'center', behavior: 'instant' }); }
+    // سطرُ الحالة تحته يعرض الرابطَ المحفوظ حرفياً — يُموَّه هو الآخر (الشاشةُ فقط، لا الوثيقة).
+    const st = document.getElementById('admin-ai-proxy-status');
+    if (st) st.innerHTML = st.innerHTML.replace(/https?:\/\/[^\s<]+/g, 'https://hail-ai-proxy.••••••••.workers.dev');
+  }).catch(() => { });
+  await wait(600);
+  await captionIn('المفتاحُ مُدارٌ خادمياً', 'مفتاحُ النموذج داخل وسيطٍ خادميٍّ لا يصل إلى المتصفّح ولا يُخزَّن في النظام — وكلُّ نداءٍ يُسجَّل استهلاكُه لكلّ ميزة', 'الذكاء الاصطناعي — الحوكمة');
+  await wait(4800);
+  await shot('ai-settings');
+}
+
 // مراحلُ الشراء: نافذةُ طلبٍ مغلقٍ يظهر أعلاها مسارُ المراحل كاملاً — تُفتح داخل
 // فصل طلبات الشراء مباشرةً (كانت مُلحقةً بآخر الفيلم فانفصلت عن سياقها).
 async function poCloseUp() {
@@ -1084,7 +1371,7 @@ let step = 0;
 const progress = async () => { step++; await pv('bar', (step / TOTAL_STEPS) * 100); };
 
 L('\n══════════════════════════════════════════════════════');
-L(PROBE ? '  وضعُ المعاينة — لقطاتٌ بلا تسجيل' : '  تسجيلُ الفيديو التعريفيّ 1920×1080');
+L((PROBE ? '  وضعُ المعاينة — لقطاتٌ بلا تسجيل' : '  تسجيلُ الفيديو التعريفيّ 1920×1080') + (TOPIC ? ' · الموضوع: ' + TOPIC : ''));
 L('══════════════════════════════════════════════════════');
 
 /* ───────── الإقلاع ───────── */
@@ -1100,8 +1387,8 @@ L(`  ${el()}  التطبيق أقلع — الإصدار ${APPV || '؟'}`);
 if (!NO_BOOKENDS) await pv('flash', true);
 TRIM_AT = Date.now() - 400;                  // كلُّ ما قبله إقلاعٌ لا مشهد
 if (NO_BOOKENDS) await wait(700);
-else await titleCard('شركة المباني السريعة', 'نظام إدارة المرافق والمشتريات',
-  'منصّةٌ واحدةٌ تُدير البلاغات والمشتريات والمخزون والأصول والصيانة الوقائية — بأثرٍ كاملٍ لكلّ حركة', 5200, { shot: 'intro' });
+else await titleCard(...(TOUR ? TOUR.intro : ['شركة المباني السريعة', 'نظام إدارة المرافق والمشتريات',
+  'منصّةٌ واحدةٌ تُدير البلاغات والمشتريات والمخزون والأصول والصيانة الوقائية — بأثرٍ كاملٍ لكلّ حركة']), 5200, { shot: 'intro' });
 await pv('flash', false); await wait(500);
 await progress();
 
@@ -1152,7 +1439,7 @@ await progress();
 L(`  ${el()}  دخلنا المشروع`);
 
 /* ───────── ٤) الفصول ───────── */
-for (const ch of CHAPTERS) {
+for (const ch of ACTIVE) {
   // لا بطاقةَ فصلٍ ملءَ الشاشة ولا وميضٌ داكن: الشاشةُ تبقى معروضةً بلا انقطاع،
   // وعنوانُ الفصل يأتي في الشريط السفليّ فوقها. القطعُ إلى لوحٍ أزرقَ كان يقطع
   // السياق البصريّ، وتدرّجُه العريض أسوأُ ما يكسّره ضغطُ الفيديو.
@@ -1188,8 +1475,8 @@ for (const ch of CHAPTERS) {
 await pv('cursorOff'); await wait(300);
 // نُنهي على آخر شاشةٍ بلا تعليق: الذوبانُ إلى مشهد ختام Remotion يتكفّل بالانتقال.
 if (NO_BOOKENDS) { await captionOut(); await wait(900); }
-else await titleCard('شركة المباني السريعة', 'نظامٌ واحدٌ — من البلاغ إلى التقرير',
-  'بلاغاتٌ ومشترياتٌ ومخزونٌ وعهدٌ وأصولٌ وصيانةٌ وقائيةٌ ومؤشّراتُ أداء · الإصدار ' + (APPV || ''),
+else await titleCard(...(TOUR ? TOUR.outro : ['شركة المباني السريعة', 'نظامٌ واحدٌ — من البلاغ إلى التقرير',
+  'بلاغاتٌ ومشترياتٌ ومخزونٌ وعهدٌ وأصولٌ وصيانةٌ وقائيةٌ ومؤشّراتُ أداء · الإصدار ' + (APPV || '')]),
   6400, { shot: 'outro', keep: true });
 await progress();
 await wait(1400);
