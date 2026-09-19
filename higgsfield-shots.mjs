@@ -14,7 +14,7 @@
 // بلا وجوهٍ قريبة) كي تبدو من عائلةٍ واحدة. الناتجُ `remotion/public/ai/<key>.mp4` وسجلٌّ
 // `manifest.json` يقرؤه `promo-assemble.mjs` ويمرّره خاصيّةَ `clips` للتركيبة.
 //
-//   NODE_USE_ENV_PROXY=1 node higgsfield-shots.mjs   → يولّد ما ينقص من اللقطات
+//   NODE_USE_ENV_PROXY=1 node higgsfield-shots.mjs   → يولّد ما ينقص من اللقطات (--parallel: معاً)
 //   (المتغيّرُ لازمٌ في بيئة Claude Code: `fetch` المدمج في Node يتجاهل HTTPS_PROXY فلا يمرّ
 //    بالوسيط الذي يحقن المفتاح — فيردّ الخادمُ 401. محلياً مع HF_CREDENTIALS لا حاجةَ له.)
 //   node higgsfield-shots.mjs --force      → يعيد توليدها كلَّها
@@ -25,9 +25,14 @@
 // POST `{base}/{endpoint}` والجسمُ هو حقولُ الإدخال مباشرةً، ثم GET `/requests/{id}/status`
 // حتى `completed` (وفيه `video.url`) أو `failed` / `nsfw` (رفضٌ رقابيّ، يُردّ الرصيد).
 // الترويسة `Authorization: Key KEY_ID:KEY_SECRET` — وهي ما يحقنه وسيطُ الاعتماد.
-// قابلٌ للتجاوز بمتغيّرات البيئة دون تعديل السكربت: HF_API_BASE · HF_MODEL_PATH ·
-// HF_STATUS_PATH · HF_RESOLUTION. النموذجُ الافتراضيّ Seedance 2.0 لأنه يصل إلى 4K
-// (2.5 يقف عند 720p في جدول الأسعار)؛ لاختبارٍ رخيص: HF_MODEL_PATH=bytedance/seedance-2.5/text-to-video HF_RESOLUTION=720p.
+//
+// **الهويةُ داخل اللقطة لا فوقها (قرارُ المالك 19/09):** نقطةُ النهاية `reference-to-video`
+// تقبل صوراً مرجعيةً (`image_urls`)، فيُمرَّر شعارُ الشركة (رابطٌ عامّ من المستودع) ويُطلب في
+// الوصف رسمُه على السترة والروبوت ولافتة الجدار. جُرّب على `Seedance 2.5` بدقّة 720p فخرج
+// الشعارُ صحيحَ الشكل والألوان. النصُّ الصغير على السترة يتموّج قليلاً — مقبولٌ ولا يُعاد.
+// قابلٌ للتجاوز بمتغيّرات البيئة: HF_API_BASE · HF_MODEL_PATH · HF_STATUS_PATH · HF_RESOLUTION ·
+// HF_LOGO_URL. `Seedance 2.0` يصل إلى 4K لكن بسعرٍ أعلى؛ 2.5 يقف عند 720p (كافيةٌ لشاشة
+// 60 بوصة والعناوينُ تُرسم متجهياً في المونتاج). `--parallel` يرسل اللقطاتِ كلَّها معاً.
 
 import fs from 'fs';
 import path from 'path';
@@ -37,34 +42,40 @@ const OUT_DIR = path.join(REPO, 'remotion', 'public', 'ai');
 const MANIFEST = path.join(OUT_DIR, 'manifest.json');
 const FORCE = process.argv.includes('--force');
 const DRY = process.argv.includes('--dry-run');
+const PARALLEL = process.argv.includes('--parallel');
 const ONLY = (() => { const i = process.argv.indexOf('--only'); return i > 0 ? String(process.argv[i + 1] || '').split(',').map(s => s.trim()).filter(Boolean) : null; })();
 
 const BASE = (process.env.HF_API_BASE || 'https://api.higgsfield.ai').replace(/\/+$/, '');
-const MODEL = process.env.HF_MODEL_PATH || 'bytedance/seedance-2.0/text-to-video';
+const MODEL = process.env.HF_MODEL_PATH || 'bytedance/seedance-2.5/reference-to-video';
 const STATUS = process.env.HF_STATUS_PATH || '/requests/{id}/status';
-const RESOLUTION = process.env.HF_RESOLUTION || '1080p';
+const RESOLUTION = process.env.HF_RESOLUTION || '720p';
+// الشعارُ مرجعاً — رابطٌ عامّ (المستودعُ عامّ) لأن النموذج لا يقبل الملفّات مباشرةً.
+const LOGO_URL = process.env.HF_LOGO_URL || 'https://raw.githubusercontent.com/islamokasha1-cloud/Fast-buildings-maintenance-/main/remotion/public/logo.png';
 // المفتاحُ بصيغة `KEY_ID:KEY_SECRET` — الاسمُ الرسميّ للمتغيّر HF_CREDENTIALS، ويُقبل الآخر.
 const KEY = process.env.HF_CREDENTIALS || process.env.HIGGSFIELD_API_KEY || '';
 const POLL_MS = Number(process.env.HF_POLL_MS || 8000);
 const TIMEOUT_MS = Number(process.env.HF_TIMEOUT_MS || 15 * 60 * 1000);
 
 // أسلوبٌ مشترك يُلحَق بكلّ وصف — فتخرج اللقطاتُ من عائلةٍ بصريةٍ واحدة.
-const STYLE = 'Cinematic corporate documentary footage, modern Saudi government office building, clean architecture, '
-  + 'soft cool daylight with subtle teal and navy tones, shallow depth of field, slow smooth camera movement, '
-  + 'photorealistic, 4K quality, no text, no logos, no subtitles, no watermarks, no close-up faces.';
+const STYLE = 'Cinematic corporate film, modern Saudi office building, clean contemporary architecture, '
+  + 'cool navy and teal tones with warm accents, slow smooth camera movement, shallow depth of field, '
+  + 'photorealistic, 4K quality, no subtitles, no extra text, no watermarks, faces never in close-up.';
+const LOGO = 'the exact company logo from the reference image';
 
-// المفتاحُ = اسمُ المشهد في `AiFacilities` (خاصيّة `clips`). المدّةُ بطول المشهد تقريباً.
+// المفتاحُ = اسمُ اللقطة في السجلّ. المدّةُ بالثواني. الهويةُ مطلوبةٌ نصّاً في كلّ لقطة.
 export const SHOTS = [
-  { key: 'problem', seconds: 10,
-    prompt: 'A facilities operations desk seen from above: stacks of printed maintenance tickets, photos of building faults, supplier quotations and monthly reports piling up beside a monitor, papers accumulating in time-lapse, slow top-down push-in.' },
-  { key: 'building', seconds: 12,
-    prompt: 'Slow dolly along a modern office building floor at dusk, ceiling lights switching off floor by floor as rooms empty, small wireless sensors with tiny green LEDs on walls and ceiling, HVAC vents, a tablet on a desk showing abstract dashboard glow.' },
-  { key: 'camera', seconds: 11,
-    prompt: 'Security camera perspective of a bright office corridor with polished floor, a small liquid spill on the floor, subtle surveillance vignette, static camera with slight digital zoom, calm and clean, no people in frame.' },
-  { key: 'robots', seconds: 11,
-    prompt: 'A compact autonomous floor-cleaning robot gliding through an empty office corridor at night, floor reflections, and in a second beat a small inspection drone hovering along a building facade at golden hour, smooth tracking shots.' },
-  { key: 'predictive', seconds: 11,
-    prompt: 'Industrial water pump room in a building basement, a vibration sensor mounted on a pump with a blinking LED, slow orbit around the pump, clean pipes, subtle steam, technical documentary lighting.' },
+  { key: 'intro', seconds: 8,
+    prompt: `Exterior of a modern office building at golden hour with a glass facade; ${LOGO} on a large illuminated sign above the main entrance; a small white inspection drone bearing the same logo lifts off from the entrance plaza and rises toward the facade; slow cinematic crane shot upward.` },
+  { key: 'corridor', seconds: 8,
+    prompt: `A facilities technician wearing a yellow high-visibility safety vest with ${LOGO} printed large on the back walks down a modern office corridor at night. Beside him rolls a compact white autonomous cleaning robot carrying the same logo on its side panel. On the corridor wall, an illuminated sign displays the same logo. As they pass, ceiling lights brighten smoothly ahead of them and dim behind them; a small ceiling security camera pivots to follow. Polished floor reflections, tracking shot from behind.` },
+  { key: 'camera', seconds: 10,
+    prompt: `High-angle security camera view of a bright office corridor with a polished floor. A small water spill appears on the floor; a thin glowing outline highlights the spill for a moment. Then a compact white autonomous cleaning robot bearing ${LOGO} on its side arrives and cleans it. Finally a technician in a yellow safety vest with the same logo on the back walks in and checks the clean spot. Static camera, calm and clean.` },
+  { key: 'drone', seconds: 10,
+    prompt: `A white inspection drone carrying ${LOGO} on its body flies slowly along the glass facade of a modern office building, then over the rooftop past large HVAC units; a soft thermal-style highlight briefly glows on one unit as the drone hovers over it. Smooth aerial tracking shot at golden hour.` },
+  { key: 'predictive', seconds: 10,
+    prompt: `Basement pump room of a modern building: clean pipes, industrial water pumps, a small vibration sensor with a blinking green LED mounted on a pump. A technician in a yellow high-visibility vest with ${LOGO} on the back checks a tablet showing a glowing line graph. Slow orbit around the pump, technical documentary lighting.` },
+  { key: 'outro', seconds: 8,
+    prompt: `Two facilities technicians in yellow high-visibility vests with ${LOGO} on the back stand in the lobby of a modern office building beside a white autonomous cleaning robot bearing the same logo; behind them a large wall sign displays the same logo. They look toward the building entrance, seen from behind. Slow cinematic push-in, soft daylight.` },
 ];
 
 const L = (...a) => console.log(...a);
@@ -98,7 +109,7 @@ function videoUrlOf(r) {
 const statusOf = (r) => String(r.status || (r.data && r.data.status) || '').toLowerCase();
 
 async function generate(shot) {
-  const body = { prompt: `${shot.prompt} ${STYLE}`, duration: shot.seconds, aspect_ratio: '16:9', resolution: RESOLUTION };
+  const body = { prompt: `${shot.prompt} ${STYLE}`, image_urls: [LOGO_URL], duration: shot.seconds, aspect_ratio: '16:9', resolution: RESOLUTION, generate_audio: false };
   if (DRY) { L(`  [dry-run] POST ${BASE}/${MODEL}\n  ${JSON.stringify(body, null, 2)}`); return null; }
   const sub = jobOf(await call('POST', `${BASE}/${MODEL}`, body));
   L(`  ⏳ أُرسل — المهمّة ${sub.id || '؟'}`);
@@ -136,18 +147,18 @@ L(`  ${BASE}/${MODEL} · ${RESOLUTION} · المفتاح ${KEY ? 'من البي�
 L('══════════════════════════════════════════════════════');
 
 let failed = 0;
-for (const shot of SHOTS) {
-  if (ONLY && !ONLY.includes(shot.key)) continue;
+const saveManifest = () => { if (!DRY) fs.writeFileSync(MANIFEST, JSON.stringify({ generatedAt: new Date().toISOString(), clips: manifest.clips }, null, 2)); };
+async function runShot(shot) {
   const file = path.join(OUT_DIR, shot.key + '.mp4');
   const rel = 'ai/' + shot.key + '.mp4';
   if (!FORCE && fs.existsSync(file) && fs.statSync(file).size > 100000) {
     L(`\n▸ ${shot.key}: موجودةٌ — تُتخطّى (--force لإعادتها)`);
-    manifest.clips[shot.key] = rel; continue;
+    manifest.clips[shot.key] = rel; return;
   }
   L(`\n▸ ${shot.key} (${shot.seconds}ث)…`);
   try {
     const url = await generate(shot);
-    if (!url) continue;
+    if (!url) return;
     const size = await download(url, file);
     manifest.clips[shot.key] = rel;
     L(`  ✅ ${rel}  ·  ${(size / 1048576).toFixed(1)} م.ب`);
@@ -155,8 +166,10 @@ for (const shot of SHOTS) {
     failed++;
     L(`  ❌ ${shot.key}: ${e.message}`);
   }
-  if (!DRY) fs.writeFileSync(MANIFEST, JSON.stringify({ generatedAt: new Date().toISOString(), clips: manifest.clips }, null, 2));
+  saveManifest();
 }
+const wanted = SHOTS.filter(s => !ONLY || ONLY.includes(s.key));
+if (PARALLEL) await Promise.all(wanted.map(runShot)); else for (const shot of wanted) await runShot(shot);
 if (!DRY) L(`\n  السجلّ: ${MANIFEST} — ${Object.keys(manifest.clips).length} لقطة`);
 L(failed ? `  ⚠️  ${failed} لقطة لم تُولَّد — المشاهدُ الناقصة تُرندَر برسومها المتجهية` : '  ✨ اكتمل');
 L('══════════════════════════════════════════════════════\n');
