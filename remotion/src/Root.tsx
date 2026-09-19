@@ -2,6 +2,7 @@ import { Composition } from "remotion";
 import { CompanyAnnouncement } from "./CompanyAnnouncement";
 import { PlatformIntro } from "./PlatformIntro";
 import { AiFacilities, AI_TOTAL_FRAMES } from "./AiFacilities";
+import { AiFilm, AI_FILM_FRAMES } from "./AiFilm";
 import { fps } from "./theme";
 
 export const RemotionRoot: React.FC = () => {
@@ -42,6 +43,41 @@ export const RemotionRoot: React.FC = () => {
           الاصطناعي من `promo-video.mjs --topic ai` ثم ختامُ الإعلان — يجمعها
           `promo-assemble.mjs --film ai`. النصوصُ كلُّها هنا؛ ولا رقمَ فيها إلا عددُ
           الأدوات وهو مشتقٌّ من طول `tools`. */}
+      {/* فيلمُ اللقطات المولَّدة كاملةِ الإطار (src/AiFilm.tsx) — الهويةُ داخل اللقطات،
+          ونحن نضيف العربية والافتتاحية والختام. اللقطاتُ يكتبها `higgsfield-shots.mjs`
+          في public/ai/. الرندر: `npm run render:ai` أو `render:ai:4k`. */}
+      <Composition
+        id="AiFilm"
+        component={AiFilm}
+        durationInFrames={AI_FILM_FRAMES}
+        fps={fps}
+        width={1920}
+        height={1080}
+        defaultProps={{
+          companyName: "شركة المباني السريعة للمقاولات",
+          tagline: "نبني الثقة… ونصون التميّز",
+          phone: "+966 55 841 6888",
+          website: "fastbuildings.sa",
+          musicVolume: 0.7,
+          clips: {
+            intro: "ai/intro.mp4",
+            corridor: "ai/corridor.mp4",
+            camera: "ai/camera.mp4",
+            drone: "ai/drone.mp4",
+            predictive: "ai/predictive.mp4",
+            outro: "ai/outro.mp4",
+          },
+          title: "الذكاء الاصطناعي في إدارة المرافق",
+          subtitle: "حلولٌ نقدّمها لتشغيل المرافق وصيانتها — من الحسّاس إلى البلاغ",
+          captions: {
+            corridor: { title: "مبنى يستجيب لمن فيه", sub: "الإنارةُ والتكييفُ يُدارَان بحسب الإشغال الفعليّ، والروبوتُ يعمل بعد ساعات الدوام" },
+            camera: { title: "الكاميرات ترى ما تفوّته الجولات", sub: "اكتشافُ مشكلة النظافة وفتحُ البلاغ قبل أن تصل الشكوى" },
+            drone: { title: "فحصٌ جويّ للواجهات والأسطح", sub: "الدرون تفحص الواجهات ووحدات التكييف دون سقالاتٍ أو توقّفٍ للتشغيل" },
+            predictive: { title: "صيانةٌ تنبّؤية قبل العطل", sub: "الحسّاس يرصد الاهتزاز، والمنصة تفتح البلاغ قبل أن تتوقّف المضخّة" },
+            outro: { title: "فريقٌ واحد… وتقنيةٌ تخدمه", sub: "الذكاء الاصطناعي يقترح، والإنسان يقرّر" },
+          },
+        }}
+      />
       <Composition
         id="AiFacilities"
         component={AiFacilities}

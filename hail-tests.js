@@ -21938,8 +21938,26 @@ function aiFacilitiesVideoGuards() {
   T("★ التجميع: سلسلةُ ذوباناتٍ بعدد المقاطع والموسيقى تُقرأ من المدخل الأخير",
     /for \(let i = 1; i < parts\.length; i\+\+\)/.test(asm) && /\[\$\{parts\.length\}:a\]afade/.test(asm) && /aresample=48000/.test(asm));
   T("★ التجميع: اللقطاتُ المولَّدة تُقرأ من manifest.json وتُمرَّر خاصيّةَ clips", /manifest\.json/.test(asm) && /clips: m\.clips/.test(asm));
-  T("★ اللقطات: بلا ترويسة مفتاحٍ ما لم يوجد في البيئة، وخمسُ لقطاتٍ بمفاتيح المشاهد",
-    /HIGGSFIELD_API_KEY/.test(shots) && /KEY \? \{ authorization/.test(shots) && ["problem", "building", "camera", "robots", "predictive"].every(k => new RegExp("key: '" + k + "'").test(shots)) && /no text, no logos/.test(shots));
+  T("★ اللقطات: بلا ترويسة مفتاحٍ ما لم يوجد في البيئة، وستُّ لقطاتٍ بمفاتيح فيلم AiFilm",
+    /HIGGSFIELD_API_KEY/.test(shots) && /KEY \? \{ authorization/.test(shots) && ["intro", "corridor", "camera", "drone", "predictive", "outro"].every(k => new RegExp("key: '" + k + "'").test(shots)));
+  // الهويةُ داخل اللقطة: الشعارُ صورةً مرجعية (reference-to-video · image_urls) ومطلوبٌ نصّاً في كلّ لقطة — لا «بلا شعارات».
+  T("★ اللقطات: الشعارُ مرجعاً عبر reference-to-video/image_urls ومطلوبٌ في كلّ وصف، وبلا صوت",
+    /seedance-2\.5\/reference-to-video/.test(shots) && /image_urls: \[LOGO_URL\]/.test(shots) && /generate_audio: false/.test(shots)
+    && (shots.match(/\$\{LOGO\}/g) || []).length >= 6 && !/no text, no logos/.test(shots) && /--parallel/.test(shots));
+  // ── فيلمُ اللقطات كاملةِ الإطار (AiFilm) ──
+  const film = R("remotion/src/AiFilm.tsx"), rmPkg = R("remotion/package.json");
+  T("★ التركيبة AiFilm موجودة ومسجَّلة في Root.tsx بسكربتَي رندر 1080p و4K",
+    !!film && /id="AiFilm"/.test(root) && /AI_FILM_FRAMES/.test(root) && /"render:ai": "remotion render AiFilm/.test(rmPkg) && /"render:ai:4k": .*--scale=2/.test(rmPkg));
+  T("★ AiFilm: مدّةُ كلّ لقطةٍ في SHOT_FRAMES = ثواني توليدها في higgsfield-shots × 30",
+    ["intro", "corridor", "camera", "drone", "predictive", "outro"].every(k => {
+      const sec = (shots.match(new RegExp("key: '" + k + "', seconds: (\\d+)")) || [])[1];
+      const fr = (film.match(new RegExp('key: "' + k + '", frames: (\\d+)')) || [])[1];
+      return sec && fr && Number(fr) === Number(sec) * 30;
+    }));
+  T("★ AiFilm: اللقطةُ تملأ الإطار (OffthreadVideo صامتة) والنصوصُ في defaultProps (captions لخمس لقطات) والموسيقى 54 ثانية = طولُ الفيلم",
+    /OffthreadVideo src=\{staticFile\(clips\[s\.key\]\)\} muted/.test(film) && /captions:\s*\{/.test(root) && ["corridor", "camera", "drone", "predictive", "outro"].every(k => new RegExp(k + ": \\{ title: \"").test(root))
+    && /audio\/background\.mp3/.test(film) && /AI_FILM_FRAMES = shotsEnd - XF \+ END_CARD_FRAMES; \/\/ 1620/.test(film));
+  T("★ AiFilm: بلا رقمٍ أو ادّعاء — «حلولٌ نقدّمها» والإنسانُ يقرّر", /حلولٌ نقدّمها لتشغيل المرافق/.test(root) && /والإنسان يقرّر/.test(root));
   T("★ اللقطاتُ المولَّدة خارج git (remotion/public/ai)", /remotion\/public\/ai\//.test(R(".gitignore")));
   T("★ سطورُ التشغيل في NOTES §5: --topic ai · --film ai · higgsfield-shots",
     /node promo-video\.mjs --probe --topic ai/.test(notes) && /node promo-assemble\.mjs --film ai/.test(notes) && /node higgsfield-shots\.mjs/.test(notes));

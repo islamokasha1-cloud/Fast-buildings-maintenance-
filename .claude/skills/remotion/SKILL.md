@@ -33,12 +33,15 @@ node promo-video.mjs --probe  # لقطاتٌ فقط بلا تسجيل (~دقيق
 node promo-video.mjs          # جولة شاشات المنصة الحقيقية (تسجيل شاشة في Chromium)
 node promo-assemble.mjs --4k  # الفيلم الكامل 4K: افتتاحية الإعلان + الجولة + الختام
 node promo-video.mjs --probe --topic ai   # فصول الذكاء الاصطناعي الستّة وحدها — لقطاتٌ بلا تسجيل
-node higgsfield-shots.mjs                 # لقطاتٌ مولَّدة لمشاهد AiFacilities (اختيارية — تحتاج اعتماد Higgsfield)
+NODE_USE_ENV_PROXY=1 node higgsfield-shots.mjs --parallel   # ستُّ لقطاتٍ مولَّدة بالشعار مرجعاً (مدفوع — اعتماد Higgsfield يحقنه الوسيط)
+(cd remotion && npm run render:ai:4k)     # فيلم اللقطات كاملةِ الإطار AiFilm بدقّة 4K
 node promo-assemble.mjs --film ai --4k    # فيلم «الذكاء الاصطناعي في إدارة المرافق» 4K
 ```
 
-**فيديو الذكاء الاصطناعي** تركيبةٌ مستقلّة `src/AiFacilities.tsx` (نصوصُها في `defaultProps`
-بـ`src/Root.tsx`)؛ لا تعدّل مشاهدَ الإعلان من أجله. التجميعُ قائمةُ مقاطع (`FILMS` في
+**فيديو الذكاء الاصطناعي** تركيبتان مستقلّتان: `src/AiFacilities.tsx` (رسمٌ متجهيّ واللقطاتُ
+خلفيةً) و`src/AiFilm.tsx` (اللقطاتُ المولَّدة تملأ الإطار والهويةُ داخلها — هذا ما اعتمده
+المالك). نصوصُهما في `defaultProps` بـ`src/Root.tsx`؛ لا تعدّل مشاهدَ الإعلان من أجلهما.
+**مدّةُ كلّ لقطة في `SHOT_FRAMES` = ثواني توليدها في `higgsfield-shots.mjs` × 30** — غيّرهما معاً. التجميعُ قائمةُ مقاطع (`FILMS` في
 `promo-assemble.mjs`) — أضف فيلماً بقائمةٍ جديدة، لا بنسخ السكربت.
 
 الجولةُ ١٩ فصلاً تُرقَّم تلقائياً بترتيبها في `CHAPTERS`، ولبعضها مشهدٌ «عن قرب»

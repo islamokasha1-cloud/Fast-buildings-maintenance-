@@ -43,7 +43,7 @@
 (function(){
   "use strict";
 
-  const MODULE_BUILD = "v18.9.3262";
+  const MODULE_BUILD = "v18.9.3267";
   const PAGE_ID = "page-purchase-reports";
   const HOST_ID = "prh-root";
   const TABS_ID = "prh-tabs";

@@ -164,6 +164,25 @@ npx remotion render AiFacilities out/ai-facilities.mp4      # الجزءُ ال�
 ومن جذر المشروع: `node promo-assemble.mjs --film ai --4k` يجمع هذه التركيبة مع جولة
 `promo-video.mjs --topic ai` (ستّةُ فصولٍ للذكاء الاصطناعي داخل المنصة) وختامِ الإعلان.
 
+## فيلمُ اللقطات المولَّدة كاملةِ الإطار (`AiFilm`)
+
+النسخةُ التي طلبها المالك بعد `AiFacilities`: **الفيديو نفسُه هو اللقطات المولَّدة**
+(54 ثانية) **والهويةُ داخلها** — `higgsfield-shots.mjs` يولّدها عبر `reference-to-video`
+بشعار الشركة صورةً مرجعية، فيظهر الشعار على السترة والروبوت ولافتة الجدار. التركيبةُ
+`src/AiFilm.tsx` تضيف ما لا يستطيعه النموذج: عنوانَ الفيلم في الافتتاحية، شريطاً سفلياً
+عربياً لكلّ لقطة، بطاقةَ ختامٍ بالتواصل، وموسيقى الإعلان (54 ثانية = طولُ الفيلم).
+
+- النصوصُ في `defaultProps` (`src/Root.tsx`)؛ مدّةُ كلّ لقطة في `SHOT_FRAMES` **يجب أن تساوي**
+  ثوانيَ توليدها في `higgsfield-shots.mjs` × 30 (يحرسها `hail-tests.js`).
+- اللقطاتُ في `public/ai/` خارج git — أعد توليدها بـ`NODE_USE_ENV_PROXY=1 node higgsfield-shots.mjs --parallel`
+  من جذر المشروع (مدفوع).
+
+```bash
+npx remotion still AiFilm out/check.png --frame=400   # لقطةٌ من الممرّ بشريطها السفليّ
+npm run render:ai        # 1920×1080 → out/ai-film.mp4
+npm run render:ai:4k     # 3840×2160 → out/ai-film-4k.mp4 (يتجاوز عشر دقائق — في الخلفية)
+```
+
 ## الخطوط
 
 خطوط **Cairo** و**Tajawal** منزّلة محلياً داخل `public/fonts` وتُحمَّل بلا
